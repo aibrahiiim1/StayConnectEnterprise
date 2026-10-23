@@ -1,8 +1,6 @@
 "use client";
 
-// Route shell for the Phase-5 (DARK) post-stay identity screen. edged enforces the real gate on every
-// request; canAct only decides whether the buttons are offered, and a client that ignored it would still be
-// refused by RBAC, the password step-up and the mandatory reason.
+// edged enforces RBAC and step-up even if a client bypasses the canAct UI gate.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";

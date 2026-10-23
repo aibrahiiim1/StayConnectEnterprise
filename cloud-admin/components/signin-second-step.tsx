@@ -1,11 +1,7 @@
 "use client";
 
-// THE SECOND SIGN-IN STEP (Central migration 0052, GDPR plan C10, decision D-C10).
-//
-// After the password: the 6-digit code from the operator's authenticator app. The first time, the app is set up
-// here first -- scan the QR code (or type the key), then enter the code it shows -- and the ten recovery codes are
-// shown once, to keep somewhere safe. The QR code is drawn in the browser: the key must never be sent to anybody
-// else to draw it. The Admin Console on each appliance has the same step (hotel-admin).
+// Draw the authenticator QR code locally so its secret never reaches another service.
+// Recovery codes appear once after enrollment.
 
 import { useEffect, useId, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -20,7 +16,6 @@ export type SecondStep = "code" | "enrol";
 type Enrolment = { secret: string; otpauth_uri: string; account: string };
 type CodeResult = { must_change_password?: boolean; recovery_codes?: string[]; recovery_codes_left?: number };
 
-// groupKey shows the key the way people type it: blocks of four.
 export function groupKey(secret: string): string {
   return secret.replace(/(.{4})/g, "$1 ").trim();
 }
@@ -39,8 +34,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
   const [lowOnCodes, setLowOnCodes] = useState<number | null>(null);
   const hintId = useId();
 
-  // A NEW VIEW TAKES FOCUS AT ITS HEADING. The recovery codes and the "codes running low" notice replace the form
-  // the person was typing in; without this, focus fell to the page and a screen reader said nothing at all.
+  // Focus new views so screen readers announce recovery codes and warnings.
   const heading = useRef<HTMLHeadingElement | null>(null);
   const view = recovery ? "recovery" : lowOnCodes !== null ? "low" : "form";
   useEffect(() => {
@@ -134,7 +128,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      {/* The banner is its own alert; a live wrapper around it made screen readers announce it twice. */}
+      {/* The alert already announces itself; an outer live wrapper would repeat it. */}
       <ErrorBanner err={err} className="mb-0" />
       {step === "enrol" ? (
         <div className="space-y-3">
@@ -147,7 +141,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
           </div>
           {enrolment ? (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-3">
-              {/* A data: URL drawn in this browser; next/image has nothing to optimise here. */}
+              {/* The browser-generated data URL needs no Next.js image optimization. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {qr && <img src={qr} alt="QR code to scan with your authenticator app" width={208} height={208} className="rounded bg-white p-1" />}
               <div className="text-center text-caption text-muted-foreground">
@@ -169,8 +163,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
       )}
       <Field label={step === "enrol" ? "Code from the app" : "Code"}>
         <Input
-          // This field replaces the password form the person just submitted; without focus here it would fall to
-          // the page and a keyboard or screen-reader user would have to search for where to continue.
+          // Focus the new code field after password entry.
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required
@@ -182,7 +175,6 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
         />
       </Field>
       {(() => {
-        // Why the button is disabled, said beside it and tied to it, so it is never a silent dead end.
         const why = busy ? null
           : step === "enrol" && !enrolment ? "Wait for the setup code to appear."
           : code.trim() === "" ? (step === "enrol" ? "Enter the code your app shows to continue." : "Enter your code to continue.")

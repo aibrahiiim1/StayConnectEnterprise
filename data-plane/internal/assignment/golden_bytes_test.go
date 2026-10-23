@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// goldenDoc and goldenBytes are duplicated byte-for-byte in the
-// control-plane and data-plane twins. If either twin's signing layout drifts,
-// its copy of this test fails.
+// Duplicated byte-for-byte in the control-plane and data-plane twins, so a drifting signing layout fails this test.
 var goldenDoc = Document{
 	AssignmentID: "a1", ApplianceID: "b2", IdentityKeyFpr: "c3", Serial: "d4",
 	TenantID: "e5", SiteID: "f6", TenantName: "T", SiteName: "S",

@@ -10,8 +10,6 @@ const (
 	custB = "bbbbbbbb-0000-4000-8000-000000000002"
 )
 
-// An appliance that still holds customer A's data can be activated for A (breakglass recovery) and for no one
-// else -- not customer B, and not a customer created inline.
 func TestActivationRefusedForAnotherCustomer(t *testing.T) {
 	ref := holdsOtherCustomerRefusal(custA, custB)
 	if ref == nil || ref.Status != http.StatusConflict || ref.Code != "holds_other_customer_data" {

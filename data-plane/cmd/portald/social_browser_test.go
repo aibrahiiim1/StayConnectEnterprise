@@ -17,7 +17,6 @@ const (
 	uaAndroidChrome  = "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
 )
 
-// fakeSCD answers the routes the social start leg reaches, and records whether an attempt was started.
 type fakeSCD struct {
 	mu       sync.Mutex
 	tls      string // body of /v1/portal/tls-state; "" = 404 (the endpoint not there yet)
@@ -49,7 +48,6 @@ func socialHandler(t *testing.T, f *fakeSCD) *handler {
 	}))
 	t.Cleanup(ts.Close)
 	addr := ts.Listener.Addr().String()
-	// portald holds scd's portal HTTPS state itself (portal_https.go); seed it from the fake's answer.
 	var holder *tlsStateHolder
 	if f.tls != "" {
 		var st portalTLSState
@@ -80,8 +78,7 @@ func socialStartReq(provider, ua, lang string) *http.Request {
 	return r
 }
 
-// GOOGLE AND FACEBOOK IN AN ANDROID WEBVIEW: the "open in your browser" page, with the canonical portal
-// address and a copy button, a way back to the other methods -- and no sign-in attempt started.
+// Google and Facebook in an Android WebView get the "open in your browser" page and no sign-in attempt.
 func TestWebViewGetsTheOpenInBrowserPageForGoogleAndFacebook(t *testing.T) {
 	for _, provider := range []string{"google", "facebook"} {
 		for _, l := range portalLanguages {
@@ -119,7 +116,6 @@ func TestWebViewGetsTheOpenInBrowserPageForGoogleAndFacebook(t *testing.T) {
 	}
 }
 
-// Apple and Microsoft allow sign-in in a WebView, and every provider proceeds in a real browser.
 func TestOtherProvidersAndRealBrowsersStartTheAttempt(t *testing.T) {
 	for _, tc := range []struct{ provider, ua string }{
 		{"apple", uaAndroidWebView}, {"microsoft", uaAndroidWebView},
@@ -138,8 +134,7 @@ func TestOtherProvidersAndRealBrowsersStartTheAttempt(t *testing.T) {
 	}
 }
 
-// The address shown is scd's canonical hostname; under the HTTP fallback there is no HTTPS address to give;
-// with scd silent, the TLS host the guest is already using; and an invented Host header is never echoed.
+// The address shown is scd's canonical hostname; under the HTTP fallback there is none; with scd silent, the TLS host in use; an invented Host header is never echoed.
 func TestTheInterstitialAddress(t *testing.T) {
 	h := socialHandler(t, &fakeSCD{tls: `{"https_active":false,"canonical_hostname":null,"fallback_reason":"NO_CERTIFICATE"}`})
 	if got := h.portalAddress(socialStartReq("google", uaAndroidWebView, "en")); got != "" {
@@ -177,8 +172,7 @@ func TestWebViewDetection(t *testing.T) {
 	}
 }
 
-// Sign in with Apple returns with a cross-site form POST and no cookie. The callback must carry state + code
-// from the form to scd with the device read from the kernel -- and nothing in the request needs a cookie.
+// Apple returns via a cross-site form POST with no cookie; the callback must carry state + code and the kernel-read device to scd.
 func TestAppleFormPostCallbackReachesSCDWithoutACookie(t *testing.T) {
 	var got map[string]string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

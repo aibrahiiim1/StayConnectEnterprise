@@ -3,9 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 
-// Every confirmation, edit and reason prompt in the live console is a designed dialog. The browser's own
-// confirm / prompt / alert boxes cannot say what an action does, show a password in clear text and are not
-// themed. There are no exemptions: the two retired pages (/commercial, /subscription) are now redirects.
+// Native dialogs cannot explain consequential actions or mask passwords.
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -23,8 +21,7 @@ const files = [
   ...walk(join(root, "lib")),
 ];
 
-// A call, not a mention: comments that name `window.prompt` are allowed, `window.prompt(` and a bare
-// `confirm(` are not.
+// Match calls, not mere mentions of native dialogs.
 const CALL = /(^|[^\w.$])(?:window\.)?(confirm|prompt|alert)\s*\(/;
 const WINDOW_CALL = /window\.(confirm|prompt|alert)\s*\(/;
 

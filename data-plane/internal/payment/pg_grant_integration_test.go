@@ -8,16 +8,10 @@ import (
 	"testing"
 )
 
-// Exactly-once against the REAL Phase-2 grant path.
-//
-// The tests above use a recording double to isolate the payment machine. These use the actual
-// CommerceEngine writing actual iam_v2.entitlements rows, because "we reuse the Phase-2 path" is a claim
-// about the production wiring and a double cannot prove it. The assertion throughout is a COUNT of
-// entitlement rows for the purchase: one, or zero, and never two.
+// Exactly-once against the real Phase-2 grant path: real CommerceEngine writing real iam_v2.entitlements rows,
+// asserting a COUNT of entitlements per purchase of one or zero, never two.
 
-// realGranter is the production granter: the one that calls iam_v2.p4_grant_paid_entitlement. There is no
-// double here on purpose -- "we reuse the one paid-grant operation" is a claim about production wiring, and
-// a stand-in cannot prove it.
+// realGranter is the production granter; no double, since the claim is about production wiring.
 func realGranter(t *testing.T) Granter {
 	t.Helper()
 	return SQLGranter{Pool: pool(t)}
@@ -28,7 +22,6 @@ func entitlements(t *testing.T, purchaseID string) int {
 	return scan1[int](t, pool(t), `SELECT count(*)::int FROM iam_v2.entitlements WHERE purchase_id=$1`, purchaseID)
 }
 
-// One capture, one entitlement, written by the Phase-2 path.
 func TestIntegrationGrant_CaptureGrantsThroughThePhase2Path(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -48,11 +41,9 @@ func TestIntegrationGrant_CaptureGrantsThroughThePhase2Path(t *testing.T) {
 	if n := entitlements(t, s.purchase); n != 1 {
 		t.Fatalf("expected exactly one entitlement, got %d", n)
 	}
-	// the purchase advanced through the same MarkPurchaseGranted the free path uses
 	if st := scan1[string](t, p, `SELECT state FROM iam_v2.purchases WHERE id=$1`, s.purchase); st != "GRANTED" {
 		t.Fatalf("expected GRANTED, got %s", st)
 	}
-	// and the entitlement carries the pins from the quote, not from anything a caller supplied
 	if got := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.entitlements en
 		JOIN iam_v2.purchases pu ON pu.id = en.purchase_id
 	   WHERE en.purchase_id=$1 AND en.package_revision_id = pu.package_revision_id`, s.purchase); got != 1 {
@@ -60,7 +51,6 @@ func TestIntegrationGrant_CaptureGrantsThroughThePhase2Path(t *testing.T) {
 	}
 }
 
-// Duplicate commands, duplicate callbacks and concurrent callbacks converge on ONE entitlement.
 func TestIntegrationGrant_ExactlyOnceUnderDuplicatesAndConcurrency(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -74,7 +64,6 @@ func TestIntegrationGrant_ExactlyOnceUnderDuplicatesAndConcurrency(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// 12 concurrent deliveries of the same capture, plus a re-execution of the same command
 	var wg sync.WaitGroup
 	ids := make(chan string, 13)
 	for i := 0; i < 12; i++ {
@@ -100,8 +89,7 @@ func TestIntegrationGrant_ExactlyOnceUnderDuplicatesAndConcurrency(t *testing.T)
 	}
 }
 
-// Restart replay: a brand-new engine over the same durable rows re-applies the same provider event and
-// grants nothing further. This is the crash-recovery case -- the process that granted is gone.
+// Restart replay: a fresh engine over the same durable rows re-applies the event and grants nothing further.
 func TestIntegrationGrant_RestartReplayGrantsNothingFurther(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -113,7 +101,6 @@ func TestIntegrationGrant_RestartReplayGrantsNothingFurther(t *testing.T) {
 	}
 	first := entitlements(t, s.purchase)
 
-	// a fresh engine, as after a restart, with no memory of anything
 	e2 := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
 	for i := 0; i < 3; i++ {
 		if _, err := e2.HandleProviderNotification(ctx,
@@ -126,8 +113,8 @@ func TestIntegrationGrant_RestartReplayGrantsNothingFurther(t *testing.T) {
 	}
 }
 
-// FAILED and UNKNOWN grant ZERO. This is the whole reason the grant is gated on the settlement rather than
-// on the charge: MANUAL_REVIEW is precisely the state in which nobody knows whether money moved.
+// FAILED and UNKNOWN grant ZERO: the grant is gated on the settlement because MANUAL_REVIEW is the state where nobody
+// knows whether money moved.
 func TestIntegrationGrant_FailedAndUnknownGrantZero(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -150,8 +137,7 @@ func TestIntegrationGrant_FailedAndUnknownGrantZero(t *testing.T) {
 			if n := entitlements(t, s.purchase); n != 0 {
 				t.Fatalf("%s granted %d entitlements", tc.name, n)
 			}
-			// and an out-of-band capture claiming the same intent cannot rescue it either: the intent is
-			// terminal, so there is nothing left for a late callback to move.
+			// An out-of-band capture for the same intent cannot rescue it: the intent is terminal.
 			_, _ = e.HandleProviderNotification(ctx,
 				BuildNotification(in.ClientRef, "evt-late", OutcomeCaptured, ""))
 			if n := entitlements(t, s.purchase); n != 0 {
@@ -161,8 +147,7 @@ func TestIntegrationGrant_FailedAndUnknownGrantZero(t *testing.T) {
 	}
 }
 
-// Substitution fails closed: a settlement cannot be pointed at a different tenant's or site's purchase, and
-// the grant path resolves the purchase itself rather than accepting one.
+// Substitution fails closed: the grant path resolves the purchase itself rather than accepting one.
 func TestIntegrationGrant_SubstitutionFailsClosed(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -170,23 +155,17 @@ func TestIntegrationGrant_SubstitutionFailsClosed(t *testing.T) {
 	b := seedPaidChain(t, p)
 	g := realGranter(t)
 
-	// site A's tenant asking to grant site B's settlement
 	if _, err := g.GrantSettledSettlement(ctx, a.tenant, a.site, b.settlement); err == nil {
 		t.Fatal("a cross-tenant settlement was granted")
 	}
-	// the right tenant, the wrong site
 	if _, err := g.GrantSettledSettlement(ctx, b.tenant, a.site, b.settlement); err == nil {
 		t.Fatal("a cross-site settlement was granted")
 	}
-	// the correct owner still cannot grant while the settlement has not reached SETTLED
 	if _, err := g.GrantSettledSettlement(ctx, b.tenant, b.site, b.settlement); err == nil {
 		t.Fatal("an unsettled settlement was granted")
 	}
-	// A PENDING purchase is not a paid-grant origin, even with a legitimately SETTLED settlement in front
-	// of it. The settlement is driven to SETTLED the real way -- a captured charge -- because forcing the
-	// status directly is refused by an existing invariant (ONLINE_PAYMENT settles only on a CAPTURED
-	// charge), and a test that worked around that would be proving something about a state the system
-	// cannot actually be in.
+	// The settlement is driven to SETTLED via a real captured charge, because forcing the status is refused by an
+	// invariant and a workaround would test an impossible state.
 	c := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
 	in, err := e.CreateChargeIntent(ctx, c.tenant, c.site, c.settlement, idem(t, "pending-origin"))

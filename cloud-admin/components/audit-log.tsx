@@ -35,10 +35,6 @@ function Details({ payload }: { payload: Record<string, unknown> }) {
   );
 }
 
-/**
- * The audit log, for the whole platform (System → Audit log) or one customer (its Activity tab). Newest first,
- * 50 at a time; "Show older" follows the server's cursor.
- */
 export function AuditLog({ filters, showCustomer = true }: { filters: AuditFilters; showCustomer?: boolean }) {
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);

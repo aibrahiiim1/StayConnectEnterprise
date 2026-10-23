@@ -9,19 +9,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// FINANCIAL_RECOVERY_MODE, exercised by simulating the event it exists for.
-//
-// A real restore cannot be performed inside a test, but the SIGNAL a restore produces can be reproduced
-// exactly: the stored system identity stops matching the running one. Every assertion below drives the same
-// code path a genuine restore would, through the same function the runtime calls at startup.
-//
-// The behaviour under test is mostly negative, and deliberately so. After a restore the safe system is the
-// one that does LESS: no new charges, no outbox drain, no automatic replay of anything.
+// Simulates the signal a restore leaves behind (the stored system identity no longer matches), driving the same startup
+// path. After a restore the safe system does less: no new charges, no outbox drain, no automatic replay.
 
 func recoverySite(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	s := seedPaidChain(t, p)
-	// establish the initial epoch, as a first-ever startup would
 	e := NewEngine(liveCfg, p, NewScriptedProvider(), &fakeGranter{})
 	got, err := e.ReconcileEpoch(context.Background(), s.tenant, s.site)
 	if err != nil {
@@ -33,8 +26,6 @@ func recoverySite(t *testing.T, p *pgxpool.Pool) scope {
 	return s
 }
 
-// simulateRestore reproduces the signal a restore leaves behind: the recorded identity no longer matches
-// the running database's own.
 func simulateRestore(t *testing.T, p *pgxpool.Pool, s scope) {
 	t.Helper()
 	if _, err := p.Exec(context.Background(),
@@ -69,14 +60,12 @@ func TestIntegrationRecovery_RestartIsIdempotentAndChangesNothing(t *testing.T) 
 	}
 }
 
-// The whole point: after a restore, nothing moves money and nothing replays.
 func TestIntegrationRecovery_RestoreHoldsEverythingAndReplaysNothing(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	s := recoverySite(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
 
-	// a charge in flight when the backup was taken
 	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +83,6 @@ func TestIntegrationRecovery_RestoreHoldsEverythingAndReplaysNothing(t *testing.
 		t.Fatal("recovery is not active after a detected restore")
 	}
 
-	// the in-flight charge and its settlement are HELD, with their state as it was
 	holds, err := e.OpenHolds(ctx, s.tenant, s.site, 50)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +101,6 @@ func TestIntegrationRecovery_RestoreHoldsEverythingAndReplaysNothing(t *testing.
 			sawPayment, sawSettlement, len(holds))
 	}
 
-	// NOTHING may be started while held
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); CodeOf(err) != ErrRecoveryHeld {
 		t.Fatalf("execution was permitted during recovery: %v", err)
 	}
@@ -124,7 +111,6 @@ func TestIntegrationRecovery_RestoreHoldsEverythingAndReplaysNothing(t *testing.
 		t.Fatalf("the held payment moved to %s during recovery", st)
 	}
 
-	// repeated startups while held do not open further epochs, and do not release anything
 	for i := 0; i < 3; i++ {
 		if got, err := e.ReconcileEpoch(ctx, s.tenant, s.site); err != nil || got != "RECOVERY_ACTIVE" {
 			t.Fatalf("restart during recovery reported %s (%v)", got, err)
@@ -136,14 +122,13 @@ func TestIntegrationRecovery_RestoreHoldsEverythingAndReplaysNothing(t *testing.
 	}
 }
 
-// Guest access is independent. A restore is our problem, not the guest's.
+// Guest access is independent: recovery holds money, not access.
 func TestIntegrationRecovery_GuestAccessIsUnaffected(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	s := recoverySite(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
 
-	// a guest who paid and was granted access before the backup
 	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatal(err)
@@ -159,7 +144,6 @@ func TestIntegrationRecovery_GuestAccessIsUnaffected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// recovery holds MONEY, not access
 	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.entitlements
 		WHERE purchase_id=$1 AND status='ACTIVE'`, s.purchase); n != before {
 		t.Fatalf("entering recovery changed the guest's access: %d -> %d", before, n)
@@ -171,7 +155,6 @@ func TestIntegrationRecovery_GuestAccessIsUnaffected(t *testing.T) {
 	}
 }
 
-// Release is earned, not requested.
 func TestIntegrationRecovery_ReleaseRequiresEveryHoldReconciled(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -193,7 +176,6 @@ func TestIntegrationRecovery_ReleaseRequiresEveryHoldReconciled(t *testing.T) {
 	if len(holds) == 0 {
 		t.Fatal("no holds to reconcile")
 	}
-	// a decision needs an author and an account of how it was established
 	if err := e.ResolveHold(ctx, holds[0].ID, "CONFIRMED_COMPLETED", actor, "short"); CodeOf(err) != ErrUntrustedInput {
 		t.Fatalf("a decision without a real note was accepted: %v", err)
 	}
@@ -207,7 +189,6 @@ func TestIntegrationRecovery_ReleaseRequiresEveryHoldReconciled(t *testing.T) {
 			t.Fatalf("resolve %s: %v", h.ID, err)
 		}
 	}
-	// a conclusion about money is not revised in place
 	if err := e.ResolveHold(ctx, holds[0].ID, "CONFIRMED_COMPLETED", actor,
 		"actually I changed my mind about this one"); CodeOf(err) != ErrNotExecutable {
 		t.Fatalf("a resolved hold was rewritten: %v", err)
@@ -224,13 +205,11 @@ func TestIntegrationRecovery_ReleaseRequiresEveryHoldReconciled(t *testing.T) {
 	if active, _ := e.RecoveryActive(ctx, s.tenant, s.site); active {
 		t.Fatal("recovery is still active after release")
 	}
-	// and money moves again
 	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "3")); CodeOf(err) == ErrRecoveryHeld {
 		t.Fatal("money movement is still held after release")
 	}
 }
 
-// An operator may hold money movement without a restore, and repeating the declaration is a no-op.
 func TestIntegrationRecovery_OperatorCanDeclareAndTheDeclarationIsIdempotent(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -259,8 +238,8 @@ func TestIntegrationRecovery_OperatorCanDeclareAndTheDeclarationIsIdempotent(t *
 	}
 }
 
-// An outcome for work that was ALREADY in flight must still be recordable during recovery. Refusing it
-// would leave a capture that really happened permanently unrecorded, which is worse than the disease.
+// An outcome for work already in flight must remain recordable during recovery; refusing it would leave a real capture
+// unrecorded.
 func TestIntegrationRecovery_AnOutcomeForInFlightWorkIsStillRecorded(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -274,7 +253,6 @@ func TestIntegrationRecovery_AnOutcomeForInFlightWorkIsStillRecorded(t *testing.
 	if _, err := e.ReconcileEpoch(ctx, s.tenant, s.site); err != nil {
 		t.Fatal(err)
 	}
-	// the provider answers about the charge we sent BEFORE the restore
 	if _, err := e.HandleProviderNotification(ctx,
 		BuildNotification(in.ClientRef, "evt-inflight", OutcomeCaptured, "prv_"+in.ClientRef)); err != nil {
 		t.Fatalf("an outcome for pre-restore work was refused: %v", err)

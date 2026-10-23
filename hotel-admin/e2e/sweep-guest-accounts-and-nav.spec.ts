@@ -1,13 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
-// REGRESSIONS FROM THE POST-ACCEPTANCE HARDENING SWEEP (D33/T0072).
-//
-// The edged backend is mocked at the network layer; no real backend, DB or production data is touched.
-// Every fixture below is the shape the REAL appliance returned, not an invented one.
-
-// An IAM-v2 guest account as edged actually serves it. Note what is ABSENT: template_id.
-// Under IAM-v2 a credential carries no plan at all -- what a guest may acquire is decided by package
-// eligibility rules -- so the field the legacy UI treated as mandatory simply does not exist here.
+// IAM-v2 credentials have no template_id; package eligibility determines available access.
 const IAMV2_ACCOUNT = {
   id: "b1e57ca4-aa9c-4b97-9fc0-0b31b3e11eda",
   username: "devguest2",
@@ -18,8 +11,6 @@ const IAMV2_ACCOUNT = {
   authority: "iam_v2",
 };
 
-// installBackend no longer takes an authority. There is one, and the envelope still carries it so an older
-// client can tell what served it, but the screen has no second personality to select.
 async function installBackend(page: Page, authority: "iam_v2", accounts: unknown[]) {
   const json = (status: number, body: unknown) =>
     ({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -33,9 +24,6 @@ async function installBackend(page: Page, authority: "iam_v2", accounts: unknown
   });
 }
 
-// THE CRASH. The screen dereferenced template_id unconditionally, so the first IAM-v2 account blanked
-// the whole page with "Cannot read properties of undefined (reading 'slice')". An operator saw
-// "Application error: a client-side exception has occurred" and nothing else -- no accounts, no way in.
 test("guest accounts renders IAM-v2 accounts that carry no template_id", async ({ page }) => {
   const crashes: string[] = [];
   page.on("pageerror", (e) => crashes.push(String(e)));
@@ -45,9 +33,7 @@ test("guest accounts renders IAM-v2 accounts that carry no template_id", async (
   expect(crashes, "the page must not throw on an account with no template_id").toEqual([]);
 });
 
-// THE DOUBLE HIGHLIGHT. `path.startsWith(href)` marked every ancestor-looking item active, and these are
-// siblings rather than parent/child: "/network" is the Guest networks LEAF, so standing on "/network/dhcp"
-// lit up both it and "DHCP & leases". The highlight is the only thing telling an operator where they are.
+// Match the longest navigation path so nested routes do not highlight sibling items.
 test("exactly one navigation item is active, including on nested network routes", async ({ page }) => {
   await installBackend(page, "iam_v2", []);
   for (const path of ["/network/dhcp", "/network/system", "/network", "/dashboard", "/guest-accounts"]) {
@@ -59,18 +45,12 @@ test("exactly one navigation item is active, including on nested network routes"
   await expect(page.locator('aside nav a[aria-current="page"]')).toHaveText(/DHCP/i);
 });
 
-// THE "MENU JUMPS BACK TO THE TOP". The menu never moved: `min-h-screen` let the whole page grow past the
-// viewport, so the sidebar had no bounded height, its overflow-y-auto never engaged, and reaching a lower
-// item meant scrolling the WINDOW. Navigating then reset the window to the top, as it should, and the menu
-// appeared to snap back. The fix bounds the layout to the viewport, so the window must not scroll at all.
+// Bound the sidebar to the viewport so navigation does not reset its apparent scroll position.
 test("the sidebar scrolls independently and the window does not scroll", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 700 });
   await installBackend(page, "iam_v2", []);
   await page.goto("/dashboard");
-  // The layout renders a skeleton until whoami resolves, so the sidebar does not exist yet; and below `lg` the
-  // column is replaced by a drawer that is mounted only while open. Waiting for the column to be VISIBLE pins
-  // the permanent one, and the measurement is taken from that same element rather than re-querying the
-  // document, so it cannot run against a null the wait had already satisfied.
+  // Wait for the permanent desktop column after whoami replaces the skeleton.
   const navEl = page.locator("aside nav").first();
   await navEl.waitFor({ state: "visible" });
   const m = await navEl.evaluate((nav) => ({
@@ -101,9 +81,6 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   await expect(page.getByText(/Could not load client accounts/i)).toBeVisible();
   await expect(page.getByText("Loading…"), "a failed load must not also claim to be loading").toHaveCount(0);
 
-  // The form must still be usable and must still imply no plan prerequisite. The "checking how this site
-  // decides guest access" states are gone with the authority branch they described -- there is nothing left
-  // to check -- so what is asserted here is that no wording came back with the failure.
   await page.getByRole("button", { name: /add account/i }).click();
   await expect(page.getByText(/eligibility rules on each internet package/i).first()).toBeVisible();
   const body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
@@ -112,10 +89,7 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
     expect(body, `a failed load must not claim ${rx}`).not.toMatch(rx);
   }
 
-  // Retrying recovers, and the stale failure banner does not survive the recovery.
-  //
-  // The form opened above is a MODAL, so the list behind it is inert until it is dismissed -- that is what a
-  // modal is for, and Radix enforces it. Closing it first is what an operator does too.
+  // Dismiss the modal before checking the list behind its inert overlay.
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   fail = false;
@@ -124,17 +98,6 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   await expect(page.getByText(/Could not load client accounts/i)).toHaveCount(0);
   await expect(page.getByText(/list failed/i), "the previous error must not linger").toHaveCount(0);
 });
-
-// THE LEGACY DIMENSION NO LONGER EXISTS, AND THAT IS WHAT THESE ASSERT.
-//
-// Twelve tests used to live here covering the legacy "guest access plans" lifecycle: picker present under
-// legacy, absent under IAM-v2, four distinguishable states for the plans request, prose that differed by
-// authority, and a window before the authority resolved in which neither could be claimed. Every one of them
-// described a superseded implementation that has been removed from the product.
-//
-// They are replaced rather than deleted, because "the branch is gone" is a property worth pinning: a
-// reintroduced plan control, a reintroduced plans request, or a reintroduced authority-specific sentence
-// would each fail one of these.
 
 test("the plan picker is absent, and there is no authority under which it returns", async ({ page }) => {
   await installBackend(page, "iam_v2", [IAMV2_ACCOUNT]);
@@ -176,8 +139,6 @@ test("no plan-bound wording or create-a-plan guidance appears anywhere, includin
       ({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
     if (path === "/guest-accounts") {
-      // Held open on purpose: the old screen rendered the LEGACY prose during exactly this window, because
-      // its structural default was the legacy answer until the first list returned.
       await held;
       return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
     }

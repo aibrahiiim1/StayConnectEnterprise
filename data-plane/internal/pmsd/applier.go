@@ -1,24 +1,8 @@
 package pmsd
 
-// STAY-EVENT APPLICATION WORKER.
-//
-// The connector's job ends when a PMS frame becomes a durable, admitted row in the stay_events inbox. Somebody
-// then has to APPLY those rows to the Stay domain — and until this existed, nobody did: the Stay Engine and
-// Checkout Converter were reachable only from tests.
-//
-// This worker is that owner, supervised alongside (never inside) the connector workers:
-//
-//   - it runs only when the Phase-3 master AND ingest flags are ON; while dark it is never constructed, opens
-//     no database handle and does no work;
-//   - it consumes the DURABLE inbox — it never parses a frame, never opens a second PMS socket, and does not
-//     care how a row got there (live, resync or replay);
-//   - each PMS Interface gets its own loop, so one Interface's failure cannot stall another's;
-//   - application goes through stayengine's per-Interface barrier, so ordering holds even with several
-//     processes running;
-//   - a Checkout Converter is REQUIRED: without one a GO event would have no authoritative boundary, so the
-//     worker refuses to start rather than silently applying checkouts with a server clock;
-//   - it drains on shutdown, and because every event is claimed transactionally, a restart resumes exactly the
-//     events that were still PENDING without re-applying anything.
+// The stay-event application worker applies durable inbox rows to the Stay domain, one loop per Interface,
+// through stayengine's per-Interface barrier. A Checkout Converter is required: without one a GO has no
+// authoritative boundary.
 
 import (
 	"context"
@@ -27,28 +11,21 @@ import (
 	"time"
 )
 
-// StayApplier applies ONE pending inbox event for a scope, returning whether it processed anything. It is the
-// narrow contract the worker needs from the Stay Engine; the engine owns the transaction, the barrier and the
-// Checkout conversion.
+// StayApplier applies one pending inbox event for a scope; the engine owns the transaction, barrier and Checkout conversion.
 type StayApplier interface {
 	ProcessNext(ctx context.Context, tenant, site, iface string) (bool, error)
 }
 
-// ErrApplierRequired — the ingest flag is ON but no Stay Applier was wired. Applying PMS events without the
-// engine (and therefore without the Checkout Converter it carries) is exactly the unverified path Phase 3
-// exists to remove, so startup fails closed instead.
+// ErrApplierRequired: applying PMS events without the engine (and its Checkout Converter) is unverified, so startup fails closed.
 var ErrApplierRequired = errors.New("pmsd: stay-event ingest enabled but no Stay Applier is wired")
 
-// applierConfig bounds the loop. Zero values get sane defaults.
+// applierConfig bounds the loop. Zero values get defaults.
 type applierConfig struct {
-	// IdlePause is how long a scope waits after finding nothing to do. It bounds the empty-inbox poll rate;
-	// it does NOT delay work, because a non-empty inbox is drained without pausing.
+	// IdlePause bounds the empty-inbox poll rate; a non-empty inbox is drained without pausing.
 	IdlePause time.Duration
-	// ErrorPause is the backoff after a failed application. A failure leaves the event PENDING (the engine
-	// rolls its transaction back), so retrying is safe — but retrying instantly would spin.
+	// ErrorPause is the backoff after a failure, which leaves the event PENDING (the engine rolls back).
 	ErrorPause time.Duration
-	// MaxBatch bounds how many events one scope applies before yielding, so a large backlog on one Interface
-	// cannot starve the others.
+	// MaxBatch bounds events per scope before yielding so one backlog cannot starve other Interfaces.
 	MaxBatch int
 }
 
@@ -64,12 +41,10 @@ func (c *applierConfig) withDefaults() {
 	}
 }
 
-// applierScope is one Interface's application loop identity.
 type applierScope struct{ Tenant, Site, Interface string }
 
-// runApplierScope drains one Interface's inbox until the context ends. It never returns an error for an
-// application failure: a failure is that Interface's problem, it is logged with a bounded code, and the loop
-// backs off and continues — which is what keeps one Interface's outage from stopping the others.
+// runApplierScope drains one Interface's inbox until ctx ends. An application failure is logged and backed off,
+// never returned, so one Interface's outage cannot stop the others.
 func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg applierConfig, log *slog.Logger) {
 	cfg.withDefaults()
 	for {
@@ -83,11 +58,7 @@ func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg a
 				if ctx.Err() != nil {
 					return // shutting down: not an error worth reporting
 				}
-				// The CAUSE is logged, not just the classification. A bounded code alone said
-				// "UNCLASSIFIED" for every failure — a missing grant, a violated domain guard and a dropped
-				// connection were one indistinguishable line, while the ordered per-interface stream sat
-				// blocked behind the event that could not be applied. The error text here comes from the
-				// database and the engine, never from PMS payload: no guest value passes through it.
+				// Log the cause, not just the code. The text comes from the database and engine, never PMS payload, so no guest value passes through it.
 				log.Warn("pmsd: stay-event application failed; event stays PENDING for retry",
 					"code", Classify(err).String(), "interface", sc.Interface, "cause", err.Error())
 				sleepCtx(ctx, cfg.ErrorPause)

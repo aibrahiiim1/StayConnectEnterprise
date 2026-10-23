@@ -2,26 +2,8 @@
 
 package main
 
-// THE WHOLE ENFORCEMENT CYCLE, END TO END, AGAINST A REAL DATABASE AND A REAL SOCKET.
-//
-// Every piece of this cycle was already tested. The cycle was not, and that is what failed live:
-//
-//	the grant committed a Session as PENDING_ENFORCEMENT   — proven, by the grant tests
-//	the producer derived a plan from durable state         — proven, by the enforce tests
-//	the applier put a plan in force and promoted a Session — proven, by the shaping tests
-//	...and on the appliance, nothing joined them up, because the producer and the writer were both gated on
-//	an unrelated feature flag. Two real guests were granted access that no kernel ever heard about, and every
-//	green test in the repository stayed green.
-//
-// So these tests own the JOIN. They run the real producer (internal/shapeproducer, the same call acctd makes)
-// against durable state in a real PostgreSQL, submit over a REAL unix socket so the producer is authenticated
-// by SO_PEERCRED exactly as it is in production, drive the real applier, and then read the Session back from
-// the database to see whether it says `active`.
-//
-// The kernel halves are the existing fakes, deliberately: what is proven here is the CONVERGENCE — that a
-// pending session becomes an active one through the real contract, that it survives a restart, and that an
-// unauthenticated producer cannot do it. That real nft admission and real tc metering behave as the applier
-// believes is proven against a live kernel in internal/kerneltest, which is the only place it can be.
+// End-to-end enforcement cycle: the real producer, a real unix socket (SO_PEERCRED auth) and a real PostgreSQL
+// converge a pending session to active. Kernel halves are fakes; the real kernel is covered in internal/kerneltest.
 
 import (
 	"bytes"
@@ -53,9 +35,7 @@ type cycleFixture struct {
 
 func cyclePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	// SO_PEERCRED is a Linux socket option and this cycle is authenticated by it, so the suite can only mean
-	// anything on the platform the appliance runs. On anything else the peer identity is unknowable (see
-	// phase3_peer_other.go) and a pass would prove the opposite of what it claims.
+	// SO_PEERCRED is Linux-only; elsewhere the peer identity is unknowable and a pass would prove nothing.
 	if runtime.GOOS != "linux" {
 		t.Skip("the enforcement cycle is authenticated by SO_PEERCRED; it runs on Linux, as the appliance does")
 	}
@@ -71,20 +51,17 @@ func cyclePool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// cycleOctet keeps concurrent fixtures on separate addresses. Two fixtures sharing one IP would exercise the
-// address-supersession rule instead of the cycle, which is a different test (internal/enforce).
+// cycleOctet keeps fixtures on separate addresses; a shared IP would trigger address supersession instead.
 var cycleOctet = 40
 
-// seedPendingSession builds exactly what a successful Room Login leaves behind: an ACTIVE entitlement, an
-// authorized device, and a Session in PENDING_ENFORCEMENT that no kernel has ever heard of.
+// seedPendingSession builds what a successful Room Login leaves: an active entitlement, an authorized device
+// and a PENDING_ENFORCEMENT session.
 func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	t.Helper()
 	ctx := context.Background()
 	cycleOctet++
 	f := cycleFixture{pool: p, mac: fmt.Sprintf("02:00:00:00:%02x:01", cycleOctet)}
-	// On the full production schema bridge_name is globally unique and parent_interface is unique among enabled
-	// untagged networks, and several packages (and earlier runs) share one database; both names are therefore
-	// derived from a fresh uuid rather than from the process-local octet.
+	// bridge_name and parent_interface are unique across a shared database, so derive them from a fresh uuid.
 	uniq := mustText(t, p, `SELECT substr(md5(gen_random_uuid()::text),1,12)`)
 	f.bridge = "b" + uniq
 	parent := "p" + uniq
@@ -92,8 +69,7 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	subnet := fmt.Sprintf("10.%d.0.0/24", cycleOctet)
 	gateway := fmt.Sprintf("10.%d.0.1", cycleOctet)
 
-	// The stay family and the commerce intent (purchases) are controlled writers on the production schema: the
-	// whole seed runs in one transaction that opens both operations, as the grant path does.
+	// The stay and commerce_intent families are controlled writers: one transaction opens both, as the grant path does.
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +117,6 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 	}
 	f.appliance = mustText(t, p, `SELECT gen_random_uuid()::text`)
 
-	// The entitlement and its history, through the same controlled writer the grant path uses.
 	var purchase string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)
@@ -167,7 +142,6 @@ func seedPendingSession(t *testing.T, p *pgxpool.Pool) cycleFixture {
 		f.entitlement, f.device); err != nil {
 		t.Fatalf("authorize device: %v", err)
 	}
-	// PENDING_ENFORCEMENT, with the addressing the applier will re-derive the accounting source from.
 	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.sessions
 		(tenant_id,site_id,entitlement_id,device_id,credential_method,state,started,ip,mac,ingress_interface)
 		VALUES ($1,$2,$3,$4,'PMS','PENDING_ENFORCEMENT',now(),($5::text)::inet,($6::text)::macaddr,$7)
@@ -187,9 +161,7 @@ func mustText(t *testing.T, p *pgxpool.Pool, q string) string {
 	return s
 }
 
-// forwarding asks the applier's own kernel surface whether this session's class is actually carrying traffic,
-// rather than inspecting the fake's internals: a class that exists but forwards nothing is precisely the state
-// the staged provisioning creates on purpose, and it is not enforcement.
+// forwarding asks whether the class carries traffic; a class that exists but forwards nothing is staged, not enforcement.
 func (f cycleFixture) forwarding(t *testing.T, tc *fakeTC) bool {
 	t.Helper()
 	on, err := tc.SessionForwarding(context.Background(), f.bridge, net.ParseIP(f.ip))
@@ -209,10 +181,7 @@ func (f cycleFixture) sessionState(t *testing.T) string {
 	return state
 }
 
-// applier builds the REAL netd shaping writer for this fixture's scope, with the durable halves bound to the
-// real database and the kernel halves faked. stateDir is separate per instance so a "restart" can be modelled
-// by building a second one with an empty directory — a reboot loses the class inventory, and must not lose the
-// ability to converge.
+// applier builds the real shaping writer with a real database and a faked kernel; a fresh stateDir models a reboot.
 func (f cycleFixture) applier(t *testing.T, stateDir string, tc *fakeTC, g *fakeGate, allowedUID int) *phase3Shaping {
 	t.Helper()
 	return &phase3Shaping{
@@ -227,15 +196,12 @@ func (f cycleFixture) applier(t *testing.T, stateDir string, tc *fakeTC, g *fake
 		generations: &pgGenerations{pool: f.pool},
 		enforcement: &pgEnforcement{pool: f.pool, tenant: f.tenant, site: f.site},
 		secClock:    newSecurityClock(),
-		// DHCP CONFIRMS THIS FIXTURE'S ADDRESS. Ownership verification sits in front of provisioning, so a
-		// writer with no evidence source answers UNKNOWN, withholds the renewal and never reaches the cycle
-		// these tests exist to prove. The lease is the one Kea would hold for this device.
+		// Ownership verification precedes provisioning; without a lease source the writer answers UNKNOWN.
 		owner: addressOwner{src: fakeLeases{rows: []KeaLease{lease(f.ip, f.mac)}}},
 	}
 }
 
-// serveOverUnixSocket runs the real handler on a real unix socket, through the real peer listener. The
-// producer's identity therefore comes from the kernel (SO_PEERCRED), not from anything the request says.
+// serveOverUnixSocket serves the real handler so the producer's identity comes from SO_PEERCRED, not the request.
 func serveOverUnixSocket(t *testing.T, p3 *phase3Shaping) *http.Client {
 	t.Helper()
 	sock := filepath.Join(t.TempDir(), "netd.sock")
@@ -265,8 +231,7 @@ func serveOverUnixSocket(t *testing.T, p3 *phase3Shaping) *http.Client {
 	}, Timeout: 10 * time.Second}
 }
 
-// producerPass is one complete acctd tick: derive the plan from durable state, build the envelope with the
-// SAME producer code acctd runs, and submit it over the socket.
+// producerPass is one acctd tick using the same producer code.
 func (f cycleFixture) producerPass(t *testing.T, c *http.Client, gen int64) (shapingPlanResponse, int) {
 	t.Helper()
 	ctx := context.Background()
@@ -292,8 +257,7 @@ func (f cycleFixture) producerPass(t *testing.T, c *http.Client, gen int64) (sha
 	return res, resp.StatusCode
 }
 
-// THE REGRESSION. A Session that the grant left PENDING_ENFORCEMENT becomes `active` because the producer and
-// the applier actually met — and it says active only once BOTH kernel halves are in force.
+// A pending session becomes active only once both kernel halves are in force.
 func TestIntegration_EnforcementCycle_PendingSessionBecomesActive(t *testing.T) {
 	p := cyclePool(t)
 	f := seedPendingSession(t, p)
@@ -316,7 +280,6 @@ func TestIntegration_EnforcementCycle_PendingSessionBecomesActive(t *testing.T) 
 		t.Fatalf("session state = %q after a healthy pass, want active. This is the live failure: the rows "+
 			"exist, the guest was told it worked, and nothing ever promoted them", got)
 	}
-	// BOTH halves, not one. A session metered but not authorized (or the reverse) is not enforcement.
 	if !g.isAuthorized(f.bridge, f.ip) {
 		t.Fatal("the session is active but holds no nft authorization — it would have no internet")
 	}
@@ -325,10 +288,7 @@ func TestIntegration_EnforcementCycle_PendingSessionBecomesActive(t *testing.T) 
 	}
 }
 
-// RESTART AND RECOVERY. The first attempt fails in the kernel and the process then dies, which is the state a
-// crash or a deployment leaves behind: a pending session, no class, and no in-memory anything. A fresh
-// instance with an EMPTY state directory must still converge it — recovery cannot depend on what the previous
-// process remembered.
+// A fresh instance with an empty state directory must converge a session whose first attempt failed.
 func TestIntegration_EnforcementCycle_RecoversAnAlreadyPendingSessionAfterRestart(t *testing.T) {
 	p := cyclePool(t)
 	f := seedPendingSession(t, p)
@@ -344,7 +304,6 @@ func TestIntegration_EnforcementCycle_RecoversAnAlreadyPendingSessionAfterRestar
 		t.Fatalf("a session whose class could not be created claims %q", got)
 	}
 
-	// A NEW process: new state directory, empty kernel, no memory of the attempt.
 	tc, g := newFakeTC(), newFakeGate()
 	second := serveOverUnixSocket(t, f.applier(t, t.TempDir(), tc, g, os.Getuid()))
 	res2, code := f.producerPass(t, second, 2)
@@ -359,11 +318,7 @@ func TestIntegration_EnforcementCycle_RecoversAnAlreadyPendingSessionAfterRestar
 	}
 }
 
-// PRODUCER AUTHENTICATION IS REAL, and it is the kernel's answer rather than the request's.
-//
-// The submission below is byte-for-byte the one that succeeds above. The only difference is which uid the
-// applier will accept, and SO_PEERCRED tells it the truth about who is calling — so the plan is refused and
-// nothing at all is enforced.
+// The same submission with a different accepted uid is refused: SO_PEERCRED is authoritative.
 func TestIntegration_EnforcementCycle_AnUnauthenticatedProducerEnforcesNothing(t *testing.T) {
 	p := cyclePool(t)
 	f := seedPendingSession(t, p)
@@ -387,13 +342,7 @@ func TestIntegration_EnforcementCycle_AnUnauthenticatedProducerEnforcesNothing(t
 	}
 }
 
-// THE HEALTHY CYCLE HAS TO FIT INSIDE THE GUEST'S RESPONSE BUDGET.
-//
-// portald abandons a connect attempt at 2500ms and hands scd 2300ms of that, so a healthy convergence must
-// complete well inside it — otherwise a guest whose grant is perfectly good is told it failed, which is
-// exactly what the appliance did for two real guests. This measures the part that is ours: everything from
-// "durable state says this session is pending" to "durable state says it is active", including the real
-// socket, the real authentication and the real database writes.
+// portald abandons a connect at 2500ms and gives scd 2300ms, so a healthy pending-to-active convergence must fit well inside it.
 func TestIntegration_EnforcementCycle_ConvergesWellInsideTheGuestBudget(t *testing.T) {
 	p := cyclePool(t)
 	f := seedPendingSession(t, p)
@@ -408,9 +357,7 @@ func TestIntegration_EnforcementCycle_ConvergesWellInsideTheGuestBudget(t *testi
 	if got := f.sessionState(t); got != "active" {
 		t.Fatalf("session state = %q", got)
 	}
-	// The budget also has to absorb one full producer interval (the tick is 1s) and scd's 100ms polling
-	// granularity, so the pass itself has roughly a second of the 2300ms to spend. Half of that is the alarm
-	// threshold: anything slower means the arithmetic in portald's budget no longer holds.
+	// The budget must also absorb a 1s producer tick and scd's 100ms polling, leaving about a second for the pass.
 	if elapsed > 500*time.Millisecond {
 		t.Fatalf("a healthy convergence took %s. portald abandons the guest at 2500ms and the budget assumes "+
 			"one producer interval plus this pass fits inside it — re-derive the budget before shipping this",

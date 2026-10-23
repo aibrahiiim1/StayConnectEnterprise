@@ -2,7 +2,6 @@ package iamv2
 
 import "testing"
 
-// env map -> Getenv
 func envGetter(m map[string]string) Getenv {
 	return func(k string) string { return m[k] }
 }
@@ -69,13 +68,11 @@ func TestPMSConfig_LoadFromEnv_Table(t *testing.T) {
 				}
 			},
 		},
-		// incoherent: each child ON while master OFF must fail closed.
 		{name: "connector ON, master OFF => reject", env: map[string]string{EnvPhase3PMSConnector: "true"}, wantErr: true},
 		{name: "ingest ON, master OFF => reject", env: map[string]string{EnvPhase3PMSIngest: "true"}, wantErr: true},
 		{name: "auth ON, master OFF => reject", env: map[string]string{EnvPhase3PMSAuth: "true"}, wantErr: true},
 		{name: "grace ON, master OFF => reject", env: map[string]string{EnvPhase3CheckoutGrace: "true"}, wantErr: true},
 		{name: "admin ON, master OFF => reject", env: map[string]string{EnvPhase3Admin: "true"}, wantErr: true},
-		// malformed booleans fail closed.
 		{name: "malformed master => reject", env: map[string]string{EnvPhase3Master: "yesish"}, wantErr: true},
 		{name: "malformed child => reject", env: map[string]string{EnvPhase3Master: "true", EnvPhase3PMSAuth: "onnn"}, wantErr: true},
 	}
@@ -101,8 +98,7 @@ func TestPMSConfig_LoadFromEnv_Table(t *testing.T) {
 	}
 }
 
-// Exhaustive: for every one of the 2^6 flag combinations, Validate/Enabled must be self-consistent and
-// no surface may be ON while master is OFF.
+// Over all 2^6 flag combinations, no surface may be live while master is OFF.
 func TestPMSConfig_Exhaustive(t *testing.T) {
 	for bits := 0; bits < 64; bits++ {
 		c := PMSConfig{
@@ -123,7 +119,6 @@ func TestPMSConfig_Exhaustive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bits=%d: coherent config must validate, got %v", bits, err)
 		}
-		// No surface may be live unless master is on.
 		if !c.MasterEnabled && (c.ConnectorOn() || c.IngestOn() || c.AuthOn() || c.CheckoutGraceOn() || c.AdminOn() || c.Enabled()) {
 			t.Fatalf("bits=%d: a surface reported live while master OFF", bits)
 		}
@@ -136,7 +131,6 @@ func TestPMSConfig_SafeFlagSummary_NoSecrets(t *testing.T) {
 	if s == "" || len(s) > 200 {
 		t.Fatalf("unexpected summary: %q", s)
 	}
-	// Must contain only flag booleans, never secret-like content.
 	for _, want := range []string{"phase3 master=true", "auth=true", "connector=false"} {
 		if !contains(s, want) {
 			t.Fatalf("summary %q missing %q", s, want)

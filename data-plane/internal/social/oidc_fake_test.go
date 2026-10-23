@@ -16,10 +16,8 @@ import (
 	"time"
 )
 
-// Shared fake OpenID Provider for the Microsoft and Apple tests: a JWKS
-// endpoint publishing one test RSA key, and a token endpoint that answers with
-// whatever id_token (or error) the test configured. Everything is local; no
-// test reaches a real IdP.
+// Shared fake OpenID Provider: a JWKS endpoint with one test RSA key and a token endpoint answering with the
+// configured id_token or error. Everything is local.
 
 var (
 	testRSAOnce sync.Once
@@ -43,7 +41,6 @@ func rsaKeys(t *testing.T) (*rsa.PrivateKey, *rsa.PrivateKey) {
 
 const testKid = "test-kid-1"
 
-// signRS256 builds a compact JWS the way an IdP would.
 func signRS256(t *testing.T, key *rsa.PrivateKey, kid string, claims map[string]any) string {
 	t.Helper()
 	hb, _ := json.Marshal(map[string]any{"alg": "RS256", "kid": kid, "typ": "JWT"})
@@ -67,7 +64,6 @@ type fakeIdP struct {
 	jwksHits    int
 }
 
-// newFakeIdP serves the JWKS at jwksPath and the token endpoint at tokenPath.
 func newFakeIdP(t *testing.T, jwksPath, tokenPath string) *fakeIdP {
 	t.Helper()
 	key, _ := rsaKeys(t)
@@ -124,16 +120,14 @@ func (f *fakeIdP) form() url.Values {
 	return f.tokenForm
 }
 
-// fixedNow is the clock every provider test runs at.
 var fixedNow = time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 
-// The attempt secrets every provider test's sign-in carries. testNonce is what a well-formed id_token repeats.
+// testNonce is what a well-formed id_token repeats.
 const (
 	testVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" // RFC 7636 Appendix B's verifier
 	testNonce    = "n-0S6_WzA2Mj"
 )
 
-// xreq is the exchange of one test attempt: the code and redirect URI, plus the attempt's verifier and nonce.
 func xreq(code, redirectURI string) ExchangeRequest {
 	return ExchangeRequest{Code: code, RedirectURI: redirectURI, CodeVerifier: testVerifier, Nonce: testNonce}
 }

@@ -20,30 +20,20 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
-// StartMTLS runs a dedicated mutual-TLS listener for appliance transport. It
-// REQUIRES a client certificate signed by our appliance CA (normal TLS
-// verification is fully enabled — no InsecureSkipVerify), extracts the bound
-// appliance_id from the cert's URI SAN; applianceAPI rejects revoked certificates
-// and retired identities. It serves the appliance API alongside the signed-JWT
-// layer (defence in depth), never replacing certificate verification with an
-// exception. The assignment channel on it is certificate-only.
+// StartMTLS runs the appliance mutual-TLS listener. A client certificate signed by the appliance CA is
+// required; applianceAPI rejects revoked certificates and retired identities.
 func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, applianceAPI http.Handler) error {
-	// The server TLS identity is PERSISTENT and MANAGED: a stable cert signed by
-	// the intermediate CA, hot-rotated before expiry via verify-before-switch
-	// (no file-deletion-and-hope). See serverTLS.
 	stls, err := newServerTLS(db, ca)
 	if err != nil {
 		return err
 	}
 	slog.Info("mTLS server certificate loaded", "not_after", stls.notAfter())
-	go stls.monitor(ctx) // expiry monitoring + controlled rotation
+	go stls.monitor(ctx)
 	caPool := x509.NewCertPool()
 	caPool.AppendCertsFromPEM(ca.CertPEM())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	// The real appliance API served over mTLS (hello, license, csr, certificate).
-	// Guarded by RequireAppliance + client-cert binding inside applianceAPI.
 	if applianceAPI != nil {
 		mux.Handle("/v1/appliance/", applianceAPI)
 	}
@@ -52,7 +42,7 @@ func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, a
 		Addr:    addr,
 		Handler: mux,
 		TLSConfig: &tls.Config{
-			GetCertificate: stls.getCertificate, // hot-swappable on rotation
+			GetCertificate: stls.getCertificate,
 			ClientAuth:     tls.RequireAndVerifyClientCert,
 			ClientCAs:      caPool,
 			MinVersion:     tls.VersionTLS12,
@@ -66,19 +56,15 @@ func StartMTLS(ctx context.Context, db *pgxpool.Pool, ca *pki.CA, addr string, a
 		_ = srv.Shutdown(sctx)
 	}()
 	slog.Info("mTLS appliance listener starting", "addr", addr, "ca_version", ca.Version)
-	// Certs supplied via TLSConfig; empty strings are correct here.
 	return srv.ListenAndServeTLS("", "")
 }
 
-// serverTLS manages Central's mTLS server certificate lifecycle: persistent
-// storage, hot-swap on rotation (via GetCertificate), expiry monitoring, and
-// controlled rotation with verify-before-switch + rollback + audit + history.
+// serverTLS manages Central's mTLS server certificate: persistent, hot-swapped on rotation after verification.
 type serverTLS struct {
 	db  *pgxpool.Pool
 	ca  *pki.CA
 	dir string
-	// names is what the certificate is issued for and verified against. Resolved once at construction
-	// from configuration (see mtlsServerNames) so issuing and verifying can never disagree.
+	// names is resolved once so issuing and verifying cannot disagree.
 	names []string
 	mu    sync.RWMutex
 	cur   *tls.Certificate
@@ -87,8 +73,7 @@ type serverTLS struct {
 
 const serverTLSLifetime = 825 * 24 * time.Hour
 
-// serverTLSThreshold is the rotate-before-expiry window (default 30d). It can be
-// raised via CTRLAPI_SERVER_TLS_ROTATE_DAYS for controlled rotation drills.
+// serverTLSThreshold is the rotate-before-expiry window (default 30d, CTRLAPI_SERVER_TLS_ROTATE_DAYS).
 func serverTLSThreshold() time.Duration {
 	if v := os.Getenv("CTRLAPI_SERVER_TLS_ROTATE_DAYS"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil {
@@ -98,21 +83,9 @@ func serverTLSThreshold() time.Duration {
 	return 30 * 24 * time.Hour
 }
 
-// mtlsServerNames is what Central's mTLS certificate is issued for, and therefore what an appliance may
-// successfully dial.
-//
-// IT USED TO BE THE LITERAL STRING "150.0.0.252" -- one lab's address, compiled into the product. That made
-// the appliance-facing endpoint un-moveable in the only way that actually matters: the configuration could
-// name any FQDN you liked, and TLS would still reject it, because the certificate was for an IP.
-//
-// Now it is derived from the same endpoint configuration everything else uses:
-//
-//	CTRLAPI_APPLIANCE_BASE   the appliance-facing name (from deploy/config/central-endpoint.env)
-//	CTRLAPI_MTLS_SANS        extra names/addresses, comma-separated -- for a transition, where appliances
-//	                         already in the field still dial the OLD address and must keep working until
-//	                         they are moved.
-//
-// 127.0.0.1 is always present so local health checks work.
+// mtlsServerNames is what the mTLS certificate is issued for, and so what an appliance may dial:
+// CTRLAPI_APPLIANCE_BASE, plus CTRLAPI_MTLS_SANS (comma-separated, for appliances still dialling an old
+// address during a move), plus 127.0.0.1 for local health checks.
 func mtlsServerNames() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -147,7 +120,6 @@ func newServerTLS(db *pgxpool.Pool, ca *pki.CA) (*serverTLS, error) {
 	slog.Info("mTLS server certificate names", "sans", s.names)
 	pair, leaf, err := s.load()
 	if err != nil {
-		// No valid cert on disk → issue the first one.
 		if err := s.issueAndPersist(); err != nil {
 			return nil, err
 		}
@@ -156,16 +128,11 @@ func newServerTLS(db *pgxpool.Pool, ca *pki.CA) (*serverTLS, error) {
 			return nil, err
 		}
 	} else if missing := s.namesNotCoveredBy(leaf); len(missing) > 0 {
-		// THE ENDPOINT MOVED AND THE CERTIFICATE DID NOT.
-		//
-		// The stored certificate is still valid and still chains, so nothing here fails -- it simply does
-		// not carry the name appliances have been told to dial, and every one of them gets a TLS error that
-		// looks like a network fault. Re-issuing on the spot is what keeps "change the endpoint config" a
-		// complete operation instead of one that needs a second, undocumented step on the server.
+		// A valid stored certificate can still lack a name appliances dial, which looks like a network fault; re-issue now.
 		slog.Info("re-issuing the mTLS server certificate: it does not cover every configured name",
 			"missing", missing, "configured", s.names)
 		if err := s.issueAndPersist(); err != nil {
-			// Keep serving with what we have. A cert missing one name is bad; no listener at all is worse.
+			// A cert missing one name is better than no listener.
 			slog.Error("could not re-issue the mTLS server certificate; continuing with the stored one",
 				"err", err, "missing", missing)
 		} else if p2, l2, err2 := s.load(); err2 == nil {
@@ -176,7 +143,6 @@ func newServerTLS(db *pgxpool.Pool, ca *pki.CA) (*serverTLS, error) {
 	return s, nil
 }
 
-// namesNotCoveredBy returns the configured names this certificate would fail for.
 func (s *serverTLS) namesNotCoveredBy(leaf *x509.Certificate) []string {
 	var missing []string
 	for _, n := range s.names {
@@ -225,20 +191,17 @@ func (s *serverTLS) notAfter() time.Time {
 	return s.leaf.NotAfter
 }
 
-// issueAndPersist issues a fresh server cert from the intermediate CA and
-// writes it atomically (cert 0644, key 0600). Keeps the previous cert as
-// history (.prev) for overlap/rollback.
+// issueAndPersist writes a fresh server cert atomically and keeps the previous pair as .prev.
 func (s *serverTLS) issueAndPersist() error {
 	certPEM, keyPEM, err := s.ca.SignServer(s.names, serverTLSLifetime)
 	if err != nil {
 		return err
 	}
-	// Verify SANs + chain BEFORE persisting/switching.
+	// Verify before persisting or switching.
 	if err := s.verify(certPEM); err != nil {
 		return err
 	}
 	_ = os.MkdirAll(s.dir, 0o700)
-	// History: preserve the current cert as .prev for rollback/overlap.
 	if old, err := os.ReadFile(s.certPath()); err == nil {
 		_ = os.WriteFile(s.certPath()+".prev", old, 0o644)
 		if oldk, err := os.ReadFile(s.keyPath()); err == nil {
@@ -254,8 +217,6 @@ func (s *serverTLS) issueAndPersist() error {
 	return nil
 }
 
-// verify checks the freshly-issued cert parses, carries the required SANs, and
-// chains to the CA — verify-before-switch.
 func (s *serverTLS) verify(certPEM []byte) error {
 	leaf, err := parseCertPEM(certPEM)
 	if err != nil {
@@ -266,8 +227,7 @@ func (s *serverTLS) verify(certPEM []byte) error {
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
 		return err
 	}
-	// EVERY name it was issued for, not one hardcoded one. A certificate that carries only some of the
-	// names appliances dial fails for exactly the appliances that use the missing one, and nowhere else.
+	// Every configured name must be covered; a missing one fails only the appliances that dial it.
 	for _, n := range s.names {
 		if err := leaf.VerifyHostname(n); err != nil {
 			return fmt.Errorf("issued mTLS certificate is not valid for %q: %w", n, err)
@@ -276,9 +236,7 @@ func (s *serverTLS) verify(certPEM []byte) error {
 	return nil
 }
 
-// CheckAndRotate rotates the server cert when it is within the threshold of
-// expiry. Verify-before-switch; on any failure the old cert stays active
-// (rollback). Audited with cert history.
+// CheckAndRotate rotates the cert inside the threshold; on any failure the old cert stays active.
 func (s *serverTLS) CheckAndRotate(ctx context.Context) {
 	na := s.notAfter()
 	remaining := time.Until(na)
@@ -310,11 +268,10 @@ func (s *serverTLS) auditServerTLS(ctx context.Context, action, detail string) {
 		action, detail)
 }
 
-// monitor runs a daily expiry check + controlled rotation.
 func (s *serverTLS) monitor(ctx context.Context) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
-	s.CheckAndRotate(ctx) // check once at startup
+	s.CheckAndRotate(ctx)
 	for {
 		select {
 		case <-ctx.Done():

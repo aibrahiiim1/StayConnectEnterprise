@@ -48,12 +48,11 @@ func TestIssueVerifyCorrectAndWrong(t *testing.T) {
 func TestCrossContextRejected(t *testing.T) {
 	r, _ := NewRing(map[int][]byte{1: key(1)}, 1)
 	_, dig, _ := r.Issue(chal(), "123456")
-	// changing any bound field must fail verification
 	mods := []Challenge{
 		{TenantID: "OTHER", Channel: "email", Destination: "a@example.com", ChallengeID: "cid-1"},
-		{TenantID: "t1", Channel: "sms", Destination: "a@example.com", ChallengeID: "cid-1"},   // cross-channel
-		{TenantID: "t1", Channel: "email", Destination: "b@example.com", ChallengeID: "cid-1"}, // cross-identity
-		{TenantID: "t1", Channel: "email", Destination: "a@example.com", ChallengeID: "cid-2"}, // cross-challenge (replay)
+		{TenantID: "t1", Channel: "sms", Destination: "a@example.com", ChallengeID: "cid-1"},
+		{TenantID: "t1", Channel: "email", Destination: "b@example.com", ChallengeID: "cid-1"},
+		{TenantID: "t1", Channel: "email", Destination: "a@example.com", ChallengeID: "cid-2"},
 	}
 	for i, c := range mods {
 		if ok, _ := r.Verify(1, dig, c, "123456"); ok {
@@ -64,27 +63,22 @@ func TestCrossContextRejected(t *testing.T) {
 
 func TestRotationKeepsOldVerifiable(t *testing.T) {
 	r1, _ := NewRing(map[int][]byte{1: key(1)}, 1)
-	gen1, dig1, _ := r1.Issue(chal(), "123456") // pinned to gen 1
-	// rotate: gen 2 active, gen 1 retained
+	gen1, dig1, _ := r1.Issue(chal(), "123456")
 	r2, _ := NewRing(map[int][]byte{1: key(1), 2: key(2)}, 2)
 	if r2.Active() != 2 {
 		t.Fatal("active should be 2 after rotation")
 	}
-	// old OTP (pinned gen1) still verifies via retained key
 	if ok, _ := r2.Verify(gen1, dig1, chal(), "123456"); !ok {
 		t.Fatal("rotation must keep old-generation OTPs verifiable")
 	}
-	// new issuance uses gen 2
 	genN, digN, _ := r2.Issue(chal(), "654321")
 	if genN != 2 {
 		t.Fatal("new issuance must use active gen 2")
 	}
-	// gen2 digest differs from gen1 digest for same code (different key)
 	_, dig1same, _ := r1.Issue(chal(), "654321")
 	if digN == dig1same {
 		t.Fatal("different generations must produce different digests")
 	}
-	// once gen1 is removed (past TTL), gen1 verify fails closed
 	r3, _ := NewRing(map[int][]byte{2: key(2)}, 2)
 	if ok, err := r3.Verify(1, dig1, chal(), "123456"); ok || err == nil {
 		t.Fatal("removed generation must fail closed")
@@ -92,7 +86,6 @@ func TestRotationKeepsOldVerifiable(t *testing.T) {
 }
 
 func TestLegacyCompat(t *testing.T) {
-	// build a legacy "salt:sha256(salt|code)" digest exactly like the current otp.go format
 	salt := "deadbeef"
 	sum := sha256.Sum256([]byte(salt + "|" + "123456"))
 	stored := salt + ":" + hex.EncodeToString(sum[:])
@@ -105,7 +98,6 @@ func TestLegacyCompat(t *testing.T) {
 	if ok, _ := VerifyLegacy(stored, "000000"); ok {
 		t.Fatal("legacy wrong code must not verify")
 	}
-	// a keyed-HMAC digest (bare 64-hex, no salt colon) is NOT legacy format
 	r, _ := NewRing(map[int][]byte{1: key(1)}, 1)
 	_, dig, _ := r.Issue(chal(), "123456")
 	if IsLegacyFormat(dig) {

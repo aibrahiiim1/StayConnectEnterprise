@@ -1,13 +1,9 @@
-// Package stayengine is the Increment-4 transactional Stay ingestion engine. It consumes ONLY durable inbox
-// rows (iam_v2.stay_events that are LIVE, or RESYNC rows whose generation has been published) and resolves
-// each into an authoritative Stay operation, moving the event PENDING→terminal exactly once. Stay identity
-// and lifecycle resolution live HERE — never in the read-only connector, whose StayResolutionCandidate is a
-// non-authoritative hint only. The engine issues NO financial command and implements NO PMS Posting.
+// Package stayengine resolves durable inbox events (iam_v2.stay_events) into authoritative Stay operations.
 package stayengine
 
 import "github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 
-// EventType is the closed set of domain event types the engine ingests (authoritative Protel map).
+// EventType is the closed set of Protel event types the engine ingests.
 type EventType string
 
 const (
@@ -16,27 +12,26 @@ const (
 	EvGuestOut    EventType = "GO" // guest out
 )
 
-// InboxEvent is a parsed durable stay_events row (its typed JSON payload), the ONLY input the engine trusts.
+// InboxEvent is a parsed durable stay_events row, the only input the engine trusts.
 type InboxEvent struct {
-	EventIdentity string // external_event_identity — the idempotency key
+	EventIdentity string // external_event_identity, the idempotency key
 	EventType     EventType
-	Reservation   string // G# (interface-scoped; never globally unique)
-	Room          string // RN (interface-scoped; never globally unique, changes on a Room Move)
+	Reservation   string // G#, interface-scoped
+	Room          string // RN, interface-scoped; changes on a room move
 	LastName      string
 	FirstName     string
 	Folio         string
 	ArrivalRaw    string
 	DepartureRaw  string
-	// Sharers is the full occupancy list when the connector reports one. Sharing a Stay is legal and ordinary;
-	// exactly one occupant is the primary.
+	// Sharers is the full occupancy list when reported; exactly one occupant is the primary.
 	Sharers []Sharer
 	// Guest attributes, nil when the record did not state them.
 	TravelAgent *string
 	VIP         *bool
 }
 
-// StayView is the CURRENT persisted state of the Stay for this reservation within one interface (nil if none).
-// AppliedIdentity reports whether a given event identity has ALREADY been applied to this Stay (idempotency).
+// StayView is the persisted Stay for a reservation within one interface (nil if none).
+// AppliedIdentity reports whether an event identity was already applied to it.
 type StayView struct {
 	ID               string
 	Status           string // RESERVED | IN_HOUSE | CHECKED_OUT | POST_STAY_ACTIVE | CANCELLED | NO_SHOW
@@ -45,34 +40,31 @@ type StayView struct {
 	AppliedIdentity  func(identity string) bool
 }
 
-// Op is the resolved, authoritative Stay operation for one event.
+// Op is the resolved Stay operation for one event.
 type Op string
 
 const (
-	OpCreateStay    Op = "CREATE_STAY"    // new Stay (new reservation), IN_HOUSE
-	OpUpdateStay    Op = "UPDATE_STAY"    // in-place attribute/name/date correction on the same episode
-	OpRoomMove      Op = "ROOM_MOVE"      // same Stay, new room (RN changed) — episode preserved
-	OpCheckout      Op = "CHECKOUT"       // IN_HOUSE → CHECKED_OUT
-	OpReinstate     Op = "REINSTATE"      // CHECKED_OUT → IN_HOUSE, lifecycle_version += 1 (new episode)
-	OpSkipDuplicate Op = "SKIP_DUPLICATE" // idempotent no-op (already applied / already in target state)
-	OpManualReview  Op = "MANUAL_REVIEW"  // ambiguous / unsafe to apply automatically → human review
+	OpCreateStay    Op = "CREATE_STAY"
+	OpUpdateStay    Op = "UPDATE_STAY" // in-place correction on the same episode
+	OpRoomMove      Op = "ROOM_MOVE"   // same Stay, new room
+	OpCheckout      Op = "CHECKOUT"
+	OpReinstate     Op = "REINSTATE" // CHECKED_OUT to IN_HOUSE, new episode
+	OpSkipDuplicate Op = "SKIP_DUPLICATE"
+	OpManualReview  Op = "MANUAL_REVIEW"
 )
 
-// Decision is the engine's resolved outcome for one event. It is DETERMINISTIC in (event, current state).
+// Decision is the engine's outcome for one event, deterministic in (event, current state).
 type Decision struct {
 	Op         Op
 	NewStatus  string // target Stay status when the op changes it ("" = unchanged)
-	Reinstate  bool   // true ⇒ lifecycle_version must increment by exactly 1 (CHECKED_OUT→IN_HOUSE)
-	RoomMove   bool   // true ⇒ the normalized room changes on the same episode
-	ReviewCode string // bounded machine code for MANUAL_REVIEW (^[A-Z][A-Z0-9_]{0,63}$)
+	Reinstate  bool   // lifecycle_version must increment by exactly 1
+	RoomMove   bool
+	ReviewCode string // bounded machine code (^[A-Z][A-Z0-9_]{0,63}$)
 }
 
-// Resolve deterministically maps (event, current Stay state) to an authoritative operation. It NEVER decides
-// from the connector hint; it uses only the durable event + the persisted Stay. Idempotency is first: an
-// event identity already applied to the Stay is SKIP_DUPLICATE. Unknown/ambiguous transitions fail closed to
-// MANUAL_REVIEW rather than guessing.
+// Resolve maps (event, current Stay state) to an operation using only the durable event and the persisted
+// Stay. Unknown or ambiguous transitions fail closed to MANUAL_REVIEW.
 func Resolve(ev InboxEvent, cur *StayView) Decision {
-	// idempotency: the same durable event applied twice is a deterministic no-op.
 	if cur != nil && cur.AppliedIdentity != nil && cur.AppliedIdentity(ev.EventIdentity) {
 		return Decision{Op: OpSkipDuplicate}
 	}
@@ -84,7 +76,6 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		case cur == nil:
 			return Decision{Op: OpCreateStay, NewStatus: "IN_HOUSE"}
 		case cur.Status == "CHECKED_OUT":
-			// re-arrival on a departed reservation → a NEW episode (exactly one lifecycle_version bump).
 			return Decision{Op: OpReinstate, NewStatus: "IN_HOUSE", Reinstate: true}
 		case cur.Status == "IN_HOUSE":
 			if roomChanged {
@@ -100,7 +91,6 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 	case EvGuestChange:
 		switch {
 		case cur == nil:
-			// a change for a Stay we have never seen is unsafe to fabricate.
 			return Decision{Op: OpManualReview, ReviewCode: "GC_UNKNOWN_STAY"}
 		case cur.Status == "IN_HOUSE":
 			if roomChanged {
@@ -110,7 +100,6 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		case cur.Status == "RESERVED":
 			return Decision{Op: OpUpdateStay}
 		default:
-			// a change to a checked-out / cancelled / no-show Stay is ambiguous → review.
 			return Decision{Op: OpManualReview, ReviewCode: "GC_ON_TERMINAL_STAY"}
 		}
 
@@ -121,7 +110,7 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 		case cur.Status == "IN_HOUSE":
 			return Decision{Op: OpCheckout, NewStatus: "CHECKED_OUT"}
 		case cur.Status == "CHECKED_OUT":
-			return Decision{Op: OpSkipDuplicate} // already departed — idempotent
+			return Decision{Op: OpSkipDuplicate}
 		default:
 			return Decision{Op: OpManualReview, ReviewCode: "GO_ON_NON_INHOUSE_STAY"}
 		}
@@ -131,8 +120,6 @@ func Resolve(ev InboxEvent, cur *StayView) Decision {
 	}
 }
 
-// TRIM ONLY WAS THE ROOM HALF OF THE SAME ASYMMETRY. The authentication query upper-cases the room the guest
-// types, so a stored "a12" could never match a typed "A12". It stayed invisible because the property where
-// the defect surfaced numbers its rooms with digits, and digits are unaffected by case -- a property of one
-// hotel's data, not a guarantee. Alphanumeric rooms are ordinary.
+// normRoom must match the authentication query, which upper-cases the typed room; alphanumeric rooms
+// like "a12" would otherwise never match.
 func normRoom(s string) string { return namenorm.Room(s) }

@@ -1,19 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// Browser-level E2E for guest sign-in protection: the three settings, and the Active restrictions tab.
-// edged is fully mocked at the network layer — no real backend, no database, no production data, no PMS.
-//
-// What a browser proves that a unit test cannot. Three things, all of them properties of the rendered page:
-//
-//   * that each setting arrives with its UNIT and its allowed range visible, because "60" has been read as
-//     minutes and a threshold a property cannot interpret is a threshold it will set wrongly;
-//   * that the screen says out loud that a change applies to what happens NEXT — somebody shortening the
-//     wait to help the guest in front of them will otherwise watch nothing happen and call it broken;
-//   * that Release is presented as "may try again", not as "let them in", and costs a typed reason.
-//
-// NO REAL GUEST DATA APPEARS HERE. Every room, address and network name is invented.
-
 type Mutations = { method: string; path: string; body: any }[];
 
 const POLICY = {
@@ -116,18 +103,15 @@ test.describe("guest sign-in protection settings", () => {
     const card = page.locator("div").filter({ hasText: /client sign-in protection/i }).first();
     await expect(page.getByText(/client sign-in protection/i).first()).toBeVisible();
 
-    // Each value is a labelled setting with its unit printed beside the field, not only in the help text.
     await expect(page.getByLabel(/maximum failed attempts/i)).toBeVisible();
     await expect(page.getByLabel(/observation window/i)).toBeVisible();
     await expect(page.getByLabel(/wait after too many attempts/i)).toBeVisible();
     await expect(page.getByText("attempts", { exact: true })).toBeVisible();
     await expect(page.getByText("seconds", { exact: true }).first()).toBeVisible();
 
-    // The standard value and the range an operator may choose within.
     await expect(page.getByText(/default 5 attempts; allowed 3–20/i)).toBeVisible();
     await expect(page.getByText(/default 60 seconds; allowed 30–3600/i).first()).toBeVisible();
 
-    // "Using the standard settings" must not read as "protection is off".
     await expect(page.getByText(/using the standard settings/i)).toBeVisible();
     await expect(page.getByText(/it is always on/i)).toBeVisible();
   });
@@ -150,10 +134,8 @@ test.describe("guest sign-in protection settings", () => {
     await attempts.fill("1");
     await expect(page.getByText(/enter a whole number between 3 and 20/i)).toBeVisible();
 
-    // Correcting it makes the save available again, and the value that leaves the browser is the one typed.
     await attempts.fill("8");
     await page.getByRole("button", { name: /save protection settings/i }).click();
-    // The change applies to every client on the site, so it is confirmed with a reason and the password (C-16).
     const confirm = page.getByRole("dialog", { name: /change client sign-in protection/i });
     await confirm.getByLabel(/reason/i).fill("conference floor, frequent typos");
     await confirm.getByLabel(/confirm your password/i).fill("operatorpw");
@@ -182,10 +164,9 @@ test.describe("the active restrictions tab", () => {
 
     await expect(page.getByRole("cell", { name: "02:00:00:aa:bb:01" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "Guest WiFi" })).toBeVisible();
-    // The heading itself says the room is unverified. A column called "Room" would read as an identity.
+    // Treat the typed room as unverified input, not guest identity.
     await expect(page.getByRole("columnheader", { name: /last room typed \(unverified\)/i })).toBeVisible();
     await expect(page.getByText(/5 incorrect sign-ins/i)).toBeVisible();
-    // The countdown is present and is the server's number.
     await expect(page.getByText(/4[0-9]s/)).toBeVisible();
   });
 

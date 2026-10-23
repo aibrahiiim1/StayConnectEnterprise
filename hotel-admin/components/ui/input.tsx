@@ -1,16 +1,11 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-// FORM CONTROLS, in one place. `Input` and `Label` kept their signatures; `Select`, `Textarea`, `Field` and
-// `Hint` are added because pages were writing `className="rounded border px-2 py-1"` by hand — which is how a
-// screen ends up with a bordered box and no background colour, invisible against a dark card.
-
 const CONTROL = cn(
   "w-full rounded-md border border-input bg-card text-foreground",
   "transition-[border-color,box-shadow] duration-base ease-onegate",
   "placeholder:text-muted-foreground",
-  // The ink border alone is the whole focus signal at rest-to-focus contrast; the ring at /60 is what makes it
-  // visible (a /20 ring measured 1.54:1 against the card, which is decoration, not a focus indicator).
+  // The stronger ring makes keyboard focus visible against the card.
   "focus:outline-none focus-visible:outline-none focus:border-foreground focus:ring-2 focus:ring-ring/60",
   "disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted-foreground",
   "aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-destructive/25",
@@ -28,8 +23,6 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
   },
 );
 
-// A native <select>, styled. Radix's Select is used where a rich listbox earns its complexity; for a short list
-// of fixed options the native control is better on every axis including mobile and keyboard.
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   function Select({ className, ...p }, ref) {
     return (
@@ -37,8 +30,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
         ref={ref}
         className={cn(
           CONTROL,
-          // The chevron and the fill live in the .select-chevron component class (globals.css): as arbitrary
-          // utilities they collided inside tailwind-merge and cost the control its background colour.
+          // Keep chevron and fill together because tailwind-merge collides on separate utilities.
           "h-10 cursor-pointer appearance-none py-0 ps-3 pe-9 text-sm select-chevron",
           className,
         )}
@@ -64,21 +56,7 @@ export function Hint({ className, ...p }: React.HTMLAttributes<HTMLParagraphElem
   return <p className={cn("mt-1.5 text-xs text-muted-foreground", className)} {...p} />;
 }
 
-/**
- * Field wires a label, its control and its hint together — and it BINDS them, which is the whole point.
- *
- * The hand-written forms in this app mostly wrapped the input inside the label. That works for a mouse click and
- * loses everything else: the control has no accessible name to announce, `getByLabelText` cannot find it, and a
- * hint sitting under the input is not associated with it at all.
- *
- * So the id is generated here and injected into the child when the child does not already carry one. That is the
- * detail worth spelling out: a `Field` whose caller forgot to pass `htmlFor` used to render a label pointing at
- * nothing, which is indistinguishable from a correct one on screen. Now it cannot happen — the caller writes
- * `<Field label="…"><Input /></Field>` and the binding is not theirs to get wrong.
- *
- * `aria-describedby` carries the hint or the error, so the explanation is announced with the field rather than
- * being visual-only. `aria-invalid` follows `error` for the same reason.
- */
+/** Generate an ID when needed so labels, hints, and errors remain bound to the control. */
 export function Field({
   label, hint, error, required, htmlFor, className, children,
 }: {
@@ -86,7 +64,6 @@ export function Field({
   hint?: React.ReactNode;
   error?: React.ReactNode;
   required?: boolean;
-  /** Pass this only when the control's id is fixed by something else; otherwise one is generated. */
   htmlFor?: string;
   className?: string;
   children: React.ReactNode;
@@ -95,8 +72,7 @@ export function Field({
   const describedBy = `${generated}-desc`;
   const hasDescription = Boolean(error ?? hint);
 
-  // A single element child is the normal case and is the one that can be bound. Anything else (a fragment, a
-  // composed group of controls) is rendered untouched, and the caller keeps the option of passing `htmlFor`.
+  // Only a single element can receive the generated ID; groups need an explicit htmlFor.
   let control = children;
   let controlId = htmlFor;
   if (React.isValidElement(children)) {
@@ -108,8 +84,7 @@ export function Field({
         ? { "aria-describedby": [childProps["aria-describedby"], describedBy].filter(Boolean).join(" ") }
         : null),
       ...(error ? { "aria-invalid": true } : null),
-      // The asterisk is visual only (WCAG 1.3.1 / 3.3.2), so the control says it is required itself. aria-required
-      // rather than `required`: several forms run their own validation and must not meet the browser's bubble.
+      // aria-required announces the rule without a browser popup pre-empting custom validation.
       ...(required && childProps["aria-required"] === undefined ? { "aria-required": true } : null),
     });
   }

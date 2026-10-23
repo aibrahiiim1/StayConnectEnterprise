@@ -1,13 +1,8 @@
 //go:build devlicense
 
-// This file is compiled ONLY into explicit development/test builds
-// (`go build -tags devlicense`). Such a binary may run in permissive
-// unlicensed-dev mode. It must never be shipped to a production appliance;
-// the default build excludes it (see prod.go).
+// Compiled only with `-tags devlicense`; such a binary may run unlicensed and must never ship to an appliance.
 package buildprofile
 
-// Production is false in a development build.
 const Production = false
 
-// Name identifies the build profile for logs and the licence status.
 const Name = "development"

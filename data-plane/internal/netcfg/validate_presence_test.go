@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// A GUEST NETWORK MUST NOT BE ACCEPTED ON AN INTERFACE THAT IS NO LONGER THERE.
-//
-// The inventory this set comes from accumulates and is never pruned, so "a row exists" used to be treated as
-// "the appliance has this interface". Observed on PRE-LIVE: a row for `vguest-h`, a bridge destroyed weeks
-// earlier, would have satisfied validation. These cases pin the distinction the fix introduces.
+// A guest network must not be accepted on an interface that is no longer there: the inventory is never pruned, so a
+// row existing does not mean the appliance has the interface (e.g. a destroyed bridge).
 
 func presenceNet(parent string) GuestNetwork {
 	return GuestNetwork{
@@ -38,10 +35,10 @@ func msgOf(iss []Issue, field string) string {
 	return ""
 }
 
-// THE DEFECT ITSELF: recorded once, gone now, must be refused.
+// Recorded once, gone now: refused.
 func TestAbsentButRecordedParentIsRefused(t *testing.T) {
 	present := map[string]bool{"ens192": true}
-	known := map[string]bool{"ens192": true, "vguest-h": true} // vguest-h was seen once, long ago
+	known := map[string]bool{"ens192": true, "vguest-h": true}
 
 	iss := ValidateOne(presenceNet("vguest-h"), topoT(), present, known, "")
 	if got := codeOf(iss, "parent_interface"); got != "interface_not_present" {
@@ -52,8 +49,8 @@ func TestAbsentButRecordedParentIsRefused(t *testing.T) {
 	}
 }
 
-// A NAME THE APPLIANCE HAS NEVER HAD is a different problem and keeps the original code, because an operator
-// resolves a typo differently from a pulled card.
+// A name never seen is a different problem with the original code, since operators resolve a typo differently from a
+// pulled card.
 func TestNeverKnownParentKeepsNotFound(t *testing.T) {
 	present := map[string]bool{"ens192": true}
 	known := map[string]bool{"ens192": true}
@@ -64,7 +61,7 @@ func TestNeverKnownParentKeepsNotFound(t *testing.T) {
 	}
 }
 
-// A PRESENT PARENT IS ACCEPTED — the check must not have become a blanket refusal.
+// A present parent is accepted.
 func TestPresentParentIsAccepted(t *testing.T) {
 	present := map[string]bool{"ens192": true}
 	known := map[string]bool{"ens192": true, "vguest-h": true}
@@ -73,8 +70,7 @@ func TestPresentParentIsAccepted(t *testing.T) {
 	}
 }
 
-// REAPPEARANCE. An interface that comes back is immediately usable again — nothing about its absence is
-// sticky, because absence was never recorded as state.
+// An interface that reappears is usable again; absence was never recorded as state.
 func TestReappearedParentIsAcceptedAgain(t *testing.T) {
 	known := map[string]bool{"ens192": true, "ens224": true}
 
@@ -88,8 +84,7 @@ func TestReappearedParentIsAcceptedAgain(t *testing.T) {
 	}
 }
 
-// WITHOUT A KNOWN SET the validator still refuses an absent parent; it just cannot say which kind it is.
-// This keeps every existing caller correct rather than silently fail-open.
+// Without a known set the validator still refuses an absent parent but cannot say which kind.
 func TestNilKnownSetStillRefusesAbsent(t *testing.T) {
 	present := map[string]bool{"ens192": true}
 	if codeOf(ValidateOne(presenceNet("vguest-h"), topoT(), present, nil, ""), "parent_interface") != "interface_not_found" {
@@ -97,8 +92,7 @@ func TestNilKnownSetStillRefusesAbsent(t *testing.T) {
 	}
 }
 
-// A NIL PRESENT SET means presence is unknown to this caller, and the check is skipped rather than turned
-// into a refusal of everything. That is pre-existing contract and must not change.
+// A nil present set means presence is unknown to this caller: the check is skipped, not turned into a refusal.
 func TestNilPresentSetSkipsTheCheck(t *testing.T) {
 	if iss := ValidateOne(presenceNet("anything"), topoT(), nil, nil, ""); len(iss) != 0 {
 		t.Fatalf("a nil present set must skip the presence check, got %v", iss)

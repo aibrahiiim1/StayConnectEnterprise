@@ -1,11 +1,7 @@
 package appliancecert
 
-// REISSUE IN CENTRAL MUST COMPLETE ON THE APPLIANCE BY ITSELF.
-//
-// Found on PRE-LIVE: an operator pressed "Reissue certificate" in Central. Central revoked the active
-// certificate and waited for the appliance's next CSR. The appliance still had its certificate FILE, so it
-// never re-entered the bootstrap: it kept presenting the revoked certificate, every mTLS call was refused
-// (HTTP 403), the Admin Console said Central was unreachable, and Central showed "Activating" for good.
+// A Reissue in Central must complete on the appliance by itself: Central revokes the active certificate and waits for the next CSR, but an appliance
+// holding its certificate FILE never re-enters the bootstrap and was refused (HTTP 403) forever.
 
 import (
 	"context"
@@ -95,7 +91,6 @@ func TestReconcileRepairsARevokedCertificateWithOneCSR(t *testing.T) {
 	if c.csrs.Load() != 1 {
 		t.Fatalf("exactly one CSR, got %d", c.csrs.Load())
 	}
-	// Settled: nothing further happens.
 	if out, _ := m.Reconcile(context.Background()); out != ReconcileCurrent || c.csrs.Load() != 1 {
 		t.Fatalf("a current certificate needs nothing: %s csrs=%d", out, c.csrs.Load())
 	}
@@ -125,7 +120,7 @@ func TestReconcileInstallsANewerCertificateCentralAlreadySigned(t *testing.T) {
 	defer stop()
 	old := m.currentFpr()
 	c.mu.Lock()
-	c.certPEM, c.caPEM = c.next() // reissued from a CSR that was waiting
+	c.certPEM, c.caPEM = c.next()
 	c.mu.Unlock()
 	if out, err := m.Reconcile(context.Background()); err != nil || out != ReconcileInstalled {
 		t.Fatalf("want installed, got %s %v", out, err)

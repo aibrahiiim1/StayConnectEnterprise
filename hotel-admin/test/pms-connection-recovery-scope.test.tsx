@@ -2,19 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// CONNECTION RECOVERY BELONGS TO ONE CONNECTION, AND PROVENANCE FAILURE IS NOT SILENCE.
-//
-// Two separate defects of the same shape -- a screen stating something that is not true of the data behind
-// it -- and both are only visible from the operator's side, which is why they are asserted here:
-//
-//   1. The recovery bounds were stored per SITE while being shown on a connection's page. The card said so
-//      in a warning box, which is the tell: a setting that needs a caption explaining it governs something
-//      other than what it is displayed under is a trap with a label on it. It is now per interface, so the
-//      card must read from and write to THIS interface, and must no longer warn about the other one.
-//
-//   2. Empty provenance had two causes that rendered identically -- nothing was ever recorded, or the
-//      record could not be read. That is how a completely dead provenance query survived a deployment: every
-//      version calmly reported that its own origin had never been written down.
+// Recovery bounds belong to one interface; unreadable provenance must differ from an empty history.
 
 const get = vi.fn();
 const post = vi.fn();
@@ -63,8 +51,6 @@ const health = {
   review_events: 0,
 };
 
-// The values this interface is actually running on, deliberately NOT the defaults: a card that rendered the
-// defaults regardless would pass against a default-valued fixture.
 const recovery = {
   backoff_min_ms: 750,
   backoff_max_ms: 45000,
@@ -104,7 +90,6 @@ async function openManage() {
   render(<Page />);
   await screen.findByText("Main PMS");
   await userEvent.click(screen.getByRole("button", { name: "Manage" }));
-  // Recovery settings and the live configuration both live on the connection's Configuration tab.
   await userEvent.click(await screen.findByRole("tab", { name: "Configuration" }));
 }
 
@@ -115,13 +100,11 @@ describe("connection recovery is scoped to one interface", () => {
 
     await screen.findByRole("heading", { name: "Connection recovery" });
 
-    // THE ADDRESS IS THE ASSERTION. Reading from the site-level reconciliation route is exactly the bug:
-    // it would return one set of values for every connection at the property.
+    // Read interface-level settings so connections do not share one site's recovery bounds.
     await waitFor(() =>
       expect(get.mock.calls.some(([p]) => p === "/pms-interfaces/i1/connection-settings")).toBe(true));
     expect(get.mock.calls.some(([p]) => String(p).includes("/pms-roster-reconciliation"))).toBe(false);
 
-    // And the values shown are this interface's, not the defaults.
     expect(await screen.findByDisplayValue("750")).toBeTruthy();
     expect(screen.getByDisplayValue("45000")).toBeTruthy();
     expect(screen.getByDisplayValue("1200")).toBeTruthy();
@@ -132,8 +115,6 @@ describe("connection recovery is scoped to one interface", () => {
     await openManage();
     await screen.findByRole("heading", { name: "Connection recovery" });
 
-    // The old copy was accurate about a storage model that has since changed. Left behind it would be worse
-    // than the original bug: a false warning that discourages an operator from tuning a link they own.
     expect(screen.queryByText(/apply to the whole site/i)).toBeNull();
     expect(screen.queryByText(/changing a value here changes it for all of them/i)).toBeNull();
     expect(screen.getByText(/These apply to this connection only\./i)).toBeTruthy();
@@ -157,8 +138,7 @@ describe("connection recovery is scoped to one interface", () => {
     expect(path).toBe("/pms-interfaces/i1/connection-settings");
     expect(body.link_down_alert_seconds).toBe(600);
     expect(body.reason).toBe("alerting sooner during the upgrade");
-    // A PARTIAL CHANGE TOUCHES NOTHING ELSE. Sending every field would overwrite a value another operator
-    // changed between this page loading and this save.
+    // Send only changed fields to avoid overwriting another operator's edits.
     expect(body.backoff_min_ms).toBeUndefined();
     expect(body.blocked_after_refusals).toBeUndefined();
   });
@@ -167,8 +147,6 @@ describe("connection recovery is scoped to one interface", () => {
     mockPage({ recovery: { ...recovery, is_default: true, config_version: 0 } });
     await openManage();
     await screen.findByRole("heading", { name: "Connection recovery" });
-    // EVERY field says it, not one: "unconfigured" is a property of the whole row, and an operator reading
-    // a single field must not have to look elsewhere to learn nobody has touched it.
     await waitFor(() =>
       expect(screen.getAllByText(/nobody has changed this one/i).length).toBe(5));
   });
@@ -178,28 +156,23 @@ describe("a provenance read failure is visible, and is not mistaken for absence"
   it("says the record could not be read, and still shows the configuration", async () => {
     mockPage({
       provenanceStatus: "UNAVAILABLE",
-      // The server sends the versions WITHOUT provenance when the read fails -- byte-identical to what it
-      // sends when nothing was ever recorded. Only provenance_status separates them.
+      // provenance_status distinguishes read failure from an honestly empty history.
       revisions,
     });
     await openManage();
 
-    // THE CONFIGURATION SURVIVES. This is the property that must never regress: losing the audit trail may
-    // not cost an operator the ability to see what the connection is set to.
+    // Keep configuration visible even when the provenance read fails.
     await screen.findByRole("heading", { name: "Live configuration" });
     const sheet = screen.getByRole("dialog");
     expect(await within(sheet).findByText("Version 1")).toBeTruthy();
     expect(within(sheet).getByText("In use")).toBeTruthy();
 
-    // AND THE FAILURE IS STATED, in the operator's terms, as a fault to report.
     expect(await screen.findByText(/could not be read just now/i)).toBeTruthy();
     expect(screen.getByText(/fault to report, not a sign that nothing was recorded/i)).toBeTruthy();
     expect(screen.queryByText(/was not recorded\./i)).toBeNull();
   });
 
   it("still says 'not recorded' when the read succeeded and there genuinely is nothing", async () => {
-    // THE MIRROR-IMAGE MISTAKE. A property whose audit log truly holds no entry for these versions is an
-    // honest state, and reporting it as a fault would send an operator chasing a defect that is not there.
     mockPage({ provenanceStatus: "AVAILABLE", revisions });
     await openManage();
 

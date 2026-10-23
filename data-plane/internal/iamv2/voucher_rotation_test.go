@@ -5,13 +5,8 @@ import (
 	"testing"
 )
 
-// ROTATION: a voucher issued under an older generation must still authenticate.
-//
-// The defect this guards: computing the blind index under the ACTIVE generation only. A voucher's stored
-// code_hmac was computed at issuance under the key of the generation it pins, so after a rotation the active
-// key produces a different index and the voucher becomes permanently unfindable -- every unredeemed voucher
-// silently dying the moment an operator rotates. The per-voucher code_key_generation_id pin exists precisely
-// because lookup must consider more than one generation.
+// A voucher issued under an older key generation must still authenticate: its stored code_hmac uses the key of
+// the generation it pins, so lookup must try every generation, not only the active one.
 func TestVoucherIndexCoversEveryGenerationNotJustTheActiveOne(t *testing.T) {
 	kr := MapVoucherKeyring{"11111111-1111-4111-8111-111111111111": make([]byte, 32)}
 	keyID := "11111111-1111-4111-8111-111111111111"
@@ -56,8 +51,7 @@ func TestVoucherIndexCoversEveryGenerationNotJustTheActiveOne(t *testing.T) {
 	}
 }
 
-// The index must be scoped to its owner: the same code at another site, or another tenant, must not collide.
-// This is the property the package-level unscoped cache violated -- it served one site's key to every site.
+// The index is scoped to its owner: the same code at another site or tenant must not collide.
 func TestVoucherIndexIsOwnerScoped(t *testing.T) {
 	kr := MapVoucherKeyring{"22222222-2222-4222-8222-222222222222": make([]byte, 32)}
 	key, _, _, err := NewVoucherHMACKey(kr, "22222222-2222-4222-8222-222222222222", "t1", "s1", 1)

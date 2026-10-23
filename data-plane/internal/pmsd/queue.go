@@ -7,14 +7,11 @@ import (
 	"time"
 )
 
-// Event is one NORMALIZED, typed protocol observation handed from the read-only adapter to the (future,
-// Increment-4) Stay ingestion engine. It deliberately carries ONLY the typed fields ingestion needs —
-// never the raw STX/ETX frame bytes, which stay inside the protocol adapter boundary and are never logged,
-// queued, persisted unredacted, returned through errors, or exported.
+// Event is a normalized, typed observation. The raw STX/ETX frame never leaves the adapter: it is never
+// logged, queued, persisted, returned in errors or exported.
 type Event struct {
-	// provenance (identity only — never secret material). RuntimeGeneration/ResyncGeneration are stamped by
-	// the owning worker at admission time (the adapter does not know them); they bind the durable inbox row
-	// to the exact ownership + resync cycle that produced it.
+	// Provenance, identity only. RuntimeGeneration/ResyncGeneration are stamped by the worker at admission and
+	// bind the inbox row to the ownership and resync cycle that produced it.
 	InterfaceID        string
 	RevisionID         string
 	SecretGenerationID string
@@ -22,25 +19,19 @@ type Event struct {
 	RuntimeGeneration  int64
 	ResyncGeneration   int64
 
-	// record classification
-	RecordType RecordType // closed enum (domain vs control)
+	RecordType RecordType
 
-	// idempotency: keyed-HMAC fingerprint over the CANONICAL complete source record (purpose
-	// PMS_EVENT_IDENTITY). ExternalEventIdentity carries the same value (the durable stay_events identity).
-	//
-	// StayResolutionCandidate is a NON-AUTHORITATIVE hint only: it is NOT unique, NEVER a database identity,
-	// NEVER a lifecycle/episode decision, and NEVER sufficient to apply a Stay mutation. The authoritative
-	// Stay / lifecycle_version / Room / Folio resolution is done TRANSACTIONALLY by the Increment-4 Stay
-	// engine (existing Stay vs Room Move vs new lifecycle vs Reinstatement vs Manual Review). The connector
-	// must not decide Stay identity — arrival evidence can be corrected within the same Stay, and the
-	// connector has no authoritative lifecycle_version.
+	// Idempotency: keyed-HMAC fingerprint over the canonical source record; ExternalEventIdentity carries the
+	// same value. StayResolutionCandidate is a non-authoritative hint (not unique, not a database identity,
+	// never enough to apply a Stay mutation): the Stay engine resolves identity transactionally, since
+	// arrival evidence can be corrected within a Stay and the connector has no lifecycle_version.
 	SourceEventFingerprint  string
 	FingerprintKeyVersion   int
 	ExternalEventIdentity   string
 	StayResolutionCandidate string
 
-	// timestamps: Arrival/Departure are Stay dates (NOT event time); ReceivedAt is the local receipt clock;
-	// PMSEvent* is populated ONLY from a verified FIAS event-timestamp field parsed under the pinned tz.
+	// Arrival/Departure are Stay dates, not event time; PMSEvent* comes only from a verified FIAS timestamp
+	// field parsed under the pinned timezone.
 	ArrivalRaw           string
 	DepartureRaw         string
 	PMSEventTimestampRaw string
@@ -48,64 +39,52 @@ type Event struct {
 	NormalizedAt         time.Time
 	ClockSuspect         bool
 
-	// feed-continuity evidence
 	Cursor string
 
-	// typed Stay/Guest/Folio attributes (authoritative Protel map: RN=room, G#=reservation, GN/GF=last/first).
-	// No derived display name is carried here: concatenating two individually-valid names could exceed a
-	// single-field bound and wrongly fail an otherwise-valid record, and a display string is a presentation
-	// concern. Increment 4 / presentation derives display text from the original validated first/last.
+	// Protel map: RN=room, G#=reservation, GN/GF=last/first. No display name here: concatenating two valid
+	// names could exceed a single-field bound and wrongly fail the record.
 	ReservationRef string
 	RoomNumber     string
 	FolioRef       string
 	GuestLastName  string
 	GuestFirstName string
 
-	// Guest attributes from the property-mapped FIAS fields (A0 travel agent, A1 VIP flag). nil = not stated,
-	// which the stay engine reads as "leave the stay's value alone"; a stated empty travel agent clears it.
+	// FIAS A0 travel agent, A1 VIP. nil = not stated (leave the stay's value alone); a stated empty travel agent clears it.
 	TravelAgent *string
 	VIP         *bool
 
-	// Sharers is the OPTIONAL full occupancy list, set only by connectors whose provider names every occupant
-	// (the REST connectors). The FIAS adapter never sets it, so a FIAS payload is byte-identical to before.
+	// Sharers is set only by REST connectors; the FIAS adapter never sets it, keeping FIAS payloads byte-identical.
 	Sharers []EventSharer
 
-	// keyed-HMAC provenance digest of the source evidence (never the raw frame); key is never stored here
+	// Keyed-HMAC digest of the source evidence; the key is never stored here.
 	SourceEvidenceHash string
 	EvidenceKeyVersion int
 
 	ReceivedAt time.Time
 }
 
-// ErrQueueClosed is returned by Enqueue after Close, and by Dequeue once closed AND drained.
 var ErrQueueClosed = errors.New("pmsd: event queue closed")
 
-// BoundedQueue is a fixed-capacity, back-pressured, LINEARIZABLE event queue between the protocol adapter
-// and the ingestion engine. It creates ZERO goroutines of its own (a passive channel), so it can never
-// leak one.
+// BoundedQueue is a back-pressured, linearizable event queue with no goroutines of its own.
 //
-// Close/Enqueue linearizability: Enqueue holds a read-lock for the whole send, and Close takes the write
-// lock; therefore `closed` cannot flip while any Enqueue is mid-send. Once Close() RETURNS, every later
-// Enqueue observes closed and returns ErrQueueClosed — no Event is ever accepted after the close boundary,
-// and there is no send-on-closed-channel panic (only `done` is closed, never `ch`).
+// Enqueue holds the read-lock for the whole send and Close takes the write lock, so no Event is accepted
+// after Close returns and there is no send-on-closed-channel panic (only `done` is closed, never `ch`).
 //
-// On sustained overflow it does NOT silently drop: Enqueue returns a QUEUE_OVERFLOW-coded error and latches
-// an "overflow → resync required" flag so the worker can drive continuity→GAP_DETECTED and sync→
-// RESYNC_REQUIRED instead of proceeding with a gap.
+// Overflow never silently drops: Enqueue returns QUEUE_OVERFLOW and latches a resync-required flag so the
+// worker drives GAP_DETECTED/RESYNC_REQUIRED.
 type BoundedQueue struct {
 	ch             chan Event
 	done           chan struct{}
 	enqueueTimeout time.Duration
 
-	mu     sync.RWMutex // RLock during a send; Lock (exclusive) during Close — makes close/enqueue linearizable
+	mu     sync.RWMutex // RLock during a send, Lock during Close
 	closed bool
 
 	ovMu           sync.Mutex
 	overflowResync bool
 }
 
-// NewBoundedQueue creates a queue with the given capacity (>=1) and per-enqueue back-pressure timeout
-// (>0). Zero/negative values are clamped to safe defaults.
+// NewBoundedQueue clamps a capacity below 1 and a non-positive timeout to safe defaults.
 func NewBoundedQueue(capacity int, enqueueTimeout time.Duration) *BoundedQueue {
 	if capacity < 1 {
 		capacity = 1
@@ -123,17 +102,10 @@ func NewBoundedQueue(capacity int, enqueueTimeout time.Duration) *BoundedQueue {
 func (q *BoundedQueue) Cap() int { return cap(q.ch) }
 func (q *BoundedQueue) Len() int { return len(q.ch) }
 
-// Enqueue adds an event with bounded back-pressure. Outcome ordering:
-//   - closed queue                              -> ErrQueueClosed
-//   - space available (now or within timeout)   -> nil (Event accepted)
-//   - ctx cancelled while waiting               -> CONTEXT_CANCELED-coded error
-//   - still full after the timeout              -> QUEUE_OVERFLOW-coded error + latch overflowResync (no drop)
-//
-// The read-lock is held for the whole call so Close (write-lock) cannot interleave: an in-flight Enqueue
-// either commits before Close proceeds, or — if it is waiting on back-pressure — is bounded by the timeout,
-// after which Close proceeds and subsequent Enqueues see closed.
+// Enqueue waits up to the timeout for space, then returns QUEUE_OVERFLOW and latches overflowResync (no
+// drop). The read-lock spans the call, so Close waits for it, bounded by that timeout.
 func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
-	// reject an invalid typed Event BEFORE it can consume queue capacity
+	// Reject before it can consume capacity.
 	if err := ev.Validate(); err != nil {
 		return coded(CodeEventInvalid, err)
 	}
@@ -142,13 +114,11 @@ func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
 	if q.closed {
 		return ErrQueueClosed
 	}
-	// fast path
 	select {
 	case q.ch <- ev:
 		return nil
 	default:
 	}
-	// back-pressure path (bounded; closed cannot flip while we hold RLock)
 	t := time.NewTimer(q.enqueueTimeout)
 	defer t.Stop()
 	select {
@@ -164,8 +134,7 @@ func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
 	}
 }
 
-// Dequeue returns the next event, blocking until one is available, ctx is cancelled, or the queue is closed
-// AND drained. A closed-but-non-empty queue keeps returning buffered events until empty.
+// Dequeue keeps returning buffered events after Close until the queue is drained.
 func (q *BoundedQueue) Dequeue(ctx context.Context) (Event, error) {
 	select {
 	case ev := <-q.ch:
@@ -199,9 +168,7 @@ func (q *BoundedQueue) ClearOverflowResync() {
 	q.ovMu.Unlock()
 }
 
-// Close idempotently closes the queue. It takes the exclusive lock, so it waits for every in-flight Enqueue
-// to finish and guarantees no Enqueue can accept an Event afterward. Buffered events remain drainable via
-// Dequeue until empty.
+// Close is idempotent and waits for in-flight Enqueues; buffered events stay drainable.
 func (q *BoundedQueue) Close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()

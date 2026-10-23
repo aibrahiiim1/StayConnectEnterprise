@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// STAFF HELP FOR CODE REQUESTS (resources_code_requests.go): who may list, and who may read a live code.
-// Revealing a code is the stronger power, and it never follows from the list. The list is READ-only for every
-// role below site_admin: its only write, clearing a device's temporary-internet windows, went with the email code.
+// Revealing a live code is a stronger power than listing and never follows from it; the list is read-only below site_admin.
 func TestCodeRequests_RevealIsItsOwnPermission(t *testing.T) {
 	cases := []struct {
 		role                     string
@@ -37,7 +35,6 @@ func TestCodeRequests_RevealIsItsOwnPermission(t *testing.T) {
 	}
 }
 
-// The "let them try again" route is gone with the temporary internet it cleared.
 func TestCodeRequests_ClearRouteIsRemoved(t *testing.T) {
 	s := &server{}
 	rec := httptest.NewRecorder()
@@ -48,7 +45,7 @@ func TestCodeRequests_ClearRouteIsRemoved(t *testing.T) {
 	}
 }
 
-// The list asks scd under the new name and falls back to the former one only when scd does not know the new.
+// The list falls back to the former scd route only when scd does not know the new one.
 func TestCodeRequests_ListFallsBackToTheFormerSCDRoute(t *testing.T) {
 	var paths []string
 	sock := fakeUnixService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +64,7 @@ func TestCodeRequests_ListFallsBackToTheFormerSCDRoute(t *testing.T) {
 	}
 }
 
-// A role that cannot show a code sees the address and the device masked; a body that cannot be parsed is never
-// relayed unmasked.
+// A role that cannot reveal sees address and device masked; an unparseable body is never relayed unmasked.
 func TestCodeRequests_ListIsMaskedForRolesThatCannotReveal(t *testing.T) {
 	in := []byte(`{"requests":[{"channel":"email","destination":"guest@example.com","device_mac":"d2:77:1c:e6:f7:3a","state":"PENDING"},` +
 		`{"channel":"sms","destination":"+201001234567","device_mac":"02:00:00:00:00:01"}],"limits":{"per_device_daily":3}}`)

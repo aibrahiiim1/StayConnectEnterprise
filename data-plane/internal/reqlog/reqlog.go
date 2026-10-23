@@ -1,11 +1,6 @@
-// Package reqlog is the request log of the appliance's HTTP services (GDPR audit 2026-10-19, A1/A2).
-//
-// chi's middleware.Logger prints the full request URI and the client address. In Hotel Admin's API that put
-// guest names, emails, phone numbers and MAC addresses typed into searches, and MACs in paths, into the
-// journal; in the captive portal it recorded the host and path of every web page a guest's browser asked
-// for before sign-in. This logger prints the matched ROUTE PATTERN instead (for example
-// "/edge/v1/usage/devices/{mac}"), never the path, the query or the client address, so a log line says what
-// was served without saying about whom.
+// Package reqlog logs the matched route pattern (e.g. "/edge/v1/usage/devices/{mac}"), never the path,
+// query or client address: chi's middleware.Logger would put guest names, emails, phones, MACs and browsed
+// hosts into the journal.
 package reqlog
 
 import (
@@ -17,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// Middleware logs one line per request after it is served.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)

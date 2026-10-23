@@ -1,19 +1,5 @@
 "use client";
 
-// ACTIVE SESSIONS — who is online, in the terms the front desk uses.
-//
-// The screen used to be six columns: IP/MAC, state, started, last activity, down/up, and a Disconnect button.
-// Every column was true and the screen still could not do its job, because the first one answered "which
-// network card" when the only question anyone brings here is "which guest".
-//
-// So: each row now leads with the room, account or voucher the session belongs to, carries the package and
-// speed it was granted, shows what is left of the allowance, and says which guest network the device is on. The
-// MAC and IP are still present — a network engineer needs them — as secondary detail rather than as the identity.
-//
-// It also gained the things a list of this kind needs to be usable at all: a search box (a full hotel produces
-// more rows than anyone scrolls), summary tiles, a per-row detail panel, and a disconnect confirmation that
-// names who is about to be cut off.
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, Session } from "@/lib/api";
@@ -87,16 +73,12 @@ export default function SessionsPage() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const toast = useToast();
 
-  // DISCONNECT IS OFFERED ONLY TO A ROLE THAT CAN USE IT. site_viewer, payments_operator and voucher_operator
-  // read this list; edged refuses them the disconnect. A button that 403s on click was the redesign handoff's
-  // complaint about this screen. Fails closed while the roles load.
+  // Disconnect is offered only to roles edged accepts it from; fails closed while roles load.
   const roles = useOperatorRoles();
   const mayDisconnect = roles === null ? false : canWrite("sessions", roles);
 
-  // PAGED, FILTERED AND SEARCHED ON THE SERVER. edged used to return the newest 200 sessions and this screen
-  // searched, filtered and counted those, so on a busy evening an earlier device was simply not findable and
-  // the tiles counted what had loaded. The search goes in a header: it is a room, a username or a guest's name,
-  // and edged logs request lines. A new tab, filter or search starts again at the first page.
+  // Paging, filtering and search are server-side. The search term goes in a header, not the URL, because it can be
+  // a guest's name and edged logs request lines.
   const path = useMemo(() => {
     const p = new URLSearchParams();
     if (tab === "active") p.set("state", "active");
@@ -112,9 +94,8 @@ export default function SessionsPage() {
   const list = useServerPage<SessionsResp>({ path, headers });
   const { resp, current, err, loading: refreshing } = list;
 
-  // The rows of the page on screen. An unchanged session stays the same object across polls, so the memoised
-  // rows below re-render only where a figure actually moved. A new question shows the skeleton, not the old
-  // question's rows; a failed first load shows an empty list under the error.
+  // Unchanged sessions keep object identity across polls so memoised rows re-render only on change.
+  // null shows the skeleton for a new query; a failed first load yields an empty list.
   const prevRows = useRef<Session[] | null>(null);
   const rows = useMemo(() => {
     if (!current || !resp) return err && !resp ? [] : null;
@@ -124,7 +105,6 @@ export default function SessionsPage() {
   }, [current, resp, err]);
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
-  // Paused while the tab is hidden; an operator switching back gets a fresh page at once.
   usePoll(() => list.reload(), 10_000, { enabled: tab === "active" });
 
   async function onDisconnect(s: Session) {
@@ -134,8 +114,7 @@ export default function SessionsPage() {
       toast.success(`${identifySession(s).title} — device disconnected.`);
       setConfirm(null);
       setDetail(null);
-      // scd enforces asynchronously, so an immediate reload can still show the session as active. The short
-      // delay is not cosmetic: without it the operator sees their own action appear not to have worked.
+      // scd enforces asynchronously; reloading immediately would still show the session active.
       setTimeout(() => void list.reload(), 600);
     } catch (e) {
       setActionErr(e);
@@ -147,8 +126,7 @@ export default function SessionsPage() {
   const openDetail = useCallback((s: Session) => { setDetail(s); setActionErr(null); }, []);
   const askDisconnect = useCallback((s: Session) => { setConfirm(s); setActionErr(null); }, []);
 
-  // THE TILES DESCRIBE EVERY SESSION IN THE TAB, counted by the server -- not the page on screen, and not
-  // narrowed by the search or the sign-in type, so they stay put while the operator narrows the table.
+  // Tiles are server counts for the whole tab, unaffected by search or sign-in type.
   const tiles = resp?.summary;
   const summary = {
     devices: tiles?.devices_online ?? 0,
@@ -160,11 +138,8 @@ export default function SessionsPage() {
   const haveSummary = !!tiles;
   const searching = needle !== "" || kind !== "";
 
-  // WHICH SIGN-IN TYPES THIS SITE CAN HAVE. Rooms are a Hotel idea: they are offered as a filter, a search
-  // term and a word in the help only where hospitality is licensed or has left records -- or where a room
-  // session is actually in the list, because a filter must never hide rows that exist. Email / social follows
-  // the identity modules the same way. Unknown module state hides both (fail closed); the rows themselves are
-  // data and always shown as they are.
+  // Room / email-social options show only where the module is licensed or has history, or rows of that kind
+  // exist (a filter must never hide existing rows). Unknown module state hides them.
   const caps = useCapabilities();
   const rooms = moduleHasHistory(caps, "hospitality") || (kindCounts.room ?? 0) > 0;
   const identity = ["email_otp", "sms_otp", "whatsapp_otp", "social_login"].some((m) => moduleLicensed(caps, m))
@@ -241,7 +216,6 @@ export default function SessionsPage() {
             </Explain>
           }
         />
-        {/* Rooms are a Hotel idea: the tile appears only when somebody is actually signed in with a room. */}
         {haveSummary && summary.rooms > 0 && (
           <StatCard
             label="Rooms online"
@@ -350,7 +324,6 @@ export default function SessionsPage() {
         </CardBody>
       </Card>
 
-      {/* ------------------------------------------------------------------ detail */}
       <DetailDialog
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
@@ -370,7 +343,6 @@ export default function SessionsPage() {
         {detail && <SessionDetail s={detail} />}
       </DetailDialog>
 
-      {/* ------------------------------------------------------------------ disconnect */}
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(v) => !v && setConfirm(null)}
@@ -414,14 +386,7 @@ export default function SessionsPage() {
   );
 }
 
-/**
- * AllowanceCell — what is left, only when there is an allowance to have left.
- *
- * A plan with no data quota is unmetered on that axis; rendering an empty meter for it would imply a limit the
- * guest does not have, which is exactly the kind of invented fact that gets repeated to a guest at the desk.
- */
-// One row of the list. MEMOISED, and `keepUnchanged` below keeps an unchanged session the same object across
-// polls, so a 10-second refresh re-renders only the rows whose figures actually moved.
+// Memoised: relies on `keepUnchanged` preserving object identity across polls.
 const SessionRow = memo(function SessionRow({
   s, mayDisconnect, onOpen, onDisconnect,
 }: {
@@ -474,7 +439,6 @@ const SessionRow = memo(function SessionRow({
           <>
             <div className="flex items-center gap-1.5 text-sm">
               <span>{s.package_name || s.package_code}</span>
-              {/* A repeat is said on the row: "3rd time" is the fact behind "why did this client get it again". */}
               {acquisitionOrdinal(s.package_acquisitions) && (
                 <span title="How many times this client has had this package, counting this one">
                   <Badge tone="warn">{acquisitionOrdinal(s.package_acquisitions)}</Badge>
@@ -528,7 +492,6 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Reuse the previous object for every session whose content has not changed, so memoised rows can skip. */
 function keepUnchanged(prev: Session[] | null, next: Session[]): Session[] {
   if (!prev || prev.length === 0) return next;
   const before = new Map(prev.map((p) => [p.id, p]));

@@ -18,9 +18,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/totp"
 )
 
-// GDPR plan C10 (migration 0052, decision D-C10): Central's console signs in with a password AND an authenticator
-// code. The password alone opens nothing; the first sign-in sets the app up and hands out ten recovery codes;
-// a code is accepted once; a recovery code works once; wrong codes lock; the secret is never stored in the clear.
 func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -78,7 +75,6 @@ func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 		return call(d.login, map[string]string{"email": "mfa@central.test", "password": "correct-horse-battery"}, "")
 	}
 
-	// The password alone opens nothing.
 	p := password()
 	if p.code != 200 || p.body["second_step"] != "enrol" || p.session != "" || p.pending == "" || sessions != 0 {
 		t.Fatalf("password step = %d %v session=%q", p.code, p.body, p.session)
@@ -108,7 +104,6 @@ func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 		t.Fatalf("confirming the app = %d %v", done.code, done.body)
 	}
 
-	// From now on: the password, then the code -- never the same code twice.
 	p2 := password()
 	if p2.body["second_step"] != "code" {
 		t.Fatalf("second sign-in = %v", p2.body)
@@ -119,7 +114,6 @@ func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 	if r := call(d.loginCode, map[string]string{"code": totp.Code(secret, totp.Step(now)+1)}, p2.pending); r.code != 200 || r.session == "" {
 		t.Fatalf("next code = %d %v", r.code, r.body)
 	}
-	// A recovery code works once.
 	rc := codes[2].(string)
 	p3 := password()
 	if r := call(d.loginCode, map[string]string{"code": strings.ToLower(rc)}, p3.pending); r.code != 200 || r.body["recovery_codes_left"] != float64(9) {
@@ -129,7 +123,6 @@ func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 	if r := call(d.loginCode, map[string]string{"code": rc}, p4.pending); r.code != 401 {
 		t.Fatalf("a used recovery code worked again: %d", r.code)
 	}
-	// Five wrong codes lock it; the right one then waits too.
 	for i := 0; i < 4; i++ {
 		_ = call(d.loginCode, map[string]string{"code": "000000"}, p4.pending)
 	}
@@ -143,7 +136,7 @@ func TestConsoleSignInNeedsTheAuthenticatorCode(t *testing.T) {
 		t.Fatalf("wrong codes audited %d, lockouts %d", failed, locked)
 	}
 
-	// Without the key, sign-in is refused rather than let through on a password.
+	// Without the key, sign-in is refused rather than let through on the password alone.
 	d.MFA = nil
 	if r := password(); r.code != http.StatusServiceUnavailable || r.session != "" {
 		t.Fatalf("sign-in without the two-step key = %d", r.code)

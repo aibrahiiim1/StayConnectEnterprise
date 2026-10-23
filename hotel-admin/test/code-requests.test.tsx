@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-// CODE REQUESTS (contract §6.7): staff see recent SMS / WhatsApp code requests; "Show code" takes a reason and the
-// password; a role without code-reveal never sees it; the code is shown only after the reveal succeeds. The email
-// code's temporary internet and "Let them try again" are gone (self-service contract §1).
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

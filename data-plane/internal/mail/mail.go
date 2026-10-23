@@ -1,6 +1,4 @@
-// Package mail abstracts outbound email so OTP / notification senders can
-// swap between a stub (dev), SMTP, and provider-specific clients (SES,
-// SendGrid) without touching call sites.
+// Package mail abstracts outbound email so senders can swap between a stub, SMTP and provider clients.
 package mail
 
 import (
@@ -26,15 +24,9 @@ type Message struct {
 	HTML    string
 }
 
-// Stub writes outgoing mail to a file (default /var/log/stayconnect/otp-mail.log)
-// AND to slog. Useful for dev so OTP codes can be tailed during testing.
-//
-// IN A PRODUCTION BUILD THE STUB WRITES NO CONTENT (audit B-13). The stub is also the fallback when a site has
-// no email provider configured, so on a real appliance it used to write every verification and password-reset
-// LINK, every code and every full address into a log file -- a reset link in a log is the account. A
-// production build (buildprofile.Production) records only that a message was not delivered, to a masked
-// recipient; the subject and body (which carry the link or code) are never written anywhere. A development
-// build (-tags devlicense) keeps the full record, which is what the stub is for.
+// Stub writes outgoing mail to a file and slog for development. In a production build it writes no content (it is
+// also the no-provider fallback, and a reset link or code in a log is the account): only that a message was not
+// delivered, to a masked recipient.
 type Stub struct {
 	Path string
 	mu   sync.Mutex
@@ -74,8 +66,7 @@ func (s *Stub) Send(ctx context.Context, m Message) error {
 	return nil
 }
 
-// MaskAddress keeps only the domain of an email address ("***@example.com"), enough for an operator to see
-// which provider a message was meant for without recording who it was for.
+// MaskAddress keeps only the domain ("***@example.com"): which provider, not who.
 func MaskAddress(to string) string {
 	if at := strings.LastIndexByte(to, '@'); at >= 0 && at < len(to)-1 {
 		return "***@" + to[at+1:]

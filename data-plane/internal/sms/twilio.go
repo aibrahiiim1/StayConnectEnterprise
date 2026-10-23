@@ -1,14 +1,7 @@
 package sms
 
-// Twilio Programmable Messaging — REST-only.
-//
-// Endpoint: POST https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json
-// Auth:     HTTP Basic — username=AccountSID, password=AuthToken
-// Body:     application/x-www-form-urlencoded with To, From, Body
-//
-// 201 Created → success; the response carries an SID we don't currently
-// persist (there's no per-send tracking table). 4xx/5xx → error with a
-// {message, code, more_info} body — surface message verbatim.
+// Twilio Messages REST API: HTTP Basic (AccountSID:AuthToken), form-encoded To/From/Body. Error bodies
+// ({message, code, more_info}) are surfaced verbatim.
 
 import (
 	"context"
@@ -68,7 +61,7 @@ func (t *Twilio) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("twilio: %w", err)
 	}
 	defer resp.Body.Close()
-	// Twilio returns 201 on accepted, plus 200 in some legacy paths.
+	// 201 on accept; 200 on some legacy paths.
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		return nil
 	}

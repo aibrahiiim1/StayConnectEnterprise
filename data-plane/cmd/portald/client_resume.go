@@ -1,18 +1,7 @@
 package main
 
-// THE REMEMBERED DEVICE ON THE PORTAL ("Welcome back"): contract §2.3.
-//
-// scd issues a device-bound resume credential after a verified OTP / identity-provider sign-in; the portal
-// keeps it in the HttpOnly cookie og_client and nowhere else. On the landing page the portal asks scd whether
-// the credential is still good FOR THIS DEVICE (IP from the connection, MAC from the kernel neighbour table --
-// never from the browser) and, if so, draws one Connect button. Connect mints an ordinary auth context and the
-// existing journey continues: join a live entitlement, or choose a package.
-//
-// HTTPS ONLY (GDPR audit B10). The cookie is set, and honoured, only over the portal's own HTTPS listener, where
-// it is Secure (cookies.go). On the plain-HTTP fallback a long-lived credential would cross the guest network in
-// clear text, so there the device is simply not remembered and the guest signs in as usual. Signing out and
-// "Not you?" still revoke a credential an older portal stored over HTTP. The credential is bound server-side to
-// the device and carries 256 bits.
+// Remembered device ("Welcome back"): scd issues a device-bound resume credential after a verified OTP or IdP sign-in; the portal keeps it only in the HttpOnly cookie og_client and asks scd whether it is good for this device (IP from the connection, MAC from the kernel, never the browser).
+// HTTPS only: over the HTTP fallback a long-lived credential would cross the guest network in clear text, so the device is not remembered; sign-out and "Not you?" still revoke one an older portal stored.
 
 import (
 	"bytes"
@@ -27,19 +16,16 @@ import (
 
 const (
 	clientResumeCookie = "og_client"
-	// clientResumeDefaultDays is the contract's default Remember-devices setting (Identity policy §2.3), used when
-	// scd's reply does not say which setting the credential was issued under. The cookie lives as long as the
-	// credential: it used to be kept for a year whatever the site set (audit P-17).
+	// clientResumeDefaultDays is the default Remember-devices setting, used when scd does not say which applied; the cookie lives as long as the credential.
 	clientResumeDefaultDays = 30
 	clientResumeMaxDays     = 365
 )
 
 type welcomeView struct {
-	Label  string // masked identity: a•••@example.com
-	Method string // OTP | SOCIAL
+	Label  string
+	Method string
 }
 
-// setClientResumeCookie keeps the remembered-device credential for `days` (the site's setting at issue).
 func setClientResumeCookie(w http.ResponseWriter, r *http.Request, token string, days int) {
 	if r == nil || r.TLS == nil {
 		return
@@ -57,19 +43,13 @@ func clearClientResumeCookie(w http.ResponseWriter, r *http.Request) {
 	clearPortalCookie(w, r, clientResumeCookie)
 }
 
-// rememberCookie is the guest's own choice, "Remember this device" ticked on the sign-in page (GDPR audit B10,
-// D-B10). A session cookie the page sets; it carries no identifier.
+// rememberCookie is the guest's own "Remember this device" choice; a session cookie carrying no identifier.
 const rememberCookie = "og_remember"
 
-// rememberMethods are the sign-ins the box is offered for: a verified code or an identity provider (templates.go
-// shows it, and the sentence explaining it, exactly where one of these is enabled). The box is a choice made on
-// the page, kept in a session cookie, so without this a tick given while a code sign-in was on offer carried over
-// to a voucher, account or room sign-in that never offered it.
+// rememberMethods are the sign-ins the box is offered for; without this a tick given on a code sign-in carried over to methods that never offered it.
 var rememberMethods = map[string]bool{"OTP": true, "SOCIAL": true}
 
-// guestAskedToRemember reports whether this sign-in may keep a remembered-device credential: it is one the box
-// is offered for, the guest ticked the box -- on the sign-in page (the cookie) or on the message-link page (the
-// form field) -- and the request is over HTTPS.
+// guestAskedToRemember: the sign-in is one the box is offered for, the guest ticked it, and the request is over HTTPS.
 func guestAskedToRemember(r *http.Request, method string) bool {
 	if r == nil || r.TLS == nil || !rememberMethods[method] {
 		return false
@@ -81,7 +61,6 @@ func guestAskedToRemember(r *http.Request, method string) bool {
 	return err == nil && c.Value == "1"
 }
 
-// revokeResume asks scd to revoke a resume credential, best effort.
 func (h *handler) revokeResume(ctx context.Context, token string) {
 	if h.scd == nil {
 		return
@@ -96,7 +75,6 @@ func (h *handler) revokeResume(ctx context.Context, token string) {
 	}
 }
 
-// rememberedToken is the credential the Welcome-back line and Connect may use: over HTTPS only.
 func (h *handler) rememberedToken(r *http.Request) string {
 	if r.TLS == nil {
 		return ""
@@ -104,7 +82,7 @@ func (h *handler) rememberedToken(r *http.Request) string {
 	return h.resumeToken(r)
 }
 
-// resumeToken reads the cookie whatever the transport, for revoking it.
+// resumeToken reads the cookie on any transport, for revoking.
 func (h *handler) resumeToken(r *http.Request) string {
 	c, err := r.Cookie(clientResumeCookie)
 	if err != nil || c.Value == "" || len(c.Value) > 128 {
@@ -113,7 +91,6 @@ func (h *handler) resumeToken(r *http.Request) string {
 	return c.Value
 }
 
-// resumeCall posts the device-bound credential to one of scd's resume routes.
 func (h *handler) resumeCall(ctx context.Context, path string, ip net.IP, mac string, token string) (int, []byte) {
 	body, _ := json.Marshal(map[string]string{"ip": ipString(ip), "mac": mac, "resume_token": token})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, bytes.NewReader(body))
@@ -128,10 +105,7 @@ func (h *handler) resumeCall(ctx context.Context, path string, ip net.IP, mac st
 	return resp.StatusCode, payload
 }
 
-// welcomeFor answers whether the landing page should greet this device as a remembered Client. It takes the
-// MAC the landing page already read from the neighbour cache (one read, documented there): a cold cache simply
-// means no greeting, and the normal sign-in page is the correct fallback. Nothing is minted here; Connect
-// resolves the device properly before anything is decided.
+// welcomeFor reuses the MAC the landing page already read; a cold cache means no greeting, and Connect resolves the device properly before anything is decided.
 func (h *handler) welcomeFor(r *http.Request, mac string) *welcomeView {
 	token := h.rememberedToken(r)
 	if token == "" || mac == "" {
@@ -158,7 +132,6 @@ func (h *handler) welcomeFor(r *http.Request, mac string) *welcomeView {
 	return &welcomeView{Label: out.Label, Method: out.Method}
 }
 
-// POST /auth/resume -- "Connect" on the Welcome-back line.
 func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 	token := h.rememberedToken(r)
 	if token == "" {
@@ -170,7 +143,6 @@ func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, msgCannotDetectDevice)
 		return
 	}
-	// Resolving lookup, as on every sign-in path: a cold cache is not evidence the device left the network.
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
@@ -180,9 +152,7 @@ func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 	if status == http.StatusOK && h.tryIAMv2Auth(w, r, payload) {
 		return
 	}
-	// A REFUSAL THAT SAYS NOTHING ABOUT THE CREDENTIAL KEEPS IT (audit P-9). Too many attempts, scd unreachable
-	// (status 0) or a server error are about this moment, not about the remembered device: clearing the cookie
-	// then threw away a credential that was still good, and the next visit asked for a code again.
+	// A refusal that says nothing about the credential keeps it: rate limits, scd down or server errors are about this moment, and clearing the cookie would discard a good credential.
 	switch {
 	case status == http.StatusTooManyRequests:
 		h.landing(w, r, msgTooManyAttemptsMoment)
@@ -191,13 +161,11 @@ func (h *handler) authResume(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Service unavailable. Please try again.")
 		return
 	}
-	// Anything else: the credential is gone (expired, revoked, another device, method switched off) or the
-	// authority refused it. The cookie is cleared so the greeting does not return, and the ordinary page is shown.
+	// Otherwise the credential is gone or refused: clear the cookie so the greeting does not return.
 	clearClientResumeCookie(w, r)
 	h.landing(w, r, msgPleaseSignIn)
 }
 
-// POST /auth/resume/forget -- "Not you?": revoke the credential and forget the device.
 func (h *handler) authResumeForget(w http.ResponseWriter, r *http.Request) {
 	if token := h.resumeToken(r); token != "" {
 		body, _ := json.Marshal(map[string]string{"resume_token": token})

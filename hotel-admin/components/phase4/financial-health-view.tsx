@@ -1,16 +1,6 @@
 "use client";
 
-// Phase 4 (DARK) — Charge health.
-//
-// The job of this screen is to answer one question quickly: is money moving, and if not, why not. So the
-// status word comes first and large, the reasons under it are the fixed codes the backend emits, and the
-// numbers are grouped by rail so an operator can see WHICH rail is unhappy without reading all of them.
-//
-// Nothing on this screen identifies a guest, a folio, a card or a provider transaction, because the API
-// does not send any of that. What the operator sees here is deliberately enough to act on and not enough to
-// act around: the detail lives behind Manual review, where every decision is audited.
-//
-// The only action is Refresh. It is a diagnostic screen.
+// This diagnostic omits guest and transaction identifiers; details stay behind audited Manual review.
 
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CircleCheck, HeartPulse, Hourglass, RefreshCw, Settings2, Wallet } from "lucide-react";
@@ -46,8 +36,7 @@ const STATUS_SUMMARY: Record<FinancialHealth["status"], string> = {
   HELD: "Money movement is held on purpose until the items below are dealt with.",
 };
 
-// The backend emits fixed codes; the UI owns the sentence. Keeping the mapping here rather than sending
-// prose over the wire is what keeps guest data out of an alerting path by construction.
+// Map fixed backend codes locally so alerting never carries guest prose.
 const REASON_TEXT: Record<string, string> = {
   FINANCIAL_RECOVERY_MODE:
     "This site is in financial recovery. Money movement is deliberately held until every item in flight has been reconciled.",
@@ -68,7 +57,6 @@ function ageText(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
-/** A count that is a problem when it is not zero. */
 const flag = (n: number, tone: "warn" | "err") => (n > 0 ? tone : "default");
 
 export function FinancialHealthView() {

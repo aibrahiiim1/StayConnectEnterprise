@@ -11,8 +11,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
-// GDPR plan F1 and F7: the hotel's notice is on the sign-in card, readable before signing in, as text (never
-// markup), and the remembered-device cookie is explained.
+// The hotel's notice is on the sign-in card, readable before signing in, as text (never markup); the remembered-device cookie is explained.
 func TestTheSignInPageCarriesThePrivacyNotice(t *testing.T) {
 	tmpl, err := template.New("land").Parse(landingHTML)
 	if err != nil {
@@ -39,15 +38,13 @@ func TestTheSignInPageCarriesThePrivacyNotice(t *testing.T) {
 	if strings.Contains(html, "<script>alert(1)</script>") {
 		t.Error("the notice was rendered as markup")
 	}
-	// The notice sits inside the sign-in card, after the forms and before the footer.
 	card, privacy, foot := strings.Index(html, `<main class="card">`), strings.Index(html, `id="privacy"`), strings.Index(html, `class="sc-foot"`)
 	if !(card < privacy && privacy < foot) {
 		t.Errorf("the notice is not on the sign-in card (card %d, notice %d, footer %d)", card, privacy, foot)
 	}
 }
 
-// GDPR audit 2026-10-19, A5: a hotel that wrote no notice still shows guests a short built-in one, and an
-// empty link is not shown. The hotel's own text, once written, replaces the built-in one.
+// A hotel with no notice shows a short built-in one; an empty link is not shown; the hotel's own text replaces the built-in.
 func TestNoHotelNoticeShowsTheBuiltInOne(t *testing.T) {
 	tmpl, _ := template.New("land").Parse(landingHTML)
 	render := func(d map[string]any) string {
@@ -81,9 +78,7 @@ func TestEveryLanguageHasThePrivacyWords(t *testing.T) {
 	}
 }
 
-// The remembered-device sentence follows exactly the box's condition: both are shown only where a code or an
-// identity provider is offered AND the page is on HTTPS. It used to be shown on plain HTTP, explaining a box
-// that was not there.
+// The remembered-device sentence is shown only where its box is: a code or identity provider is offered and the page is on HTTPS.
 func TestTheRememberSentenceFollowsTheBox(t *testing.T) {
 	tmpl, err := template.New("land").Parse(landingHTML)
 	if err != nil {

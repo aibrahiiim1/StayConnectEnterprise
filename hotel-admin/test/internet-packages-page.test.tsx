@@ -50,7 +50,6 @@ const PKG = {
 };
 const PLAN = { plan_id: "p1", code: "GOLD", name: "Gold", enabled: true, current_revision_id: "rev-gold", revision_count: 1, down_kbps: 10000 };
 
-/** Route the mocked GETs by path; anything not named answers an empty list. */
 function routes(map: Record<string, unknown>) {
   g.mockImplementation((path: string) => {
     for (const [prefix, value] of Object.entries(map)) {
@@ -59,7 +58,6 @@ function routes(map: Record<string, unknown>) {
       }
     }
     if (path.startsWith("/commercial-packages/activity")) return Promise.resolve(activity());
-    // A role that may change packages, unless a test routes whoami itself.
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     return Promise.resolve(list([]));
   });
@@ -87,7 +85,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(screen.getByText(/10 Mbps down/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-    // The plan is chosen BY NAME. Its revision id never appears.
     const sel = (await screen.findByTestId("service-plan")) as HTMLSelectElement;
     expect(Array.from(sel.options).map((o) => o.value)).toContain("p1");
     expect(Array.from(sel.options).map((o) => o.value)).not.toContain("rev-gold");
@@ -95,7 +92,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(document.body.innerHTML).not.toContain("rev-gold");
   });
 
-  // THE PRICE BUG: "500 USD" was printed for a 5.00 USD package, because the list showed minor units raw.
   it("formats every price with the exponent it was published with", async () => {
     routes({
       "/commercial-packages": list([
@@ -110,7 +106,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(screen.queryByText("500 USD")).toBeNull();
     expect(screen.getByText("500 JPY")).toBeInTheDocument();
     expect(screen.getByText("1.500 BHD")).toBeInTheDocument();
-    // An exponent the record does not carry is assumed out loud, never silently.
     expect(screen.getByText("2.50 USD (assumed 2 decimals)")).toBeInTheDocument();
   });
 
@@ -127,39 +122,27 @@ describe("InternetPackagesPage — packages", () => {
     const sheet = await screen.findByRole("dialog");
     expect(await within(sheet).findByText(/in force/i)).toBeInTheDocument();
     expect(within(sheet).getByText(/Version 1/)).toBeInTheDocument();
-    // History prices are formatted too (they printed "500 USD" before).
     expect(within(sheet).getAllByText("5.00 USD").length).toBeGreaterThan(0);
     expect(within(sheet).queryByText("500 USD")).toBeNull();
   });
 
-  // THE GUIDANCE ON A STALE PLAN PIN MUST DESCRIBE WHAT THE PRODUCT ACTUALLY DOES.
-  //
-  // It used to say "Choose Edit and save to bring it up to date". Saving a package KEEPS the service-plan
-  // revision it is pinned to when the plan selection has not changed -- decideSave does that deliberately, so
-  // that renaming a package cannot apply a technical change nobody approved on this screen (see
-  // lib/package-save.ts, and the decideSave cases in test/package-save.test.ts). The operator would therefore
-  // follow the instruction, read "Changes saved", and the package would still be on the old revision with
-  // nothing to tell them it had not worked. The supported action lives on Service plans and asks which
-  // packages should move, one at a time.
+  // A stale plan pin's guidance must match the product: saving KEEPS the pinned revision (decideSave), so "Edit and
+  // save" cannot update it;
+  // the supported action is on Service plans.
   it("directs a stale plan pin to Service plans, not to Edit and save", async () => {
     routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: true }]) });
     render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
     const sheet = await screen.findByRole("dialog");
-    // Located by the new sentence, which is unique; the heading text also appears on the row badge.
     const callout = (await within(sheet).findByText(/will not move it/i)).closest("div")!;
 
-    // The instruction that cannot work is gone...
     expect(within(sheet).queryByText(/edit and save to bring it up to date/i)).toBeNull();
-    // ...and is replaced by one that names the supported action and links to where it is.
     expect(callout.textContent).toMatch(/Apply current settings/);
     const link = within(sheet).getByRole("link", { name: /service\s*plans/i });
     expect(link).toHaveAttribute("href", "/service-plans");
-    // ...and it keeps the promise the revision model actually makes.
     expect(callout.textContent).toMatch(/already online keep what they have/i);
   });
 
-  // ...and it is not shown when the package is already on the plan's current settings.
   it("says nothing about plan settings when the pin is current", async () => {
     routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: false }]) });
     render(<InternetPackagesPage />);
@@ -179,8 +162,8 @@ describe("InternetPackagesPage — packages", () => {
     await waitFor(() => expect(within(row).getByText("3")).toBeInTheDocument());
   });
 
-  // THE STEP-UP IS A DIALOG, NOT TWO window.prompt() CALLS IN A ROW. The backend contract is unchanged: the API
-  // is called with active:false plus a reason and a password, and not at all until both are supplied.
+  // The step-up is a dialog: the API is called with active:false plus a reason and a password, and not before both are
+  // supplied.
   it("deactivation requires reason + password step-up before calling the API", async () => {
     routes({ "/commercial-packages": list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]) });
     p.mockResolvedValue({});
@@ -234,7 +217,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(screen.getByTestId("code")).toBeInTheDocument();
   });
 
-  // ADD NEVER BECOMES A SILENT REVISION of a package that already owns the code.
   it("Add sends create_only, and a taken code is shown as the server's refusal inside the form", async () => {
     routes({ "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]) });
     p.mockRejectedValue(new ApiError(409, {
@@ -307,7 +289,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(await within(dialog).findByText("Room charge: One mapping per PMS interface.")).toBeInTheDocument();
   });
 
-  // AUDIT O-15: EDIT MUST ROUND-TRIP EVERYTHING, including what the form has no control for.
   it("Edit hands back unknown conditions, tier match keys, the whole display and the carried fields", async () => {
     routes({
       "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]),
@@ -329,7 +310,6 @@ describe("InternetPackagesPage — packages", () => {
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
     fireEvent.click(screen.getByRole("button", { name: /^edit\b/i }));
-    // The unknown condition is shown, read-only, as kept.
     const kept = await screen.findByTestId("preserved-rules");
     expect(kept.textContent).toContain("STAY_STATUS");
     expect(kept.textContent).toContain("kept as is");
@@ -346,11 +326,9 @@ describe("InternetPackagesPage — packages", () => {
       price_minor: 0, currency: "USD", currency_exponent: 2, acquisition_methods: ["NOT_REQUIRED", "PREPAID"],
       room_charge_mappings: [],
     });
-    // A rename changes nothing clients pay or receive, so no password is asked or sent.
     expect(body).not.toHaveProperty("password");
   });
 
-  // AUDIT O-21: changing what clients pay is a step-up.
   it("a price change asks for the password once and sends it with the same body", async () => {
     routes({
       "/commercial-packages": list([{ ...PKG, price_minor: 500, currency: "USD", currency_exponent: 2 }]),
@@ -370,7 +348,6 @@ describe("InternetPackagesPage — packages", () => {
     const price = await screen.findByLabelText("Price");
     fireEvent.change(price, { target: { value: "7.50" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
-    // Nothing is sent until the password is given.
     const confirm = await screen.findByRole("dialog", { name: /confirm the change of terms/i });
     expect(p).not.toHaveBeenCalled();
     fireEvent.change(within(confirm).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
@@ -414,7 +391,6 @@ describe("InternetPackagesPage — packages", () => {
     await waitFor(() => expect(p).toHaveBeenCalledWith("/commercial-packages/pk1/active", { active: true, password: "pw-op" }));
   });
 
-  // AUDIT O-12: only the DEFAULT active account takes card checkouts.
   it("warns about the card currency against the DEFAULT account, not any active one", async () => {
     routes({
       "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]),
@@ -432,11 +408,9 @@ describe("InternetPackagesPage — packages", () => {
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     fireEvent.change(await screen.findByLabelText("Price"), { target: { value: "5" } });
     fireEvent.click(await screen.findByTestId("method-check-ONLINE_PAYMENT"));
-    // A USD account exists and is active, but it is not the default, so USD is not offered by card.
     expect((await screen.findByTestId("card-currency-note")).textContent).toMatch(/default payment account settles EGP, not USD/);
   });
 
-  // DELETE… REFUSES WITH THE SERVER'S REASONS when anything uses the package, and offers Disable.
   it("Delete… of a used package explains, with real counts, and offers Disable instead — it never deletes", async () => {
     routes({
       "/commercial-packages": list([PKG]),
@@ -464,7 +438,6 @@ describe("InternetPackagesPage — packages", () => {
     expect((api as unknown as { del: ReturnType<typeof vi.fn> }).del).not.toHaveBeenCalled();
   });
 
-  // AN UNUSED PACKAGE IS DELETED for real, with a reason and the operator's password.
   it("Delete… of an unused package asks for a reason and password, then deletes", async () => {
     const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
     d.mockResolvedValue({ deleted: true });
@@ -484,7 +457,6 @@ describe("InternetPackagesPage — packages", () => {
     await waitFor(() => expect(d).toHaveBeenCalledWith("/commercial-packages/pk1", { reason: "Created by mistake", password: "pw" }));
   });
 
-  // SOMETHING STARTED USING IT while the dialog was open: the server's 409 becomes the refusal.
   it("a 409 from the delete switches the dialog to the server's reasons", async () => {
     const d = (api as unknown as { del: ReturnType<typeof vi.fn> }).del;
     d.mockRejectedValue(new ApiError(409, { error: "in_use", deletability: {
@@ -503,8 +475,6 @@ describe("InternetPackagesPage — packages", () => {
     expect(screen.queryByRole("button", { name: /^delete package$/i })).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------------------------------------
 
 const ROW_STAY = {
   purchase_id: "pu1", entitlement_id: "en1", package_id: "pk1", package_code: "FREEWIFI",
@@ -549,15 +519,12 @@ describe("InternetPackagesPage — guest activity", () => {
     await openActivity();
 
     expect(await screen.findByText("Room 4202")).toBeInTheDocument();
-    // A voucher grant (no quote at all) is listed — the old view could not show it.
     expect(screen.getByText("A voucher client")).toBeInTheDocument();
     expect(screen.getAllByText("Voucher").length).toBeGreaterThan(0);
     expect(screen.getAllByText("In use").length).toBeGreaterThan(1); // the status chip and the row badge
-    // Summary: guests on a package now, data used, top package, breakdown by source.
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.getAllByText("Chosen on the portal").length).toBeGreaterThan(0);
     expect(screen.getByText(/cannot be placed in a period/i)).toBeInTheDocument();
-    // No row claims an offer; ids are not on the surface.
     expect(screen.queryByText(/was offered/i)).toBeNull();
     expect(screen.queryByText("pu1")).toBeNull();
 
@@ -579,7 +546,6 @@ describe("InternetPackagesPage — guest activity", () => {
     expect(within(sheet).getByText("5.00 USD")).toBeInTheDocument();
     const link = within(sheet).getByRole("link", { name: /open this stay/i });
     expect(link.getAttribute("href")).toBe("/usage?stay=st1");
-    // Support ids live here, not on the list.
     expect(sheet.innerHTML).toContain("pu1");
   });
 
@@ -591,7 +557,6 @@ describe("InternetPackagesPage — guest activity", () => {
     expect(within(sheet).getByText("Given without a portal offer")).toBeInTheDocument();
     expect(within(sheet).queryByText(/offer taken/i)).toBeNull();
     expect(within(sheet).getAllByText("Data allowance used up").length).toBeGreaterThan(0); // timeline + "why it ended"
-    // No stay, so no usage link pretending to be one.
     expect(within(sheet).queryByRole("link", { name: /open this stay/i })).toBeNull();
   });
 
@@ -627,9 +592,7 @@ describe("InternetPackagesPage — guest activity", () => {
 });
 
 describe("a package with no published configuration (found live on PRE-LIVE)", () => {
-  // The appliance holds an active package with no current revision. The page asked the server for its
-  // configuration on every load, got a correct 404, and listed the package as "Active" -- which it cannot be,
-  // since there is nothing to offer.
+  // An active package with no current revision (404 on its configuration) must not be listed as "Active".
   it("is shown as not configured, and its configuration is never requested", async () => {
     routes({ "/commercial-packages": list([{ package_id: "pk9", code: "SCAFFOLD", name: "Scaffold package", active: true, current_revision_id: "", revision_count: 0 }]) });
     render(<InternetPackagesPage />);

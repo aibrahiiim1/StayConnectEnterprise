@@ -2,17 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// The Phase-3 pages talk to edged through lib/api; the client is mocked so the components can be exercised
-// in jsdom without a backend. What is asserted here is the behaviour an operator depends on: the review queue
-// shows WHY an event was refused, the alert queue can be acted on, and the grace form publishes the COMPLETE
-// policy rather than a patch.
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
-// ApiError is part of the module's RUNTIME surface, not just its types: ErrorBanner does
-// `err instanceof ApiError` to decide whether to show a trace id. A mock that omits it makes that check
-// throw, React unmounts the tree, and the page renders as an empty div — which is what happened here, and
-// it looked like the error state was missing rather than the mock being incomplete.
+// Preserve ApiError in the mock because ErrorBanner checks it with instanceof at runtime.
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
@@ -57,14 +50,12 @@ describe("Stays page", () => {
     const { default: StaysPage } = await import("@/app/(app)/stays/page");
     render(<StaysPage />);
     expect(await screen.findByText("R900")).toBeTruthy();
-    // sharing a stay is ordinary: the occupant count is shown plainly
     expect(screen.getByText(/1 sharing/)).toBeTruthy();
     expect(screen.getByText(/Not allowed/)).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: /^View\b/ }));
     expect(await screen.findByText("Byron, Ada")).toBeTruthy();
     expect(screen.getByText("Main guest")).toBeTruthy();
-    // No folios any more: the stay shows room charge permission in words, with who decided it.
     expect(screen.queryByText(/folio/i)).toBeNull();
     const section = screen.getByRole("region", { name: "Room charge" });
     expect(within(section).getByText("The guest is not in house")).toBeTruthy();
@@ -81,8 +72,7 @@ describe("Stays page", () => {
 });
 
 describe("Stays page — room charge on a stay", () => {
-  // Phase-0 Amendment A1: only ADMIN_BLOCK is an operator's. PMS_NO_POST / PMS_DATA_SUSPECT clear from fresh
-  // Protel data and POSTING_UNRESOLVED from the charge's manual review, so the page never offers to lift them.
+  // Only ADMIN_BLOCK is operator-controlled; other blocks clear from PMS data or charge review.
   const STAY = {
     id: "s7", pms_interface_id: "i1", external_reservation_id: "G5000", room: "205",
     status: "IN_HOUSE", lifecycle_version: 3, posting_allowed: false, occupants: 1,
@@ -124,7 +114,6 @@ describe("Stays page — room charge on a stay", () => {
     expect(within(section).getByText(/clears only when the charge is decided in Manual review/i)).toBeTruthy();
     expect(within(section).getByText(/clears only when fresh Protel data allows posting again/i)).toBeTruthy();
     expect(within(section).getByText("Earlier blocks")).toBeTruthy();
-    // The site admin may SET an administrative block, but nothing offers to remove these.
     expect(within(section).getByRole("button", { name: /block room charge/i })).toBeTruthy();
     expect(within(section).queryByRole("button", { name: /remove|lift|clear|unblock/i })).toBeNull();
   });
@@ -197,12 +186,7 @@ describe("Stays page — room charge on a stay", () => {
 });
 
 describe("Stay events page", () => {
-  // IT NO LONGER DEFAULTS TO THE REVIEW QUEUE, and that is the fix rather than a regression.
-  //
-  // The default filter was MANUAL_REVIEW, so the normal and healthy state of this screen was an empty table
-  // reading "Nothing to review" -- which an operator checking whether the PMS feed is alive reads as "the feed
-  // is dead". It now opens on everything the feed has sent, and the review queue is called out above the table
-  // whenever it is non-empty. What this test pins is that the bounded review code is still surfaced.
+  // Default to all messages so an empty review queue does not imply the PMS feed is empty.
   it("opens on the whole feed and still surfaces the bounded reason an event was refused", async () => {
     get.mockResolvedValue({
       data: [{
@@ -211,17 +195,13 @@ describe("Stay events page", () => {
         received_at: new Date().toISOString(),
       }],
       meta: { has_more: false }, page: 1, page_size: 50, total: 1,
-      // edged counts every message for the tiles, whatever the filter.
       summary: { applied: 0, pending: 0, manual_review: 1, rejected: 0, unmatched: 1 },
     });
     const { default: StayEventsPage } = await import("@/app/(app)/stay-events/page");
     render(<StayEventsPage />);
     await waitFor(() => expect(get).toHaveBeenCalled());
-    // No status filter on the first load: the screen shows what the PMS has actually sent.
     expect(get.mock.calls[0][0]).not.toContain("processing_status=");
-    // The review code is rendered de-underscored and lower-cased, as every other bounded code in the UI now is.
     expect(await screen.findByText(/folio claimed by other stay/i)).toBeTruthy();
-    // And the queue is announced rather than being the only thing visible.
     expect(screen.getByText(/need a decision/i)).toBeTruthy();
   });
 });
@@ -244,7 +224,7 @@ describe("Operational alerts page", () => {
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
     expect(path).toBe("/operational-alerts/a1/acknowledge");
-    // the action carries the state this operator was looking at, so a concurrent change is a clean conflict
+    // Carry the viewed state so concurrent changes return a conflict.
     expect(body.expected_state).toBe("OPEN");
     expect(get).toHaveBeenCalledTimes(2); // the queue is re-read after acting
   });
@@ -281,21 +261,6 @@ describe("Operational alerts page", () => {
   });
 });
 
-// THE CHECKOUT GRACE TESTS THAT LIVED HERE DESCRIBED A WORKFLOW THAT NO LONGER EXISTS.
-//
-// They asserted that the operator SELECTS a package revision, that publishing without one is refused, and
-// that the publish control stays disabled until a package is chosen. That workflow was a dead end: the
-// checkout validator only ever accepts a package derived from the policy, and the operator publisher refuses
-// to create the reserved system package those tests assumed somebody had prepared. On a site with none --
-// PRE-LIVE among them -- the page offered nothing to select and told the operator to visit a catalog that
-// could not help.
-//
-// The operator now authors the POLICY and the system derives the package. The equivalent claims, and the
-// whole journey from an unconfigured site to a published second version, are performed in
-// test/checkout-grace-self-service.test.tsx: what is actually SENT on publish, the read-only role, and the
-//409-reloads-rather-than-overwrites contract.
-
-
 describe("Concurrency contracts in the UI", () => {
   it("an alert changed by someone else reloads the queue instead of overwriting it", async () => {
     get.mockResolvedValue({
@@ -310,13 +275,8 @@ describe("Concurrency contracts in the UI", () => {
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /Acknowledge alert/ }));
-    // the operator is told what happened, and the queue is re-read rather than retried blindly
+    // Reload after conflict instead of retrying a stale decision.
     expect(await screen.findByRole("status")).toBeTruthy();
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
-
-  // The grace 409 contract moved with the workflow it belongs to: it is asserted against the real publish
-  // journey (author -> review -> confirm) in test/checkout-grace-self-service.test.tsx. The version that was
-  // here drove a package selector that no longer exists.
-
 });

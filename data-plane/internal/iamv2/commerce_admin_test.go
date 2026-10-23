@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// dark: admin surface OFF -> disabled, nil repo never used.
 func TestCommerceAdminDark(t *testing.T) {
 	a, err := NewCommerceAdmin(DefaultCommerceConfig(), nil, nil)
 	if err != nil {
@@ -37,7 +36,6 @@ func newAdmin(t *testing.T, db *pgxpool.Pool) *CommerceAdmin {
 	return a
 }
 
-// seedPlanOnly creates a guest_network + service_plan + one current plan revision (no package).
 func seedPlanOnly(t *testing.T, db *pgxpool.Pool) (planRevID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -72,7 +70,6 @@ func TestCommerceAdminPublishImmutableAndPointer(t *testing.T) {
 	if err != nil || r1.Reason != "published" || r1.PackageID == "" || r1.CurrentRevisionID == "" {
 		t.Fatalf("publish 1: %+v %v", r1, err)
 	}
-	// current pointer + rule/tier rows present
 	if got := scan1(t, db, `SELECT current_revision_id::text FROM iam_v2.internet_packages WHERE id=$1`, r1.PackageID); got != r1.CurrentRevisionID {
 		t.Fatalf("current pointer %s != %s", got, r1.CurrentRevisionID)
 	}
@@ -82,7 +79,6 @@ func TestCommerceAdminPublishImmutableAndPointer(t *testing.T) {
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.package_grant_tiers WHERE package_revision_id=$1`, r1.CurrentRevisionID); n != 1 {
 		t.Fatalf("want 1 grant tier, got %d", n)
 	}
-	// published revision is free + immutable
 	var price int64
 	db.QueryRow(ctx, `SELECT price_minor FROM iam_v2.internet_package_revisions WHERE id=$1`, r1.CurrentRevisionID).Scan(&price)
 	if price != 0 {
@@ -92,7 +88,6 @@ func TestCommerceAdminPublishImmutableAndPointer(t *testing.T) {
 		t.Fatal("published revision must be immutable")
 	}
 
-	// publish a SECOND revision -> pointer moves; old revision unchanged; revision_count=2
 	r2, err := a.PublishRevision(ctx, spec)
 	if err != nil || r2.Reason != "published" || r2.CurrentRevisionID == r1.CurrentRevisionID {
 		t.Fatalf("publish 2: %+v %v", r2, err)
@@ -104,7 +99,6 @@ func TestCommerceAdminPublishImmutableAndPointer(t *testing.T) {
 		t.Fatalf("want 2 revisions, got %d", n)
 	}
 
-	// SetActive toggle is a package-row change; revision history unchanged.
 	before := count(t, db, `SELECT count(*) FROM iam_v2.internet_package_revisions WHERE package_id=$1`, r1.PackageID)
 	if _, err := a.SetActive(ctx, p2Tenant, p2Site, r1.PackageID, false); err != nil {
 		t.Fatalf("deactivate: %v", err)
@@ -145,27 +139,22 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 		{"foreign-plan", func(s *PackagePublishSpec) {
 			s.ServicePlanRevisionID = "99999999-9999-9999-9999-999999999999"
 		}, "plan_revision_not_found"},
-		// O-16: two speed steps with one order were a 500 from the insert; now a reason.
 		{"duplicate-step-order", func(s *PackagePublishSpec) {
 			s.GrantTiers = []GrantTier{{Order: 10, Value: map[string]any{}}, {Order: 10, Value: map[string]any{}}}
 		}, "invalid_grant_tier"},
-		// O-9: free access once AND requires an earlier purchase -- offered to nobody.
 		{"contradictory-prior-purchase", func(s *PackagePublishSpec) {
 			s.EligibilityRules = []EligibilityRule{
 				{Type: "PRIOR_PURCHASE", Value: map[string]any{"forbids_prior": true}},
 				{Type: "PRIOR_PURCHASE", Value: map[string]any{"requires_prior": true}},
 			}
 		}, "invalid_eligibility_rule"},
-		// O-19: interface ids are ids, not free text.
 		{"pms-interface-not-uuid", func(s *PackagePublishSpec) {
 			s.EligibilityRules = []EligibilityRule{{Type: "PMS_INTERFACE", Value: map[string]any{"pms_interface_ids": []any{"protel"}}}}
 		}, "invalid_eligibility_rule"},
-		// O-17: a three-decimal price a card provider refuses.
 		{"three-decimal-card", func(s *PackagePublishSpec) {
 			s.PriceMinor, s.Currency, s.CurrencyExponent = 1005, "KWD", 3
 			s.AcquisitionMethods = []string{AcquireCard}
 		}, "invalid_currency"},
-		// O-18: a NEW fixed end in the past is refused, with its reason.
 		{"past-fixed-end", func(s *PackagePublishSpec) {
 			s.DurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
 		}, "invalid_duration_policy"},
@@ -174,24 +163,20 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 		spec := base
 		c.mut(&spec)
 		res, err := a.PublishRevision(ctx, spec)
-		// The REASON travels with its detail (O-18): "label" or "label: why".
 		if err != nil || (res.Reason != c.reason && !strings.HasPrefix(res.Reason, c.reason+": ")) {
 			t.Fatalf("%s: want reason %q, got %+v err=%v", c.name, c.reason, res, err)
 		}
 	}
-	// The duration refusal says why.
 	spec := base
 	spec.DurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
 	if res, _ := a.PublishRevision(ctx, spec); !strings.Contains(res.Reason, "must be in the future") {
 		t.Fatalf("duration refusal lost its reason: %q", res.Reason)
 	}
-	// ...but a republish that CARRIES the package's existing, now-past end is not a duration decision.
 	spec.PriorDurationPolicy = map[string]any{"end_mode": "FIXED_AT", "ends_at": "2020-01-01T00:00:00Z"}
 	spec.DryRun = true
 	if res, err := a.PublishRevision(ctx, spec); err != nil || res.Reason != "validated" {
 		t.Fatalf("an unchanged past end blocked a republish: %+v err=%v", res, err)
 	}
-	// A three-decimal price in steps of ten is fine.
 	spec = base
 	spec.PriceMinor, spec.Currency, spec.CurrencyExponent = 1010, "KWD", 3
 	spec.AcquisitionMethods = []string{AcquireCard}
@@ -199,7 +184,6 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 	if res, err := a.PublishRevision(ctx, spec); err != nil || res.Reason != "validated" {
 		t.Fatalf("KWD 1.010 by card refused: %+v err=%v", res, err)
 	}
-	// no partial package/revision persisted by any rejected publish
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.internet_packages WHERE code='BAD'`); n != 0 {
 		t.Fatalf("rejected publishes left %d packages", n)
 	}
@@ -219,12 +203,10 @@ func TestCommerceAdminServicePlans(t *testing.T) {
 	if err != nil || r1.Reason != "published" || r1.PackageID == "" {
 		t.Fatalf("publish plan: %+v %v", r1, err)
 	}
-	// list plans
 	plans, disabled, err := a.ListPlans(ctx, p2Tenant, p2Site)
 	if err != nil || disabled || len(plans) != 1 || plans[0].Code != "GOLD" || plans[0].RevisionCount != 1 {
 		t.Fatalf("list plans: %+v disabled=%v err=%v", plans, disabled, err)
 	}
-	// publish a second revision -> pointer moves, 2 revisions
 	r2, err := a.PublishPlanRevision(ctx, spec)
 	if err != nil || r2.CurrentRevisionID == r1.CurrentRevisionID {
 		t.Fatalf("publish plan rev2: %+v %v", r2, err)
@@ -233,13 +215,10 @@ func TestCommerceAdminServicePlans(t *testing.T) {
 	if err != nil || len(revs) != 2 || !revs[0].IsCurrent || revs[0].RevisionNo != 2 {
 		t.Fatalf("plan revisions: %+v %v", revs, err)
 	}
-	// AGGREGATE accounting is capability-disabled
 	bad := spec
 	bad.TimeAccountingMode = "AGGREGATE_ONLINE_TIME"
-	// The reason must be the SPECIFIC one, not the generic label. The admin
-	// surface returns verbatim validation reasons on purpose (the operator is
-	// trusted, unlike a guest), and collapsing every rejection to
-	// "invalid_plan_spec" made a one-word enum typo cost a debugging cycle.
+	// The admin surface returns specific validation reasons on purpose (the operator is trusted, unlike a
+	// guest); collapsing them to a generic label made a one-word enum typo cost a debugging cycle.
 	res, _ := a.PublishPlanRevision(ctx, bad)
 	if res.Reason != "unsupported time_accounting_mode" {
 		t.Fatalf("AGGREGATE plan must be rejected with the specific reason, got %+v", res)
@@ -255,7 +234,6 @@ func TestCommerceAdminInspectionPIIFree(t *testing.T) {
 	e := newEngine(t, db, 5*time.Minute)
 	a := newAdmin(t, db)
 	ctx := context.Background()
-	// create a quote + confirm to populate inspection rows
 	q, err := e.CreateQuote(ctx, req(s))
 	if err != nil || q.QuoteID == "" {
 		t.Fatalf("quote: %+v %v", q, err)
@@ -273,16 +251,8 @@ func TestCommerceAdminInspectionPIIFree(t *testing.T) {
 	}
 }
 
-// THE RETIRED GRACE WRITER MUST REFUSE, NOT WRITE.
-//
-// These four tests previously exercised CommerceAdmin.SetGrace, in which an operator CHOSE a grace package and
-// the code validated a list of its properties. That contract is gone: the checkout conversion judges the
-// pinned revision with iam_v2.grace_package_mismatch_reason, which demands exact equality between the
-// published policy and the revision's plan scalars, duration policy and declared policy version -- equalities
-// the old property list never checked. A save could therefore succeed while the grace could never convert.
-//
-// What replaces them is not a like-for-like rewrite, because the failure modes they guarded are no longer
-// reachable: an operator cannot name a package at all. What is worth pinning is that the retired door is shut.
+// The retired grace writer must refuse, not write: an operator can no longer name a package, and the
+// conversion demands exact equality with the published policy.
 func TestRetiredRawGraceWriterRefuses(t *testing.T) {
 	db := p2DB(t)
 	repo := NewPgCommerceAdminRepository(db)
@@ -299,7 +269,6 @@ func TestRetiredRawGraceWriterRefuses(t *testing.T) {
 	if !errors.As(got, &de) || de.Code != ErrInvalidInput {
 		t.Fatalf("the raw grace writer did not refuse: %v", got)
 	}
-	// And it must have written nothing: a refusal that still leaves a row behind is not a refusal.
 	var n int
 	if err := db.QueryRow(ctx,
 		`SELECT count(*) FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
@@ -311,12 +280,8 @@ func TestRetiredRawGraceWriterRefuses(t *testing.T) {
 	}
 }
 
-// THE READ MUST NOT PRESENT STALE FREE-FORM STATE AS CURRENT POLICY.
-//
-// Pre-D32 rows can carry a free-form `config` jsonb. Nothing can write it now (the boundary writes typed
-// columns) and nothing can clear it (the table is owner-only), so any keys left in it are residue. Surfacing
-// them would put values the operator cannot change or delete next to the ones that govern the system --
-// "grace_minutes: 30" beside grace_duration_seconds, agreeing today and diverging after the next publication.
+// The read must not present stale pre-D32 free-form config as current policy: nothing can write or clear it
+// now, so surfacing it would show values the operator cannot change.
 func TestGraceReadDoesNotSurfaceStaleFreeFormConfig(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
@@ -330,7 +295,6 @@ func TestGraceReadDoesNotSurfaceStaleFreeFormConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	// Simulate a pre-D32 row by writing residue directly, as the owner -- which is the only way it could exist.
 	if _, err := db.Exec(ctx,
 		`UPDATE iam_v2.site_checkout_grace_config SET config = '{"grace_minutes":30,"operator_note":"stale"}'::jsonb
 		  WHERE tenant_id=$1 AND site_id=$2`, p2Tenant, p2Site); err != nil {
@@ -345,7 +309,6 @@ func TestGraceReadDoesNotSurfaceStaleFreeFormConfig(t *testing.T) {
 			t.Errorf("stale free-form key %q was returned as current configuration", k)
 		}
 	}
-	// The typed policy IS the answer, and every field of it must be present.
 	for k, want := range map[string]any{
 		"grace_duration_seconds": 1800, "grace_down_kbps": 512, "grace_up_kbps": 256,
 		"grace_device_limit": 2, "grace_device_limit_policy": "REJECT_NEW_DEVICE",
@@ -355,15 +318,14 @@ func TestGraceReadDoesNotSurfaceStaleFreeFormConfig(t *testing.T) {
 			t.Errorf("typed field %q = %v, want %v", k, got.Config[k], want)
 		}
 	}
-	// And the version the operator must echo back on the next publish.
 	if got.ConfigVersion < 1 {
 		t.Errorf("config_version=%d: the read does not tell the operator what to send as expected_version",
 			got.ConfigVersion)
 	}
 }
 
-// graceTestActor seeds an ACTIVE operator to publish as. tenant_id is NULL because the boundary accepts an
-// actor whose tenant is NULL or matches, and the scratch database has no public.tenants row to point a FK at.
+// tenant_id is NULL because the boundary accepts a NULL or matching tenant and the scratch database has no
+// public.tenants row to reference.
 func graceTestActor(t *testing.T, db *pgxpool.Pool) string {
 	t.Helper()
 	return scan1(t, db, `INSERT INTO public.operators (id,email,password_hash,status,tenant_id)

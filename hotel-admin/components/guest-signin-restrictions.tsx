@@ -1,18 +1,7 @@
 "use client";
 
-// ACTIVE RESTRICTIONS — which devices are currently being asked to wait, and the one action that ends a wait.
-//
-// It sits beside Guest sign-in attempts rather than on a page of its own because it answers the second half of
-// the same question. The attempts list says why a guest could not connect; this says whether they are being
-// asked to wait before trying again, and lets an operator who can see the guest end that wait.
-//
-// THE ROOM SHOWN HERE IS UNVERIFIED. It is the last room this device TYPED — a string somebody chose, not a
-// statement about where anyone is staying. The column heading, the detail label and the release dialog all say
-// so, because an operator who read it as an identity would be identifying a person by an attacker's input.
-//
-// RELEASING ALLOWS ANOTHER ATTEMPT. IT DOES NOT SIGN ANYONE IN. That is stated on the button's dialog and in
-// the confirmation, because "release this guest" is exactly the phrase a desk would expect to mean "let them
-// in", and the difference matters when the person at the desk is not the person who was guessing.
+// The room shown is unverified device input, never proof of a guest's identity.
+// Releasing a restriction permits another attempt; it does not sign anyone in.
 
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
@@ -32,9 +21,7 @@ import { LiveStatus, formatCountdown, refreshingClass } from "@/components/ui/pa
 import { useToast } from "@/components/ui/toast";
 import { cn, formatDate } from "@/lib/utils";
 
-// countdown renders the remaining wait. The number it counts from is the SERVER's, taken at the moment of the
-// read; this only makes it tick so the screen is not stale between refreshes. When it reaches zero the row is
-// gone on the next load rather than being declared over here.
+// The server owns the wait deadline; the countdown only updates its display between reads.
 function useTicker(): number {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -88,8 +75,7 @@ export function ActiveRestrictions({
 
   useEffect(() => { void load(); }, [load]);
 
-  // A restriction is a minute long by default, so the list re-reads itself periodically. Without it an
-  // operator watching the screen would see a countdown reach zero and the row stay there.
+  // Refresh periodically so expired restrictions leave the list.
   useEffect(() => {
     const t = setInterval(() => { void inBackground(load); }, POLL_SECONDS * 1000);
     return () => clearInterval(t);

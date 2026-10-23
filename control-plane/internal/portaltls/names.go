@@ -1,11 +1,6 @@
-// Package portaltls is Central's half of the HTTPS client portal (docs/architecture/
-// ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md): it gives every appliance a permanent hostname under
-// gw.onegate.work, publishes that name's A record (the appliance's private portal address), verifies a hotel's
-// own portal domain, and obtains publicly trusted certificates for both from an ACME CA with DNS-01 -- always
-// for a CSR the appliance generated. Private keys never leave the appliance; Central holds public material,
-// one ACME account key and one DNS API token, both root-only files.
-//
-// Nothing here carries guest data: hostnames, an address, CSRs and certificate status only (CLAUDE.md §0E).
+// Package portaltls is Central's half of the HTTPS client portal: permanent appliance hostnames, their A
+// records, hotel-domain verification, and ACME (DNS-01) certificates for CSRs the appliance generated.
+// Private keys never leave the appliance, and nothing here carries guest data.
 package portaltls
 
 import (
@@ -20,11 +15,10 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// Name shapes, from the contract §2. They are also CHECK constraints in migration 0050.
+// Name shapes; they are also CHECK constraints in the database.
 const (
-	labelLen          = 8  // <label>.gw.onegate.work: [a-z][a-z0-9]{7}
-	challengeLabelLen = 16 // <challenge_label>.acme.onegate.work: [a-z0-9]{16}
-	// GatewaySubdomain and ChallengeSubdomain sit under the configured zone (onegate.work).
+	labelLen           = 8  // <label>.gw.onegate.work: [a-z][a-z0-9]{7}
+	challengeLabelLen  = 16 // <challenge_label>.acme.onegate.work: [a-z0-9]{16}
 	GatewaySubdomain   = "gw"
 	ChallengeSubdomain = "acme"
 )
@@ -34,8 +28,7 @@ const (
 	alphaNum = "abcdefghijklmnopqrstuvwxyz0123456789"
 )
 
-// randomFrom draws n characters uniformly from alphabet with crypto/rand. rand.Int rejects internally, so no
-// character is more likely than another (a modulo over random bytes would bias the first few).
+// randomFrom draws uniformly with crypto/rand; a modulo over random bytes would bias the first characters.
 func randomFrom(alphabet string, n int) (string, error) {
 	var b strings.Builder
 	max := big.NewInt(int64(len(alphabet)))
@@ -49,9 +42,8 @@ func randomFrom(alphabet string, n int) (string, error) {
 	return b.String(), nil
 }
 
-// NewLabel returns a fresh appliance hostname label: a letter, then seven letters or digits. A letter first
-// keeps the name from ever looking like a number to a sloppy parser. 26*36^7 ≈ 2·10^12 labels: the unique
-// index catches the collision a fleet will never see, and the caller retries.
+// NewLabel returns a letter then seven letters or digits (a letter first never looks like a number). The unique
+// index catches the rare collision and the caller retries.
 func NewLabel() (string, error) {
 	first, err := randomFrom(alpha, 1)
 	if err != nil {
@@ -64,13 +56,10 @@ func NewLabel() (string, error) {
 	return first + rest, nil
 }
 
-// NewChallengeLabel returns the label of a hotel domain's delegated DNS-01 name,
-// <challenge_label>.acme.onegate.work. It is unguessable so that one hotel cannot point its _acme-challenge
-// at another's delegate and ride on its validations.
+// NewChallengeLabel is unguessable so one hotel cannot point its _acme-challenge at another's delegate.
 func NewChallengeLabel() (string, error) { return randomFrom(alphaNum, challengeLabelLen) }
 
-// NewVerifyToken returns the value a hotel publishes at _onegate-verify.<fqdn>: 160 random bits as 32
-// lowercase base32 characters (DNS is case-insensitive in practice for TXT tooling, so no mixed case).
+// NewVerifyToken is 160 random bits as lowercase base32 (no mixed case for TXT tooling).
 func NewVerifyToken() (string, error) {
 	var b [20]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -79,7 +68,6 @@ func NewVerifyToken() (string, error) {
 	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:])), nil
 }
 
-// IsLabel reports whether s has the shape of an appliance hostname label.
 func IsLabel(s string) bool {
 	if len(s) != labelLen || s[0] < 'a' || s[0] > 'z' {
 		return false
@@ -92,11 +80,10 @@ func IsLabel(s string) bool {
 	return true
 }
 
-// HostnameFor is the appliance's OneGate portal hostname.
 func HostnameFor(label, zone string) string { return label + "." + GatewaySubdomain + "." + zone }
 
-// ChallengeNameFor is the TXT name Central writes to answer DNS-01 for hostname: under the OneGate zone the
-// usual _acme-challenge name, for a hotel domain the delegate its _acme-challenge CNAME points at.
+// ChallengeNameFor is the DNS-01 TXT name: the usual _acme-challenge name for OneGate hostnames, the delegate a
+// hotel's _acme-challenge CNAME points at for custom domains.
 func ChallengeNameFor(kind, hostname, challengeLabel, zone string) string {
 	if kind == KindCustom {
 		return challengeLabel + "." + ChallengeSubdomain + "." + zone
@@ -104,10 +91,8 @@ func ChallengeNameFor(kind, hostname, challengeLabel, zone string) string {
 	return "_acme-challenge." + hostname
 }
 
-// ParsePortalIP validates the portal address an appliance reports: a single IPv4 address in RFC 1918 space
-// (contract §2.1). It accepts "10.255.255.1" and "10.255.255.1/32" and returns the bare address. Anything
-// public, loopback, link-local, IPv6 or wider than a /32 is refused -- the A record is published in public
-// DNS, and a public address there would point every guest's portal name at somebody else's machine.
+// ParsePortalIP accepts a single RFC 1918 IPv4 address ("10.255.255.1" or "/32"). Anything else is refused:
+// the A record is published in public DNS, and a public address would point guests at somebody else's machine.
 func ParsePortalIP(s string) (netip.Addr, error) {
 	s = strings.TrimSpace(s)
 	if strings.Contains(s, "/") {
@@ -127,13 +112,11 @@ func ParsePortalIP(s string) (netip.Addr, error) {
 	return a, nil
 }
 
-// NormalizeFQDN lowercases a DNS name and drops one trailing dot.
 func NormalizeFQDN(s string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
 }
 
-// validHostnameSyntax checks LDH syntax: 1-63 character labels of letters, digits and inner hyphens, at
-// most 253 characters, and a TLD that is not all digits (that would be an address, not a name).
+// validHostnameSyntax checks LDH syntax; an all-digit TLD would be an address, not a name.
 func validHostnameSyntax(name string) error {
 	if len(name) < 4 || len(name) > 253 {
 		return errors.New("the name must be between 4 and 253 characters")
@@ -160,10 +143,8 @@ func validHostnameSyntax(name string) error {
 	return nil
 }
 
-// ValidateCustomDomain checks a hotel portal domain (contract §3.1) and returns it normalised. The name must
-// be lowercase LDH syntax, at least three labels, strictly BELOW its registrable domain (wifi.nilehotel.com,
-// never nilehotel.com: an apex cannot carry the CNAME the delegation relies on, and a public suffix is not
-// anybody's to claim), and never under the OneGate zone (those names are Central's to allocate).
+// ValidateCustomDomain requires lowercase LDH, at least three labels, strictly below its registrable domain
+// (an apex cannot carry the delegation CNAME), and never under the OneGate zone (Central allocates those).
 func ValidateCustomDomain(raw, zone string) (string, error) {
 	if strings.ToLower(raw) != raw {
 		return "", errors.New("enter the name in lowercase")
@@ -189,5 +170,4 @@ func ValidateCustomDomain(raw, zone string) (string, error) {
 	return fqdn, nil
 }
 
-// RegistrableDomain is fqdn's eTLD+1 (the Public Suffix List's idea of the domain somebody registered).
 func RegistrableDomain(fqdn string) (string, error) { return publicsuffix.EffectiveTLDPlusOne(fqdn) }

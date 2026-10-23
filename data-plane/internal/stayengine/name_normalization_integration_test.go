@@ -2,22 +2,8 @@
 
 package stayengine
 
-// THE DEFECT THAT LOCKED OUT ONE IN SEVEN GUESTS, pinned end to end on a real PostgreSQL 16.
-//
-// The guest sign-in query matches what the guest TYPED against what the PMS mirror STORED. The read side
-// upper-cased and trimmed; the write side wrote the feed value untouched into the `_norm` columns. A PMS that
-// spells a surname "Okafor" therefore produced a row an upper-cased query could never match, and the guest
-// was told to check their details or contact reception -- the same sentence a typo produces.
-//
-// WHY THE EXISTING SUITE COULD NOT SEE IT. Every fixture in cmd/scd seeds stay_guests with a raw INSERT of an
-// ALREADY-UPPER-CASE literal ('OKONKWO', 'SHARED'). Against data shaped like that the two normalizers agree
-// by luck, so a test can pass while the contract is broken. These tests therefore never insert a `_norm`
-// value directly: everything goes in as a PMS payload through the real Processor, exactly as the connector
-// delivers it, and the assertions are made on what comes back out.
-//
-// HOW EACH TEST FAILS AGAINST THE OLD CODE: with the pre-fix write path, `stored` below is "Okafor" while the
-// guest-side normalizer produces "OKAFOR", so every match assertion fails and every canonical-form assertion
-// fails. That is the regression these exist to hold.
+// Never insert a `_norm` value directly here: everything goes in as a PMS payload through the real
+// Processor, so the stored form is checked against the guest-side normalizer.
 
 import (
 	"context"
@@ -30,12 +16,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/namenorm"
 )
 
-// probeMatches runs the SAME predicate the resolver's probeInterface uses (cmd/scd/phase3_auth.go), with the
-// SAME guest-side normalization, and reports whether the stay would be found.
-//
-// It is deliberately a copy of the production predicate rather than a call into it: cmd/scd is a main package
-// and cannot be imported. The value is that it exercises the REAL STORED ROW -- which is the half that was
-// wrong -- against the REAL normalizer both sides now share.
+// probeMatches copies the predicate of the resolver's probeInterface (cmd/scd/phase3_auth.go; a main
+// package, so not importable) and reports how many stays the typed room and surname would find.
 func probeMatches(t *testing.T, p *pgxpool.Pool, s scope, typedRoom, typedLast string) int {
 	t.Helper()
 	var n int
@@ -69,13 +51,11 @@ func guestRow(t *testing.T, p *pgxpool.Pool, s scope, res string) (first, last, 
 	return
 }
 
-// (1) ingest through the real path, (2) match in any case, (3) whitespace, (9) display name preserved.
 func TestIntegration_MixedCaseGuestIngestsCanonicalAndAuthenticates(t *testing.T) {
 	p := pool(t)
 	s := seed(t, p)
 	pr := NewProcessor(p)
 
-	// Exactly what a PMS sends: mixed case, and padded. Nothing here is pre-normalized by the test.
 	insertLive(t, p, s, "E-GI-MIX", "GI", pay("RES-MIX", " 512 ", "  Okafor ", "Chinua", "F-MIX", "260101", "260105"))
 	process(t, pr, s)
 
@@ -83,30 +63,23 @@ func TestIntegration_MixedCaseGuestIngestsCanonicalAndAuthenticates(t *testing.T
 	if rows != 1 {
 		t.Fatalf("expected exactly one guest row, got %d", rows)
 	}
-	// THE STORED VALUE IS CANONICAL. Pre-fix this was "  Okafor " and the test stops here.
 	if last != "OKAFOR" {
 		t.Fatalf("last_name_norm = %q, want canonical %q", last, "OKAFOR")
 	}
 	if first != "CHINUA" {
 		t.Fatalf("first_name_norm = %q, want canonical %q", first, "CHINUA")
 	}
-	// THE DISPLAY NAME IS NOT TOUCHED, and this assertion is written to prove exactly that rather than to
-	// prescribe a tidier value. display_name is composed from the RAW feed fields, so it keeps the PMS's own
-	// casing -- which is the requirement -- and also keeps any padding the PMS sent. The padding is
-	// pre-existing behaviour, unchanged by this fix and deliberately left alone: trimming a display name is a
-	// product decision about what operators see, not part of correcting an authentication comparison.
+	// display_name keeps the PMS spelling (and padding); trimming it is a product decision, not auth.
 	if display == namenorm.Name(display) && display != "" {
 		t.Fatalf("display_name = %q looks canonicalized; it must preserve the PMS spelling, not be normalized", display)
 	}
 	if !strings.Contains(display, "Okafor") || !strings.Contains(display, "Chinua") {
 		t.Fatalf("display_name = %q lost the PMS spelling of the guest's name", display)
 	}
-	// The room is canonical too, and was trimmed.
 	if _, _, room := stayState(t, p, s, "RES-MIX"); room != "512" {
 		t.Fatalf("normalized_room_number = %q, want %q", room, "512")
 	}
 
-	// A guest may type it however they like, including padded.
 	for _, typed := range []string{"OKAFOR", "okafor", "OkAfOr", "  okafor  ", " Okafor "} {
 		if n := probeMatches(t, p, s, "512", typed); n != 1 {
 			t.Fatalf("surname %q typed at the portal matched %d stays, want 1", typed, n)
@@ -119,7 +92,6 @@ func TestIntegration_MixedCaseGuestIngestsCanonicalAndAuthenticates(t *testing.T
 	}
 }
 
-// (5) wrong credentials still fail, and fail for the right reason.
 func TestIntegration_WrongCredentialsStillDoNotMatch(t *testing.T) {
 	p := pool(t)
 	s := seed(t, p)
@@ -139,17 +111,15 @@ func TestIntegration_WrongCredentialsStillDoNotMatch(t *testing.T) {
 	}
 }
 
-// (6) tenant / site / interface confinement survives the change.
 func TestIntegration_NormalizationDoesNotCrossScopes(t *testing.T) {
 	p := pool(t)
 	a := seed(t, p)
-	b := seed(t, p) // an independent tenant+site+interface
+	b := seed(t, p)
 	pr := NewProcessor(p)
 
 	insertLive(t, p, a, "E-GI-A", "GI", pay("RES-A", "700", "Okafor", "Chinua", "F-A", "260101", "260105"))
 	process(t, pr, a)
 
-	// B's scope must not see A's guest, however the surname is typed.
 	for _, typed := range []string{"OKAFOR", "okafor"} {
 		if n := probeMatches(t, p, b, "700", typed); n != 0 {
 			t.Fatalf("scope B matched %d of scope A's stays for %q -- confinement broken", n, typed)
@@ -160,12 +130,8 @@ func TestIntegration_NormalizationDoesNotCrossScopes(t *testing.T) {
 	}
 }
 
-// (8) the sharer path: mixed-case occupant inserted then updated, and NO duplicate created.
-//
-// This is the case that would have been missed by fixing only the primary-guest write. The sharer lookup
-// finds an existing occupant BY NAME when the PMS sends no guest id, so the lookup had to be normalized in
-// step with the writes -- otherwise the second event stops matching the first event's row and inserts a
-// second occupant instead of updating one.
+// The sharer lookup finds an occupant by name when the PMS sends no guest id, so it must normalize
+// like the writes or a re-sent occupant is inserted twice.
 func TestIntegration_MixedCaseSharerUpdatesInsteadOfDuplicating(t *testing.T) {
 	p := pool(t)
 	s := seed(t, p)
@@ -182,7 +148,7 @@ func TestIntegration_MixedCaseSharerUpdatesInsteadOfDuplicating(t *testing.T) {
 	insertLive(t, p, s, "E-SH-1", "GI", sharer("Adeyemi", "Bola"))
 	process(t, pr, s)
 
-	insertLive(t, p, s, "E-SH-2", "GC", sharer("ADEYEMI", "Bola")) // same person, different casing from the PMS
+	insertLive(t, p, s, "E-SH-2", "GC", sharer("ADEYEMI", "Bola"))
 	process(t, pr, s)
 
 	var occupants int
@@ -204,13 +170,11 @@ func TestIntegration_MixedCaseSharerUpdatesInsteadOfDuplicating(t *testing.T) {
 	if sharerLast != "ADEYEMI" {
 		t.Fatalf("sharer last_name_norm = %q, want canonical %q", sharerLast, "ADEYEMI")
 	}
-	// And the sharer can authenticate.
 	if n := probeMatches(t, p, s, "801", "adeyemi"); n != 1 {
 		t.Fatalf("sharer matched %d stays, want 1", n)
 	}
 }
 
-// (10) room creation and room MOVE share one contract.
 func TestIntegration_RoomMoveUsesTheSameRoomContract(t *testing.T) {
 	p := pool(t)
 	s := seed(t, p)
@@ -225,12 +189,7 @@ func TestIntegration_RoomMoveUsesTheSameRoomContract(t *testing.T) {
 		t.Fatalf("alphanumeric room typed lower-case matched %d, want 1", n)
 	}
 
-	// A room move must land in the same canonical form, not reintroduce a raw value.
-	//
-	// A move is a GC carrying a different room -- there is no "RM" event type; the engine DERIVES OpRoomMove
-	// from an IN_HOUSE stay whose room changed (internal/stayengine/resolve.go). Sending a type the engine
-	// does not know produced no move at all, which is why the first version of this test saw the original
-	// room and reported a defect that was in the test.
+	// A move is a GC with a different room; the engine derives OpRoomMove (resolve.go), there is no "RM" type.
 	insertLive(t, p, s, "E-RM-2", "GC", pay("RES-RM", " b7 ", "Okafor", "Chinua", "F-RM", "260101", "260105"))
 	process(t, pr, s)
 	if _, _, room := stayState(t, p, s, "RES-RM"); room != "B7" {
@@ -244,12 +203,7 @@ func TestIntegration_RoomMoveUsesTheSameRoomContract(t *testing.T) {
 	}
 }
 
-// (4) authentication resolves from the PUBLISHED LOCAL MIRROR while the PMS transport is DISCONNECTED.
-//
-// This is the operating mode the Product Owner runs deliberately: the PMS endpoint is shared with another
-// system and is taken offline on purpose. Guests whose stays are already in the mirror must keep signing in.
-// The probe reads only mirror tables, so the point of this test is to hold that property against a future
-// change that quietly makes authentication depend on transport state.
+// Sign-in must keep resolving from the published mirror while the PMS transport is deliberately offline.
 func TestIntegration_AuthenticatesFromMirrorWhilePMSTransportOffline(t *testing.T) {
 	p := pool(t)
 	s := seed(t, p)
@@ -259,7 +213,6 @@ func TestIntegration_AuthenticatesFromMirrorWhilePMSTransportOffline(t *testing.
 	insertLive(t, p, s, "E-OFF", "GI", pay("RES-OFF", "902", "Okafor", "Chinua", "F-OFF", "260101", "260105"))
 	process(t, pr, s)
 
-	// Take the transport down exactly as the runtime records a real outage, and age the mirror.
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime
 		SET transport_status='DISCONNECTED', transport_error_code='DIAL_FAILED',
 		    disconnected_since=now(), last_connected_at=now() - interval '6 hours',

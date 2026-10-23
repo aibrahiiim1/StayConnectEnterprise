@@ -45,9 +45,7 @@ func TestIntersectColumns(t *testing.T) {
 	}
 }
 
-// TestFKOrder proves the migration list is FK-safe: every declared FK target
-// appears strictly BEFORE the table that references it, so parents always
-// exist in dest by the time children are inserted.
+// Every declared FK target must appear BEFORE the table that references it.
 func TestFKOrder(t *testing.T) {
 	pos := map[string]int{}
 	for i, s := range migrationTables {
@@ -71,13 +69,9 @@ func TestFKOrder(t *testing.T) {
 	}
 }
 
-// TestMigrationTableSet pins the exact table set so an accidental edit is
-// caught, and checks per-spec invariants.
 func TestMigrationTableSet(t *testing.T) {
-	// The superseded guest-IAM tables -- ticket_templates, voucher_batches, vouchers, guests, sessions and
-	// payments -- are NOT here, because they no longer exist. Site migration moves what the product has, and
-	// asserting the exact set is what makes an accidental re-addition visible: a table reappearing in this
-	// list would mean the superseded domain had come back somewhere.
+	// The superseded guest-IAM tables (ticket_templates, voucher_batches, vouchers, guests, sessions, payments) no longer exist; asserting the exact set
+	// makes their re-addition visible.
 	want := []string{
 		"tenants", "sites", "appliances", "operators", "operator_roles",
 		"accounting_records", "auth_otps", "social_oauth_states", "pms_providers",
@@ -165,8 +159,7 @@ func TestBatchSizeFor(t *testing.T) {
 	}
 }
 
-// TestNothingDestructive asserts the never-TRUNCATE/never-DELETE invariant
-// over every piece of SQL the tool can generate from its table specs.
+// Never TRUNCATE or DELETE, over every SQL statement the specs can generate.
 func TestNothingDestructive(t *testing.T) {
 	for _, s := range migrationTables {
 		for n := 1; n <= 2; n++ {

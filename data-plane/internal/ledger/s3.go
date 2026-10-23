@@ -15,12 +15,9 @@ import (
 	"time"
 )
 
-// S3Dest keeps the ledger in an S3-compatible bucket owned by the hotel: Amazon S3, Backblaze B2, Wasabi, MinIO, a NAS that
-// speaks S3. Requests are signed with AWS Signature Version 4; nothing else of the vendor's SDK is needed for three calls.
-//
-// The bucket should have versioning (or object lock) on so that a deleted or overwritten ledger can be recovered; the ledger
-// does not depend on it, because every restore verifies the chain, but it is the customer's cheapest protection against their
-// own mistakes. Credentials need only read, write and list on the one prefix.
+// S3Dest keeps the ledger in an S3-compatible bucket owned by the hotel, signing requests with AWS Signature Version 4.
+// The bucket should have versioning or object lock on so a deleted or overwritten ledger can be recovered; credentials
+// need only read, write and list on the one prefix.
 type S3Dest struct {
 	Endpoint  string // "https://host[:port]"; empty means Amazon S3 for Region
 	Region    string
@@ -31,8 +28,7 @@ type S3Dest struct {
 	Client    *http.Client
 	// AllowLocal permits an endpoint on this appliance, and plain http (tests only).
 	AllowLocal bool
-	// Now is the clock, replaceable in tests.
-	Now func() time.Time
+	Now        func() time.Time
 }
 
 func (d *S3Dest) Kind() string { return "s3" }
@@ -152,7 +148,6 @@ func (d *S3Dest) signed(ctx context.Context, method, name string, body []byte) (
 	return d.client().Do(req)
 }
 
-// signingKey is the AWS Signature Version 4 key derivation.
 func signingKey(secret, day, region, service string) []byte {
 	k := hmacSHA256([]byte("AWS4"+secret), day)
 	k = hmacSHA256(k, region)
@@ -220,7 +215,6 @@ func (d *S3Dest) Get(ctx context.Context, name string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxObject))
 }
 
-// Remove deletes an object (used to clean the probe up).
 func (d *S3Dest) Remove(ctx context.Context, name string) error {
 	resp, err := d.request(ctx, http.MethodDelete, name, nil)
 	if err != nil {

@@ -1,16 +1,7 @@
 package main
 
-// Phase 2 (DARK) guest-portal commerce bridge. These routes are mounted only when the Phase-2 portal
-// surface is ON; while dark they are absent and no scd commerce call is ever made.
-//
-// TRUST BOUNDARY (WS-D/item 3): the guest browser may submit ONLY opaque ids — a package_id to quote and
-// a quote_id to confirm. Tenant, Site, Auth Context, IAM-v2 Device and Guest Network are NEVER read from
-// the browser. Portald derives Auth Context / Device / Guest Network from its own trusted server-side
-// commerce session (issued by the IAM-v2 auth flow, keyed by an opaque httpOnly cookie the browser cannot
-// forge) and forwards them to scd over the existing protected Unix socket; scd fills Tenant/Site from its
-// appliance config. Because IAM-v2 authentication is still DARK, no commerce session exists in production,
-// so every bridge call fail-closes to a single generic "unavailable" — it never fabricates an Auth Context
-// and never falls back to a browser-supplied id.
+// Phase 2 (dark) guest-portal commerce bridge, mounted only when the portal surface is on.
+// Trust boundary: the browser submits only opaque ids (package_id, quote_id); Auth Context, Device and Guest Network come from portald's server-side commerce session and Tenant/Site from scd, so with no session every call fails closed to a generic "unavailable".
 
 import (
 	"bytes"
@@ -25,37 +16,28 @@ import (
 
 const commerceCookie = "sc_commerce"
 
-// commerceSession holds the server-derived pins for a guest whose IAM-v2 auth produced an Auth Context.
 type commerceSession struct {
 	authContextID  string
 	deviceID       string
 	guestNetworkID string
 	expiry         time.Time
-	// returnCode is shown once on the package page to a client who chose open selection and got a new
-	// anonymous subject; it is cleared after it has been rendered.
+	// returnCode is shown once to a client who chose open selection, then cleared.
 	returnCode string
-	// identityLabel is the masked factor the Client proved (a•••@example.com), shown on the package page so a
-	// Client on a shared device can tell whose allowance they are about to use. Never the full value.
+	// identityLabel is the masked factor shown so a client on a shared device can tell whose allowance is used; never the full value.
 	identityLabel string
-	// acquired is set once this session has put the device online. The landing page continues an UNFINISHED
-	// journey at package selection (main.go index); a finished one is left to the success page and its panel.
+	// acquired is set once the device is online; an unfinished journey continues at package selection, a finished one goes to the success page.
 	acquired bool
-	// notice is a refusal waiting to be shown once on the package page, for a choice the page's script
-	// submitted (backToPackages): the script is told where to go, so the reason travels here, never in a URL.
+	// notice is a refusal shown once on the package page; the reason travels here, never in a URL.
 	notice string
-	// purchaseID is the card purchase this session started: the landing page sends a client who comes back to
-	// "/" to the page that asks where it stands, rather than offering the package list again (P-25).
+	// purchaseID: a client returning to "/" is sent to the page asking where the card purchase stands, not the package list.
 	purchaseID string
-	// held is set when activation was refused because the email account must verify its address first: the
-	// landing page then does not send the client round to the package list again (P-13).
+	// held: activation was refused until the email account verifies, so landing does not loop back to packages.
 	held bool
-	// replacedEntitlement is the package a device replacement already moved a place to for this device: a retry
-	// activates on it rather than replacing another device (device_pages.go, audit P-10).
+	// replacedEntitlement: a retry activates on the package a replacement already moved a place to, rather than replacing another device.
 	replacedEntitlement string
 }
 
-// commerceSessionStore maps an opaque cookie token to a trusted commerceSession. The browser only ever
-// holds the token; it can never set the pins directly.
+// commerceSessionStore maps an opaque cookie token to a trusted session; the browser never sets the pins.
 type commerceSessionStore struct {
 	mu  sync.Mutex
 	now func() time.Time
@@ -88,8 +70,7 @@ func (s *commerceSessionStore) get(token string) (commerceSession, bool) {
 	return sess, true
 }
 
-// resolveCommerceSession returns the trusted pins for this request, or ok=false when there is no valid
-// IAM-v2 commerce session (the dark default). It reads ONLY the opaque server-issued cookie.
+// resolveCommerceSession reads only the opaque server-issued cookie; ok=false when there is no session (the dark default).
 func (h *handler) resolveCommerceSession(r *http.Request) (commerceSession, bool) {
 	if h.commerceSessions == nil {
 		return commerceSession{}, false
@@ -101,8 +82,6 @@ func (h *handler) resolveCommerceSession(r *http.Request) (commerceSession, bool
 	return h.commerceSessions.get(c.Value)
 }
 
-// updateCommerceSession applies fn to this request's commerce session (by its cookie) and stores the result. It
-// does nothing when there is no valid session.
 func (h *handler) updateCommerceSession(r *http.Request, fn func(*commerceSession)) {
 	if h.commerceSessions == nil {
 		return
@@ -119,14 +98,12 @@ func (h *handler) updateCommerceSession(r *http.Request, fn func(*commerceSessio
 	h.commerceSessions.put(c.Value, sess)
 }
 
-// commerceUnavailable is the single generic guest-facing response for every non-happy path.
 func commerceUnavailable(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	_, _ = w.Write([]byte(`{"error":"unavailable"}`))
 }
 
-// scdDo issues a request to scd over the trusted Unix socket and returns the response.
 func (h *handler) scdDo(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -142,7 +119,6 @@ func (h *handler) scdDo(ctx context.Context, method, path string, body []byte) (
 	return h.scd.Do(req)
 }
 
-// relay copies scd's (already guest-safe, generic) status + JSON body to the guest.
 func relay(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -151,7 +127,6 @@ func relay(w http.ResponseWriter, resp *http.Response) {
 	_, _ = w.Write(payload)
 }
 
-// GET /api/commerce/packages — list the guest's eligible free packages.
 func (h *handler) commercePackages(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.resolveCommerceSession(r)
 	if !ok {
@@ -170,7 +145,7 @@ func (h *handler) commercePackages(w http.ResponseWriter, r *http.Request) {
 	relay(w, resp)
 }
 
-// browser-submittable fields ONLY. Any other JSON keys are ignored by construction.
+// Browser-submittable fields only; other JSON keys are ignored by construction.
 type portalQuoteReq struct {
 	PackageID string `json:"package_id"`
 }
@@ -178,7 +153,6 @@ type portalConfirmReq struct {
 	QuoteID string `json:"quote_id"`
 }
 
-// POST /api/commerce/quote — create a quote for the selected package.
 func (h *handler) commerceQuote(w http.ResponseWriter, r *http.Request) {
 	var in portalQuoteReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
@@ -205,7 +179,6 @@ func (h *handler) commerceQuote(w http.ResponseWriter, r *http.Request) {
 	relay(w, resp)
 }
 
-// POST /api/commerce/confirm — confirm a free purchase for a prior quote.
 func (h *handler) commerceConfirm(w http.ResponseWriter, r *http.Request) {
 	var in portalConfirmReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
@@ -241,9 +214,7 @@ func (h *handler) commerceConfirm(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(raw)
 		return
 	}
-	// A GRANT IS NOT A CONNECTION. The panel says "Package active" when this answers with an entitlement, so
-	// the entitlement is only returned once the device is actually online -- activated and enforced -- exactly
-	// as /packages/acquire requires before its success page.
+	// A grant is not a connection: the entitlement is returned only once the device is activated and enforced, as /packages/acquire requires.
 	sid, failure := h.activateEnforced(r, sess, granted.EntitlementID)
 	if failure != "" {
 		w.Header().Set("Content-Type", "application/json")

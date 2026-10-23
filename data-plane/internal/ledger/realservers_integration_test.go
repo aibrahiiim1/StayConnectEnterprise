@@ -13,9 +13,8 @@ import (
 	"filippo.io/age"
 )
 
-// THE DESTINATIONS AGAINST REAL SERVERS (scripts/ledger-destinations-compat.sh starts them): an S3 implementation that verifies
-// AWS Signature Version 4 itself (Scality CloudServer), and OpenSSH's own SFTP subsystem (atmoz/sftp). The unit tests prove the
-// protocol against fakes written in this repository; these prove it against software somebody else wrote.
+// The destinations against real servers (scripts/ledger-destinations-compat.sh starts them): Scality CloudServer for
+// S3 SigV4 and OpenSSH's SFTP subsystem.
 
 func TestRealS3_SignedRequestsAndAFullLedgerCommit(t *testing.T) {
 	ep := os.Getenv("LEDGER_S3_ENDPOINT")
@@ -50,7 +49,6 @@ func TestRealS3_SignedRequestsAndAFullLedgerCommit(t *testing.T) {
 		t.Fatalf("a missing bucket must be an error, not an empty ledger: %v", err)
 	}
 
-	// a whole encrypted ledger through the store, read back by a key holder
 	id, _ := age.GenerateX25519Identity()
 	st := NewStore(Config{LocalPath: t.TempDir() + "/l.jsonl", Dest: d, Cipher: func(context.Context) (*Cipher, error) {
 		return &Cipher{Recipients: []age.Recipient{id.Recipient()}, Fingerprint: "k1"}, nil
@@ -108,7 +106,6 @@ func TestRealSFTP_PinnedHostKeyAndAFullLedgerCommit(t *testing.T) {
 	if c.Reach != nil || !c.Intact() || len(c.Parse.Entries) != 4 {
 		t.Fatalf("read back = %+v", c)
 	}
-	// replacing is atomic and leaves no partial file
 	b, err := d.Get(ctx, ExternalHead)
 	if err != nil || len(b) == 0 {
 		t.Fatalf("head: %v", err)

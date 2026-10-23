@@ -8,12 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// WHAT STILL POINTS AT A PACKAGE OR A PLAN, AND THE DELETION ITSELF, are answered by the database
-// (migration 0091): iam_v2.internet_package_deletion_blockers / service_plan_deletion_blockers count every
-// reference -- vouchers, batches, portal offers and settlement mappings included, which svc_edged cannot read --
-// and iam_v2.internet_package_delete_unused / service_plan_delete_unused refuse on the very same list under a
-// row lock. svc_edged holds EXECUTE on those four and DELETE on none of the catalogue tables, so there is no
-// second, weaker path to keep in step.
+// Blockers and deletion are answered by the database functions: they count references svc_edged cannot read,
+// and the delete refuses on the same list under a row lock. svc_edged has EXECUTE on them and no DELETE.
 
 const packageBlockersSQL = `SELECT reason, n FROM iam_v2.internet_package_deletion_blockers($1::uuid, $2::uuid, $3::uuid)`
 const planBlockersSQL = `SELECT reason, n FROM iam_v2.service_plan_deletion_blockers($1::uuid, $2::uuid, $3::uuid)`
@@ -55,8 +51,8 @@ func (r *PgCommerceAdminRepository) DeleteUnusedPlan(ctx context.Context, tenant
 	return mapCatalogueErr(err)
 }
 
-// mapCatalogueErr turns the functions' documented refusals into typed errors and leaves everything else as-is.
-// A foreign-key violation is the schema's own backstop catching a reference no blocker counted: still "in use".
+// mapCatalogueErr types the functions' documented refusals. A foreign-key violation is the schema's backstop
+// for a reference no blocker counted: still "in use".
 func mapCatalogueErr(err error) error {
 	if err == nil {
 		return nil
@@ -66,7 +62,7 @@ func mapCatalogueErr(err error) error {
 		return err
 	}
 	switch {
-	case pe.Code == "42883": // undefined_function: the database predates 0091
+	case pe.Code == "42883": // undefined_function: database predates the deletion functions
 		return ErrCatalogueDeleteUnavailable
 	case pe.Code == "23001", pe.Code == "23503": // restrict_violation (…_IN_USE), foreign_key_violation
 		return ErrCatalogueInUse

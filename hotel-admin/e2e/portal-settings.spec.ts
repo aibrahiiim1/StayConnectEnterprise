@@ -2,22 +2,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 import { portalHTML, shippedWording } from "./portal-page";
 import { installCapabilities } from "./capabilities";
 
-// PORTAL SETTINGS, IN A BROWSER.
-//
-// The component tests assert the behaviour; these assert the things only a real browser can answer — that the
-// designer's sections lay out, that an image the operator picks reaches the field and appears, that the preview
-// and the template gallery really render the guest portal rather than a drawing of it, and that choosing a
-// template visibly changes the layout. The preview exists for that last reason, and no jsdom test can see it:
-// it is an iframe running the portal's own script.
-//
-// edged is mocked at the network layer. No appliance, no database, no guest data.
-
-/** An 8×8 teal PNG, byte for byte, and a VALID one.
- *
- *  The first version of this fixture had the right magic bytes and a corrupt IDAT. Everything passed except
- *  the preview, where the browser could not decode it and the portal's own onerror hid the logo — which is
- *  the correct behaviour for a broken image and made the test look like a product defect for twenty minutes.
- *  A fixture that only has to fool a sniffer proves nothing about a page that has to DRAW it. */
+/** Use a decodable PNG; valid magic bytes alone cannot prove the browser renders it. */
 const PNG = Buffer.from(
   "89504e470d0a1a0a0000000d4948445200000008000000080806000000c40fbe" +
   "8b000000124944415478da63e0cd4efe8f0f338c0c0500c4cc768141e7381700" +
@@ -49,7 +34,6 @@ async function installBackend(page: Page) {
       return route.fulfill(json(200, { design, draft: {}, revisions: [], published: true }));
     if (path === "/portal-branding/draft") return route.fulfill(json(200, { saved: true }));
     if (path === "/portal-branding/validate") {
-      // The server's verdict, as internal/portaldesign would give it for the one hostile fragment used below.
       const d = (req.postDataJSON() as { design: Record<string, string> }).design ?? {};
       const bad = d.custom_html === HOSTILE_HTML;
       return route.fulfill(json(200, {
@@ -64,8 +48,6 @@ async function installBackend(page: Page) {
       return route.fulfill(json(200, { saved: true }));
     }
     if (path === "/portal-branding/preview") return route.fulfill(json(200, { html: PORTAL_HTML }));
-    // The preview shows the site's OWN sign-in methods (edged's /auth-methods), each optional one only while its
-    // module is licensed. This site offers Room sign-in, vouchers and personal accounts.
     if (path === "/auth-methods")
       return route.fulfill(json(200, {
         pms: { enabled: true, mode: "ROOM_AND_LAST_NAME" }, phase3_pms: true,
@@ -96,8 +78,6 @@ test("the designer is sections and a live preview, with no release vocabulary", 
   for (const s of ["Template", "Brand", "Content", "Sign-in page text", "Languages", "Advanced HTML & CSS", "History"]) {
     await expect(page.getByRole("tab", { name: new RegExp(s) })).toBeVisible();
   }
-  // The words a hotel does not have. Asserted on the rendered page rather than the source, because what
-  // matters is what an operator reads.
   const text = (await page.locator("main").innerText()).toLowerCase();
   for (const word of ["draft", "publish", "rollback", "live version"]) {
     expect(text, `the page still says "${word}"`).not.toContain(word);
@@ -110,15 +90,11 @@ test("the preview renders the real guest portal, at every size", async ({ page }
   await page.goto("/portal-branding");
 
   const frame = preview(page);
-  // The portal's OWN markup, inside the frame: its card, its brand slot, its sign-in tabs.
   await expect(frame.locator(".card")).toBeVisible();
   await expect(frame.locator("#brand-name")).toHaveText("Semantics Demo Hotel");
-  // And its script ran: the tabs are generated from the auth-methods answer, not present in the template.
-  // (The ways in are chips under "Or sign in with" since the one-journey landing, contract §6.2.)
   await expect(frame.locator('#alt-methods button[data-tab="pms"]')).toBeVisible();
   await expect(frame.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])')).toBeVisible();
 
-  // A change in the form reaches the preview without a save.
   await page.getByRole("tab", { name: /Content/ }).click();
   await page.getByLabel("Site name", { exact: true }).fill("Blue Bay Resort");
   await expect(frame.locator("#brand-name")).toHaveText("Blue Bay Resort");
@@ -135,18 +111,15 @@ test("the template gallery shows the real page in each layout, and choosing one 
 
   const gallery = page.getByRole("radiogroup", { name: "Page template" });
   await expect(gallery.getByRole("radio")).toHaveCount(6);
-  // Each thumbnail is the portal itself, rendered with this hotel's name in that layout.
   const thumb = page.frameLocator('iframe[title="Template thumbnail: Split"]');
   await expect(thumb.locator("html")).toHaveAttribute("data-template", "split");
   await expect(thumb.locator(".sc-hero-name")).toHaveText("Semantics Demo Hotel");
 
   await gallery.getByText("Editorial", { exact: true }).click();
   await expect(preview(page).locator("html")).toHaveAttribute("data-template", "editorial");
-  // The Editorial layout has a banner height; the other options follow the layout too.
   await page.getByRole("radiogroup", { name: "Banner height" }).getByRole("radio", { name: "Tall" }).click();
   await expect(preview(page).locator("html")).toHaveAttribute("data-hero", "tall");
 
-  // A layout is not markup: it saves with no password.
   await page.getByRole("button", { name: /Save changes/ }).click();
   await saved(page);
   expect(lastSave?.design.template_id).toBe("editorial");
@@ -161,7 +134,6 @@ test("custom HTML: the server's findings are shown, the preview shows the cleane
   await page.getByLabel("Custom HTML").fill(HOSTILE_HTML);
   await expect(page.getByText(/removed the onerror attribute on <img>/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Save changes/ })).toBeDisabled();
-  // The preview renders what a guest would receive: the paragraph, without the handler.
   await expect(preview(page).locator("#custom-html .amenity")).toHaveText("Pool 08:00–20:00");
   await expect(preview(page).locator("#custom-html img")).not.toHaveAttribute("onerror", /.*/);
 
@@ -183,18 +155,15 @@ test("a logo is uploaded, previewed, saved and kept", async ({ page }) => {
 
   await page.getByLabel("Upload logo").setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG });
 
-  // It is shown back through the operator API, not through the guest-network path that resolves to nothing
-  // from this origin.
+  // Read uploaded images through the operator API; the guest-network path is unavailable here.
   const shown = page.getByAltText("Logo currently set");
   await expect(shown).toBeVisible();
   await expect(shown).toHaveAttribute("src", /\/api\/edge\/v1\/portal-assets\/.*\/raw$/);
 
-  // And it reaches the guest portal preview, as an image that actually loaded.
   await expect(preview(page).locator("#brand-logo")).toBeVisible();
 
   await page.getByRole("button", { name: /Save changes/ }).click();
   await saved(page);
-  // Reloading shows what was saved, with no step in between.
   await page.reload();
   await page.getByRole("tab", { name: /Brand/ }).click();
   await expect(page.getByAltText("Logo currently set")).toBeVisible();
@@ -221,17 +190,12 @@ test("languages are chosen for guests, and their wording edited one at a time", 
 
   await expect(page.getByLabel("Offer العربية to clients")).toBeVisible();
   await expect(page.getByLabel("Offer English to clients")).toBeDisabled();
-  // Turning one off removes it from what a guest is offered, which the preview's own selector shows.
   await page.getByLabel("Offer Русский to clients").uncheck();
 
   await page.getByRole("tab", { name: /Sign-in page text/ }).click();
   await page.getByRole("tab", { name: /Italiano/ }).click();
-  // Fifty-one strings are grouped by where they appear on the page; a shipped language opens on the first
-  // group. The group's <summary>, not the field labelled "Guest Login" that lives inside Navigation -- the
-  // string and the group share a name, which is correct for an operator and ambiguous for a text locator.
+  // Select the group summary rather than an inner field with the same label.
   await page.locator("summary").filter({ hasText: "Client Login" }).click();
-  // AND THE FIELD HOLDS THE REAL ITALIAN, which is the whole point: an empty box with English behind it is
-  // what made selecting a language look like it had done nothing.
   const shipped = shippedWording().strings.it["pms.room"];
   await expect(page.getByRole("textbox", { name: "Room Number in Italiano" })).toHaveValue(shipped);
   await expect(page.getByRole("textbox", { name: "Room Number in Deutsch" })).toHaveCount(0);

@@ -2,11 +2,7 @@
 
 package main
 
-// A ROOM GUEST AT THE STAY'S DEVICE LIMIT REPLACES A DEVICE (portal audit H-6, contract
-// ONEGATE_DEVICE_MANAGEMENT §3): the same rules as every other client. The refused grant names the device scd
-// placed (for portald's replacement page), the client_device_action REPLACE moves the stay's place to the new
-// device on the strength of its verified room sign-in, and activation then admits that device to the stay's
-// entitlement through the same sign-in.
+// A room guest at the stay's device limit can replace a device (contract ONEGATE_DEVICE_MANAGEMENT §3).
 
 import (
 	"bytes"
@@ -27,12 +23,11 @@ func TestIntegration_Phase3_ARoomGuestAtTheLimitReplacesADevice(t *testing.T) {
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
-	// ONE device for this stay's package.
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`) // seeding only: revisions are immutable
+	_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`) // revisions are immutable
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.service_plan_revisions SET max_concurrent_devices = 1 WHERE tenant_id=$1 AND site_id=$2`,
 		f.tenant, f.site); err != nil {
 		t.Fatal(err)

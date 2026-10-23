@@ -1,10 +1,7 @@
 "use client";
 
-// TWO-STEP SIGN-IN — the operator's own authenticator (Central migration 0052, GDPR plan C10). The app is set up at
-// sign-in, so this page shows the state and makes a new set of recovery codes: after the password step-up AND with
-// a current code from the authenticator app (Product-Owner decision D-R3) -- a recovery code is not accepted for it.
-// Losing the phone is solved by a recovery code or by an administrator's reset, never from here: a stolen session
-// plus a password must not be able to remove the second step.
+// Rotating recovery codes requires password step-up and a current authenticator code, never a recovery code.
+// A stolen session and password must not remove the second factor.
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, withStepUp } from "@/lib/api";
@@ -45,7 +42,7 @@ export default function TwoStepSigninPage() {
       setCode("");
       await load();
     } catch (e) {
-      // A wrong, used or malformed code belongs to the field; anything else (a lockout, Central unavailable) to the banner.
+      // Code errors belong to the field; service failures belong to the banner.
       if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
         setCode("");
         f.fail({ code: e.message });

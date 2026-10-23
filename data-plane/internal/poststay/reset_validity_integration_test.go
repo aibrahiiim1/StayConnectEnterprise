@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// AUDIT H-17. A reset rotates the PIN and leaves the validity window alone unless the operator asks for it to
-// be restarted. It used to move valid_until to now+24h on every reset while the console said only the PIN
-// changes.
+// A reset rotates the PIN and leaves the validity window alone unless the operator asks to restart it.
 func TestIntegration_ResetKeepsValidityUnlessAsked(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

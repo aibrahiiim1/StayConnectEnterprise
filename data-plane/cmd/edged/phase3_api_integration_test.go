@@ -23,11 +23,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
-// Real HTTP + real PostgreSQL 16 contract tests for the Phase-3 Hotel-Admin mutations. These exist because a
-// mocked browser test cannot catch an API that disagrees with its own schema: the handler is exercised through
-// the actual chi router, with the actual session/RBAC middleware, against a disposable database that enforces
-// every constraint and controlled operation. Nothing here touches an appliance, a production database or a PMS.
-
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("PHASE3_TEST_DSN")
@@ -46,10 +41,9 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// controlled runs fn in ONE transaction that first opens each named controlled-writer family. On the full
-// appliance schema the superuser is not the owner of the iam_v2 guards, so a fixture that seeds a guarded
-// table must open the same controlled operation the product's own writer opens. Seeding only: the code
-// under test opens its own operations.
+// controlled runs fn in one transaction that first opens each named controlled-writer family; the superuser does
+// not own the iam_v2 guards, so seeding a guarded table must open the same operation the product's writer opens.
+// Seeding only: the code under test opens its own operations.
 func controlled(ctx context.Context, p *pgxpool.Pool, families []string, fn func(tx pgx.Tx) error) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -67,9 +61,8 @@ func controlled(ctx context.Context, p *pgxpool.Pool, families []string, fn func
 	return tx.Commit(ctx)
 }
 
-// asOwner runs fn in ONE transaction under SET LOCAL ROLE iam_v2_owner. It reproduces exactly what the old
-// scratch fixture did implicitly (the test user WAS the owner of every guard) and is used ONLY to SEED a row
-// in an owner-guarded table that has no product operation a test can call — never on a code path under test.
+// asOwner runs fn under SET LOCAL ROLE iam_v2_owner, only to seed a row in an owner-guarded table that has no
+// product operation a test can call; never on a code path under test.
 func asOwner(ctx context.Context, p *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -85,9 +78,8 @@ func asOwner(ctx context.Context, p *pgxpool.Pool, fn func(tx pgx.Tx) error) err
 	return tx.Commit(ctx)
 }
 
-// seedGuestNetwork inserts a production-shaped public.guest_networks row. bridge_name is globally unique and
-// parent_interface is unique among enabled untagged networks, and several packages share ONE database, so
-// both are derived from the row's own uuid. Returns the id and the derived bridge name.
+// seedGuestNetwork derives bridge_name (globally unique) and parent_interface (unique among enabled untagged
+// networks) from the row's uuid, since several packages share one database. Returns the id and bridge name.
 func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet string) (string, string) {
 	t.Helper()
 	var id, bridge string
@@ -104,10 +96,8 @@ func seedGuestNetwork(t *testing.T, p *pgxpool.Pool, tenant, site, name, subnet 
 
 type apiFixture struct {
 	srv *httptest.Server
-	// app is the very server the routes are mounted on. Exposed so a test can drive an internal step directly
-	// -- materialising a staged client-network replacement, which the apply performs between the operator's
-	// request and netd -- and so it can supply a collaborator main.go would wire at startup, such as the scd
-	// unix-socket client the disconnect action must reach enforcement through.
+	// app is the server the routes are mounted on, so a test can drive an internal step directly or supply a
+	// collaborator main.go would wire (such as the scd client).
 	app      *server
 	pool     *pgxpool.Pool
 	tenant   string
@@ -115,20 +105,15 @@ type apiFixture struct {
 	operator string
 	password string
 	sessTok  string
-	// mfa stands in for scd's authenticator service (operator_mfa_fake_test.go).
-	mfa *fakeMFA
-	// ledger is the erasure ledger the fixture's erasures are committed to (ledger_fixture_integration_test.go).
-	ledger  *ledger.Store
-	ledgerC *storeLedger
+	mfa      *fakeMFA
+	ledger   *ledger.Store
+	ledgerC  *storeLedger
 }
 
-// newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
-// site/tenant seeded for this test.
 func newAPI(t *testing.T, roles ...string) *apiFixture { return newAPIIn(t, "", roles...) }
 
-// newAPIIn builds a fixture for a NEW site. When tenant is non-empty the site is created under that
-// EXISTING tenant, which is how a multi-property customer is actually arranged — and the arrangement
-// a tenant-only scope check silently fails to cover.
+// newAPIIn builds a fixture for a new site; a non-empty tenant creates it under that existing tenant (the
+// multi-property arrangement a tenant-only scope check would miss).
 func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	t.Helper()
 	p := testPool(t)
@@ -148,9 +133,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 		tenant).Scan(&f.tenant, &f.site); err != nil {
 		t.Fatalf("seed second site under the same tenant: %v", err)
 	}
-	// The disposable fixture builds the iam_v2 schema only. The appliance's own operator identity tables come
-	// from migration 0001; they are provisioned here (same shape) because the controlled operations validate a
-	// REAL actor against them — which is exactly the contract these tests exist to prove.
+	// The disposable fixture builds only iam_v2; the appliance's operator identity tables are provisioned here
+	// because the controlled operations validate a real actor against them.
 	if _, err := p.Exec(ctx, `CREATE TABLE IF NOT EXISTS public.operators (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			tenant_id uuid,
@@ -163,8 +147,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			auth_method text NOT NULL DEFAULT 'local')`); err != nil {
 		t.Fatalf("provision operators: %v", err)
 	}
-	// the appliance's local audit log (0001) — the handlers append to it, and a test that silently loses those
-	// writes would hide a broken audit path.
+	// The handlers append to the local audit log; losing those writes silently would hide a broken audit path.
 	if _, err := p.Exec(ctx, `CREATE TABLE IF NOT EXISTS public.audit_log (
 			id bigserial PRIMARY KEY,
 			tenant_id uuid, actor_type text, actor_id text, action text NOT NULL,
@@ -204,12 +187,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	f.ledger = sharedLedger(t, p)
 	f.ledgerC = &storeLedger{st: f.ledger}
 	s.ledgerC = f.ledgerC
-	// The commerce repository, wired exactly as main.go wires it. Publishing a checkout-grace policy derives
-	// the service plan and package revisions that express it, so this is not optional plumbing: without it the
-	// route these tests exercise would answer 503 and every assertion below would be about a fixture gap
-	// rather than about the product.
+	// Publishing a checkout-grace policy derives plan and package revisions, so without this repository the route answers 503.
 	s.commerceRepo = iamv2.NewPgCommerceAdminRepository(p)
-	// the Phase-3 admin surface is mounted explicitly below; this fixture exercises the routes themselves.
 	f.app = s
 	f.sessTok = s.sessions.create(&session{OperatorID: f.operator, Email: "op@test.local", Roles: roles})
 
@@ -217,7 +196,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
-			// As main.go: a no-op until a test gives the server a read recorder (guest_data_reads_integration_test.go).
+			// A no-op until a test gives the server a read recorder.
 			r.Use(s.recordGuestDataReads)
 			mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 			mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
@@ -228,42 +207,22 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
-			// Review decisions and roster reconciliation (audit remediation H-5, H-13, H-15).
 			mountResource(r, s, "pms-event-decisions", s.pmsEventDecisionsRoutes)
 			mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
 			mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
-			// Guest sign-in attempts, both halves. Mounted here so the list, the detail and the credential
-			// proxy are all exercised through the real router, the real role matrix and a real database.
 			mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
 			mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
-			// Guest sign-in protection: the policy and the restrictions it creates, mounted for the same
-			// reason — the permission split, the site confinement and the audit are properties of the real
-			// router and a real database together.
 			mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
 			mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
-			// The operational snapshot the dashboard reads. Mounted here so its authorization and its
-			// site confinement are exercised through the REAL middleware chain and the real role matrix --
-			// see dashboard_api_integration_test.go for why a mocked assertion would not be worth having.
 			mountResource(r, s, "reports", s.reportsRoutes)
-			// Phase 4 (DARK): the Manual Review surface. Mounted here so the API contract tests exercise the
-			// real router and the real RBAC/step-up middleware, exactly as the appliance would when enabled.
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
-			// ...and the financial OPERATIONS surface, which shares that permission.
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
-			// Client networks: create, batch create, replace and delete are site-database work in edged (only
-			// validate/apply/confirm/rollback reach netd), so they are exercised here against a real schema.
 			mountResource(r, s, "network", s.networkRoutes)
-			// The walled garden and its widest-network policy (0125).
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
-			// Client accounts and the generated-password format (0104): paging, search, newest-first and the
-			// format setting are exercised through the real router, role matrix and database.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
-			// The paged operator lists (paging_integration_test.go): the activity trail and the sessions
-			// list, through the real router and role matrix.
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
-			// Devices (0118), mounted exactly as main.go mounts them: under the sessions and auth-methods keys.
 			r.Route("/client-devices", func(r chi.Router) {
 				r.Use(s.resourcePermission("sessions"))
 				r.Mount("/", s.clientDevicesAdminRoutes())
@@ -290,7 +249,6 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.backupKeysRoutes())
 			})
-			// The Backups surface itself, for the erasure ledger and the daily backup relays (ledger_admin.go).
 			mountResource(r, s, "backups", s.backupsRoutes)
 		})
 	})
@@ -299,9 +257,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	return f
 }
 
-// doRaw returns the status AND the exact response bytes. A non-enumeration claim -- "an out-of-scope
-// resource is indistinguishable from an absent one" -- can only be proved from raw bodies: two responses
-// can share a status code and still differ in a message that confirms the resource exists.
+// doRaw returns the exact response bytes: non-enumeration ("out-of-scope looks like absent") can only be proved from raw
+// bodies, since two responses can share a status and differ in a message that confirms existence.
 func (f *apiFixture) doRaw(t *testing.T, method, path string, body any) (int, string) {
 	t.Helper()
 	var rdr *bytes.Reader
@@ -362,7 +319,6 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	res := fmt.Sprintf("R%d", time.Now().UnixNano())
 
 	var iface, stay string
-	// posting_allowed is computed by the database (stay_posting_permission); a CHECKED_OUT stay is not postable.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `WITH
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -374,8 +330,8 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	}); err != nil {
 		t.Fatalf("seed stay: %v", err)
 	}
-	// events are admitted PENDING; only the engine moves one to a terminal state, so the fixture applies it in
-	// a separate statement exactly as the engine would (a data-modifying CTE cannot see a sibling's insert).
+	// Events are admitted PENDING and only the engine moves one to a terminal state, so apply it in a separate
+	// statement (a data-modifying CTE cannot see a sibling's insert).
 	var event string
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
@@ -391,9 +347,7 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	}); err != nil {
 		t.Fatalf("seed/apply event: %v", err)
 	}
-	// An emergency alert always accompanies a real emergency Grace entitlement (the audit's coherence check
-	// enforces exactly that), so the fixture provisions the canonical Emergency catalog and grants one — the
-	// same shape the converter produces.
+	// An emergency alert must accompany a real emergency Grace entitlement (the audit's coherence check), so provision the catalog and grant one.
 	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.bootstrap_emergency_grace($1,$2)`, f.tenant, f.site); err != nil {
 		t.Fatalf("bootstrap emergency catalog: %v", err)
 	}
@@ -451,14 +405,10 @@ func (f *apiFixture) seedAlert(t *testing.T) string {
 	return auditID
 }
 
-// ---------------------------------------------------------------- alerts
-
-// The lifecycle an operator actually drives, end to end, through HTTP into PostgreSQL.
 func TestIntegration_API_AlertLifecycleOpenAckResolve(t *testing.T) {
 	f := newAPI(t)
 	audit := f.seedAlert(t)
 
-	// the alert appears in the queue as OPEN — created by the database with the audit, not by the API
 	status, body := f.do(t, "GET", "/operational-alerts", nil)
 	if status != 200 {
 		t.Fatalf("list: %d %v", status, body)
@@ -472,7 +422,6 @@ func TestIntegration_API_AlertLifecycleOpenAckResolve(t *testing.T) {
 		t.Fatalf("alert state=%v seq=%v, want OPEN/1", first["state"], first["seq"])
 	}
 
-	// acknowledge, then resolve
 	status, body = f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
 		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"})
 	if status != 200 || body["seq"].(float64) != 2 {
@@ -484,7 +433,6 @@ func TestIntegration_API_AlertLifecycleOpenAckResolve(t *testing.T) {
 		t.Fatalf("resolve: %d %v", status, body)
 	}
 
-	// a resolved alert leaves the queue, and the history is complete and attributed
 	status, body = f.do(t, "GET", "/operational-alerts", nil)
 	if len(body["data"].([]any)) != 0 {
 		t.Fatal("a RESOLVED alert is still in the operator queue")
@@ -503,28 +451,24 @@ func TestIntegration_API_AlertRefusals(t *testing.T) {
 	f := newAPI(t)
 	audit := f.seedAlert(t)
 
-	// an action with no expected state is refused: acting on an unknown world is not allowed
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge", map[string]any{}); status != 400 {
 		t.Fatalf("missing expected_state got %d, want 400", status)
 	}
-	// a stale expected state conflicts
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
 		map[string]any{"expected_state": "ACKNOWLEDGED", "reason_code": "REVIEWED"}); status != 409 {
 		t.Fatalf("stale expected_state got %d, want 409", status)
 	}
-	// an unknown alert is a 404
 	if status, _ := f.do(t, "POST", "/operational-alerts/00000000-0000-0000-0000-000000000000/acknowledge",
 		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 404 {
 		t.Fatalf("unknown alert got %d, want 404", status)
 	}
-	// an alert from ANOTHER site is invisible and unactionable
+	// An alert from another site is invisible and unactionable.
 	other := newAPI(t)
 	foreign := other.seedAlert(t)
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+foreign+"/acknowledge",
 		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 404 {
 		t.Fatalf("cross-site alert got %d, want 404", status)
 	}
-	// acknowledge, then acknowledge again → conflict; and any action after RESOLVED → conflict
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
 		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 200 {
 		t.Fatal("first acknowledge should succeed")
@@ -543,7 +487,7 @@ func TestIntegration_API_AlertRefusals(t *testing.T) {
 	}
 }
 
-// Two operators clicking Acknowledge at the same instant: exactly one wins, the other is told why.
+// Concurrent acknowledgements: exactly one wins, the others get a clean conflict.
 func TestIntegration_API_ConcurrentAcknowledgeHasOneWinner(t *testing.T) {
 	f := newAPI(t)
 	audit := f.seedAlert(t)
@@ -582,8 +526,6 @@ func TestIntegration_API_ConcurrentAcknowledgeHasOneWinner(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- checkout-grace publication
-
 func gracePolicy(expected int, pkgRev any) map[string]any {
 	return map[string]any{
 		"grace_package_revision_id":  pkgRev,
@@ -601,7 +543,6 @@ func gracePolicy(expected int, pkgRev any) map[string]any {
 	}
 }
 
-// A read-only role can see the policy and the queue but can change neither.
 func TestIntegration_API_ReadOnlyRoleCannotMutate(t *testing.T) {
 	f := newAPI(t, "site_viewer")
 	audit := f.seedAlert(t)
@@ -617,7 +558,6 @@ func TestIntegration_API_ReadOnlyRoleCannotMutate(t *testing.T) {
 	}
 }
 
-// count runs a scalar count/int query against the disposable database.
 func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	t.Helper()
 	var n int
@@ -627,17 +567,8 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
-// EVERY READ-ONLY ADMIN COLLECTION MUST ACTUALLY ANSWER.
-//
-// The Stays screen returned "query failed" on every request, because the listing ordered by
-// `s.updated_at` -- a column iam_v2.stays does not have. It could never have worked against any database
-// built from these migrations, and it survived because the route was MOUNTED in this harness but never
-// CALLED: mounting proves the route exists, not that its SQL is valid.
-//
-// A handler that swallows the driver error turns a schema mismatch into an opaque 500, so the cheapest
-// possible guard is to ask each collection for its first page and insist on a 200. That is enough to
-// execute the SQL, which is where this class of defect lives -- a missing column, a renamed table, a
-// projection that drifted from the schema.
+// Every read-only collection must answer: mounting a route proves it exists, not that its SQL is valid, and a
+// handler that swallows the driver error turns a schema mismatch into an opaque 500.
 func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
 	f := newAPI(t)
 	for _, path := range []string{
@@ -657,13 +588,9 @@ func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
 	}
 }
 
-// validRevisionBody is the smallest configuration the authoring endpoint accepts. Every field is one the
-// running connector reads, so a test that drifts from reality fails here rather than in front of an operator.
-//
-// It no longer sends folio_identity_strategy, normalization_version, credential_mode, read_only or
-// resync_supported. Those are stamped by the server now — a folio strategy is a financial determination
-// rather than a form value, and the rest describe the implementation rather than the hotel — so a body that
-// still carried GLOBALLY_UNIQUE was asserting the OLD contract and was refused, correctly.
+// validRevisionBody is the smallest configuration the authoring endpoint accepts. The server stamps
+// folio_identity_strategy, normalization_version, credential_mode, read_only and resync_supported itself, so they
+// are not sent.
 func validRevisionBody(endpoint string) map[string]any {
 	return map[string]any{
 		"endpoint": endpoint, "source_timezone": "Africa/Cairo",
@@ -673,12 +600,8 @@ func validRevisionBody(endpoint string) map[string]any {
 	}
 }
 
-// WRITE RBAC ON THE NEW AUTHORING SURFACE.
-//
-// Creating an interface and authoring a revision are the configuration surface of the PMS integration, so
-// they must be write-gated like every other mutation. The resource middleware already maps POST to a write
-// permission, but "already does" is exactly the kind of claim that is true until somebody mounts a route
-// somewhere else -- so it is asserted rather than assumed, for both new endpoints.
+// Creating an interface and authoring a revision must be write-gated; asserted rather than assumed, since a route
+// mounted elsewhere would silently lose the resource middleware's POST-to-write mapping.
 func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T) {
 	f := newAPI(t, "site_viewer")
 	if status, _ := f.do(t, "GET", "/pms-interfaces", nil); status != 200 {
@@ -694,17 +617,9 @@ func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T
 	}
 }
 
-// CONCURRENT AUTHORING MUST BE DETERMINISTIC, AND MUST NOT 500.
-//
-// revision_no came from `(SELECT COALESCE(MAX(revision_no),0)+1 ...)` inside the INSERT. Under READ
-// COMMITTED that subquery snapshots at statement start and takes no lock, so two operators saving at the
-// same moment both computed the same number and the second died on
-// pms_interface_revisions_pms_interface_id_revision_no_key -- surfaced as HTTP 500, an internal error for a
-// situation that is neither internal nor an error.
-//
-// With a transaction-scoped advisory lock keyed on the interface, every caller gets its own number. This
-// asserts the property that matters to an operator: nobody sees a 500, nobody silently loses their draft,
-// and the numbers are a contiguous run with no duplicates.
+// Concurrent authoring must not 500: a transaction-scoped advisory lock keyed on the interface gives every caller
+// its own revision_no (under READ COMMITTED a MAX()+1 subquery takes no lock), so numbers are a contiguous run
+// with no duplicates and nobody loses a draft.
 func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T) {
 	f := newAPI(t)
 	status, body := f.do(t, "POST", "/pms-interfaces",
@@ -757,12 +672,8 @@ func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T
 	}
 }
 
-// A DECOMMISSIONED INTERFACE IS TERMINAL, AND MUST NOT ACCEPT CONFIGURATION.
-//
-// The authoring endpoint originally selected connector_kind purely to prove the interface existed, and threw
-// the value away. Existence is not the question that matters: a revision authored against a decommissioned
-// interface can never be published or dialled, so accepting it silently is how an operator ends up believing
-// a retired interface was reconfigured.
+// A decommissioned interface is terminal and must refuse configuration: a revision authored against it could never
+// be published or dialled, and accepting it would leave the operator believing a retired interface was reconfigured.
 func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.T) {
 	f := newAPI(t)
 	status, body := f.do(t, "POST", "/pms-interfaces",
@@ -772,7 +683,6 @@ func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.
 	}
 	id, _ := body["id"].(string)
 
-	// While it is live, authoring works.
 	if st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions",
 		validRevisionBody("live.local:5010")); st != 201 {
 		t.Fatalf("authoring on a live interface: %d %v", st, b)
@@ -787,14 +697,12 @@ func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.
 	if st != 409 {
 		t.Fatalf("authoring on a decommissioned interface = %d, want 409: %v", st, b)
 	}
-	// The refusal must leave nothing behind: one revision, the one authored while it was live.
 	if got := count(t, f.pool,
 		`SELECT count(*) FROM iam_v2.pms_interface_revisions WHERE pms_interface_id=$1`, id); got != 1 {
 		t.Fatalf("%d revisions after a refused authoring, want 1", got)
 	}
 }
 
-// An interface that does not exist in THIS tenant and site is a 404, not a 500 and not a silent success.
 func TestIntegration_API_AuthoringAnUnknownInterfaceIsNotFound(t *testing.T) {
 	f := newAPI(t)
 	if st, b := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",

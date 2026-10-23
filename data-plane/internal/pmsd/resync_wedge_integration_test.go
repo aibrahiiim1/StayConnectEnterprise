@@ -2,17 +2,9 @@
 
 package pmsd
 
-// A RESYNC INTERRUPTED BETWEEN DS AND DE MUST NOT WEDGE THE INTERFACE FOREVER.
-//
-// pir_resync_coherent requires resync_started_at >= resync_requested_at. RequireInitialResync writes a fresh
-// requested_at on every connect, so if an abandoned DS…DE window left an older started_at on the row, the
-// CHECK rejects the write, Serve returns, and the transport closes — about four milliseconds after
-// connecting. The interface then reconnects and fails again, permanently, with no operator-visible cause
-// beyond UNCLASSIFIED.
-//
-// That is not hypothetical: it is what took a PRE-LIVE Protel interface offline for a day and a half. The link
-// was healthy the whole time. LIVE admission stays barred until a complete resync generation publishes, so the
-// event backlog grew, no Stay could gain occupancy evidence, and no guest could sign in.
+// A resync interrupted between DS and DE must not wedge the interface. pir_resync_coherent requires
+// started_at >= requested_at and RequireInitialResync writes a fresh requested_at on every connect, so a stale
+// started_at would make the CHECK reject every reconnect permanently.
 
 import (
 	"context"
@@ -20,8 +12,7 @@ import (
 	"time"
 )
 
-// The exact wedge: an abandoned resync window, then a reconnect. Before the fix this returned a CHECK
-// violation; the interface could never connect again without manual database surgery.
+// An abandoned resync window, then a reconnect, must not violate the CHECK.
 func TestIntegration_ReconnectAfterAbandonedResyncIsNotWedged(t *testing.T) {
 	p := integPool(t)
 	defer p.Close()
@@ -35,7 +26,7 @@ func TestIntegration_ReconnectAfterAbandonedResyncIsNotWedged(t *testing.T) {
 	}
 	base := axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen}
 
-	// An operator-visible resync began and never finished — the DE never arrived because the link dropped.
+	// A resync began and never finished: the link dropped before DE.
 	requested := time.Now().UTC().Add(-26 * time.Hour)
 	started := requested.Add(200 * time.Millisecond)
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime
@@ -71,8 +62,7 @@ func TestIntegration_ReconnectAfterAbandonedResyncIsNotWedged(t *testing.T) {
 	}
 }
 
-// The reset is keyed to the STATUS, so it must not fire on the other sync transitions — clearing started_at
-// while a resync is genuinely in progress would lose the window's own start time.
+// The reset is keyed to the status and must not fire on other transitions: clearing started_at mid-resync loses the window's start.
 func TestIntegration_InProgressResyncKeepsItsStartedAt(t *testing.T) {
 	p := integPool(t)
 	defer p.Close()
@@ -95,8 +85,7 @@ func TestIntegration_InProgressResyncKeepsItsStartedAt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("require resync: %v", err)
 	}
-	// Truncated to microseconds because timestamptz stores no finer, so an untruncated Go time would differ
-	// from what comes back purely in digits PostgreSQL never kept.
+	// Truncated to microseconds: timestamptz stores no finer.
 	started := now.Add(time.Second).Truncate(time.Microsecond)
 	base.At = started
 	if err := repo.UpdateSync(ctx, SyncUpdate{

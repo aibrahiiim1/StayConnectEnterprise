@@ -10,21 +10,12 @@ import (
 
 var errAssignmentChanged = &typedErr{code: CodeAssignmentChanged}
 
-// workerLifecycle reports whether a connection in this lifecycle state keeps its PMS link (and so its worker).
-//
-//	ACTIVE    yes.
-//	DRAINING  yes, while room charges are still queued -- wind down lets them finish (contract section 10,
-//	          "outbox drains"; audit H-8). The repository lists a DRAINING interface only while
-//	          iam_v2.pms_interface_has_undrained_postings is true, so the worker stops once the outbox is empty.
-//	          This is what distinguishes wind down from pause.
-//	anything else: no.
+// workerLifecycle: ACTIVE keeps its link; DRAINING keeps it only while room charges are queued (the repo lists
+// it only while iam_v2.pms_interface_has_undrained_postings is true), so wind down finishes charges; else no.
 func workerLifecycle(state string) bool { return state == "ACTIVE" || state == "DRAINING" }
 
-// supervisor runs a single-goroutine reconcile loop over the ACTIVE PMS Interfaces within the assigned
-// Tenant/Site scope, keeping exactly one worker per Interface. It compares the COMPLETE desired identity
-// (interface id + current revision id), contains worker panics (logging only a closed event, never the
-// recovered value), and drains every worker before returning. The workers map is owned by run()'s single
-// goroutine, so no lock is needed.
+// supervisor keeps one worker per Interface, comparing interface id plus current revision id. Worker panics
+// are contained and only a closed event is logged. The workers map belongs to run()'s goroutine (no lock).
 type supervisor struct {
 	cfg     iamv2.PMSConfig
 	assign  Assignment
@@ -60,9 +51,7 @@ func (s *supervisor) run(ctx context.Context) error {
 	}
 }
 
-// reconcile re-verifies the assignment, lists the assigned scope's ACTIVE interfaces, and converges the
-// worker set to the complete desired identity. An assignment change returns errAssignmentChanged so Run can
-// drain + re-scope.
+// reconcile returns errAssignmentChanged on an assignment change so Run can drain and re-scope.
 func (s *supervisor) reconcile(ctx context.Context) error {
 	if a, assigned, err := s.deps.LoadAssignment(ctx); err == nil {
 		if !assigned || a.TenantID != s.assign.TenantID || a.SiteID != s.assign.SiteID || a.ApplianceID != s.assign.ApplianceID {
@@ -79,8 +68,6 @@ func (s *supervisor) reconcile(ctx context.Context) error {
 		if iface.TenantID != s.assign.TenantID || iface.SiteID != s.assign.SiteID {
 			continue // defense in depth: never accept a cross-scope row
 		}
-		// ACTIVE, or DRAINING with room charges still to finish: the repo lists a DRAINING interface only while
-		// iam_v2.pms_interface_has_undrained_postings says so, and drops it once the outbox is empty (H-8).
 		if !workerLifecycle(iface.LifecycleState) {
 			continue
 		}
@@ -113,7 +100,7 @@ func (s *supervisor) startWorker(parent context.Context, iface Interface) {
 		defer close(w.done)
 		defer func() {
 			if r := recover(); r != nil {
-				// log ONLY a closed event + safe fields; never render the recovered panic value
+				// Never render the recovered panic value.
 				_ = r
 				logEvent(s.deps.log(), EventWorkerPanicRecovered, CodePanicRecovered,
 					SafeFields{InterfaceID: NewUUIDValue(iface.ID), Generation: w.gen, Stage: StageServe, Attempt: w.attempt})
@@ -134,7 +121,6 @@ func (s *supervisor) stopAll() {
 	s.desired = map[string]string{}
 }
 
-// backoff is a bounded exponential backoff with full jitter.
 type backoff struct {
 	min, max time.Duration
 	cur      time.Duration

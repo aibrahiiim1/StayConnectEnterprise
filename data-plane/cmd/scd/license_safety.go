@@ -17,14 +17,9 @@ const productionMarker = "/etc/stayconnect/production"
 // mode. On a production appliance its presence is a REJECTED attempt.
 const devModeMarker = "/etc/stayconnect/dev-mode"
 
-// resolveLicenseRequired decides whether a real signed license is mandatory and
-// detects any attempt to run permissively on a production appliance.
-//
-// Production is determined at COMPILE time (buildprofile.Production, the default
-// build) OR by an explicit /etc/stayconnect/production marker. In production a
-// license is ALWAYS required — SCD_LICENSE_REQUIRED=false and the dev-mode
-// marker are ignored and reported as attempts. Only an explicit `-tags
-// devlicense` build with no production marker may run permissively.
+// resolveLicenseRequired decides whether a signed licence is mandatory. In production (compile-time buildprofile.Production, or the production
+// marker) it is ALWAYS required: SCD_LICENSE_REQUIRED=false and the dev-mode marker are ignored and reported as attempts.
+// Only a devlicense build without the marker may run permissively.
 func resolveLicenseRequired(envRequired bool) (required bool, devAttempt string) {
 	_, markerErr := os.Stat(productionMarker)
 	isProduction := buildprofile.Production || markerErr == nil
@@ -42,21 +37,16 @@ func resolveLicenseRequired(envRequired bool) (required bool, devAttempt string)
 		}
 		return true, devAttempt
 	}
-	// Development build (no production marker): permissive unless explicitly
-	// required. This whole branch is compiled out of production binaries.
+	// Development build: permissive unless explicitly required; compiled out of production binaries.
 	return envRequired, ""
 }
 
-// reportPermissiveAttempt raises a local critical alert and writes an audit record
-// when a production appliance rejects an attempt to enable permissive/dev
-// licensing. Enforcement is NOT weakened — the attempt was already refused
-// (license stays required). The alert is surfaced in Hotel Admin through the
-// licence status (permissiveBlocked).
+// reportPermissiveAttempt raises a critical alert and audit record when production rejects a permissive-licensing attempt;
+// enforcement is not weakened. The alert surfaces in Hotel Admin through licence status (permissiveBlocked).
 func (s *server) reportPermissiveAttempt(ctx context.Context, reason string) {
 	slog.Error("LICENSE SECURITY: rejected attempt to enable permissive/dev licensing on a production appliance",
 		"reason", reason, "build_profile", buildprofile.Name, "action", "enforcement kept ON")
 
-	// Audit (best-effort; never blocks startup).
 	if s.db != nil {
 		actx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		_, _ = s.db.Exec(actx, `INSERT INTO audit_log

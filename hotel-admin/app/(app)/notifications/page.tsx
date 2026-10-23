@@ -1,22 +1,10 @@
 "use client";
 
-// DELIVERY — how the appliance sends a client a one-time code: email, text message or WhatsApp. WhatsApp is its
-// own channel with its own services, never a kind of SMS. A channel is offered for a new sender only when its
-// sign-in module is licensed here; an existing sender stays listed so it can be edited or removed.
-//
-// Same treatment as the other provider screens: Add and Edit are dialogs instead of cards stacked above the
-// table, the native confirm() on delete is a real confirmation that says what stops working, and a blank secret
-// on Edit still means "keep the one already stored" rather than "erase it".
-//
-// Email now has two real services: SendGrid, and the site's OWN MAIL SERVER over SMTP (host, port, STARTTLS/TLS,
-// an optional login). Amazon SES is no longer offered for a new sender -- edged refuses it until an adapter
-// exists -- but a stored row of that kind is still listed so it can be removed.
-//
-// OPERATED LIKE A PRODUCT (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §7.2): every sender can be TESTED from
-// here, to an address the operator types, with the stored credentials; the result and the service's own error
-// text are shown, and recorded on the row. The Health column reads from that record: "Last delivered 2 minutes
-// ago" and "Last error: … at …" are what an operator needs when a client says the code never arrived. A sender
-// that has never sent anything is not healthy -- it is untested -- and that is what it says.
+// WhatsApp is its own channel, never a kind of SMS. A channel is offered for a new sender only when its
+// sign-in module is licensed; an existing sender stays listed so it can be edited or removed. A blank secret
+// on Edit keeps the stored one. Amazon SES is no longer offered (edged refuses it) but a stored row is listed
+// so it can be removed. Every sender can be tested with its stored credentials, and the result is recorded on
+// the row; the Health column reads from that record.
 
 import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, NotificationProvider, NotificationTestResult } from "@/lib/api";
@@ -60,10 +48,10 @@ const KIND_LABELS: Record<string, string> = {
 const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", sms: "Text message", whatsapp: "WhatsApp" };
 const CHANNEL_MODULE: Record<Channel, string> = { email: "email_otp", sms: "sms_otp", whatsapp: "whatsapp_otp" };
 
-// The port each security mode implies, stated beside the field. The server fills it in when left blank.
+// The server fills the port in when left blank.
 const IMPLIED_PORT: Record<Security, string> = { starttls: "587", tls: "465", none: "25" };
 
-// SMTP timeout: an operational number with a default, a unit and bounds (edged validates the same range).
+// edged validates the same range.
 const SMTP_TIMEOUT_DEFAULT = 10;
 const SMTP_TIMEOUT_MIN = 1;
 const SMTP_TIMEOUT_MAX = 120;
@@ -73,8 +61,7 @@ function health(n: NotificationProvider): { tone: "ok" | "err" | "default"; labe
     return { tone: "err", label: "Failing", detail: n.last_error ?? undefined };
   }
   if (n.last_success_at) return { tone: "ok", label: "Sending" };
-  // NOT "idle". A sender that has never delivered anything is untested, and the difference matters the first time
-  // a client cannot receive their code.
+  // A sender that has never delivered is untested, not idle.
   return { tone: "default", label: "Never used" };
 }
 
@@ -89,7 +76,7 @@ type FormState = {
   template_name: string;
   language: string;
   content_sid: string;
-  // SMTP only. The password travels as api_key, write-only, like every other secret here.
+  // SMTP only; the password travels as api_key, write-only.
   host: string;
   port: string;
   security: Security;
@@ -104,8 +91,7 @@ const EMPTY: FormState = {
   host: "", port: "", security: "starttls", username: "", timeout_seconds: "", enabled: true,
 };
 
-// The non-secret settings that live in `extra`: the WhatsApp template for a WhatsApp sender, the relay for an
-// SMTP sender (an empty value removes one; a blank port lets the server fill it from the security mode).
+// Non-secret settings in `extra`; an empty value removes one.
 function extraOf(f: FormState): Record<string, string> | undefined {
   if (f.channel === "whatsapp") {
     return { template_name: f.template_name.trim(), language: f.language.trim(), content_sid: f.content_sid.trim() };
@@ -132,8 +118,7 @@ export default function NotificationsPage() {
   const [f, setF] = useState<FormState>(EMPTY);
   const [deleting, setDeleting] = useState<NotificationProvider | null>(null);
 
-  // THE TEST MESSAGE. One dialog per sender: an address, a Send, and the answer -- kept open after the answer so
-  // the service's own error text can be read, not flashed in a toast.
+  // Kept open after the answer so the service's error text can be read, not flashed in a toast.
   const [testing, setTesting] = useState<NotificationProvider | null>(null);
   const [testTo, setTestTo] = useState("");
   const [testResult, setTestResult] = useState<NotificationTestResult | null>(null);
@@ -141,7 +126,6 @@ export default function NotificationsPage() {
 
   const writable = roles !== null && canWrite("notification-providers", roles);
   const caps = useCapabilities();
-  // Channels a NEW sender may use: those whose sign-in module is licensed here.
   const channels = (Object.keys(KINDS) as Channel[]).filter((c) => moduleLicensed(caps, CHANNEL_MODULE[c]));
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
@@ -165,7 +149,7 @@ export default function NotificationsPage() {
       channel: n.channel,
       kind: n.kind,
       display_name: n.display_name ?? "",
-      api_key: "", // write-only: blank means keep
+      api_key: "",
       api_user: n.api_user ?? "",
       from_address: n.from_address ?? "",
       from_name: n.from_name ?? "",
@@ -207,7 +191,7 @@ export default function NotificationsPage() {
         };
         const extra = extraOf(f);
         if (extra) body.extra = extra;
-        if (f.api_key) body.api_key = f.api_key; // blank keeps the existing secret
+        if (f.api_key) body.api_key = f.api_key;
         await api.patch(`/notification-providers/${editing.id}`, body);
       }
       toast.success(mode === "new" ? "Sender added" : "Sender saved", "The change is live: no restart is needed.");
@@ -238,14 +222,11 @@ export default function NotificationsPage() {
     try {
       const r = await api.post<NotificationTestResult>(`/notification-providers/${testing.id}/test`, { to: testTo.trim() });
       setTestResult(r ?? { ok: false, error: "no_answer", message: "The appliance gave no answer." });
-      // The row records the outcome either way; the Health column should say so without a reload.
       await load();
     } catch (e) { setTestErr(e); }
     finally { setBusy(false); }
   }
 
-  // Changing channel invalidates the kind, so it follows rather than being left pointing at an SMS provider for
-  // an email channel.
   function setChannel(channel: Channel) {
     setF((p) => ({ ...p, channel, kind: KINDS[channel][1] ?? KINDS[channel][0] }));
   }

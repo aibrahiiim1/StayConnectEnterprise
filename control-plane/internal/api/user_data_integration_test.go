@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// GDPR audit B5 (migration 0055): the platform can hand a Central user their data; a user's email can be
-// corrected, and the history then names them by it; removing a user leaves their email nowhere.
 func TestACentralUsersDataIsExportedCorrectedAndForgotten(t *testing.T) {
 	f := newFixture(t)
 	var colleague string
@@ -19,7 +17,6 @@ func TestACentralUsersDataIsExportedCorrectedAndForgotten(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO operator_roles (operator_id, role) VALUES ($1,'platform_support')`, colleague); err != nil {
 		t.Fatal(err)
 	}
-	// What the history keeps about her: an entry she made, one about her naming her email, a settings change.
 	if _, err := f.pool.Exec(f.ctx, `
 		INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, payload) VALUES
 		  (now(), 'operator', $1, 'appliance.activated', 'appliance', 'a-1', '{}'::jsonb),
@@ -31,7 +28,6 @@ func TestACentralUsersDataIsExportedCorrectedAndForgotten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Export: a reason, the platform only (the route's permission), her data.
 	if rec := f.operatorCall(f.base.userDataExport, http.MethodPost, colleague, map[string]string{"reason": ""}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("an export without a reason: %d", rec.Code)
 	}
@@ -55,7 +51,6 @@ func TestACentralUsersDataIsExportedCorrectedAndForgotten(t *testing.T) {
 		t.Fatal("the export was not audited")
 	}
 
-	// Correction: the address changes, and the history follows it.
 	if rec := f.operatorCall(f.base.patchTeam, http.MethodPatch, colleague, map[string]string{"email": "Grace.Hopper@central.test"}); rec.Code != http.StatusOK {
 		t.Fatalf("correct email = %d %s", rec.Code, rec.Body.String())
 	}
@@ -68,7 +63,6 @@ func TestACentralUsersDataIsExportedCorrectedAndForgotten(t *testing.T) {
 		t.Fatalf("taking another user's email = %d", rec.Code)
 	}
 
-	// Removal: her email is left nowhere.
 	if rec := f.operatorCall(f.base.deleteTeam, http.MethodDelete, colleague, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("remove = %d %s", rec.Code, rec.Body.String())
 	}

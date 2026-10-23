@@ -17,7 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
-// GDPR plan C5: the nightly backup's encrypt/decrypt round trip, and the reader verify and restore load from.
+// Nightly backup encrypt/decrypt round trip, and the reader verify and restore load from.
 
 func TestBackupCryptCLIRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -123,9 +123,8 @@ func TestNewestEncryptedBackupLooksOnlyAtBackupsTheEngineMade(t *testing.T) {
 	if newestEncryptedBackup() != "" {
 		t.Fatal("found a backup in empty directories")
 	}
-	os.WriteFile(filepath.Join(a, "db-1.sql.gz"), []byte("x"), 0o600) // clear: not a key test target
+	os.WriteFile(filepath.Join(a, "db-1.sql.gz"), []byte("x"), 0o600)
 	os.WriteFile(filepath.Join(a, "db-2.sql.gz.age"), []byte("x"), 0o600)
-	// an earlier nightly set is retired recovery material, not a key-test target
 	os.WriteFile(filepath.Join(b, "site-20261017-020000.dump.age"), []byte("x"), 0o600)
 	if got, want := newestEncryptedBackup(), filepath.Join(a, "db-2.sql.gz.age"); got != want {
 		t.Fatalf("newest = %q, want %q", got, want)
@@ -172,9 +171,7 @@ func TestBackupKeyTestOpensTheNewestEncryptedBackup(t *testing.T) {
 	}
 }
 
-// THE NIGHTLY BACKUP IS NOT GZIP. the retired nightly site-backup job encrypted a raw `pg_dump -Fc` stream, so when the
-// newest encrypted backup is a nightly one the key test must still answer ok for the holder's key -- it used to
-// gzip-decode it and answer 500. Verify and restore, which load SQL text with psql, refuse it by name.
+// The nightly backup is raw pg_dump -Fc, not gzip: the key test must still pass for it; verify and restore refuse it by name.
 func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	oldA, oldB := scdBackupDir, nightlyBackupDir
@@ -184,7 +181,6 @@ func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
 	outsider, _, _ := backupcrypt.GenerateKey()
 	rs, _ := backupcrypt.ParseRecipients([]string{public})
 
-	// An older on-demand gzip backup, and a newer nightly custom-format dump.
 	fa, _ := os.Create(filepath.Join(a, "db-20261016T020000Z.sql.gz.age"))
 	wa, _ := backupcrypt.Encrypt(fa, rs)
 	gz := gzip.NewWriter(wa)
@@ -220,7 +216,6 @@ func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
 		t.Fatalf("another key on a nightly dump = %d %v", code, out)
 	}
 
-	// The SQL loaders never misread it.
 	if _, _, err := openBackup(nightly, secret); !errors.Is(err, errNotSQLBackup) {
 		t.Fatalf("openBackup on a nightly dump = %v, want errNotSQLBackup", err)
 	}
@@ -233,7 +228,6 @@ func TestBackupKeyTestAcceptsANightlyCustomFormatDump(t *testing.T) {
 		c.Close()
 	}
 
-	// Content that is neither is refused, not guessed at.
 	junk := filepath.Join(a, "db-20261018T020000Z.sql.gz")
 	os.WriteFile(junk, []byte("not an archive"), 0o600)
 	if _, _, _, err := openBackupStream(junk, ""); err == nil || !strings.Contains(err.Error(), "not a readable archive") {

@@ -18,9 +18,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// The test tools (cmd/acceptance, cmd/pkitest, cmd/regtest -signin) sign in through the real two-step handlers:
-// the first sign-in sets the authenticator up and keeps its secret, a second one straight after uses the next
-// step's code (the last one is refused as a replay), and an operator the keyring does not know gets the reset.
 func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -82,7 +79,6 @@ func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 		t.Fatalf("the curl jar does not carry the session:\n%s", b)
 	}
 
-	// A fresh process reads the keyring back and signs in again at once.
 	kr2, err := opsignin.Open(ringPath)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +90,6 @@ func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 		t.Fatalf("want 2 sessions, got %d", sessions)
 	}
 
-	// An authenticator set up elsewhere: the tool says how to hand it back instead of guessing.
 	empty, _ := opsignin.Open(filepath.Join(t.TempDir(), "none.json"))
 	if _, err := signIn(empty); err == nil || !strings.Contains(err.Error(), "reset-mfa") {
 		t.Fatalf("want the reset-mfa hint, got %v", err)

@@ -1,9 +1,5 @@
 package main
 
-// The producer half of the shaping contract. These prove the properties netd relies on: a complete desired
-// state (never a delta), a durable monotonic generation, a scope acctd cannot invent, and a refusal that is
-// reported rather than mistaken for enforcement.
-
 import (
 	"context"
 	"encoding/json"
@@ -39,8 +35,7 @@ func derivedPlan() enforce.Plan {
 	}
 }
 
-// Every live session appears in the envelope exactly once, entitled or not. "Not mentioned" must never be how
-// access ends: a truncated body would then be indistinguishable from a mass revocation.
+// "Not mentioned" must never end access: a truncated body would look like a mass revocation.
 func TestEnvelopeStatesTheWholeDesiredState(t *testing.T) {
 	p := testArm(t, filepath.Join(t.TempDir(), "gen.json"))
 	env := p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
@@ -64,8 +59,7 @@ func TestEnvelopeStatesTheWholeDesiredState(t *testing.T) {
 	if env.DesiredStateHash != shapeplan.HashDesiredState(env.ManagedBridges, env.Sessions) {
 		t.Fatal("the envelope hash does not cover its own bridges and sessions")
 	}
-	// Every bridge a session is on, the fallback, AND a guest bridge with no sessions at all — the last one
-	// is the whole point: nothing else would ever tell the applier to look there.
+	// A bridge with no sessions must still be declared: nothing else tells the applier to look there.
 	if got := env.ManagedBridges; len(got) != 3 ||
 		got[0] != "br-empty" || got[1] != "br-guest" || got[2] != "br-lan" {
 		t.Fatalf("declared bridges = %v, want the session bridges, the fallback and the empty one", got)
@@ -81,8 +75,7 @@ func TestEnvelopeStatesTheWholeDesiredState(t *testing.T) {
 	}
 }
 
-// The hash is what makes a truncated or tampered body refusable. It must not depend on the order the producer
-// happened to read rows in, or an identical desired state would hash differently every tick.
+// The hash must not depend on row order, or an identical desired state would hash differently each tick.
 func TestDesiredStateHashIsOrderIndependentAndContentSensitive(t *testing.T) {
 	a := []shapeplan.Session{
 		{SessionID: "s1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 100, UpKbps: 50, Entitled: true},
@@ -99,14 +92,11 @@ func TestDesiredStateHashIsOrderIndependentAndContentSensitive(t *testing.T) {
 	if shapeplan.HashDesiredState(nil, a) == shapeplan.HashDesiredState(nil, a[:1]) {
 		t.Fatal("a truncated desired state hashed the same as the full one")
 	}
-	// dropping a managed bridge changes the hash too: it changes WHERE unclaimed classes get removed
 	if shapeplan.HashDesiredState([]string{"br-a", "br-b"}, a) == shapeplan.HashDesiredState([]string{"br-a"}, a) {
 		t.Fatal("trimming the managed-bridge list did not change the hash")
 	}
 }
 
-// The generation is DURABLE. If it restarted at 1, netd would correctly refuse every plan the new process
-// produced — and enforcement would freeze at the pre-restart state with nothing appearing broken.
 func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gen.json")
 
@@ -120,7 +110,6 @@ func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 		last = env.PlanGeneration
 	}
 
-	// a new process, same appliance
 	restarted := testArm(t, path)
 	env := restarted.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now())
 	if env.PlanGeneration <= last {
@@ -130,7 +119,6 @@ func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 		t.Fatal("a restarted producer did not claim a new runtime generation")
 	}
 
-	// the state file is the whole mechanism: it must be written before the plan is used, not after
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("the generation was not persisted: %v", err)
@@ -144,11 +132,10 @@ func TestPlanGenerationSurvivesAProducerRestart(t *testing.T) {
 	}
 }
 
-// A netd REFUSAL is not a kernel problem and must not be reported as one — nor, worse, as success. Re-deriving
-// the same plan will be refused for the same reason, so the reason has to reach the operator.
+// A netd refusal must surface with its reason, neither as a kernel problem nor as success.
 func TestRefusedPlanIsReportedWithItsReason(t *testing.T) {
 	p := testArm(t, "")
-	p.enf = nil // shapingPlan() is exercised separately; drive the reporting path directly
+	p.enf = nil
 
 	refusing := &fakeNetd{result: shapingResult{Accepted: false, Reason: shapeplan.ReasonWrongSite}}
 	res, err := refusing.SubmitShapingPlan(context.Background(), p.buildEnvelope(derivedPlan(), []string{"br-empty"}, "br-lan", time.Now()))
@@ -159,7 +146,6 @@ func TestRefusedPlanIsReportedWithItsReason(t *testing.T) {
 		t.Fatal("the fake claimed acceptance")
 	}
 
-	// the arm's own handling of that answer
 	p.degraded = ""
 	if !res.Accepted {
 		p.degraded = "netd refused the shaping plan: " + res.Reason
@@ -168,7 +154,6 @@ func TestRefusedPlanIsReportedWithItsReason(t *testing.T) {
 		t.Fatal("a refused plan was not surfaced as degraded")
 	}
 
-	// and an unreachable netd is degraded too, for a different reason
 	down := &fakeNetd{err: errors.New("netd socket unavailable")}
 	if _, err := down.SubmitShapingPlan(context.Background(), shapeplan.Envelope{}); err == nil {
 		t.Fatal("expected a transport failure")

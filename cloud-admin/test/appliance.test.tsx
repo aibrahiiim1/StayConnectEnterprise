@@ -16,7 +16,6 @@ const lists = [
   { match: "/api/cloud/v1/customers?status=active", body: { items: [CUSTOMER] } },
   { match: "/api/cloud/v1/customers/c1/sites", body: { items: [SITE] } },
 ];
-/** A §6 SU write: the first attempt is refused for step-up, the retry succeeds. */
 const stepUp = (method: string, match: string) => ({
   method,
   match,
@@ -76,7 +75,6 @@ describe("Appliance page — the primary action follows the activation state", (
     expect(screen.getByRole("button", { name: /Move/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Retire appliance/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
-    // Protocol details stay out of the primary view.
     const advanced = screen.getByText("Advanced").closest("details")!;
     expect(advanced).not.toHaveAttribute("open");
     expect(within(advanced).getByText("Certificate fingerprint")).toBeInTheDocument();
@@ -338,7 +336,7 @@ describe("Move — same customer only", () => {
     renderAs(PLATFORM_ME, <AppliancePage params={{ id: "a1" }} />);
     const dialog = await openMove(user);
 
-    // No customer picker, and no customer list is even fetched.
+    // Customer scoping stays on the server.
     expect(within(dialog).queryByLabelText(/^Customer/)).not.toBeInTheDocument();
     expect(calls.some((c) => c.url.startsWith("/api/cloud/v1/customers?"))).toBe(false);
     expect(within(dialog).getByText("Semantics Hotels")).toBeInTheDocument();
@@ -346,7 +344,7 @@ describe("Move — same customer only", () => {
     const site = within(dialog).getByLabelText(/^New site/);
     await waitFor(() => expect(within(site).getByRole("option", { name: "North Beach" })).toBeInTheDocument());
     const offered = within(site).getAllByRole("option").map((o) => o.textContent);
-    expect(offered).toEqual(["Choose a site…", "North Beach"]); // not the current site, not the archived one
+    expect(offered).toEqual(["Choose a site…", "North Beach"]);
 
     expect(within(dialog).getByText(/re-issued for the new site with the same terms/)).toBeInTheDocument();
     expect(within(dialog).getByText(/retire it, factory-reset it and activate it for that customer/)).toBeInTheDocument();
@@ -380,7 +378,6 @@ describe("Move — same customer only", () => {
     await user.type(within(dialog).getByLabelText(/^Reason/), "reorganisation");
     await user.click(within(dialog).getByRole("button", { name: "Move appliance" }));
     expect(await within(dialog).findByText(message)).toBeInTheDocument();
-    // Still open, so the operator reads why.
     expect(screen.getByRole("dialog", { name: "Move OG-0001" })).toBeInTheDocument();
   });
 
@@ -418,7 +415,6 @@ describe("Retirement and replacement", () => {
     expect(screen.getByText(/did not confirm its retirement, so its credentials are still valid/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "retire it now without waiting" }));
     const dialog = await screen.findByRole("dialog", { name: "Retire OG-0001 now" });
-    // Already retiring: not waiting is the only choice left, so there is no switch to turn it off.
     expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
     expect(within(dialog).getByText(/revoked now, without waiting/)).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText(/Type the serial/), "OG-0001");

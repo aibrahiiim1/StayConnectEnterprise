@@ -17,9 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 )
 
-// AssignmentBase issues vendor-signed appliance-assignment documents and serves
-// the current one to the authenticated appliance. Signing reuses the vendor key
-// the appliance already trusts for licenses/offline packages.
+// AssignmentBase issues signed appliance-assignment documents and serves the current one to the appliance.
 type AssignmentBase struct {
 	*Base
 	SignKey ed25519.PrivateKey
@@ -43,12 +41,10 @@ func assignUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// identityFprFromPubB64 computes the appliance identity-key fingerprint the same
-// way the edge does: hex(sha256(pub)[:8]) over the raw Ed25519 public key.
+// identityFprFromPubB64 must match the edge's fingerprint: hex(sha256(pub)[:8]) of the raw Ed25519 key.
 func identityFprFromPubB64(pubB64 string) string {
 	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
 	if err != nil || len(raw) != ed25519.PublicKeySize {
-		// tolerate std-padding just in case
 		if r2, e2 := base64.StdEncoding.DecodeString(pubB64); e2 == nil && len(r2) == ed25519.PublicKeySize {
 			raw = r2
 		} else {
@@ -58,7 +54,6 @@ func identityFprFromPubB64(pubB64 string) string {
 	return assignment.KeyID(ed25519.PublicKey(raw))
 }
 
-// Issue builds, signs and persists a NEW current assignment for the appliance in its own transaction.
 func (b *AssignmentBase) Issue(ctx context.Context, applianceID, state string) (*assignment.Document, error) {
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
@@ -75,20 +70,15 @@ func (b *AssignmentBase) Issue(ctx context.Context, applianceID, state string) (
 	return doc, nil
 }
 
-// IssueTx builds, signs and persists a NEW current assignment for the appliance inside the caller's
-// transaction, bumping its version. It reads the appliance's tenant/site/serial/pubkey from the appliances
-// row AS SEEN BY THAT TRANSACTION, so a caller that has just set the tenant and site signs exactly that.
-// Activation uses it so the assignment and the licence commit or roll back together.
+// IssueTx signs and persists a new current assignment inside the caller's transaction, bumping its version.
+// It reads the appliances row as seen by that transaction, so a caller that just set tenant and site signs exactly that.
 func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, state string) (*assignment.Document, error) {
 	if b.SignKey == nil {
 		return nil, errors.New("assignment signing key not configured")
 	}
-	// SIGNING GUARD: only an ACTIVE key may mint new assignments. A verify_only key
-	// (rotated out) or a revoked key must never produce a new document, even if
-	// ctrlapi is still configured with it.
+	// Only an active key may mint assignments; a verify_only or revoked key must not, even if ctrlapi still holds it.
 	signerKeyID := assignment.KeyID(b.SignKey.Public().(ed25519.PublicKey))
-	// FAIL CLOSED: a key Central has no record of (registration failed at boot, or the row is unreadable) does
-	// not sign either -- an unknown state is not "active". ctrlapi registers its key on every start.
+	// Fail closed: a key with no readable record does not sign; unknown is not "active".
 	var st string
 	if err := tx.QueryRow(ctx, `SELECT state FROM assignment_signing_keys WHERE key_id=$1`, signerKeyID).Scan(&st); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -119,9 +109,8 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	_ = tx.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1 FOR UPDATE`, applianceID).Scan(&prevVersion)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	// expires_at is a REFRESH horizon, not a kill switch: past it the appliance marks
-	// the assignment stale but keeps operating on it (a hotel must survive a Central
-	// outage). 0 = no expiry. CTRLAPI_ASSIGN_TTL_SECONDS sets a fleet-wide horizon.
+	// expires_at is a refresh horizon, not a kill switch: past it the appliance marks the assignment stale but keeps
+	// operating (a hotel must survive a Central outage). 0 = no expiry.
 	var expiresAt int64
 	if ttl := assignTTLSeconds(); ttl > 0 {
 		expiresAt = now.Add(time.Duration(ttl) * time.Second).Unix()
@@ -138,8 +127,7 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	}
 	if assignment.Grants(state) {
 		doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName = tenantID, siteID, tenantName, siteName
-		// Descriptive only, and signed exactly like the names. UNSPECIFIED is sent as empty so an untyped
-		// site's document stays byte-identical to the pre-site-type layout.
+		// Descriptive only. UNSPECIFIED is sent empty so an untyped site's document stays byte-identical.
 		doc.SiteType = assignmentSiteType(siteType)
 	}
 	assignment.Sign(b.SignKey, doc)
@@ -166,8 +154,7 @@ func (b *AssignmentBase) IssueTx(ctx context.Context, tx pgx.Tx, applianceID, st
 	return doc, nil
 }
 
-// signerKeyID reports which assignment key signed an appliance's current
-// assignment — used to verify a rotation left no appliance on the old signer.
+// signerKeyID reports which key signed the appliance's current assignment, to verify a rotation left none on the old signer.
 func signerKeyID(b *Base, ctx context.Context, applianceID string) string {
 	var k string
 	_ = b.DB.QueryRow(ctx,

@@ -1,16 +1,5 @@
-// Package otpkey implements keyed-HMAC OTP verification (decision D7).
-//
-// A one-time code is never stored in plaintext. New OTPs are stored as an HMAC-SHA256 over a
-// domain-separated, length-prefixed message binding the challenge context (tenant, channel,
-// destination, challenge id) to the code, keyed by a dedicated appliance-local secret. Each stored
-// digest is PINNED to the key generation that produced it, so the key can be rotated: a new
-// generation becomes active for issuance while superseded generations are retained (verify-only)
-// until every OTP pinned to them has expired, after which they may be removed (removal gate =
-// max OTP TTL).
-//
-// Verification is constant-time. The key material never appears in the database, logs, or the stored
-// digest. Legacy in-flight OTPs (stored as "salt:sha256(salt|code)") are verified through a
-// time-bounded compatibility path; no new OTP is ever issued in the legacy format.
+// Package otpkey implements keyed-HMAC OTP verification. Digests are pinned to a key generation so keys can rotate;
+// superseded generations stay verify-only until their OTPs expire.
 package otpkey
 
 import (
@@ -29,11 +18,10 @@ const domainSep = "stayconnect/otp/hmac/v1"
 
 // Ring is an immutable set of key generations with one active generation for issuance.
 type Ring struct {
-	keys   map[int][]byte // generation -> key bytes
+	keys   map[int][]byte
 	active int
 }
 
-// NewRing builds a key ring. Every key must be >= 16 bytes. active must exist in keys.
 func NewRing(keys map[int][]byte, active int) (*Ring, error) {
 	if len(keys) == 0 {
 		return nil, errors.New("otpkey: no key generations")
@@ -56,10 +44,8 @@ func NewRing(keys map[int][]byte, active int) (*Ring, error) {
 	return &Ring{keys: cp, active: active}, nil
 }
 
-// Active returns the current issuance generation.
 func (r *Ring) Active() int { return r.active }
 
-// Generations returns the known generations, ascending.
 func (r *Ring) Generations() []int {
 	gs := make([]int, 0, len(r.keys))
 	for g := range r.keys {
@@ -69,16 +55,14 @@ func (r *Ring) Generations() []int {
 	return gs
 }
 
-// Challenge is the immutable context an OTP is bound to.
 type Challenge struct {
 	TenantID    string
-	Channel     string // "email" | "sms"
-	Destination string // email/phone
-	ChallengeID string // the auth_otps row id
+	Channel     string
+	Destination string
+	ChallengeID string
 }
 
-// message builds the domain-separated, length-prefixed HMAC input. Length-prefixing every field
-// makes the encoding unambiguous, so no two distinct field tuples can collide.
+// Length-prefixing every field makes the encoding unambiguous.
 func message(c Challenge, code string) []byte {
 	var b []byte
 	put := func(s string) {
@@ -106,7 +90,6 @@ func (r *Ring) mac(gen int, c Challenge, code string) ([]byte, error) {
 	return m.Sum(nil), nil
 }
 
-// Issue returns the (generation, hex-digest) to store for a new OTP, using the active generation.
 func (r *Ring) Issue(c Challenge, code string) (generation int, digestHex string, err error) {
 	d, err := r.mac(r.active, c, code)
 	if err != nil {
@@ -115,7 +98,6 @@ func (r *Ring) Issue(c Challenge, code string) (generation int, digestHex string
 	return r.active, hex.EncodeToString(d), nil
 }
 
-// Verify checks a candidate code against a stored (generation, hex-digest) in constant time.
 func (r *Ring) Verify(gen int, storedHex string, c Challenge, code string) (bool, error) {
 	stored, err := hex.DecodeString(storedHex)
 	if err != nil || len(stored) != sha256.Size {
@@ -128,8 +110,7 @@ func (r *Ring) Verify(gen int, storedHex string, c Challenge, code string) (bool
 	return subtle.ConstantTimeCompare(stored, want) == 1, nil
 }
 
-// VerifyLegacy verifies a legacy stored value "salt:sha256hex(salt|code)" in constant time.
-// Used only for already-issued in-flight OTPs during the compatibility window; never for issuance.
+// Only for in-flight legacy OTPs during the compatibility window; never for issuance.
 func VerifyLegacy(stored, code string) (bool, error) {
 	i := strings.IndexByte(stored, ':')
 	if i <= 0 || i == len(stored)-1 {
@@ -144,8 +125,6 @@ func VerifyLegacy(stored, code string) (bool, error) {
 	return subtle.ConstantTimeCompare(raw, sum[:]) == 1, nil
 }
 
-// IsLegacyFormat reports whether a stored value is the legacy "salt:sha256hex" form (has a colon and
-// a 64-hex tail). Keyed-HMAC storage records the generation separately and stores only the hex digest.
 func IsLegacyFormat(stored string) bool {
 	i := strings.IndexByte(stored, ':')
 	if i <= 0 {

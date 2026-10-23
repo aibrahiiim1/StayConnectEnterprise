@@ -1,7 +1,5 @@
 package main
 
-// REGRESSION TESTS FOR THE CLIENT PORTAL AUDIT (stream 8). Each test names the finding it pins.
-
 import (
 	"context"
 	"crypto/tls"
@@ -40,8 +38,8 @@ func (f *auditSCD) last(path string) map[string]any {
 	return c[len(c)-1]
 }
 
-// auditHandler is the client-access fixture (MAC aa:bb:cc:dd:ee:ff, commerce on) over a fake scd answering the
-// given routes; every call is recorded with its JSON body (or its query, for a GET).
+// auditHandler is the client-access fixture (MAC aa:bb:cc:dd:ee:ff, commerce on) over a fake scd; every call is
+// recorded with its JSON body (or query, for a GET).
 func auditHandler(t *testing.T, routes map[string]func(in map[string]any) (int, string)) (*handler, *auditSCD) {
 	t.Helper()
 	f := &auditSCD{calls: map[string][]map[string]any{}, answer: routes}
@@ -101,8 +99,6 @@ func setCookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 	return nil
 }
 
-// ---- P-1, P-33: the card checkout and form-action ---------------------------------------------------------------
-
 func TestFormActionAllowsTheProvidersCheckoutAndThePortalsHTTPSNames(t *testing.T) {
 	csp := portalCSP("n0nce")
 	for _, want := range []string{"form-action 'self'", "https://checkout.stripe.com", "https://accept.paymob.com", "https://ksa.checkout.paymob.com"} {
@@ -141,7 +137,6 @@ func TestCardChoiceSubmittedByScriptIsToldWhereToGo(t *testing.T) {
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &out) != nil || out["next"] != "https://checkout.stripe.com/c/pay/cs_test_1" {
 		t.Fatalf("the page's script must be told the provider's URL, got %d %s", rec.Code, rec.Body.String())
 	}
-	// The plain form still gets its redirect (form-action now allows the provider's origin).
 	r = withCommerce(h, auditReq(http.MethodPost, "/packages/acquire", form), commerceSession{authContextID: "ac", deviceID: "dv", guestNetworkID: "gn"})
 	rec = serveAcct(h, r)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://checkout.stripe.com/c/pay/cs_test_1" {
@@ -157,7 +152,7 @@ func TestThePackagePageSubmitsByScriptAndNavigatesWithWindowLocation(t *testing.
 	}
 }
 
-// A refusal reached by the script is shown once on the package page, from the session -- never from a URL.
+// A refusal is shown once, from the session, never from a URL.
 func TestARefusalTheScriptWasToldAboutIsShownOnThePackagePage(t *testing.T) {
 	routes := cardRoutes()
 	routes["/v1/commerce/quote"] = fixed(409, `{"error":"unavailable"}`)
@@ -184,8 +179,6 @@ func mustSession(h *handler) commerceSession {
 	return s
 }
 
-// ---- P-15, P-25: the return URL and the way back after paying ------------------------------------------------
-
 func TestTheProviderReturnsToTheCanonicalPortalNotTheHostHeader(t *testing.T) {
 	h, f := auditHandler(t, cardRoutes())
 	h.portalTLS = &tlsStateHolder{st: portalTLSState{HTTPSActive: true, Canonical: "portal.example.org", Hostnames: []string{"portal.example.org"}}}
@@ -197,14 +190,11 @@ func TestTheProviderReturnsToTheCanonicalPortalNotTheHostHeader(t *testing.T) {
 	if got := f.last("/v1/commerce/confirm")["return_base"]; got != "https://portal.example.org" {
 		t.Fatalf("return_base = %v, want the canonical HTTPS origin", got)
 	}
-	// After starting the payment, "/" goes back to where the payment stands, not to the package list.
 	rec := serveAcct(h, withCommerce(h, auditReq(http.MethodGet, "/", nil), mustSession(h)))
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/pay/return?p="+auditPurchase {
 		t.Fatalf("/ after paying: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 }
-
-// ---- P-2: the stub OAuth is absent from a production build ----------------------------------------------------
 
 func TestTheStubOAuthIsAbsentFromAProductionBuild(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){})
@@ -220,8 +210,6 @@ func TestTheStubOAuthIsAbsentFromAProductionBuild(t *testing.T) {
 		t.Fatal("the stub confirm redirected in a production build")
 	}
 }
-
-// ---- P-4, P-11, P-12: open selection --------------------------------------------------------------------------
 
 func openRoutes() map[string]func(map[string]any) (int, string) {
 	return map[string]func(map[string]any) (int, string){
@@ -283,8 +271,6 @@ func TestSignOutForgetsTheOpenSelectionCookie(t *testing.T) {
 	}
 }
 
-// ---- P-5, P-31: the voucher refusals ----------------------------------------------------------------------------
-
 func TestAThrottledVoucherIsToldToWaitAndScdCodesAreNeverShown(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){
 		"/v1/sessions/authorize": fixed(429, `{"error":"TOO_MANY_ATTEMPTS"}`),
@@ -313,8 +299,6 @@ func TestDeviceLimitSentencesNoLongerSayDisconnect(t *testing.T) {
 	}
 }
 
-// ---- P-6, P-32, P-16: You're online ----------------------------------------------------------------------------
-
 func TestYoureOnlineSaysTheRealTimeLeftAndTrustsNothingInItsURL(t *testing.T) {
 	ends := time.Now().Add(2*time.Hour + 30*time.Second).UTC().Format(time.RFC3339)
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){
@@ -334,7 +318,6 @@ func TestYoureOnlineSaysTheRealTimeLeftAndTrustsNothingInItsURL(t *testing.T) {
 	if strings.Contains(page, "/api/commerce/") {
 		t.Error("the online page must offer nothing to buy")
 	}
-	// Not online: the sign-in page.
 	h2, _ := auditHandler(t, map[string]func(map[string]any) (int, string){
 		"/v1/sessions/status": fixed(200, `{"session_id":"","active":false}`),
 	})
@@ -343,8 +326,6 @@ func TestYoureOnlineSaysTheRealTimeLeftAndTrustsNothingInItsURL(t *testing.T) {
 		t.Fatalf("a device that is not online must not be told it is: %d", rec.Code)
 	}
 }
-
-// ---- P-22: the captive API -------------------------------------------------------------------------------------
 
 func TestTheCaptiveAPIReportsTheEarlierEnd(t *testing.T) {
 	hard := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
@@ -356,8 +337,6 @@ func TestTheCaptiveAPIReportsTheEarlierEnd(t *testing.T) {
 		t.Fatalf("seconds-remaining must be the hard expiry (~3600), got %v %v", online, left)
 	}
 }
-
-// ---- P-7, P-26: the payment page -------------------------------------------------------------------------------
 
 func TestThePaymentPageOffersAnotherWayAtOnceAfterCancelling(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){})
@@ -376,8 +355,6 @@ func TestThePaymentPageOffersAnotherWayAtOnceAfterCancelling(t *testing.T) {
 	}
 }
 
-// ---- P-8, P-30: sign-out ---------------------------------------------------------------------------------------
-
 func TestSignOutNeedsThisDevicesTokenAndIsRecordedAsLogout(t *testing.T) {
 	h, f := auditHandler(t, map[string]func(map[string]any) (int, string){"/v1/sessions/revoke": fixed(200, `{}`)})
 	rec := serveAcct(h, auditReq(http.MethodPost, "/logout", url.Values{}))
@@ -387,7 +364,6 @@ func TestSignOutNeedsThisDevicesTokenAndIsRecordedAsLogout(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `name="leave" value="`+leaveToken(net.ParseIP("10.20.0.50"))+`"`) {
 		t.Fatal("the confirmation must carry a fresh token so a real client can still sign out")
 	}
-	// Another device's token is not this device's.
 	_ = serveAcct(h, auditReq(http.MethodPost, "/logout", url.Values{"leave": {leaveToken(net.ParseIP("10.20.0.51"))}}))
 	if f.n("/v1/sessions/revoke") != 0 {
 		t.Fatal("another device's token signed this one out")
@@ -408,8 +384,6 @@ func TestEveryDisconnectFormCarriesTheToken(t *testing.T) {
 	}
 }
 
-// ---- P-9: Welcome back -----------------------------------------------------------------------------------------
-
 func TestWelcomeBackKeepsTheCredentialWhenTheRefusalIsAboutTheMoment(t *testing.T) {
 	for _, tc := range []struct {
 		code  int
@@ -419,7 +393,7 @@ func TestWelcomeBackKeepsTheCredentialWhenTheRefusalIsAboutTheMoment(t *testing.
 			"/v1/sessions/authorize-resume": fixed(tc.code, `{"error":"x"}`),
 		})
 		r := auditReq(http.MethodPost, "/auth/resume", url.Values{})
-		r.TLS = &tls.ConnectionState{} // the remembered device is honoured over HTTPS only (B10)
+		r.TLS = &tls.ConnectionState{} // the remembered device is honoured over HTTPS only
 		r.AddCookie(&http.Cookie{Name: clientResumeCookie, Value: "client-tok"})
 		rec := serveAcct(h, r)
 		c := setCookie(rec, clientResumeCookie)
@@ -428,8 +402,6 @@ func TestWelcomeBackKeepsTheCredentialWhenTheRefusalIsAboutTheMoment(t *testing.
 		}
 	}
 }
-
-// ---- P-10, P-28, P-24: the replacement page --------------------------------------------------------------------
 
 func TestReplacementSpendsOneChangeHoweverManyTaps(t *testing.T) {
 	var mu sync.Mutex
@@ -482,8 +454,6 @@ func TestAnArrivingAlertTakesFocus(t *testing.T) {
 	}
 }
 
-// ---- P-13: the held account ------------------------------------------------------------------------------------
-
 func TestAHeldAccountIsOfferedSignOutAndIsNotSentRoundAgain(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){})
 	r := withCommerce(h, auditReq(http.MethodGet, "/account/verification", nil), commerceSession{authContextID: "ac", deviceID: "dv"})
@@ -497,8 +467,6 @@ func TestAHeldAccountIsOfferedSignOutAndIsNotSentRoundAgain(t *testing.T) {
 		t.Fatal("a held account is sent round to the package list again")
 	}
 }
-
-// ---- P-17: cookies ---------------------------------------------------------------------------------------------
 
 func TestCookiesAreSecureOverTLSAndTheRememberedDeviceLivesAsLongAsItsCredential(t *testing.T) {
 	r := auditReq(http.MethodGet, "/", nil)
@@ -523,8 +491,6 @@ func TestCookiesAreSecureOverTLSAndTheRememberedDeviceLivesAsLongAsItsCredential
 		t.Fatalf("og_client defaults to the contract's 30 days, got %d", c.MaxAge)
 	}
 }
-
-// ---- P-18: the one-time code -----------------------------------------------------------------------------------
 
 func TestTheCodeRequestComesOnlyFromThePortalsOwnPageAndIsBoundToTheDevice(t *testing.T) {
 	h, f := auditHandler(t, map[string]func(map[string]any) (int, string){
@@ -551,7 +517,6 @@ func TestTheCodeRequestComesOnlyFromThePortalsOwnPageAndIsBoundToTheDevice(t *te
 	if code := send("application/json", "http://example.com"); code != 200 || f.n("/v1/auth/otp/issue") != 1 {
 		t.Fatalf("the portal's own page must be able to ask: %d", code)
 	}
-	// The pending code reopens for this device, and not for another device that got the same address.
 	methods := func() string {
 		r := auditReq(http.MethodGet, "/api/auth-methods", nil)
 		return serveAcct(h, r).Body.String()
@@ -564,8 +529,6 @@ func TestTheCodeRequestComesOnlyFromThePortalsOwnPageAndIsBoundToTheDevice(t *te
 		t.Fatal("another device on the same address was offered the pending code")
 	}
 }
-
-// ---- P-19: the flood damper ------------------------------------------------------------------------------------
 
 func TestTheSignInDamper(t *testing.T) {
 	d := newSignInDamper()
@@ -586,7 +549,6 @@ func TestTheSignInDamper(t *testing.T) {
 	if !d.allow("10.0.0.1") {
 		t.Fatal("the window must pass")
 	}
-	// The sign-in routes are behind it.
 	h, f := auditHandler(t, map[string]func(map[string]any) (int, string){"/v1/sessions/authorize": fixed(403, `{"error":"x"}`)})
 	h.signIns = newSignInDamper()
 	for i := 0; i < signInBurst+1; i++ {
@@ -596,8 +558,6 @@ func TestTheSignInDamper(t *testing.T) {
 		t.Fatalf("scd was asked %d times, want %d", f.n("/v1/sessions/authorize"), signInBurst)
 	}
 }
-
-// ---- P-20: the request deadline ----------------------------------------------------------------------------------
 
 func TestARequestThatRunsOutGetsAPageInWords(t *testing.T) {
 	h, _ := auditHandler(t, map[string]func(map[string]any) (int, string){})
@@ -613,8 +573,6 @@ func TestARequestThatRunsOutGetsAPageInWords(t *testing.T) {
 		t.Fatal("the deadline must cover quote + confirm + activation")
 	}
 }
-
-// ---- P-21, P-27: the HTTP fallback's origin ----------------------------------------------------------------------
 
 func TestFallbackProbesGoToAnAddressTheDeviceCanReach(t *testing.T) {
 	h := &handler{cfg: cfg{PortalFQDN: "portal.stayconnect.local"}}
@@ -661,8 +619,6 @@ func TestTheHTTPFallbackKeepsTheJourneyOnThePortalAddress(t *testing.T) {
 	}
 }
 
-// ---- H-6: a room guest at the stay's device limit ----------------------------------------------------------------
-
 func TestARoomGuestAtTheDeviceLimitIsOfferedTheReplacementPage(t *testing.T) {
 	routes := map[string]func(map[string]any) (int, string){
 		"/v1/phase3/auth/pms/grant": fixed(200, `{"outcome":"NOT_VERIFIED","failure_class":"DEVICE_LIMIT","device_id":"dv-room","guest_network_id":"gn-room"}`),
@@ -687,7 +643,7 @@ func TestARoomGuestAtTheDeviceLimitIsOfferedTheReplacementPage(t *testing.T) {
 	if !ok || sess.authContextID != "ac-room" || sess.deviceID != "dv-room" || sess.guestNetworkID != "gn-room" {
 		t.Fatalf("session pins: %+v", sess)
 	}
-	// Without the Phase-2 surface there is nowhere to hold the proof: the sentence, as before.
+	// Without the Phase-2 surface there is nowhere to hold the proof, so the sentence is answered.
 	h2, _ := auditHandler(t, routes)
 	h2.commerceSessions = nil
 	r = httptest.NewRequest(http.MethodPost, "/auth/pms/phase3", strings.NewReader(`{"auth_context_id":"ac-room","package_revision_id":"pr-1"}`))

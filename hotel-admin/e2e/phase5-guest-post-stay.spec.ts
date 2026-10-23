@@ -1,27 +1,10 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { portalHTML as renderLanding } from "./portal-page";
 
-// THE POST-STAY GUEST PANEL, in a real browser, running the REAL client JS.
-//
-// The landing page is served by the Go `portald`, so the template is read from the source it is served from
-// (no second copy that can drift) and the script executes exactly as a departing guest's phone would run it.
-//
-// What only a browser can prove here: that the page does not put an identity in the request. The server's
-// strict decoder refuses one, but a refusal is a safety net — this asserts the page never reaches for the net
-// in the first place, on a real DOM, with the real event handlers.
+// The guest page must not send identity fields; the server's strict decoder is a second safeguard.
 
 const UNIFORM_MESSAGE =
   "We could not verify your stay. Please check your details or contact the site team for assistance.";
-
-// renderLanding comes from ./portal-page now.
-//
-// IT USED TO BE A COPY IN THIS FILE, one of five, each ending `.replace(/\{\{[^}]*\}\}/g, "")` -- strip every
-// Go action and hope the rest is HTML. That worked while the only actions were the two client-address
-// conditionals, whose empty branch is a legitimate rendering. It stopped working the moment the shipped
-// wording moved out of the template into languages.go: `var LANGS = {{.Languages}};` became `var LANGS = ;`,
-// a syntax error that killed the entire script block, and thirty-one tests across four files failed with as
-// many symptoms and one cause. The shared helper RENDERS the actions and refuses a page that still contains
-// one.
 
 type Call = { path: string; body: Record<string, unknown> };
 
@@ -32,10 +15,7 @@ async function serve(page: Page, answers: unknown[], calls: Call[]) {
     r.fulfill({
       status: 200,
       contentType: "application/json",
-      // phase5_poststay is declared EXPLICITLY. The tab used to appear whenever PMS was on, so this mock
-      // did not need to mention post-stay at all — which is precisely the coupling that put a Post-Stay tab
-      // in front of guests on an appliance whose post-stay routes were not mounted. The capability now has
-      // its own gate, and a fixture that wants the panel has to say so.
+      // Post-stay needs its own capability gate; PMS availability alone is insufficient.
       body: JSON.stringify({
         pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true, phase5_poststay: true,
       }),
@@ -63,8 +43,7 @@ test.describe("the post-stay guest panel", () => {
 
     const panel = page.locator("#panel-poststay");
     await expect(panel.getByLabel(/post-stay pin/i)).toBeVisible();
-    // The fields a first-time proof needs and a SECOND proof must not: there is no room, no last name and no
-    // reservation number on this panel, because the appliance already knows which stay this device was on.
+    // The appliance already knows the device's stay, so no room or guest identity is requested.
     await expect(panel.locator('input[name="room"]')).toHaveCount(0);
     await expect(panel.locator('input[name="last_name"]')).toHaveCount(0);
     await expect(panel.locator('input[name="reservation_number"]')).toHaveCount(0);
@@ -73,7 +52,6 @@ test.describe("the post-stay guest panel", () => {
 
   test("sends the PIN alone — no stay, room, profile or device", async ({ page }) => {
     const calls: Call[] = [];
-    // Verified with more than one free post-stay package: the server lists them and the guest chooses (P-3).
     await serve(page, [
       {
         ok: true, needs_choice: true, auth_context_id: "ctx-1",
@@ -90,15 +68,13 @@ test.describe("the post-stay guest panel", () => {
     await page.locator("#form-poststay button[type=submit]").click();
 
     await expect.poll(() => calls.length).toBeGreaterThan(0);
-    // The FIRST call is the whole assertion: exactly one key, and it is the PIN.
     expect(Object.keys(calls[0].body).sort()).toEqual(["pin"]);
     expect(calls[0].body.pin).toBe("K7M4RTQX");
     for (const forbidden of ["stay", "stay_id", "room", "room_number", "profile", "profile_id",
       "pms_interface_id", "last_name", "reservation_number", "device"]) {
       expect(calls[0].body).not.toHaveProperty(forbidden);
     }
-    // The second call carries the context the SERVER issued and a package from the offers the SERVER returned
-    // -- still no stay, room, profile or device the page chose.
+    // Reuse server-issued context rather than client-chosen stay or device identifiers.
     await page.locator("#ps-choices button.choice", { hasText: "POSTSTAY-PLUS" }).click();
     await expect.poll(() => calls.length).toBe(2);
     expect(Object.keys(calls[1].body).sort()).toEqual(["auth_context_id", "package_revision_id"]);
@@ -106,8 +82,7 @@ test.describe("the post-stay guest panel", () => {
   });
 
   test("every failure is the same message and reveals nothing", async ({ page }) => {
-    // A server that leaks detail must not become a page that displays it. These are the shapes a broken or
-    // hostile upstream could return; all of them render as the one message.
+    // Collapse upstream refusal details to one guest-visible message to prevent enumeration.
     for (const answer of [
       { ok: false },
       { ok: false, message: "profile 7777aaaa revoked at 10:00" },

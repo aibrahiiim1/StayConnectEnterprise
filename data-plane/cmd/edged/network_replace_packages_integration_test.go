@@ -11,21 +11,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// WHAT A CLIENT-NETWORK REPLACEMENT MAY AND MAY NOT DO TO AN INTERNET PACKAGE.
-//
-// The replacement carries the packages that name the retired network forward onto its successor. That is a
-// republish of an IMMUTABLE revision, which means every field the forwarded spec fails to carry is a silent,
-// uncorrectable edit to the hotel's pricing, offer window, renewal terms or quota — made by an operator who
-// asked for a cabling change. These tests hold the two properties that follow from that:
-//
-//   1. the forwarded revision differs from its predecessor in the network id and in NOTHING else;
-//   2. a package that CANNOT be carried forward stops the change becoming permanent, rather than leaving the
-//      wire confirmed and the catalogue behind it.
+// A replacement republishes (immutable) package revisions onto the successor, so any field the forwarded spec drops
+// is a silent edit to pricing or terms. The forwarded revision must differ only in the network id, and a package
+// that cannot be carried forward must stop the change settling.
 
-// seedNetworkPackage publishes a package with deliberately NON-DEFAULT values in every field a republish could
-// drop, limited to one client network. It writes the revision directly, because the authoring API has no way to
-// set plan_overrides, renewable or max_purchases_per_stay — which is exactly how those three came to be reset on
-// every republish without anybody noticing.
+// seedNetworkPackage publishes a package with non-default values in every field a republish could drop. It writes
+// the revision directly because the authoring API cannot set plan_overrides, renewable or max_purchases_per_stay.
 func (f *apiFixture) seedNetworkPackage(t *testing.T, code, networkID string, extra map[string]string) (pkgID, revID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -133,9 +124,8 @@ func (f *apiFixture) revisionFacts(t *testing.T, pkgID string) revisionFacts {
 	return v
 }
 
-// materialise runs the apply's DATABASE half and then stands up the netd revision the apply would have
-// created, in the state the apply left it in. A settle only ever looks at a request whose apply was KEPT, so a
-// fixture that skipped the revision would be testing a state the product cannot be in.
+// materialise runs the apply's database half, then creates the netd revision the apply would have; a settle only sees
+// requests whose apply was kept, so skipping the revision would test an impossible state.
 func (f *apiFixture) materialise(t *testing.T, replID, revisionState string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -150,8 +140,7 @@ func (f *apiFixture) materialise(t *testing.T, replID, revisionState string) str
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// At most one revision may be mid-flight at a time (ncr_single_inflight). Earlier tests in this package
-	// leave theirs behind, so the fixture retires them rather than racing the index.
+	// At most one revision may be mid-flight (ncr_single_inflight); earlier tests leave theirs behind, so retire them.
 	if _, err := f.pool.Exec(ctx, `UPDATE network_config_revisions SET state='superseded'
 		 WHERE state IN ('applying','pending_confirmation')`); err != nil {
 		t.Fatal(err)
@@ -167,7 +156,6 @@ func (f *apiFixture) materialise(t *testing.T, replID, revisionState string) str
 	return revID
 }
 
-// materialiseAndSettle applies and then settles, as a confirm does.
 func (f *apiFixture) materialiseAndSettle(t *testing.T, replID string) []map[string]any {
 	t.Helper()
 	rev := f.materialise(t, replID, "pending_confirmation")
@@ -191,7 +179,6 @@ func TestIntegration_NetworkReplace_ForwardedRevisionChangesTheNetworkAndNothing
 	if st != 201 {
 		t.Fatalf("stage = %d %v", st, body)
 	}
-	// Staging alone must not touch the catalogue at all.
 	if mid := f.revisionFacts(t, pkgID); mid.RevisionNo != before.RevisionNo {
 		t.Fatalf("staging published a revision: %d -> %d", before.RevisionNo, mid.RevisionNo)
 	}
@@ -213,8 +200,7 @@ func TestIntegration_NetworkReplace_ForwardedRevisionChangesTheNetworkAndNothing
 	if len(after.NetworkIDs) != 1 || !strings.EqualFold(after.NetworkIDs[0], successor) {
 		t.Fatalf("forwarded rule names %v, want the successor %s", after.NetworkIDs, successor)
 	}
-	// EVERY OTHER FIELD, compared one by one. A loop over a struct would pass while silently skipping a field
-	// nobody remembered to add, which is the failure mode this test exists for.
+	// Every other field is compared one by one; a loop over the struct would silently skip a field nobody added.
 	for _, c := range []struct {
 		field string
 		a, b  any
@@ -247,8 +233,7 @@ func TestIntegration_NetworkReplace_ForwardedRevisionChangesTheNetworkAndNothing
 	}
 }
 
-// A PACKAGE WHOSE FIXED END HAS PASSED IS CARRIED FORWARD UNCHANGED (audit O-18). The cabling change does not
-// decide the package's end, so the end it already had -- now in the past -- must not stop the network change.
+// A package whose fixed end has passed is carried forward unchanged: the cabling change does not decide the end.
 func TestIntegration_NetworkReplace_CarriesAPackageWhoseEndHasPassed(t *testing.T) {
 	f := newAPI(t)
 	f.app.commerce = f.commerceAdmin(t)
@@ -268,11 +253,8 @@ func TestIntegration_NetworkReplace_CarriesAPackageWhoseEndHasPassed(t *testing.
 	}
 }
 
-// A PACKAGE THAT CANNOT BE CARRIED FORWARD STOPS THE CHANGE SETTLING. The forced failure is a stored duration
-// policy this build refuses to publish (a stay-dependent end). Publication refuses it, by design, and that
-// refusal must not be swallowed. (A FIXED_AT end that has since passed used to be the example; carrying an
-// unchanged past end is no longer refused, because it is not a duration decision -- audit O-18, and
-// TestIntegration_NetworkReplace_CarriesAPackageWhoseEndHasPassed.)
+// A package that cannot be carried forward stops the change settling. The forced failure is a stored duration
+// policy this build refuses to publish (a stay-dependent end); that refusal must not be swallowed.
 func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedForward(t *testing.T) {
 	f := newAPI(t)
 	f.app.commerce = f.commerceAdmin(t)
@@ -290,7 +272,6 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 	}
 	replID := body["replacement_id"].(string)
 
-	// The pre-flight the confirm route runs refuses it, naming the package — and writes nothing.
 	rev := f.materialise(t, replID, "pending_confirmation")
 	blocking := f.app.replacementsBlockingConfirm(context.Background(), rev)
 	if len(blocking) != 1 {
@@ -303,7 +284,6 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 		t.Fatal("the dry run published a revision; it must write nothing")
 	}
 
-	// ...and settling anyway leaves the request APPLIED rather than CONFIRMED.
 	settled := f.app.settleConfirmedReplacements(context.Background(), nil, rev)
 	if len(settled) != 1 || settled[0]["state"] != "APPLIED" {
 		t.Fatalf("settle = %v, want the request left APPLIED", settled)
@@ -312,8 +292,7 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 		t.Fatalf("replacement state = %s, want APPLIED: a change whose packages were not carried forward must not read as finished", state)
 	}
 
-	// THE GUESTS ARE NOT STRANDED MEANWHILE. The retired network keeps its logical identity, so the pinned rule
-	// still resolves to a device on the successor.
+	// Guests are not stranded: the retired network keeps its logical identity, so the pinned rule still resolves to the successor.
 	var successor string
 	if err := f.pool.QueryRow(context.Background(), `SELECT successor_network_id::text
 		  FROM iam_v2.guest_network_replacements WHERE id=$1`, replID).Scan(&successor); err != nil {
@@ -329,9 +308,7 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 		t.Fatalf("lineage from the successor back to the retired network = %d rows, want 1", ancestors)
 	}
 
-	// Correcting the package lets the withheld settle finish on its own, with no second confirm. The
-	// correction is a NEW revision, because a revision is immutable — which is also why a replacement cannot
-	// repair one of these itself and has to refuse instead.
+	// Correcting the package (a new revision, since revisions are immutable) lets the withheld settle finish without a second confirm.
 	if _, err := f.pool.Exec(context.Background(), `WITH cur AS (
 		  SELECT * FROM iam_v2.internet_package_revisions
 		   WHERE id = (SELECT current_revision_id FROM iam_v2.internet_packages WHERE id=$1)),
@@ -364,8 +341,7 @@ func TestIntegration_NetworkReplace_WillNotSettleWhileAPackageCannotBeCarriedFor
 	}
 }
 
-// A ROLLBACK LEAVES NO LINEAGE AND NO FORWARDED REVISION: the original network is back, and the catalogue is
-// exactly as it was.
+// A rollback leaves no lineage and no forwarded revision; the catalogue is exactly as it was.
 func TestIntegration_NetworkReplace_RollbackLeavesEligibilityExactlyAsItWas(t *testing.T) {
 	f := newAPI(t)
 	f.app.commerce = f.commerceAdmin(t)
@@ -412,7 +388,6 @@ func TestIntegration_NetworkReplace_RollbackLeavesEligibilityExactlyAsItWas(t *t
 	}
 }
 
-// commerceAdmin builds the real authoring engine against the fixture's pool, with the master flag on.
 func (f *apiFixture) commerceAdmin(t *testing.T) *iamv2.CommerceAdmin {
 	t.Helper()
 	repo := iamv2.NewPgCommerceAdminRepository(f.pool)

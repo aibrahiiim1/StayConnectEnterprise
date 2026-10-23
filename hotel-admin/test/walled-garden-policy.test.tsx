@@ -1,6 +1,3 @@
-// N-7: the Allowed sites screen shows the site's widest-range limit, marks a stored rule that is wider than it,
-// edits a rule in place, and changes the limit only with a reason and the password.
-
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 

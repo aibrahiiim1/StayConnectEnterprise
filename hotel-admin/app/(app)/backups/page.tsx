@@ -1,21 +1,7 @@
 "use client";
 
-// BACKUPS — one job, in the order it is done.
-//
-// The journey is BACKUP -> VERIFY -> DOWNLOAD -> RESTORE, so that is the shape of the page: recovery
-// readiness at the top in one sentence, the backups under it with their actions, and the settings that
-// govern them below, collapsed and quiet.
-//
-// RESTORE IS DELIBERATELY HARD TO DO BY ACCIDENT and easy to understand. It is only offered for backups that
-// have passed Verify, it says in plain words what will be replaced, it requires the backup's own name typed
-// out and a password, and it tells the operator what the appliance will do before it does it -- take a safety
-// copy, stop serving, swap, check, and put everything back if the check fails. It then stays open, showing
-// progress, until the appliance reports the outcome.
-//
-// DOWNLOAD IS NARROWER THAN THE PAGE (decision D-B). A backup is a complete copy of the site's data, so taking
-// one off the appliance is for the site admin and the IT manager only, and asks for the password every time:
-// edged answers the password with a single-use ticket valid for a minute, and the file is fetched with it.
-// Every other role that can open this page sees the list and no Download button.
+// Restore is hard to do by accident: only for verified backups, and it needs the backup's own name and a password.
+// Download is limited to site admin and IT manager, asks for the password each time, and is not offered to other roles.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, BACKGROUND_HEADER, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
@@ -76,8 +62,8 @@ export default function BackupsPage() {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
 
-  // THE PASSWORD BUYS A ONE-MINUTE, ONE-USE TICKET; the file is then fetched with it as a form post, so the
-  // browser saves it without leaving the page and the ticket never appears in a URL.
+  // The password buys a one-minute, one-use ticket; the file is fetched with it as a form post so the ticket never
+  // appears in a URL.
   async function download({ password }: { password: string }) {
     if (!downloading) return;
     setDownloadBusy(true); setDownloadErr(null);
@@ -111,9 +97,6 @@ export default function BackupsPage() {
   const newest = artifacts?.[0] ?? null;
   const verifiedNewest = !!newest?.verified_at;
 
-  // TAKING A BACKUP NEEDS THE OPERATOR'S PASSWORD. The endpoint has always required password confirmation -- a
-  // backup writes a complete copy of the property's data to disk -- and the screen once posted no body at all,
-  // so every click returned "malformed request body". The confirmation dialog collects it, masked.
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupErr, setBackupErr] = useState<string | null>(null);
@@ -128,7 +111,6 @@ export default function BackupsPage() {
     } catch (e) { setBackupErr(errMsg(e)); } finally { setBackupBusy(false); }
   }
 
-  // AN ENCRYPTED BACKUP (.age) is opened with a key holder's key, asked for here and sent with this one request.
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const [verifyKey, setVerifyKey] = useState("");
   const startVerify = (name: string) => {
@@ -204,7 +186,6 @@ export default function BackupsPage() {
         </ReadOnlyNotice>
       )}
 
-      {/* MAINTENANCE IS THE MOST IMPORTANT THING ON THE PAGE WHEN IT IS TRUE. */}
       {maint?.active && (
         <Callout tone="warning" icon={<Loader2 className="animate-spin motion-reduce:animate-none" />}
           title="This appliance is not serving clients right now">
@@ -217,7 +198,6 @@ export default function BackupsPage() {
         <Callout tone="danger" title="Verification failed">{verifyOutcome.text}</Callout>
       )}
 
-      {/* ---- 1. CAN WE RECOVER? One sentence, at the top. -------------------------------------------- */}
       <Card>
         <CardBody>
           {artifacts === null ? (
@@ -274,15 +254,12 @@ export default function BackupsPage() {
         </CardBody>
       </Card>
 
-      {/* ---- encryption to the hotel's own keys (GDPR plan C5) --------------------------------------- */}
       <BackupKeysCard writable={writable} />
       <LedgerCard writable={writable} />
       <ScheduledBackupsCard writable={writable} />
 
-      {/* ---- the outcome of the last restore, if there was one --------------------------------------- */}
       {lastRestore && <LastRestoreCard result={lastRestore} />}
 
-      {/* ---- 2. THE BACKUPS, with their actions ------------------------------------------------------ */}
       <Card className="overflow-hidden">
         <CardHeader>
           <div className="space-y-0.5">
@@ -362,12 +339,10 @@ export default function BackupsPage() {
         )}
       </Card>
 
-      {/* ---- 3. THE SETTINGS THAT GOVERN THEM: present, and not in the way ------------------------- */}
       <StorageAndRetention writable={writable} />
       <AccountingRetentionCard writable={writable} />
       <DataRetentionCard writable={writable} />
 
-      {/* ---- Back up now: password confirmation ------------------------------------------------------ */}
       <ConfirmDialog
         open={backupOpen}
         onOpenChange={(v) => { if (!v) { setBackupOpen(false); setBackupErr(null); } }}
@@ -380,7 +355,6 @@ export default function BackupsPage() {
         onConfirm={backupNow}
       />
 
-      {/* ---- Download: password confirmation ---------------------------------------------------------- */}
       <ConfirmDialog
         open={downloading !== null}
         onOpenChange={(v) => { if (!v) { setDownloading(null); setDownloadErr(null); } }}
@@ -418,9 +392,7 @@ export default function BackupsPage() {
 }
 
 function LastRestoreCard({ result }: { result: RestoreResult }) {
-  // A RESTORE IN PROGRESS IS NOT A FAILED ONE. The durable record carries ok:false until it finishes, which
-  // is correct -- nothing has succeeded yet -- but rendering it with a warning icon and a red step list would
-  // tell an operator their restore had gone wrong while it was quietly working.
+  // A restore in progress (ok:false until it finishes) must not render as a failure.
   const running = result.running === true;
   return (
     <Card>
@@ -447,7 +419,6 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
             ? (result.started ? ` · started ${formatDate(result.started)}` : "")
             : <>{result.finished ? ` · ${formatDate(result.finished)}` : ""}{result.duration ? ` · took ${result.duration}` : ""}</>}
         </p>
-        {/* EVERY STEP, INCLUDING THE ONES THAT DID NOT RUN. A restore that stopped early should show where. */}
         {result.steps && result.steps.length > 0 && (
           <ol className="space-y-1.5">
             {result.steps.map((s, i) => (
@@ -467,10 +438,8 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
   );
 }
 
-/** A backup encrypted to the hotel's backup keys (migration 0129). */
 function isEncrypted(name: string) { return name.endsWith(".age"); }
 
-/** THE CONFIRMATION. Two independent proofs, and a plain account of what is about to happen. */
 function RestoreDialog({ backup, onClose, onDone }: {
   backup: Artifact;
   onClose: () => void;
@@ -484,14 +453,8 @@ function RestoreDialog({ backup, onClose, onDone }: {
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
-  // START IT, THEN WATCH IT. The request returns as soon as the appliance has accepted the restore; the
-  // outcome arrives from the durable record. This is not a nicety: the restore restarts edged, so the
-  // connection this request was made over is one of the things being taken away. A screen that waited for a
-  // reply would eventually show a timeout as a FAILURE while the restore was still running -- which is how an
-  // operator ends up starting a second destructive operation on top of the first.
-  //
-  // Nothing here retries anything. It asks what happened until the appliance says. The dialog cannot be
-  // closed while it is busy.
+  // Return as soon as the appliance accepts: the restore restarts edged, so waiting on this request would show a
+  // timeout as failure and invite a second destructive operation.
   async function go({ password, confirm }: { password: string; confirm: string }) {
     if (encrypted && identity.trim() === "") { setErr("This backup is encrypted: paste a key holder’s backup key."); return; }
     setBusy(true); setErr(null);
@@ -507,7 +470,7 @@ function RestoreDialog({ backup, onClose, onDone }: {
     while (alive.current) {
       await new Promise((r) => setTimeout(r, 4000));
       let r: RestoreResult | null = null;
-      // A failed poll means edged is restarting, which is expected mid-restore. Keep asking.
+      // A failed poll means edged is restarting; keep asking.
       try { r = await api.get<RestoreResult>("/backups/last-restore", { [BACKGROUND_HEADER]: "1" }); } catch { continue; }
       if (r?.present && r.running === false) { onDone(r); return; }
     }
@@ -548,8 +511,6 @@ function RestoreDialog({ backup, onClose, onDone }: {
 
       {encrypted && !started && <BackupKeyInput value={identity} onChange={setIdentity} />}
 
-      {/* SAYING WHAT WILL HAPPEN IS PART OF THE CONSENT. An operator agreeing to a destructive step
-          should know the appliance protects them, and how, rather than hoping it does. */}
       <div>
         <div className="mb-1.5 text-label">What the appliance will do</div>
         <ol className="list-decimal space-y-1 ps-5 text-sm text-muted-foreground">
@@ -578,11 +539,6 @@ function RestoreDialog({ backup, onClose, onDone }: {
   );
 }
 
-/** RETENTION, SCHEDULE, DISK AND THE SWEEP.
- *
- *  Kept in full, below the journey, collapsed by default: the numbers matter on the day somebody is looking
- *  for them and are noise on every other day. Retention values are hotel-editable settings, each with its unit,
- *  default and allowed range; saving them requires password confirmation, as the appliance enforces. */
 function StorageAndRetention({ writable }: { writable: boolean }) {
   const toast = useToast();
   const [health, setHealth] = useState<BackupHealth | null>(null);
@@ -599,7 +555,6 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
         api.get<BackupHealth>("/backups/health"),
         api.get<BackupSettings>("/backups/settings"),
       ]);
-      // The backup schedule and counts belong to the Scheduled backups card; this section keeps the sweep's own values.
       const s = { ...s0, retention: s0.retention.filter((x) => !(SCHEDULE_SETTING_KEYS as readonly string[]).includes(x.key)) };
       setHealth(h);
       setSettings(s);
@@ -716,8 +671,6 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
                 </Field>
               </div>
 
-              {/* The sweep is what stands between this appliance and a full disk, and retention decides how
-                  far back it can recover. Changing either is attributed and needs password confirmation. */}
               {writable && dirty && (
                 <div className="space-y-3 rounded-md border border-border bg-surface p-4">
                   <ErrorBanner err={saveErr} className="mb-0" />

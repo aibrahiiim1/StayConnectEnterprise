@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 
-// THE OPERATOR JOURNEY, PERFORMED RATHER THAN DESCRIBED.
-//
-// The operator authors the POLICY — time, speeds, allowance, devices, stay rules — and the server derives the
-// package that expresses it. Each test drives the real controls and reads what was actually SENT, because "the
-// button was enabled" is not "the right policy was published".
-
 const get = vi.fn();
 const put = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -62,7 +56,6 @@ const live = {
   emergency_history: { count: 0 },
 };
 
-/** states may hold successive GET responses, so a test can assert what the screen shows AFTER publishing. */
 function mockGrace(states: Record<string, any>[], history: any[] = []) {
   let i = 0;
   get.mockImplementation((path: string) => {
@@ -87,7 +80,6 @@ function setField(label: string | RegExp, value: string) {
 }
 
 function openEditor(name: RegExp = /Create site policy|Edit policy/) {
-  // The header action; the empty history may offer a second "Create" button, so take the first.
   fireEvent.click(screen.getAllByRole("button", { name })[0]);
 }
 
@@ -122,7 +114,6 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     setField("Upload speed (Mbps)", "3");
     setField("Data allowance (MB)", "750");
     setField("Device limit", "2");
-    // No eligibility field (audit H-19): the converter never read it.
     expect(screen.queryByLabelText("Stay rules after checkout")).toBeNull();
 
     await toReview();
@@ -131,23 +122,18 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     const [path, body] = put.mock.calls[0];
     expect(path).toBe("/checkout-grace");
-    // THE UNITS ARE THE POINT: minutes/hours, Mbps and MB in; seconds, kbps and bytes out.
     expect(body.grace_duration_seconds).toBe(45 * 60);
     expect(body.grace_down_kbps).toBe(8000);
     expect(body.grace_up_kbps).toBe(3000);
     expect(body.grace_data_quota_bytes).toBe(750 * 1024 * 1024);
     expect(body.grace_device_limit).toBe(2);
     expect(body.grace_device_limit_policy).toBe("REJECT_NEW_DEVICE");
-    // Carried unchanged (the schema default for a first policy), never set by the operator.
     expect(body.eligibility_window_seconds).toBe(86400);
-    // No package revision is sent at all: the server derives it.
     expect(body.grace_package_revision_id).toBeUndefined();
-    // Optimistic concurrency and step-up travel with it.
     expect(body.expected_config_version).toBe(0);
     expect(body.password).toBe("s3cret");
     expect(body.reason_code).toBe("INITIAL_SETUP");
 
-    // The page re-reads and says what happened.
     expect(await screen.findByText("Version 1 published")).toBeTruthy();
   });
 
@@ -170,7 +156,6 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     await renderScreen();
     openEditor(/Edit policy/);
 
-    // A second version starts from what is in force, not from a blank form.
     expect((screen.getByLabelText("Grace time") as HTMLInputElement).value).toBe("30");
     expect((screen.getByLabelText("Grace time unit") as HTMLSelectElement).value).toBe("min");
     expect((screen.getByLabelText("Download speed (Mbps)") as HTMLInputElement).value).toBe("10");
@@ -270,10 +255,8 @@ describe("an operator authors the hotel's checkout grace policy", () => {
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Someone else published a newer policy/i));
     expect(put).toHaveBeenCalledTimes(1);
-    // Reloaded, and back on the terms step with the draft intact.
     expect(get.mock.calls.filter((c) => c[0] === "/checkout-grace").length).toBe(2);
     expect((screen.getByLabelText("Grace time") as HTMLInputElement).value).toBe("20");
-    // The review now compares against the NEW version and would publish against it.
     put.mockResolvedValue({ config_version: 8 });
     await toReview();
     const row = within(screen.getByLabelText("Policy changes")).getByText("Grace time").closest("li")!;
@@ -294,7 +277,6 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/password was not accepted/i));
     expect(screen.getByText("Password not accepted.")).toBeTruthy();
     expect(screen.queryByText(/^Version \d+ published$/)).toBeNull();
-    // Still on the review step, so the operator can retype the password.
     expect(screen.getByLabelText("Policy changes")).toBeTruthy();
   });
 
@@ -335,16 +317,13 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     expect(within(list).getByText("Version 2")).toBeTruthy();
     expect(within(list).getByText("Version 1")).toBeTruthy();
     expect(within(list).getByText(/Guest feedback/)).toBeTruthy();
-    // An unknown code is humanised, not shown raw.
     expect(within(list).getByText(/Shorter grace/)).toBeTruthy();
 
-    // What changed in v2, computed from consecutive snapshots.
     const changes = within(list).getByLabelText("Changes in version 2");
     expect(changes.textContent).toMatch(/Grace time: 1 h → 30 min/);
     expect(changes.textContent).toMatch(/Data allowance: 500 MB → 1 GB/);
     expect(changes.textContent).not.toMatch(/Download speed/);
 
-    // Opening a version shows ITS OWN terms.
     fireEvent.click(within(list).getByRole("button", { name: "View terms of version 1" }));
     const terms = await screen.findByLabelText("Version 1 terms");
     expect(within(terms).getByText("1 h")).toBeTruthy();

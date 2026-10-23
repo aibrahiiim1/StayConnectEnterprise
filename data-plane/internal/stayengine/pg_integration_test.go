@@ -14,8 +14,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
-// These tests require a disposable PostgreSQL 16 with the accepted iam_v2 schema + migration 0010 applied,
-// reachable via PHASE3_TEST_DSN (scripts/pmsd-pg-integration.sh builds it). They skip ONLY when no DSN is set.
+// These tests need a disposable PostgreSQL 16 with the iam_v2 schema at PHASE3_TEST_DSN
+// (scripts/pmsd-pg-integration.sh builds it); they skip when it is unset.
 
 func pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -37,11 +37,9 @@ func pool(t *testing.T) *pgxpool.Pool {
 
 type scope struct{ tenant, site, iface string }
 
-// guardedExec runs ONE write in a transaction that first opens the named controlled-operation families. On the
-// full production schema the controlled-writer triggers (stays/stay_events -> 'stay', purchases ->
-// 'commerce_intent', ...) no longer let the superuser through merely for owning the objects, so a test seed must
-// open the family exactly as the product's own writers do. It returns the write's error so callers that assert
-// a GENUINE refusal (uniqueness, append-only) still see it -- and see it for the right reason.
+// guardedExec runs one write after opening the named controlled-operation families, as the product's own
+// writers do (the controlled-writer triggers refuse even the superuser otherwise). It returns the write's
+// error so callers can assert a genuine refusal.
 func guardedExec(p *pgxpool.Pool, families []string, q string, args ...any) error {
 	ctx := context.Background()
 	tx, err := p.Begin(ctx)
@@ -82,7 +80,7 @@ func seed(t *testing.T, p *pgxpool.Pool) scope {
 	return s
 }
 
-// insertLive appends a LIVE PENDING inbox row and returns nothing (the processor consumes it next).
+// insertLive appends a LIVE PENDING inbox row.
 func insertLive(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string) {
 	t.Helper()
 	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
@@ -125,67 +123,54 @@ func eventOutcome(t *testing.T, p *pgxpool.Pool, s scope, identity string) (stat
 	return
 }
 
-// TestIntegration_StayLifecycle drives GI→GC→room-move→GO→reinstate through the real transactional processor
-// and asserts the authoritative Stay state, lifecycle_version episodes, primary guest, and the
-// terminal event outcomes — end to end on PostgreSQL through the real append-only + lifecycle triggers.
 func TestIntegration_StayLifecycle(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seed(t, p)
-	// a GO event has no legacy Stay-domain-only path any more, so the lifecycle test drives the REAL wired
-	// Checkout slice (commerce seeded so the conversion can run).
+	// A GO needs the real Checkout Converter, and commerce seeded so the conversion can run.
 	commerce(t, p, s, true)
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 	res := "RES-1"
 
-	// GI → create IN_HOUSE stay + primary guest (the FO field is not stored, A1)
 	insertLive(t, p, s, "e-gi", "GI", pay(res, "1408", "Smith", "John", "F900", "260101", "260105"))
 	process(t, pr, s)
 	if st, lv, room := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 || room != "1408" {
 		t.Fatalf("after GI: status=%s lv=%d room=%s, want IN_HOUSE/1/1408", st, lv, room)
 	}
-	// SCOPED to this test's own interface: the reservation id is not unique across sites, and an unscoped
-	// count makes the assertion depend on whether the database has seen this test before.
+	// Scoped to this interface: reservation ids are not unique across sites.
 	if n := scalar(t, p, `SELECT count(*) FROM iam_v2.stay_guests g JOIN iam_v2.stays s ON s.id=g.stay_id
 		WHERE s.external_reservation_id=$1 AND s.pms_interface_id=$2 AND g.is_primary`, res, s.iface); n != 1 {
 		t.Fatalf("primary guest count=%d, want 1", n)
 	}
-	// A1 (D46, migration 0100): the FO field is no longer stored as a folio identity (formerly asserted
-	// iam_v2.folios count=1); the folio tables are dropped.
 	assertNoFolioTables(t, p)
 	if st, _ := eventOutcome(t, p, s, "e-gi"); st != "APPLIED" {
 		t.Fatalf("GI outcome=%s, want APPLIED", st)
 	}
 
-	// GC same room → update (name correction), still IN_HOUSE/1
 	insertLive(t, p, s, "e-gc", "GC", pay(res, "1408", "Smithe", "John", "", "260101", "260105"))
 	process(t, pr, s)
 	if st, lv, room := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 || room != "1408" {
 		t.Fatalf("after GC: %s/%d/%s", st, lv, room)
 	}
 
-	// GC different room → room move (episode preserved, lv unchanged)
 	insertLive(t, p, s, "e-move", "GC", pay(res, "1500", "Smithe", "John", "", "260101", "260105"))
 	process(t, pr, s)
 	if st, lv, room := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 || room != "1500" {
 		t.Fatalf("after room move: %s/%d/%s, want IN_HOUSE/1/1500", st, lv, room)
 	}
 
-	// GO → checkout
 	insertLive(t, p, s, "e-go", "GO", pay(res, "1500", "", "", "", "", ""))
 	process(t, pr, s)
 	if st, lv, _ := stayState(t, p, s, res); st != "CHECKED_OUT" || lv != 1 {
 		t.Fatalf("after GO: %s/%d, want CHECKED_OUT/1", st, lv)
 	}
 
-	// duplicate GO → idempotent skip (still CHECKED_OUT)
 	insertLive(t, p, s, "e-go2", "GO", pay(res, "1500", "", "", "", "", ""))
 	process(t, pr, s)
 	if st, r := eventOutcome(t, p, s, "e-go2"); st != "SKIPPED_DUPLICATE" {
 		t.Fatalf("duplicate GO outcome=%s review=%s, want SKIPPED_DUPLICATE", st, r)
 	}
 
-	// GI on a checked-out reservation → REINSTATE (exactly one lifecycle bump)
 	insertLive(t, p, s, "e-reinstate", "GI", pay(res, "1500", "Smithe", "John", "", "260601", "260605"))
 	process(t, pr, s)
 	if st, lv, _ := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 2 {
@@ -193,19 +178,15 @@ func TestIntegration_StayLifecycle(t *testing.T) {
 	}
 }
 
-// TestIntegration_ManualReviewAndEmptyQueue proves an ambiguous event fails closed to MANUAL_REVIEW with a
-// bounded code and admits no Stay, and that ProcessNext reports no work when the inbox is empty.
 func TestIntegration_ManualReviewAndEmptyQueue(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seed(t, p)
 	pr := NewProcessor(p)
 
-	// empty inbox
 	if ok, err := pr.ProcessNext(context.Background(), s.tenant, s.site, s.iface); err != nil || ok {
 		t.Fatalf("empty inbox: ok=%v err=%v, want false/nil", ok, err)
 	}
-	// GO for an unknown reservation → MANUAL_REVIEW, no stay created
 	insertLive(t, p, s, "e-orphan", "GO", pay("UNKNOWN", "9", "", "", "", "", ""))
 	process(t, pr, s)
 	if st, review := eventOutcome(t, p, s, "e-orphan"); st != "MANUAL_REVIEW" || review == "" {

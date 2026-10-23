@@ -9,7 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// fetchLicence runs the appliance's authenticated licence fetch and returns the revoked ids it was told about.
 func (f *fixture) fetchLicence(appID string) []string {
 	f.t.Helper()
 	lb := &LicensesBase{Base: f.base, Svc: f.base.Lic}
@@ -27,8 +26,7 @@ func (f *fixture) fetchLicence(appID string) []string {
 	return out.Revoked
 }
 
-// X-5: deleting a site must not erase a revocation the appliance has not received yet. The site is refused
-// until the appliance's licence fetch has carried the revocation; then the history goes with the site.
+// Deleting a site must not erase a revocation the appliance has not received; it is refused until a licence fetch carries it.
 func TestSiteDeleteWaitsForRevocationDelivery(t *testing.T) {
 	f := newFixture(t)
 	cust, siteA := f.customerSite("Two Sites")
@@ -42,7 +40,6 @@ func TestSiteDeleteWaitsForRevocationDelivery(t *testing.T) {
 	var licID string
 	_ = f.pool.QueryRow(f.ctx, `SELECT id::text FROM licenses WHERE $1::uuid = ANY(appliance_ids) AND status='active'`, app).Scan(&licID)
 
-	// Revoke the licence, then move the (now unlicensed) appliance to the other site.
 	rec = f.operatorCallAs(f.session, f.base.licenseAction("revoke"), http.MethodPost, map[string]string{"id": licID},
 		map[string]any{"reason": "unpaid"})
 	if rec.Code != http.StatusOK {
@@ -65,7 +62,6 @@ func TestSiteDeleteWaitsForRevocationDelivery(t *testing.T) {
 		t.Fatal("the revoked licence row must survive the refused delete")
 	}
 
-	// The appliance fetches; the revocation is in its answer and is recorded as delivered.
 	got := f.fetchLicence(app)
 	if len(got) != 1 || got[0] != licID {
 		t.Fatalf("the licence fetch must carry the revocation, got %v", got)

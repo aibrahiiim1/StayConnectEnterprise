@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// THE CONTRACT, AGAINST A REAL DATABASE (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md).
-// Needs IAMV2_TEST_DSN / PHASE2_TEST_DSN (scripts/sitedb-dev.sh up); skipped otherwise.
+// Needs IAMV2_TEST_DSN / PHASE2_TEST_DSN; skipped otherwise.
 
 func TestAVerifiedEmailLinksAGoogleSignInToTheSameClient(t *testing.T) {
 	db := scratchDB(t)
@@ -38,12 +37,10 @@ func TestAVerifiedEmailLinksAGoogleSignInToTheSameClient(t *testing.T) {
 		return out
 	}
 
-	// 1. An email code creates the Client.
 	alice := resolve(OTPFactor("EMAIL", "Alice@Example.com"), nil)
 	if alice.PrincipalID == "" || !alice.Created {
 		t.Fatalf("first code must create: %+v", alice)
 	}
-	// 2. Google, asserting the same verified email: the SAME Client, with the subject now attached.
 	p, sec := SocialFactors("google", "sub-alice", "alice@example.com", true, map[string]string{"hd": "example.com"})
 	g := resolve(p, sec)
 	if g.PrincipalID != alice.PrincipalID || g.Created {
@@ -65,19 +62,18 @@ func TestAVerifiedEmailLinksAGoogleSignInToTheSameClient(t *testing.T) {
 	if social != 1 || email != 1 {
 		t.Fatalf("one Client, two factors; got %+v", fs)
 	}
-	// 3. The same subject again, now without an email at all (a provider that stopped sharing it): still her.
+	// Same subject without an email (provider stopped sharing it): still the same Client.
 	again := resolve(FactorClaim{Type: "SOCIAL_SUBJECT", Issuer: "google", Value: "sub-alice"}, nil)
 	if again.PrincipalID != alice.PrincipalID {
 		t.Fatal("the subject is the identity; the email was only ever a second factor")
 	}
-	// 4. Facebook with the same email links NOTHING: it is a different Client, keyed by its own subject.
+	// Facebook with the same email links nothing: a different Client keyed by its own subject.
 	fp, fsec := SocialFactors("facebook", "fb-1", "alice@example.com", true, nil)
 	fb := resolve(fp, fsec)
 	if fb.PrincipalID == alice.PrincipalID || !fb.Created {
 		t.Fatalf("facebook must not be believed about a mailbox: %+v", fb)
 	}
-	// 5. A conflict is recorded, never merged: carol signs in with Google (sub-carol, carol@); bob exists by
-	// code; then sub-carol turns up asserting bob's address. Sub wins; bob's Client is untouched.
+	// A conflict is recorded, never merged: sub-carol asserting bob's address keeps carol's Client; bob's is untouched.
 	cp, csec := SocialFactors("google", "sub-carol", "carol@example.com", true, nil)
 	carol := resolve(cp, csec)
 	bob := resolve(OTPFactor("EMAIL", "bob@example.com"), nil)
@@ -93,7 +89,7 @@ func TestAVerifiedEmailLinksAGoogleSignInToTheSameClient(t *testing.T) {
 	if bobAgain.PrincipalID != bob.PrincipalID {
 		t.Fatal("bob's Client must not have been moved or merged")
 	}
-	// 6. A row the previous code wrote (the subject keyed by the email) still finds its Client.
+	// A legacy row (subject keyed by the email) still finds its Client.
 	var legacyPID string
 	if err := db.QueryRow(ctx, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, testTenant).Scan(&legacyPID); err != nil {
 		t.Fatal(err)
@@ -107,10 +103,9 @@ func TestAVerifiedEmailLinksAGoogleSignInToTheSameClient(t *testing.T) {
 	if legacy.PrincipalID != legacyPID || legacy.Created {
 		t.Fatalf("a pre-0107 row must be honoured, got %+v want %s", legacy, legacyPID)
 	}
-	// ...and nothing re-created the legacy-shaped row: the lookup-only claim is never inserted.
 	var n int
 	_ = db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_principal_identities WHERE factor_value_norm='legacy@example.com'`).Scan(&n)
-	if n != 2 { // the legacy SOCIAL row + the new EMAIL factor
+	if n != 2 {
 		t.Fatalf("expected the legacy row plus one EMAIL factor, got %d rows", n)
 	}
 }
@@ -150,7 +145,6 @@ func TestTheGroupIsDecidedFromVerifiedFactorsAndPinnedOnTheContext(t *testing.T)
 	if pub.ClientGroupID != "" {
 		t.Fatalf("a public address is in no group: %+v", pub)
 	}
-	// The pin is on the row, with evidence that names no address, and the commerce reader sees it.
 	var pinned string
 	var evidence string
 	if err := db.QueryRow(ctx, `SELECT COALESCE(client_group_id::text,''), COALESCE(client_group_evidence::text,'') FROM iam_v2.auth_contexts WHERE id=$1`, staff.AuthContextID).Scan(&pinned, &evidence); err != nil {
@@ -167,8 +161,7 @@ func TestTheGroupIsDecidedFromVerifiedFactorsAndPinnedOnTheContext(t *testing.T)
 		}
 		return nil
 	})
-	// DELETING THE GROUP CLEARS ONLY THE PIN: the context survives as Public with its evidence intact, and the
-	// referential action is allowed under the auth_context operation scope (what edged opens).
+	// Deleting the group clears only the pin; the context survives as Public.
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +190,6 @@ func TestTheGroupIsDecidedFromVerifiedFactorsAndPinnedOnTheContext(t *testing.T)
 		VALUES ($1,$2,$3::uuid,'EMAIL_DOMAIN','{"domains":["example.com"]}'::jsonb)`, testTenant, testSite, gid); err != nil {
 		t.Fatal(err)
 	}
-	// A remembered device resumes with the SAME decision, from stored factors.
 	resumed, err := a.Authenticate(ctx, Request{Method: MethodOTP, TenantID: testTenant, SiteID: testSite,
 		ResumedPrincipalID: staff.Subject.PrincipalID,
 		Device:             DeviceContext{MAC: "02:00:00:00:00:77", ApplianceID: p2Appl, GuestNetworkID: testGN, IP: "10.50.0.9"}})
@@ -232,13 +224,12 @@ func TestFreeAllowanceIsKeyedOnThePackageAndCountsTheDevice(t *testing.T) {
 	if err != nil || pr.EntitlementID == "" {
 		t.Fatalf("confirm: %+v %v", pr, err)
 	}
-	// The same account, a fresh context: the free allowance is spent, and the list says so.
 	ac2 := scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`, p2Tenant, p2Site, s.accountID, s.deviceID, p2GN)
 	if l := list(ac2, s.deviceID); len(l.Packages) != 0 || !l.FreeAllowanceUsed {
 		t.Fatalf("spent allowance must be withheld AND explained: %+v", l)
 	}
-	// REPUBLISHING DOES NOT RESET IT: a new revision of the same package, same rule.
+	// Republishing does not reset the spent allowance.
 	rev2 := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
 		VALUES ($1,$2,$3,2,$4,'GENERAL',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb,'{"name":"Free WiFi v2"}'::jsonb) RETURNING id::text`,
@@ -257,14 +248,13 @@ func TestFreeAllowanceIsKeyedOnThePackageAndCountsTheDevice(t *testing.T) {
 	if l := list(ac3, s.deviceID); len(l.Packages) != 0 || !l.FreeAllowanceUsed {
 		t.Fatalf("a republish must not hand out a second free allowance: %+v", l)
 	}
-	// ANOTHER IDENTITY ON THE SAME DEVICE: still spent (the device counts on a free package by default).
+	// Another identity on the same device is still spent (the device counts on a free package by default).
 	pid := scan1(t, db, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, p2Tenant)
 	ac4 := scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_principal_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'OTP',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`, p2Tenant, p2Site, pid, s.deviceID, p2GN)
 	if l := list(ac4, s.deviceID); len(l.Packages) != 0 || !l.FreeAllowanceUsed {
 		t.Fatalf("a second email on the same phone is not a second allowance: %+v", l)
 	}
-	// A NEW CLIENT ON A NEW DEVICE: offered.
 	dev2 := scan1(t, db, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,'02:00:00:fe:00:01') RETURNING id::text`, p2Tenant, p2Site, p2Appl)
 	pid2 := scan1(t, db, `INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`, p2Tenant)
 	ac5 := scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_principal_id,device_id,guest_network_id,expires_at)
@@ -272,13 +262,10 @@ func TestFreeAllowanceIsKeyedOnThePackageAndCountsTheDevice(t *testing.T) {
 	if l := list(ac5, dev2); len(l.Packages) != 1 || l.FreeAllowanceUsed {
 		t.Fatalf("a new Client on a new device is offered the free package: %+v", l)
 	}
-	// And the quote agrees with the list: the spent account cannot quote what the list withheld.
 	if q, err := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: ac3, PackageID: s.packageID, DeviceID: s.deviceID, GuestNetworkID: p2GN}); err != nil || q.QuoteID != "" {
 		t.Fatalf("a quote must never pass what the list withheld: %+v %v", q, err)
 	}
-	// A VOUCHER ON THE SAME PHONE IS ITS OWN ALLOWANCE (O-10). The device has had this package, so the
-	// device-counted history answers "yes" -- for a voucher subject the device is not counted, and a second
-	// card redeems. The read is the real history query the list and quote use.
+	// A voucher on the same phone has its own allowance: the device is not counted for a voucher subject.
 	pol := PriorPurchasePolicyOf([]EligibilityRule{{Type: RulePriorPurchase, Value: map[string]any{"forbids_prior": true}}}, 0)
 	voucherSubject := CommerceSubject{Kind: SubjectVoucher, VoucherID: "00000000-0000-4000-8000-0000000000b1", DeviceID: s.deviceID}
 	if err := NewPgCommerceRepository(db).WithTx(ctx, func(tx CommerceTx) error {

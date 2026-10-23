@@ -11,34 +11,27 @@ import (
 	"strings"
 )
 
-// ErrNotFound is returned by Get for an object that does not exist (as opposed to a storage that cannot be reached).
+// ErrNotFound is returned by Get for a missing object (as opposed to unreachable storage).
 var ErrNotFound = errors.New("ledger: not found")
 
-// Destination is somewhere a copy of the ledger can be kept. It is deliberately tiny: put a whole object atomically, get it
-// back, say whether it can be used. The ledger is small and written rarely (an erasure is a handful of lines), so every
-// write replaces the whole object: there is no append protocol to get wrong over a network, and a reader sees the old
-// ledger or the new one, never half of one.
+// Destination keeps a copy of the ledger. Every write replaces the whole object atomically, so there is no append
+// protocol over the network and a reader never sees half a ledger.
 type Destination interface {
-	// Kind is "dir", "sftp" or "s3".
 	Kind() string
 	// Describe names the place without any secret ("/mnt/ledger", "sftp://user@host/path", "s3://bucket/prefix").
 	Describe() string
-	// Check proves the place can be used without changing anything that matters: it is reachable, it can be written and read
-	// back, and (for a directory) it is genuinely not the appliance's own disk.
+	// Check proves the place is usable without changing anything that matters: reachable, writable and readable, and
+	// for a directory not the appliance's own disk.
 	Check(ctx context.Context) error
-	// Put replaces the named object atomically and durably.
 	Put(ctx context.Context, name string, data []byte) error
-	// Get returns the named object, or ErrNotFound.
 	Get(ctx context.Context, name string) ([]byte, error)
-	// Remove deletes the named object; a missing one is not an error.
 	Remove(ctx context.Context, name string) error
 }
 
 // DirDest keeps the ledger in a directory: a mounted external disk, or a NAS share mounted by the operating system.
 type DirDest struct {
 	Root string
-	// Independent, when set, is asked to prove the directory is not on the appliance's own storage. Production sets it
-	// (independence_linux.go); tests that only exercise the file protocol leave it nil.
+	// Independent, when set, proves the directory is not on the appliance's own storage; production sets it, tests leave it nil.
 	Independent func(root string) error
 }
 
@@ -116,8 +109,7 @@ func (d *DirDest) Get(_ context.Context, name string) ([]byte, error) {
 	return b, err
 }
 
-// checkRoundTrip writes a probe object, reads it back byte for byte and removes it, so "Test" answers the only question that
-// matters: would a ledger put here come back?
+// checkRoundTrip writes, reads back and removes a probe object: would a ledger put here come back?
 func checkRoundTrip(ctx context.Context, d Destination) error {
 	probe := []byte("stayconnect ledger probe " + hex.EncodeToString(probeNonce()))
 	name := "ledger-probe.tmp"
@@ -141,7 +133,6 @@ func probeNonce() []byte {
 	return b
 }
 
-// Remove deletes an object (used to clean the probe up).
 func (d *DirDest) Remove(_ context.Context, name string) error {
 	p, err := d.path(name)
 	if err != nil {

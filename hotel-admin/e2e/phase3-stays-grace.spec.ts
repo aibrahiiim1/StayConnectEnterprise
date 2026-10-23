@@ -1,10 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// Browser-level E2E for the Phase-3 (DARK) Hotel-Admin surface. The edged backend is fully mocked at the
-// network layer — no real backend, no database, no production data, no PMS. The Next server under test runs
-// with NEXT_PUBLIC_PHASE3_ADMIN=1 (a TEST-only flag-ON profile, never the deployed dark bundle).
-
 type Mutations = { method: string; path: string; body: unknown }[];
 
 async function installBackend(
@@ -52,7 +48,6 @@ async function installBackend(
     if (path.startsWith("/pms-stays/")) return route.fulfill(json(200, opts.stayDetail ?? {}));
     if (path.startsWith("/pms-stays")) return route.fulfill(json(200, list(opts.stays ?? [])));
     if (path.startsWith("/pms-events")) {
-      // edged pages this list and counts every message for the tiles; the mock answers the same shape.
       const ev = (opts.events ?? []) as { processing_status?: string; stay_id?: string; received_at?: string }[];
       const n = (s: string) => ev.filter((e) => e.processing_status === s).length;
       return route.fulfill(json(200, {
@@ -82,9 +77,7 @@ async function installBackend(
       return route.fulfill(json(200, JSON.stringify({ data: opts.packages ?? [gracePackage], meta: { has_more: false } })));
     }
     if (path === "/checkout-grace") {
-      // `effective` is not optional decoration: the real endpoint has returned it on BOTH branches since the
-      // page started answering "what does a departing guest actually get". This fixture omitted it, which
-      // made the mock describe a response the appliance stopped sending.
+      // Include effective terms to match both branches of the server response.
       if (opts.unpublished) {
         return route.fulfill(json(200, {
           published: false, config_version: 0,
@@ -172,14 +165,11 @@ test("stays list shows the stay and its occupants and room charge state on deman
     mutations,
   });
   await page.goto("/stays");
-  // The list opens on in-house stays, which is the question an operator asks by default; this fixture is a
-  // departed stay, so the filter is set explicitly rather than the fixture being changed to fit the default.
   await page.getByLabel("Filter by status").selectOption("");
   await expect(page.getByText("R900")).toBeVisible();
   await page.getByRole("button", { name: "View" }).click();
   await expect(page.getByText("Byron, Ada")).toBeVisible();
   await expect(page.getByRole("region", { name: "Room charge" }).getByText("The guest is not in house")).toBeVisible();
-  // a read-only page issues no mutations at all
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
 });
 
@@ -202,7 +192,6 @@ test("stay events open on the whole feed and still show why an event was refused
   await page.goto("/stay-events");
   await expect(page.getByText(/folio claimed by other stay/i)).toBeVisible();
   await expect(page.getByLabel(/Filter by what happened to the message/i)).toHaveValue("");
-  // ...and the queue is ANNOUNCED rather than being the only thing visible.
   await expect(page.getByText(/need a decision/i).first()).toBeVisible();
 });
 
@@ -233,8 +222,6 @@ test("an operator acknowledges an operational alert", async ({ page }) => {
     .toBeTruthy();
 });
 
-// The checkout grace journey: open the editor sheet, set terms, review old → new, choose a reason, confirm the
-// password, publish. The operator authors the POLICY; the system derives the package.
 async function openGraceEditor(page: Page) {
   await page.getByRole("button", { name: /^(Edit policy|Create site policy)$/ }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -266,11 +253,10 @@ test("publishing the checkout-grace policy sends the COMPLETE policy and reports
     if (k === "grace_package_revision_id" || k === "config_version") continue;
     expect(sent).toHaveProperty(k);
   }
-  // NO PACKAGE IS SENT. The server derives the revision that expresses these terms exactly.
+  // Let the server derive the package matching the authored policy.
   expect(sent.grace_package_revision_id).toBeUndefined();
   expect(sent.grace_duration_seconds).toBe(5400);
   expect(sent.grace_down_kbps).toBe(4000);
-  // governed publication: the version the operator read, a VALID reason code and a password confirmation
   expect(sent.expected_config_version).toBe(7);
   expect(String(sent.reason_code)).toMatch(/^[A-Z][A-Z0-9_]{0,63}$/);
   expect(sent.password).toBe("operator-pw");
@@ -303,7 +289,6 @@ test("a refused policy is surfaced, not silently swallowed", async ({ page }) =>
   await page.getByLabel("Grace time", { exact: true }).fill("45");
   await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
   await reviewAndPublish(page);
-  // the refusal reaches the operator rather than being swallowed into a success state
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText(/refused/i);
   await expect(page.getByText(/^Version \d+ published$/)).toHaveCount(0);
 });
@@ -312,16 +297,12 @@ test("a site with no published policy starts from defaults rather than an error"
   const mutations: Mutations = [];
   await installBackend(page, { unpublished: true, mutations });
   await page.goto("/checkout-grace");
-  // A STARTING POINT WITH A WAY OUT OF IT: it names what is actually in force and offers the action that
-  // leaves it, instead of sending the operator to the commercial catalog.
   await expect(page.getByText(/Departing guests are on the emergency fallback/)).toBeVisible();
   await expect(page.getByRole("button", { name: /Create site policy/ }).first()).toBeVisible();
   await expect(page.getByText(/commercial catalog/i)).toHaveCount(0);
   await expect(page.getByText(/could not be loaded/)).toHaveCount(0);
 });
 
-// Accessibility: the pages must be operable and understandable without sight — every control carries a name,
-// the page has one main heading, and the filters are labelled.
 test("phase-3 pages are accessible: named controls, one heading, labelled filters", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { stays: [stay], events: [], alerts: [], grace: graceCfg, mutations });
@@ -347,7 +328,6 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
   ]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
-  // No eligibility field (audit H-19): the converter never read it, so the form no longer offers it.
   await expect(page.getByLabel("Stay rules after checkout", { exact: true })).toHaveCount(0);
   await page.getByLabel("Grace time", { exact: true }).fill("45");
   await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
@@ -356,7 +336,6 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
 
-  // every interactive control on the page has an accessible name
   const unnamed = await page.evaluate(() => {
     const els = Array.from(document.querySelectorAll("button, a[href], select, input"));
     return els.filter((el) => {
@@ -388,7 +367,7 @@ test("a policy published by someone else is a conflict the operator can see, not
   await page.getByLabel("Grace time unit", { exact: true }).selectOption("min");
   await reviewAndPublish(page);
   await expect(page.getByText(/Someone else published a newer policy/i)).toBeVisible();
-  // the draft survives the reload
+  // Preserve the draft while reloading after a publication conflict.
   await expect(page.getByLabel("Grace time", { exact: true })).toHaveValue("45");
 });
 

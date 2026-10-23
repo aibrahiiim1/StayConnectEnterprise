@@ -1,22 +1,7 @@
 package main
 
-// A REAL BROWSER, THE REAL CSP, A REAL CROSS-ORIGIN CHECKOUT (audit P-1).
-//
-// The defect was invisible to every handler test: /packages/acquire answered 303 to the provider, which is
-// correct, and Chromium then refused the redirect because the page's form-action is 'self'. Only a browser
-// enforcing the policy shows it. This drives a headless Chrome (or Chromium / Edge) against the real portald
-// handler -- the real package page, its real script and its real Content-Security-Policy -- with a local HTTPS
-// server standing in for the provider's hosted checkout on another origin, and asserts where the browser ends up:
-//
-//	A. the page's own script (fetch + window.location), the provider NOT in form-action  -> reaches the provider
-//	B. a plain form submission, the provider NOT in form-action                          -> blocked (the control:
-//	   proves the browser enforces form-action on the redirect, so A and C mean something)
-//	C. a plain form submission, the provider in form-action (the no-script fallback)      -> reaches the provider
-//
-// The browser is found at $ONEGATE_TEST_CHROME or the usual install paths; without one the test is skipped (and
-// says so). The harness adds one nonce-carrying script that presses the first package button, because
-// --dump-dom cannot click; for B and C it submits the form with HTMLFormElement.submit(), which bypasses the
-// page's submit handler exactly as a browser without script would.
+// A real browser enforcing the real CSP on a cross-origin checkout: a 303 to the provider is blocked by form-action 'self', which no handler test can show.
+// Cases: A script navigation reaches the provider; B plain form POST without the provider in form-action is blocked (the control); C with it in form-action reaches the provider. Skipped without a browser ($ONEGATE_TEST_CHROME or usual paths).
 
 import (
 	"bytes"
@@ -67,9 +52,7 @@ func TestCardCheckoutReachesTheProviderInARealBrowser(t *testing.T) {
 	if chrome == "" {
 		t.Skip("no Chrome/Chromium/Edge found (set ONEGATE_TEST_CHROME): the browser-level CSP check did not run")
 	}
-	// The provider's hosted checkout: another origin, over HTTPS.
-	// A navigation that reaches it is counted HERE, on the provider's side: that is the fact under test, and it
-	// does not depend on when the browser happens to dump its DOM.
+	// The provider's hosted checkout, another origin over HTTPS; reaches are counted on its side.
 	var hits atomic.Int32
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/c/pay/cs_test_1" {
@@ -79,7 +62,7 @@ func TestCardCheckoutReachesTheProviderInARealBrowser(t *testing.T) {
 		_, _ = w.Write([]byte(`<!doctype html><html><body><h1 id="reached">PROVIDER-CHECKOUT-REACHED</h1></body></html>`))
 	}))
 	defer provider.Close()
-	providerOrigin := strings.Replace(provider.URL, "127.0.0.1", "localhost", 1) // a different host: cross-origin
+	providerOrigin := strings.Replace(provider.URL, "127.0.0.1", "localhost", 1)
 
 	saved := hostedCheckoutOrigins
 	defer func() { hostedCheckoutOrigins = saved }()
@@ -115,10 +98,8 @@ func TestCardCheckoutReachesTheProviderInARealBrowser(t *testing.T) {
 				press = `HTMLFormElement.prototype.submit.call(document.querySelector('.choice-list form'));`
 			}
 			portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// The browser's connection is loopback; the portal identifies the device from the address it
-				// came from, so the harness presents the fixture's guest address.
+				// The portal identifies the device from the source address, so the harness presents the fixture's guest address.
 				r.RemoteAddr = "10.20.0.50:4321"
-				// Plain bytes, so the harness can add its one script.
 				r.Header.Del("Accept-Encoding")
 				if r.URL.Path == "/start" {
 					http.SetCookie(w, &http.Cookie{Name: commerceCookie, Value: "tok-browser", Path: "/"})

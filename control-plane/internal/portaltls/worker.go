@@ -11,29 +11,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// THE WORKER. One loop per ctrlapi, every 30 s (sooner when nudged):
-//
-//  1. DNS: publish A records whose address changed, delete those of released hostnames;
-//  2. revocations that were requested (retirement, domain removal, an operator);
-//  3. queued orders, one at a time, within the weekly cap on NEW gw.onegate.work certificates;
-//  4. ARI: refresh renew_after daily for every current certificate;
-//  5. hotel domains: re-check every VERIFIED delegation daily (a broken one becomes FAILED: no renewals).
-//
-// It does nothing at all until Central is configured (Availability), so a fresh Central runs it harmlessly.
-
-// WorkerInterval is how often the worker looks for work.
+// The worker does nothing until Central is configured (Availability).
 const WorkerInterval = 30 * time.Second
 
-// Order processing limits.
 const (
 	maxAttempts    = 5
-	processingRent = 20 * time.Minute // how long a PROCESSING order is leased before another pass may reclaim it
+	processingRent = 20 * time.Minute // lease on a PROCESSING order before another pass may reclaim it
 	issueBudget    = 10 * time.Minute // one ACME conversation, propagation included
 	capWindow      = 7 * 24 * time.Hour
 )
 
-// Backoff is the wait before retrying an order that failed for the n-th time (n >= 1): 5 min, 15 min, 1 h,
-// 4 h. The fifth failure is final.
+// Backoff is the wait after the n-th failure (n >= 1); the fifth failure is final.
 func Backoff(n int) time.Duration {
 	switch {
 	case n <= 1:
@@ -47,9 +35,8 @@ func Backoff(n int) time.Duration {
 	}
 }
 
-// WeeklyCap decides whether one more NEW certificate may be issued now. counted are the times at which the
-// counted certificates were issued in the last 7 days (an issuance in progress counts as now). If the cap is
-// reached, the answer is the moment enough of them will have aged out of the rolling window for one more.
+// WeeklyCap decides whether one more NEW certificate may be issued now (an issuance in progress counts as
+// now). At the cap it returns when enough have aged out of the rolling window.
 func WeeklyCap(limit int, counted []time.Time, now time.Time) (bool, time.Time) {
 	var live []time.Time
 	for _, t := range counted {
@@ -61,11 +48,10 @@ func WeeklyCap(limit int, counted []time.Time, now time.Time) (bool, time.Time) 
 		return true, now
 	}
 	sort.Slice(live, func(i, j int) bool { return live[i].Before(live[j]) })
-	// Issuing one more needs len(live)-limit+1 of them gone; the last of those to go is live[len(live)-limit].
+	// One more needs len(live)-limit+1 gone; the last of those is live[len(live)-limit].
 	return false, live[len(live)-limit].Add(capWindow)
 }
 
-// Run is the worker loop. It returns when ctx ends.
 func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(WorkerInterval)
 	defer t.Stop()
@@ -80,7 +66,6 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// Tick runs one pass of the worker.
 func (s *Service) Tick(ctx context.Context) {
 	st, ok := s.available(ctx)
 	if !ok {
@@ -137,7 +122,6 @@ func (s *Service) syncAllDNS(ctx context.Context, prov DNSProvider) {
 	}
 }
 
-// processNextOrder claims one due order and runs it. Reports whether there was one.
 func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSProvider) (bool, error) {
 	dirURL := s.Opts.directoryURL(st.ACMEDirectory)
 	tx, err := s.DB.Begin(ctx)
@@ -164,9 +148,8 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 
 	countsNew := false
 	if kind == KindOneGate {
-		// NEW = this hostname never had a certificate FROM THIS DIRECTORY. Let's Encrypt exempts renewals from its
-		// 50-per-week limit on a registered domain, and so does this cap -- but a staging certificate is not a
-		// production one: the first production certificate after the staging-first switch is new to the CA.
+		// NEW = no earlier certificate for this hostname from THIS directory (renewals are exempt from the CA's
+		// limit); a staging certificate does not make a production one a renewal.
 		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM portal_certificate_orders
 		        WHERE hostname=$1 AND issued_at IS NOT NULL AND acme_directory_url=$2)`,
 			hostname, dirURL).Scan(&countsNew); err != nil {
@@ -174,7 +157,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 		}
 	}
 	if countsNew {
-		// One cap decision at a time, across every ctrlapi sharing this database.
+		// One cap decision at a time across every ctrlapi sharing this database.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('portal_tls_weekly_cap'))`); err != nil {
 			return false, err
 		}
@@ -224,8 +207,7 @@ func (s *Service) processNextOrder(ctx context.Context, st *Settings, prov DNSPr
 	return true, nil
 }
 
-// runOrder checks the order is still wanted and obtains the certificate. permanent marks a failure no retry
-// can fix (the hostname was released, the domain no longer verified).
+// runOrder obtains the certificate if the order is still wanted. permanent marks a failure no retry can fix.
 func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, dirURL, id, applianceID, hostname, kind string,
 	csrDER []byte) (*issued, bool, error) {
 	challengeLabel := ""
@@ -288,8 +270,7 @@ func (s *Service) completeOrder(ctx context.Context, id, applianceID, hostname s
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		// Cancelled while the CA was working (the appliance was retired, the domain removed): the certificate
-		// exists anyway, so it is recorded and revoked rather than left valid and forgotten.
+		// Cancelled while the CA was working: the certificate exists anyway, so record and revoke it.
 		_, _ = tx.Exec(ctx, `
             UPDATE portal_certificate_orders
                SET issued_at=now(), not_before=$2, not_after=$3, serial=$4, chain_pem=$5,
@@ -301,7 +282,6 @@ func (s *Service) completeOrder(ctx context.Context, id, applianceID, hostname s
 		s.Nudge()
 		return
 	}
-	// The new certificate replaces the one before it.
 	_, _ = tx.Exec(ctx, `
         UPDATE portal_certificate_orders SET status='SUPERSEDED'
          WHERE appliance_id=$1 AND hostname=$2 AND status='ISSUED' AND id::text<>$3`, applianceID, hostname, id)
@@ -334,8 +314,8 @@ func (s *Service) failOrder(ctx context.Context, id, applianceID, hostname strin
 	slog.Warn("portal tls: certificate order failed", "order_id", id, "hostname", hostname, "attempt", attempts, "final", final, "err", msg)
 }
 
-// processRevocations revokes every certificate whose revocation was requested (only the appliance's when
-// applianceID is set). Returns the first failure; the rest are still attempted. Caller holds acmeMu.
+// processRevocations revokes requested certificates (only one appliance's when applianceID is set). It returns
+// the first failure but attempts the rest. Caller holds acmeMu.
 func (s *Service) processRevocations(ctx context.Context, st *Settings, applianceID string) error {
 	rows, err := s.DB.Query(ctx, `
         SELECT id::text, appliance_id::text, hostname, chain_pem, COALESCE(acme_directory_url,''),
@@ -362,7 +342,7 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 	var first error
 	for _, r := range work {
 		if r.notAfter != nil && r.notAfter.Before(time.Now()) {
-			// Expired: there is nothing left to revoke, and the CA would refuse to.
+			// Expired: the CA would refuse to revoke it.
 			_, _ = s.DB.Exec(ctx, `UPDATE portal_certificate_orders SET status='REVOKED', revoked_at=now() WHERE id::text=$1`, r.id)
 			AppendEvent(ctx, s.DB, r.app, r.host, EvCertRevoked, ActorSystem, map[string]any{"order_id": r.id, "note": "already expired"})
 			continue
@@ -401,13 +381,12 @@ func (s *Service) processRevocations(ctx context.Context, st *Settings, applianc
 	return first
 }
 
-// refreshARI asks the issuing CA, once a day per current certificate, whether its renewal window moved.
-// A renew_after already inside the window is kept (re-drawing it daily would make it wander); one outside is
-// re-drawn -- which is how a CA-announced revocation reaches the appliance as an early renewal.
+// refreshARI asks the CA daily whether a certificate's renewal window moved. A renew_after inside the window is
+// kept (re-drawing would make it wander); one outside is re-drawn, which carries a CA-announced revocation to
+// the appliance as an early renewal.
 func (s *Service) refreshARI(ctx context.Context) {
-	// Only certificates from the CURRENT directory: one issued by a directory Central has since left (staging,
-	// after the switch to production) is due for replacement now, and its old CA's renewal window must not
-	// push that back out.
+	// Current directory only: a certificate from a directory Central left is already due, and its old CA's
+	// window must not push that back out.
 	st, err := LoadSettings(ctx, s.DB)
 	if err != nil {
 		return
@@ -455,8 +434,7 @@ func (s *Service) refreshARI(ctx context.Context) {
 	}
 }
 
-// recheckDomains re-verifies, once a day, every VERIFIED hotel domain. A delegation that broke becomes
-// FAILED (and an event): its renewals stop until it verifies again.
+// recheckDomains re-verifies VERIFIED domains daily; a broken delegation becomes FAILED and renewals stop.
 func (s *Service) recheckDomains(ctx context.Context, st Settings) {
 	rows, err := s.DB.Query(ctx, `
         SELECT d.id::text, d.appliance_id::text, d.fqdn, d.verify_token, d.challenge_label, d.status, d.last_checked_at,
@@ -486,11 +464,9 @@ func (s *Service) recheckDomains(ctx context.Context, st Settings) {
 	}
 }
 
-// CanRelease refuses a deletion that Central could not clean up after. NOTHING TO CLEAN is the only case that
-// may pass while Central is unconfigured: deleting the appliance cascades its portal rows away, and those rows
-// are what the worker would retry from, so deleting while a published A record or an unrevoked certificate
-// exists would leave both unmanaged for good. Called BEFORE a deletion revokes anything, and again by
-// FinalizeRelease.
+// CanRelease refuses a deletion Central could not clean up after. Deleting cascades the portal rows the worker
+// retries from, so with an unconfigured Central only "nothing to clean" may pass; otherwise a published A
+// record or valid certificate would be orphaned. Call it before a deletion revokes anything.
 func (s *Service) CanRelease(ctx context.Context, applianceID string) error {
 	if s == nil {
 		return nil
@@ -512,9 +488,8 @@ func (s *Service) CanRelease(ctx context.Context, applianceID string) error {
 	return nil
 }
 
-// FinalizeRelease performs, now, what the worker would do for a released appliance -- delete its A record
-// and revoke its certificates -- so that deleting the appliance record (which cascades its portal rows away)
-// never leaves a live DNS name or a valid certificate behind. Nothing to do when Central is not configured.
+// FinalizeRelease deletes the A record and revokes certificates now, so deleting the appliance never leaves a
+// live DNS name or valid certificate behind.
 func (s *Service) FinalizeRelease(ctx context.Context, applianceID string) error {
 	if s == nil {
 		return nil

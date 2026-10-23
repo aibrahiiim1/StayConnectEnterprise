@@ -1,13 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
-// VOUCHERS, IN A BROWSER.
-//
-// The component tests assert what the screen sends; these assert what only a real browser can: that a
-// step-up dialog opens IN VIEW rather than below a long table (the reported "the button does nothing"), that
-// the page fits a 390px phone without sideways scrolling, and that printing lays out cards and nothing else.
-//
-// edged is mocked at the network layer. No appliance, no database, no guest data.
-
 const PKG = "11111111-1111-4111-8111-111111111111";
 const BATCH = "22222222-2222-4222-8222-222222222222";
 const DAY = 86_400_000;
@@ -35,7 +27,6 @@ function rows(n: number) {
 export async function installBackend(page: Page, baseURL = "http://127.0.0.1:3123") {
   const json = (status: number, body: unknown) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
   await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: baseURL }]);
-  // Record print() instead of opening the browser dialog, and capture what would have been printed.
   await page.addInitScript(() => {
     (window as any).__printed = [];
     window.print = () => {
@@ -94,8 +85,6 @@ test("issuing shows the codes once and prints only the cards", async ({ page, ba
   await dlg.getByRole("button", { name: "Next" }).click();
   await dlg.getByLabel(/How many cards/).fill("3");
   await dlg.getByRole("button", { name: "Review", exact: true }).click();
-  // Issuing a batch is step-up: the button stays unavailable until the operator's password is typed (O-21),
-  // and the password travels with the issue request.
   const issueBtn = dlg.getByRole("button", { name: "Issue 3 vouchers" });
   await expect(issueBtn).toBeDisabled();
   await dlg.locator('input[type="password"]').fill("operatorpw");
@@ -110,7 +99,7 @@ test("issuing shows the codes once and prints only the cards", async ({ page, ba
   expect(printed.cards).toBe(3);
   expect(printed.text).toContain("48273962");
   expect(printed.text).toContain("Semantics Demo Hotel");
-  // The print root is removed after printing: nothing of the codes is left in the document outside the dialog.
+  // Remove the print root so issued codes do not remain in the document.
   await expect(page.locator(".voucher-print-root")).toHaveCount(0);
 });
 

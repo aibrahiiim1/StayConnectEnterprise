@@ -13,32 +13,27 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// Probe asks ONE interface for its determinate verdict on the guest evidence. An implementation must never
-// block indefinitely: the fan-out bounds it, and a probe that does not answer in time is UNAVAILABLE — an
-// indeterminate verdict, never a NO_MATCH, because "we could not ask" and "we asked and it said no" are
-// different facts and only the second one is safe to act on.
+// Probe asks one interface for its verdict. A probe that doesn't answer in time is UNAVAILABLE, never
+// NO_MATCH: "could not ask" differs from "asked and it said no", and only the second is safe to act on.
 type Probe interface {
 	Probe(ctx context.Context, ifaceID string) (CandidateOutcome, string, error)
 }
 
-// ProbeFunc adapts a function to Probe. The second return value is the matched Stay id (only meaningful for a
-// VERIFIED verdict).
+// ProbeFunc's second return value is the matched Stay id, meaningful only for VERIFIED.
 type ProbeFunc func(ctx context.Context, ifaceID string) (CandidateOutcome, string, error)
 
 func (f ProbeFunc) Probe(ctx context.Context, ifaceID string) (CandidateOutcome, string, error) {
 	return f(ctx, ifaceID)
 }
 
-// ErrNoRequestID — an idempotent resolution needs a caller-supplied request id. Without one, a retry would
-// record a second resolution for the same guest attempt, so the resolver fails closed rather than duplicating.
+// Without a request id a retry would record a second resolution, so the resolver fails closed.
 var ErrNoRequestID = errors.New("pmsresolve: resolution_request_id is required")
 
-// Resolver gathers the COMPLETE candidate vector for a guest network and records the strict outcome.
 type Resolver struct {
 	pool *pgxpool.Pool
-	// MaxCandidates bounds the mapped-interface vector (0 = unbounded). Over the cap is INDETERMINATE.
+	// MaxCandidates bounds the interface vector (0 = unbounded); over the cap is INDETERMINATE.
 	MaxCandidates int
-	// ProbeTimeout bounds EACH candidate probe. Exceeding it is UNAVAILABLE for that candidate only.
+	// ProbeTimeout bounds each probe; exceeding it is UNAVAILABLE for that candidate only.
 	ProbeTimeout time.Duration
 }
 
@@ -46,53 +41,31 @@ func NewResolver(pool *pgxpool.Pool) *Resolver {
 	return &Resolver{pool: pool, ProbeTimeout: 5 * time.Second}
 }
 
-// Result is a recorded resolution.
 type Result struct {
 	Outcome
 	Stay string
-	// Replayed is true when this request id had already been resolved SUCCESSFULLY and that stored outcome was
-	// returned unchanged (the probes are not re-run and no second row is written). It is never true for a
-	// non-success: see Resolve.
+	// Replayed: the request id was already resolved successfully and returned unchanged; never true for a non-success.
 	Replayed bool
-	// Candidates is the complete vector the decision was made on, in stable interface order.
+	// Candidates is the full vector the decision used, in stable interface order.
 	Candidates []Candidate
 }
 
-// ReasonSpentOnRefusal — this request id already carries a RECORDED REFUSAL, and re-evaluating it against the
-// evidence presented now produced a success. The two cannot both be true of one resolution request, and the
-// recorded one cannot be corrected: scd holds INSERT on iam_v2.auth_resolutions and deliberately not UPDATE,
-// because a service that can rewrite the record of why a guest was admitted is a service whose audit trail
-// proves nothing. Admitting a guest whose authority cannot be recorded is the failure this refuses.
-//
-// No conforming caller reaches it. A request id identifies ONE deliberate submission, so a second submission
-// carries a second id and is resolved and recorded on its own terms. Reaching this means a client re-used a
-// spent id — a stale portal build, or something that is not the portal — so the guest gets the uniform
-// refusal and scd logs it as the distinct condition it is, rather than as one more wrong surname.
+// ReasonSpentOnRefusal: the request id carries a recorded refusal but re-evaluation now succeeds. The record
+// can't be corrected (scd holds INSERT, deliberately not UPDATE, on iam_v2.auth_resolutions, so the audit
+// trail can't be rewritten), and admitting a guest whose authority can't be recorded is refused. A conforming
+// client never reaches this (each submission has its own id); it means a re-used id, logged as a distinct condition.
 const ReasonSpentOnRefusal = "REQUEST_ID_SPENT_ON_AN_EARLIER_REFUSAL"
 
-// Resolve gathers every mapped interface's verdict CONCURRENTLY, waits for the whole vector (a slow VERIFIED
-// must still beat a fast NO_MATCH), applies the strict decision, and records it IDEMPOTENTLY against the
-// caller's request id. Concurrent retries of the same request id converge on one stored resolution.
+// Resolve waits for the whole vector (a slow VERIFIED must still beat a fast NO_MATCH) and records the
+// decision idempotently by request id; concurrent retries converge on one stored resolution.
 func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requestID string, p Probe) (Result, error) {
 	var res Result
 	if requestID == "" {
 		return res, ErrNoRequestID
 	}
-	// (1) ALREADY RESOLVED? REPLAY IS A PROPERTY OF SUCCESS, AND ONLY OF SUCCESS.
-	//
-	// A stored VERIFIED resolution is replayed verbatim, without re-probing anything. That is what makes a
-	// successful identity proof idempotent: the same request id yields the same Stay, so a double tap or a
-	// reply the guest's phone never received converges on the one Auth Context instead of minting a second.
-	//
-	// A stored NON-VERIFIED resolution is NOT a verdict binding on anything that comes later. It is the record
-	// of one refused attempt, and the evidence in front of us now may be different — a guest who mistyped a
-	// surname and corrected it presents a different fact about the world than the one that was refused. This
-	// used to replay it, and that froze the portal page: the first typo answered every later submission, and
-	// because every non-success renders one uniform sentence, the guest could not tell that their correction
-	// had never been compared against anything at all.
-	//
-	// So a request id whose stored outcome is anything other than VERIFIED is RE-EVALUATED below, against
-	// current state, with every probe actually run. Nothing is replayed.
+	// Only a stored VERIFIED resolution is replayed (same request id, same Stay, so a double tap converges on
+	// one Auth Context). A stored refusal is not binding: the guest may have corrected a typo, so it is
+	// re-evaluated below with every probe run. Replaying it froze the portal on the first mistake.
 	prev, spent, err := r.load(ctx, tenant, site, requestID)
 	if err != nil {
 		return res, err
@@ -102,14 +75,12 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 		return prev, nil
 	}
 
-	// (2) the mapped vector — from the TRUSTED guest network mapping, never a client hint. Ordered so the
-	// recorded vector is stable and comparable across retries.
+	// From the trusted guest network mapping, never a client hint; ordered for a stable vector across retries.
 	ifaces, err := r.mapped(ctx, tenant, site, guestNetwork)
 	if err != nil {
 		return res, err
 	}
 
-	// (3) fan out. Every candidate is probed; the decision waits for ALL of them.
 	cands := make([]Candidate, len(ifaces))
 	stays := make([]string, len(ifaces))
 	var wg sync.WaitGroup
@@ -125,7 +96,7 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 			}
 			out, stay, err := p.Probe(pctx, id)
 			if err != nil || out == "" {
-				// a failed / timed-out / empty probe is INDETERMINATE, never a determinate NO_MATCH
+				// A failed, timed-out or empty probe is indeterminate, never NO_MATCH.
 				out, stay = Unavailable, ""
 			}
 			cands[i] = Candidate{InterfaceID: id, Outcome: out}
@@ -144,8 +115,7 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 				stay = stays[i]
 			}
 		}
-		// a VERIFIED verdict with no Stay identity proves nothing — fail closed rather than record a success
-		// that cannot be acted on.
+		// VERIFIED without a Stay proves nothing: fail closed.
 		if stay == "" {
 			o = Outcome{Resolution: ResIndeterminate, Reason: "VERIFIED_WITHOUT_STAY"}
 		}
@@ -155,10 +125,8 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 		res.Stay = ""
 	}
 
-	// (4) RECORD. The unique index is what makes this idempotent, and the interesting case is the one where it
-	// refuses the insert — either because the id already carried a refusal that step (1) chose to re-evaluate,
-	// or because a concurrent racer on the same id got there first. Both hand back the STORED row, and both
-	// are answered by the same rule.
+	// The unique index makes recording idempotent; when it refuses the insert (an earlier refusal being
+	// re-evaluated, or a concurrent racer) the STORED row is reconciled with this result.
 	if spent {
 		return r.reconcile(prev, res, cands), nil
 	}
@@ -172,18 +140,10 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 	return res, nil
 }
 
-// reconcile answers what a caller sees when a request id already carries a stored resolution and the probes
-// have just been run again for it. `stored` is the durable record; `fresh` is what this evaluation decided.
-//
-// The rule follows from the record being append-only (see ReasonSpentOnRefusal):
-//
-//   - stored VERIFIED — the success stands and is replayed. Every caller of one request id sees one Stay,
-//     which is what stops a retry becoming a second Auth Context.
-//   - stored refused, fresh refused — the fresh evaluation IS the answer. The probes genuinely ran; the guest
-//     is refused because they are refused now, not because they were refused before. The stored row already
-//     records the attempt, so nothing new is written.
-//   - stored refused, fresh VERIFIED — irreconcilable. One request id cannot be both, and the refusal cannot
-//     be overwritten, so this fails closed rather than granting access whose authority is unrecordable.
+// reconcile follows from the append-only record (see ReasonSpentOnRefusal):
+//   - stored VERIFIED: the success stands, so one request id always sees one Stay;
+//   - stored refused, fresh refused: the fresh result is the answer, nothing new is written;
+//   - stored refused, fresh VERIFIED: irreconcilable, fails closed since the authority is unrecordable.
 func (r *Resolver) reconcile(stored, fresh Result, cands []Candidate) Result {
 	if stored.Resolution == ResVerified {
 		stored.Candidates = cands
@@ -243,16 +203,13 @@ func (r *Resolver) load(ctx context.Context, tenant, site, requestID string) (Re
 	return res, true, nil
 }
 
-// store writes the resolution. It returns a non-nil Result when the row already existed (a concurrent racer
-// resolved the same request id first) — the STORED outcome, which is the one every caller must see.
+// store returns a non-nil Result when a concurrent racer resolved the id first: the stored outcome every caller must see.
 func (r *Resolver) store(ctx context.Context, tenant, site, guestNetwork, requestID string, res Result) (*Result, error) {
 	var stayArg any
 	if res.Stay != "" {
 		stayArg = res.Stay
 	}
-	// The resolution record is capability-scoped, and a scope lives for exactly one transaction. That is why
-	// this runs in an explicit transaction rather than as a single pool statement: opening the scope on the
-	// pool and inserting on the pool are two transactions, and the second would find no scope open.
+	// The capability scope lives for one transaction, so open it and insert in the same explicit transaction.
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err

@@ -5,24 +5,18 @@ import (
 	"net"
 )
 
-// netContext is the guest network a source IP belongs to. Because netd enforces
-// non-overlapping enabled subnets on one appliance, a source IP maps to at most
-// one guest network, so IP alone unambiguously determines the ingress bridge.
+// netContext is the guest network a source IP belongs to; netd enforces non-overlapping enabled subnets, so IP alone determines the ingress bridge.
 type netContext struct {
 	NetworkID string
-	// Name is the operator's own label for the network ("Guest WiFi", "Conference"). It is carried so a
-	// sign-in attempt can be recorded against a network a human recognises; a uuid in an operator's list is
-	// a lookup they should not have to perform.
+	// Name is the operator's label for the network, so a sign-in attempt can be recorded against something a human recognises.
 	Name      string
 	VLANID    *int
 	Bridge    string
 	GatewayIP string
 }
 
-// resolveNetwork finds the guest network whose subnet contains ip. Falls back
-// to the legacy bridge (default br-lan) with no network id when the networking
-// tables are empty or the IP matches nothing — preserving pre-Phase-19
-// behaviour so the guest path never breaks during rollout.
+// resolveNetwork finds the guest network whose subnet contains ip, falling back to the legacy bridge (default br-lan) with
+// no network id when nothing matches, so the guest path never breaks.
 func (s *server) resolveNetwork(ctx context.Context, ip net.IP) netContext {
 	fallback := netContext{Bridge: s.legacyBridge}
 	if s.db == nil || ip == nil {
@@ -42,10 +36,3 @@ func (s *server) resolveNetwork(ctx context.Context, ip net.IP) netContext {
 	}
 	return netContext{NetworkID: netID, Name: name, VLANID: vlan, Bridge: bridge, GatewayIP: gw}
 }
-
-// recordSessionNetwork stamps the session row with its network context after
-// creation. Best-effort: a failure here never fails the authorization.
-
-// recordSessionNetwork is REMOVED. It stamped the resolved bridge and guest_network onto a public.sessions
-// row. In the current model the device's network is pinned on the IAM-v2 auth_context and device at
-// authentication time (internal/iamv2/adapters.go finalize), so there is no second place to record it.

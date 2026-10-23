@@ -2,13 +2,8 @@ package iamv2
 
 import "testing"
 
-// The Service Plans screen must not present a system row as an operator plan.
-//
-// service_plans has no is_system column, so the listing filters by code — and it previously hardcoded two of
-// the four reserved codes while the publish guard refused all four. The half that was wrong was the visible
-// one: __sys_emergency_grace_plan__, created by migration 0010's bootstrap, appeared on the operator screen
-// as though it were theirs, while publishing onto it was refused. Asserted against the guard so the listing
-// and the guard cannot drift apart again.
+// service_plans has no is_system column, so the listing filters by code; asserting against the publish guard
+// keeps the two reserved-code lists from drifting apart.
 func TestReservedCommerceCodes_CoverBothProvisioningSchemes(t *testing.T) {
 	for _, code := range []string{
 		"__system_checkout_grace", "__system_checkout_grace_plan", // Go-provisioned

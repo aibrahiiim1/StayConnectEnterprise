@@ -2,17 +2,10 @@
 
 package checkout
 
-// THE LOCK HAD TO SURVIVE LOSING THE PRIVILEGE THAT USED TO TAKE IT.
-//
-// The Checkout Converter locks the site grace-config row so a departure and a concurrent grace-policy
-// publication cannot interleave into a mixed snapshot. It used to do that with SELECT ... FOR UPDATE on the
-// table, which PostgreSQL only permits with UPDATE privilege — and granting UPDATE to svc_pmsd collided with
-// Gate-P's D32 invariant, which refuses to complete while any runtime role can mutate grace policy.
-//
-// iam_v2.p3_lock_grace_config takes the lock as its owner instead. The privilege question is settled elsewhere;
-// what these tests establish is that the SERIALISATION is genuinely unchanged, because a boundary that quietly
-// stopped locking would replace a loud privilege error with a silent race — a checkout reading half of one
-// policy and half of the next, once in a while, under load.
+// The Checkout Converter locks the site grace-config row so a departure and a grace-policy publication cannot
+// interleave into a mixed snapshot. A row lock needs UPDATE privilege, which Gate-P's D32 invariant forbids for
+// svc_pmsd, so iam_v2.p3_lock_grace_config takes it as owner. These tests prove the serialisation is intact; a
+// silent loss of locking would be a rare mixed-policy race instead of a loud privilege error.
 
 import (
 	"context"
@@ -22,16 +15,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// A second transaction must WAIT for the lock the function took, and must proceed once it is released. Both
-// halves matter: a function that never locked would fail the first, and one that took a lock nobody released
-// would fail the second and deadlock every checkout after the first.
+// A second transaction must wait for the lock and proceed once it is released: never locking fails the first
+// half, never releasing deadlocks every later checkout.
 func TestIntegration_LockGraceConfigStillSerialisesAgainstPublication(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true})
 
-	// Transaction A: the converter's path. Takes the row lock and holds it.
+	// Transaction A is the converter's path and holds the row lock.
 	txA, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin A: %v", err)
@@ -44,7 +36,7 @@ func TestIntegration_LockGraceConfigStillSerialisesAgainstPublication(t *testing
 		t.Fatalf("p3_lock_grace_config did not return the locked row: %v", err)
 	}
 
-	// Transaction B: a publication contending for the same row.
+	// Transaction B is a publication contending for the same row.
 	blocked := make(chan error, 1)
 	go func() {
 		txB, berr := p.Begin(context.Background())
@@ -64,7 +56,6 @@ func TestIntegration_LockGraceConfigStillSerialisesAgainstPublication(t *testing
 		t.Fatalf("a concurrent FOR UPDATE completed (%v) while the converter held the lock: the function is "+
 			"not locking, and a checkout can now read a policy that is being replaced underneath it", err)
 	case <-time.After(700 * time.Millisecond):
-		// Still waiting, which is the point.
 	}
 
 	if err := txA.Commit(ctx); err != nil {
@@ -81,9 +72,8 @@ func TestIntegration_LockGraceConfigStillSerialisesAgainstPublication(t *testing
 	}
 }
 
-// The lock belongs to the CALLER's transaction, not to the function. A SECURITY DEFINER function gets no
-// transaction of its own, and if that ever stopped being true the lock would be released the instant the
-// function returned — leaving the converter to read the row it thought it had pinned.
+// The lock belongs to the caller's transaction: a SECURITY DEFINER function has none of its own, and were that
+// to change the lock would be released on return.
 func TestIntegration_LockGraceConfigLockOutlivesTheFunctionCall(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -101,7 +91,6 @@ func TestIntegration_LockGraceConfigLockOutlivesTheFunctionCall(t *testing.T) {
 		f.tenant, f.site).Scan(&v); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
-	// The function has returned. Do unrelated work in the same transaction, then prove the row is still held.
 	if _, err := txA.Exec(ctx, `SELECT 1`); err != nil {
 		t.Fatalf("interleaved statement: %v", err)
 	}
@@ -111,9 +100,8 @@ func TestIntegration_LockGraceConfigLockOutlivesTheFunctionCall(t *testing.T) {
 	}
 }
 
-// An unconfigured site returns no row rather than an error — the converter distinguishes "no policy" from
-// "policy present but incomplete", and both take different paths. Collapsing them would silently move sites
-// onto Emergency Grace or off it.
+// An unconfigured site returns no row, not an error: the converter treats "no policy" and "policy incomplete"
+// differently, and collapsing them would silently move sites onto or off Emergency Grace.
 func TestIntegration_LockGraceConfigReturnsNoRowForAnUnconfiguredSite(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -129,8 +117,7 @@ func TestIntegration_LockGraceConfigReturnsNoRowForAnUnconfiguredSite(t *testing
 	}
 }
 
-// rowIsLocked answers without blocking: a separate connection tries to take the same lock with NOWAIT and
-// reports whether it was refused.
+// rowIsLocked probes with FOR UPDATE NOWAIT on a separate connection.
 func rowIsLocked(t *testing.T, p *pgxpool.Pool, tenant, site string) bool {
 	t.Helper()
 	ctx := context.Background()
@@ -142,5 +129,5 @@ func rowIsLocked(t *testing.T, p *pgxpool.Pool, tenant, site string) bool {
 	var v int64
 	err = tx.QueryRow(ctx, `SELECT config_version FROM iam_v2.site_checkout_grace_config
 		WHERE tenant_id=$1 AND site_id=$2 FOR UPDATE NOWAIT`, tenant, site).Scan(&v)
-	return err != nil // refused == still locked by the other transaction
+	return err != nil
 }

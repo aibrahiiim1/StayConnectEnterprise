@@ -1,13 +1,5 @@
-// Package otp issues + verifies one-time codes for guest auth.
-//
-// Design:
-//   - 6-digit numeric codes — easy to type on a phone keypad
-//   - SHA-256(per-row salt + code) — fast verify, no global secret needed,
-//     OTP lifetime is short (10m default) and rate-limited so brute-force
-//     resistance comes from the attempt cap, not the hash work-factor
-//   - Code is shown to the user once (returned from Issue) and sent by SMS or
-//     WhatsApp. We never log it server-side after delivery. (Email codes are
-//     removed: email sign-in is an Email account, cmd/scd/self_service.go.)
+// Package otp issues and verifies one-time guest codes. Salted SHA-256 is enough because brute force is bounded by the
+// attempt cap and short TTL, not the hash work factor.
 package otp
 
 import (
@@ -28,12 +20,11 @@ import (
 const (
 	DefaultTTL         = 10 * time.Minute
 	DefaultMaxAttempts = 5
-	IssueCooldown      = 60 * time.Second // between issues to same destination
-	IssueHourlyCap     = 5                // max issues per destination per hour
-	IPHourlyCap        = 20               // max issues per source IP per hour (anti-abuse)
+	IssueCooldown      = 60 * time.Second
+	IssueHourlyCap     = 5
+	IPHourlyCap        = 20
 )
 
-// Errors surfaced to callers (HTTP handlers map to status codes).
 var (
 	ErrCooldown         = errors.New("otp: cooldown — wait before requesting another code")
 	ErrHourlyCap        = errors.New("otp: too many requests this hour")
@@ -43,27 +34,24 @@ var (
 	ErrAttemptsExceeded = errors.New("otp: too many wrong attempts")
 	ErrAlreadyUsed      = errors.New("otp: code already used")
 	ErrCodeMismatch     = errors.New("otp: incorrect code")
-	// ErrOtherDevice: the code (or the SMS link, which carries the same code) was presented from a device
-	// other than the one it was issued to. It is not a wrong guess and does not count as one.
+	// ErrOtherDevice: the code was presented from a different device than it was issued to; it is not a wrong guess and
+	// is not counted.
 	ErrOtherDevice = errors.New("otp: code was requested from another device")
 )
 
 type IssueParams struct {
 	TenantID    string
 	ApplianceID string
-	TemplateID  string // kept for callers; auth_otps lost its template_id column in migration 0049 and it is no longer stored
-	Channel     string // "sms" or "whatsapp"
-	Destination string // phone number (E.164)
-	IP          string // source IP of requester (for forensics)
+	TemplateID  string
+	Channel     string
+	Destination string
+	IP          string
 	UserAgent   string
-	// DeviceMAC is the requesting device's kernel-resolved hardware address. When set, the challenge is bound
-	// to it (iam_v2.otp_device_bindings, migration 0110) and VerifyFrom refuses any other device.
+	// DeviceMAC binds the challenge to that device (iam_v2.otp_device_bindings); VerifyFrom refuses any other.
 	DeviceMAC string
 }
 
-// bindDevice records which device a challenge was issued to, and prunes bindings a day old. A failure here
-// is a failure to issue: an unbound code would be verifiable from anywhere, which is what the binding exists
-// to prevent.
+// bindDevice failing fails the issue: an unbound code would be verifiable from anywhere.
 func bindDevice(ctx context.Context, db *pgxpool.Pool, challengeID, tenantID, mac string) error {
 	if strings.TrimSpace(mac) == "" {
 		return nil
@@ -78,25 +66,18 @@ func bindDevice(ctx context.Context, db *pgxpool.Pool, challengeID, tenantID, ma
 
 type Issued struct {
 	ChallengeID string
-	Code        string // plaintext — return to caller, never persisted
+	Code        string
 	ExpiresAt   time.Time
 }
 
-// Issue creates an OTP row, returns the plaintext code (for the mailer).
-// Enforces cooldown + hourly cap before generating.
-//
-// When ring is non-nil (keyed-HMAC / D7 enabled) the stored code_hash is a keyed HMAC over the
-// domain-separated (tenant, channel, destination, challenge id) tuple using the ring's ACTIVE
-// generation, and otp_key_generation records that generation. When ring is nil the legacy
-// per-row salt:sha256(salt|code) format is written and otp_key_generation is left NULL — byte-for-byte
-// the previous behavior (safe against a database that has not yet applied migration 0008).
+// Issue enforces cooldown and hourly caps, then stores the code. With a ring the code_hash is a keyed HMAC pinned to
+// the active generation; with a nil ring it is the legacy salt:sha256 and otp_key_generation stays NULL.
 func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssueParams) (*Issued, error) {
 	if p.TenantID == "" || p.Channel == "" || p.Destination == "" {
 		return nil, fmt.Errorf("otp: tenant/channel/destination required")
 	}
 	dest := strings.ToLower(strings.TrimSpace(p.Destination))
 
-	// Rate-limit per destination: cooldown + hourly cap.
 	var lastAt *time.Time
 	var hourCount int
 	if err := db.QueryRow(ctx, `
@@ -114,8 +95,7 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		return nil, ErrHourlyCap
 	}
 
-	// Rate-limit per source IP across ALL destinations + channels.
-	// Mitigates address-enumeration / brute-spam from a single guest.
+	// Per-source-IP limit across all destinations and channels (anti-enumeration).
 	if p.IP != "" {
 		var ipHour int
 		if err := db.QueryRow(ctx, `
@@ -135,7 +115,6 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 	expires := time.Now().Add(DefaultTTL)
 
 	if ring == nil {
-		// Legacy path — unchanged: per-row salt:sha256, otp_key_generation stays NULL.
 		salt := randHex(8)
 		hash := hashOTP(salt, code)
 		var id string
@@ -159,8 +138,7 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 		return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 	}
 
-	// Keyed-HMAC path (D7). The digest binds the challenge id, so the id must be known BEFORE the HMAC
-	// is computed — pre-generate it, then insert with the explicit id and its key generation.
+	// The digest binds the challenge id, so the id is generated before the HMAC is computed.
 	var id string
 	if err := db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		return nil, fmt.Errorf("otp: id gen: %w", err)
@@ -193,31 +171,20 @@ func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssuePara
 type Verified struct {
 	ChallengeID string
 	TenantID    string
-	TemplateID  string // empty if not configured
+	TemplateID  string
 	Channel     string
 	Destination string
 }
 
-// Verify checks the code, records the attempt, and returns details on success.
-// The row is marked consumed on success — single-use.
-//
-// When ring is non-nil (D7) a row that pins a key generation is verified with the keyed HMAC for that
-// exact generation; a row with a NULL generation is a legacy salt:sha256 OTP and is accepted only
-// while unexpired (the compatibility window — no new legacy rows are issued once the ring is on). When
-// ring is nil the legacy verify path runs unchanged (and does not reference otp_key_generation, so it
-// is safe against a pre-0008 database). Attempt-increment and consume are atomic in one FOR UPDATE tx.
-//
-// Verify does NOT check the device: it exists for the package's own tests of code, expiry and attempt
-// handling. Every guest path calls VerifyFrom.
+// Verify records the attempt and consumes the row on success; attempt increment and consume are atomic in one FOR
+// UPDATE tx. A pinned key generation verifies with its keyed HMAC; a NULL generation is a legacy OTP accepted only
+// while unexpired. It does not check the device: guest paths call VerifyFrom.
 func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
 	return verify(ctx, db, ring, challengeID, code)
 }
 
-// VerifyFrom is Verify from a named device, and it FAILS CLOSED: no device, or a challenge bound to another
-// device, or a challenge with no binding at all, is refused with ErrOtherDevice BEFORE the code is compared --
-// no attempt is counted and nothing is learned about the code. Every challenge issued since migration 0110 is
-// bound (scd refuses to issue one it cannot bind), so an unbound challenge can only be one issued before it,
-// which expired within its ten minutes -- refusing it costs nothing and closes the any-device path for good.
+// VerifyFrom fails closed: no device, another device, or no binding is refused with ErrOtherDevice before the code is
+// compared, so no attempt is counted. An unbound challenge can only predate device binding and has already expired.
 func VerifyFrom(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code, deviceMAC string) (*Verified, error) {
 	mac := strings.TrimSpace(deviceMAC)
 	if mac == "" {
@@ -250,7 +217,6 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 		keyGen                                   *int
 	)
 	if ring == nil {
-		// Legacy SELECT — does not reference otp_key_generation (pre-0008 safe).
 		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
                expires_at, attempts, max_attempts, consumed_at
@@ -281,7 +247,6 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 		return nil, ErrAttemptsExceeded
 	}
 
-	// Bump attempts regardless of outcome (atomic with verify).
 	if _, err := tx.Exec(ctx, `UPDATE auth_otps SET attempts = attempts + 1 WHERE id = $1`, challengeID); err != nil {
 		return nil, err
 	}
@@ -293,7 +258,6 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 		return nil, err
 	}
 	if !match {
-		// Persist the attempt count, then fail.
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
 		}
@@ -318,7 +282,6 @@ func verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeI
 	return out, nil
 }
 
-// generate6 returns a 6-digit code (left-padded with zeros).
 func generate6() string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
@@ -337,11 +300,8 @@ func hashOTP(salt, code string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// verifyDigest checks a candidate code against the stored digest. A row that pins a key generation
-// (keyGen != nil) is verified with that exact generation's keyed HMAC and REQUIRES a ring — a pinned
-// row with no ring loaded fails closed (a keyed OTP must never fall back to a weaker check). A row
-// with no pinned generation is a legacy salt:sha256 OTP and is verified with the constant-time legacy
-// comparison (compatibility window for already-issued codes).
+// A row pinning a key generation REQUIRES a ring and fails closed without one; a NULL generation uses the constant-time
+// legacy comparison.
 func verifyDigest(ring *otpkey.Ring, keyGen *int, stored string, c otpkey.Challenge, code string) (bool, error) {
 	if keyGen != nil {
 		if ring == nil {
@@ -349,7 +309,6 @@ func verifyDigest(ring *otpkey.Ring, keyGen *int, stored string, c otpkey.Challe
 		}
 		return ring.Verify(*keyGen, stored, c, code)
 	}
-	// legacy salt:sha256 (no pinned generation)
 	if !otpkey.IsLegacyFormat(stored) {
 		return false, fmt.Errorf("otp: malformed legacy digest")
 	}

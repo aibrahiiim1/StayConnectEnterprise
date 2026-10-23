@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// A long path really is long: the client has no deadline of its own that cuts a call to the default, and a path not on the list is
-// still held to the default. (Found on PRE-LIVE: http.Client.Timeout capped every call at 15 seconds, so a backup scd completes in
-// about 40 seconds was reported to the operator as failed while it went on and finished.)
+// A long path has no client deadline that cuts it to the default; a path not on the list is still held to the default.
 func TestLongSCDPathsOutliveTheDefaultDeadline(t *testing.T) {
 	dir, err := os.MkdirTemp("", "scdt")
 	if err != nil {

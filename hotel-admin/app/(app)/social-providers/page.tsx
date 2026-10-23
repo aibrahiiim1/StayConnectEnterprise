@@ -1,21 +1,7 @@
 "use client";
 
-// SOCIAL LOGIN — the OAuth apps a guest can use instead of a room number or a voucher. Each hotel registers
-// and owns its own apps (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5).
-//
-// The Add and Edit forms were two cards that appeared above the table, and the Edit one could be open while the
-// Add one was too. Both are dialogs now, for the reason that applies everywhere in this admin: on a list with
-// several providers the form opened below the fold, so the click appeared to do nothing.
-//
-// One behaviour is preserved exactly and is worth naming, because it is easy to lose in a rewrite: on Edit, a
-// BLANK client secret means "keep the one you have". The field is therefore not pre-filled (there is nothing to
-// pre-fill it with — the secret is write-only) and an empty value is omitted from the request rather than sent as
-// an empty string, which would erase it.
-//
-// THERE IS NO REDIRECT URI FIELD ANY MORE. The callback is https://<portal host name>/auth/social/callback, one
-// per host name the appliance has (its OneGate host name and, once set up, the hotel portal domain). The page
-// shows each one with a copy button and asks the hotel to tick the ones it registered in its app; a provider is
-// offered only while HTTPS is active and the portal's current host name is ticked.
+// On Edit a blank client secret means "keep the existing one": the secret is write-only, so it is omitted, never sent empty (which would erase it).
+// A provider is offered only while HTTPS is active and the portal's current host name's callback is ticked.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -65,7 +51,6 @@ const EMPTY: FormState = {
   callback_hosts: [], scopes: "", tenant: "", team_id: "", key_id: "", enabled: true,
 };
 
-// What each provider calls its two values, so the form uses the words on the provider's own console.
 const SECRET_LABEL: Record<string, string> = {
   google: "Client secret", facebook: "App secret", microsoft: "Client secret", apple: "Private key (.p8)",
 };
@@ -73,7 +58,6 @@ const ID_LABEL: Record<string, string> = {
   google: "Client ID", facebook: "App ID", microsoft: "Application (client) ID", apple: "Services ID",
 };
 
-// Provider-specific, non-secret settings: only the ones this provider uses are sent.
 function providerExtras(f: FormState): Record<string, string> {
   if (f.provider === "microsoft") return { tenant: f.tenant.trim() };
   if (f.provider === "apple") return { team_id: f.team_id.trim(), key_id: f.key_id.trim() };
@@ -119,7 +103,7 @@ export default function SocialProvidersPage() {
       provider: p.provider,
       display_name: p.display_name ?? "",
       client_id: p.client_id,
-      // Deliberately blank. The secret cannot be read back, and a placeholder value here would be sent on save.
+      // Blank on purpose: a placeholder would be sent on save.
       client_secret: "",
       callback_hosts: keepAvailable(p.callback_hosts ?? [], callbacks),
       scopes: p.scopes ?? "",

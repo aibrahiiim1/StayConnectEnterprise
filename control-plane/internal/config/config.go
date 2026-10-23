@@ -16,17 +16,12 @@ type Config struct {
 	Env          string
 	AllowOrigins []string
 	CookieSecure bool
-	// AllowPublicListen (CTRLAPI_ALLOW_PUBLIC_LISTEN=true) lets a production ctrlapi bind the operator
-	// listener to every interface. Central puts Caddy in front and binds loopback; this exists only for a
-	// deployment that has deliberately put something else in front.
+	// AllowPublicListen lets a production ctrlapi bind the operator listener to every interface; Central binds
+	// loopback behind Caddy, so this is only for a deployment that deliberately fronts it otherwise.
 	AllowPublicListen bool
 }
 
-// HARDENING IS THE DEFAULT, NOT AN ENV VAR SOMEBODY MUST REMEMBER.
-//
-// The operator listener used to default to ":8080" (every interface) and the session cookie to Secure=false,
-// so a Central whose env file lacked either line served the console API, unencrypted cookies and all, on every
-// address of the host. Now the defaults are loopback and Secure, and a PRODUCTION ctrlapi refuses to start
+// Hardening is the default: loopback listener and Secure cookie, and a production ctrlapi refuses to start
 // when either is weakened without the explicit opt-out (Validate).
 func Load() (Config, error) {
 	c := Config{
@@ -42,7 +37,7 @@ func Load() (Config, error) {
 		return c, err
 	}
 	c.LogLevel = level
-	// LOOPBACK ONLY BY DEFAULT. A real deployment sets CTRLAPI_ALLOW_ORIGINS to its own admin origin.
+	// Loopback only by default; a real deployment sets CTRLAPI_ALLOW_ORIGINS to its admin origin.
 	origins := env("CTRLAPI_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 	for _, o := range strings.Split(origins, ",") {
 		if s := strings.TrimSpace(o); s != "" {
@@ -55,11 +50,10 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// ListensOnAllInterfaces reports whether addr binds every interface (":8080", "0.0.0.0:8080", "[::]:8080").
 func ListensOnAllInterfaces(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return true // unparseable: assume the worst
+		return true // unparseable: assume every interface
 	}
 	if host == "" {
 		return true
@@ -68,8 +62,7 @@ func ListensOnAllInterfaces(addr string) bool {
 	return ip != nil && ip.IsUnspecified()
 }
 
-// Validate is the start-time hardening check. It returns the problems that refuse a start (production only)
-// and the warnings to log. Called by `ctrlapi serve` before anything listens.
+// Validate returns the problems that refuse a start (production only) and the warnings to log.
 func (c Config) Validate() (errs []string, warnings []string) {
 	prod := strings.EqualFold(c.Env, "production") || strings.EqualFold(c.Env, "prod")
 	report := func(msg string) {
@@ -89,7 +82,6 @@ func (c Config) Validate() (errs []string, warnings []string) {
 	return errs, warnings
 }
 
-// ParseLogLevel maps CTRLAPI_LOG_LEVEL (debug, info, warn, error) onto slog.
 func ParseLogLevel(s string) (slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":

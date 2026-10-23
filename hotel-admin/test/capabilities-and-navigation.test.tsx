@@ -1,20 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-// THE MENU MUST NOT OFFER WHAT THIS APPLIANCE CANNOT SERVE.
-//
-// The operator sweep of PRE-LIVE found eight destinations that answered 404 and rendered a blank page:
-// Guest devices, Online-time budgets, Post-stay access, Cross-PMS transfer, Charge health, Manual review,
-// Settlements and Recovery. The bundle was built with every capability compiled in; the appliance mounts a
-// subset; nothing reconciled the two. An operator cannot tell "this hotel does not have that" from "this is
-// broken", and the second reading is the reasonable one from where they stand.
+// The menu must not offer what this appliance cannot serve (the bundle compiles every capability in; the appliance
+// mounts a subset).
 
-// The Nav asks where it is so it can mark the active item; jsdom has no router.
 vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard" }));
 
-// THE DEPLOYED BUNDLE HAS EVERY CAPABILITY COMPILED IN -- that is the whole premise of the defect. Without
-// these the build flags are off here, every gated item is hidden for the wrong reason, and the assertions
-// below would pass while proving nothing.
+// The deployed bundle has every capability compiled in; without these flags the assertions would pass vacuously.
 for (const f of ["PHASE2", "PHASE3", "PHASE4", "PHASE5", "PHASE6"]) {
   vi.stubEnv(`NEXT_PUBLIC_${f}_ADMIN`, "1");
 }
@@ -28,7 +20,6 @@ vi.mock("@/lib/api", () => ({
 beforeEach(() => { get.mockReset(); vi.resetModules(); });
 afterEach(() => vi.resetModules());
 
-/** Every surface a fully-enabled appliance mounts, minus the ones PRE-LIVE does not. */
 const PRELIVE_SURFACES = [
   "reports", "sessions", "guest-accounts", "auth-methods", "walled-garden", "portal-branding",
   "notification-providers", "social-providers", "network", "diagnostics", "audit", "license", "backups",
@@ -51,15 +42,13 @@ describe("navigation follows the appliance, not the build", () => {
     const { Nav } = await import("@/components/nav");
     render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
 
-    // Asserted on the LINKS, by destination. Matching on label text is ambiguous in a rail that also renders
-    // collapsed spans, and what matters is whether the operator can reach the page at all.
+    // Asserted on links by destination: label text is ambiguous in a rail that also renders collapsed spans.
     const hrefs = () =>
       Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"));
 
     await waitFor(() => expect(hrefs()).toContain("/sessions"));
     expect(hrefs()).toContain("/stays");
 
-    // Absent: the eight that 404'd on PRE-LIVE.
     for (const gone of [
       "/guest-device-self-service", "/online-time", "/post-stay", "/stay-transfers",
       "/financial-health", "/financial-review", "/financial-settlements", "/financial-recovery",
@@ -78,7 +67,6 @@ describe("navigation follows the appliance, not the build", () => {
     expect(hrefs()).toContain("/financial-health");
   });
 
-  // A café that was once a hotel still has stays and PMS history served, but its menu is not a hotel's.
   it("without Hospitality licensed there is no Hotel section, even where hotel records are served", async () => {
     mockCaps(PRELIVE_SURFACES, { hospitality: { deployed: true, licensed: false, enabled: true, ready: true, effective: false, manageable: true } });
     const { Nav } = await import("@/components/nav");
@@ -92,8 +80,7 @@ describe("navigation follows the appliance, not the build", () => {
   });
 
   it("fails open when the appliance cannot say", async () => {
-    // An appliance that cannot answer is not an appliance with no features. Emptying the menu on a failed
-    // request would turn one unavailable endpoint into a product with no navigation.
+    // An appliance that cannot answer is not one with no features: do not empty the menu.
     get.mockImplementation(() => Promise.reject(new Error("offline")));
     const { Nav } = await import("@/components/nav");
     render(<Nav email="a@b.c" roles={["site_admin"]} onLogout={() => {}} />);
@@ -106,19 +93,15 @@ describe("navigation follows the appliance, not the build", () => {
 
 describe("a destination that is not enabled explains itself", () => {
   it("says so, says what is unaffected, and does not look like a fault", async () => {
-    // An appliance with no optional module reported: the screen asks, and must not name a PMS.
     get.mockResolvedValue({ surfaces: PRELIVE_SURFACES });
     const { SurfaceNotEnabled } = await import("@/components/surface-not-enabled");
     render(<SurfaceNotEnabled label="Charge health" />);
 
-    // The label and the state are separate lines: "Guest devices is not enabled" does not agree with itself.
     expect(screen.getByRole("heading", { name: "Charge health" })).toBeTruthy();
     expect(screen.getByText("Not enabled on this appliance")).toBeTruthy();
     expect(screen.getByText(/configuration of the appliance, not a fault/)).toBeTruthy();
-    // The question behind every unexpected screen in an admin -- answered without a PMS the site does not have.
     expect(screen.getByText(/Client internet, sign-in, sessions and accounting are unaffected/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/PMS/);
-    // And a way out, rather than a dead end.
     expect(screen.getByRole("link", { name: /Back to the dashboard/ })).toBeTruthy();
   });
 

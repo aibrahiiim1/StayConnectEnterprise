@@ -1,10 +1,6 @@
 package main
 
-// HOW LONG A DISABLED STAFF ACCOUNT IS KEPT (migration 0138; GDPR audit 2026-10-19, B4).
-//
-// GET/PUT /edge/v1/operators/account-retention. An audited appliance setting (docs/OPERATIONAL_SETTINGS_POLICY.md):
-// default 730 days, 30 to 3650, changed with a reason and the operator's password by whoever may change
-// operators. scd applies it hourly (public.run_staff_retention).
+// Audited appliance setting (default 730 days, 30 to 3650); scd applies it hourly.
 
 import (
 	"errors"
@@ -22,7 +18,7 @@ type accountRetention struct {
 	UpdatedBy           *string    `json:"updated_by,omitempty"`
 }
 
-// accountRetentionBound mirrors the CHECK in migration 0138 exactly; the API sends it so the form cannot drift.
+// Mirrors the CHECK constraint exactly; the API sends it so the form cannot drift.
 var accountRetentionBound = signinBound{"disabled_account_days", "Keep disabled accounts for", "days", 30, 3650, 730,
 	"A disabled staff account is anonymised this long after it was disabled: its email, name, password and authenticator are removed, and the activity log then shows it as a removed account."}
 

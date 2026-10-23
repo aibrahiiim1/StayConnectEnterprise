@@ -17,39 +17,17 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// THE FIRST GUEST NETWORK ON A FACTORY-CLEAN APPLIANCE, AND THE THREE WAYS KEA REFUSES TO SERVE IT.
-//
-// All three were found by running the guest-network workflow end to end on a real appliance. None of them
-// surfaces as "DHCP is broken": each one leaves Kea answering its control socket and reporting healthy while
-// guests send DHCPDISCOVER into silence, which from the guest side is indistinguishable from a dead cable.
-//
-//  1. THE BOOTSTRAP DEADLOCK. netd configures Kea through its control socket, and the socket exists only
-//     while Kea runs. Provisioning installs Kea stopped and DISABLED on purpose, because it binds the guest
-//     bridge and a new appliance has none. So Kea could not start without configuration and netd would not
-//     configure it without the socket: the first guest network could never apply, and retrying could never
-//     help. The bridge exists by the time the Kea step runs — l2l3 created it moments earlier — which is
-//     precisely when Kea can legitimately start.
-//
-//  2. THE BIND GAP. Kea refuses to bind an interface that is not IFF_RUNNING:
-//     DHCPSRV_OPEN_SOCKET_FAIL / DHCPSRV_NO_SOCKETS_OPEN. `ip link add` returns immediately, but a bridge is
-//     not running until a member settles a moment later, and the Kea configuration used to land in that gap.
-//
-//  3. config-set DOES NOT RELIABLY REBIND. Rollback destroys a bridge and re-apply creates a new one with a
-//     new ifindex; Kea accepts a configuration for an interface it never binds. status-get still reports
-//     healthy and config-get still shows the right subnet. Only the socket tells the truth.
-//
-// The pattern in all three: ASSERT THE THING THAT MATTERS — is Kea LISTENING on each guest gateway — rather
-// than asking it whether it feels well.
+// First guest network on a factory-clean appliance. Kea can answer its control socket and report healthy while
+// guests get no DHCP, so the check is whether Kea is listening on each guest gateway:
+//  1. Bootstrap deadlock: the control socket exists only while Kea runs, but provisioning installs Kea stopped
+//     and disabled (it binds the guest bridge), so the first apply must start it once the bridge exists.
+//  2. Bind gap: Kea will not bind an interface that is not IFF_RUNNING, and a new bridge is not running until
+//     a member settles.
+//  3. config-set does not reliably rebind a recreated bridge (new ifindex); status-get and config-get still look healthy.
 
-// keaBootstrapState is the pre-apply Kea state, captured before the first apply touches anything so a
-// rollback can put the appliance back exactly as it found it.
-//
-// WHY IT IS ON DISK. The first apply STARTS Kea, because there is no other way to configure it. If that
-// apply fails or its confirmation expires, there is no previous confirmed revision to fall back to — so a
-// rollback that only tore down the bridge, the netplan and the unbound fragment would leave Kea running,
-// enabled, and serving DHCP for a guest network that no longer exists. A factory-clean appliance has to come
-// back factory-clean. The rollback that needs this is usually run by the confirmation watchdog, which also
-// runs at boot, so the snapshot cannot live in memory.
+// keaBootstrapState is the pre-apply Kea state, captured before the first apply so a rollback can restore a
+// factory-clean appliance (else Kea stays enabled and serving a removed network). It is on disk because the
+// confirmation watchdog, which runs the rollback, also runs at boot.
 type keaBootstrapState struct {
 	WasEnabled  bool   `json:"was_enabled"`
 	WasActive   bool   `json:"was_active"`
@@ -63,7 +41,6 @@ func (a *applier) keaSnapshotPath() string {
 	return filepath.Join(a.generatedDir, "kea-bootstrap-state.json")
 }
 
-// keaSocketPresent reports whether Kea is answering at all.
 func (a *applier) keaSocketPresent() bool {
 	c, err := net.DialTimeout("unix", a.keaSocket, 2*time.Second)
 	if err != nil {
@@ -73,18 +50,11 @@ func (a *applier) keaSocketPresent() bool {
 	return true
 }
 
-// bootstrapKeaIfStopped breaks the deadlock in (1): it writes the rendered configuration straight to
-// /etc/kea/kea-dhcp4.conf, enables the unit so the choice survives a reboot (provisioning left it disabled),
-// starts it, and waits for the control socket.
+// bootstrapKeaIfStopped breaks deadlock (1): it writes the rendered config to /etc/kea/kea-dhcp4.conf, enables
+// the unit, starts it and waits for the control socket. It is a no-op whenever Kea already answers.
 //
-// It is a NO-OP whenever Kea is already answering, so every later apply goes through the socket exactly as
-// before. This runs only to break the one deadlock.
-//
-// It calls a.run, NEVER a.runFn. runFn is the test seam and is nil in production: calling it directly
-// panicked on the first real apply, inside an HTTP handler, where the router's Recoverer turned it into a
-// 500 — the apply never reached its own error path and the revision was left stuck in "applying" with no
-// event and no rollback. Every test passed, because tests always set the seam. shell_seam_test.go now greps
-// this package for direct seam calls, because nothing else we have can see that class of mistake.
+// It must call a.run, never a.runFn: runFn is the test seam and is nil in production, so a direct call panics
+// on a real apply and leaves the revision stuck in "applying" (shell_seam_test.go greps for direct seam calls).
 func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4Full []byte) error {
 	if a.dryRun || a.keaSocketPresent() {
 		return nil
@@ -93,7 +63,7 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 	slog.Info("kea bootstrap: no control socket; Kea is installed stopped on a factory-clean appliance and " +
 		"cannot be configured until it runs")
 
-	// Capture what we are about to change, BEFORE changing any of it.
+	// Capture what we are about to change before changing it.
 	snap := keaBootstrapState{
 		WasEnabled:  a.unitIsEnabled(ctx, "kea-dhcp4-server"),
 		WasActive:   a.unitIsActive(ctx, "kea-dhcp4-server"),
@@ -106,7 +76,7 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 		return fmt.Errorf("kea bootstrap: read existing config: %w", err)
 	}
 	if err := a.writeKeaSnapshot(snap); err != nil {
-		// Refuse to start Kea if we cannot record how to stop it again.
+		// Do not start Kea if we cannot record how to undo it.
 		return fmt.Errorf("kea bootstrap: record pre-apply state: %w", err)
 	}
 
@@ -123,9 +93,7 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 		return fmt.Errorf("kea bootstrap: start: %w", err)
 	}
 
-	// WAIT FOR THE SOCKET rather than assuming it. A Kea that refuses the bridge then reports that directly,
-	// instead of failing the following config-set with the same "no control socket" message that describes
-	// the deadlock we just removed.
+	// Wait for the socket so a Kea that refuses the bridge reports that, not a misleading "no control socket" later.
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if a.keaSocketPresent() {
@@ -141,8 +109,7 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 	return fmt.Errorf("kea bootstrap: started kea-dhcp4-server but no control socket appeared at %s within 20s", a.keaSocket)
 }
 
-// restoreKeaBootstrap undoes exactly what bootstrapKeaIfStopped did, and only if it ran. Confirming a
-// revision discards the snapshot, because confirming is the operator saying to keep it.
+// restoreKeaBootstrap undoes bootstrapKeaIfStopped, only if it ran. Confirming a revision discards the snapshot.
 func (a *applier) restoreKeaBootstrap(ctx context.Context) {
 	snap, ok := a.readKeaSnapshot()
 	if !ok || a.dryRun {
@@ -156,7 +123,6 @@ func (a *applier) restoreKeaBootstrap(ctx context.Context) {
 			slog.Error("kea rollback: restore previous config", "err", err)
 		}
 	} else {
-		// There was no config before us; ours must not survive.
 		if err := os.Remove(a.keaConfPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			slog.Error("kea rollback: remove bootstrap config", "err", err)
 		}
@@ -224,14 +190,9 @@ func (a *applier) unitIsActive(ctx context.Context, unit string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == "active"
 }
 
-// --- (2) the bind gap -------------------------------------------------------------------------------
-
-// waitBridgesRunning waits, bounded, for each managed bridge to be IFF_RUNNING before anything is told to
-// use it.
-//
-// NON-FATAL ON TIMEOUT, deliberately: a bridge whose only member is an unplugged NIC never comes up, and an
-// operator may legitimately configure the network before the cable is in. That must not fail an apply. What
-// must not happen is configuring Kea against it SILENTLY — keaListeningFor below is what catches that.
+// waitBridgesRunning waits, bounded, for each bridge to be IFF_RUNNING. Timeout is non-fatal on purpose: a
+// bridge with an unplugged NIC never comes up, and the network may be configured before the cable is in;
+// keaListeningFor catches a silently unbound bridge.
 func (a *applier) waitBridgesRunning(ctx context.Context, bridges []string) {
 	if a.dryRun || len(bridges) == 0 {
 		return
@@ -256,8 +217,7 @@ func (a *applier) waitBridgesRunning(ctx context.Context, bridges []string) {
 	}
 }
 
-// ifaceIsRunning reads IFF_RUNNING from sysfs. operstate alone is not enough for a bridge: it reads
-// "unknown" on some kernels while flags already carry RUNNING.
+// ifaceIsRunning reads IFF_RUNNING from sysfs; operstate reads "unknown" on some kernels while flags carry RUNNING.
 func ifaceIsRunning(name string) bool {
 	raw, err := os.ReadFile("/sys/class/net/" + name + "/flags")
 	if err != nil {
@@ -271,13 +231,8 @@ func ifaceIsRunning(name string) bool {
 	return v&iffRunning != 0
 }
 
-// --- (3) does Kea actually hold a DHCP socket? ------------------------------------------------------
-
-// gatewaysNotListening returns the gateway addresses of locally-served, enabled networks that hold NO DHCP
-// socket. An empty result is the only acceptable post-apply state.
-//
-// Only DHCPLocal networks are expected to hold a socket: a relayed network legitimately has none, and
-// demanding one would fail an apply that is entirely correct.
+// gatewaysNotListening returns gateways of enabled, locally-served networks with no DHCP socket (relayed
+// networks legitimately have none). Empty is the only acceptable post-apply state.
 func (a *applier) gatewaysNotListening(managed []netcfg.GuestNetwork) []string {
 	proc := readProcNetUDP()
 	var missing []string
@@ -292,9 +247,8 @@ func (a *applier) gatewaysNotListening(managed []netcfg.GuestNetwork) []string {
 	return missing
 }
 
-// keaListeningFor reports whether something holds udp/67 bound to the given gateway address (or to the
-// wildcard). It reads /proc/net/udp rather than asking Kea, because asking Kea is exactly what could not
-// tell the difference.
+// keaListeningFor reports whether something holds udp/67 on the gateway (or wildcard). It reads /proc/net/udp
+// because Kea's own status cannot tell the difference.
 func keaListeningFor(gatewayIP string) bool {
 	return keaListeningIn(readProcNetUDP(), gatewayIP)
 }
@@ -307,7 +261,6 @@ func readProcNetUDP() string {
 	return string(raw)
 }
 
-// keaListeningIn is the pure half, so a test can state the /proc contents exactly.
 func keaListeningIn(procNetUDP, gatewayIP string) bool {
 	want := hexLE(gatewayIP)
 	if want == "" {
@@ -318,23 +271,22 @@ func keaListeningIn(procNetUDP, gatewayIP string) bool {
 		if len(f) < 2 {
 			continue
 		}
-		local := f[1] // "0100007F:0043"
+		local := f[1]
 		i := strings.IndexByte(local, ':')
 		if i < 0 {
 			continue
 		}
 		addr, port := strings.ToUpper(local[:i]), strings.ToUpper(local[i+1:])
-		if port != "0043" { // 67
+		if port != "0043" { // port 67
 			continue
 		}
-		if addr == want || addr == "00000000" { // exact bind, or wildcard
+		if addr == want || addr == "00000000" {
 			return true
 		}
 	}
 	return false
 }
 
-// hexLE renders a dotted-quad the way /proc/net/udp does: little-endian, uppercase hex.
 func hexLE(ip string) string {
 	p := strings.Split(ip, ".")
 	if len(p) != 4 {

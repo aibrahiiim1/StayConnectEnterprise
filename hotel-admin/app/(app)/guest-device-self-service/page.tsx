@@ -1,14 +1,6 @@
 "use client";
 
-// THE PHASE-6 "CLIENT DEVICES" SCREEN IS RETIRED (decision D-K, audit C-1, 2026-10-16).
-//
-// It switched the dark Phase-6 guest device self-service on or off. Since migration 0118 the portal's "Your
-// devices" list is served by scd's always-on client device routes and never reads that switch, so the screen saved
-// a setting that controlled nothing -- and said "an online device can never be removed", which is no longer true.
-// It also duplicated "Devices" in the menu.
-//
-// The edged API (/guest-device-self-service) is KEPT: it is the dark Phase-6 surface and its own deployment
-// decision. This route stays only so an old bookmark lands on the answer rather than a 404.
+// Retired screen; the route stays so old bookmarks land here, and the edged API is kept.
 
 import Link from "next/link";
 import { Smartphone, ArrowUpRight } from "lucide-react";

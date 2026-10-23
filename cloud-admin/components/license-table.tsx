@@ -7,12 +7,11 @@ import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { LicenseBadge } from "@/components/status-badge";
 import { formatLicenseDay, licenseSentence } from "@/lib/status";
 
-/** A license's modules in words: "Core only" when it authorises none. */
+/** Empty grants display as "Core only". */
 export function modulesSummary(ids: string[] | null | undefined): string {
   return ids && ids.length ? ids.map((id) => id.replace(/_/g, " ")).join(", ") : "Core only";
 }
 
-/** Every license list: the fleet list and a customer's Licenses tab. A row opens the appliance it belongs to. */
 export function LicenseTable({ rows, showCustomer = true }: { rows: LicenseRow[]; showCustomer?: boolean }) {
   const router = useRouter();
   return (

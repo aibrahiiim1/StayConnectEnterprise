@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// A ONE-TIME CODE SURVIVES LEAVING THE CAPTIVE BROWSER (otp_pending.go). What the Product Owner hit on a
-// phone: open Mail to read the code, the mini-browser is gone, the reopened page has forgotten everything.
-
 // otpHandler is a full portal whose scd issues challenge "11111111-2222-4333-8444-555555555555" and accepts code 123456 for it.
 func otpHandler(t *testing.T) (*handler, *[]map[string]string) {
 	t.Helper()
@@ -62,7 +59,6 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	if (*issued)[0]["portal_base"] != "http://example.com" {
 		t.Fatalf("the issue call must carry the origin the device reached the portal by, got %q", (*issued)[0]["portal_base"])
 	}
-	// A fresh landing visit (the mini-browser was dismissed): the methods carry the pending code, masked.
 	rec = httptest.NewRecorder()
 	h.authMethods(rec, devReq(http.MethodGet, "/api/auth-methods", ""))
 	var cfg map[string]any
@@ -74,7 +70,6 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "+201001234567") {
 		t.Fatal("the number itself must never be echoed")
 	}
-	// Another device sees nothing.
 	rec = httptest.NewRecorder()
 	other := devReq(http.MethodGet, "/api/auth-methods", "")
 	other.RemoteAddr = "10.20.0.51:1"
@@ -82,13 +77,11 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "pending_otp") {
 		t.Fatal("a pending code belongs to the device that asked for it")
 	}
-	// Send again: the stored address is reused, never echoed.
 	rec = httptest.NewRecorder()
 	h.authOTPResend(rec, devReq(http.MethodPost, "/auth/otp/resend", ""))
 	if rec.Code != 200 || len(*issued) != 2 || (*issued)[1]["destination"] != "+201001234567" {
 		t.Fatalf("send again must re-issue to the same address: %d %v", rec.Code, *issued)
 	}
-	// The verified code clears the pending state and starts the journey.
 	rec = httptest.NewRecorder()
 	h.authOTPVerify(rec, devReq(http.MethodPost, "/auth/otp/verify", `{"challenge_id":"11111111-2222-4333-8444-555555555555","code":"123456"}`))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"next":"/packages"`) {
@@ -97,7 +90,6 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	if _, ok := h.pendingOTP.get("10.20.0.50"); ok {
 		t.Fatal("a verified code must not be reopened")
 	}
-	// Use a different address: forgotten.
 	h.authOTPRequest(httptest.NewRecorder(), devReq(http.MethodPost, "/auth/otp/request", `{"channel":"whatsapp","destination":"+201009999999"}`))
 	h.authOTPForget(httptest.NewRecorder(), devReq(http.MethodPost, "/auth/otp/forget", ""))
 	if _, ok := h.pendingOTP.get("10.20.0.50"); ok {
@@ -105,8 +97,7 @@ func TestThePendingCodeIsHeldForTheDeviceAndReopensTheCodeBox(t *testing.T) {
 	}
 }
 
-// THE EMAIL CODE IS GONE (self-service contract section 1): an email address signs in as an email account, so
-// the code route refuses the channel before anything reaches scd -- no code, no pending box, no temporary access.
+// An email address signs in as an email account, so the code route refuses the channel before reaching scd.
 func TestTheOneTimeCodeRefusesTheEmailChannel(t *testing.T) {
 	h, issued := otpHandler(t)
 	rec := httptest.NewRecorder()
@@ -133,14 +124,12 @@ func TestTheMessageLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
 		t.Fatal("the page is a guest page in words")
 	}
 	_ = calls
-	// A malformed link is a refusal page, not a verification.
 	rec = httptest.NewRecorder()
 	h.connectPage(rec, devReq(http.MethodGet, "/connect?c=<script>&k=abc", ""))
 	if rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "<script>") {
 		t.Fatalf("malformed link: %d", rec.Code)
 	}
-	// The button: the same verification as the code box, from the connection's device, then the journey.
-	form := "c=11111111-2222-4333-8444-555555555555&k=123456&remember=1" // the guest ticked "Remember this device"
+	form := "c=11111111-2222-4333-8444-555555555555&k=123456&remember=1" // "Remember this device" ticked
 	req := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/link", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.RemoteAddr = "10.20.0.50:4321"
@@ -158,7 +147,6 @@ func TestTheMessageLinkOpensAPageAndOnlyTheButtonVerifies(t *testing.T) {
 	if !resume {
 		t.Fatal("the real browser keeps the remembered-device credential")
 	}
-	// A wrong code says so, in words, with a way back.
 	req = httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/link", strings.NewReader("c=11111111-2222-4333-8444-555555555555&k=000000"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.RemoteAddr = "10.20.0.50:4321"

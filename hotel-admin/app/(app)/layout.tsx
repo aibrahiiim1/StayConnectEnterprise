@@ -20,10 +20,8 @@ import { ToastProvider } from "@/components/ui/toast";
 import { WhoamiProvider, useWhoamiSession } from "@/lib/whoami-context";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 
-// SCREENS REACHED BY LINK, NOT FROM THE MENU. They are opened from other pages (PMS connection, Stays), so the
-// menu's table does not list them; without this a role that cannot read them saw a shell of 403 banners instead
-// of the "not permitted" page (found in PRE-LIVE acceptance, 2026-10-16). Every other route outside the menu is a
-// server redirect.
+// Screens reached by link, not the menu; listed here so a role that cannot read them sees "not permitted"
+// instead of a shell of 403 banners. Every other off-menu route is a server redirect.
 const OFF_MENU_SCREENS: { href: string; resource: string; label: string }[] = [
   { href: "/pms-reconciliation", resource: "pms-reconciliation", label: "Unresolved departures" },
   { href: "/roster-reconciliation", resource: "pms-roster-reconciliation", label: "Roster reconciliation" },
@@ -36,13 +34,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const mainRef = useRef<HTMLElement | null>(null);
   const [drawer, setDrawer] = useState(false);
-  // Desktop only. The drawer below `lg` is a full-width overlay and never consults this.
+  // Desktop only; the drawer below `lg` never consults this.
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
-  // WHETHER THIS APPLIANCE CAN SERVE THE SCREEN THE OPERATOR IS ON.
-  //
-  // Handled here rather than in each page because it is the same answer for all of them, and because the
-  // eight that needed it were eight chances to write a slightly different wrong one. A page whose resource
-  // is not mounted renders an explanation instead of itself -- reached by menu, by bookmark or by typed URL.
+  // A page whose resource is not mounted renders an explanation instead of itself.
   const caps = useCapabilities();
   const unavailable = useMemo(() => {
     const href = activeNavHref(pathname);
@@ -51,62 +45,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return item.label;
   }, [pathname, caps]);
 
-  // A PAGE THAT IS ABOUT TO BE REPLACED MUST NOT LOAD FIRST.
-  //
-  // The final sweep caught this with one page left: Cross-PMS transfer still logged a 404. Until the
-  // capability answer arrives, `unavailable` is null -- it has to be, or every screen would flash an
-  // explanation on every load -- so the real page mounted, fired the request its data needs, and was
-  // replaced a moment later by the explanation. The operator saw the right thing; the appliance still got a
-  // doomed request and the console still got an error, which is exactly the noise this delivery removed
-  // everywhere else.
-  //
-  // So children wait for the answer rather than racing it. The cost is one request on the first navigation
-  // of a session: loadCapabilities caches for the lifetime of the page, so every subsequent screen renders
-  // immediately. Nothing waits on a failure either -- the loader resolves to an empty set, which fails open.
+  // Children wait for the capability answer: until it arrives `unavailable` is null, so a page that will be
+  // replaced by the explanation would otherwise mount and fire a doomed request. loadCapabilities caches, and
+  // a failure resolves to an empty set (fails open).
   const capsKnown = caps !== null;
 
-  // Session cookie is stale/invalid (expired, or edged restarted and dropped
-  // its in-memory sessions). Explicitly clear the cookie so the middleware
-  // won't bounce /login back to /dashboard (a redirect loop), then show the
-  // login form. The login page is told why and where the operator was, so it can say the session ended and
-  // bring them back afterwards (lib/safe-next.ts decides whether that place may be followed).
+  // The session cookie is stale (expired, or edged restarted). Clear it explicitly so the middleware does not
+  // bounce /login back to /dashboard (a redirect loop); lib/safe-next.ts decides whether to return afterwards.
   const bounce = useCallback(async () => {
     try { await api.post("/auth/logout"); } catch {}
     router.replace(loginAfterExpiry(window.location.pathname + window.location.search));
   }, [router]);
 
-  // Who is signed in: asked once, then re-validated every 30 seconds (see useWhoamiSession). A failure bounces
-  // to /login; a success replaces the identity, so a role granted or revoked meanwhile reaches the nav and
-  // every role-gated page without a reload.
+  // Re-validated every 30 seconds so a role change reaches the nav and gated pages without a reload.
   const { me, loading } = useWhoamiSession(bounce);
 
-  // With the CONTENT as the scrolling element, the window no longer scrolls, so Next's scroll-to-top on
-  // navigation has nothing to reset. Reset the content pane explicitly instead -- otherwise an operator who
-  // scrolled to the bottom of one screen would open the next one already scrolled halfway down it.
+  // The content pane scrolls, not the window, so Next's scroll-to-top has nothing to reset.
   useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [pathname]);
 
-  // The drawer must close on navigation, or following a link on a phone leaves the menu covering the screen
-  // that was just opened.
   useEffect(() => { setDrawer(false); }, [pathname]);
 
-  // WHERE AM I. The top bar names the current screen and the group it belongs to, derived from the same table
-  // the sidebar is built from so the two cannot disagree.
+  // Derived from the sidebar's own table so the top bar and the menu cannot disagree.
   const here = useMemo(() => {
     const href = activeNavHref(pathname);
     const item = NAV_ITEMS.find((i) => i.href === href);
     return { section: href ? NAV_SECTION_OF[href] : undefined, label: item?.label };
   }, [pathname]);
 
-  // EVERY SCREEN HAD THE SAME TAB TITLE (WCAG 2.4.2), so a tab list, the history menu and a screen reader's
-  // window announcement all said "OneGate Admin Console" whatever was open. The title follows the same label the
-  // top bar shows; a screen reached by link names itself from its own table.
+  // The tab title follows the top bar's label (WCAG 2.4.2); off-menu screens name themselves from their table.
   const pageLabel = here.label
     ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"))?.label;
   useEffect(() => {
     document.title = pageLabel ? `${pageLabel} · ${APP_TITLE}` : APP_TITLE;
   }, [pageLabel]);
 
-  // "Stay signed in" on the idle warning: a request edged counts as activity, answering the new end.
+  // A request edged counts as activity and answers the new session end.
   const keepAlive = useCallback(
     () => api.get<{ expires_at: string }>("/auth/keepalive").then((r) => r.expires_at),
     [],
@@ -125,8 +98,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="flex h-screen overflow-hidden">
-        {/* The width token, not a literal: the pre-paint script has already decided this, so the
-            placeholder and the real column agree and nothing moves when loading finishes. */}
+        {/* The width token, so the placeholder matches the real column. */}
         <div className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-sidebar-border bg-sidebar lg:block" />
         <div className="flex-1 space-y-4 p-6">
           <Skeleton className="h-7 w-48" />
@@ -140,8 +112,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
   if (!me) return null;
 
-  // A SESSION THAT MUST REPLACE ITS PASSWORD SEES NOTHING ELSE. edged refuses every other call for it, so the
-  // shell would only render a screen of refusals. Once the password is changed the page reloads into the console.
+  // edged refuses every other call for this session, so the shell would only render refusals.
   if (me.must_change_password) {
     return (
       <ForcedPasswordChange email={me.email} onLogout={onLogout} onChanged={() => window.location.reload()} />
@@ -149,29 +120,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   const roles = me.roles ?? [];
-  // WHETHER THE OPERATOR'S ROLE MAY READ THE SCREEN THEY ARE ON (audit L-2). The menu hides it; a URL or a
-  // bookmark still reaches it, and the page used to open as a shell of 403 banners. The same table the menu
-  // uses decides, and the page does not mount, so it sends nothing that would be refused.
+  // The menu hides screens a role cannot read, but a URL still reaches them; the same table decides here and
+  // the page does not mount, so it sends nothing that would be refused.
   const activeItem = NAV_ITEMS.find((i) => i.href === activeNavHref(pathname))
     ?? OFF_MENU_SCREENS.find((i) => pathname === i.href || pathname.startsWith(i.href + "/"));
   const notPermitted = activeItem && !canRead(activeItem.resource, roles) ? activeItem.label : null;
 
   return (
-    // THE SIDEBAR "JUMPING BACK TO THE TOP" WAS THE WINDOW SCROLLING, NOT THE MENU MOVING.
-    //
-    // `min-h-screen` is a MINIMUM: on a long screen the flex container grew past the viewport, the sidebar
-    // stretched with it, and its own `overflow-y-auto` never engaged -- so reaching a lower item such as
-    // WAN / LAN settings meant scrolling the WHOLE WINDOW down. Clicking it then navigated, Next.js reset the
-    // window to the top as it is supposed to, and the menu appeared to snap back.
-    //
-    // `h-screen` + `overflow-hidden` bounds the container to the viewport. The sidebar becomes a real
-    // independently-scrolling column whose position survives navigation (the layout is not remounted between
-    // routes), and the page content scrolls in its own pane.
+    // h-screen + overflow-hidden (not min-h-screen) bounds the container so the sidebar scrolls on its own and
+    // keeps its position across navigation, while the content scrolls in its own pane.
     <WhoamiProvider value={me}>
     <ToastProvider>
-    {/* SKIP TO CONTENT (WCAG 2.4.1): the first stop on every screen, visible only when focused, so a keyboard
-        user does not tab through thirty-odd menu links to reach the page they opened. Focus is moved by hand
-        because a hash link alone does not move it reliably in every browser. */}
+    {/* Skip link (WCAG 2.4.1); focus is moved by hand because a hash link alone is unreliable across browsers. */}
     <a
       href="#content"
       onClick={(e) => {
@@ -190,9 +150,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       onExpired={() => void bounce()}
     />
     <div className="flex h-screen overflow-hidden">
-      {/* Below `lg` the column becomes a drawer instead of disappearing. A 64px-wide icon rail was the other
-          option and is worse here: these labels ("Duplicate sources", "Grace Period") are not guessable
-          from an icon. */}
+      {/* Below `lg` the column becomes a drawer; an icon rail would not work because labels are not guessable from icons. */}
       <div className="hidden lg:block">
         <Nav
           email={me.email}
@@ -209,17 +167,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <DialogPrimitive.Content
             className="fixed inset-y-0 left-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
             aria-label="Navigation"
-            /*
-              OPENING A MENU IS NOT ASKING TO TYPE.
-
-              Radix focuses a dialog's first focusable element on open. In this drawer that is the navigation
-              filter, so tapping the hamburger on a phone raised the software keyboard over the menu the
-              operator had just asked to see — they then had to dismiss a keyboard before they could read
-              anything. Focus goes to the panel itself instead: Escape still closes it, Tab still walks it,
-              and the filter is still one tap away when somebody actually wants it.
-
-              Desktop is untouched. There is no drawer above `lg`, and Ctrl+K focuses the filter as before.
-            */
+            // Radix would focus the nav filter and raise the phone keyboard over the menu; focus the panel instead.
             onOpenAutoFocus={(e) => {
               e.preventDefault();
               (e.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
@@ -231,14 +179,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </DialogPrimitive.Portal>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {/*
-            THE TOP BAR IS NEW, and it carries the three things that were previously nowhere: where you are,
-            whether the appliance is healthy, and the theme control. Appliance health in particular was only
-            visible by navigating to the dashboard or Diagnostics — so an operator on any other screen had no
-            way to know the PMS had dropped or the database was unreachable.
-          */}
-          {/* Solid, not translucent: the content scrolls in its own pane below, so nothing ever passes under
-              this bar for a blur to show. */}
+          {/* Solid, not translucent: content scrolls in its own pane, so nothing passes under this bar. */}
           <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
             <DialogPrimitive.Trigger
               className="-ml-1.5 inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 pointer-coarse:size-11 lg:hidden"
@@ -263,20 +204,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </header>
 
-          {/*
-            THE GUTTER LIVES HERE, so no screen can be built without one.
-            --------------------------------------------------------------------------------------------------
-            This is the fix for the most visible layout fault in the product. Roughly half the screens opened
-            with `<div className="mx-auto w-full max-w-7xl space-y-5">` and the other half with `<div className="space-y-4">`,
-            which has no padding at all — so those pages rendered flush against the window edge and the sidebar,
-            with their cards touching both. The padded half did not agree either: `max-w-7xl`, `max-w-[92rem]`,
-            `max-w-3xl` and `space-y-6 p-6` all appear.
-            --------------------------------------------------------------------------------------------------
-            Putting the padding and the measure on the scroll container means a page cannot get it wrong by
-            omission. `PageShell` narrows the measure further where a screen wants it (a single form does not
-            want 96rem) and owns the vertical rhythm; it no longer needs to supply the gutter.
-          */}
-          {/* The skip link's target. tabIndex -1 lets it take focus without adding a tab stop. */}
+          {/* The gutter and measure live here so no page can omit them; PageShell narrows the measure and owns
+              vertical rhythm. This is the skip link's target (tabIndex -1: focusable, no tab stop). */}
           <main ref={mainRef} id="content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
             <div className="mx-auto w-full max-w-[104rem] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
               {!capsKnown ? <Skeleton className="h-64" />

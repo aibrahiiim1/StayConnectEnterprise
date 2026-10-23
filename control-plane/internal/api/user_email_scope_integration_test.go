@@ -9,9 +9,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// Migration 0056. A user's data export shows other people's emails as "[other user]", never as the address; and
-// a customer administrator correcting one of their users' email rewrites only what is attributable to that user,
-// not every matching string in the platform's history. The new email is validated properly.
+// A data export masks other people's emails, and a customer administrator's email correction rewrites only what is
+// attributable to that user, not every matching string in the platform history.
 func TestEmailCorrectionAndExportStayWithTheUser(t *testing.T) {
 	f := newFixture(t)
 	cust, _ := f.customerSite("Scope Hotel")
@@ -30,8 +29,7 @@ func TestEmailCorrectionAndExportStayWithTheUser(t *testing.T) {
 		admin, user, cust); err != nil {
 		t.Fatal(err)
 	}
-	// History: the user's own entry naming a colleague, an entry about the user, and an entry of somebody else's
-	// (the platform owner's) that happens to contain the user's address as a string.
+	// Includes an entry of the platform owner's that merely contains the user's address as a string.
 	if _, err := f.pool.Exec(f.ctx, `
 		INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, payload) VALUES
 		  (now(), 'operator', $1, 'user.created', 'operator', 'x-1', '{"email":"new.colleague@scope.test","by":"front.desk@scope.test"}'),
@@ -41,7 +39,6 @@ func TestEmailCorrectionAndExportStayWithTheUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The export: the user's own address stays, everyone else's is masked.
 	rec := f.operatorCall(f.base.userDataExport, http.MethodPost, user, map[string]string{"reason": "they asked in writing"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export = %d %s", rec.Code, rec.Body.String())
@@ -66,7 +63,6 @@ func TestEmailCorrectionAndExportStayWithTheUser(t *testing.T) {
 		}
 	}
 
-	// The customer's administrator corrects the user's email.
 	tenantAdmin := &auth.Session{OperatorID: admin, Email: "hotel.admin@scope.test", DefaultTenantID: cust, Roles: []string{"tenant_admin"}}
 	patch := func(email string) int {
 		return f.operatorCallAs(tenantAdmin, f.base.patchCustomerUser, http.MethodPatch,

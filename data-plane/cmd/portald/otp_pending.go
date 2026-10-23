@@ -1,25 +1,8 @@
 package main
 
-// A ONE-TIME CODE SURVIVES LEAVING THE CAPTIVE BROWSER.
-//
-// The code-entry step used to live only in the landing page's script. On a phone the captive mini-browser is
-// dismissed the moment the client opens Mail to read the code, and the page it reopens starts from nothing:
-// no challenge, no "enter the code" box, a second code to request (into a 60-second cooldown), and the same
-// loop again. Found by the Product Owner on PRE-LIVE with Gmail over SMTP.
-//
-// Two remedies, both server-side:
-//
-//  1. THE PENDING CHALLENGE IS HELD BY THE PORTAL FOR THE DEVICE, keyed by the device's address, for the code's
-//     own lifetime. The landing page asks for it with the sign-in methods and opens straight on the code box
-//     ("We texted a code to +20•••1234"), with Use a different number. Nothing here decides anything:
-//     verification still needs the challenge AND the code, from a device the kernel can place.
-//  2. THE MESSAGE CAN CARRY A TAP-TO-CONNECT LINK into the phone's real browser, which the client can reach
-//     before sign-in (the portal is in the pre-auth allow set). The link opens a page with ONE button; the
-//     button POSTs the verification. The link is never verified on GET, so a scanner or a prefetcher that
-//     follows it spends nothing. The code in the link is the same secret the message already carries.
-//
-// The code is for SMS and WhatsApp only since the email code was replaced by email accounts
-// (account_handlers.go); the store and the link serve those two channels unchanged.
+// A one-time code survives the captive mini-browser being dismissed: the portal holds the pending challenge
+// per device so the landing page reopens on the code box, and the message can carry a tap-to-connect link.
+// The link is never verified on GET (a scanner or prefetcher must spend nothing); its one button POSTs.
 
 import (
 	"bytes"
@@ -44,8 +27,6 @@ type pendingOTP struct {
 	ExpiresAt   time.Time `json:"-"`
 }
 
-// pendingOTPStore keys a device's in-flight challenge by its address. Addresses are leased by the appliance's
-// own DHCP, so for the ten minutes a code lives the key is stable even as the captive browser comes and goes.
 type pendingOTPStore struct {
 	mu  sync.Mutex
 	now func() time.Time
@@ -92,11 +73,8 @@ func (s *pendingOTPStore) clear(key string) {
 	delete(s.m, key)
 }
 
-// pendingKeyFor is the DEVICE a pending code belongs to: its address AND its hardware address (audit P-18).
-//
-// Keyed by the address alone, a code in flight followed the IP: when DHCP handed that address to another device,
-// the new device's landing page opened on the previous device's code box and could resend the message to the
-// previous device's number. The hardware address comes from the kernel neighbour table, never from the browser.
+// pendingKeyFor keys by address and hardware address: with the address alone, a reassigned IP would open on
+// the previous device's code box and resend to its number. The MAC comes from the kernel neighbour table.
 func pendingKeyFor(ip net.IP, mac net.HardwareAddr) string {
 	if ip == nil || len(mac) == 0 {
 		return ""
@@ -104,8 +82,7 @@ func pendingKeyFor(ip net.IP, mac net.HardwareAddr) string {
 	return ip.String() + "|" + mac.String()
 }
 
-// pendingKey is this request's device key, from the connection and the resolving neighbour lookup ("" when the
-// device cannot be named: no pending code is offered to a device the portal cannot place).
+// "" when the device cannot be placed: no pending code is offered then.
 func (h *handler) pendingKey(r *http.Request) string {
 	ip := clientIP(r)
 	if ip == nil {
@@ -118,7 +95,7 @@ func (h *handler) pendingKey(r *http.Request) string {
 	return pendingKeyFor(ip, mac)
 }
 
-// maskDestination renders a phone number for the page without disclosing it: +20•••1234.
+// maskDestination: +20•••1234.
 func maskDestination(channel, dest string) string {
 	dest = strings.TrimSpace(dest)
 	if len(dest) <= 4 {
@@ -127,8 +104,7 @@ func maskDestination(channel, dest string) string {
 	return dest[:3] + "•••" + dest[len(dest)-4:]
 }
 
-// POST /auth/otp/forget -- "Use a different address": the device's pending challenge is dropped. The
-// challenge itself still expires on its own clock in scd; dropping it here only stops the page reopening it.
+// POST /auth/otp/forget drops the pending challenge here; scd still expires it on its own clock.
 func (h *handler) authOTPForget(w http.ResponseWriter, r *http.Request) {
 	if h.pendingOTP != nil {
 		h.pendingOTP.clear(h.pendingKey(r))
@@ -137,8 +113,7 @@ func (h *handler) authOTPForget(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// POST /auth/otp/resend -- "Send again" with the address the device gave earlier (held server-side, never
-// echoed). It is the ordinary issue call; scd's cooldown and caps apply unchanged.
+// POST /auth/otp/resend reuses the held address (never echoed); scd's cooldown and caps apply.
 func (h *handler) authOTPResend(w http.ResponseWriter, r *http.Request) {
 	if h.pendingOTP == nil {
 		jsonErr(w, 404, "challenge not found")
@@ -153,12 +128,10 @@ func (h *handler) authOTPResend(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(r.Context())
 	r2.Body = io.NopCloser(bytes.NewReader(body))
 	r2.ContentLength = int64(len(body))
-	// The body is portald's own; the origin rule still applies (the caller's Origin header is kept).
+	// The caller's Origin header is kept so the origin rule still applies.
 	r2.Header.Set("Content-Type", "application/json")
 	h.authOTPRequest(w, r2)
 }
-
-// ---- the tap-to-connect link ------------------------------------------------------------------------------
 
 var reChallengeID = regexp.MustCompile(`^[0-9a-fA-F-]{20,64}$`)
 var reCode = regexp.MustCompile(`^[0-9]{4,10}$`)
@@ -166,12 +139,11 @@ var reCode = regexp.MustCompile(`^[0-9]{4,10}$`)
 type connectView struct {
 	guestPage
 	ChallengeID, Code string
-	// Secure: the page was served over HTTPS, so "Remember this device" can be offered (GDPR audit B10).
+	// Secure: served over HTTPS, so "Remember this device" can be offered.
 	Secure bool
 }
 
-// GET /connect?c=<challenge>&k=<code> -- the page the email's link opens. It verifies NOTHING: it shows one
-// Connect button whose POST does. A link without both parts, or a malformed one, is an ordinary refusal page.
+// GET /connect verifies nothing; only the button's POST does.
 func (h *handler) connectPage(w http.ResponseWriter, r *http.Request) {
 	c, k := strings.TrimSpace(r.URL.Query().Get("c")), strings.TrimSpace(r.URL.Query().Get("k"))
 	if !reChallengeID.MatchString(c) || !reCode.MatchString(k) {
@@ -180,9 +152,8 @@ func (h *handler) connectPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	// THE LINK CARRIES A CODE IN ITS QUERY. Nothing on this page may hand that URL on: no Referer to anything it
-	// loads, no indexing, no caching (above). The code is bound to the device that asked for it, so a leaked link
-	// is refused from any other device -- these headers keep it from leaking in the first place.
+	// The URL carries the code: no Referer, indexing or caching. The code is device-bound, so a leaked link
+	// is refused elsewhere anyway.
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	nonce := setPortalCSP(w)
@@ -190,8 +161,7 @@ func (h *handler) connectPage(w http.ResponseWriter, r *http.Request) {
 	_ = connectTmpl.Execute(w, connectView{guestPage: pg, ChallengeID: c, Code: k, Secure: r.TLS != nil})
 }
 
-// POST /auth/otp/link -- the Connect button: the same verification as the code box, from the browser the
-// link opened, with the device resolved from the connection; then the same journey as every sign-in.
+// POST /auth/otp/link is the same verification as the code box, with the device resolved from the connection.
 func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		h.landing(w, r, "Please sign in.")
@@ -231,8 +201,6 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A spent, expired or wrong code: say so in words, and offer the sign-in page (which may still hold the
-	// pending box for a fresh code).
 	var e struct {
 		Error  string `json:"error"`
 		Reason string `json:"reason"`
@@ -244,22 +212,20 @@ func (h *handler) authOTPLink(w http.ResponseWriter, r *http.Request) {
 	}
 	switch strings.ToLower(e.Error) {
 	case "assisted_existing_client":
-		// A code staff showed cannot sign in an address that already belongs to a Client (contract §6.7).
+		// A code staff showed cannot sign in an address that already belongs to a Client.
 		key = "err.otp.assisted"
 	case "incorrect code":
 		key = "err.otp.code"
 	case "too_many_attempts":
 		key = "err.attempts"
 	case "other_device":
-		// The link was opened on a device other than the one that asked for the code: say which device to use.
 		key = "err.otp.device"
 	}
 	h.renderGuestNotice(w, r, http.StatusForbidden, "link.title", key, "/", "errpage.back")
 }
 
-// portalLinkBase is the origin the email's link should use: the address the client reached the portal by,
-// which is the one its browser can reach before sign-in. Anything that does not parse as a plain http(s)
-// origin yields "", and the email then carries the code alone.
+// portalLinkBase is the origin the client reached the portal by (reachable pre-sign-in); "" if it is not a
+// plain http(s) origin, and the message then carries the code alone.
 func portalLinkBase(r *http.Request) string {
 	o := portalOrigin(r)
 	if o == "" {

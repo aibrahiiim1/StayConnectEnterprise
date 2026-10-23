@@ -1,11 +1,7 @@
 //go:build integration && phase4
 
-// PHASE-4 TEST OWNERSHIP. The `phase4` tag is not decoration: these tests need the Phase-4 schema
-// (migrations 0011-0026), and the PHASE-3 regression gate builds a database that stops at 0010. With
-// only the `integration` tag they compiled into the Phase-3 gate's ./cmd/edged/ package and failed
-// against a schema in which `financial_base_currency` and `p4_declare_financial_recovery` cannot exist
-// -- a false failure that says nothing about Phase 3 and hides anything that would say something.
-// The tag is what makes the schema requirement structural rather than a naming convention.
+// The phase4 tag is needed: the Phase-3 regression gate builds a schema without the Phase-4 objects, so
+// without it these tests compile into that gate and fail falsely.
 
 package main
 
@@ -19,19 +15,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Real HTTP + real PostgreSQL contract tests for the Phase-4 Financial Manual Review surface.
-//
-// The database already refuses a bad DECISION — the action catalog, the action/state matrix, reviewer
-// concurrency and single-use retry authorization are all enforced by iam_v2.record_posting_review_action,
-// and iam_v2_scratch/phase4_0011_financial.sh proves that. None of it is AUTHORIZATION. What these tests
-// prove is the half that only exists at the API: that the decision came from an authenticated operator who
-// holds financial-review write, who has just re-entered their password, and whose identity was taken from
-// the session rather than from anything the request could say.
-//
-// They need a disposable database carrying 0011+0012+0013 (scripts/phase4-pg-integration.sh builds one).
+// The database refuses bad decisions (iam_v2.record_posting_review_action); these tests cover the API half:
+// the decision came from an authenticated operator with financial-review write who just re-entered their
+// password, with identity taken from the session.
 
-// seedReviewablePosting builds a posting in the fixture's own tenant, transmitted once and left UNKNOWN —
-// the state an operator is actually asked to decide about.
+// seedReviewablePosting builds a transmitted posting left UNKNOWN, the state an operator is asked to decide.
 func (f *apiFixture) seedReviewablePosting(t *testing.T, outcome, asStatus string) (postingID, ifaceID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -44,7 +32,7 @@ func (f *apiFixture) seedReviewablePosting(t *testing.T, outcome, asStatus strin
 			t.Fatalf("seed (%s): %v", sql[:40], err)
 		}
 	}
-	// qc is q inside the controlled operation a guarded table demands on the full appliance schema.
+	// qc is q inside the controlled operation a guarded table demands.
 	qc := func(family string, dst *string, sql string, args ...any) {
 		t.Helper()
 		if err := controlled(ctx, f.pool, []string{family}, func(tx pgx.Tx) error {
@@ -53,7 +41,7 @@ func (f *apiFixture) seedReviewablePosting(t *testing.T, outcome, asStatus strin
 			t.Fatalf("seed (%s): %v", sql[:40], err)
 		}
 	}
-	// The posting targets the reservation (Amendment A1): its g_number is the stay's reservation number.
+	// The posting targets the reservation: its g_number is the stay's reservation number.
 	reservation := fmt.Sprintf("R%d", uniq)
 	q(&ifaceID, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, f.tenant, f.site)
@@ -143,8 +131,6 @@ func reviewBody(action, reason string, extra map[string]any) map[string]any {
 	return b
 }
 
-// ---------------------------------------------------------------- authorization
-
 func TestIntegrationReviewAPI_RequiresFinancialReviewWrite(t *testing.T) {
 	// voucher_operator has no financial-review entry at all
 	f := newAPI(t, "voucher_operator")
@@ -187,7 +173,7 @@ func TestIntegrationReviewAPI_PaymentsOperatorCanDecide(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("payments_operator holds financial-review write per section 15, got %d: %v", code, body)
 	}
-	// The decision is in the console's audit trail too, by the session's operator (audit O-22).
+	// The decision is in the console's audit trail too, by the session's operator.
 	var n int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log
 		WHERE action='financial_review.decided' AND target_id=$1 AND actor_id=$2 AND payload->>'action'='CONFIRM_POSTED'`,
@@ -196,14 +182,8 @@ func TestIntegrationReviewAPI_PaymentsOperatorCanDecide(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- identity
-
-// The decisive property: the recorded actor is the SESSION operator, and there is no way to say otherwise.
-//
-// Two things are proved, because they are separate guarantees. First, the request schema has no actor field
-// and decoding is strict, so a body that tries to name someone is rejected outright rather than having its
-// extra field quietly ignored. Second — and this is the one that matters for the audit ledger — a perfectly
-// ordinary valid decision records the AUTHENTICATED operator.
+// The recorded actor is the session operator: the request has no actor field and strict decoding rejects a body
+// naming one, and an ordinary valid decision records the authenticated operator.
 func TestIntegrationReviewAPI_ActorComesFromTheSessionNeverTheRequest(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	forged := "99999999-9999-9999-9999-999999999999"
@@ -225,7 +205,6 @@ func TestIntegrationReviewAPI_ActorComesFromTheSessionNeverTheRequest(t *testing
 		}
 	}
 
-	// and the ordinary path attributes the decision to the session
 	id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
 	code, body := f.do(t, "POST", "/financial-review/postings/"+id+"/actions",
 		reviewBody("CONFIRM_POSTED", "folio inspected at the desk", nil))
@@ -247,8 +226,6 @@ func TestIntegrationReviewAPI_ActorComesFromTheSessionNeverTheRequest(t *testing
 		t.Fatal("a forged actor reached the financial audit ledger")
 	}
 }
-
-// ---------------------------------------------------------------- step-up
 
 func TestIntegrationReviewAPI_RequiresPasswordStepUp(t *testing.T) {
 	f := newAPI(t, "payments_operator")
@@ -275,8 +252,6 @@ func TestIntegrationReviewAPI_RequiresPasswordStepUp(t *testing.T) {
 		t.Fatalf("a decision refused at step-up must write nothing, found %d rows", n)
 	}
 }
-
-// ---------------------------------------------------------------- catalog, reason, evidence
 
 func TestIntegrationReviewAPI_CatalogReasonAndEvidence(t *testing.T) {
 	f := newAPI(t, "payments_operator")
@@ -311,8 +286,6 @@ func TestIntegrationReviewAPI_CatalogReasonAndEvidence(t *testing.T) {
 		t.Fatalf("the catalog is exactly the five section-15 actions, got %d", len(items))
 	}
 }
-
-// ---------------------------------------------------------------- the action/state matrix
 
 func TestIntegrationReviewAPI_AckedOKChargeCannotBeRetried(t *testing.T) {
 	f := newAPI(t, "payments_operator")
@@ -362,8 +335,6 @@ func TestIntegrationReviewAPI_SecondIncompatibleDecisionIsRefused(t *testing.T) 
 		t.Fatalf("exactly one decision may be recorded, found %d", n)
 	}
 }
-
-// ---------------------------------------------------------------- passive reversal
 
 func TestIntegrationReviewAPI_CreateReversalIsPassiveAndNonExecutable(t *testing.T) {
 	f := newAPI(t, "payments_operator")
@@ -424,8 +395,6 @@ func contains(hay, needle string) bool {
 	})()
 }
 
-// ---------------------------------------------------------------- scope
-
 func TestIntegrationReviewAPI_AnotherTenantsPostingIsNotVisible(t *testing.T) {
 	a := newAPI(t, "payments_operator")
 	b := newAPI(t, "payments_operator")
@@ -448,10 +417,7 @@ func TestIntegrationReviewAPI_AnotherTenantsPostingIsNotVisible(t *testing.T) {
 	}
 }
 
-// THE CASE THE EARLIER TEST MISSED. Every fixture used to get a fresh tenant AND a fresh site, so
-// "another site's posting is not visible" was only ever exercised across tenants — and the queries were
-// scoped by tenant alone, so they would have passed while leaking between two sites of the SAME customer.
-// That is the arrangement a multi-property hotel group actually has.
+// Two sites of the same tenant (a multi-property group) must be isolated; queries scoped by tenant alone would leak between them.
 func TestIntegrationReviewAPI_SameTenantDifferentSiteIsIsolated(t *testing.T) {
 	a := newAPI(t, "payments_operator")
 	b := newAPIIn(t, a.tenant, "payments_operator") // SAME tenant, different site
@@ -505,8 +471,7 @@ func TestIntegrationReviewAPI_SameTenantDifferentSiteIsIsolated(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("a cross-site decision reached the ledger (%d rows)", n)
 	}
-	// Non-enumeration, proved from RAW BODIES rather than status codes. T0034 claimed "byte-identical" on
-	// the strength of a status comparison, which cannot see a message that confirms the row exists.
+	// Non-enumeration is proved from raw bodies: a status comparison cannot see a message that confirms the row exists.
 	absent := "00000000-0000-0000-0000-000000000000"
 	c1, b1 := a.doRaw(t, "GET", "/financial-review/postings/"+theirs, nil)
 	c2, b2 := a.doRaw(t, "GET", "/financial-review/postings/"+absent, nil)
@@ -528,9 +493,7 @@ func TestIntegrationReviewAPI_SameTenantDifferentSiteIsIsolated(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- evidence exposure
-
-// The detail view must carry what an operator needs and nothing that would leak the connector.
+// The detail view carries what an operator needs and nothing that leaks the connector.
 func TestIntegrationReviewAPI_DetailExposesEvidenceButNoSecrets(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
@@ -539,8 +502,6 @@ func TestIntegrationReviewAPI_DetailExposesEvidenceButNoSecrets(t *testing.T) {
 		t.Fatalf("detail: %d", code)
 	}
 	pinned, _ := body["pinned_evidence"].(map[string]any)
-	// Amendment A1: a charge is pinned to the reservation, so the evidence carries g_number and
-	// posting_target_model where it used to carry folio_id and folio_identity_strategy.
 	for _, k := range []string{"settlement_id", "purchase_id", "stay_id", "g_number",
 		"posting_interface_revision_id", "idempotency_key", "posting_target_model"} {
 		if pinned[k] == nil || pinned[k] == "" {
@@ -559,10 +520,8 @@ func TestIntegrationReviewAPI_DetailExposesEvidenceButNoSecrets(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- evidence contract
-
-// §15 requires evidence; §11 forbids secrets and card data in audit payloads. An append-only ledger cannot
-// be redacted afterwards, so the shape has to make a secret unrepresentable in the first place.
+// Evidence is required but secrets and card data are forbidden in audit payloads; an append-only ledger cannot
+// be redacted afterwards, so the shape must make a secret unrepresentable.
 func TestIntegrationReviewAPI_EvidenceIsStructuredAndRefusesSecrets(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 
@@ -638,10 +597,7 @@ func TestIntegrationReviewAPI_EvidenceIsStructuredAndRefusesSecrets(t *testing.T
 	}
 }
 
-// ---------------------------------------------------------------- reason is audit input too
-
-// The structured evidence contract would have been bypassable through the free-form reason, which reaches
-// the SAME immutable ledger.
+// The free-form reason reaches the same immutable ledger, so it must be bounded and screened too.
 func TestIntegrationReviewAPI_ReasonIsBoundedAndScreened(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	for _, tc := range []struct{ name, reason string }{

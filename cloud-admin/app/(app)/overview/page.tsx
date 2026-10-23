@@ -30,7 +30,6 @@ const DOT: Record<string, string> = {
   default: "bg-muted-foreground/50",
 };
 
-/** One state and its count, as a link to the list filtered to it. */
 function CountRow({ info, count, href }: { info: StateInfo; count: number; href: string }) {
   return (
     <li>

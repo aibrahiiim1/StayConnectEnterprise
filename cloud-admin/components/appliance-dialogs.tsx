@@ -1,7 +1,6 @@
 "use client";
 
-// THE APPLIANCE'S WRITE DIALOGS. Each is one §6 call wrapped in withStepUp (every one is marked SU), and each
-// says in plain words what will happen before it happens.
+// Appliance writes require password step-up.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -27,11 +26,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/** The server's operator sentence for 409 holds_other_customer_data, shown before the call when the outcome is known. */
 const HOLDS_OTHER_CUSTOMER =
   "This appliance still holds another customer's data. Factory-reset it before activating it for a different customer.";
 
-/** Activate a waiting appliance: where it goes and what its license allows, in one step. */
 export function ActivateDialog({
   appliance,
   open,
@@ -44,11 +41,10 @@ export function ActivateDialog({
   onDone: () => void;
 }) {
   const toast = useToast();
-  // An appliance that still holds a customer's data is activated for that customer or not at all (the server
-  // refuses any other with 409 holds_other_customer_data). Preselect it and lock the choice.
+  // Held customer data locks activation to that customer to prevent cross-customer disclosure.
   const heldId = appliance.holds_customer_id ?? "";
   const heldName = appliance.holds_customer_name ?? "";
-  const heldGone = !!heldId && !heldName; // the customer it holds is no longer in Central
+  const heldGone = !!heldId && !heldName;
   const [placement, setPlacement] = useState<Placement>(emptyPlacement(heldGone ? "" : heldId));
   const [terms, setTerms] = useState<TermsDraft>(DEFAULT_TERMS);
   const [busy, setBusy] = useState(false);
@@ -67,7 +63,7 @@ export function ActivateDialog({
     }
   }, [open, heldId, heldGone, clearFields]);
 
-  // A new license starts from the site type's suggested modules until the operator changes them by hand.
+  // Manual module choices override site-type suggestions.
   useEffect(() => {
     setTerms((t) => withSuggestedModules(t, catalog, siteType));
   }, [catalog, siteType]);
@@ -144,7 +140,6 @@ export function ActivateDialog({
   );
 }
 
-/** Issue, renew or change a license. Always a new signed version that replaces the current one. */
 export function SetLicenseDialog({
   appliance,
   open,
@@ -168,9 +163,7 @@ export function SetLicenseDialog({
 
   useEffect(() => {
     if (!open) return;
-    // A change starts from the CURRENT terms, not Central's defaults: saving without touching the grace period
-    // or the end date keeps them (it used to reset them to 30 days and a fresh year). An end date already in
-    // the past is not offered back; a renewal then starts from the default one year.
+    // Preserve current terms on edits; an expired end date starts renewal from the default term.
     const until = current?.valid_until ? current.valid_until.slice(0, 10) : "";
     const untilInFuture = !!current?.valid_until && Date.parse(current.valid_until) > Date.now();
     setTerms({
@@ -178,8 +171,7 @@ export function SetLicenseDialog({
       maxGuests: String(current?.max_concurrent_online_guests ?? DEFAULT_TERMS.maxGuests),
       graceDays: hasLicense && current?.grace_period_days != null ? String(current.grace_period_days) : DEFAULT_TERMS.graceDays,
       ...(hasLicense && untilInFuture ? { validMode: "date" as const, validUntil: until } : {}),
-      // A change keeps the current license's modules unless the operator edits them. Only a first license
-      // starts from the site type's suggestion.
+      // Only a first license uses site-type module suggestions.
       modules: hasLicense ? [...(current?.modules ?? [])] : [],
       modulesTouched: hasLicense,
     });
@@ -242,11 +234,7 @@ export function SetLicenseDialog({
   );
 }
 
-/**
- * Move an activated appliance to another site of the SAME customer. Another customer is not a move: the server
- * refuses it (409) and the console does not offer it. That path is Retire → factory reset → activate for the new
- * customer.
- */
+/** Cross-customer moves require retirement and factory reset before activation for the new customer. */
 export function MoveDialog({
   appliance,
   open,
@@ -280,8 +268,6 @@ export function MoveDialog({
       return;
     }
     api.get<Items<Site>>(`/cloud/v1/customers/${customerId}/sites`)
-      // Only the customer's other active sites: the current one is where it already is, and an archived site
-      // takes no appliance.
       .then((r) => setSites(itemsOf(r).filter((s) => s.status !== "archived" && s.id !== appliance.site_id)))
       .catch((e) => { setSites([]); setErr(e); });
   }, [open, customerId, appliance.site_id, clearFields]);
@@ -309,8 +295,6 @@ export function MoveDialog({
       onOpenChange(false);
       onDone();
     } catch (e) {
-      // A refusal (409) or licensing being unavailable (503, nothing changed) carries the server's own
-      // sentence; the dialog shows it as it is.
       setErr(e);
     } finally {
       setBusy(false);

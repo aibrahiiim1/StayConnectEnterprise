@@ -1,12 +1,7 @@
 "use client";
 
-// GUEST DATA REQUESTS (migration 0128; GDPR plan C3 and C4; Product-Owner decisions D-C3 and D-C4).
-//
-// A guest asks for a copy of what the hotel holds about them, or to be erased. Staff find the guest, check who
-// they are, and either download the file to hand over or erase them. Only site_admin and the IT manager reach
-// this page; every export and erasure asks for the password and a reason, and is recorded in Activity by record
-// id or erasure reference -- never by the guest's name or address. Erasure anonymises (no record is deleted, so
-// reports and totals keep working) and is refused while the guest is still staying or online.
+// Only site_admin and the IT manager reach this page; every export and erasure asks for the password and a reason
+// and is recorded by id, never by name. Erasure anonymises and is refused while the guest is staying or online.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -43,7 +38,6 @@ const KIND_LABELS: Record<Kind, string> = {
   stay_guest: "Guest on a shared stay",
 };
 
-// Why an erasure was refused, in the words a front office understands.
 function saveJSON(doc: unknown) {
   const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -81,8 +75,7 @@ export default function GuestDataPage() {
     } catch { setErasures([]); }
   }, []);
   useEffect(() => { void loadErasures(); }, [loadErasures]);
-  // Erasure needs both copies of the erasure ledger (Backups). Say so before the request, not after it is refused. A role that
-  // cannot read Backups simply sees no banner; the refusal itself still explains.
+  // Erasure needs both copies of the erasure ledger (Backups); say so before the request.
   useEffect(() => {
     void (async () => {
       try { setLedger(await api.get<LedgerStatus>("/backups/ledger", { [BACKGROUND_HEADER]: "1" })); } catch { /* no banner */ }
@@ -121,7 +114,6 @@ export default function GuestDataPage() {
         "/guest-data-rights/erase", { kind: erasing.kind, id: erasing.id, reason, password });
       setErasing(null);
       setDone({ ref: r.erasure_ref, counts: r.counts });
-      // The rest of the list names the same person (and their records are now erased): nothing of it stays on screen.
       setMatches(null); setMatchesCut(false); setQ("");
       await loadErasures();
     } catch (e) {
@@ -210,7 +202,6 @@ export default function GuestDataPage() {
                       <TD>{m.status ? <Badge tone="neutral">{m.status}</Badge> : null}</TD>
                       <TD>{m.last_activity ? formatDate(m.last_activity) : "—"}</TD>
                       <TD className="whitespace-nowrap text-right">
-                        {/* Named with the row: "Export" ten times over says nothing about which record (WCAG 2.4.6). */}
                         <Button size="sm" variant="outline" aria-label={`Export ${KIND_LABELS[m.kind]} ${m.label}`}
                           onClick={() => { setActionErr(null); setExporting(m); }}>
                           <Download /> Export

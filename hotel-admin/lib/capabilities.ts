@@ -1,17 +1,7 @@
 "use client";
 
-// WHAT THIS APPLIANCE ACTUALLY SERVES, ASKED RATHER THAN ASSUMED.
-//
-// Navigation used to be decided by NEXT_PUBLIC_PHASE*_ADMIN, substituted when the bundle is BUILT. edged
-// decides what to mount at RUNTIME, from the appliance's own configuration. On PRE-LIVE those two facts
-// disagreed about eight destinations — Guest devices, Online-time budgets, Post-stay access, Cross-PMS
-// transfer, Charge health, Manual review, Settlements and Recovery were all in the menu and all answered
-// 404. An operator clicking one got a blank screen and a console full of errors, with nothing to say the
-// feature is not enabled here.
-//
-// The build flags are still what decide whether a screen is COMPILED IN. This decides whether the appliance
-// in front of the operator can actually serve it, which is a different question and the one the menu should
-// be answering.
+// Navigation asks the appliance what edged actually mounted at runtime; NEXT_PUBLIC_PHASE* build flags only decide what
+// is compiled in.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -33,19 +23,21 @@ export type Capabilities = {
   modules?: Record<string, ModuleFlags> | null;
 };
 
-/** While unknown, nothing is hidden: a menu that empties itself for a second on every load would be worse
- *  than one that is briefly optimistic, and every page enforces its own state anyway. */
+/**
+ * While unknown, nothing is hidden: a menu that empties briefly on load is worse, and pages enforce their own state.
+ */
 export const CAPABILITIES_UNKNOWN: Capabilities | null = null;
 
 let cached: Capabilities | null = null;
 let cachedAt = 0;
 let inflight: Promise<Capabilities> | null = null;
 
-/** Kept for a minute: surfaces change when edged is redeployed, but MODULE state changes when a licence is
- *  re-issued or a module is switched, and a page must not keep offering a module for the rest of the session. */
+/**
+ * Cached for a minute: module state changes when a licence is re-issued, and a page must not keep offering a module for
+ * the whole session.
+ */
 const CAPABILITIES_TTL_MS = 60_000;
 
-/** Forget the cached answer (after switching a module, so the menu follows at once). */
 export function invalidateCapabilities() {
   cached = null;
   inflight = null;
@@ -65,8 +57,8 @@ export function loadCapabilities(): Promise<Capabilities> {
         return cached;
       })
       .catch(() => {
-        // An appliance that cannot answer is not an appliance with no features. Failing open keeps the menu
-        // as it was and leaves each page to report its own trouble.
+        // An appliance that cannot answer is not one with no features: fail open and let each page report its own
+        // trouble.
         inflight = null;
         return { surfaces: [] };
       });
@@ -84,31 +76,26 @@ export function useCapabilities(): Capabilities | null {
   return caps;
 }
 
-/** MODULE-OWNED SURFACES follow the licence and the site's choice (docs/architecture/
- *  ONEGATE_MODULES_AND_ACQUISITION.md). edged stops reporting one whose module is not manageable here. This
- *  list mirrors `surfaceModules` in data-plane/cmd/edged/modules.go, which a test checks. */
+/**
+ * Module-owned surfaces follow the licence and the site's choice. Mirrors `surfaceModules` in
+ * data-plane/cmd/edged/modules.go (a test checks).
+ */
 export const MODULE_SURFACES: readonly string[] = [
   "pms-stays", "pms-events", "pms-event-decisions", "pms-resolutions", "guest-signin-attempts", "guest-signin-credentials",
   "guest-signin-protection", "guest-signin-restrictions", "checkout-grace", "operational-alerts",
   "pms-interfaces", "pms-routing", "pms-source-conflicts", "pms-reconciliation", "pms-roster-reconciliation",
   "post-stay-profiles", "stay-transfers", "pms-financial-onboarding", "payment-providers",
   "financial-review", "financial-ops",
-  // The provider screens behind the optional sign-in methods (audit C-15): served only where the method's module is.
   "social-providers", "notification-providers",
 ];
 
-/** Whether a nav resource is served here.
- *
- *  Unknown answers YES for a core surface — see CAPABILITIES_UNKNOWN — and NO for a module-owned one. A
- *  licence-controlled destination is offered only on a positive answer: the menu must never present a module
- *  the site is not licensed for, even for the moment before the answer arrives. */
+/** Whether a nav resource is served here. Unknown answers YES for a core surface and NO for a module-owned one. */
 export function surfaceAvailable(caps: Capabilities | null, resource: string): boolean {
   if (!caps || caps.surfaces.length === 0) return !MODULE_SURFACES.includes(resource);
   return caps.surfaces.includes(resource);
 }
 
-/** OPTIONAL MODULES FAIL CLOSED. A module the appliance has not confirmed is treated as absent: a page never
- *  shows a hotel, card or optional sign-in concept on the strength of "we could not tell". */
+/** Optional modules fail closed: an unconfirmed module is treated as absent. */
 export function moduleLicensed(caps: Capabilities | null, id: string): boolean {
   const m = caps?.modules?.[id];
   return !!m && m.deployed && m.licensed;

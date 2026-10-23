@@ -2,16 +2,8 @@
 
 package poststay
 
-// THE F8 SERIES, against a real PostgreSQL.
-//
-// Every case here is about one property: a Post-Stay PIN must never become usable by whoever occupies the
-// room next. The cases are written as attacks rather than as feature checks, because a feature check would
-// pass on a system that leaks — issuing and verifying a PIN is the easy half.
-//
-// The fail-closed reinstatement limitation is tested here too (F8-i): the FINAL contract draws no arrow out
-// of POST_STAY_ACTIVE, so a reinstatement event for a converted Stay is REFUSED and lands in the operator's
-// queue. That behaviour is deliberate and recorded; the test exists so that a future change which quietly
-// adds an exit has to fail a test that says why the exit is not there.
+// One property: a Post-Stay PIN must never become usable by whoever occupies the room next. The cases are
+// written as attacks, since a feature check would pass on a system that leaks.
 
 import (
 	"context"
@@ -47,13 +39,11 @@ func pool(t *testing.T) *pgxpool.Pool {
 
 type fx struct{ tenant, site, iface, rev, stay, device, network, pkg string }
 
-// seed builds a site with a CHECKED_OUT Stay and a zero-price POST_STAY package — the state a real post-stay
-// guest is in. Each test gets its own tenant, so nothing here depends on execution order.
+// seed builds a site with a CHECKED_OUT Stay and a zero-price POST_STAY package, in its own tenant.
 func seed(t *testing.T, p *pgxpool.Pool) fx {
 	t.Helper()
 	ctx := context.Background()
 	var f fx
-	// On the full schema stays are a controlled-writer table: the seed opens the 'stay' family in its tx.
 	stx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
@@ -116,21 +106,10 @@ func store(t *testing.T, p *pgxpool.Pool) *Store {
 	return New(p, thr)
 }
 
-// storeAtFixedTime is the store a LOCKOUT test must use, because the throttle counts attempts inside a
-// FIXED window and a moving clock can roll that window over in the middle of the loop.
-//
-// THIS COST A GATE CYCLE, so it is written down. TestIntegration_ThrottledIsDistinctInternallyAndIdentical-
-// Outside drives 15 wrong PINs against a device limit of 10. Each attempt pays for an argon2 hash, so the
-// loop spans about 1.4s -- and the window is one minute, truncated to the minute. A run that begins within
-// ~1.4s of a minute boundary therefore charges some attempts to one window and the rest to the next: 6 then
-// 9, neither above 10, and the lockout correctly never engages. The test then reports "the device lockout
-// never engaged", which reads like a security regression and is a clock artefact. It failed in CI at
-// 12:58:00.8Z after 1.42s, i.e. a loop that began at 12:57:59.4Z, and passed everywhere else.
-//
-// Pinning the clock removes the boundary, NOT the assertion: the lockout must still engage on the same
-// durable counter, in the same table, through the same code path. Each caller passes its OWN instant so its
-// buckets -- including the shared post-stay ENDPOINT bucket, which every attempt in the package charges --
-// cannot be reached by any other test.
+// storeAtFixedTime is required by lockout tests: the throttle counts attempts in a one-minute window, and a
+// moving clock can roll the window over mid-loop (argon2 makes the loop ~1.4s), splitting the count so the
+// lockout never engages. Pinning the clock keeps the assertion on the same durable counter. Each caller
+// passes its own instant so no other test can reach its buckets, including the shared endpoint bucket.
 func storeAtFixedTime(t *testing.T, p *pgxpool.Pool, at time.Time) *Store {
 	t.Helper()
 	thr, err := throttle.New(p, []byte("post-stay-test-key-0123456789abcd"), time.Minute)
@@ -151,7 +130,7 @@ func issue(t *testing.T, s *Store, f fx) Issued {
 	return out
 }
 
-// reLet is the room's next occupant: the Stay is reinstated (a NEW episode) and checks out again.
+// reLet reinstates the Stay (a new episode) and checks it out again, as the room's next occupant.
 func reLet(t *testing.T, p *pgxpool.Pool, f fx) {
 	t.Helper()
 	ctx := context.Background()
@@ -168,9 +147,8 @@ func reLet(t *testing.T, p *pgxpool.Pool, f fx) {
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatalf("reinstate: %v", err)
 	}
-	// posting_allowed=false in the same UPDATE, exactly as internal/checkout does: the reinstatement made the
-	// stay postable again (computed by the AFTER trigger), and the posting_only_in_house CHECK is evaluated
-	// before that trigger recomputes it for the departure.
+	// posting_allowed=false in the same UPDATE, as internal/checkout does: the posting_only_in_house CHECK runs
+	// before the AFTER trigger recomputes it for the departure.
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 		WHERE id=$1`, f.stay); err != nil {
 		t.Fatalf("re-checkout: %v", err)
@@ -180,7 +158,7 @@ func reLet(t *testing.T, p *pgxpool.Pool, f fx) {
 	}
 }
 
-// F8 baseline: the happy path must actually work, or every refusal below proves nothing.
+// Baseline: the happy path must work, or every refusal below proves nothing.
 func TestIntegration_F8_IssueAndVerify(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -209,7 +187,7 @@ func TestIntegration_F8_IssueAndVerify(t *testing.T) {
 	}
 }
 
-// F8-a / F8-b. THE CASE THE PHASE EXISTS FOR.
+// The next occupant must not be able to use the previous guest's PIN.
 func TestIntegration_F8_NextOccupantCannotUseThePreviousPIN(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -234,7 +212,7 @@ func TestIntegration_F8_NextOccupantCannotUseThePreviousPIN(t *testing.T) {
 	}
 }
 
-// F8-e. One profile per episode: a second issuance for the same episode is refused, not silently duplicated.
+// One profile per episode: a second issuance is refused, not silently duplicated.
 func TestIntegration_F8_OneProfilePerEpisode(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -247,7 +225,7 @@ func TestIntegration_F8_OneProfilePerEpisode(t *testing.T) {
 	}
 }
 
-// F8-f. The PIN must not be recoverable from anything the system stores.
+// The PIN must not be recoverable from anything the system stores.
 func TestIntegration_F8_PlaintextIsNeverStored(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -271,8 +249,7 @@ func TestIntegration_F8_PlaintextIsNeverStored(t *testing.T) {
 	if revealed == nil {
 		t.Fatalf("the one-time reveal was not recorded, so a second reveal could not be refused")
 	}
-	// And the whole row, rendered as text, must not contain it either — a PIN that leaked into a reason,
-	// a note or a status string would be just as exposed as one stored in its own column.
+	// The whole row rendered as text must not contain it either (e.g. leaked into a reason or note).
 	var whole string
 	if err := p.QueryRow(context.Background(),
 		`SELECT post_stay_profiles::text FROM iam_v2.post_stay_profiles WHERE id=$1`, got.Profile).
@@ -284,15 +261,12 @@ func TestIntegration_F8_PlaintextIsNeverStored(t *testing.T) {
 	}
 }
 
-// F8-g. The throttle is durable and fails closed, and a lockout survives the process.
+// The throttle is durable and fails closed, and a lockout survives the process.
 func TestIntegration_F8_ThrottleLocksOutAndPersists(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	f := seed(t, p)
-	// A PINNED throttle clock, on this test's own window, for the same reason as the uniformity lockout
-	// test: 8 attempts against an identity limit of 5 need 6 of them inside ONE fixed window, and a real
-	// clock that rolls the minute over mid-loop splits the count so the lockout never engages. This test has
-	// not failed that way yet; it is the identical defect and one line from being immune to it.
+	// Pinned throttle clock (see storeAtFixedTime): the lockout needs 6 attempts inside one window.
 	at := time.Date(2030, 1, 1, 0, 22, 30, 0, time.UTC)
 	s := storeAtFixedTime(t, p, at)
 	got := issue(t, s, f)
@@ -313,16 +287,14 @@ func TestIntegration_F8_ThrottleLocksOutAndPersists(t *testing.T) {
 	if !throttled {
 		t.Fatalf("the throttle never engaged after 8 wrong PINs")
 	}
-	// A NEW store — a different process, as far as the counter is concerned — must still be locked out, and
-	// the CORRECT PIN must not get through it either. It shares the pinned instant so that it also shares
-	// the window; what is being proved is that the counter lives in the DATABASE and not in the process, and
-	// a second store reading a different window would be testing the clock instead.
+	// A new store (a different process) must still be locked out, even for the correct PIN. It shares the
+	// pinned instant so this proves the counter lives in the database, not the clock.
 	s2 := storeAtFixedTime(t, p, at)
 	if _, err := s2.Verify(ctx, VerifyRequest{Tenant: f.tenant, Site: f.site, Profile: got.Profile,
 		PIN: got.PIN, Device: f.device}); !errors.Is(err, ErrThrottled) {
 		t.Fatalf("a fresh store bypassed the lockout: err = %v", err)
 	}
-	// ...and it is recorded under the post-stay method, sharing no counter with any other method.
+	// recorded under the post-stay method, sharing no counter with any other method
 	var n int
 	if err := p.QueryRow(ctx, `SELECT count(*) FROM public.auth_throttle_buckets WHERE method=$1`,
 		ThrottleMethod).Scan(&n); err != nil {
@@ -385,7 +357,7 @@ func TestIntegration_F8_OperatorRevokeAndReset(t *testing.T) {
 	}
 }
 
-// X-1. The refusal that keeps Phase 5 out of the financial system.
+// A priced post-stay package is refused, keeping post-stay out of the financial system.
 func TestIntegration_ZeroPriceOnly(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -395,9 +367,7 @@ func TestIntegration_ZeroPriceOnly(t *testing.T) {
 	ctx := context.Background()
 	got := issue(t, s, f)
 
-	// A priced post-stay package, exactly as a mis-configuration would produce one. Revisions are IMMUTABLE
-	// (the schema refuses UPDATE), so this is a NEW revision that the package is then pointed at — which is
-	// also how a real operator would introduce the mistake.
+	// Revisions are immutable, so the mis-priced package is a new revision the package is pointed at.
 	var priced string
 	if err := p.QueryRow(ctx, `WITH ipr AS (
 		  INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,
@@ -499,10 +469,8 @@ func TestIntegration_ConversionIsZeroPriceAndNonPosting(t *testing.T) {
 	}
 }
 
-// F8-i. THE RECORDED LIMITATION. The FINAL contract draws no arrow out of POST_STAY_ACTIVE, so a
-// reinstatement for a converted Stay is REFUSED at the database and the event goes to the operator instead of
-// silently rewriting the episode. This test is the record: it fails if an exit transition is ever added
-// without the contract change that would justify it.
+// There is no transition out of POST_STAY_ACTIVE: a reinstatement for a converted Stay is refused at the
+// database and goes to the operator queue. This fails if an exit is ever added.
 func TestIntegration_F8_ReinstatementOfAConvertedStayFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -532,7 +500,7 @@ func TestIntegration_F8_ReinstatementOfAConvertedStayFailsClosed(t *testing.T) {
 	if !strings.Contains(err.Error(), "illegal stays.status transition") {
 		t.Fatalf("refused, but not by the transition guard: %v", err)
 	}
-	// The Stay is untouched — the refusal is fail-closed, not a partial write.
+	// The Stay is untouched: the refusal is not a partial write.
 	_ = tx.Rollback(ctx)
 	var status string
 	if err := p.QueryRow(ctx, `SELECT status FROM iam_v2.stays WHERE id=$1`, f.stay).Scan(&status); err != nil {

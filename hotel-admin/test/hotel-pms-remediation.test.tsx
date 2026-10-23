@@ -2,17 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// AUDIT REMEDIATION, STREAM 6 (Hotel / PMS) — the console half.
-//
-//   H-15  PMS activity counts only UNDECIDED messages, and the integration owner can acknowledge one or link it
-//         to a stay under the password; a desk role cannot.
-//   H-14  "At the limit" counts the devices holding a place on the package, not only those online.
-//   H-7   a role without the identity key is told names are hidden rather than shown "Not provided".
-//   H-16  a legacy routing row can be changed (the dialog always saves MAPPED).
-//   H-3   the Protel form follows the server's field list (max_auth_cache_age_seconds survives an edit).
-//   D-E   "Room-charge posting is live on this appliance" wherever posting is effective.
-//   H-17  a post-stay reset keeps the validity unless the operator ticks the extension.
-
 // jsdom has no ResizeObserver; the dialog's scroll area asks for one.
 (globalThis as any).ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 
@@ -54,7 +43,6 @@ function eventsBackend(roles: string[]) {
     if (path.includes("/candidates")) return Promise.resolve({ data: [] });
     return Promise.resolve({
       data: [REVIEW_EVENT], meta: { has_more: false }, page: 1, page_size: 50, total: 1,
-      // 13 717 placed in review, 1 still undecided: the tile must say 1.
       summary: { applied: 5, pending: 0, manual_review: 13717, undecided: 1, rejected: 0, unmatched: 1 },
     });
   });

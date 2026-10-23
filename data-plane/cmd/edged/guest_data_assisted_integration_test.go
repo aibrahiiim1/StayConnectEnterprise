@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-// Migration 0146: an assisted guest data request. A MAC address, a room number, a reservation credential or a shared
-// device is not proof of who a person is. Staff verify the requester and state what they saw; the database
-// classifies every record in the stated range, and discloses or anonymises exactly the records staff reviewed and
-// selected -- only those established as the person's -- and nothing that belongs to another person.
-
 // asstRoom is one reservation (CHECKED_OUT, the primary guest "Ada Lovelace") with the room's ended access and n
 // devices, each with one ended session. The addresses are global (not randomised) unless private.
 type asstRoom struct {
@@ -179,9 +174,6 @@ func asstClasses(rv asstReview, kind string) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// The workflow: a phone in a shared room, claimed, reviewed and handed over alone.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_AClaimedPhoneOfASharedRoomIsHandedOverAlone(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS1", asstMACs("3c:22:fb:10:00", 3), "10.90.1")
@@ -197,12 +189,10 @@ func TestIntegration_Assisted_AClaimedPhoneOfASharedRoomIsHandedOverAlone(t *tes
 	if len(rv.Records) != 2 {
 		t.Fatalf("only the stated address is reviewed, got %d records: %+v", len(rv.Records), rv.Records)
 	}
-	// What would be disclosed is shown to staff before they decide.
 	if d := rv.of("session")[0].Detail; d["ip"] != r.ips[0] {
 		t.Errorf("the review does not show what the record would disclose: %v", d)
 	}
 
-	// --- A wrong confirmation, a stale review and a record that is not listed are all refused; nothing is handed over.
 	if st, _ := asstAct(f, t, "export", id, rv, "AR-0000000000", rv.selectable()); st != 409 {
 		t.Errorf("export with the wrong reference = %d, want 409", st)
 	}
@@ -219,7 +209,6 @@ func TestIntegration_Assisted_AClaimedPhoneOfASharedRoomIsHandedOverAlone(t *tes
 		t.Errorf("export with a wrong password = %d, want 401", st)
 	}
 
-	// --- The hand-over: exactly the claimed phone; none of the other occupants' phones, none of the reservation.
 	st, raw := asstAct(f, t, "export", id, rv, ref, rv.selectable())
 	if st != 200 {
 		t.Fatalf("export = %d %s", st, raw)
@@ -234,7 +223,6 @@ func TestIntegration_Assisted_AClaimedPhoneOfASharedRoomIsHandedOverAlone(t *tes
 			t.Errorf("the hand-over lacks %q: %s", want, raw)
 		}
 	}
-	// Reading changes nothing.
 	for i := range r.macs {
 		if got := sessAddr(t, f, r.sess[i]); got != r.ips[i]+","+r.macs[i] {
 			t.Errorf("an export changed session %d: %s", i, got)
@@ -267,9 +255,6 @@ func TestIntegration_Assisted_AClaimedPhoneOfASharedRoomIsHandedOverAlone(t *tes
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Staff statements gate everything that is shared by nature.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_NothingSharedIsSelectableWithoutTheStatements(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS2", asstMACs("3c:22:fb:20:00", 1), "10.90.2")
@@ -294,7 +279,6 @@ func TestIntegration_Assisted_NothingSharedIsSelectableWithoutTheStatements(t *t
 			}
 		})
 	}
-	// The requester must be verified before anything is opened.
 	o := asstDefaults("ACCESS", r.macs, r.anchor())
 	o.identity = false
 	if st, _ := f.do(t, "POST", "/guest-data-rights/assisted", o.body()); st != 400 {
@@ -318,9 +302,6 @@ func TestIntegration_Assisted_APrivateAddressNeedsItsOwnConfirmation(t *testing.
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// The erasure: exactly the selection, nothing the room or another person shares.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -366,14 +347,12 @@ func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t 
 		t.Errorf("the request's own file must be handed back once: %v", res.Receipt)
 	}
 
-	// The claimed phone: address gone from the session and the device.
 	if got := sessAddr(t, f, r.sess[0]); got != "" {
 		t.Errorf("the claimed session kept its address: %s", got)
 	}
 	if got := devMAC(t, f, r.devs[0]); !strings.HasPrefix(got, "03:") {
 		t.Errorf("the claimed device was kept: %s", got)
 	}
-	// The other occupants: untouched.
 	for i := 1; i < 3; i++ {
 		if got := devMAC(t, f, r.devs[i]); got != r.macs[i] {
 			t.Errorf("occupant %d's device changed: %s", i, got)
@@ -382,7 +361,6 @@ func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t 
 			t.Errorf("occupant %d's session changed: %s", i, got)
 		}
 	}
-	// The reservation, its holder, the room's access and its usage counters are untouched.
 	if got := gdStr(t, f, `SELECT concat_ws(',',external_reservation_id LIKE 'anon-%', normalized_room_number) FROM iam_v2.stays WHERE id=$1`, r.stay); got != "f,101" {
 		t.Errorf("the reservation changed: %s", got)
 	}
@@ -395,7 +373,6 @@ func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t 
 	if got := gdStr(t, f, `SELECT count(*)::text FROM iam_v2.accounting_records WHERE session_id=ANY($1::uuid[])`, r.sess); got == "" {
 		t.Error("accounting is unreadable")
 	}
-	// The activity log: the anonymised phone's address is replaced where it was searched for; another's is not.
 	for _, sp := range spellings {
 		if got := gdStr(t, f, `SELECT count(*)::text FROM public.audit_log WHERE tenant_id=$1 AND payload::text ILIKE '%'||$2||'%' AND action='guest_data.searched'`, f.tenant, sp); got != "0" {
 			t.Errorf("the anonymised phone's address, spelled %q, is still in the activity log (%s entries)", sp, got)
@@ -404,7 +381,6 @@ func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t 
 	if got := gdStr(t, f, `SELECT count(*)::text FROM public.audit_log WHERE tenant_id=$1 AND payload::text ILIKE '%'||$2||'%'`, f.tenant, r.macs[1]); got != "1" {
 		t.Errorf("another occupant's address in the activity log changed (%s entries)", got)
 	}
-	// The request: closed and scrubbed; the register lists it; the ids are kept, the addresses are not.
 	got := asstStatus(t, f, id)
 	if got["status"] != "COMPLETED" || got["addresses"] != nil || got["requester"] != "[removed]" {
 		t.Errorf("a completed request keeps no address or text: %v", got)
@@ -412,12 +388,10 @@ func TestIntegration_Assisted_ErasureAnonymisesTheSelectedPhoneAndNothingElse(t 
 	if got := gdStr(t, f, `SELECT subject_kind FROM iam_v2.guest_data_erasures WHERE erasure_ref=$1`, res.Ref); got != "assisted" {
 		t.Errorf("the erasure register: %s", got)
 	}
-	// The ids of what was anonymised stay (they identify nobody now); the anchors do not.
 	if got := gdStr(t, f, `SELECT (SELECT count(*) FROM iam_v2.assisted_guest_request_records WHERE request_id=$1::uuid AND action='ANONYMISED')::text || ',' ||
 		(SELECT count(*) FROM iam_v2.assisted_guest_request_anchors WHERE request_id=$1::uuid)::text`, id); got != "2,0" {
 		t.Errorf("records and anchors after an erasure: %s, want 2,0", got)
 	}
-	// It cannot run twice.
 	if st, raw := asstAct(f, t, "erase", id, rv, ref, rv.selectable()); st != 409 || !strings.Contains(raw, "closed") {
 		t.Errorf("a second erasure from the same request = %d %s", st, raw)
 	}

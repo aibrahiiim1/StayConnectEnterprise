@@ -2,12 +2,8 @@
 
 package main
 
-// ROOM-GUEST COMMERCE, held to the same rules as every other client (stream 4 of the audit remediation):
-//
-//	O-2'  card is offered to a room guest only in a currency the default account accepts -- the same function
-//	      the non-room listing, quote and confirm ask (iamv2.SiteMethods.CardApplicable)
-//	O-11  purchase-history (PRIOR_PURCHASE) limits apply to room-guest offers, per stay and per device, keyed on
-//	      the package; choosing the package behind the stay's live access still joins it (D-J)
+// Room-guest commerce follows the same rules as other clients: card is offered only in a currency the default
+// account accepts (iamv2.SiteMethods.CardApplicable), and PRIOR_PURCHASE limits apply per stay and device.
 
 import (
 	"bytes"
@@ -21,7 +17,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// addCardPackage adds a priced package acquirable by card only.
 func (f *authFixture) addCardPackage(t *testing.T, code, currency string) string {
 	t.Helper()
 	var rev string
@@ -167,8 +162,6 @@ func TestIntegration_RoomGuestOffersApplyPurchaseHistoryPerStayAndDevice(t *test
 	}
 }
 
-// O-4 / O-26: a voucher that could never be redeemed is refused at issue, with the reason, before any key or
-// code is touched; an ordinary package is not refused by this check.
 func TestIntegration_VoucherIssueRefusesPackagesAVoucherCanNeverRedeem(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -212,7 +205,6 @@ func TestIntegration_VoucherIssueRefusesPackagesAVoucherCanNeverRedeem(t *testin
 	}
 }
 
-// mustDevice registers another device on the fixture's appliance.
 func mustDevice(t *testing.T, f *authFixture) string {
 	t.Helper()
 	var id string

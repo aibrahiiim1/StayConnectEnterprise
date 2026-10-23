@@ -1,16 +1,7 @@
 "use client";
 
-// APPLIANCE & LICENCE — one page, one status document.
-//
-// Everything on this page comes from GET /central/status (docs/CENTRAL_CONTROL_PLANE.md section 8), which the
-// appliance computes once from its VERIFIED activation, its locally evaluated licence and its record of when
-// OneGate Central last answered. The page words those states; it derives none of them. It used to stitch four
-// endpoints together into two tabs and a fifteen-stage wizard, and they disagreed about whether the appliance
-// was licensed.
-//
-// The primary surface speaks the hotel's language: activated or not, what the licence allows, whether Central
-// is reachable and whether that matters (it never matters to guests). Protocol facts -- fingerprints, versions,
-// the endpoint, MAC addresses -- sit in the collapsed Technical details for support.
+// Everything comes from GET /central/status, computed once by the appliance; the page words those states
+// and derives none of them. Protocol facts sit in the collapsed Technical details.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -42,9 +33,8 @@ function day(s?: string | null): string {
   return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
-// A licence ends at the end of a calendar day (23:59:59Z). In a time zone east of UTC that instant is already
-// the next day, so a licence issued to end on 1 December would read "2 December". Licence dates are shown as
-// the UTC calendar day they were issued for; OneGate Central shows them the same way.
+// A licence ends at 23:59:59Z, which is already the next day east of UTC, so licence dates are shown as the
+// UTC calendar day, as OneGate Central does.
 function licenceDay(s?: string | null): string {
   if (!s) return "—";
   const d = new Date(s);
@@ -55,8 +45,6 @@ function daysWord(n?: number | null): string {
   if (n == null) return "";
   return n === 1 ? "1 day" : `${n} days`;
 }
-
-// ---- words for each state --------------------------------------------------------------------------------
 
 export function activationWords(st: CentralStatus): { title: string; tone: Tone; body: React.ReactNode } {
   switch (st.activation) {
@@ -92,9 +80,8 @@ export function activationWords(st: CentralStatus): { title: string; tone: Tone;
           : "This appliance is activated.",
       };
     case "retired":
-      // REMOVED FROM CENTRAL: Central deleted this appliance after it had held a customer. It keeps that
-      // customer's data, serves no new guests and will not register again by itself -- changing customer goes
-      // through a factory-clean install and a new activation, never in place.
+      // Central deleted this appliance after it held a customer: it serves no new guests and never re-registers
+      // by itself; changing customer needs a factory-clean install.
       if (st.details?.reason === "removed_from_central") {
         return {
           title: "Removed from OneGate Central",
@@ -154,8 +141,7 @@ export function centralWords(c: CentralStatus["central"]): { title: string; tone
         line: "Clients are not affected: this appliance signs clients in by itself. Licence renewals wait until the connection returns.",
       };
     case "credential_refused":
-      // Central answers, but refuses this appliance's certificate (after "Reissue certificate" in Central). The
-      // appliance requests a new certificate by itself; this is not a network problem.
+      // Central refuses the certificate after a reissue; the appliance requests a new one itself.
       return {
         title: "Renewing its certificate",
         tone: "warn",
@@ -176,7 +162,6 @@ function StateIcon({ tone }: { tone: Tone }) {
   return <CircleDashed className={`${cls} text-warning`} aria-hidden />;
 }
 
-/** One labelled part of the status card: a heading row with the state, then a line of words. */
 function Part({ icon, label, badge, children }: {
   icon: React.ReactNode; label: string; badge: React.ReactNode; children: React.ReactNode;
 }) {
@@ -191,11 +176,9 @@ function Part({ icon, label, badge, children }: {
   );
 }
 
-// ---- the page ----------------------------------------------------------------------------------------------
-
 export function ApplianceStatus() {
   const router = useRouter();
-  // Read through a ref so load() keeps one identity across renders (its effect runs once).
+  // A ref keeps load() stable across renders (its effect runs once).
   const routerRef = useRef(router);
   routerRef.current = router;
   const toast = useToast();
@@ -242,7 +225,6 @@ export function ApplianceStatus() {
     void load();
   }, [load]);
 
-  // Faster while the appliance is on its way to activated, so the operator watching sees it land.
   const activating = st?.activation === "activating" || st?.activation === "waiting";
   usePoll(() => load(), activating ? POLL_ACTIVATING_MS : POLL_MS);
 
@@ -345,7 +327,6 @@ export function ApplianceStatus() {
 
       <ErrorBanner err={err ? `Couldn't refresh the status (retrying): ${err}` : null} className="mb-0" />
 
-      {/* ---- PROBLEMS, in words, with what to do ---- */}
       {d.permissive_blocked && (
         <Callout tone="danger" title="A blocked attempt to switch off licence enforcement">
           This appliance refused to run without a licence ({d.permissive_blocked}). Clients still need a real licence.
@@ -389,7 +370,6 @@ export function ApplianceStatus() {
         </Callout>
       )}
 
-      {/* ---- STATUS: activation, licence, Central ---- */}
       <Card>
         <CardBody className="divide-y divide-border">
           <Part icon={<ServerCog className="size-4" aria-hidden />} label="Activation"
@@ -451,7 +431,6 @@ export function ApplianceStatus() {
         </CardBody>
       </Card>
 
-      {/* ---- FILES: offline activation and the licence upload ---- */}
       <Card>
         <CardHeader>
           <div className="space-y-0.5">
@@ -507,7 +486,6 @@ export function ApplianceStatus() {
         </CardBody>
       </Card>
 
-      {/* ---- TECHNICAL DETAILS: for support, collapsed ---- */}
       <Card>
         <details className="group" data-testid="technical-details">
           <summary className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-5 py-4 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

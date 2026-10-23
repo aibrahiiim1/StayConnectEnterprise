@@ -1,15 +1,7 @@
 package main
 
-// PMS PROVIDERS: THE CATALOGUE, PROVIDER CONFIGURATION, AND A ONE-OFF CONNECTION TEST.
-//
-// Everything here reads from internal/pmsprovider, the single registry pmsd's supported kinds also derive
-// from. The Hotel Admin renders the connection form from GET /pms-providers, so the form can only offer a
-// connector the runtime can run, and only the fields that connector's revision actually accepts.
-//
-// The connection test exists for the REST connectors only. It authenticates and performs ONE bounded read
-// (page size 1) with a short timeout, writes no stay data, and never returns the credential. It deliberately
-// does NOT dial a FIAS socket: Protel accepts one link, and a second one opened to "test" would compete with
-// the live connector for it.
+// The connection test is for REST connectors only: one bounded read, no stay data, never returns the credential.
+// It never dials a FIAS socket: Protel accepts one link and a test link would compete with the live connector.
 
 import (
 	"context"
@@ -26,13 +18,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsrest"
 )
 
-// listPMSProviders serves GET /edge/v1/pms-providers.
 func (s *server) listPMSProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": pmsprovider.Providers()})
 }
 
-// providerMeta decorates an interface row with the registry's view of its connector kind. A kind the
-// registry does not know (a legacy row) reports empty values rather than a guess.
+// An unknown kind (legacy row) reports empty values rather than a guess.
 func providerMeta(kind string) (label, transport, verification string) {
 	if p, ok := pmsprovider.Get(kind); ok {
 		return p.Label, string(p.Transport), string(p.Verification)
@@ -54,7 +44,6 @@ type testConnectionResult struct {
 	Details   map[string]any `json:"details"`
 }
 
-// testConnectionMessages are the operator wording for each bounded code. Plain English; no provider text.
 var testConnectionMessages = map[string]string{
 	"OK":                        "Signed in to the PMS and read the in-house reservation list successfully.",
 	"SOCKET_LINK_HEALTH_ONLY":   "This connection is a live socket link; its health is shown by the link status, not a one-off test.",
@@ -80,7 +69,6 @@ func testResult(ok bool, stage, code string, started time.Time, details map[stri
 		LatencyMS: time.Since(started).Milliseconds(), Details: details}
 }
 
-// testPMSConnection serves POST /edge/v1/pms-interfaces/{id}/test-connection (write + step-up).
 func (s *server) testPMSConnection(w http.ResponseWriter, r *http.Request) {
 	var in testConnectionReq
 	if err := decodeJSON(r, &in); err != nil {
@@ -163,7 +151,6 @@ func (s *server) runConnectionTest(ctx context.Context, id, kind, currentRev, wa
 	}
 	defer secret.Zero()
 
-	// Short and bounded: one attempt per request, at most 15 s per request, 20 s overall.
 	perReq := 15 * time.Second
 	if readMs != nil && *readMs > 0 && time.Duration(*readMs)*time.Millisecond < perReq {
 		perReq = time.Duration(*readMs) * time.Millisecond

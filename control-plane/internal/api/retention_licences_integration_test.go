@@ -9,10 +9,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 )
 
-// Migration 0056: retention never takes what licensing needs. A revoked licence an appliance may not have heard
-// about stays on its revocation list while it is still valid, and the newest licence of an appliance is kept for
-// good, so the next licence is numbered above every version the appliance has seen (it refuses a lower one as a
-// rollback).
+// Retention never takes what licensing needs: a still-valid revoked licence stays on the revocation list, and an
+// appliance's newest licence is kept so the next version is numbered above any it has seen (it refuses a lower one).
 func TestRetentionKeepsWhatLicensingNeeds(t *testing.T) {
 	f := newFixture(t)
 	cust, site := f.customerSite("Licence Hotel")
@@ -48,7 +46,6 @@ func TestRetentionKeepsWhatLicensingNeeds(t *testing.T) {
 	}
 	exists := func(id string) bool { return f.count(`SELECT count(*) FROM licenses WHERE id=$1`, id) == 1 }
 
-	// Revoked seven years ago, never delivered, still valid: kept, and still on the appliance's revocation list.
 	exec(`UPDATE licenses SET revoked_at = now() - interval '7 years', created_at = now() - interval '8 years',
 	      revocation_delivered_at = NULL WHERE id = $1`, v1)
 	retain()
@@ -58,14 +55,12 @@ func TestRetentionKeepsWhatLicensingNeeds(t *testing.T) {
 	if !slices.Contains(f.fetchLicence(app), v1) {
 		t.Fatal("the kept revocation is not on the appliance's revocation list")
 	}
-	// Its validity ended long ago too: now it goes.
 	exec(`UPDATE licenses SET valid_until = now() - interval '7 years', revocation_delivered_at = NULL WHERE id = $1`, v1)
 	retain()
 	if exists(v1) {
 		t.Fatal("a revoked licence past its validity and the history period was kept")
 	}
 
-	// The appliance's newest licence ended seven years ago, but it is kept: it carries the highest version.
 	exec(`UPDATE licenses SET valid_until = now() - interval '7 years', created_at = now() - interval '8 years',
 	      issued_at = now() - interval '8 years' WHERE id = $1`, v2)
 	retain()

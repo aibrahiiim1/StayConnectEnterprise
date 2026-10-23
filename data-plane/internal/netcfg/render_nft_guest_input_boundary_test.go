@@ -1,20 +1,8 @@
 package netcfg
 
-// A GUEST NETWORK MAY ADDRESS THE APPLIANCE ONLY ON ITS OWN GATEWAY.
-//
-// The per-bridge input accepts used to be keyed on the INGRESS INTERFACE alone -- `iifname "br-g20" tcp
-// dport 8380 accept` -- and the input hook fires for every packet aimed at ANY local address. So a guest on
-// one network reached the appliance on another network's gateway, and on the management address, simply by
-// addressing it. Measured on PRE-LIVE before the fix: from a client on VLAN 221, the other network's
-// gateway and the portal on it were REACHABLE, and the management address answered ICMP.
-//
-// The forward chain was never the problem: it already drops guest -> mgmt CIDRs and guest -> @guest_subnets,
-// which is why guest-to-guest client isolation held. These tests are about the INPUT path to the appliance
-// itself, which those rules never see.
-//
-// EVERY CASE HERE IS PAIRED. A ruleset that opened nothing would satisfy "the other gateway is not
-// reachable" perfectly and take guest internet down with it, so each restriction is asserted next to the
-// same-network path it must not break.
+// A guest network may address the appliance only on its own gateway: input accepts used to key on the ingress
+// interface alone, so a guest reached another network's gateway and the management address. Every case is paired:
+// each restriction is asserted next to the same-network path it must not break.
 
 import (
 	"fmt"
@@ -22,7 +10,6 @@ import (
 	"testing"
 )
 
-// twoNetworks returns two enabled tagged networks on one trunk -- the configuration the boundary is about.
 func twoNetworks() []GuestNetwork {
 	a := vlan20()
 	b := vlan20()
@@ -32,7 +19,6 @@ func twoNetworks() []GuestNetwork {
 	return []GuestNetwork{a, b}
 }
 
-// inputChain returns just the input chain, so a rule in forward cannot satisfy an assertion about input.
 func inputChain(t *testing.T, out string) string {
 	t.Helper()
 	i := strings.Index(out, "chain input {")
@@ -78,7 +64,7 @@ func TestEveryGuestInputAcceptNamesItsOwnGateway(t *testing.T) {
 	}
 }
 
-// THE PAIRED HALF: every same-network service a guest needs is still open on its own gateway.
+// The paired half: every same-network service a guest needs is still open on its own gateway.
 func TestTheRequiredSameNetworkPathsAreStillOpen(t *testing.T) {
 	in := inputChain(t, string(RenderNftables(twoNetworks(), topoT())))
 	for _, gw := range []string{"10.20.0.1", "10.21.0.1"} {
@@ -91,16 +77,13 @@ func TestTheRequiredSameNetworkPathsAreStillOpen(t *testing.T) {
 				t.Errorf("%s is not open on %s; guests on that network would lose it", want.what, gw)
 			}
 		}
-		// The portal accept carries the configured port, so it is matched on the gateway + dport pair.
 		if !strings.Contains(in, fmt.Sprintf("ip daddr %s tcp dport", gw)) {
 			t.Errorf("no portal accept on %s", gw)
 		}
 	}
 }
 
-// DHCP IS THE ONE PATH THAT CANNOT BE GATEWAY-ONLY. A client with no address yet sends DISCOVER and REQUEST
-// to 255.255.255.255; a gateway-only rule would break address assignment outright, which is the one mistake
-// here that takes guest networking down rather than hardening it.
+// DHCP cannot be gateway-only: a client with no address sends DISCOVER/REQUEST to 255.255.255.255.
 func TestDHCPKeepsTheBroadcastDestination(t *testing.T) {
 	in := inputChain(t, string(RenderNftables(twoNetworks(), topoT())))
 	for _, gw := range []string{"10.20.0.1", "10.21.0.1"} {
@@ -111,10 +94,8 @@ func TestDHCPKeepsTheBroadcastDestination(t *testing.T) {
 	}
 }
 
-// A NETWORK WITH NO GATEWAY OPENS NOTHING, and that is fail-safe rather than tidy. An empty address would
-// render `ip daddr  udp dport ...`, a syntax error -- and this ruleset is applied as ONE atomic `nft -f`, so
-// a single malformed line does not break one network, it breaks the whole table and takes every guest
-// network with it.
+// A network with no gateway opens nothing (fail-safe): an empty address would render `ip daddr  udp dport ...`, a
+// syntax error that breaks the whole atomic `nft -f`.
 func TestANetworkWithoutAGatewayOpensNothing(t *testing.T) {
 	nets := twoNetworks()
 	nets[1].GatewayIP = ""
@@ -134,7 +115,6 @@ func TestANetworkWithoutAGatewayOpensNothing(t *testing.T) {
 		t.Error("the installed ruleset does not say why br-g21 has no services; an operator reading it " +
 			"would see an absence with no explanation")
 	}
-	// ...and the healthy network is untouched by its neighbour's incomplete configuration.
 	if !strings.Contains(in, "ip daddr 10.20.0.1 udp dport 53 accept") {
 		t.Error("one network's missing gateway suppressed another network's services")
 	}
@@ -154,8 +134,7 @@ func TestTheGuestInputBoundaryIsStatedAsARule(t *testing.T) {
 	}
 }
 
-// WHAT THIS CHANGE MUST NOT HAVE TOUCHED. The two-NIC management path and the forward-chain protections are
-// accepted behaviour; a hardening that quietly altered either would be a regression wearing a fix's clothes.
+// The two-NIC management path and the forward-chain protections must be unchanged.
 func TestTheManagementAndForwardProtectionsAreUnchanged(t *testing.T) {
 	topo := topoT()
 	topo.MgmtAddr = "172.21.60.25"

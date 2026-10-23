@@ -9,15 +9,9 @@ import (
 	"time"
 )
 
-// ---- item 4: config loader (unit) -----------------------------------------
-
 func TestLoadConfigFromEnv(t *testing.T) {
-	// default: everything OFF, valid, no stub.
-	//
-	// This is the DEVELOPMENT-build contract and it still holds there. A production build deliberately
-	// contradicts it -- the guest IAM authority is locked to IAM-v2 and an all-off configuration is a startup
-	// refusal, not a valid dark default -- so the assertion is scoped to the build it describes rather than
-	// weakened for both. The production side is proven in guest_authority_e2e_production_test.go.
+	// The all-off default is the development-build contract; a production build refuses it (see
+	// guest_authority_e2e_production_test.go).
 	if !productionBuild {
 		cfg, err := LoadConfigFromEnv(env(nil), true)
 		if err != nil || cfg.MasterEnabled || cfg.AllowSocialStub {
@@ -29,15 +23,12 @@ func TestLoadConfigFromEnv(t *testing.T) {
 			}
 		}
 	}
-	// malformed boolean => startup failure
 	if _, err := LoadConfigFromEnv(env(map[string]string{EnvMaster: "yesish"}), true); err == nil {
 		t.Fatal("malformed boolean must fail startup")
 	}
-	// method ON while master OFF => startup failure
 	if _, err := LoadConfigFromEnv(env(map[string]string{EnvOTP: "true"}), true); err == nil {
 		t.Fatal("method-on-master-off must fail startup")
 	}
-	// production profile refuses the stub even if the flag is set
 	cfg, err := LoadConfigFromEnv(env(map[string]string{EnvMaster: "true", EnvSocial: "true", EnvSocialStub: "true"}), true)
 	if err != nil || cfg.AllowSocialStub {
 		t.Fatalf("production must refuse the stub: %+v %v", cfg, err)
@@ -47,10 +38,8 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 }
 
-// ---- item 5: argon2 bounds (unit) -----------------------------------------
-
 func TestArgon2ParamBounds(t *testing.T) {
-	// oversized m, t, p must be rejected WITHOUT running argon2 (no resource exhaustion)
+	// Oversized m, t, p must be rejected without running argon2 (no resource exhaustion).
 	bad := []string{
 		"$argon2id$v=19$m=9999999999,t=1,p=4$YWJjZGVmZ2hpamtsbW5v$" + strings.Repeat("A", 43),
 		"$argon2id$v=19$m=65536,t=9999,p=4$YWJjZGVmZ2hpamtsbW5v$" + strings.Repeat("A", 43),
@@ -67,8 +56,6 @@ func TestArgon2ParamBounds(t *testing.T) {
 		}
 	}
 }
-
-// ---- item 1: principal resolution concurrency (DB) ------------------------
 
 func TestPrincipalResolutionConcurrent(t *testing.T) {
 	db := scratchDB(t)
@@ -108,9 +95,8 @@ func TestPrincipalResolutionConcurrent(t *testing.T) {
 	if principals != 1 {
 		t.Fatalf("expected exactly 1 principal (no orphan), got %d", principals)
 	}
-	// issuer namespaces independent: SOCIAL with same value is a different identity
 	_ = repo.WithTx(ctx, func(tx Tx) error {
-		// A bare subject with NO secondary factor links to nothing: the issuer namespace stays independent.
+		// A bare subject with no secondary factor links to nothing: SOCIAL with the same value is a different identity.
 		_, err := tx.ResolvePrincipalByFactors(ctx, testTenant,
 			FactorClaim{Type: "SOCIAL_SUBJECT", Issuer: "google", Value: "race@example.com"}, nil, time.Now())
 		return err
@@ -121,15 +107,12 @@ func TestPrincipalResolutionConcurrent(t *testing.T) {
 	}
 }
 
-// ---- item 2/3: transaction rollback on downstream failure (DB) ------------
-
 func TestRollbackOnDownstreamFailure(t *testing.T) {
 	db := scratchDB(t)
 	seedGuestNetwork(t, db)
 	ctx := context.Background()
 	repo := NewPgRepository(db)
-	// UpsertDevice succeeds, but CreateAuthContext fails (guest_network_id absent => FK violation).
-	// The whole tx must roll back: NO device row must persist.
+	// CreateAuthContext fails (FK violation) after UpsertDevice succeeds; the tx must roll back with no device row.
 	err := repo.WithTx(ctx, func(tx Tx) error {
 		if _, e := tx.UpsertDevice(ctx, testTenant, testSite, "33333333-3333-3333-3333-333333333333", "de:ad:be:ef:00:01", "", "", time.Now()); e != nil {
 			return e
@@ -150,14 +133,11 @@ func TestRollbackOnDownstreamFailure(t *testing.T) {
 	}
 }
 
-// ---- item 3: auth_context atomic consume (DB) -----------------------------
-
 func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 	db := scratchDB(t)
 	seedGuestNetwork(t, db)
 	ctx := context.Background()
 	repo := NewPgRepository(db)
-	// seed an account + create an auth_context via the account adapter
 	db.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts (tenant_id, site_id, username, password_hash, enabled) VALUES ($1,$2,'carol',$3,true)`, testTenant, testSite, argon2idHash("pw"))
 	a, _ := New(Config{MasterEnabled: true, Methods: map[Method]bool{MethodAccount: true}}, repo, NopObserver{})
 	res, err := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "carol", Secret: "pw", Device: gnDevice("de:ad:be:ef:11:22")})
@@ -166,7 +146,6 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 	}
 	acID := res.AuthContextID
 
-	// double-consume: many workers, exactly one wins
 	const workers = 24
 	var wins int64
 	var consumedErr int64
@@ -193,7 +172,6 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 		t.Fatalf("exactly one consumer must win, got %d", wins)
 	}
 
-	// mismatch: consuming with the wrong method on a fresh context
 	res2, _ := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "carol", Secret: "pw", Device: gnDevice("de:ad:be:ef:11:23")})
 	_ = repo.WithTx(ctx, func(tx Tx) error {
 		_, err := tx.ConsumeAuthContext(ctx, ConsumeAuthContextRequest{AuthContextID: res2.AuthContextID, TenantID: testTenant, SiteID: testSite, ExpectedMethod: MethodOTP, ExpectedDeviceID: res2.DeviceID, ExpectedGuestNetworkID: testGN, Now: time.Now()})
@@ -203,14 +181,8 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 		return err
 	})
 
-	// expired: force expiry, then consume -> expired
-	// Force expiry THROUGH the controlled operation, and check the error.
-	//
-	// This was a bare db.Exec whose error was discarded. The auth_context family is guarded by
-	// p3_controlled_writer_only, so the raw UPDATE was refused, the row never expired, consume then SUCCEEDED,
-	// and the assertion below failed with "expired context must return expired, got " -- an empty code that
-	// reads as broken expiry handling and was in fact broken test setup. A silent setup failure turns a passing
-	// assertion into no assertion at all, which is the more expensive of the two bugs.
+	// Force expiry through the controlled operation and check the error: p3_controlled_writer_only refuses a
+	// raw UPDATE, and a silently failed setup would make the assertion below meaningless.
 	expireTx, err := db.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)

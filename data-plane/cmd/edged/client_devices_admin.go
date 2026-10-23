@@ -1,27 +1,11 @@
 package main
 
-// DEVICES: find a client device -- online or not -- see what it holds, and act on it
-// (contract docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md, migration 0118).
+// Device actions are three distinct things, not one "reset": disconnect ends sessions only; release frees the
+// device's place on one package (package time, data, owner and history untouched); require-signin forgets the
+// remembered sign-in. None deletes a record, resets a quota or re-enables the one-time free package (that rule
+// reads purchase history, which nothing here changes). prepare-test is all three.
 //
-//	GET  /edge/v1/client-devices                      search (X-Device-Search: MAC, address or account name)
-//	GET  /edge/v1/client-devices/{id}                 the device: packages and places, sessions, restrictions,
-//	                                                  remembered sign-in, free packages used, recent actions
-//	POST /edge/v1/client-devices/{id}/disconnect      end its live sessions (it keeps its places; it can sign in)
-//	POST /edge/v1/client-devices/{id}/release         {entitlement_id, reason}: disconnect it from that package
-//	                                                  and free its place there (iam_v2.staff_release_device_slot)
-//	POST /edge/v1/client-devices/{id}/require-signin  {reason}: disconnect it and forget its remembered sign-in, so
-//	                                                  its next visit shows the full sign-in page
-//	POST /edge/v1/client-devices/{id}/prepare-test    {reason}: all three, for a device reused in a sign-in test
-//	GET/PUT /edge/v1/device-settings/                 how many device changes a client may make per day
-//
-// THREE DISTINCT ACTIONS, NOT ONE "RESET". Disconnecting ends a session and nothing else. Releasing a place ends the
-// device's hold on one package -- the package's time, data and owner are untouched, and its history stays.
-// Requiring a fresh sign-in forgets the remembered "Welcome back". None of them deletes a record, resets a
-// quota, or lets a device take a one-time free package again: the free-package rule reads the device's purchase
-// history, which nothing here changes, and the detail says so.
-//
-// Governed by the "sessions" key (the same live-access state the Active sessions screen manages); the setting by
-// "auth-methods", like the Email accounts terms -- what the property allows its clients is a configuration decision.
+// Governed by the "sessions" key; the per-day change setting by "auth-methods".
 
 import (
 	"context"
@@ -58,8 +42,7 @@ type devicePackage struct {
 }
 
 type deviceRow struct {
-	// ID is empty for a device that is on the Wi-Fi but has never signed in: it has a DHCP lease and no device
-	// record yet (records are created at sign-in).
+	// ID is empty for a device on the Wi-Fi that has never signed in (records are created at sign-in).
 	ID        string         `json:"id"`
 	MAC       string         `json:"mac"`
 	LastIP    string         `json:"last_ip,omitempty"`
@@ -68,24 +51,21 @@ type deviceRow struct {
 	Online    bool           `json:"online"` // signed in: a live Internet session
 	OnlineIP  string         `json:"online_ip,omitempty"`
 	Current   *devicePackage `json:"current,omitempty"`
-	// OnNetwork: the device holds an active DHCP lease right now -- it is on the Wi-Fi, signed in or not.
+	// OnNetwork: holds an active DHCP lease, signed in or not.
 	OnNetwork    bool       `json:"on_network"`
 	LeaseIP      string     `json:"lease_ip,omitempty"`
 	Hostname     string     `json:"hostname,omitempty"`
 	LeaseExpires *time.Time `json:"lease_expires,omitempty"`
 }
 
-// deviceLease is one active DHCP lease, from netd's /v1/leases (Kea's lease view).
 type deviceLease struct {
 	IP       string
 	Hostname string
 	Expires  time.Time
 }
 
-// activeLeases maps a hardware address (lower case) to its active lease. ON THE WI-FI IS NOT THE SAME AS SIGNED
-// IN: a device holds a lease from the moment it joins, and a session only once it signs in. The Devices screen
-// used to know only the second, so a phone sitting on the Wi-Fi at the portal read as "Offline" and a phone that
-// had never signed in was not listed at all. nil when netd cannot be asked (the screen still answers).
+// activeLeases maps lower-case MAC to its active lease. On the Wi-Fi is not signed in: a lease starts at join, a
+// session at sign-in. nil when netd cannot be asked (the screen still answers).
 func (s *server) activeLeases(ctx context.Context) map[string]deviceLease {
 	if s.netd == nil {
 		return nil
@@ -97,7 +77,6 @@ func (s *server) activeLeases(ctx context.Context) map[string]deviceLease {
 	return parseActiveLeases(raw, time.Now())
 }
 
-// parseActiveLeases keeps the leases that are assigned (Kea state 0) and not yet expired, by hardware address.
 func parseActiveLeases(raw []byte, now time.Time) map[string]deviceLease {
 	var v struct {
 		Leases []struct {
@@ -115,7 +94,7 @@ func parseActiveLeases(raw []byte, now time.Time) map[string]deviceLease {
 	out := map[string]deviceLease{}
 	for _, l := range v.Leases {
 		exp := time.Unix(l.CLTT+l.Valid, 0)
-		if l.State != 0 || l.MAC == "" || !exp.After(now) { // 0 = default (assigned); declined/expired are not "on"
+		if l.State != 0 || l.MAC == "" || !exp.After(now) { // Kea state 0 = assigned
 			continue
 		}
 		out[strings.ToLower(l.MAC)] = deviceLease{IP: l.IP, Hostname: l.Hostname, Expires: exp}
@@ -131,7 +110,7 @@ func (d *deviceRow) withLease(leases map[string]deviceLease) {
 	}
 }
 
-// devicePackageSelect projects one binding of a device with its package and subject. $1 tenant, $2 site.
+// devicePackageSelect: $1 tenant, $2 site.
 const devicePackageSelect = `
 	    SELECT e.id::text, e.status, COALESCE(NULLIF(ipr.display->>'name',''), ''), COALESCE(ipr.price_minor,0) = 0,
 	           CASE WHEN e.guest_account_id IS NOT NULL THEN 'ACCOUNT' WHEN e.voucher_id IS NOT NULL THEN 'VOUCHER'
@@ -189,7 +168,7 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	const size = 50
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// What is connected NOW comes first: signed in, then on the Wi-Fi, then the rest by when they last signed in.
+	// Order: signed in, then on the Wi-Fi, then the rest by last sign-in.
 	leases := s.activeLeases(ctx)
 	onWiFi := make([]string, 0, len(leases))
 	for m := range leases {
@@ -229,9 +208,7 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 	if more {
 		out = out[:size]
 	}
-	// ON THE WI-FI NOW. Every listed device learns whether it holds a lease; and on the first page, a device that
-	// is on the Wi-Fi but has never signed in (no record yet) is listed first, so "I connected my phone and
-	// cannot find it" has an answer.
+	// On the first page, devices on the Wi-Fi that have never signed in (no record yet) are listed first.
 	for i := range out {
 		out[i].withLease(leases)
 	}
@@ -267,7 +244,6 @@ func (s *server) listClientDevices(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(fresh, func(i, j int) bool { return fresh[i].LeaseIP < fresh[j].LeaseIP })
 		out = append(fresh, out...)
 	}
-	// The package each device holds now (or held last), one query per row on a page of at most 50.
 	for i := range out {
 		if out[i].ID == "" {
 			continue
@@ -357,7 +333,6 @@ func (s *server) getClientDevice(w http.ResponseWriter, r *http.Request) {
 		srows.Close()
 	}
 
-	// Access restrictions that bear on this device: the sign-in protection wait, and the remembered sign-in.
 	restriction := map[string]any{"restricted": false}
 	var until *time.Time
 	var failures *int
@@ -396,8 +371,8 @@ func (s *server) getClientDevice(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// endDeviceSessions ends the device's live sessions (optionally only on one package) through scd's operator
-// disconnect, and reads back what ended. A non-zero status is a refusal issued before anything was ended.
+// endDeviceSessions ends live sessions (optionally one package's) via scd and reads back what ended. A non-zero
+// status is a refusal issued before anything was ended.
 func (s *server) endDeviceSessions(r *http.Request, ctx context.Context, deviceID, entitlementID string) (int, int, string, string) {
 	q := `SELECT x.id::text, COALESCE(host(x.ip),'') FROM iam_v2.sessions x
 	     WHERE x.tenant_id=$1 AND x.site_id=$2 AND x.device_id=$3::uuid AND x.ended IS NULL
@@ -454,7 +429,7 @@ type deviceActionIn struct {
 	Reason        string `json:"reason,omitempty"`
 }
 
-// deviceActor is the operator the session belongs to: never a field the caller sends.
+// deviceActor is the session's operator, never a caller-supplied field.
 func deviceActor(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	sess := sessFrom(r.Context())
 	if sess == nil || sess.OperatorID == "" {
@@ -512,7 +487,6 @@ func (s *server) disconnectClientDevice(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "disconnected_sessions": n})
 }
 
-// releaseOne disconnects the device from one package and frees its place there.
 func (s *server) releaseOne(r *http.Request, ctx context.Context, deviceID, ent, opID, opLabel, reason string) (string, int, string, string) {
 	if _, st, code, msg := s.endDeviceSessions(r, ctx, deviceID, ent); st != 0 {
 		return "", st, code, msg
@@ -596,9 +570,8 @@ func (s *server) requireClientDeviceSignIn(w http.ResponseWriter, r *http.Reques
 		"remembered_signins_revoked": n})
 }
 
-// prepareClientDeviceForTest is the three actions together, for a device reused in a sign-in test: disconnected,
-// every place it holds on a live package freed, its remembered sign-in forgotten. What it does NOT do is said in
-// the answer: the device's package history -- and so the one-time free package rule -- is unchanged.
+// prepareClientDeviceForTest runs all three actions for a device reused in a sign-in test; package history, and
+// so the one-time free package rule, is unchanged.
 func (s *server) prepareClientDeviceForTest(w http.ResponseWriter, r *http.Request) {
 	d, in, ctx, cancel, ok := s.deviceActionStart(w, r, true)
 	if !ok {
@@ -659,8 +632,6 @@ func (s *server) prepareClientDeviceForTest(w http.ResponseWriter, r *http.Reque
 		"remembered_signins_revoked": n, "free_packages_used": freeUsed,
 	})
 }
-
-// ---- the setting --------------------------------------------------------------------------------------------
 
 type deviceSettings struct {
 	ClientDeviceChangesPerDay int `json:"client_device_changes_per_day"`

@@ -4,8 +4,6 @@ package main
 
 import "testing"
 
-// D-H: accounting-detail retention is an audited §0C setting. 365 days by default (0131, GDPR C2); bounded; a reason and the
-// password to change it; logged; site administrators write, the roles that can see backups can read.
 func TestIntegration_AccountingRetention_TheSetting(t *testing.T) {
 	f := newAPI(t)
 	st, body := f.do(t, "GET", "/accounting-retention/", nil)

@@ -12,10 +12,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
 )
 
-// RECOVERY UNDER EDGED'S OWN LOGIN. The API contract tests above run against a superuser pool, which is how
-// Charge health and Recovery answered "query failed" on a real appliance for months without a test noticing:
-// no test ever read or acted as svc_edged. This one does, with the Gate-P grants a factory-clean appliance
-// gets. EDGED_ROLE_TEST_DSN is a svc_edged login on the same database as PHASE3_TEST_DSN.
+// Runs as svc_edged with a factory-clean appliance's grants; the superuser-pool API tests would miss a missing
+// grant. EDGED_ROLE_TEST_DSN is a svc_edged login on the same database as PHASE3_TEST_DSN.
 func TestIntegrationFinOpsAPI_RecoveryWorksUnderEdgedsOwnLogin(t *testing.T) {
 	dsn := os.Getenv("EDGED_ROLE_TEST_DSN")
 	if dsn == "" {
@@ -78,7 +76,7 @@ func TestIntegrationFinOpsAPI_RecoveryWorksUnderEdgedsOwnLogin(t *testing.T) {
 		t.Fatalf("zero-attempt retry as svc_edged: %v", err)
 	}
 
-	// The financial mirror maximum age (D48): read it, and change it through the audited definer.
+	// The financial mirror maximum age: read it, and change it through the audited definer.
 	var age int
 	if err := ep.QueryRow(ctx, `SELECT iam_v2.p4_financial_mirror_max_age_seconds($1::uuid,$2::uuid,gen_random_uuid())`,
 		f.tenant, f.site).Scan(&age); err != nil || age != 14400 {
@@ -94,9 +92,8 @@ func TestIntegrationFinOpsAPI_RecoveryWorksUnderEdgedsOwnLogin(t *testing.T) {
 		t.Fatalf("set mirror age as svc_edged: %v", err)
 	}
 
-	// Reads other screens make: Checkout grace history and the client-network active count. The financial
-	// settings CHANGE LOG is not among them: no edged code reads it, so migration 0124 (audit B-7) withdrew
-	// svc_edged's SELECT on it, and asserting it here would demand a grant the product does not use.
+	// Reads other screens make: Checkout grace history and the client-network active count. The financial settings
+	// change log is not among them: svc_edged has no SELECT on it because no edged code reads it.
 	for _, q := range []string{
 		`SELECT count(*) FROM iam_v2.pms_interface_financial_settings WHERE tenant_id=$1`,
 		`SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE tenant_id=$1`,

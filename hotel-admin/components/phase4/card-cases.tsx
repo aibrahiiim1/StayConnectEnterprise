@@ -1,11 +1,7 @@
 "use client";
 
-// CARD DISPUTES AND CHARGEBACKS (Product-Owner policy 2026-10-12, migration 0115).
-//
-// A chargeback or a dispute never ends a client's access by itself: each is a case a payments operator resolves
-// once, explicitly — Keep access, or End access (the access that charge paid for). Both ask for the password and a
-// reason and are recorded. A FULL provider refund needs no case: the access it paid for was ended automatically,
-// and those terminations are listed below as evidence. OneGate never initiates a refund or a reversal.
+// Disputes and chargebacks leave access unchanged until an operator records a step-up decision.
+// A full provider refund ends the paid access automatically; OneGate never initiates refunds.
 
 import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";

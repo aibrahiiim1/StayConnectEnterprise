@@ -12,8 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Phase-2 commerce integration tests (C2/C3/C4) against a disposable iam_v2 database. Set
-// PHASE2_TEST_DSN to run; skipped otherwise.
+// Needs a disposable iam_v2 database via PHASE2_TEST_DSN; skipped otherwise.
 
 func p2DB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -26,7 +25,6 @@ func p2DB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// clean commerce/session/entitlement subtree this test writes (disposable DB)
 	_, err = db.Exec(context.Background(), `TRUNCATE
 		iam_v2.entitlement_devices, iam_v2.entitlement_adjustments, iam_v2.entitlements,
 		iam_v2.settlements, iam_v2.purchases, iam_v2.offer_quotes, iam_v2.auth_contexts,
@@ -53,8 +51,7 @@ type seed struct {
 	packageID, planRevID, pkgRevID, accountID, deviceID, authCtxID string
 }
 
-// seedFreeCommerce builds a full free-package chain + an unconsumed ACCOUNT auth_context. `rules`/
-// `tiers` are optional JSON specs; opts adjust price/settlement/visibility for negative cases.
+// seedFreeCommerce builds a free-package chain and an unconsumed ACCOUNT auth_context; opts adjust it for negative cases.
 func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed {
 	t.Helper()
 	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED,PREPAID}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`,
@@ -68,11 +65,8 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 			t.Fatalf("seed: %v\nSQL: %s", err, sql)
 		}
 	}
-	// The auth_context family is guarded in the DATABASE: a trigger refuses any write not inside a
-	// transaction that has called iam_v2.begin_controlled_operation('auth_context'). That is a real IAM-v2
-	// invariant, not test scaffolding, so the fixture satisfies it the way production code does rather than
-	// being granted a way around it. These tests are DSN-gated and had not run since the guard landed, so the
-	// seed still wrote the row bare.
+	// A trigger refuses auth_context writes outside a transaction that called
+	// iam_v2.begin_controlled_operation('auth_context'); the fixture satisfies it as production does.
 	oneGuarded := func(sql string, args ...any) string {
 		tx, err := db.Begin(ctx)
 		if err != nil {
@@ -100,20 +94,16 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 	}
 	var s seed
 	ex(`INSERT INTO public.guest_networks (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr) VALUES ($1,$2,$3,'net','br-lan','br-guest','10.77.0.1/24','10.77.0.1','10.77.0.0/24') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site)
-	// A MAC OF ITS OWN PER SEED. Device identity is (tenant, site, appliance, MAC), so a fixed literal made
-	// this fixture collide with any other test that had already inserted the same address -- and the symptom
-	// was a unique-violation in a DIFFERENT test, which is the worst place to discover it. The counter is
-	// process-local; every test that needs a clean table truncates first.
+	// A distinct MAC per seed: device identity is (tenant, site, appliance, MAC), and a fixed literal would
+	// trigger a unique-violation in a different test.
 	seedDeviceSeq++
 	s.deviceID = one(`INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,$4) RETURNING id::text`,
 		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:ff:%02x:%02x", (seedDeviceSeq>>8)&0xff, seedDeviceSeq&0xff))
 	s.accountID = one(`INSERT INTO iam_v2.guest_access_accounts (tenant_id,site_id,username,password_hash,enabled) VALUES ($1,$2,'alice','x',true) RETURNING id::text`, p2Tenant, p2Site)
-	// plan + revision (current)
 	planID := one(`INSERT INTO iam_v2.service_plans (tenant_id,site_id,code) VALUES ($1,$2,'PLAN1') RETURNING id::text`, p2Tenant, p2Site)
 	s.planRevID = one(`INSERT INTO iam_v2.service_plan_revisions (tenant_id,site_id,service_plan_id,revision_no,name,down_kbps,up_kbps,max_concurrent_devices,time_accounting_mode,data_quota_bytes,time_quota_seconds)
 		VALUES ($1,$2,$3,1,'p',5000,2000,2,$4,1000000000,$5) RETURNING id::text`, p2Tenant, p2Site, planID, o.timeMode, o.timeQuota)
 	ex(`UPDATE iam_v2.service_plans SET current_revision_id=$1 WHERE id=$2`, s.planRevID, planID)
-	// package + revision (current, free)
 	s.packageID = one(`INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'PKG1',$3) RETURNING id::text`, p2Tenant, p2Site, o.active())
 	s.pkgRevID = one(`INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,visible_from,visible_until,display)
@@ -128,13 +118,11 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 		ex(`INSERT INTO iam_v2.package_grant_tiers (tenant_id,site_id,package_revision_id,tier_order,grant_value)
 			SELECT $1,$2,$3, (r->>'order')::int, (r->'grant') FROM jsonb_array_elements($4::jsonb) r`, p2Tenant, p2Site, s.pkgRevID, o.tiers)
 	}
-	// auth_context (ACCOUNT), unconsumed, future TTL
 	s.authCtxID = oneGuarded(`INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`, p2Tenant, p2Site, s.accountID, s.deviceID, p2GN)
 	return s
 }
 
-// seedDeviceSeq keeps every seeded device's MAC distinct within a process.
 var seedDeviceSeq int
 
 type seedOpts struct {
@@ -148,10 +136,8 @@ type seedOpts struct {
 	inactive   bool
 	visFrom    *time.Time
 	visUntil   *time.Time
-	// timeMode/timeQuota let a fixture publish an IMMUTABLE plan revision in a given accounting mode. They
-	// default to the pre-Phase-6 shape, so every existing seed is unchanged.
-	timeMode  string
-	timeQuota *int64
+	timeMode   string
+	timeQuota  *int64
 }
 
 func (o seedOpts) active() bool { return !o.inactive }
@@ -168,7 +154,6 @@ func req(s seed) QuoteRequest {
 	return QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: s.authCtxID, PackageID: s.packageID, DeviceID: s.deviceID, GuestNetworkID: p2GN}
 }
 
-// C2: valid free quote + confirm -> GRANTED + one entitlement; auth-context not consumed by quote.
 func TestC2QuoteAndFreePurchase(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -178,7 +163,6 @@ func TestC2QuoteAndFreePurchase(t *testing.T) {
 	if err != nil || q.QuoteID == "" || q.Reason != "ok" {
 		t.Fatalf("quote: %+v err=%v", q, err)
 	}
-	// quote must NOT have consumed the auth context
 	var consumed *time.Time
 	db.QueryRow(ctx, `SELECT consumed_at FROM iam_v2.auth_contexts WHERE id=$1`, s.authCtxID).Scan(&consumed)
 	if consumed != nil {
@@ -199,7 +183,6 @@ func TestC2QuoteAndFreePurchase(t *testing.T) {
 	if setl != 1 || ent != 1 {
 		t.Fatalf("want 1 settlement + 1 active entitlement, got %d/%d", setl, ent)
 	}
-	// replay: second confirm on the consumed quote -> deny, no new purchase
 	pr2, _ := e.ConfirmFreePurchase(ctx, ConfirmRequest{TenantID: p2Tenant, SiteID: p2Site, QuoteID: q.QuoteID, DeviceID: s.deviceID, GuestNetworkID: p2GN})
 	if pr2.Reason == "granted" {
 		t.Fatal("replay must not grant a second purchase")
@@ -211,7 +194,6 @@ func TestC2QuoteAndFreePurchase(t *testing.T) {
 	}
 }
 
-// C2: quote denials — wrong device/network, cross-tenant, ineligible, no tier, not free, out of window.
 func TestC2QuoteDenials(t *testing.T) {
 	db := p2DB(t)
 	e := newEngine(t, db, 5*time.Minute)
@@ -258,7 +240,6 @@ func TestC2QuoteDenials(t *testing.T) {
 	}
 }
 
-// C2: expired quote cannot be confirmed.
 func TestC2ExpiredQuote(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -274,7 +255,7 @@ func TestC2ExpiredQuote(t *testing.T) {
 	}
 }
 
-// C2: ≥24 concurrent confirmations of ONE quote -> exactly one purchase/settlement/live-entitlement.
+// At least 24 concurrent confirmations of one quote yield exactly one purchase, settlement and live entitlement.
 func TestC2ConcurrentSingleWinner(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -310,23 +291,20 @@ func TestC2ConcurrentSingleWinner(t *testing.T) {
 	}
 }
 
-// C4: published revisions immutable (mg9 triggers) + 0009 purchase<->quote pin trigger.
 func TestC4ImmutabilityAndPinTrigger(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	ctx := context.Background()
-	// published plan/package revisions cannot be updated
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.service_plan_revisions SET down_kbps=1 WHERE id=$1`, s.planRevID); err == nil {
 		t.Fatal("service_plan_revision must be immutable")
 	}
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_package_revisions SET price_minor=1 WHERE id=$1`, s.pkgRevID); err == nil {
 		t.Fatal("internet_package_revision must be immutable")
 	}
-	// pin trigger: a purchase whose package_revision_id differs from its quote is rejected (free path,
-	// NULL pms/settlement, where the composite FK is not enforced).
+	// A purchase whose package_revision_id differs from its quote's is rejected by the pin trigger (free path,
+	// where the composite FK is not enforced).
 	e := newEngine(t, db, 5*time.Minute)
 	q, _ := e.CreateQuote(ctx, req(s))
-	// second package revision (different id) to substitute
 	var otherRev string
 	db.QueryRow(ctx, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods)
@@ -339,7 +317,7 @@ func TestC4ImmutabilityAndPinTrigger(t *testing.T) {
 	}
 }
 
-// dark: flags OFF -> disabled result, zero repository use (panic repo would trip).
+// With flags OFF the result is disabled and the repository is never used.
 func TestPhase2DarkNoRepo(t *testing.T) {
 	e, err := NewCommerceEngine(DefaultCommerceConfig(), nil, NopObserver{})
 	if err != nil {

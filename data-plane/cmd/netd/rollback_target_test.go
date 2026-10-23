@@ -1,18 +1,7 @@
 package main
 
-// AN OPERATOR ROLLBACK MUST HAVE A TARGET, OR REFUSE.
-//
-// THE DEFECT THESE PIN. applier.Rollback used to call a.rollback straight through. a.rollback finds its
-// target with store.ActiveBundlePath(ctx, exceptID) -- `WHERE state='active' AND id<>$1` -- which answers
-// correctly while a revision is PENDING CONFIRMATION, because the previous revision is then still active.
-// Once a revision is CONFIRMED there is exactly one active row and it is the revision itself, so the query
-// returns nothing, prevBundle is empty, and a.rollback takes its factory-clean branch: every guest bridge
-// destroyed, netplan and unbound fragment deleted, Kea restored to stopped and disabled.
-//
-// So pressing Rollback on the configuration currently in force took the whole guest network down, and the
-// endpoint answered {"state":"rolled_back"}. These tests assert the refusal, and -- the part that matters
-// most -- that the refusal issues NO kernel command at all. A test that only checked the error could pass
-// while the bridges were already gone.
+// An operator rollback must have a target or refuse.
+// On a confirmed revision no previous active bundle exists and the factory-clean branch would destroy every guest bridge; the refusal must issue no kernel command.
 
 import (
 	"context"
@@ -26,15 +15,13 @@ func rollbackApplier(t *testing.T, k *fakeKernel, state string, stateErr error) 
 	t.Helper()
 	a := newTestApplier(t, k)
 	a.revStateFn = func(context.Context, string) (string, error) { return state, stateErr }
-	// If the guard ever falls through to the real rollback, these make the damage observable rather than
-	// hypothetical: a target lookup that answers "none" is what selects the tear-down branch.
+	// Makes damage observable if the guard falls through to the real rollback.
 	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
 	a.markRolledFn = func(context.Context, string, string) error { return nil }
 	a.eventFn = func(context.Context, string, string, bool, map[string]any) {}
 	return a
 }
 
-// THE CENTRAL CASE.
 func TestRollbackOfAConfirmedRevisionIsRefusedAndTouchesNothing(t *testing.T) {
 	k := newFakeKernel(t)
 	a := rollbackApplier(t, k, "active", nil)
@@ -47,7 +34,6 @@ func TestRollbackOfAConfirmedRevisionIsRefusedAndTouchesNothing(t *testing.T) {
 	if !errors.Is(err, errRollbackRefused) {
 		t.Errorf("error does not wrap errRollbackRefused, so the transport will report 500: %v", err)
 	}
-	// The operator has to be able to act on the message, so it must say what to do instead.
 	for _, want := range []string{"CONFIRMED", "apply that as a new revision"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal does not mention %q: %v", want, err)
@@ -58,7 +44,7 @@ func TestRollbackOfAConfirmedRevisionIsRefusedAndTouchesNothing(t *testing.T) {
 	}
 }
 
-// The window where a rollback IS meaningful: the previous revision is still the active one.
+// Rollback is meaningful only while the previous revision is still active.
 func TestRollbackIsAllowedWhileTheRevisionIsStillMidFlight(t *testing.T) {
 	for _, state := range []string{"applying", "pending_confirmation"} {
 		k := newFakeKernel(t)
@@ -70,7 +56,7 @@ func TestRollbackIsAllowedWhileTheRevisionIsStillMidFlight(t *testing.T) {
 	}
 }
 
-// Everything that is not in force has nothing to undo, and must not reach the tear-down branch either.
+// Revisions not in force have nothing to undo and must not reach the tear-down branch.
 func TestRollbackOfARevisionThatIsNotInForceIsRefused(t *testing.T) {
 	for _, state := range []string{"draft", "validated", "failed", "rolled_back", "superseded"} {
 		k := newFakeKernel(t)
@@ -101,8 +87,7 @@ func TestRollbackOfAnUnknownRevisionIsRefused(t *testing.T) {
 	}
 }
 
-// FAIL CLOSED. Not knowing the state is not a reason to run the branch that destroys everything -- it is the
-// strongest reason not to.
+// Fail closed: unknown state is a reason not to run the destructive branch.
 func TestAnUnreadableRevisionStateRefusesWithoutTouchingTheKernel(t *testing.T) {
 	k := newFakeKernel(t)
 	a := rollbackApplier(t, k, "", fmt.Errorf("connection refused"))
@@ -118,25 +103,13 @@ func TestAnUnreadableRevisionStateRefusesWithoutTouchingTheKernel(t *testing.T) 
 	}
 }
 
-// THE RACE THE REVIEWER FOUND, AND IT WAS WIDER THAN THE GUARD.
-//
-// Both callers decide to roll back before a.rollback looks for a target:
-//
-//	applier.Rollback   reads the state, sees pending_confirmation, calls a.rollback;
-//	watchdogLoop       reads PendingRevision(), sees it overdue, calls a.rollback.
-//
-// If /confirm commits in that gap the revision becomes ACTIVE and its predecessor becomes SUPERSEDED, so
-// ActiveBundlePath finds no other active revision, prevBundle is empty, and the factory-clean branch
-// destroys every guest bridge and stops DHCP -- for a configuration an operator had just confirmed.
-//
-// The watchdog's half of this predates the operator guard, so the fix is at the decision point inside
-// a.rollback rather than in either caller.
+// Race: applier.Rollback and the watchdog each decide to roll back before a.rollback looks for a target. If /confirm commits in that gap, no previous bundle exists and the factory-clean branch destroys a just-confirmed configuration.
+// The fix is at the decision point inside a.rollback, not in either caller.
 func TestAConfirmationLandingMidRollbackDoesNotTearDownTheGuestNetwork(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
 
-	// The state read that the CALLER made: still mid-flight. The state read a.rollback makes at the
-	// decision point: confirmed in between.
+	// The caller saw mid-flight state; a.rollback's own read at the decision point sees it confirmed.
 	calls := 0
 	a.revStateFn = func(context.Context, string) (string, error) {
 		calls++
@@ -145,7 +118,6 @@ func TestAConfirmationLandingMidRollbackDoesNotTearDownTheGuestNetwork(t *testin
 		}
 		return "active", nil
 	}
-	// No previous active bundle -- exactly what a confirmation leaves behind.
 	a.prevBundleFn = func(context.Context, string) (string, error) { return "", nil }
 	a.markRolledFn = func(context.Context, string, string) error { return nil }
 	var events []string
@@ -189,8 +161,7 @@ func TestAnUnreadableStateAtTheDecisionPointDoesNotTearDownTheGuestNetwork(t *te
 	}
 }
 
-// AND THE FACTORY-CLEAN PATH MUST STILL WORK. It is the correct answer for a first apply that fails or
-// expires, and narrowing the branch must not have taken that away.
+// The factory-clean path must still work for a first apply that fails or expires.
 func TestAFirstApplyThatExpiresStillComesBackFactoryClean(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)

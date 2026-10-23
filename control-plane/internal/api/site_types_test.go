@@ -30,7 +30,6 @@ func TestSiteTypeWritesAcceptOnlyKnownTypes(t *testing.T) {
 			t.Errorf("%q accepted", bad)
 		}
 	}
-	// Every accepted type fits the database CHECK shape (migration 0049).
 	for _, st := range SiteTypes {
 		if !regexpSiteTypeShape(st) {
 			t.Errorf("%s does not match the 0049 CHECK shape", st)
@@ -50,7 +49,6 @@ func regexpSiteTypeShape(s string) bool {
 	return true
 }
 
-// UNSPECIFIED is signed as empty, so an untyped site's assignment is byte-identical to the old layout.
 func TestAssignmentCarriesSiteTypeOnlyWhenSet(t *testing.T) {
 	if assignmentSiteType(SiteTypeUnspecified) != "" || assignmentSiteType("HOTEL") != "HOTEL" {
 		t.Fatal("assignment site_type mapping wrong")
@@ -100,7 +98,6 @@ func TestModulesCatalogMirrorsTheRegistry(t *testing.T) {
 			t.Errorf("%s preset %v, want none", st, presets[st])
 		}
 	}
-	// Every preset is itself a valid module set.
 	for id, p := range presets {
 		if _, err := lic.ModulesFromIDs(p); err != nil {
 			t.Errorf("%s preset invalid: %v", id, err)

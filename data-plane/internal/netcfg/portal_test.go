@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// ---- the portal-address validator ------------------------------------------------------------------------
-
 func codes(issues []Issue) []string {
 	var out []string
 	for _, i := range issues {
@@ -82,13 +80,11 @@ func TestValidatePortalIP(t *testing.T) {
 }
 
 func TestValidatePortalIP_TheAddressOnItsOwnInterfaceIsNotAnOverlap(t *testing.T) {
-	// After the first apply the portal interface carries 10.255.255.1/32. Re-validating the same address (every
-	// later apply does) must not find it overlapping itself.
+	// Re-validating the same address after the first apply (the portal interface carries it) must not find it overlapping itself.
 	host := append(liveHost(), HostAddr{Iface: PortalIface, CIDR: "10.255.255.1/32"})
 	if got := ValidatePortalIP("10.255.255.1", vipNets(), host); len(got) != 0 {
 		t.Fatalf("the portal address overlapped itself: %v", got)
 	}
-	// ...but the same /32 on ANY other interface is a real conflict.
 	host = append(liveHost(), HostAddr{Iface: "ens192", CIDR: "10.255.255.1/32"})
 	if got := ValidatePortalIP("10.255.255.1", vipNets(), host); !hasPortalCode(got, "portal_ip_overlap") {
 		t.Fatalf("an address another interface carries was accepted: %v", got)
@@ -98,11 +94,9 @@ func TestValidatePortalIP_TheAddressOnItsOwnInterfaceIsNotAnOverlap(t *testing.T
 func TestValidateSetPassesThePortalStateToOption114Rule(t *testing.T) {
 	n := vlan20()
 	topo := topoT()
-	// Fallback: plain HTTP, no issue.
 	if res := ValidateSet([]GuestNetwork{n}, topo, nil, nil); hasAny(res.Issues, "portal_https") {
 		t.Fatalf("the HTTP fallback was refused: %v", res.Issues)
 	}
-	// HTTPS active, the exact canonical form: no issue.
 	topo.PortalVIP = "10.255.255.1"
 	topo.PortalTLS = PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"}
 	if res := ValidateSet([]GuestNetwork{n}, topo, nil, nil); hasAny(res.Issues, "portal_https") {
@@ -118,8 +112,6 @@ func hasAny(issues []Issue, code string) bool {
 	}
 	return false
 }
-
-// ---- option 114 --------------------------------------------------------------------------------------------
 
 func TestCaptivePortalURL(t *testing.T) {
 	base := topoT()
@@ -183,7 +175,6 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 	if got := option114(t, active); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
 		t.Fatalf("active option 114 = %q", got)
 	}
-	// A non-captive network carries no option 114 in either state.
 	n := vlan20()
 	n.CaptiveEnabled = false
 	for _, o := range RenderKeaDhcp4([]GuestNetwork{n}, topo, "/x", "/y")["subnet4"].([]map[string]any)[0]["option-data"].([]map[string]any) {
@@ -192,8 +183,6 @@ func TestRenderKea_Option114FollowsTheHTTPSState(t *testing.T) {
 		}
 	}
 }
-
-// ---- the portal-names resolver fragment ------------------------------------------------------------------
 
 func TestRenderUnboundPortal(t *testing.T) {
 	header := "# StayConnect generated -- portal hostnames -> portal address. Do not edit by hand.\n"
@@ -220,7 +209,6 @@ func TestRenderUnboundPortal(t *testing.T) {
 		t.Fatal("the portal names must have no AAAA")
 	}
 
-	// A hostname that is not plainly a hostname never reaches the resolver configuration.
 	evil := string(RenderUnboundPortal("10.255.255.1", PortalTLS{
 		OneGateHostname: "x.gw.onegate.work\"\n    local-zone: \".\" refuse", CustomDomain: "WIFI.NileHotel.com."}))
 	if strings.Contains(evil, "refuse") || strings.Contains(evil, "x.gw.onegate.work") {

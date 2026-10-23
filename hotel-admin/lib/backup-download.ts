@@ -1,5 +1,4 @@
-// Kept out of the page module: a Next.js page file may export only the page and its config.
-/** Posts the ticket as a form so the browser saves the file in place (Content-Disposition: attachment). */
+// Next.js pages cannot export this helper; form submission lets the browser save the attachment.
 export function submitDownload(name: string, ticket: string) {
   const form = document.createElement("form");
   form.method = "POST";

@@ -1,15 +1,7 @@
 package main
 
-// The request register (GDPR final mission): a request a guest or visitor made under the data-protection rules, the day it
-// is due, and how it was answered.
-//
-//	GET  /edge/v1/guest-data-rights/register               the requests, open ones first, with days left
-//	POST /edge/v1/guest-data-rights/register               record a request that was received
-//	POST /edge/v1/guest-data-rights/register/{id}/extend   two more months for a complex request (once, with a reason)
-//	POST /edge/v1/guest-data-rights/register/{id}/answer   close it: answered, partly refused, refused or withdrawn
-//
-// It is a record the staff keep and decides nothing: it does not run an export or an erasure. Answering removes the
-// requester reference and returns it once, as the hotel's own file of the request.
+// The register of data-protection requests: due dates and answers only; it runs no export or erasure.
+// Answering removes the requester reference and returns it once.
 
 import (
 	"context"

@@ -1,9 +1,5 @@
 package main
 
-// netd resolves its own Phase-3 mode. These tests pin the two things that must never drift: while the flags
-// are off netd is inert and reads nothing, and when it cannot establish its own scope it stays inactive rather
-// than falling back to whatever a submitted plan claims.
-
 import (
 	"context"
 	"testing"
@@ -12,8 +8,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment/assignmenttest"
 )
 
-// F5: the enforcement plane takes its scope from the VERIFIED assignment. A document signed by a key outside the
-// trust registry used to be accepted here because netd read assignment.json raw.
+// The scope comes from the verified assignment; a document signed outside the trust registry is refused.
 func TestModeRequiresAVerifiedAssignment(t *testing.T) {
 	envFor := func(f *assignmenttest.Fixture) func(string) string {
 		return env(map[string]string{
@@ -45,8 +40,7 @@ func env(pairs map[string]string) func(string) string {
 	return func(k string) string { return pairs[k] }
 }
 
-// DARK is the default. With the flags off netd resolves no scope at all, so there is nothing for a plan to
-// match — and it does not even read the enrollment identity or the assignment.
+// With the flags off netd resolves no scope and reads neither identity nor assignment.
 func TestModeIsDarkByDefault(t *testing.T) {
 	mode, err := loadPhase3Mode(context.Background(), env(nil))
 	if err != nil {
@@ -60,15 +54,7 @@ func TestModeIsDarkByDefault(t *testing.T) {
 	}
 }
 
-// THE MASTER FLAG IS THE GATE, and a child flag without its master is a startup error everywhere else in the
-// product.
-//
-// This test used to assert the opposite of its first case — that the master flag ALONE left shaping off,
-// because enforcement followed the checkout-grace surface flag. That is the defect: an appliance running Room
-// authentication with grace off had a network writer that refused every plan, so two real guests were granted
-// sessions the kernel never heard about. Enforcement is the substrate under every guest-session surface, not a
-// surface of its own, so it follows the master flag. Scope still has to resolve (see the next test), and a
-// producer still has to authenticate (see main.go), so this is a gate, not a bypass.
+// Enforcement follows the master flag, not a surface flag such as checkout grace; scope must still resolve.
 func TestModeFollowsTheMasterFlag(t *testing.T) {
 	mode, err := loadPhase3Mode(context.Background(), env(map[string]string{
 		"STAYCONNECT_PHASE3_MASTER": "true",
@@ -78,8 +64,7 @@ func TestModeFollowsTheMasterFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// No identity is enrolled in those empty dirs, so the mode correctly stays inactive — what matters here is
-	// that it got as far as TRYING to resolve a scope instead of returning dark on the flag alone.
+	// Empty dirs enroll no identity, so it stays inactive.
 	if mode.Active {
 		t.Fatal("shaping went live without a resolvable scope")
 	}
@@ -90,7 +75,6 @@ func TestModeFollowsTheMasterFlag(t *testing.T) {
 		t.Fatal("a child flag without its master was accepted")
 	}
 
-	// a malformed flag is a startup failure, not a silently-off surface
 	if _, err := loadPhase3Mode(context.Background(), env(map[string]string{
 		"STAYCONNECT_PHASE3_MASTER": "yes-please",
 	})); err == nil {
@@ -98,9 +82,7 @@ func TestModeFollowsTheMasterFlag(t *testing.T) {
 	}
 }
 
-// With the flags on but no resolvable identity or assignment, netd stays INACTIVE. The alternative — trusting
-// the tenant/site/appliance in the submitted plan — would make the envelope both the claim and its own
-// authorization, and any local process could then enforce arbitrary policy here.
+// Without a resolvable scope netd stays inactive rather than trusting the plan's own tenant/site/appliance.
 func TestLiveFlagsWithoutScopeStayInactive(t *testing.T) {
 	dir := t.TempDir()
 	mode, err := loadPhase3Mode(context.Background(), env(map[string]string{

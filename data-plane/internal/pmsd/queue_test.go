@@ -117,10 +117,7 @@ func TestQueue_CloseIdempotent(t *testing.T) {
 	q.Close()
 }
 
-// TestQueue_LinearizableClose_NoAcceptAfterClose is the core §1 property under heavy concurrency:
-// once Close() RETURNS, no Enqueue may have been accepted after that boundary, and the total
-// accepted == total drained (no event lost, none double-counted). Runs repeatedly with 100+ producers,
-// concurrent consumers, and a concurrent close.
+// Once Close() returns no Enqueue may be accepted, and accepted == drained (none lost or double-counted).
 func TestQueue_LinearizableClose_NoAcceptAfterClose(t *testing.T) {
 	for iter := 0; iter < 20; iter++ {
 		q := NewBoundedQueue(64, 100*time.Millisecond)
@@ -167,11 +164,8 @@ func TestQueue_LinearizableClose_NoAcceptAfterClose(t *testing.T) {
 			go func(p int) {
 				defer prodWG.Done()
 				for i := 0; i < 20; i++ {
-					// Observe the close boundary BEFORE the call: the guarantee is that an Enqueue which
-					// STARTS after Close() has returned is never accepted. Reading closeReturned AFTER the
-					// call would falsely flag an Enqueue that legitimately committed while Close() was still
-					// blocked on the write lock and was only observed afterward (a measurement race, not a
-					// linearizability violation).
+					// Read the boundary before the call: reading it after would falsely flag an Enqueue that
+					// committed while Close() was still blocked on the write lock.
 					startedAfterClose := atomic.LoadInt32(&closeReturned) == 1
 					err := q.Enqueue(ctx, ev(fmt.Sprintf("p%d-%d", p, i)))
 					if err == nil {
@@ -212,8 +206,6 @@ func TestQueue_InvalidEventRejectedBeforeCapacity(t *testing.T) {
 	}
 }
 
-// TestQueue_CloseLatencyBounded proves Close returns within ~enqueueTimeout even with a producer blocked on
-// a full queue (it cannot exceed the worker shutdown deadline).
 func TestQueue_CloseLatencyBounded(t *testing.T) {
 	timeout := 60 * time.Millisecond
 	q := NewBoundedQueue(1, timeout)
@@ -227,8 +219,6 @@ func TestQueue_CloseLatencyBounded(t *testing.T) {
 	}
 }
 
-// TestQueue_OverflowLatchPersists proves the resync latch is NOT cleared by ordinary activity — only an
-// explicit ClearOverflowResync (which the worker calls after a verified resync) clears it.
 func TestQueue_OverflowLatchPersists(t *testing.T) {
 	q := NewBoundedQueue(1, 20*time.Millisecond)
 	_ = q.Enqueue(context.Background(), ev("1"))

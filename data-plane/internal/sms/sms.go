@@ -1,6 +1,4 @@
-// Package sms abstracts outbound SMS so OTP / notification senders can
-// swap between a stub (dev), Twilio, MessageBird, and others without
-// touching call sites. Mirrors the design of internal/mail.
+// Package sms abstracts outbound SMS so senders can swap providers without touching call sites.
 package sms
 
 import (
@@ -19,20 +17,14 @@ type Sender interface {
 }
 
 type Message struct {
-	To   string // E.164 (e.g. "+15551234567")
-	From string // E.164 sender id, optional (provider-decided when empty)
-	Text string // SMS body (plain text)
+	To   string // E.164
+	From string // E.164 sender id, optional
+	Text string
 }
 
-// Stub appends outgoing SMS to a file (default /var/log/stayconnect/otp-sms.log)
-// AND to slog. Useful for dev so the flow can be exercised without a real
-// SMS account; replace with TwilioSender / MessageBirdSender in production.
-//
-// IN A PRODUCTION BUILD THE STUB WRITES NO CONTENT (audit B-13): the stub is the fallback for a site with no SMS
-// provider, and on a real appliance it used to write every code and full phone number to a log file. A
-// production build (buildprofile.Production) records only that a message was not delivered, to the last four
-// digits of the number; the text (which carries the code) is never written. A development build
-// (-tags devlicense) keeps the full record.
+// Stub is the fallback for a site with no SMS provider. A production build writes no content, only that a
+// message was not delivered and the last four digits of the number, because the text carries the OTP code;
+// a development build (-tags devlicense) keeps the full record.
 type Stub struct {
 	Path string
 	mu   sync.Mutex
@@ -71,7 +63,6 @@ func (s *Stub) Send(_ context.Context, m Message) error {
 	return nil
 }
 
-// MaskNumber keeps only the last four digits of a phone number.
 func MaskNumber(to string) string {
 	if len(to) <= 4 {
 		return "****"

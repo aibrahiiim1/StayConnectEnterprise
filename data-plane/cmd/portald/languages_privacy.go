@@ -1,13 +1,6 @@
 package main
 
-// THE PRIVACY NOTICE'S OWN WORDS, IN EVERY SHIPPED LANGUAGE (GDPR remediation plan F1 and F7).
-//
-// The notice itself is the hotel's text (privacy_text in the design), in whatever language the hotel wrote it.
-// These are the portal's words around it: the line that opens it, the link to a full notice, the sentence
-// that explains the remembered-device cookie (og_client, client_resume.go), the box that asks for it (GDPR audit B10), and privacy.default, the short
-// notice shown while the hotel has written none (GDPR audit 2026-10-19, A5): a guest is always told who is
-// responsible and what is recorded before signing in (Art. 13). They join builtinStrings at start-up
-// like helpStrings, so there is still one dictionary.
+// The portal's words around the hotel's privacy notice, including privacy.default shown while the hotel has written none, so a guest is always told who is responsible and what is recorded before signing in (Art. 13).
 var privacyStrings = map[string]map[string]string{
 	"en": {
 		"privacy.default":  "This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel’s full privacy notice, or to see, correct or delete your data.",
@@ -53,7 +46,7 @@ var privacyStrings = map[string]map[string]string{
 	},
 }
 
-// The privacy words join the one dictionary at start-up; a key defined twice is refused loudly.
+// A key defined twice is refused loudly.
 func init() {
 	for code, words := range privacyStrings {
 		dst := builtinStrings[code]

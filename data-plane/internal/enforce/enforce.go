@@ -1,16 +1,8 @@
-// Package enforce is the Phase-3 enforcement layer that connects the durable Entitlement model to what the
-// edge actually does: the SHAPING PLAN netd applies (per-session rate limits derived from the Entitlement's
-// pinned Service Plan revision) and the EXPIRY ENFORCEMENT acctd performs (ending access when a validity
-// window elapses or a data quota is crossed).
+// Package enforce derives the shaping plan netd applies and performs the expiry enforcement acctd runs.
 //
-// Two properties drive the design:
-//
-//   - The plan is DERIVED, never remembered. netd is told what the current durable state implies, so a Grace
-//     conversion, a rebinding or a revocation is reflected without any separate "tell netd" bookkeeping that
-//     could drift from the database.
-//   - Expiry is recorded at the TRUE time it happened — the instant the window elapsed, or the sample time of
-//     the accounting record that crossed the quota — not at the moment a sweep happened to notice. Access that
-//     ended at 14:03 is recorded as ending at 14:03 even if the sweep runs at 14:07.
+//   - The plan is derived from durable state, never remembered, so it cannot drift from the database.
+//   - Expiry is recorded at the true time it happened (window end or the sample that crossed the quota), not
+//     when a sweep noticed.
 package enforce
 
 import (
@@ -24,66 +16,48 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// SessionShape is one live session's desired treatment at the edge.
 type SessionShape struct {
 	SessionID     string
 	EntitlementID string
 	DeviceID      string
 	IP            string
 	MAC           string
-	// Bridge is where the session's traffic actually appears. Shaping is per-bridge, so a plan without it
-	// could only be applied by guessing — and guessing the wrong bridge silently shapes nobody.
+	// Bridge is required: shaping is per-bridge, and guessing the wrong one silently shapes nobody.
 	Bridge   string
 	DownKbps int
 	UpKbps   int
-	// WindowEndsAt is the entitlement's hard validity boundary, carried to the edge so the applier can bound
-	// its kernel authorization lease by it. Nil means the entitlement states no wall-clock end.
+	// WindowEndsAt bounds the applier's kernel authorization lease. Nil means no wall-clock end.
 	WindowEndsAt *time.Time
-	// EndReason is why a TEAR entry must stop being enforced, as a bounded machine code. It is empty for a
-	// session torn down for the ordinary reason (its access ended), and set when the plan is tearing a session
-	// down for a reason the durable record should name.
+	// EndReason is a bounded machine code set when the plan tears a session down for a reason the durable
+	// record should name; empty for an ordinary end.
 	EndReason string
-	// SpeedAllocation is PER_DEVICE or SHARED, from the entitlement's pinned plan revision.
+	// SpeedAllocation is PER_DEVICE or SHARED.
 	SpeedAllocation string
 }
 
-// Plan is what the edge should be enforcing right now for a site.
 type Plan struct {
-	// Shape is every live session that is entitled, with the rates its CURRENT entitlement's plan revision
-	// specifies (a grace conversion therefore re-rates the session automatically).
+	// Shape is every entitled live session, rated by its current entitlement's plan revision.
 	Shape []SessionShape
-	// Tear is every session that must have no shaping and no forwarding: it has ended, or its entitlement is
-	// no longer live. Ordering matters to the caller: tear down first, then shape.
+	// Tear is every session that must have no shaping or forwarding. The caller tears down first, then shapes.
 	Tear []SessionShape
 }
 
-// Enforcer derives plans and applies expiry enforcement.
 type Enforcer struct {
 	pool *pgxpool.Pool
-	// aggregateTimeMaxCharge, when positive, turns on the Phase-6 AGGREGATE_ONLINE_TIME accrual tick inside
-	// the expiry sweep, bounded by this many seconds per tick. Zero -- the default, and the only value any
-	// existing caller produces -- means the mode is DARK: no accrual runs, no watermark is written, and the
-	// sweep behaves exactly as it did before Phase 6.
+	// aggregateTimeMaxCharge > 0 enables the AGGREGATE_ONLINE_TIME accrual tick, bounded per tick. Zero is dark.
 	aggregateTimeMaxCharge int
-	// dataCrossing is the LATERAL that derives the DATA-quota crossing, chosen per sweep from the catalog --
-	// the Phase-6 function when the schema has it, the pre-Phase-6 expression when it does not.
+	// dataCrossing is the LATERAL deriving the DATA-quota crossing, chosen per sweep from the catalog.
 	dataCrossing string
-	// phase6Writers records whether the Phase-6 expiry writer exists in this schema. It, the crossing and the
-	// online_time_exhausted_at column arrive together (0036/0038/0041) and disappear together on a rollback,
-	// so one probe decides all three.
+	// phase6Writers: the expiry writer, the crossing and online_time_exhausted_at arrive and roll back
+	// together, so one probe decides all three.
 	phase6Writers bool
-	// exhaustedAt is the stamped online-time exhaustion instant, or a typed NULL on a schema without the
-	// column. Referencing a column that does not exist fails the whole statement, so it is a fragment too.
+	// exhaustedAt is the exhaustion instant or a typed NULL; a missing column would fail the whole statement.
 	exhaustedAt string
-	// incrementalCrossing records whether the schema has the durable data-crossing checkpoint (0122). When it
-	// does, the sweep advances it before the candidate read, so p6_data_crossing answers from the checkpoint plus
-	// the records since it instead of re-summing every record an entitlement ever had.
+	// incrementalCrossing: the data-crossing checkpoint exists, so p6_data_crossing need not re-sum every record.
 	incrementalCrossing bool
 }
 
-// The two forms. They answer the same question; the first is the single sanctioned implementation the expiry
-// writer also calls, so on a Phase-6 database the sweep's candidate list and the writer's verdict cannot
-// disagree about when a guest ran out of data.
+// Both forms must agree on when a guest ran out of data; the first is the implementation the expiry writer calls.
 const dataCrossingPhase6 = `LEFT JOIN LATERAL (SELECT iam_v2.p6_data_crossing(e.id) AS at) dat ON true`
 
 const dataCrossingLegacy = `LEFT JOIN LATERAL (
@@ -103,9 +77,8 @@ const dataCrossingLegacy = `LEFT JOIN LATERAL (
 				WHERE COALESCE(e.data_quota_bytes, spr.data_quota_bytes) IS NOT NULL
 				  AND x.running >= COALESCE(e.data_quota_bytes, spr.data_quota_bytes)) dat ON true`
 
-// resolveDataCrossing asks the catalog once per sweep. It is a single cheap lookup rather than a cached flag
-// because a migration can be applied or rolled back under a running process, and a flag decided at startup
-// would then be wrong for the rest of the process's life -- in the direction that stops every expiry.
+// resolveDataCrossing probes the catalog every sweep, not once at startup: a migration applied or rolled back
+// under a running process would otherwise leave a stale flag that stops every expiry.
 func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
 	var present, incremental bool
 	if err := tx.QueryRow(ctx,
@@ -128,29 +101,18 @@ func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
 
 func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
 
-// WithAggregateOnlineTime enables the Phase-6 accrual tick with the given per-tick charge bound.
-//
-// THE BOUND IS THE WHOLE SAFETY PROPERTY, so it is a required argument rather than a default: it is what
-// stops an appliance that was switched off for six hours from billing six hours the moment it comes back.
-// It should be a small multiple of the sweep interval -- large enough that an ordinary slow tick is charged
-// in full, small enough that an outage is obviously an outage.
+// WithAggregateOnlineTime requires the per-tick bound: it stops an appliance switched off for hours from
+// billing them on return. Use a small multiple of the sweep interval.
 func (e *Enforcer) WithAggregateOnlineTime(maxChargeSeconds int) *Enforcer {
 	e.aggregateTimeMaxCharge = maxChargeSeconds
 	return e
 }
 
-// Pool exposes the database handle so a composition root can call the controlled Phase-3 operations directly
-// without opening a second pool. The operations themselves remain the authority on what is allowed.
 func (e *Enforcer) Pool() *pgxpool.Pool { return e.pool }
 
-// PlanForSite derives the complete enforcement plan for a site from durable state alone.
-//
-// PENDING_ENFORCEMENT sessions are included as DESIRED. That state means "the grant is durable and this guest
-// should be enforced, but the kernel has not confirmed it yet" — which is exactly the set the enforcement
-// owner must act on. Excluding them would deadlock the lifecycle: the grant would wait forever for an ACTIVE
-// that nothing was ever asked to produce. They are safe to include because being in the plan is not access:
-// netd still admits a guest only after the accountable class is proven, and promotes the Session only after
-// the nft gate is proven.
+// PlanForSite derives the plan from durable state alone. PENDING_ENFORCEMENT sessions must be included as
+// desired, or the grant would wait forever for an ACTIVE nothing was asked to produce; this is safe because
+// netd admits a guest only after the accountable class and the nft gate are proven.
 func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, error) {
 	var p Plan
 	rows, err := e.pool.Query(ctx, `SELECT s.id::text, s.entitlement_id::text, s.device_id::text,
@@ -184,7 +146,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		if entitled {
 			p.Shape = append(p.Shape, sh)
 		} else {
-			// a torn-down session carries no rates: the edge must remove its shaping, not re-apply it slower.
+			// Zero rates: the edge must remove shaping, not re-apply it slower.
 			sh.DownKbps, sh.UpKbps = 0, 0
 			p.Tear = append(p.Tear, sh)
 		}
@@ -195,32 +157,15 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 	return resolveAddressOwnership(retireMovedDevices(p)), nil
 }
 
-// EndReasonDeviceMoved is recorded on a session torn down because its own device is now attached at a
-// different address. Nothing failed and the guest did nothing wrong: the entitlement, its purchase and its
-// usage are untouched, and only the obsolete network attachment ends.
+// EndReasonDeviceMoved marks a session torn down because its device is now attached at a different address;
+// only the network attachment ends, never the entitlement.
 const EndReasonDeviceMoved = "SUPERSEDED_ON_DEVICE_MOVE"
 
-// retireMovedDevices ends an attachment the device itself has abandoned.
-//
-// A DEVICE MOVES. DHCP hands it a new address after a lease lapses, after a reboot, after a day switched off.
-// The durable Session it left behind still names the OLD address, and the applier keeps renewing kernel
-// authorization for that address because durable state says the session is live. Nothing ever stops.
-//
-// That is not merely untidy, it is the whole exposure: DHCP reassigns the abandoned address to somebody else,
-// and the new holder inherits authorization — and metering — belonging to a guest who is no longer there. It
-// happened on the PRE-LIVE appliance: one iPhone authenticated on .139, was switched off for days, came back
-// on .102, and .139 was reissued to a different device while the appliance went on authorizing it.
-//
-// So when the same device appears at a NEWER address, its older attachments end. The evidence is the device's
-// own newer session, which is as authoritative as durable state gets — the device is demonstrably somewhere
-// else. This is deliberately narrower than the applier's DHCP check, which catches the other case (the device
-// left and never came back); the two together are what close the address.
-//
-// WHAT THIS DOES NOT TOUCH. The Entitlement, its Purchase, its quota and its accumulated usage all survive
-// unchanged, because none of them is a property of an address. A device changing address costs the guest
-// nothing and buys them nothing.
+// retireMovedDevices ends older attachments of a device that now appears at a newer address. Otherwise the
+// applier keeps authorizing the abandoned address after DHCP reissues it to another device. This is narrower
+// than the applier's DHCP check, which catches a device that left and never came back.
 func retireMovedDevices(p Plan) Plan {
-	// The newest entry per device, by the query's total (started, id) order.
+	// Newest entry per device, by the query's total (started, id) order.
 	newest := map[string]int{}
 	for i, sh := range p.Shape {
 		if sh.DeviceID == "" || sh.IP == "" {
@@ -240,8 +185,7 @@ func retireMovedDevices(p Plan) Plan {
 			continue
 		}
 		if p.Shape[latest].IP == sh.IP && p.Shape[latest].Bridge == sh.Bridge {
-			// Same device, same address: two sessions on ONE attachment. That is the address-ownership
-			// question, not a move, and resolveAddressOwnership decides it with its own reason code.
+			// Same address is an ownership question, decided by resolveAddressOwnership.
 			keep = append(keep, sh)
 			continue
 		}
@@ -253,49 +197,28 @@ func retireMovedDevices(p Plan) Plan {
 	return p
 }
 
-// EndReasonSupersededOnAddress is recorded on a session torn down because a newer session took over its
-// address. It is deliberately distinct from ENFORCEMENT_TORN_DOWN: nothing failed, and the entitlement behind
-// it is untouched.
+// EndReasonSupersededOnAddress marks a session torn down because a newer one took its address; distinct from
+// ENFORCEMENT_TORN_DOWN because nothing failed.
 const EndReasonSupersededOnAddress = "SUPERSEDED_ON_ADDRESS"
 
-// resolveAddressOwnership makes the plan COHERENT AT THE ADDRESS, which the applier requires and cannot fix.
-//
-// One (bridge, IP) is one network endpoint and one accountable tc class. Two entitled sessions claiming it is
-// a state netd refuses outright — installing either would attribute the other's traffic to it — so it fails
-// BOTH closed and reports a class conflict. That is the correct kernel answer and the wrong end state: the
-// address stays unenforced for as long as both rows are live, and every later session on that address joins
-// the pile.
-//
-// It is not hypothetical. A device that authenticates as one room and then as another holds two live
-// entitlements — legitimately, because the uniqueness rules are per SUBJECT (one live entitlement per Stay,
-// per account, per principal, per voucher) and a device is not a subject. Both sessions carry that device's
-// single address, and the appliance can enforce neither.
-//
-// So the producer decides, rather than emitting a state the applier can only refuse: THE NEWEST SESSION OWNS
-// THE ADDRESS. Older sessions on the same address are torn down and recorded as SUPERSEDED_ON_ADDRESS.
-//
-// What this deliberately does NOT do is touch the ENTITLEMENT. The older guest's entitlement stays ACTIVE and
-// remains usable from another device or another address; only the network attachment is superseded, which is
-// the only thing that was ever in conflict. Deciding that one of two live entitlements should END would be a
-// commercial policy question, and this is not one — it is which row owns an IP.
-//
-// Ordering: the plan query orders by (started, id), a TOTAL order, so the last entitled session seen for an
-// address is the newest one and the outcome is the same on every pass rather than whichever row the planner
-// happened to return first.
+// resolveAddressOwnership makes the plan coherent per (bridge, IP): netd refuses two entitled sessions on one
+// endpoint and fails both closed, leaving the address unenforced. That happens when a device authenticates as
+// two rooms (entitlements are unique per subject, not per device). The newest session owns the address and older
+// ones are torn down as SUPERSEDED_ON_ADDRESS; the entitlement itself is never touched (ending one would be a
+// commercial decision). The query's total (started, id) order makes the outcome identical on every pass.
 func resolveAddressOwnership(p Plan) Plan {
-	// The rows arrive in the query's total (started, id) order, so the LAST entry seen for an address is the
-	// newest session on it. Overwriting as we go is therefore "the newest wins" without a second comparison.
+	// The last entry seen for an address is the newest, so overwriting means "newest wins".
 	owners := map[string]int{}
 	addressed := 0
 	for i, sh := range p.Shape {
 		if sh.IP == "" {
-			continue // an unaddressed session cannot conflict for an address; the applier reports it separately
+			continue
 		}
 		addressed++
 		owners[sh.Bridge+"|"+sh.IP] = i
 	}
 	if len(owners) == addressed {
-		return p // the common case: every address has exactly one claimant
+		return p
 	}
 	keep := make(map[int]bool, len(owners))
 	for _, idx := range owners {
@@ -315,7 +238,6 @@ func resolveAddressOwnership(p Plan) Plan {
 	return p
 }
 
-// Expiry is one enforced ending.
 type Expiry struct {
 	EntitlementID string
 	Reason        string // TIME | DATA | SUSPENDED_OVER_BUDGET (withheld, not ended)
@@ -324,9 +246,8 @@ type Expiry struct {
 	Devices       int
 }
 
-// EnforceExpiries ends every live Entitlement of the site whose validity window has elapsed or whose data
-// quota has been crossed, AT THE TRUE TIME it happened, and revokes its access with it. It is idempotent: an
-// Entitlement already terminated is skipped, and re-running the sweep changes nothing.
+// EnforceExpiries ends live Entitlements whose window elapsed or quota was crossed, at the true time, and
+// revokes their access. It is idempotent.
 func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]Expiry, error) {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
@@ -334,55 +255,26 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// THE DATA CROSSING HAS TO SURVIVE A DATABASE THAT HAS NEVER SEEN PHASE 6.
-	//
-	// iam_v2.p6_data_crossing arrives with migration 0038. This sweep is Phase-3/5 machinery that predates it
-	// by two phases and runs on every appliance, so calling the function unconditionally made the whole of
-	// expiry enforcement fail with "function iam_v2.p6_data_crossing(uuid) does not exist" the moment the
-	// binary met an older schema -- which is exactly what a Phase-6 rollback produces, and what CI caught
-	// against the Phase-3 migration set.
-	//
-	// That is worse than losing a Phase-6 feature: no entitlement expires at all, so every guest whose window
-	// or quota has run out keeps their access. So the crossing is resolved per sweep against the catalog, and
-	// when the function is absent the sweep falls back to the pre-Phase-6 expression it always used. Same
-	// answer on a Phase-6 database, correct behaviour on one without it, and no version flag to keep in sync.
+	// Resolve the crossing per sweep: calling p6_data_crossing unconditionally fails the whole sweep on an older
+	// or rolled-back schema, and then no entitlement expires at all.
 	if err := e.resolveDataCrossing(ctx, tx); err != nil {
 		return nil, err
 	}
 
-	// THE CROSSING IS COUNTED INCREMENTALLY (0122). The checkpoint advances by the records that arrived since the
-	// last sweep -- one index probe per binding -- and, once a running total reaches its quota, the exact crossing
-	// instant is derived ONCE and stored. The candidate read below then calls the same p6_data_crossing as
-	// before, which answers from that state. Before 0122 every sweep re-summed every accounting record of every
-	// live entitlement, which grows without bound and, past the statement timeout, silently stopped expiry.
+	// Advance the checkpoint incrementally; re-summing every accounting record each sweep grows without bound
+	// and past the statement timeout silently stops expiry.
 	if e.incrementalCrossing {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.p6_advance_data_crossing($1,$2)`, tenant, site); err != nil {
 			return nil, err
 		}
 	}
 
-	// THE CANDIDATE READ DOES NOT LOCK, and that is deliberate rather than an omission.
+	// The candidate read must not lock: FOR UPDATE needs UPDATE on entitlements, which an accounting daemon must
+	// never hold. p6_expire_entitlement locks as the definer and is idempotent, so concurrent sweeps converge.
 	//
-	// It used to take FOR UPDATE OF e, which PostgreSQL only allows to a role holding UPDATE on
-	// iam_v2.entitlements -- the one privilege an accounting daemon must never have, because a role that can
-	// write an entitlement row can end a guest's access, or hand it back, with no evidence anywhere. The
-	// lock now lives where the write lives: p6_expire_entitlement takes the row lock itself, as the definer,
-	// and is idempotent for an entitlement another sweep already ended. Two concurrent sweeps therefore
-	// converge on one terminal transition without either of them holding write authority.
-	//
-	// Candidates: live entitlements that have reached a terminal condition -- the outer window elapsed, or
-	// attributed usage crossed the plan quota -- WITH THE EARLIEST OF THE TWO WINNING.
-	//
-	// The earliest is the whole point, and the previous version got it wrong in a way that only shows when
-	// both have happened. It asked "is the window elapsed?" first and answered TIME if so, without comparing
-	// instants. So an entitlement whose quota was crossed at T1 and whose window expired later at T2, swept
-	// after T2, was recorded as ending at T2 for the wrong reason -- and, worse, the aggregate tick was
-	// handed T2 as its cap and could bill the guest for the T1..T2 stretch during which their access had
-	// already ended.
-	//
-	// Now both instants are derived and LEAST decides, with the reason following the instant rather than the
-	// other way round. The DATA crossing is still computed in exactly one place, by the same LATERAL: the
-	// only change is which answer is preferred once both exist.
+	// The earliest of window end and quota crossing wins, with the reason following the instant; otherwise an
+	// entitlement crossed at T1 and expired at T2 is recorded as TIME at T2 and the aggregate tick could bill
+	// T1..T2.
 	rows, err := tx.Query(ctx, `SELECT id, reason, at FROM (
 			SELECT e.id::text AS id,
 				CASE WHEN dat.at IS NOT NULL
@@ -423,17 +315,8 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		return nil, err
 	}
 
-	// PHASE 6 (DARK unless the flag is on): accrue online time IN THIS TRANSACTION, and only now.
-	//
-	// THE ORDER IS THE CORRECTNESS. The candidate query above owns the DATA crossing -- it derives the exact
-	// sample that crossed the quota, and that algorithm exists in exactly one place. Running the accrual
-	// first meant the tick knew nothing about it, so an entitlement whose quota was crossed an hour ago went
-	// on accruing online seconds for that hour: time charged for access that had already ended, and, if the
-	// accrual reached the budget, an exhaustion instant later than the true ending recorded as though the
-	// minutes had run out too.
-	//
-	// So the instants found above are passed IN, as per-entitlement caps. The tick treats a cap exactly like
-	// the outer window -- a hard ceiling on what is billable -- and never computes a data crossing itself.
+	// Accrue online time only after the candidate query: the instants found above are passed in as caps, so
+	// time is never charged for access that had already ended. The tick never computes a data crossing itself.
 	var exhausted []Expiry
 	if e.aggregateTimeMaxCharge > 0 {
 		capIDs := make([]string, 0, len(due))
@@ -455,8 +338,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 				trows.Close()
 				return nil, err
 			}
-			// The contract's existing TIME reason: aggregate exhaustion is a time termination, and which
-			// time rule ran out is recorded as evidence rather than as new terminal vocabulary.
+			// Aggregate exhaustion is a TIME termination; which rule ran out is recorded as evidence.
 			x.Reason = "TIME"
 			exhausted = append(exhausted, x)
 		}
@@ -466,10 +348,8 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		}
 	}
 
-	// MERGE, KEEPING THE EARLIEST INSTANT. An entitlement can reach two terminal conditions in one sweep --
-	// its outer window elapsed AND its online-time budget ran out -- and section 6.1 says the FIRST reached
-	// triggers ONE atomic terminal transition. Terminating twice is not merely untidy: the second would
-	// re-date the ending, and the ending is what every downstream record is attributed against.
+	// Merge keeping the earliest instant: the first terminal condition reached triggers one transition, and a
+	// second would re-date the ending that downstream records are attributed against.
 	for _, x := range exhausted {
 		found := false
 		for i := range due {
@@ -490,22 +370,12 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	for i := range due {
 		x := &due[i]
 
-		// ONE AUDITED OPERATION, AND IT DOES NOT TRUST THIS CALLER.
+		// The writer takes only the entitlement id and re-derives the condition, reason and instant from
+		// authoritative state, so a sweep cannot end a healthy entitlement or misdate an ending. The database's
+		// answer wins over the sweep's proposal.
 		//
-		// The writer takes the entitlement id and nothing else. It establishes the terminal condition from
-		// authoritative state -- the outer window, the shared data crossing, an exhausted online-time budget
-		// -- takes the earliest, and terminates with THAT reason at THAT instant, recording the matching
-		// Phase-6 evidence. A sweep cannot end a healthy entitlement, misdate an ending, or relabel one
-		// condition as another, because it supplies none of those things.
-		//
-		// The reason and instant come BACK, so what this sweep reports is what the database decided rather
-		// than what the sweep proposed. Where they differ, the database is right: it locked the row first.
-		//
-		// WITHOUT the Phase-6 writer -- a schema that predates 0041, or one it has been rolled back from --
-		// the sweep takes the path it always took: the controlled boundary termination at the instant the
-		// candidate query derived, then closing the authorizations and sessions. Less evidence is recorded,
-		// because less exists to record; access still ends, which is the part that must never depend on a
-		// migration being present.
+		// Without the writer (older or rolled-back schema) fall back to the controlled boundary termination:
+		// less evidence, but access must still end without depending on a migration.
 		if !e.phase6Writers {
 			if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,$2,$3)`,
 				x.EntitlementID, x.At, x.Reason); err != nil {
@@ -524,8 +394,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 			`SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
 			x.EntitlementID).Scan(&gotReason, &gotAt, &x.Devices, &x.Sessions)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Already terminated -- by a concurrent sweep, or by another path entirely. Nothing was done and
-			// nothing is claimed.
+			// Already terminated elsewhere; claim nothing.
 			x.Devices, x.Sessions = 0, 0
 			continue
 		}
@@ -534,14 +403,9 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		}
 		x.Reason, x.At = gotReason, gotAt
 	}
-	// FAIL CLOSED ON WHAT CANNOT BE DATED. An aggregate entitlement whose consumption has reached its budget
-	// RIGHT NOW, and whose crossing instant no durable evidence can establish, must not keep carrying traffic
-	// while the question stays open. It is suspended rather than terminated: SUSPENDED already means "not
-	// entitled to forwarding, not ended", admission already refuses anything that is not ACTIVE, and the
-	// shaping plan already excludes it -- so access stops without anyone claiming to know when it ended.
-	//
-	// It stays in the terminal-condition candidate set, so if evidence later establishes the true crossing it
-	// converges through the ONE boundary path at the true instant.
+	// Fail closed on what cannot be dated: an aggregate entitlement at its budget whose crossing instant is
+	// unprovable is suspended, not terminated, so access stops without claiming an end time. It stays a
+	// candidate and converges at the true instant if evidence appears.
 	if e.aggregateTimeMaxCharge > 0 && e.phase6Writers {
 		srows, err := tx.Query(ctx,
 			`SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)`,
@@ -555,8 +419,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 				srows.Close()
 				return nil, err
 			}
-			// Reported with its own reason so a caller cannot mistake it for an ending. It is not one, and
-			// nothing durable says it is.
+			// Own reason so a caller cannot mistake it for an ending.
 			x.Reason, x.At = "SUSPENDED_OVER_BUDGET", time.Now().UTC()
 			due = append(due, x)
 		}
@@ -572,10 +435,8 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	return due, nil
 }
 
-// revoke closes the Entitlement's open authorization intervals and ends its live sessions at the same instant,
-// so nothing keeps forwarding traffic for access that has ended.
+// revoke closes open authorization intervals and ends live sessions at the same instant.
 func revoke(ctx context.Context, tx pgx.Tx, ent string, at time.Time) (int, int, error) {
-	// Closing an authorization interval is a write to the device-authorization family.
 	if err := writerguard.Open(ctx, tx, writerguard.CapDeviceAuth); err != nil {
 		return 0, 0, err
 	}
@@ -587,9 +448,7 @@ func revoke(ctx context.Context, tx pgx.Tx, ent string, at time.Time) (int, int,
 	if err != nil {
 		return 0, 0, err
 	}
-	// PENDING_ENFORCEMENT is ended here too. A grant whose enforcement was still converging when its
-	// entitlement expired is not exempt from the expiry: leaving it behind would let the enforcement owner
-	// promote it to active on the very next pass — access created by a revocation.
+	// PENDING_ENFORCEMENT must end too, or the enforcement owner would promote it to active: access created by a revocation.
 	ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended',
 			ended=GREATEST($2::timestamptz, started), end_reason='ENTITLEMENT_ENDED'
 		WHERE entitlement_id=$1 AND state IN ('active','PENDING_ENFORCEMENT')`, ent, at)

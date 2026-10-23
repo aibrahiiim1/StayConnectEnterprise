@@ -1,17 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-// THE CLIENT JOURNEY on Sign-in methods (contract §2.3, §6.2, §9): the primary method and the remembered-device
-// window save together as the one `portal` key, nothing is sent until Save, only a method that is switched on
-// can lead, and the days field is an operational setting with its default, unit and bounds stated.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
-  // No hospitality: the Room sign-in card and the protection card are not part of this.
   return { ...actual, useCapabilities: () => ({ surfaces: [], modules: { email_otp: on, sms_otp: on } }) };
 });
 
@@ -46,7 +41,6 @@ describe("Client journey", () => {
     render(<SignInMethodsPage />);
 
     const primary = await screen.findByLabelText("Primary method") as HTMLSelectElement;
-    // Automatic, then only the methods that are switched on: SMS is off and is not offered to lead.
     expect(Array.from(primary.options).map((o) => o.value)).toEqual(["", "email_account", "voucher"]);
     expect(primary.value).toBe("");
     const days = screen.getByLabelText("Remember devices") as HTMLInputElement;
@@ -62,7 +56,6 @@ describe("Client journey", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { portal: { primary_method: "email_account", remember_device_days: 14 } }));
-    // One key, so the switches on this page are untouched by the save.
     expect(Object.keys(put.mock.calls[0][1])).toEqual(["portal"]);
   });
 

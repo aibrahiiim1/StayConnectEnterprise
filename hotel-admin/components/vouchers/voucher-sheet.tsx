@@ -1,8 +1,6 @@
 "use client";
 
-// ONE CARD, in full: what it grants, whether it can still be used, what has happened to it, and the two
-// actions an operator can take on it. Both actions are step-up: the server re-checks the password and
-// records the reason, and this sheet says so before, not after.
+// Card actions require password step-up and a recorded reason.
 
 import * as React from "react";
 import { Ban, Eye, EyeOff, Layers, Ticket } from "lucide-react";
@@ -48,8 +46,7 @@ export function VoucherSheet({
     <Sheet open={row !== null} onOpenChange={onOpenChange}>
       <SheetContent
         width="md"
-        // Focus the panel itself, not its first focusable element: that is a timestamp with a tooltip, which
-        // would open on arrival and swallow the first Escape.
+        // Focus the panel; the first timestamp's tooltip would swallow Escape.
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           (e.currentTarget as HTMLElement).focus();
@@ -87,7 +84,6 @@ function VoucherDetail({
   onShowBatch: (batchId: string) => void;
 }) {
   const toast = useToast();
-  // Local copy so a cancellation shows at once, before the list reloads.
   const [current, setCurrent] = React.useState<VoucherRow>(row);
   const status = effectiveStatus(current);
   const [history, setHistory] = React.useState<VoucherHistory | null>(null);
@@ -95,7 +91,7 @@ function VoucherDetail({
   const [action, setAction] = React.useState<"reveal" | "cancel" | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<unknown>(null);
-  // The revealed code lives here only. This component unmounts when the sheet closes, and the code with it.
+  // Keep the revealed code in component memory so closing the sheet drops it.
   const [code, setCode] = React.useState<string | null>(null);
 
   React.useEffect(() => {

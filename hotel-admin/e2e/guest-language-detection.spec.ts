@@ -3,27 +3,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { portalHTML, shippedWording } from "./portal-page";
 
-// AUTOMATIC GUEST LANGUAGE, IN REAL BROWSERS.
-//
-// A guest arriving at a captive portal has not chosen a language and is not going to hunt for a selector on a
-// phone they are holding one-handed at a reception desk. Their device already knows what they read. The rules
-// this exercises:
-//
-//   1. a language the guest CHOSE outranks anything detected, on this and every later visit;
-//   2. otherwise the device's ORDERED preference list decides, first match against what the hotel enabled;
-//   3. locale variants resolve to their language -- ar-EG is Arabic, de-AT is German;
-//   4. a device asking for something the hotel does not offer falls back to English;
-//   5. a stored choice the hotel has since switched off falls through to detection rather than pinning the
-//      guest to a language that is no longer on the page.
-//
-// This serves the REAL landing page -- read out of portald's template -- from a throwaway server, so the
-// script under test is the one the appliance ships. The same cases are then run against the live PRE-LIVE
-// portal by hand; see the delivery report.
+// A guest's explicit choice wins; otherwise use the first enabled device preference or fall back to English.
 
 const PORTAL_HTML = portalHTML();
 const SHIPPED = shippedWording();
 
-/** Serves the real page plus the two answers it asks the appliance for. */
 async function startPortal(enabled: string[] | null) {
   const langs = enabled === null
     ? undefined
@@ -51,12 +35,10 @@ async function startPortal(enabled: string[] | null) {
   return { url: `http://127.0.0.1:${port}/`, close: () => srv.close() };
 }
 
-/** Opens the portal with a device whose language list is exactly `languages`. */
 async function visit(browser: Browser, url: string, languages: string[], extra: Record<string, unknown> = {}) {
   const ctx = await browser.newContext({
     locale: languages[0],
-    // locale sets navigator.language; the ORDERED list is what the page is supposed to read, and only an
-    // init script can set it. Defined on the prototype so it survives the page's own scripts.
+    // Set the ordered preference list before portal scripts run.
     ...extra,
   });
   await ctx.addInitScript(([list]) => {
@@ -106,16 +88,12 @@ test.describe("automatic guest language", () => {
   });
 
   test("reads the whole ordered list, not just the first entry", async ({ browser }) => {
-    // A phone set to Japanese first and Italian second, at a hotel offering neither Japanese nor French,
-    // should land on Italian rather than on English.
     const portal = await startPortal(["en", "it", "de"]);
     try {
       const { page, ctx } = await visit(browser, portal.url, ["ja-JP", "it-IT", "de-DE"]);
       expect((await shownLanguage(page)).selected).toBe("it");
       await ctx.close();
 
-      // And the hotel's list decides, not the device's first choice: the same phone at a hotel offering only
-      // German gets German.
       const portal2 = await startPortal(["en", "de"]);
       const v2 = await visit(browser, portal2.url, ["ja-JP", "it-IT", "de-DE"]);
       expect((await shownLanguage(v2.page)).selected).toBe("de");
@@ -133,7 +111,6 @@ test.describe("automatic guest language", () => {
       expect(got.roomLabel).toBe(SHIPPED.strings.en["pms.room"]);
       await ctx.close();
 
-      // A language the portal ships but the hotel switched OFF is not offered either.
       const v2 = await visit(browser, portal.url, ["de-DE"]);
       expect((await shownLanguage(v2.page)).selected).toBe("en");
       await v2.ctx.close();
@@ -150,7 +127,6 @@ test.describe("automatic guest language", () => {
       await page.waitForTimeout(200);
       expect((await shownLanguage(page)).dir).toBe("rtl");
 
-      // The same device, arriving again — which on a captive portal is the common case, not the rare one.
       await page.goto(portal.url, { waitUntil: "networkidle" });
       await page.waitForTimeout(350);
       const again = await shownLanguage(page);
@@ -178,8 +154,6 @@ test.describe("automatic guest language", () => {
       const narrowed = await startPortal(["en", "it"]);
       await page.goto(narrowed.url, { waitUntil: "networkidle" });
       await page.waitForTimeout(350);
-      // Russian is no longer on the page. Rather than pinning the guest to a missing option, or dropping
-      // them to English, detection runs again and their device says Italian.
       expect((await shownLanguage(page)).selected).toBe("it");
       narrowed.close();
     } finally { await ctx.close(); }
@@ -201,19 +175,10 @@ test.describe("automatic guest language", () => {
   });
 });
 
-// iOS CAPTIVE PORTAL.
-//
-// iOS opens the portal in the Captive Network Assistant, a WebKit WebView that is NOT the Safari profile: its
-// storage is short-lived and on a managed device localStorage can throw on the first write. That is why the
-// chosen language is written to a cookie as well. This runs the real page under WebKit with the iPhone device
-// profile, and again with localStorage made to throw, which is the condition that used to lose the choice.
+// iOS Captive Network Assistant may reject localStorage, so a cookie also preserves explicit language choice.
 test.describe("iOS captive-portal sheet", () => {
   test("detects and remembers under WebKit, even when localStorage is unavailable", async () => {
-    // WebKit is launched explicitly rather than through a project override: the iPhone descriptor carries
-    // defaultBrowserType, which Playwright refuses inside a describe. This is the same engine Safari and the
-    // Captive Network Assistant run, with the iPhone viewport, user agent and touch profile.
-    // channel is cleared: the config pins Chrome for the Chromium projects, and WebKit has no such
-    // channel. Without this the launch is refused with 'Unsupported webkit channel "chrome"'.
+    // Launch WebKit explicitly and clear the Chromium-only channel for the iPhone descriptor.
     const wk = await webkit.launch({ channel: undefined });
     const portal = await startPortal(["en", "ar", "fr"]);
     const ctx = await wk.newContext({ ...devices["iPhone 13"], locale: "ar-EG" });
@@ -221,7 +186,6 @@ test.describe("iOS captive-portal sheet", () => {
       Object.defineProperty(Object.getPrototypeOf(navigator), "languages", {
         get: () => ["ar-EG", "en-US"], configurable: true,
       });
-      // The CNA condition: storage present but refusing.
       const dead = {
         getItem() { throw new Error("denied"); },
         setItem() { throw new Error("denied"); },
@@ -237,7 +201,6 @@ test.describe("iOS captive-portal sheet", () => {
       expect(got.selected, "an Egyptian iPhone should land on Arabic").toBe("ar");
       expect(got.dir).toBe("rtl");
 
-      // The guest prefers French. With localStorage throwing, the cookie is what carries it.
       await page.selectOption("#lang", "fr");
       await page.waitForTimeout(200);
       expect(await page.evaluate(() => document.cookie.includes("sc-lang"))).toBe(true);

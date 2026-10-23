@@ -1,19 +1,8 @@
 package main
 
-// APPLIANCE RESOURCES: load, memory, uptime and disk, read by the process that is already on the appliance.
-//
-// Nothing exposed these before, so the overview could not say whether the box itself was short of memory or
-// disk. edged runs ON the appliance, so the legitimate read path is the kernel's own accounting: /proc/loadavg,
-// /proc/meminfo, /proc/uptime and statfs(2). No command is shelled out to and nothing is written.
-//
-// WHAT IS NOT HERE, AND WHY. The Postgres data volume lives inside Docker and no configuration this service
-// reads names its host path, so it is not reported rather than guessed. The paths that are reported are the
-// root filesystem and the install tree; when both are on the same filesystem that is said, instead of the same
-// disk being counted twice.
-//
-// The parsing below is platform-independent so it is tested everywhere (the workstation suite runs on
-// Windows). Only the collection is Linux-specific; elsewhere the endpoint answers "unavailable on this
-// platform" rather than inventing a machine.
+// Appliance load, memory, uptime and disk come from /proc and statfs(2); nothing is shelled out to.
+// The Postgres data volume is not reported: no configuration names its host path, so it is not guessed.
+// Parsing is platform-independent; only collection is Linux-specific.
 
 import (
 	"bufio"
@@ -30,7 +19,7 @@ type loadAverage struct {
 	Five    float64 `json:"five"`
 	Fifteen float64 `json:"fifteen"`
 	CPUs    int     `json:"cpus"`
-	// PerCPU is the one-minute load divided by the CPU count: 1.0 means every core had work queued.
+	// PerCPU is the one-minute load divided by the CPU count.
 	PerCPU float64 `json:"one_per_cpu"`
 }
 
@@ -47,7 +36,7 @@ type diskFigures struct {
 	UsedBytes      int64   `json:"used_bytes"`
 	AvailableBytes int64   `json:"available_bytes"`
 	UsedPct        float64 `json:"used_pct"`
-	// SameFilesystemAs names an earlier path on the same filesystem, so the UI does not present one disk twice.
+	// SameFilesystemAs names an earlier path on the same filesystem so one disk is not shown twice.
 	SameFilesystemAs string `json:"same_filesystem_as,omitempty"`
 }
 
@@ -58,11 +47,9 @@ type applianceResources struct {
 	Memory        *memoryFigures `json:"memory,omitempty"`
 	UptimeSeconds *int64         `json:"uptime_seconds,omitempty"`
 	Disks         []diskFigures  `json:"disks"`
-	// Errors lists any single figure that could not be read, so a missing figure is explained, not blank.
-	Errors []string `json:"errors,omitempty"`
+	Errors        []string       `json:"errors,omitempty"`
 }
 
-// resourcePaths are the filesystems reported. Fixed, not configurable: they are where this product lives.
 var resourcePaths = []string{"/", "/opt/stayconnect"}
 
 func parseLoadavg(s string) (one, five, fifteen float64, err error) {
@@ -81,10 +68,8 @@ func parseLoadavg(s string) (one, five, fifteen float64, err error) {
 	return vals[0], vals[1], vals[2], nil
 }
 
-// parseMeminfo reads MemTotal and MemAvailable. "Used" is total minus AVAILABLE, not total minus free: Linux
-// keeps otherwise-idle memory as page cache and hands it back on demand, and counting it as used would show a
-// healthy appliance as permanently full. A kernel without MemAvailable (pre-3.14) is reported as unreadable
-// rather than approximated.
+// parseMeminfo: "used" is total minus MemAvailable, not minus free, or page cache makes a healthy appliance
+// look full. A kernel without MemAvailable (pre-3.14) is reported unreadable, not approximated.
 func parseMeminfo(s string) (memoryFigures, error) {
 	var total, avail int64 = -1, -1
 	sc := bufio.NewScanner(strings.NewReader(s))
@@ -134,9 +119,7 @@ func parseUptime(s string) (int64, error) {
 	return int64(v), nil
 }
 
-// diskFromStatfs computes df-style figures. Used is blocks minus FREE; available is what an unprivileged
-// writer can still use (bavail), and the percentage is used / (used + available) — the same figure `df` prints,
-// which treats the root-reserved blocks as unavailable rather than as free space nobody can actually write to.
+// diskFromStatfs matches `df`: percentage is used / (used + bavail), so root-reserved blocks count as unavailable.
 func diskFromStatfs(path string, blocks, bfree, bavail uint64, bsize int64) (diskFigures, error) {
 	if bsize <= 0 || blocks == 0 || bfree > blocks || bavail > blocks {
 		return diskFigures{}, errors.New("statfs: implausible figures for " + path)
@@ -153,7 +136,6 @@ func diskFromStatfs(path string, blocks, bfree, bavail uint64, bsize int64) (dis
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
 
-// reportsApplianceResources serves GET /reports/appliance-resources.
 func (s *server) reportsApplianceResources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, collectApplianceResources())
 }

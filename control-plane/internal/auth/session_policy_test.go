@@ -33,14 +33,12 @@ func TestValidateEndsSessionsWhenAccessEnds(t *testing.T) {
 	if _, _, err := Validate(sess, active, now); err != nil {
 		t.Fatalf("an active operator's young session must continue: %v", err)
 	}
-	// A sign-in AFTER the change is not caught by it.
 	early := now.Add(-3 * time.Hour)
 	if _, _, err := Validate(sess, OperatorState{Found: true, Status: "active", SessionsNotBefore: &early, MaxHours: 24}, now); err != nil {
 		t.Fatalf("a session opened after sessions_not_before must continue: %v", err)
 	}
 }
 
-// Roles are re-read: a demoted operator is authorised with the new role on the very next request.
 func TestValidateUsesCurrentRoles(t *testing.T) {
 	now := time.Now()
 	sess := &Session{OperatorID: "op", Roles: []string{"platform_admin"}, IsSuperAdmin: true,
@@ -60,7 +58,6 @@ func TestValidateUsesCurrentRoles(t *testing.T) {
 	}
 }
 
-// An out-of-range stored cap falls back to the default instead of disabling the cap.
 func TestValidateOutOfRangeCapUsesDefault(t *testing.T) {
 	now := time.Now()
 	sess := &Session{OperatorID: "op", CreatedAt: now.Add(-13 * time.Hour), LastSeenAt: now, ExpiresAt: now.Add(time.Hour)}

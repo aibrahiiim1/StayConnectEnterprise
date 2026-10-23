@@ -14,8 +14,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 )
 
-// otpDB connects the disposable full-auth_otps database (auth_otps + 0008 + one active generation).
-// Set OTP_TEST_DSN to run.
+// Needs OTP_TEST_DSN.
 func otpDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("OTP_TEST_DSN")
@@ -59,7 +58,6 @@ func TestKeyedIssueThenVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keyed issue: %v", err)
 	}
-	// stored digest pins generation 1 and is a bare 64-hex HMAC (NOT the legacy salt:sha256 form).
 	var gen *int
 	var stored string
 	db.QueryRow(ctx, `SELECT otp_key_generation, code_hash FROM auth_otps WHERE id=$1`, iss.ChallengeID).Scan(&gen, &stored)
@@ -69,7 +67,6 @@ func TestKeyedIssueThenVerify(t *testing.T) {
 	if strings.Contains(stored, ":") || len(stored) != 64 {
 		t.Fatalf("keyed digest must be a bare 64-hex HMAC, got %q", stored)
 	}
-	// verify succeeds once, then the row is consumed (single-use).
 	if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != nil {
 		t.Fatalf("keyed verify: %v", err)
 	}
@@ -86,7 +83,6 @@ func TestKeyedWrongCodeIncrementsAttemptsThenLocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// DefaultMaxAttempts wrong tries -> each ErrCodeMismatch, attempts increments; then ErrAttemptsExceeded.
 	for i := 0; i < DefaultMaxAttempts; i++ {
 		if _, err := Verify(ctx, db, ring, iss.ChallengeID, "000000"); err != ErrCodeMismatch {
 			t.Fatalf("wrong attempt %d: want ErrCodeMismatch, got %v", i, err)
@@ -97,19 +93,15 @@ func TestKeyedWrongCodeIncrementsAttemptsThenLocks(t *testing.T) {
 	if attempts != DefaultMaxAttempts {
 		t.Fatalf("attempts=%d want %d", attempts, DefaultMaxAttempts)
 	}
-	// even the correct code is now refused (attempt cap reached, atomic with verify).
 	if _, err := Verify(ctx, db, ring, iss.ChallengeID, iss.Code); err != ErrAttemptsExceeded {
 		t.Fatalf("after cap: want ErrAttemptsExceeded, got %v", err)
 	}
 }
 
-// A legacy salt:sha256 row (NULL generation) still verifies while the ring is loaded — the
-// compatibility window for already-issued codes.
 func TestLegacyRowVerifiesUnderRing(t *testing.T) {
 	db := otpDB(t)
 	ring := testRing(t)
 	ctx := context.Background()
-	// craft a legacy row directly (as the old Issue would have)
 	code := "246810"
 	salt := randHex(8)
 	stored := salt + ":" + hashOTP(salt, code)
@@ -125,7 +117,6 @@ func TestLegacyRowVerifiesUnderRing(t *testing.T) {
 	}
 }
 
-// Legacy Issue (ring==nil) is byte-for-byte unchanged: salt:sha256, NULL generation.
 func TestLegacyIssueUnchangedWhenNoRing(t *testing.T) {
 	db := otpDB(t)
 	ctx := context.Background()
@@ -147,8 +138,6 @@ func TestLegacyIssueUnchangedWhenNoRing(t *testing.T) {
 	}
 }
 
-// 20 concurrent verifiers of the same challenge with the correct code: exactly one wins (single
-// consume; the FOR UPDATE row lock serializes them).
 func TestKeyedConcurrentSingleWinner(t *testing.T) {
 	db := otpDB(t)
 	ring := testRing(t)
@@ -157,7 +146,6 @@ func TestKeyedConcurrentSingleWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// allow enough attempts so the cap is not the limiter (we want to prove single-consume, not lockout)
 	db.Exec(ctx, `UPDATE auth_otps SET max_attempts=100 WHERE id=$1`, iss.ChallengeID)
 
 	const n = 20

@@ -1,22 +1,7 @@
 package main
 
-// DURABILITY AND SECURITY TIME.
-//
-// Two properties are under test here, and both are about what happens when something goes wrong at exactly
-// the wrong instant:
-//
-//	WRITE-AHEAD — the bound on an unproven activation is fsynced to disk BEFORE the guest is provisionally
-//	authorized. A crash anywhere after that recovers the same bound; a crash before it means no guest was
-//	ever authorized, so there is nothing to recover. A write that cannot be proven durable denies access.
-//
-//	SECURITY TIME — that bound is measured against boot-relative monotonic time, not the wall clock. Moving
-//	the wall clock backwards (NTP, a wrong RTC, a resumed snapshot) must not lengthen it by a single
-//	millisecond, and a reboot must not manufacture a fresh one.
-//
-// The tests drive the REAL composition — real journal file, real fsync path, real load/restore/submit — because
-// both defects lived in the seams between those steps rather than inside any one of them.
-//
-// FAKE-KERNEL tests. nft and tc are modelled; the disposable-namespace suite covers the kernel contract.
+// Write-ahead durability and monotonic security time of the activation bound, against the real journal and
+// fsync path with a fake nft/tc kernel.
 
 import (
 	"errors"
@@ -26,11 +11,9 @@ import (
 	"time"
 )
 
-// bootIDFor builds a distinct, CANONICAL boot identity per tag.
+// bootIDFor builds a distinct, canonical boot identity per tag.
 func bootIDFor(tag string) string {
-	// A CANONICAL Linux boot id: lowercase hex, 8-4-4-4-12. The security clock validates the real kernel
-	// contract, so a fake producing a looser token would only pass because the fake was lenient. The tag's
-	// first byte varies the last two nibbles, so different tags are genuinely different boots.
+	// Must be a canonical Linux boot id (lowercase hex, 8-4-4-4-12); the security clock validates the real format.
 	hex := "0123456789abcdef"
 	var b byte
 	if tag != "" {
@@ -39,12 +22,7 @@ func bootIDFor(tag string) string {
 	return "f81d4fae-7dec-11d0-a765-00a0c91e6b" + string(hex[(b>>4)&0x0f]) + string(hex[b&0x0f])
 }
 
-// ---- harness ----------------------------------------------------------------
-
-// durHarness is one appliance: its two durable files, its kernel, and a clock the test controls.
-//
-// It keeps the MONOTONIC clock and the WALL clock as separate dials on purpose. Almost every test here is
-// about what happens when they disagree, and a harness that moved them together could not express that.
+// durHarness is one appliance with separate monotonic and wall clocks, so tests can make them disagree.
 type durHarness struct {
 	dir     string
 	tc      *fakeTC
@@ -82,8 +60,7 @@ func (h *durHarness) build() *phase3Shaping {
 	return p
 }
 
-// restart models a netd RESTART: new process object, same files, same kernel, same boot. It goes through the
-// real load/restore path exactly as main.go does, so anything the files do not carry is genuinely lost.
+// restart models a netd restart through the real load/restore path: same files, kernel and boot.
 func (h *durHarness) restart(t *testing.T) {
 	t.Helper()
 	p := h.build()
@@ -94,24 +71,23 @@ func (h *durHarness) restart(t *testing.T) {
 	h.p = p
 }
 
-// reboot models a REBOOT: a new boot id, an empty kernel, the same files on disk.
+// reboot models a new boot id, an empty kernel and the same files.
 func (h *durHarness) reboot(t *testing.T, bootID string) {
 	t.Helper()
 	h.tc, h.g = newFakeTC(), newFakeGate()
 	h.clk.bootID = bootID
-	h.clk.ms = 45_000 // the monotonic clock restarts near zero, as it does on every boot
+	h.clk.ms = 45_000
 	h.restart(t)
 }
 
-// advance moves monotonic time, kernel lease time and wall time together — an ordinary healthy interval.
+// advance moves monotonic, kernel lease and wall time together.
 func (h *durHarness) advance(d time.Duration) {
 	h.clk.ms += d.Milliseconds()
 	h.g.advance(d)
 	h.wall = h.wall.Add(d)
 }
 
-// moveWall moves ONLY the wall clock. This is what an NTP correction or a wrong RTC does, and the whole point
-// of security time is that it changes nothing.
+// moveWall moves only the wall clock, like an NTP correction or a wrong RTC.
 func (h *durHarness) moveWall(d time.Duration) { h.wall = h.wall.Add(d) }
 
 // pass runs one reconciliation for a single entitled session.
@@ -137,10 +113,7 @@ func brokenDB(h *durHarness) {
 	h.enf.confirmErr = errors.New("database unreachable")
 }
 
-// ---- 1. write-ahead durability ------------------------------------------------
-
-// THE ORDERING ITSELF. The attempt is on disk, fsynced, before the guest is authorized — so a crash anywhere
-// after admission finds the bound already recorded.
+// The attempt is fsynced before the guest is authorized.
 func TestDurable_TheAttemptIsRecordedBeforeTheGuestIsAuthorized(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -161,8 +134,7 @@ func TestDurable_TheAttemptIsRecordedBeforeTheGuestIsAuthorized(t *testing.T) {
 	}
 }
 
-// CRASH IMMEDIATELY BEFORE THE RECORD. The write fails, so nothing is authorized — and a restart finds no
-// attempt, because there is genuinely nothing to recover.
+// A failed write-ahead authorizes nothing and leaves nothing to recover.
 func TestDurable_AFailedWriteAheadDeniesAdmissionEntirely(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -182,7 +154,6 @@ func TestDurable_AFailedWriteAheadDeniesAdmissionEntirely(t *testing.T) {
 		t.Fatal("a failed write left an attempt record behind")
 	}
 
-	// And a restart is a clean first run, because nothing was ever granted.
 	h.p.journal.writeErr = nil
 	h.restart(t)
 	if h.p.unprovenUnknown {
@@ -190,8 +161,7 @@ func TestDurable_AFailedWriteAheadDeniesAdmissionEntirely(t *testing.T) {
 	}
 }
 
-// THE FSYNC SEAM SPECIFICALLY. A write that reached the page cache and not the platter is the one that looks
-// successful and is not, so it must be treated exactly like any other failure to prove durability.
+// A write that reached the page cache but failed fsync is a durability failure like any other.
 func TestDurable_AnFsyncFailureDeniesAdmission(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -206,9 +176,7 @@ func TestDurable_AnFsyncFailureDeniesAdmission(t *testing.T) {
 	}
 }
 
-// A WRITE FAILURE WITH A PREVIOUS VALID FILE ON DISK is the dangerous variant: the old file still loads, so a
-// restart could easily look like a healthy appliance with no outstanding attempt. It must not — the earlier
-// attempt is still recorded, and the bound continues from it.
+// A write failure with an older valid file on disk must not look like a clean appliance; the earlier bound continues.
 func TestDurable_AWriteFailureWithAnOlderValidFileStillHonoursTheEarlierBound(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -228,7 +196,6 @@ func TestDurable_AWriteFailureWithAnOlderValidFileStillHonoursTheEarlierBound(t 
 	if len(got) != 1 || got[0].BeganBootMs != first[0].BeganBootMs {
 		t.Fatalf("the earlier bound was lost or restarted: before=%+v after=%+v", first[0], got)
 	}
-	// The countdown continues from the ORIGINAL start, so the grace still expires on time.
 	h.advance(phase3ActivationGrace)
 	h.pass(t, nil)
 	if h.authorized() {
@@ -237,8 +204,7 @@ func TestDurable_AWriteFailureWithAnOlderValidFileStillHonoursTheEarlierBound(t 
 	}
 }
 
-// CRASH AFTER ADMISSION, REPEATEDLY. This is the loop the write-ahead record exists to stop: a process that
-// dies just after authorizing must not hand the next process a clean slate.
+// A process that dies just after authorizing must not hand the next one a clean slate.
 func TestDurable_RepeatedCrashesJustAfterAdmissionCannotManufactureFreshGrace(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -247,9 +213,9 @@ func TestDurable_RepeatedCrashesJustAfterAdmissionCannotManufactureFreshGrace(t 
 
 	authorizedFor := time.Duration(0)
 	const step = 5 * time.Second
-	for i := 0; i < 24; i++ { // two minutes of crash-restart cycles
+	for i := 0; i < 24; i++ {
 		h.advance(step)
-		h.restart(t) // the crash: no clean shutdown, no extra persistence
+		h.restart(t)
 		h.pass(t, nil)
 		if h.authorized() {
 			authorizedFor += step
@@ -266,8 +232,7 @@ func TestDurable_RepeatedCrashesJustAfterAdmissionCannotManufactureFreshGrace(t 
 	}
 }
 
-// AN UNREADABLE JOURNAL is not an empty one: the history of every session is unknown, so no fresh grace may
-// be granted. A session durable state proves ACTIVE needs no grace and is still admitted.
+// An unreadable journal is not an empty one: no fresh grace, but a session proven active is still admitted.
 func TestDurable_ACorruptJournalDeniesFreshGraceButNotAProvenActiveSession(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -283,7 +248,6 @@ func TestDurable_ACorruptJournalDeniesFreshGraceButNotAProvenActiveSession(t *te
 		t.Fatal("a corrupt journal awarded a fresh grace period")
 	}
 
-	// The one thing that resolves it honestly: durable state proving the Session is already active.
 	h.enf.err, h.enf.confirmErr = nil, nil
 	h.enf.setState("live-1", "active")
 	h.advance(time.Second)
@@ -293,8 +257,7 @@ func TestDurable_ACorruptJournalDeniesFreshGraceButNotAProvenActiveSession(t *te
 	}
 }
 
-// A PROVEN ACTIVATION CLEARS THE RECORD, and a clear that fails leaves it behind rather than turning a
-// cleanup problem into a disconnection.
+// A proven activation clears the record; a failed clear leaves it behind rather than disconnecting the guest.
 func TestDurable_AProvenActivationClearsTheRecordAndAFailedClearIsSafe(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -316,7 +279,6 @@ func TestDurable_AProvenActivationClearsTheRecordAndAFailedClearIsSafe(t *testin
 		t.Fatalf("a proven session holds a %v lease, want the full %v", got, phase3LeaseTTL)
 	}
 
-	// Now make the clear itself fail: the guest must stay online, and the stale marker is the safe residue.
 	brokenDB(h)
 	h.advance(5 * time.Second)
 	h.pass(t, nil)
@@ -329,7 +291,7 @@ func TestDurable_AProvenActivationClearsTheRecordAndAFailedClearIsSafe(t *testin
 	}
 }
 
-// THE LOST-ACK CASE still recovers without an unnecessary disconnect, across a crash.
+// A lost acknowledgement recovers across a crash without a disconnect.
 func TestDurable_ACommittedButUnacknowledgedActivationRecoversAcrossACrash(t *testing.T) {
 	h := newDurHarness(t)
 	h.enf.commitThenLoseAck["live-1"] = true
@@ -339,7 +301,7 @@ func TestDurable_ACommittedButUnacknowledgedActivationRecoversAcrossACrash(t *te
 	}
 	h.advance(3 * time.Second)
 	h.restart(t)
-	h.enf.commitThenLoseAck = map[string]bool{} // the database answers normally again
+	h.enf.commitThenLoseAck = map[string]bool{}
 	h.pass(t, nil)
 	if !h.authorized() {
 		t.Fatal("a genuinely active session was disconnected during recovery")
@@ -352,17 +314,14 @@ func TestDurable_ACommittedButUnacknowledgedActivationRecoversAcrossACrash(t *te
 	}
 }
 
-// ---- 2. security time ---------------------------------------------------------
-
-// WALL CLOCK BACKWARDS BY AN HOUR, same boot. The grace is measured monotonically, so it expires exactly on
-// schedule — the jump changes nothing.
+// The grace is monotonic, so a wall-clock jump back does not extend it.
 func TestSecurityTime_WallClockBackwardsOneHourCannotExtendTheGrace(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
 	h.pass(t, nil)
 
 	h.advance(10 * time.Second)
-	h.moveWall(-time.Hour) // NTP correction, or an RTC that came back wrong
+	h.moveWall(-time.Hour)
 	h.pass(t, nil)
 	if !h.authorized() {
 		t.Fatal("the guest lost access early; the wall-clock jump should have changed nothing")
@@ -375,8 +334,7 @@ func TestSecurityTime_WallClockBackwardsOneHourCannotExtendTheGrace(t *testing.T
 	}
 }
 
-// BACKWARDS BY A DAY, and forwards, and across a restart. Same conclusion, and the restart is included because
-// that is where a persisted wall-clock timestamp would have been re-read and believed.
+// Large jumps in either direction, across a restart, still cannot extend the grace.
 func TestSecurityTime_LargeClockJumpsAndRestartsCannotExtendTheGrace(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -406,8 +364,7 @@ func TestSecurityTime_LargeClockJumpsAndRestartsCannotExtendTheGrace(t *testing.
 	}
 }
 
-// AN UNREADABLE MONOTONIC CLOCK means the bound cannot be measured, and a bound that cannot be measured must
-// not be assumed unspent.
+// An unreadable monotonic clock denies admission: an unmeasurable bound is not assumed unspent.
 func TestSecurityTime_AnUnreadableMonotonicClockDeniesAdmission(t *testing.T) {
 	h := newDurHarness(t)
 	h.clk.err = errors.New("/proc/uptime: no such file or directory")
@@ -420,8 +377,7 @@ func TestSecurityTime_AnUnreadableMonotonicClockDeniesAdmission(t *testing.T) {
 	}
 }
 
-// A REBOOT never yields a fresh grace. The prior monotonic readings belong to a timeline that no longer
-// exists, and the only way to bridge them would be to ask the RTC — the clock this design refuses to trust.
+// A reboot never yields a fresh grace; bridging the timelines would require trusting the RTC.
 func TestSecurityTime_ARebootDoesNotCreateAFreshGrace(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -453,14 +409,13 @@ func TestSecurityTime_ARebootDoesNotCreateAFreshGrace(t *testing.T) {
 	}
 }
 
-// AFTER A REBOOT, durable state proving the Session ACTIVE resolves it safely and enforcement is rebuilt.
+// After a reboot, durable state proving the session active resolves it and rebuilds enforcement.
 func TestSecurityTime_ARebootWhereTheDatabaseProvesActiveRebuildsEnforcement(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
 	h.pass(t, nil)
 	h.advance(5 * time.Second)
 
-	// The promotion had in fact committed before the crash; the database says so once it is reachable.
 	h.enf.err, h.enf.confirmErr = nil, nil
 	h.enf.setState("live-1", "active")
 	h.reboot(t, bootIDFor("C"))
@@ -474,8 +429,7 @@ func TestSecurityTime_ARebootWhereTheDatabaseProvesActiveRebuildsEnforcement(t *
 	}
 }
 
-// AFTER A REBOOT WITH THE DATABASE UNREADABLE, the session stays denied — it cannot be resolved, and a fresh
-// grace is exactly what must not be granted.
+// After a reboot with the database unreadable the session stays denied; no fresh grace.
 func TestSecurityTime_ARebootWithAnUnreadableDatabaseStaysDenied(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -492,12 +446,11 @@ func TestSecurityTime_ARebootWithAnUnreadableDatabaseStaysDenied(t *testing.T) {
 	}
 }
 
-// A SESSION WITH NO WALL-CLOCK BOUNDARY is covered by every case above — it has no business deadline at all,
-// so its only bound is this one, and it must still be finite across clock jumps and reboots.
+// A session with no access boundary is bounded only by the activation grace, across clock jumps and reboots.
 func TestSecurityTime_NoAccessBoundarySessionIsStillBoundedAcrossJumpsAndReboot(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
-	h.pass(t, nil) // leasePlanAt(_, nil, _) — no AccessEndsAt
+	h.pass(t, nil)
 
 	h.advance(5 * time.Second)
 	h.moveWall(-12 * time.Hour)
@@ -515,8 +468,7 @@ func TestSecurityTime_NoAccessBoundarySessionIsStillBoundedAcrossJumpsAndReboot(
 	}
 }
 
-// PRUNING must not be able to erase a still-relevant security record because wall time moved. The record is
-// keyed to durable resolution, not to age, so a wall-clock jump of any size leaves it in place.
+// The record is keyed to durable resolution, not age, so wall-clock jumps never prune an unresolved one.
 func TestSecurityTime_WallClockJumpsCannotPruneAnUnresolvedSecurityRecord(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -533,8 +485,6 @@ func TestSecurityTime_WallClockJumpsCannotPruneAnUnresolvedSecurityRecord(t *tes
 			t.Fatalf("a %v wall-clock jump pruned an unresolved security record: %+v", jump, h.attempts(t))
 		}
 	}
-	// The record survived every jump, and the MONOTONIC bound is what ends the access — on schedule, and only
-	// once monotonic time has actually passed.
 	if !h.authorized() {
 		t.Fatal("a few seconds of monotonic time ended a 30-second grace; the wall-clock jumps leaked into the bound")
 	}

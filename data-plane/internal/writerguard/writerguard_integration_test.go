@@ -2,10 +2,7 @@
 
 package writerguard
 
-// The startup boundary check, against a real PostgreSQL 16 carrying the real Phase-3 schema.
-//
-// Every case here is a way a service could come up believing it is protected when it is not. The check exists
-// because all of them look identical from inside the process: writes succeed either way.
+// Each case is a way a service could start believing it is protected when it is not; all look identical from inside the process.
 
 import (
 	"context"
@@ -32,19 +29,12 @@ func ownerPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// probeConn connects as a NON-OWNER role — the shape a Gate-P runtime actually has. Running the check as the
-// schema owner would pass the trigger assertions while proving nothing about whether they constrain anyone.
+// probeConn connects as a non-owner role, the runtime's real shape; the schema owner would pass while proving nothing about who is constrained.
 func probeConn(t *testing.T, owner *pgxpool.Pool) *pgx.Conn {
 	t.Helper()
 	ctx := context.Background()
-	// The EXECUTE grant is part of what "the shape a Gate-P runtime has" MEANS. A service that writes a
-	// capability-scoped family must be able to open that family's scope, or every one of its authoritative
-	// writes is refused — so a probe without it would be testing a role that could not do the job at all.
-	//
-	// This is a test-only role, so it does not touch the dark-privilege invariant the migration lifecycle gate
-	// asserts: the named runtime service roles (scd, edged, portald, acctd, pmsd) still hold ZERO iam_v2
-	// function EXECUTE while Phase 3 is dark. They receive this grant at Gate-P, alongside the rest of their
-	// least-privilege set, and Verify runs only where the Phase-3 surface is actually mounted.
+	// The EXECUTE grant is part of the runtime's shape: a service writing a capability-scoped family must be able
+	// to open its scope. This test-only role does not touch the dark-privilege invariant on the real service roles.
 	if _, err := owner.Exec(ctx, `
 		DO $$ BEGIN CREATE ROLE p3_guard_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 		EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -65,9 +55,7 @@ func probeConn(t *testing.T, owner *pgxpool.Pool) *pgx.Conn {
 	return c
 }
 
-// The real requirement set, checked by a role that is NOT the writer, must pass. If this fails, either the
-// boundary is not installed or the check is asserting something the schema does not actually promise — and
-// both are worth knowing before a service refuses to start in production.
+// The real requirement set, checked by a non-writer role, must pass.
 func TestIntegration_BoundaryHoldsForANonOwnerRuntime(t *testing.T) {
 	owner := ownerPool(t)
 	probe := probeConn(t, owner)
@@ -76,9 +64,7 @@ func TestIntegration_BoundaryHoldsForANonOwnerRuntime(t *testing.T) {
 	}
 }
 
-// THE MIXED-MODE REFUSAL. A process connected as the controlled operations' owner satisfies every guard
-// trivially: it can write any Phase-3 table raw, and nothing in the schema would ever object. That is the
-// legacy/raw writer mode, and it must stop the service rather than run "protected" in name only.
+// A process connected as the controlled operations' owner satisfies every guard trivially (raw writes), so it must be refused.
 func TestIntegration_OwnerConnectionIsRefused(t *testing.T) {
 	owner := ownerPool(t)
 	err := Verify(context.Background(), owner, Phase3Requirements())
@@ -90,8 +76,7 @@ func TestIntegration_OwnerConnectionIsRefused(t *testing.T) {
 	}
 }
 
-// A missing operation and an unguarded table are the two ways an out-of-date or hand-repaired schema silently
-// drops the boundary while every Phase-3 write keeps succeeding.
+// A missing operation and an unguarded table silently drop the boundary while writes keep succeeding.
 func TestIntegration_MissingPiecesAreRefused(t *testing.T) {
 	owner := ownerPool(t)
 	probe := probeConn(t, owner)
@@ -106,8 +91,7 @@ func TestIntegration_MissingPiecesAreRefused(t *testing.T) {
 		t.Fatalf("a missing controlled operation was accepted: %v", err)
 	}
 
-	// iam_v2.devices is a real Phase-3 table with no controlled-writer guard. Naming it here stands in for a
-	// schema where a guard was never applied to a table that needs one.
+	// iam_v2.devices has no controlled-writer guard, standing in for a table that needed one.
 	err = Verify(ctx, probe, []Requirement{{
 		Family:   "accounting",
 		Function: "iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)",
@@ -118,12 +102,10 @@ func TestIntegration_MissingPiecesAreRefused(t *testing.T) {
 	}
 }
 
-// A SECURITY DEFINER function is only safe with a pinned search_path and without PUBLIC EXECUTE. Both defects
-// are invisible at runtime — the function works perfectly — so they have to be caught at startup.
+// A SECURITY DEFINER function needs a pinned search_path and no PUBLIC EXECUTE; both defects are invisible at runtime, so catch them at startup.
 func TestIntegration_UnsafeFunctionShapesAreRefused(t *testing.T) {
 	owner := ownerPool(t)
 	ctx := context.Background()
-	// These live in their own schema so the shared Phase-3 objects are never touched.
 	if _, err := owner.Exec(ctx, `
 		CREATE SCHEMA IF NOT EXISTS wg_probe;
 		CREATE OR REPLACE FUNCTION wg_probe.no_path() RETURNS void
@@ -160,10 +142,7 @@ func TestIntegration_UnsafeFunctionShapesAreRefused(t *testing.T) {
 	}
 }
 
-// A runtime that cannot OPEN a capability-scoped family's operation is refused at startup rather than at the
-// first write. The difference matters more than it looks: the first Stay write is the first PMS event of the
-// day, and the first commerce write is a guest standing in the lobby. Both are terrible places to discover a
-// missing grant, and both are places where the pressure is to disable the check rather than fix the grant.
+// A runtime that cannot open a capability-scoped family's operation is refused at startup, not at the first write (a PMS event or a guest purchase).
 func TestIntegration_ARuntimeThatCannotOpenAScopeIsRefusedAtStartup(t *testing.T) {
 	owner := ownerPool(t)
 	ctx := context.Background()
@@ -194,9 +173,7 @@ func TestIntegration_ARuntimeThatCannotOpenAScopeIsRefusedAtStartup(t *testing.T
 	}
 }
 
-// The two tiers must stay distinguishable in the recorded contract. If every family drifted to the weaker
-// tier the package would still compile, every test above would still pass, and the boundary would quietly be
-// a different, weaker thing than the one that was reviewed.
+// The two tiers must stay distinguishable: if every family drifted to the weaker tier, everything else would still pass.
 func TestPhase3RequirementsRecordBothTiers(t *testing.T) {
 	var owned, scoped int
 	seen := map[string]bool{}
@@ -221,9 +198,7 @@ func TestPhase3RequirementsRecordBothTiers(t *testing.T) {
 			}
 		}
 	}
-	// The five families whose corruption is silent — entitlement, grace config, accounting, class generation
-	// and the offer set — are the ones that must stay operation-owned. This is a floor, not an equality: new
-	// families may be added at either tier, but these five may not be downgraded without this failing.
+	// Families whose corruption is silent (entitlement, grace config, accounting, class generation, offer set) must stay operation-owned; a floor, not an equality.
 	if owned < 6 {
 		t.Fatalf("only %d operation-owned families remain; the strong tier is being eroded", owned)
 	}

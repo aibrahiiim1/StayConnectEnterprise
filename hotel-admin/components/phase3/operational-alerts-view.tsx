@@ -1,11 +1,6 @@
 "use client";
 
-// ALERTS — checkout situations the configured policy could not handle. The queue shows only alerts whose
-// lifecycle head is not RESOLVED, because an operator's queue is what still needs attention.
-//
-// Every action carries the state the operator was looking at. That is what makes two people clicking
-// Acknowledge at the same moment produce exactly one winner and one clear "someone got there first", instead
-// of one silently overwriting the other. A conflict reloads the queue rather than retrying blindly.
+// Send the viewed alert state with each action so concurrent decisions cannot silently overwrite each other.
 
 import { useEffect, useState } from "react";
 import { BellRing, CheckCheck } from "lucide-react";
@@ -26,7 +21,6 @@ import { HelpList, HelpSection } from "@/components/help";
 const stateTone = (s: string) => (s === "ACKNOWLEDGED" ? "info" : "warn");
 const stateWord = (s: string) => (s === "ACKNOWLEDGED" ? "Acknowledged" : s === "OPEN" ? "Open" : s.toLowerCase());
 
-/** A bounded code, read out: EMERGENCY_GRACE_USED -> "emergency grace used". */
 const words = (code?: string | null) => (code ? code.replace(/_/g, " ").toLowerCase() : "—");
 const sentence = (code?: string | null) => {
   const w = words(code);
@@ -38,7 +32,7 @@ export function OperationalAlertsView({
   readOnly = false,
 }: {
   canAct?: boolean;
-  /** Show the read-only line. Separate from canAct so it does not flash while the role is still loading. */
+  /** Wait for role loading before declaring the operator read-only. */
   readOnly?: boolean;
 }) {
   const toast = useToast();
@@ -53,7 +47,7 @@ export function OperationalAlertsView({
       const r = await api.get<ListResp<OperationalAlert>>("/operational-alerts");
       setRows(r.data);
     } catch (e: any) {
-      // The last answer stays on screen. An empty queue is only claimed when the appliance said so.
+      // Keep the last known queue if a refresh fails.
       setErr(e?.message ?? "Failed to load alerts");
     }
   }
@@ -68,7 +62,6 @@ export function OperationalAlertsView({
     setNote(null);
     try {
       await api.post("/operational-alerts/" + a.audit_id + "/" + action, {
-        // what this operator was looking at when they clicked
         expected_state: a.state,
         reason_code: action === "resolve" ? "OPERATOR_RESOLVED" : "OPERATOR_ACKNOWLEDGED",
       });
@@ -76,7 +69,7 @@ export function OperationalAlertsView({
       await load();
     } catch (e: any) {
       if (e?.status === 409) {
-        // someone else moved this alert; show them the current truth instead of overwriting it
+        // Reload on conflict to show the other operator's decision.
         setNote("This alert changed while you were looking at it. The queue has been refreshed.");
         await load();
       } else {
@@ -156,7 +149,6 @@ export function OperationalAlertsView({
                 <TR key={a.audit_id}>
                   <TD>
                     <div className="font-medium">{words(a.alert_code)}</div>
-                    {/* On a phone the secondary columns are hidden; the one fact that matters most rides along. */}
                     <div className="text-caption text-muted-foreground sm:hidden">
                       Raised {formatRelative(a.created_at)}
                     </div>

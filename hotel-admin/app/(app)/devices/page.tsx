@@ -1,8 +1,6 @@
 "use client";
 
-// DEVICES: find a client device -- online or not -- and act on it (edged /client-devices, migration 0118).
-// The search text travels in a header, not the URL (it is a MAC address or a client's account name, and edged logs
-// request lines).
+// The search text travels in a header, not the URL: it is a MAC address or account name, and edged logs request lines.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ClientDeviceRow, type DeviceSettings } from "@/lib/api";
@@ -26,8 +24,7 @@ import { DeviceDetailDialog } from "@/components/devices/device-detail";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
 import { useEditFocus } from "@/lib/use-edit-focus";
 
-// THREE STATES, NOT TWO. "Online" is signed in with a live Internet session. A device can be on the Wi-Fi --
-// holding a DHCP lease, sitting at the sign-in page -- without that, and used to read as "Offline".
+// Online means signed in with a live session; a device on Wi-Fi without one is not "Offline".
 function DeviceStatus({ r }: { r: ClientDeviceRow }) {
   if (r.online) return <Badge tone="ok" dot>Online</Badge>;
   if (r.on_network) return <Badge tone="warn" dot>On the Wi-Fi, not signed in</Badge>;
@@ -50,8 +47,7 @@ export default function DevicesPage() {
   const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("sessions", roles);
   const mayConfigure = roles === null ? false : canWrite("auth-methods", roles);
-  // The daily device-change limit is an auth-methods setting. A role that cannot read it (the voucher station, the
-  // payments role) is not shown the card at all -- it used to be, and the page opened on a 403 banner.
+  // A role that cannot read this setting is not shown the card (it would open on a 403).
   const maySeeSettings = roles === null ? false : canRead("auth-methods", roles);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -143,7 +139,6 @@ export default function DevicesPage() {
                     <div className="text-caption text-muted-foreground">
                       {[r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ")}
                     </div>
-                    {/* The package on narrow screens, where its column is hidden. */}
                     {r.current && (
                       <div className="text-caption text-muted-foreground md:hidden">
                         {r.current.package_name || "Package"} · {holder(r)}
@@ -187,7 +182,6 @@ export default function DevicesPage() {
   );
 }
 
-// The site setting: how many device changes a client may make on the portal per package per day.
 function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
   const toast = useToast();
   const [value, setValue] = useState<number | null>(null);

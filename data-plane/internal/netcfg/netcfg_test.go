@@ -99,7 +99,7 @@ func TestGatewayOutsideSubnet(t *testing.T) {
 
 func TestProtectedInterface(t *testing.T) {
 	n := vlan20()
-	n.ParentInterface = "ens160" // WAN/mgmt
+	n.ParentInterface = "ens160"
 	if !hasCode(ValidateOne(n, topoT(), availAll(), nil, ""), "protected_interface") {
 		t.Fatal("expected protected_interface")
 	}
@@ -148,7 +148,6 @@ func TestSubnetOverlap(t *testing.T) {
 	bnet.Name = "Other"
 	bnet.VLANID = 30
 	bnet.BridgeName = "br-g30"
-	// overlapping subnet
 	res := ValidateSet([]GuestNetwork{a, bnet}, topoT(), availAll(), nil)
 	if !hasCode(res.Issues, "subnet_overlap") {
 		t.Fatalf("expected subnet_overlap, got %+v", res.Issues)
@@ -227,8 +226,7 @@ func TestNetplanRenderVLAN(t *testing.T) {
 }
 
 func TestNetplanEmptyIsValid(t *testing.T) {
-	// legacy-only apply => zero netd-managed networks => must NOT emit an
-	// empty "bridges:" (invalid netplan YAML).
+	// legacy-only apply => zero netd-managed networks => must not emit an empty "bridges:" (invalid netplan YAML).
 	out := string(RenderNetplan(nil))
 	if strings.Contains(out, "bridges:") {
 		t.Fatalf("empty netplan must not contain a bridges section:\n%s", out)
@@ -284,7 +282,6 @@ func TestNftReplacesOnlyOwnTableNotWholeRuleset(t *testing.T) {
 	if strings.Contains(out, "flush ruleset") {
 		t.Fatalf("generated ruleset must NOT `flush ruleset` (would wipe Docker's nft chains):\n%s", out)
 	}
-	// atomic replace of only our table
 	if !strings.Contains(out, "table inet stayconnect\ndelete table inet stayconnect") {
 		t.Fatalf("expected scoped `table …; delete table …` replace of only the stayconnect table:\n%s", out)
 	}

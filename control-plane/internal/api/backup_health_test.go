@@ -34,7 +34,6 @@ func writeDump(t *testing.T, name string, at time.Time) {
 	_ = os.Chtimes(p, at, at)
 }
 
-// X-15: the backup health reports the newest database backup and shows a failing daily dump.
 func TestBackupHealthShowsNewestDumpAndFailures(t *testing.T) {
 	pointBackupPathsAt(t)
 	now := time.Now()
@@ -50,7 +49,6 @@ func TestBackupHealthShowsNewestDumpAndFailures(t *testing.T) {
 		t.Fatalf("a 5-hour-old finished dump is healthy and is the newest (the partial is ignored): %+v", h)
 	}
 
-	// The next run failed: the page must say so even though a dump exists.
 	ok, fail := now.Add(-5*time.Hour).UTC(), now.Add(-time.Hour).UTC()
 	raw, _ := json.Marshal(dbBackupRun{LastAttemptAt: &fail, LastSuccessAt: &ok, LastFailureAt: &fail, LastError: "pg_dump failed"})
 	_ = os.WriteFile(dbBackupStatusPath, raw, 0o600)
@@ -58,7 +56,6 @@ func TestBackupHealthShowsNewestDumpAndFailures(t *testing.T) {
 		t.Fatalf("a failed last run must be reported: %+v", h)
 	}
 
-	// Old dumps only: overdue.
 	_ = os.Remove(dbBackupStatusPath)
 	_ = os.Remove(filepath.Join(dbBackupDir, "central-20261015T020000Z-scheduled.dump"))
 	writeDump(t, "central-20261012T020000Z-scheduled.dump", now.Add(-4*24*time.Hour))
@@ -66,7 +63,6 @@ func TestBackupHealthShowsNewestDumpAndFailures(t *testing.T) {
 		t.Fatalf("a four-day-old newest dump is overdue: %+v", h)
 	}
 
-	// The handler always carries the database backup block, even before the cleanup ever ran.
 	rec := httptest.NewRecorder()
 	(&Base{}).BackupHealthHandler(rec, httptest.NewRequest(http.MethodGet, "/cloud/v1/backup-health", nil))
 	var out map[string]any

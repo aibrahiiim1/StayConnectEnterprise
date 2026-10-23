@@ -13,10 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The Phase-6 device self-service surface, against a real PostgreSQL carrying the authoritative chain.
-//
-// These are written as ATTACKS wherever there is something to attack. The happy path is one test; the rest
-// ask what a guest who is not being honest can reach.
+// Device self-service against a real PostgreSQL; most tests attack what a dishonest guest can reach.
 
 func pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -32,9 +29,8 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// macFromUUID derives a locally-administered MAC from a device uuid. Device identity is
-// (tenant, site, appliance, MAC), so two fixtures sharing a MAC would be the SAME device -- and that
-// uniqueness outlives the test process, which is why this is derived from the id rather than counted.
+// macFromUUID derives a MAC from the device uuid: device identity is (tenant, site, appliance, MAC) and that
+// uniqueness outlives the test process, so a counter would collide with earlier runs.
 func macFromUUID(id, prefix string) string {
 	h := strings.ReplaceAll(id, "-", "")
 	return fmt.Sprintf("%s:%s:%s:%s:%s:%s", prefix, h[0:2], h[2:4], h[4:6], h[6:8], h[8:10])
@@ -47,7 +43,6 @@ const (
 	fixOperator  = "55555555-5555-5555-5555-555555555555"
 )
 
-// seedEntitlement makes one live entitlement and returns its id.
 func seedEntitlement(t *testing.T, p *pgxpool.Pool) string {
 	t.Helper()
 	ctx := context.Background()
@@ -84,7 +79,6 @@ func seedEntitlement(t *testing.T, p *pgxpool.Pool) string {
 	return id
 }
 
-// seedDevice binds a device to an entitlement, optionally with a live session.
 func seedDevice(t *testing.T, p *pgxpool.Pool, ent, sessionState string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -100,10 +94,7 @@ func seedDevice(t *testing.T, p *pgxpool.Pool, ent, sessionState string) string 
 	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
 		t.Fatalf("replica: %v", err)
 	}
-	// The MAC is DERIVED FROM THE DEVICE UUID, in Go. Two earlier attempts were wrong for different reasons:
-	// building it in SQL from $1 made PostgreSQL deduce two types for one parameter, and a process-local
-	// counter collided with devices left behind by previous runs, because device identity is
-	// (tenant, site, appliance, MAC) and that uniqueness outlives any one test process.
+	// Derive the MAC in Go: building it in SQL from $1 makes PostgreSQL deduce two types for one parameter.
 	mac := macFromUUID(id, "02")
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.devices (id, tenant_id, site_id, appliance_id, mac, last_seen)
 		VALUES ($1,$2,$3,$4,$5::macaddr, now())`, id, fixTenant, fixSite, fixAppliance, mac); err != nil {
@@ -133,8 +124,7 @@ func seedDevice(t *testing.T, p *pgxpool.Pool, ent, sessionState string) string 
 	return id
 }
 
-// seedEntitlementWithLimit makes a live entitlement whose PINNED plan revision carries a real
-// max_concurrent_devices, so authorize_entitlement_device enforces a genuine limit rather than none.
+// seedEntitlementWithLimit pins a real max_concurrent_devices so authorize_entitlement_device enforces a limit.
 func seedEntitlementWithLimit(t *testing.T, p *pgxpool.Pool, limit int) string {
 	t.Helper()
 	ctx := context.Background()
@@ -193,7 +183,6 @@ func seedEntitlementWithLimit(t *testing.T, p *pgxpool.Pool, limit int) string {
 	return ent
 }
 
-// seedBareDevice makes a device with no binding at all: a genuine newcomer.
 func seedBareDevice(t *testing.T, p *pgxpool.Pool) string {
 	t.Helper()
 	ctx := context.Background()
@@ -230,11 +219,9 @@ func cleanup(t *testing.T, p *pgxpool.Pool, ent string) {
 	_ = tx.Commit(ctx)
 }
 
-// ---------------------------------------------------------------------------------------------------------
 // The per-appliance setting
 
-// An appliance nobody configured has not opted in. If a missing row read as "on", every unconfigured
-// appliance in a fleet would be serving a guest-facing capability the hotel never asked for.
+// A missing row must read as off, or every unconfigured appliance would serve the feature.
 func TestSettingDefaultsOffWhenNoRowExists(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -251,7 +238,6 @@ func TestSettingDefaultsOffWhenNoRowExists(t *testing.T) {
 	}
 }
 
-// The setting and its audit move together or not at all.
 func TestSettingChangeIsAudited(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -288,7 +274,6 @@ func TestSettingChangeIsAudited(t *testing.T) {
 	}
 }
 
-// An appliance id that does not exist cannot acquire managed state, however it is presented.
 func TestSettingRefusesUnknownAppliance(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -303,10 +288,7 @@ func TestSettingRefusesUnknownAppliance(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// The guest surface
-
-// Only the caller's own devices are visible, and the query is what enforces it.
+// Only the caller's own devices are visible; the query enforces it.
 func TestListShowsOnlyTheCallersOwnDevices(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -347,8 +329,7 @@ func TestListShowsOnlyTheCallersOwnDevices(t *testing.T) {
 	}
 }
 
-// The listing carries no MAC address. A guest does not need one, and it is a stable network identifier for a
-// device on a shared network.
+// The listing carries no MAC address (a stable network identifier on a shared network).
 func TestListCarriesNoMACAddress(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -365,7 +346,6 @@ func TestListCarriesNoMACAddress(t *testing.T) {
 	}
 }
 
-// Online and converging devices are not removable, and the two are refused identically.
 func TestOnlineAndPendingEnforcementAreNotRemovable(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -419,7 +399,6 @@ func TestAnotherGuestsDeviceIsIndistinguishableFromNothing(t *testing.T) {
 	}
 }
 
-// The whole point: an offline device releases, exactly once, and nothing durable is destroyed.
 func TestOfflineReleaseFreesTheSlotExactlyOnceAndKeepsHistory(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -462,7 +441,6 @@ func TestOfflineReleaseFreesTheSlotExactlyOnceAndKeepsHistory(t *testing.T) {
 	}
 }
 
-// The slot really is available again: a replacement device can take it.
 func TestReleasedSlotIsAvailableForAReplacement(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -498,8 +476,7 @@ func TestReleasedSlotIsAvailableForAReplacement(t *testing.T) {
 	}
 }
 
-// Two concurrent releases of the same offline device: exactly one may free the slot. Two would mean one slot
-// freed twice, which is how a device limit quietly stops being a limit.
+// Of two concurrent releases of one device exactly one may free the slot, or the device limit stops being a limit.
 func TestConcurrentReleasesFreeTheSlotOnce(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -541,15 +518,13 @@ func TestConcurrentReleasesFreeTheSlotOnce(t *testing.T) {
 	}
 }
 
-// The throttle is counted from durable rows, so reconnecting or restarting does not reset it.
 func TestThrottleIsDurable(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	ent := seedEntitlement(t, p)
 	dev := seedDevice(t, p, ent, "")
 
-	// Three attempts against a budget of three, then the fourth must be refused. Called directly so the
-	// budget can be made small; the service uses the default.
+	// Called directly so the budget can be small; the service uses the default.
 	for i := 0; i < 3; i++ {
 		var out string
 		if err := p.QueryRow(ctx, `SELECT iam_v2.p6_guest_release_device($1,$2,3)`, ent, dev).Scan(&out); err != nil {
@@ -563,7 +538,6 @@ func TestThrottleIsDurable(t *testing.T) {
 	if Outcome(out) != OutcomeRefusedThrottled {
 		t.Fatalf("the throttle did not engage: %s", out)
 	}
-	// A fresh pool is a fresh process as far as any in-memory counter is concerned.
 	p2, err := pgxpool.New(ctx, os.Getenv("PHASE3_TEST_DSN"))
 	if err != nil {
 		t.Fatal(err)
@@ -577,22 +551,11 @@ func TestThrottleIsDurable(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// THE RACE, against the REAL admission path.
-//
-// The first version of this test created the competing session with a raw INSERT under
-// session_replication_role=replica, which disables the very triggers the invariant depends on -- so it proved
-// that a release and a fake admission do not collide, which is not the claim. Worse, it ACCEPTED the outcome
-// "release OK, binding DISCONNECTED, live session arriving after", and that final state is exactly what the
-// feature must never produce.
-//
-// admitDevice below goes through iam_v2.authorize_entitlement_device -- the primitive migration 0010 declares
-// to be one of only two approved ways to open an authorization interval, the one the real grant path in
-// staygrant.go calls, the one that takes the L3 entitlement lock in the global lock order and enforces the
-// device limit under it -- and then inserts the session with every trigger armed.
+// The race runs against the real admission path: admitDevice goes through iam_v2.authorize_entitlement_device
+// (the approved primitive, which takes the entitlement lock and enforces the device limit) and inserts the
+// session with every trigger armed. A raw INSERT under session_replication_role=replica would disable the
+// triggers the invariant depends on.
 
-// admitDevice performs a REAL device admission: authorize through the approved primitive, then open a
-// session, in one transaction, with no trigger disabled.
 func admitDevice(ctx context.Context, p *pgxpool.Pool, ent, dev string) error {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -611,8 +574,7 @@ func admitDevice(ctx context.Context, p *pgxpool.Pool, ent, dev string) error {
 	return tx.Commit(ctx)
 }
 
-// assertNoReleasedBindingIsOnline is THE assertion. It fails if the database anywhere contains a
-// DISCONNECTED binding carrying an active or PENDING_ENFORCEMENT session.
+// assertNoReleasedBindingIsOnline fails if any DISCONNECTED binding carries an active or PENDING_ENFORCEMENT session.
 func assertNoReleasedBindingIsOnline(t *testing.T, p *pgxpool.Pool) {
 	t.Helper()
 	var n int
@@ -627,8 +589,7 @@ func assertNoReleasedBindingIsOnline(t *testing.T, p *pgxpool.Pool) {
 	}
 }
 
-// The structural guard, stated on its own: a live session cannot be created on a released binding by ANY
-// writer, however it orders its statements.
+// A live session cannot be created on a released binding by any writer.
 func TestLiveSessionCannotExistOnAReleasedBinding(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -648,8 +609,7 @@ func TestLiveSessionCannotExistOnAReleasedBinding(t *testing.T) {
 	}
 	assertNoReleasedBindingIsOnline(t, p)
 
-	// ...and a legitimate reconnect works, but only through the normal authorization path, which opens a NEW
-	// interval rather than reviving the closed one.
+	// A legitimate reconnect opens a new interval rather than reviving the closed one.
 	if err := admitDevice(ctx, p, ent, dev); err != nil {
 		t.Fatalf("legitimate re-admission was refused: %v", err)
 	}
@@ -676,8 +636,7 @@ func TestLiveSessionCannotExistOnAReleasedBinding(t *testing.T) {
 	}
 }
 
-// Release versus a REAL concurrent admission of the same device. Exactly one coherent outcome, and the
-// forbidden state must never appear.
+// Release versus a concurrent admission of the same device: one coherent outcome, never the forbidden state.
 func TestReleaseRacesRealAdmission(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -714,9 +673,7 @@ func TestReleaseRacesRealAdmission(t *testing.T) {
 			// (A) release won: the binding is released and the admission was refused outright.
 			releaseWon++
 		case out == OutcomeOK && aerr == nil && status == "AUTHORIZED" && live > 0:
-			// (A') release won, then the admission RE-AUTHORIZED through the approved primitive -- a new
-			// interval, a fresh device-limit check. That is a legitimate reconnect, not a survival of the
-			// released authorization, and the interval history proves which it was.
+			// (A') release won, then the admission re-authorized through the primitive: a legitimate reconnect.
 			releaseWon++
 		case out == OutcomeRefusedOnline && aerr == nil && status == "AUTHORIZED" && live > 0:
 			// (B) admission won: the binding is untouched and the release observed the live session.
@@ -733,10 +690,8 @@ func TestReleaseRacesRealAdmission(t *testing.T) {
 	t.Logf("release won %d, admission won %d, forbidden state never observed", releaseWon, admissionWon)
 }
 
-// BRANCH (B), DETERMINISTICALLY. The unbiased race above resolved to "release won" in every round, which is
-// exactly the situation Phase 5 hit with F9-i: an outcome that never occurs is an outcome never tested, and
-// tuning a sleep until it sometimes happens is not a proof. So the admission is committed FIRST, through the
-// real primitive, and the release must then observe it and refuse.
+// Branch (B) deterministically: the unbiased race always resolves to "release won", so the admission is
+// committed first and the release must then observe it and refuse.
 func TestAdmissionWinsIsRefusedByRelease(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -765,8 +720,7 @@ func TestAdmissionWinsIsRefusedByRelease(t *testing.T) {
 	assertNoReleasedBindingIsOnline(t, p)
 }
 
-// Release versus a NEW device admission at the max-device boundary. The limit must never be exceeded, even
-// transiently, and exactly one slot may be freed.
+// At the max-device boundary the limit must never be exceeded, even transiently, and exactly one slot is freed.
 func TestReleaseRacesNewDeviceAtTheLimit(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -796,7 +750,6 @@ func TestReleaseRacesNewDeviceAtTheLimit(t *testing.T) {
 		}
 		assertNoReleasedBindingIsOnline(t, p)
 
-		// Exactly one slot freed: the released binding is DISCONNECTED exactly once, never twice.
 		var released int
 		if err := p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_device_actions
 			WHERE entitlement_id=$1 AND device_id=$2 AND outcome='OK'`, ent, held).Scan(&released); err != nil {
@@ -808,33 +761,18 @@ func TestReleaseRacesNewDeviceAtTheLimit(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// THE FIRST SETTING WRITE, CONCURRENTLY.
-//
-// p6_set_guest_device_self_service used to take the settings row FOR UPDATE, which orders nothing on an
-// appliance that has never been configured: there is no row to lock. Two concurrent first writes would each
-// read old_value as NULL and each record a transition from "unset", so the setting converged (the upsert is
-// idempotent) while the HISTORY claimed two independent first changes -- and the history is the only reason
-// the audit exists.
-//
-// The fix anchors the lock on the APPLIANCE identity, which always exists. This proves the audit's old/new
-// chain reflects the actual committed sequence.
+// Concurrent first setting writes: an unconfigured appliance has no settings row to lock, so the lock is
+// anchored on the appliance identity; otherwise both writes would record a transition from "unset". This
+// proves the audit's old/new chain reflects the committed sequence.
 func TestConcurrentFirstSettingWriteProducesACoherentAuditChain(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	t.Cleanup(func() { clearSetting(ctx, p) })
 	clearSetting(ctx, p)
 
-	// TWO GOROUTINES WERE NOT ENOUGH. Fired together they passed with and without the fix, because the
-	// window between "read the absent row" and "insert it" is a few microseconds and the Go scheduler plus
-	// connection acquisition almost always serialized them. A race that only sometimes overlaps is a test
-	// that only sometimes tests anything -- the Phase-5 F9-i lesson again.
-	//
-	// So the overlap is FORCED. Writer A opens a transaction, calls the function and does NOT commit. Writer
-	// B then calls the function in its own transaction. Without the appliance anchor, B reads the absent row
-	// (READ COMMITTED sees nothing of A's uncommitted insert), records old_value = NULL, and only then blocks
-	// on the row -- so both rows claim to be the first change. With the anchor, B blocks BEFORE it reads, and
-	// therefore sees what A committed.
+	// Force the overlap (two goroutines almost always serialize): writer A calls the function and does not
+	// commit, then B calls it. Without the appliance anchor B reads the absent row, records old_value = NULL
+	// and only then blocks; with it, B blocks before reading and sees A's commit.
 	txA, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -861,7 +799,7 @@ func TestConcurrentFirstSettingWriteProducesACoherentAuditChain(t *testing.T) {
 		bDone <- txB.Commit(ctx)
 	}()
 
-	// Give B time to reach the function and block (or, without the fix, to read past it).
+	// Give B time to reach the function and block.
 	time.Sleep(150 * time.Millisecond)
 	if err := txA.Commit(ctx); err != nil {
 		t.Fatalf("writer A commit: %v", err)
@@ -909,8 +847,7 @@ func TestConcurrentFirstSettingWriteProducesACoherentAuditChain(t *testing.T) {
 		t.Fatalf("%d of 2 audit rows claim to be the FIRST change: the writers were not ordered", firsts)
 	}
 
-	// The chain must be continuous AND in the committed order: A committed first, so A is the first row and
-	// B must have observed A's value.
+	// The chain must be continuous and in committed order: A first, and B observed A's value.
 	if got[0].by != "writer-A" {
 		t.Fatalf("the audit order does not reflect the committed order: first row is %q", got[0].by)
 	}
@@ -928,7 +865,7 @@ func TestConcurrentFirstSettingWriteProducesACoherentAuditChain(t *testing.T) {
 	}
 }
 
-// clearSetting removes the fixture appliance's setting and audit so a first-write test really is first.
+// clearSetting removes the setting and audit so a first-write test really is first.
 func clearSetting(ctx context.Context, p *pgxpool.Pool) {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -942,8 +879,7 @@ func clearSetting(ctx context.Context, p *pgxpool.Pool) {
 	_ = tx.Commit(ctx)
 }
 
-// The setting write must refuse an operator label the server did not resolve. "Somebody changed it" is not an
-// audit record, and an empty label is how that happens in practice.
+// The setting write must refuse an empty operator label: "somebody changed it" is not an audit record.
 func TestSettingRefusesAnEmptyOperatorLabel(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -955,12 +891,7 @@ func TestSettingRefusesAnEmptyOperatorLabel(t *testing.T) {
 	}
 }
 
-// A RELEASED DEVICE LEAVES THE GUEST'S LIST, AND LEAVES NOTHING ELSE.
-//
-// This is the one place the two halves of the rule meet: the guest-facing answer to "what is using my
-// allowance" must stop including a device the guest just removed, and every durable record of that device --
-// its identity, its authorization intervals, the audit of the release -- must survive untouched. A test that
-// asserted only the first half would be satisfied by deleting the device.
+// A released device leaves the guest's list, but its identity, authorization intervals and release audit survive.
 func TestAReleasedDeviceLeavesTheListingButNotTheRecord(t *testing.T) {
 	p := pool(t)
 	s := New(p)
@@ -994,8 +925,6 @@ func TestAReleasedDeviceLeavesTheListingButNotTheRecord(t *testing.T) {
 		t.Fatalf("the release erased history: devices=%d bindings=%d authorizations=%d actions=%d",
 			devices, bindings, authorizations, actions)
 	}
-	// The binding is still there, marked as what it is -- which is how the slot arithmetic and the audit
-	// both stay answerable after the guest's screen has moved on.
 	var status string
 	if err := p.QueryRow(ctx,
 		`SELECT status FROM iam_v2.entitlement_devices WHERE entitlement_id=$1 AND device_id=$2`,

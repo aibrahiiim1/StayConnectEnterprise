@@ -2,16 +2,11 @@
 
 package posting
 
-// ROOM CHARGE ACROSS THE REAL BOUNDARY (decision D45), on the full appliance schema (0095-0098):
+// Room charge across the real boundary: engine -> postinghandoff -> pmsd FinancialRelay -> FIAS adapter ->
+// fake PMS over a pipe, and the PA back to settlement.
 //
-//	posting engine (financial authority, svc_posting)
-//	  -> postinghandoff client -> root-only unix socket
-//	  -> pmsd FinancialRelay (authorises the exact bytes via p4_posting_command_authorised, as svc_pmsd)
-//	  -> the real FIAS adapter and its single writer -> a fake PMS over a pipe
-//	  -> PA -> back through the relay -> engine -> settlement.
-//
-// Env: ROOMCHARGE_TEST_DSN (admin), optional ROOMCHARGE_WORKER_DSN (svc_posting) and ROOMCHARGE_PMSD_DSN
-// (svc_pmsd) to prove each side needs only its own privileges.
+// Env: ROOMCHARGE_TEST_DSN (admin); optional ROOMCHARGE_WORKER_DSN (svc_posting) and ROOMCHARGE_PMSD_DSN
+// (svc_pmsd) prove each side needs only its own privileges.
 
 import (
 	"bufio"
@@ -82,7 +77,7 @@ func startRig(t *testing.T, admin *pgxpool.Pool, s rcScope, f *fakePMS) *rig {
 	if os.Getenv("ROOMCHARGE_WORKER_DSN") != "" {
 		worker = rcPool(t, "ROOMCHARGE_WORKER_DSN")
 	}
-	// A short path: a unix socket path is limited to about 100 bytes, and a per-test temp dir is longer.
+	// A unix socket path is limited to about 100 bytes, so use a short temp dir.
 	dir, err := os.MkdirTemp("", "ho")
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +151,7 @@ func startRig(t *testing.T, admin *pgxpool.Pool, s rcScope, f *fakePMS) *rig {
 	return &rig{engine: eng, pms: f, relay: relay, cancel: cancel}
 }
 
-// run executes lane passes until the posting is concluded (a pass refused NOT_SENT -- e.g. the link still
-// resyncing -- is legitimately queued again, which is exactly the case this loop exercises).
+// run executes lane passes until the posting concludes; a NOT_SENT pass (e.g. link still resyncing) is queued again.
 func (r *rig) run(t *testing.T, s rcScope) Outcome {
 	t.Helper()
 	for i := 0; i < 20; i++ {
@@ -171,11 +165,9 @@ func (r *rig) run(t *testing.T, s rcScope) Outcome {
 	return Outcome{}
 }
 
-// seedHandoff builds, on the full appliance schema, exactly what a real room charge needs (Phase-0 Amendment
-// A1): a FIAS interface financially ONBOARDED with the RESERVATION posting target through the audited definer,
-// an in-house stay whose reservation number is the G# every PS carries (no folio exists anywhere), a priced
-// Room-charge package with its mapping, a verified Room sign-in and a REQUIRED PMS_POSTING settlement.
-// posting_allowed is not written: the database computes it.
+// seedHandoff builds what a real room charge needs: an onboarded FIAS interface, an in-house stay whose
+// reservation number is the G#, a priced Room-charge package, a verified Room sign-in and a REQUIRED
+// PMS_POSTING settlement.
 func seedHandoff(t *testing.T, p *pgxpool.Pool) rcScope {
 	t.Helper()
 	var s rcScope
@@ -245,7 +237,7 @@ func seedHandoff(t *testing.T, p *pgxpool.Pool) rcScope {
 	return s
 }
 
-// reservationOf is the stay's reservation number: the G# a PS for it carries (A1).
+// reservationOf is the stay's reservation number, the G# a PS carries.
 func reservationOf(t *testing.T, p *pgxpool.Pool, s rcScope) string {
 	return scan1[string](t, p, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, s.stay)
 }
@@ -268,17 +260,14 @@ func TestHandoff_PAOKOverTheOneLinkSettlesAndGrantsExactlyOnce(t *testing.T) {
 	if st, pu, n := rcState(t, admin, s); st != "SETTLED" || pu != "GRANTED" || n != 1 {
 		t.Fatalf("PA=OK settles and grants: %s %s %d", st, pu, n)
 	}
-	// The PMS received exactly the bytes the financial path recorded, once.
 	stored := scan1[string](t, admin, `SELECT ps_sha256 FROM iam_v2.posting_attempts WHERE internal_posting_id=$1`, posting)
 	if f.count() != 1 || postinghandoff.BodyHash(f.seen[0]) != stored {
 		t.Fatalf("one PS, byte-identical to the authorised command: sent=%d", f.count())
 	}
-	// A1: the PS targets the reservation -- the stay's current room and its reservation number as G#.
 	if !strings.Contains(f.seen[0], "|RN1421|G#"+reservationOf(t, admin, s)+"|") {
 		t.Fatalf("the PS must carry the stay's room and reservation number: %s", f.seen[0])
 	}
-	// Replaying the same command through a fresh relay (no in-memory memory of it) is refused by the database:
-	// the attempt is no longer SENDING. Nothing reaches the PMS.
+	// Replaying through a fresh relay (no in-memory state) is refused by the database: the attempt is no longer SENDING.
 	fresh := pmsd.NewFinancialRelay(true, authoriserFrom(admin), nil)
 	resp := fresh.Handle(context.Background(), postinghandoff.Request{Version: 1, InterfaceID: s.iface,
 		PNumber: postinghandoff.PNumberOf(f.seen[0]), Body: f.seen[0], BodySHA256: postinghandoff.BodyHash(f.seen[0]), WaitMillis: 500})
@@ -322,16 +311,15 @@ func TestHandoff_TamperedBytesAreNeverCarried(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedHandoff(t, admin)
 	createRoomCharge(t, admin, s)
-	// The stub's NG answer is a definite "not posted" only when the vendor confirmed NG on this interface (A1);
-	// unconfirmed it would be UNKNOWN. The fixture confirms it, so the pass concludes as it did before A1.
+	// NG is a definite "not posted" only when confirmed on this interface; the fixture confirms it.
 	mustExec(t, admin, `SELECT iam_v2.pms_answer_confirmation_record($1,$2,$3,'NG','CONFIRM',
 		'Vendor interface specification section 7: this status means the posting was not applied.','fixture',
 		(SELECT id FROM public.operators WHERE tenant_id=$1 LIMIT 1))`, s.tenant, s.site, s.iface)
 	g := reservationOf(t, admin, s)
 	relay := pmsd.NewFinancialRelay(true, authoriserFrom(admin), nil)
 	var verdict postinghandoff.Response
-	// While the real attempt is SENDING, present pmsd a command for the same P# whose amount was changed. It is
-	// self-consistent (its own hash), but not the bytes the financial path authorised.
+	// While the real attempt is SENDING, present pmsd a same-P# command with a changed amount: self-consistent
+	// hash, but not the authorised bytes.
 	tr := &stubTransport{answer: func(pn int64) (*PA, error) {
 		body := "PS|RN1421|G#" + g + "|TA999999|PT|SOOG|CTWIFI|P#" + strconv.FormatInt(pn, 10) + "|WSOG|"
 		verdict = relay.Handle(context.Background(), postinghandoff.Request{Version: 1, InterfaceID: s.iface,
@@ -351,13 +339,12 @@ func TestHandoff_AttemptLeftSendingByAStoppedWorkerBecomesUnknown(t *testing.T) 
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedHandoff(t, admin)
 	posting := createRoomCharge(t, admin, s)
-	// The worker records the attempt and dies before recording any outcome.
 	stopped := make(chan struct{})
 	tr := &stubTransport{answer: func(int64) (*PA, error) { close(stopped); select {} }}
 	e := NewEngine(transmitCfg, NewRepo(admin), tr)
 	go func() { _, _ = e.RunOnce(context.Background(), s.tenant, s.site, s.iface) }()
 	<-stopped
-	// Age the attempt past any possible in-process send (the identity trigger forbids this outside a test).
+	// Age the attempt past any possible in-process send (the one-way trigger forbids this outside a test).
 	ctx := context.Background()
 	tx, err := admin.Begin(ctx)
 	if err != nil {

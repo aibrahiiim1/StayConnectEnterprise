@@ -12,11 +12,8 @@ import (
 	"time"
 )
 
-// restart returns a NEW Manager over the same certificate directory — the process-restart boundary.
-//
-// This is the distinction that matters. Repeated calls on one Manager only prove the in-memory guard works;
-// scd restarts on assignment changes, deploys, crashes and reboots, and a guard that lives in a process
-// variable is gone every time. Everything below goes through a fresh Manager on purpose.
+// restart returns a NEW Manager over the same certificate directory (the process-restart boundary): repeated calls on one Manager only prove the
+// in-memory guard, and scd restarts often.
 func restart(t *testing.T, old *Manager, base string) *Manager {
 	t.Helper()
 	m := New(old.dir, base, base, old.applianceID, old.priv)
@@ -29,7 +26,6 @@ func restart(t *testing.T, old *Manager, base string) *Manager {
 	return m
 }
 
-// certifiedManager returns a Manager holding a current certificate, plus the fake Central behind it.
 func certifiedManager(t *testing.T) (*Manager, *statusCentral, func()) {
 	t.Helper()
 	central, srv := newStatusCentral(statusIssued)
@@ -69,12 +65,7 @@ func ageRotationMarker(t *testing.T, m *Manager, by time.Duration) {
 	}
 }
 
-// THE GAP THIS CLOSES.
-//
-// A rotation CSR is filed and Central holds it pending. The appliance then restarts — a deploy, a reboot,
-// an assignment change re-execing scd. Nothing about Central changed, so filing another request would be
-// pure duplication, and over a fourteen-day rotation window a restart-happy appliance produces exactly the
-// pile the suppression exists to prevent.
+// The gap this closes: a rotation CSR is filed, then the appliance restarts (deploy, reboot, assignment change); filing another would be pure duplication.
 func TestPendingRotationSurvivesProcessRestart(t *testing.T) {
 	m, central, done := certifiedManager(t)
 	defer done()
@@ -99,8 +90,7 @@ func TestPendingRotationSurvivesProcessRestart(t *testing.T) {
 	}
 }
 
-// Once the new certificate is installed the marker must be gone, or the NEXT rotation — potentially years
-// later — would be suppressed by a stale file and the certificate would expire.
+// Once the new certificate is installed the marker must be gone, or a stale file would suppress the NEXT rotation and the certificate would expire.
 func TestRotationMarkerClearsAfterSuccessfulInstall(t *testing.T) {
 	m, central, done := certifiedManager(t)
 	defer done()
@@ -136,11 +126,8 @@ func TestRotationMarkerClearsAfterSuccessfulInstall(t *testing.T) {
 	}
 }
 
-// The marker names the certificate it was filed against, so it invalidates itself.
-//
-// The case this covers: a rotation is filed, the process restarts, and at startup a plain Ensure() collects
-// the already-issued replacement before any rotation check runs. The marker now describes a rotation that
-// is finished. Without the fingerprint it would go on suppressing rotations until it aged out.
+// The marker names the certificate it was filed against, so it invalidates itself: if a restart Ensure() collects the issued replacement first, the marker
+// describes a finished rotation.
 func TestRotationMarkerSelfInvalidatesWhenCertificateChanged(t *testing.T) {
 	m, central, done := certifiedManager(t)
 	defer done()
@@ -166,8 +153,7 @@ func TestRotationMarkerSelfInvalidatesWhenCertificateChanged(t *testing.T) {
 	}
 }
 
-// A corrupt marker must not be able to block rotation until the certificate expires. One duplicate CSR is
-// the lesser failure by a wide margin.
+// A corrupt marker must not block rotation until the certificate expires; one duplicate CSR is the lesser failure.
 func TestCorruptRotationMarkerDoesNotBlockRotation(t *testing.T) {
 	m, central, done := certifiedManager(t)
 	defer done()

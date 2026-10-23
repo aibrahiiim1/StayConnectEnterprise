@@ -1,12 +1,7 @@
-// Package nft is a thin wrapper over the `nft` command for managing the
-// stayconnect auth set. All operations are idempotent.
-//
-// Phase 19: the auth set may be either the legacy IP-only form
-// (`type ipv4_addr`) or the multi-network concatenated form
-// (`type ifname . ipv4_addr`). The wrapper probes the live set once and
-// formats elements accordingly, so scd works across the netd cutover without
-// a coordinated restart. Callers always pass the ingress interface; it is
-// ignored on an IP-only set.
+// Package nft is a thin wrapper over the `nft` command for managing the stayconnect auth sets; all operations are
+// idempotent. An auth set may be IP-only (`type ipv4_addr`) or concatenated (`type ifname . ipv4_addr`); the wrapper
+// probes the live set once and formats elements accordingly, so scd works across the netd cutover. The ingress
+// interface is ignored on an IP-only set.
 package nft
 
 import (
@@ -21,35 +16,22 @@ import (
 const (
 	Table  = "inet stayconnect"
 	AuthV4 = "auth_ipv4"
-	// Phase3AuthV4 is the SEPARATE packet-authorization set that Phase 3 owns.
-	//
-	// It is deliberately NOT auth_ipv4. Legacy scd authorizes guests by adding to auth_ipv4 and reconciles that
-	// set from public.sessions; Phase 3 authorizes through netd from iam_v2.sessions. If both wrote one set, a
-	// Phase-3 full-state reconciliation — which must remove entries no Phase-3 session claims — would delete
-	// live legacy authorizations, cutting off guests that Phase 3 knows nothing about. Two structurally
-	// distinct sets make that impossible by construction rather than by careful filtering: Phase-3
-	// reconciliation enumerates only this set, and legacy code never names it.
-	//
-	// The set exists in the ruleset from the start, EMPTY, whether or not Phase 3 is enabled. An empty set
-	// matches nothing, so a dark appliance behaves exactly as it did before. It is present-but-empty rather
-	// than added at cutover because installing it later would mean regenerating the ruleset, and the generated
-	// ruleset is applied as `delete table` + recreate — which would flush auth_ipv4 and drop every live legacy
-	// guest. Shipping the set from the start is what makes Phase-3 activation a flag flip with no packet
-	// interruption, and gives the cutover exactly one boundary.
+	// Phase3AuthV4 is the separate packet-authorization set Phase 3 owns, deliberately not auth_ipv4: a Phase-3
+	// full-state reconciliation would otherwise delete live legacy authorizations. It exists in the ruleset from the
+	// start, empty (it matches nothing), because adding it later means regenerating the ruleset by `delete table` +
+	// recreate, which would drop every live legacy guest.
 	Phase3AuthV4 = "phase3_auth_ipv4"
 )
 
 type Client struct {
 	NftPath string
 
-	// exec runs one nft invocation. It is a field so the exact command strings this package builds can be
-	// proven by contract tests without a kernel — which is the only honest way to test a packet-authorization
-	// gate in CI.
+	// exec runs one nft invocation; a field so tests can prove the exact command strings without a kernel.
 	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 	mu sync.Mutex
-	// concatBySet caches the probed key type PER SET. auth_ipv4 and phase3_auth_ipv4 are independent sets and
-	// a single shared flag would let one set's probe decide the other's element format.
+	// concatBySet caches the probed key type per set: auth_ipv4 and phase3_auth_ipv4 are independent, so one shared flag
+	// would let one probe decide the other's element format.
 	concatBySet map[string]bool
 }
 
@@ -81,7 +63,6 @@ func (c *Client) probeConcatIn(ctx context.Context, set string) bool {
 	return concat
 }
 
-// execOrReal tolerates a zero-value Client (callers that built one with &Client{NftPath: ...}).
 func (c *Client) execOrReal(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if c.exec != nil {
 		return c.exec(ctx, name, args...)
@@ -92,7 +73,6 @@ func (c *Client) execOrReal(ctx context.Context, name string, args ...string) ([
 func (c *Client) probeConcat(ctx context.Context) bool { return c.probeConcatIn(ctx, AuthV4) }
 
 func containsConcatType(s string) bool {
-	// "type ifname . ipv4_addr"
 	return indexOf(s, "ifname . ipv4_addr") >= 0 || indexOf(s, "ipv4_addr . ifname") >= 0
 }
 
@@ -105,25 +85,17 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-// Allow adds (iface, ip) to the LEGACY auth_ipv4 set. Zero timeout = no timeout.
-// On an IP-only set, iface is ignored. Legacy scd's behaviour is unchanged.
+// Allow adds (iface, ip) to the legacy auth_ipv4 set; zero timeout means none.
 func (c *Client) Allow(ctx context.Context, iface string, ip net.IP, ttl time.Duration) error {
 	return c.AllowIn(ctx, AuthV4, iface, ip, ttl)
 }
 
-// Deny removes (iface, ip) from the LEGACY auth_ipv4 set (no-op if absent).
 func (c *Client) Deny(ctx context.Context, iface string, ip net.IP) error {
 	return c.DenyIn(ctx, AuthV4, iface, ip)
 }
 
-// AllowIn authorizes (iface, ip) for internet forwarding in the NAMED set.
-//
-// This is the real packet-authorization gate: the forward chain accepts a guest's traffic only when its
-// (bridge, IP) is in an authorization set, and the captive-portal DNAT rules redirect it when it is not.
-// Adding an element here is what actually gives a guest the internet.
-//
-// Legacy scd calls this through Allow with ttl=0 (no timeout), which is its historical behaviour and is not
-// changed here. Phase 3 does NOT use it: see LeaseIn.
+// AllowIn authorizes (iface, ip) for internet forwarding in the named set: the forward chain accepts a guest only
+// when its (bridge, IP) is in an authorization set. Legacy scd reaches it through Allow with ttl=0; Phase 3 uses LeaseIn.
 func (c *Client) AllowIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -133,25 +105,14 @@ func (c *Client) AllowIn(ctx context.Context, set, iface string, ip net.IP, ttl 
 	return c.run(ctx, "add", "element", "inet", "stayconnect", set, "{", elem, "}")
 }
 
-// ErrUnboundedLease is returned when a bounded authorization is asked to be permanent.
 var ErrUnboundedLease = fmt.Errorf("nft: packet authorization must be a bounded lease (ttl > 0)")
 
-// LeaseIn asserts a BOUNDED, RENEWABLE authorization for (iface, ip) in the named set.
-//
-// A permanent element is a promise no daemon can keep. If the process that maintains authorization dies, hangs
-// or is partitioned, a non-expiring element keeps forwarding that guest's traffic forever — past their
-// entitlement window, past checkout, past a revocation nobody was alive to apply. The kernel's own timeout is
-// the only mechanism that fails closed without anything running, so Phase-3 authorization is always a lease
-// and renewal is the ONLY thing that keeps a guest online.
-//
-// It is idempotent in the way that matters: calling it for an absent element creates the lease, and calling it
-// for a present one REFRESHES the remaining time.
-//
-// Refreshing is deliberately not `add element` again. nftables does not restart an existing element's timer on
-// a repeated add — the element is already in the set, so the add is a no-op and the original expiry stands. A
-// renewal loop built on `add` would look healthy and still drop every guest at the first lease boundary. The
-// refresh is therefore a delete+add issued as ONE nft command buffer, which nft commits as a single netlink
-// transaction: either both take or neither does, so there is no instant in which the guest is unauthorized.
+// LeaseIn asserts a bounded, renewable authorization in the named set. A permanent element is a promise no daemon
+// can keep: if the maintaining process dies, a non-expiring element forwards traffic past entitlement and checkout.
+// The kernel timeout fails closed with nothing running, so renewal is the only thing keeping a guest online.
+// Refreshing is a delete+add in ONE nft command buffer (a single netlink transaction, so the guest is never
+// unauthorized), not a repeated `add element`: nftables does not restart an existing element's timer on a repeated
+// add, so such a loop would look healthy yet drop every guest at the first lease boundary.
 func (c *Client) LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error {
 	if ttl <= 0 {
 		return ErrUnboundedLease
@@ -177,36 +138,22 @@ func (c *Client) LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl 
 		set, key, set, elem))
 }
 
-// ErrLeaseTooShort is returned when a lease is shorter than the kernel can represent.
-//
-// It is an ERROR and not a rounded-up lease. nft's element timeout granularity is whole seconds, so a 200ms
-// lease can only be installed as 1s — which is 800ms LONGER than asked for. For an ordinary lease that
-// overshoot is harmless; for a lease clamped to a guest's hard access boundary it is the boundary being
-// exceeded, which is the one thing the clamp exists to prevent. So a lease that cannot be represented without
-// overshooting is refused, and the caller (which knows whether a boundary is involved) decides what that
-// means — for Phase 3 it means the guest is not authorized at all.
+// ErrLeaseTooShort is returned when a lease is shorter than the kernel can represent. nft timeouts are whole seconds,
+// so a 200ms lease could only be installed as 1s, overshooting a guest's hard access boundary; it is refused rather
+// than rounded up.
 var ErrLeaseTooShort = fmt.Errorf("nft: lease is shorter than the kernel's one-second timeout granularity")
 
-// leaseSeconds converts a lease to whole seconds WITHOUT EVER ROUNDING UP.
-//
-// The invariant it exists to hold is:
-//
-//	the installed kernel expiry is never later than the lease the caller asked for.
-//
-// Rounding up breaks that by up to a second. Rounding down cannot: a guest whose access ends at 11:00:00.9
-// loses at most the last 900ms of it, which is invisible, while rounding up would have kept them forwarding
-// for 100ms past a deadline the business stated. Below one second there is no representable lease at all, and
-// the second return value says so rather than silently becoming `timeout 1s` — or, worse, `timeout 0s`, which
-// nft reads as NO timeout and would turn an about-to-expire authorization into a permanent one.
+// leaseSeconds converts a lease to whole seconds without ever rounding up: the installed kernel expiry must never be
+// later than requested. Below one second there is no representable lease (`timeout 0s` means no timeout in nft and
+// would make an expiring authorization permanent), and the second return value says so.
 func leaseSeconds(ttl time.Duration) (int, bool) {
-	s := int(ttl / time.Second) // integer division truncates toward zero: floor for a positive ttl
+	s := int(ttl / time.Second)
 	if s < 1 {
 		return 0, false
 	}
 	return s, true
 }
 
-// keyIn renders the element KEY (no timeout) for a set, in that set's own key format.
 func (c *Client) keyIn(ctx context.Context, set, iface string, ip net.IP) string {
 	if c.probeConcatIn(ctx, set) && iface != "" {
 		return fmt.Sprintf("%q . %s", iface, ip.String())
@@ -214,7 +161,6 @@ func (c *Client) keyIn(ctx context.Context, set, iface string, ip net.IP) string
 	return ip.String()
 }
 
-// DenyIn removes (iface, ip) from the NAMED set (no-op if absent), revoking internet forwarding.
 func (c *Client) DenyIn(ctx context.Context, set, iface string, ip net.IP) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -242,8 +188,8 @@ func (c *Client) DenyIn(ctx context.Context, set, iface string, ip net.IP) error
 	return nil
 }
 
-// AuthorizedIn reports whether (iface, ip) is CURRENTLY authorized in the named set. It is the verification
-// half of the gate: an Allow that returned nil but did not take is indistinguishable from success otherwise.
+// AuthorizedIn reports whether (iface, ip) is currently authorized in the named set; the verification half of the
+// gate, since an Allow that returned nil but did not take looks like success.
 func (c *Client) AuthorizedIn(ctx context.Context, set, iface string, ip net.IP) (bool, error) {
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -267,30 +213,25 @@ func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, tt
 	if secs, ok := leaseSeconds(ttl); ok {
 		return fmt.Sprintf("%s timeout %ds", base, secs)
 	}
-	// ttl <= 0 (legacy scd's permanent element) or a sub-second ttl that cannot be represented. AllowIn is the
-	// legacy surface and keeps its historical "no timeout" behaviour here; the bounded Phase-3 surface is
-	// LeaseIn, which refuses an unrepresentable lease outright.
+	// ttl <= 0 or a sub-second ttl: AllowIn is the legacy surface and keeps its "no timeout" behaviour; the bounded
+	// surface is LeaseIn, which refuses an unrepresentable lease.
 	return base
 }
 
 type Element struct {
 	Iface string
 	IP    net.IP
-	// Port is the service part of an `ipv4_addr . inet_service` element (the port-restricted walled-garden
-	// sets); 0 on a set keyed by address or by (interface, address).
+	// Port is the service part of an `ipv4_addr . inet_service` element (port-restricted garden sets); 0 otherwise.
 	Port int
-	// Timeout is the lease the element was created with; Expires is how much of it is LEFT. Renewal decisions
-	// need the remainder, not the original: an element created with a 90s lease 89 seconds ago is one second
-	// from cutting its guest off, and only Expires says so.
+	// Timeout is the lease the element was created with; Expires is how much is left, which is what renewal decisions need.
 	Timeout time.Duration
 	Expires time.Duration
 }
 
 func (c *Client) List(ctx context.Context) ([]Element, error) { return c.ListIn(ctx, AuthV4) }
 
-// ListIn enumerates the named authorization set. Phase-3 reconciliation uses it to find strays — entries the
-// desired state does not claim — and it only ever names the Phase-3 set, so it can never enumerate (and
-// therefore never remove) a legacy authorization.
+// ListIn enumerates the named authorization set. Phase-3 reconciliation names only the Phase-3 set, so it can never
+// enumerate (or remove) a legacy authorization.
 func (c *Client) ListIn(ctx context.Context, set string) ([]Element, error) {
 	out, err := c.execOrReal(ctx, c.NftPath, "-j", "list", "set", "inet", "stayconnect", set)
 	if err != nil {

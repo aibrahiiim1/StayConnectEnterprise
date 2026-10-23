@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-// PORTAL SETTINGS — a designer for a hotel's sign-in page, not a revision manager.
-//
-// Much of what is asserted here is ABSENCE: the operator-facing vocabulary that was removed, and the password
-// prompt on ordinary changes. A test that only checked the new controls would pass just as happily with the old
-// draft/publish/version machinery still sitting beside them, which is exactly what the Product Owner rejected.
-
 const get = vi.fn();
 const put = vi.fn();
 const post = vi.fn();
@@ -26,8 +20,6 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-// The preview renders real browser frames and fetches the portal page; it has its own reasoning (and its own
-// browser tests in e2e/) and is not what these assertions are about.
 vi.mock("@/app/(app)/portal-branding/preview", () => ({
   PortalPreview: ({ design, sanitized }: any) => (
     <div data-testid="preview" data-hotel={design.hotel_name ?? ""} data-template={design.template_id ?? ""}
@@ -41,9 +33,6 @@ vi.mock("@/app/(app)/portal-branding/preview", () => ({
   useSettled: (v: any) => v,
 }));
 
-// WHICH MODULES THIS SITE HAS. File-scoped, as in nav.test.tsx: the holder lets a test choose, and the real
-// moduleLicensed decides. Hospitality is licensed by default because most wording tests below are about the
-// Room Number string; the module tests switch it off.
 const MODULES: { on: string[] } = { on: ["hospitality"] };
 const flags = (on: boolean) => ({ deployed: on, licensed: on, enabled: on, ready: on, effective: on, manageable: on });
 vi.mock("@/lib/capabilities", async (importOriginal) => {
@@ -66,7 +55,6 @@ beforeEach(() => {
 });
 afterEach(() => vi.resetModules());
 
-/** A slice of what the portal really ships, enough to prove the screen shows it rather than English. */
 const SHIPPED = {
   languages: [
     { code: "en", label: "English" },
@@ -98,7 +86,6 @@ function mock(design: Record<string, any> = {}, draft: Record<string, any> = {},
 
 type Verdict = { ok: boolean; issues: any[]; sanitized: { custom_css: string; custom_html: string } };
 
-/** POST answers: /validate from `verdict` (clean by default), everything else succeeds. */
 function mockPost(verdict?: (design: any) => Verdict, onSave?: (path: string, body: any) => any) {
   post.mockImplementation((p: string, body: any) => {
     if (p === "/portal-branding/validate") {
@@ -159,7 +146,6 @@ describe("the page speaks a hotel's language, not a release manager's", () => {
     await waitFor(() => expect(saves()).toHaveLength(1));
     const body = saves()[0][1];
     expect(body.design.hotel_name).toBe("Semantics Demo Hotel");
-    // No password for an ordinary settings change.
     expect(body.password).toBeUndefined();
   });
 
@@ -182,7 +168,6 @@ describe("templates", () => {
     const radios = within(group).getAllByRole("radio");
     expect(radios.length).toBeGreaterThanOrEqual(5);
     expect((within(group).getByRole("radio", { name: /Classic/ }) as HTMLInputElement).checked).toBe(true);
-    // Every card previews the REAL page, not an illustration.
     expect(screen.getAllByTestId("thumb").length).toBe(radios.length);
   });
 
@@ -191,7 +176,6 @@ describe("templates", () => {
     await renderPage();
     fireEvent.click(screen.getByRole("radio", { name: /Split/ }));
     expect(screen.getByTestId("preview").getAttribute("data-template")).toBe("split");
-    // The options follow the layout: a split layout has a photograph and a side to put the sign-in on.
     expect(screen.getByRole("radiogroup", { name: /Sign-in panel position/ })).toBeTruthy();
     expect(screen.getByLabelText(/Upload hero photograph/i)).toBeTruthy();
 
@@ -237,7 +221,6 @@ describe("the password step-up is asked for where it matters", () => {
 
     await waitFor(() => expect((screen.getAllByRole("button", { name: /Save changes/i })[0] as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getAllByRole("button", { name: /Save changes/i })[0]);
-    // Nothing is saved until the password is given, and it is given in a masked field.
     const pw = await screen.findByLabelText(/Confirm your password/i) as HTMLInputElement;
     expect(pw.type).toBe("password");
     expect(saves()).toHaveLength(0);
@@ -248,7 +231,6 @@ describe("the password step-up is asked for where it matters", () => {
   });
 
   it("asks when the custom CSS is CLEARED, too", async () => {
-    // Emptying the stylesheet is still a change to what the page carries; the rule holds in both directions.
     mock({ hotel_name: "Semantics Demo", custom_css: ".card { border: 0 }" });
     await renderPage();
     open(/Advanced/);
@@ -290,9 +272,7 @@ describe("the server's verdict on the Advanced fields", () => {
     fireEvent.change(screen.getByLabelText(/Custom HTML/i), { target: { value: hostile } });
 
     expect(await screen.findAllByText(/removed the onerror attribute on <img>/)).not.toHaveLength(0);
-    // The preview renders what a guest would actually get.
     expect(screen.getByTestId("preview").getAttribute("data-html")).toBe('<p>Pool</p><img src="x">');
-    // A design the portal would change cannot be saved as written.
     expect((screen.getAllByRole("button", { name: /Save changes/i })[0] as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: /Use the cleaned version/i }));
@@ -371,7 +351,6 @@ describe("languages and wording", () => {
       expect(screen.getByLabelText(new RegExp(`Offer ${l} to clients`))).toBeTruthy();
     }
     expect((screen.getByLabelText(/Offer English to clients/) as HTMLInputElement).disabled).toBe(true);
-    // The wording is its own section.
     expect(screen.queryByLabelText(/Room Number in English/)).toBeNull();
   });
 
@@ -550,9 +529,7 @@ describe("unsaved work is kept only when the server would keep it (found on PRE-
   });
 });
 
-// A SITE IS NOT A HOTEL UNLESS HOSPITALITY IS LICENSED, and it does not take cards, codes or social sign-in
-// unless those modules are. The wording editor lists only what this site's portal can show -- and a
-// translation saved for a string it no longer lists survives a save untouched.
+// Preserve hidden translation overrides when a module is unavailable.
 describe("the wording follows the site's modules", () => {
   const HIDDEN = [/Room Number in English/, /Post-stay PIN in English/, /Pay by card in English/,
     /Charge to my room in English/, /Continue with Google in English/, /Email address in English/,
@@ -585,7 +562,6 @@ describe("the wording follows the site's modules", () => {
     await renderPage();
     open(/Sign-in page text/);
     fireEvent.click(screen.getByRole("tab", { name: /Italiano/ }));
-    // A hidden override is not counted as one the operator can see.
     expect(within(screen.getByRole("tab", { name: /Italiano/ })).getByText("Built-in")).toBeTruthy();
     fireEvent.change(await screen.findByLabelText(/Voucher Code in Italiano/), { target: { value: "Codice" } });
     await waitFor(() => expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false));
@@ -611,8 +587,6 @@ describe("the wording follows the site's modules", () => {
   });
 });
 
-// GDPR plan F1 and F7: the privacy notice starts from the shipped template, and the designer says what the
-// server warns about (an unfinished notice, an outside image host) without blocking the save.
 describe("the privacy notice", () => {
   it("is missing until the hotel writes one, and starts from the template", async () => {
     mock({ hotel_name: "Semantics Demo" });

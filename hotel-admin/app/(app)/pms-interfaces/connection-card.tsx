@@ -1,11 +1,6 @@
 "use client";
 
-// ONE PMS CONNECTION AT A GLANCE.
-//
-// The card answers, without opening anything: which system is this, is it switched on, can guests sign in
-// through it right now, when was the PMS last heard from, is the guest list current, which Wi-Fi networks use
-// it, what configuration is live, and is there anything that needs a person. Readiness itself is the server's
-// verdict (room_auth_ready) put into words by describePmsReadiness; this card does not re-derive it.
+// Readiness is the server's verdict (room_auth_ready) worded by describePmsReadiness; the card does not re-derive it.
 
 import Link from "next/link";
 import type { PmsInterfaceHealth } from "@/lib/api";
@@ -20,7 +15,6 @@ import {
 } from "@/lib/api/pms-connections";
 import { Check, Minus, X } from "lucide-react";
 
-/** A letter tile standing in for a provider logo — no vendor artwork is shipped. */
 export function ProviderTile({ label, bare, className }: { label: string; bare?: boolean; className?: string }) {
   const letter = (label.trim()[0] ?? "?").toUpperCase();
   if (bare) return <span className="text-sm font-semibold">{letter}</span>;
@@ -56,7 +50,6 @@ export function providerLabel(i: PmsConnection, p: PmsProvider | null): string {
 
 type Check = { label: string; state: boolean | null };
 
-/** The four things that have to be true for room sign-in, each stated on its own. */
 export function readinessChecks(h?: PmsInterfaceHealth | null): Check[] {
   const known = (v?: string) => (v ? v !== "UNKNOWN" : false);
   return [
@@ -97,7 +90,7 @@ export function ConnectionCard({
   health?: PmsInterfaceHealth;
   healthLoaded: boolean;
   provider: PmsProvider | null;
-  /** Names of the guest networks resolved against this connection; null when routing could not be read. */
+  /** null when routing could not be read. */
   networks: string[] | null;
   onOpen: () => void;
 }) {

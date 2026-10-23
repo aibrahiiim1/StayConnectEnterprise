@@ -5,34 +5,22 @@ import (
 	"sort"
 )
 
-// Module ids are the stable commercial capabilities a licence may authorise.
-//
-// The registry below is the ONE definition shared by Central (which issues
-// licences) and the appliance (which enforces them). A module is an
-// authorisation ceiling only: a licensed module still has to be enabled
-// locally by the site and be ready at runtime before anything executes.
-//
-// Site Type never authorises a module. Nothing in this file reads it.
+// A grant only permits a module; local enablement and runtime readiness still apply.
 const (
-	ModuleHospitality = "hospitality"  // Hotel section: PMS, Room sign-in, stays, grace, post-stay
-	ModulePaidAccess  = "paid_access"  // priced Internet Packages
-	ModuleCardPayment = "card_payment" // Card payment through a provider-hosted page
-	ModuleRoomCharge  = "room_charge"  // PMS Room Charge (financial posting)
+	ModuleHospitality = "hospitality"
+	ModulePaidAccess  = "paid_access"
+	ModuleCardPayment = "card_payment"
+	ModuleRoomCharge  = "room_charge"
 	ModuleSMSOTP      = "sms_otp"
-	// ModuleWhatsAppOTP is a one-time code delivered as a WhatsApp authentication-template message. It is its
-	// own identity channel: it is never SMS, never derived from an SMS grant, and a legacy (v1-v3) licence
-	// cannot authorise it (legacyModules has no source for it).
+	// WhatsApp requires its own grant; SMS and legacy grants cannot authorize it.
 	ModuleWhatsAppOTP = "whatsapp_otp"
-	// ModuleEmailOTP is EMAIL SIGN-IN. The id is historical and stays (it is in every signed licence); since the
-	// Email accounts delivery (2026-10-15) it licenses self-registered email + password accounts, which replaced
-	// the email one-time code.
+	// This signed ID grants email and password accounts despite its OTP name.
 	ModuleEmailOTP    = "email_otp"
 	ModuleSocialLogin = "social_login"
 	ModuleWhiteLabel  = "white_label"
 	ModuleHA          = "ha"
 )
 
-// ModuleSpec describes one registered module.
 type ModuleSpec struct {
 	ID       string
 	Label    string
@@ -52,14 +40,12 @@ var registry = []ModuleSpec{
 	{ID: ModuleHA, Label: "High availability"},
 }
 
-// Registry returns a copy of the module registry in stable order.
 func Registry() []ModuleSpec {
 	out := make([]ModuleSpec, len(registry))
 	copy(out, registry)
 	return out
 }
 
-// LookupModule returns the spec for a registered id.
 func LookupModule(id string) (ModuleSpec, bool) {
 	for _, m := range registry {
 		if m.ID == id {
@@ -69,17 +55,14 @@ func LookupModule(id string) (ModuleSpec, bool) {
 	return ModuleSpec{}, false
 }
 
-// ModuleGrant is the per-module payload of a v4 licence. It is deliberately
-// small: a licence authorises, it never configures.
+// A license grant authorizes a module but does not configure it.
 type ModuleGrant struct {
 	Limits map[string]int `json:"limits,omitempty"`
 }
 
-// Modules is the v4 authorisation map: module id → grant.
 type Modules map[string]ModuleGrant
 
-// CheckDependencies reports the first registered module whose dependency is
-// missing. Unknown ids are ignored (forward compatibility).
+// Unknown modules are ignored so newer licenses remain readable.
 func CheckDependencies(ids []string) error {
 	have := map[string]bool{}
 	for _, id := range ids {
@@ -99,8 +82,6 @@ func CheckDependencies(ids []string) error {
 	return nil
 }
 
-// ModulesFromIDs builds a Modules map from a list of ids, rejecting
-// unregistered ids and unmet dependencies. Central uses it at issue time.
 func ModulesFromIDs(ids []string) (Modules, error) {
 	m := Modules{}
 	for _, id := range ids {
@@ -115,12 +96,7 @@ func ModulesFromIDs(ids []string) (Modules, error) {
 	return m, nil
 }
 
-// ProjectFeatures is the ONLY way legacy Features are produced from a v4
-// licence. Features is a compatibility projection, never an authority.
-//
-// Modules added after v4 (whatsapp_otp) have no legacy Feature: nothing older
-// than v4 can express them, and the v4 Features block must keep its exact
-// historical shape so existing signed documents still validate.
+// Features mirrors existing signed documents; new modules have no legacy feature authority.
 func ProjectFeatures(m Modules) Features {
 	_, pms := m[ModuleHospitality]
 	_, paid := m[ModulePaidAccess]
@@ -132,9 +108,7 @@ func ProjectFeatures(m Modules) Features {
 	return Features{PMS: pms, PaidWiFi: paid, SMSOTP: sms, EmailOTP: email, SocialLogin: social, HA: ha, WhiteLabel: wl}
 }
 
-// legacyModules maps a pre-v4 Features block onto modules, conservatively.
-// paid_wifi is NOT mapped: Central hard-coded it to true, so it never
-// recorded a commercial grant. Financial modules are never derived.
+// paid_wifi never proves a grant because Central hard-coded it true; financial modules stay ungranted.
 func legacyModules(f Features) Modules {
 	m := Modules{}
 	if f.PMS {
@@ -158,10 +132,7 @@ func legacyModules(f Features) Modules {
 	return m
 }
 
-// AuthorizedModules returns the registered module ids this document
-// authorises, with every dependency satisfied. v4 reads `modules` only;
-// older schemas use the conservative legacy mapping. Unknown ids and modules
-// with unmet dependencies are dropped (fail closed).
+// Unknown modules and unmet dependencies are dropped so authorization fails closed.
 func (d *Document) AuthorizedModules() map[string]bool {
 	var src Modules
 	if d.SchemaVersion >= 4 {
@@ -175,7 +146,6 @@ func (d *Document) AuthorizedModules() map[string]bool {
 			out[id] = true
 		}
 	}
-	// Drop anything with an unmet dependency until stable.
 	for changed := true; changed; {
 		changed = false
 		for id := range out {
@@ -191,7 +161,6 @@ func (d *Document) AuthorizedModules() map[string]bool {
 	return out
 }
 
-// ModuleIDs returns the sorted ids of a Modules map.
 func (m Modules) ModuleIDs() []string {
 	set := map[string]bool{}
 	for id := range m {

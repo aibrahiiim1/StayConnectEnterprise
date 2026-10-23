@@ -1,9 +1,5 @@
 package main
 
-// Composition-root tests for acctd's Phase-3 arm: what the DAEMON does with the enforcement library, not what
-// the library can do on its own. Since ADR-0002, acctd DERIVES the shaping plan and submits it to netd — it
-// holds no tc client for Phase-3, so these tests assert on what it submits and how it reports failure.
-
 import (
 	"context"
 	"errors"
@@ -13,7 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// fakeNetd records the envelopes acctd submits.
 type fakeNetd struct {
 	envs   []shapeplan.Envelope
 	result shapingResult
@@ -27,23 +22,18 @@ func (f *fakeNetd) SubmitShapingPlan(ctx context.Context, env shapeplan.Envelope
 	}
 	res := f.result
 	if !res.Accepted && res.Reason == "" {
-		// a fake that was not told otherwise stands in for a netd that accepted the plan
 		res.Accepted = true
 	}
 	return res, nil
 }
 
-// THE ARM FOLLOWS THE MASTER FLAG, NOT CHECKOUT GRACE.
-//
-// It used to be constructed only when checkout grace was on, and this test asserted that {MasterEnabled: true}
-// produced NOTHING — which is precisely the defect, written down as an expectation. An appliance running Room
-// authentication therefore had no shaping producer: two real guests were granted entitlements and sessions
-// that stayed PENDING_ENFORCEMENT because nothing ever derived a plan for them.
+// The arm follows the master flag, not checkout grace; otherwise Room-authentication sessions stay
+// PENDING_ENFORCEMENT because nothing derives a plan for them.
 func TestPhase3ArmRunsWheneverPhase3IsEnabled(t *testing.T) {
 	for _, cfg := range []iamv2.PMSConfig{
-		{MasterEnabled: true},                             // the Room-authentication appliance: grace OFF
-		{MasterEnabled: true, PMSAuthEnabled: true},       // ...with the surface that mints the sessions
-		{MasterEnabled: true, CheckoutGraceEnabled: true}, // ...and the case that used to be the only one
+		{MasterEnabled: true},
+		{MasterEnabled: true, PMSAuthEnabled: true},
+		{MasterEnabled: true, CheckoutGraceEnabled: true},
 	} {
 		if p := newPhase3(cfg, &acctd{}, "t", "s", planScope{}, nil); p == nil {
 			t.Fatalf("no enforcement producer while Phase 3 is enabled: %+v — sessions would stay pending forever", cfg)
@@ -51,20 +41,18 @@ func TestPhase3ArmRunsWheneverPhase3IsEnabled(t *testing.T) {
 	}
 }
 
-// While dark, the arm is never constructed and every entry point is a safe no-op: acctd keeps running exactly
-// the legacy path, issuing zero Phase-3 queries and submitting no plan.
+// While dark the arm is never constructed and every entry point on a nil arm is a safe no-op.
 func TestPhase3ArmIsInertWhileDark(t *testing.T) {
 	for _, cfg := range []iamv2.PMSConfig{
-		{},                           // everything off
-		{CheckoutGraceEnabled: true}, // surface on without master (invalid; still off)
-		{PMSAuthEnabled: true},       // likewise: a child flag cannot enable anything on its own
+		{},
+		{CheckoutGraceEnabled: true}, // a child flag cannot enable anything without master
+		{PMSAuthEnabled: true},
 	} {
 		p := newPhase3(cfg, &acctd{}, "t", "s", planScope{}, nil)
 		if p != nil {
 			t.Fatalf("the Phase-3 arm was constructed while dark: %+v", cfg)
 		}
 		netd := &fakeNetd{}
-		// a nil arm must be callable — the tick path has no flag checks of its own
 		p.enforceExpiries(context.Background())
 		p.reconcileShaping(context.Background(), netd, "br-lan")
 		if len(netd.envs) != 0 {
@@ -79,7 +67,6 @@ func TestPhase3ArmIsInertWhileDark(t *testing.T) {
 	}
 }
 
-// With the flags on, the arm is constructed and owns the site scope it was given.
 func TestPhase3ArmIsConstructedWhenLive(t *testing.T) {
 	cfg := iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true}
 	p := newPhase3(cfg, &acctd{}, "tenant-1", "site-1", planScope{ApplianceID: "appl-1"}, nil)
@@ -94,12 +81,10 @@ func TestPhase3ArmIsConstructedWhenLive(t *testing.T) {
 	}
 }
 
-// A plan that netd could not put in force must be reported, not hidden: an unapplied plan means the kernel and
-// durable state disagree, and the next tick re-derives and re-submits rather than assuming success.
+// An unapplied plan means kernel and durable state disagree; it is reported and re-derived next tick.
 func TestUnappliedPlanIsReportedAsDegraded(t *testing.T) {
 	p := &phase3{tenant: "t", site: "s"}
 	netd := &fakeNetd{err: errors.New("netd socket unavailable")}
-	// no enforcer wired, so shapingPlan() short-circuits; drive the reporting path directly
 	p.degraded = ""
 	res, err := netd.SubmitShapingPlan(context.Background(), shapeplan.Envelope{})
 	if err == nil {
@@ -111,7 +96,7 @@ func TestUnappliedPlanIsReportedAsDegraded(t *testing.T) {
 		t.Fatal("a failed submission must surface as degraded")
 	}
 
-	// and a plan netd applied WITH PROBLEMS is also degraded — partial enforcement is not success
+	// partial enforcement is not success
 	p2 := &phase3{tenant: "t", site: "s"}
 	p2.degraded = "netd applied the plan with problems"
 	if p2.Degraded() == "" {
@@ -119,22 +104,18 @@ func TestUnappliedPlanIsReportedAsDegraded(t *testing.T) {
 	}
 }
 
-// acctd must hold no tc client for Phase-3: the single-writer property (ADR-0002) is structural, not a
-// convention. This test is the tripwire — if a future change gives the arm a shaper, it fails here.
+// Tripwire: the single-writer property is structural; the arm must not gain a tc client.
 func TestAcctdCannotMutateShapingDirectly(t *testing.T) {
 	p := newPhase3(iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true}, &acctd{}, "t", "s", planScope{}, nil)
 	if p == nil {
 		t.Fatal("expected a live arm")
 	}
-	// the arm's only outward shaping capability is submitting a plan; it has no Add/Delete session surface.
 	var _ interface {
 		reconcileShaping(ctx context.Context, netd planSubmitter, fallbackBridge string)
 	} = p
 }
 
-// The legacy loop must stand down when Phase-3 owns enforcement. Leaving it running would measure and shape a
-// second, overlapping view of the same guests through acctd's own tc client — reintroducing exactly the second
-// writer ADR-0002 removed.
+// The legacy loop must stand down when Phase-3 owns enforcement, or it becomes a second writer of the same guests.
 func TestLegacyLoopStandsDownWhenPhase3Owns(t *testing.T) {
 	live := newPhase3(iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true}, &acctd{}, "t", "s", planScope{}, nil)
 	if !live.ownsAccounting() {

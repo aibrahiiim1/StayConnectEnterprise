@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// item 2: eligibility genuinely fails closed + publication validation.
 func TestEligibilityFailClosedEdges(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	s := EligibilitySubject{Now: now, AuthMethod: MethodAccount, Kind: SubjectAccount, GuestNetworkID: "gn-1"}
@@ -67,11 +66,9 @@ func TestPublicationValidation(t *testing.T) {
 	}
 }
 
-// item 3: typed grant snapshot validation (integer-only, bounds, enums, disabled accounting).
 func TestGrantSnapshotValidation(t *testing.T) {
 	plan := PlanRevisionRow{ID: "p", DownKbps: 1000, MaxConcurrentDevices: 2, TimeAccountingMode: "VALIDITY_WINDOW"}
 	pkg := PackageRevisionRow{ID: "k"}
-	// valid override
 	if _, err := BuildGrantSnapshot(GrantTier{Order: 1, Value: map[string]any{"down_kbps": json.Number("2000")}}, plan, pkg); err != nil {
 		t.Fatalf("valid integer override rejected: %v", err)
 	}
@@ -89,7 +86,6 @@ func TestGrantSnapshotValidation(t *testing.T) {
 			t.Fatalf("grant case %d must be rejected: %v", i, v)
 		}
 	}
-	// canonical round-trip
 	g, _ := BuildGrantSnapshot(GrantTier{Order: 3, Value: map[string]any{"down_kbps": json.Number("2000")}}, plan, pkg)
 	g.EndMode = "MANUAL_END"
 	rt, err := ParseGrantSnapshot(g.Canonical())
@@ -98,7 +94,6 @@ func TestGrantSnapshotValidation(t *testing.T) {
 	}
 }
 
-// item 4: authoritative ISO-4217 currency + exponent.
 func TestCurrencyMetadata(t *testing.T) {
 	for _, c := range []struct {
 		code string
@@ -115,7 +110,6 @@ func TestCurrencyMetadata(t *testing.T) {
 	}
 }
 
-// item 8: duration policy resolution (supported vs capability-disabled).
 func TestDurationPolicy(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	if m, w, err := ResolveEndPolicy(map[string]any{"end_mode": "MANUAL_END"}, now); err != nil || m != "MANUAL_END" || w != nil {

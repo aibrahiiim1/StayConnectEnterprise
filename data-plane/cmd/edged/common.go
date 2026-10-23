@@ -16,8 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ----- responses ---------------------------------------------------------------
-
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -42,20 +40,9 @@ func writeList[T any](w http.ResponseWriter, rows []T) {
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	// UseNumber, or every free-form map[string]any body silently loses integers.
-	//
-	// Grant tiers, duration policies and eligibility rules are carried as
-	// map[string]any. Without this, encoding/json turns their numbers into
-	// float64, and the domain validators accept only json.Number/int/int64 --
-	// deliberately, because they reject anything with a "." or an exponent so a
-	// bandwidth cap can never arrive as 2047.9999999. The two halves disagreed,
-	// so EVERY numeric override sent over HTTP was rejected as
-	// "invalid_grant_tier": publishing a package with a bandwidth or quota
-	// override was impossible through the API.
-	//
-	// It stayed hidden because the unit tests build json.Number values in Go and
-	// call the admin layer directly, never crossing this decoder -- so the tests
-	// exercised a type the HTTP surface could not actually produce.
+	// UseNumber is required: grant tiers, duration policies and eligibility rules are map[string]any, and the
+	// domain validators accept only json.Number/int/int64 (rejecting "." or exponents so a bandwidth cap can
+	// never be 2047.9999999). With float64 every numeric override was rejected as "invalid_grant_tier".
 	dec.UseNumber()
 	return dec.Decode(dst)
 }
@@ -64,10 +51,7 @@ func dbCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), 10*time.Second)
 }
 
-// ----- local audit ---------------------------------------------------------------
-
-// audit appends to the site-local audit_log. Best-effort: never fails the
-// calling request.
+// audit appends to the site-local audit_log; best-effort, it never fails the request.
 func (s *server) audit(r *http.Request, action, targetType, targetID string, payload map[string]any) {
 	if err := s.auditErr(r, action, targetType, targetID, payload); err != nil {
 		slog.Warn("audit write failed", "action", action, "err", err)
@@ -84,9 +68,7 @@ func (s *server) auditErr(r *http.Request, action, targetType, targetID string, 
 	raw, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	// tenant_id may be empty before enrollment (factory-clean box). It is a
-	// nullable uuid, so map "" -> NULL; otherwise the insert fails and pre-
-	// enrollment attempts (e.g. setup.enroll_*) would go unaudited.
+	// tenant_id is empty before enrollment; map "" to NULL or pre-enrollment attempts would go unaudited.
 	_, err := s.db.Exec(ctx, `
         INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, target_type, target_id, ip, user_agent, payload)
         VALUES (NULLIF($1,'')::uuid, 'operator', NULLIF($2,''), $3, NULLIF($4,''), NULLIF($5,''),
@@ -96,9 +78,8 @@ func (s *server) auditErr(r *http.Request, action, targetType, targetID string, 
 }
 
 func clientIP(r *http.Request) string {
-	// edged sits behind Caddy on loopback, so prefer the forwarded client IP. X-Real-IP first: the Admin Console
-	// vhost SETS it from the connection Caddy accepted (header_up X-Real-IP {remote_host}), so a browser cannot
-	// choose it -- and the sign-in throttle counts per source address with this value (operator_signin.go).
+	// edged sits behind Caddy. X-Real-IP comes first: the Admin Console vhost sets it from the accepted connection,
+	// so a browser cannot choose it, and the sign-in throttle counts per source address with it.
 	if rip := strings.TrimSpace(r.Header.Get("X-Real-IP")); rip != "" {
 		return rip
 	}
@@ -112,18 +93,14 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// ----- scd unix-socket client ------------------------------------------------------
-
-// scdClient talks to scd's admin surface over its unix socket — the same
-// channel portald uses. edged never touches nftables or tc directly.
+// scdClient talks to scd's admin surface over its unix socket; edged never touches nftables or tc directly.
 type scdClient struct {
 	http *http.Client
 }
 
 func newSCDClient(socket string) *scdClient {
-	// NO http.Client.Timeout: it caps the WHOLE call and cannot be extended by a request's own context, which silently turned every
-	// "long" path below into a 15-second one (found on PRE-LIVE: a manual backup, which scd completes in about 40 seconds, was
-	// reported to the operator as failed while it went on and finished). The default deadline is applied per call in call().
+	// No http.Client.Timeout: it caps the whole call and would turn every long path below into a 15 s one. The
+	// deadline is applied per call in call().
 	return &scdClient{http: &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -134,20 +111,18 @@ func newSCDClient(socket string) *scdClient {
 	}}
 }
 
-// call proxies a request to scd and returns (status, body).
-// longSCDPaths are the privileged operations that legitimately take MINUTES rather than milliseconds: a
-// database dump and its verification. The shared 15s client deadline is right for every other call and was
-// killing these mid-flight -- the appliance reported "signal: killed" as though the dump were corrupt.
-// scdDefaultTimeout is the deadline of every scd call that is not in longSCDPaths.
+// scdDefaultTimeout applies to every scd call not in longSCDPaths.
 var scdDefaultTimeout = 15 * time.Second
 
+// longSCDPaths take minutes (a dump and its verification); the shared 15 s deadline killed them mid-flight and
+// the appliance reported "signal: killed" as though the dump were corrupt.
 var longSCDPaths = map[string]time.Duration{
 	"/v1/backup/run":    20 * time.Minute,
 	"/v1/backup/verify": 25 * time.Minute,
-	// The status re-reads every stored backup against its checksum, and removing earlier backups does the same first.
+	// Status and earlier-backup removal re-read every stored backup against its checksum.
 	"/v1/backup/status":         3 * time.Minute,
 	"/v1/backup/earlier/remove": 5 * time.Minute,
-	// The erasure ledger: a commit writes two copies and reads both back; recovery and a first copy can take longer.
+	// A ledger commit writes two copies and reads both back; recovery and a first copy take longer.
 	"/v1/ledger/prepare":           60 * time.Second,
 	"/v1/ledger/commit":            2 * time.Minute,
 	"/v1/ledger/abort":             90 * time.Second,
@@ -203,8 +178,6 @@ func (c *scdClient) proxy(w http.ResponseWriter, r *http.Request, method, path s
 	_, _ = w.Write(raw)
 }
 
-// ----- license endpoints (proxied to scd, which owns the license store) -----------
-
 func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil || len(raw) == 0 {
@@ -224,16 +197,10 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-// ----- health -----------------------------------------------------------------------
-
-// health is the unauthenticated liveness answer, and the dashboard's summary for a signed-in operator.
-//
-// WHO SEES WHAT (audit C-21). Anyone who can reach the management address gets liveness only -- service, status,
-// db, scd -- which is what an uptime check needs. The site id, the version and the licence state go only to a
-// signed-in operator (the dashboard and the top-bar status) and to a caller on the appliance itself that
-// connects to edged directly (the acceptance and reboot scripts curl 127.0.0.1:8090): through Caddy and the
-// console every request carries X-Forwarded-For / X-Real-IP, so "loopback with no forwarding header" means a
-// process on this machine, which can read all of this anyway.
+// health is the unauthenticated liveness answer. Anyone reaching the management address gets liveness only; site
+// id, version and licence state go only to a signed-in operator or a process on the appliance itself. Through
+// Caddy every request carries X-Forwarded-For / X-Real-IP, so loopback with no forwarding header means a local
+// process, which can read all of this anyway.
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
@@ -247,9 +214,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	out["db"] = dbOK
 
 	scdOK := false
-	// The licence summary comes from the SAME scd computation as /central/status (section 8 vocabulary:
-	// none|active|expiring|grace|expired|suspended|revoked|wrong_hardware), so the dashboard and the Appliance
-	// & licence page can never disagree about it.
+	// Same scd computation as /central/status, so the dashboard and the licence page cannot disagree.
 	var licState, activation any
 	if sum, ok := s.readLicenceSummary(ctx); ok {
 		scdOK = true
@@ -289,10 +254,7 @@ func (s *server) healthCallerMaySeeDetail(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// ----- seed-admin -------------------------------------------------------------------
-
-// runSeedAdmin bootstraps (or resets) the site_admin account directly in the
-// site DB. Used during hotel onboarding before any operator exists.
+// runSeedAdmin bootstraps (or resets) the site_admin account directly in the site DB during onboarding.
 func runSeedAdmin(args []string) error {
 	fs := flag.NewFlagSet("seed-admin", flag.ExitOnError)
 	email := fs.String("email", "", "site admin email / username")
@@ -306,7 +268,7 @@ func runSeedAdmin(args []string) error {
 	if len(*password) < 10 && !*allowWeak {
 		return fmt.Errorf("--password must be >= 10 chars (pass --allow-weak to override; not for production)")
 	}
-	// A weak seeded password is usable exactly once: the first sign-in can only replace it (0119).
+	// A weak seeded password is usable only to replace it at first sign-in.
 	mustChange := *allowWeak || len(*password) < 10
 	if len(*password) < 10 {
 		slog.Warn("seeding a WEAK site-admin password via --allow-weak — it must be changed at first sign-in")
@@ -350,8 +312,7 @@ func runSeedAdmin(args []string) error {
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	// Break-glass recovery: a reset password must be usable now, so a running sign-in lockout on this account ends
-	// with it (the same as an administrator's reset). Best-effort -- before migration 0119 there is no throttle.
+	// Break-glass: a reset password must work now, so any sign-in lockout on the account ends with it. Best-effort.
 	if _, err := pool.Exec(ctx, `SELECT public.operator_signin_throttle_clear('account', $1)`,
 		throttleKey(scopeAccount, *email)); err != nil {
 		slog.Warn("could not clear a sign-in lockout for the seeded account", "err", err)
@@ -360,14 +321,8 @@ func runSeedAdmin(args []string) error {
 	return nil
 }
 
-// writeAwaitingAssignment answers a tenant- or site-scoped surface on an appliance that has not yet received
-// its signed assignment.
-//
-// It returns 200 with an EMPTY result and an explicit reason, not an error. The distinction matters to the
-// operator: a factory-clean appliance before enrollment/claim/assignment is working exactly as designed, and
-// the previous behaviour -- a uuid comparison against ” failing, surfaced as "the appliance did not answer"
-// -- described a broken machine. The screens read `data` and render an empty state; `awaiting_assignment`
-// lets them say WHY it is empty instead of implying a fault.
+// writeAwaitingAssignment returns 200 with an empty result and a reason, not an error: an appliance awaiting
+// assignment is working as designed, and the screens use `awaiting_assignment` to say why they are empty.
 func writeAwaitingAssignment(w http.ResponseWriter, what string) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data":                []any{},
@@ -378,12 +333,8 @@ func writeAwaitingAssignment(w http.ResponseWriter, what string) {
 	})
 }
 
-// ----- reset-mfa ----------------------------------------------------------------------------------------------
-
-// runResetMFA removes one operator's authenticator from the appliance's own command line (0132, GDPR plan C10):
-// the break-glass for the last site administrator, when nobody is left to reset them in the console. Whoever can
-// run it is root on the appliance already. The operator sets up a new authenticator at their next sign-in; a
-// running edged ends their sessions at its next restart, or an administrator ends them by any password reset.
+// runResetMFA removes one operator's authenticator from the command line: the break-glass for the last site
+// administrator. Whoever can run it is already root. The operator sets up a new authenticator at next sign-in.
 func runResetMFA(args []string) error {
 	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
 	email := fs.String("email", "", "the operator's email / username")

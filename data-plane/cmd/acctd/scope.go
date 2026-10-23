@@ -7,7 +7,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// acctdScope is who accounting rows are attributed to.
 type acctdScope struct {
 	TenantID    string
 	SiteID      string
@@ -16,15 +15,9 @@ type acctdScope struct {
 	Outcome     assignment.Outcome
 }
 
-// resolveAcctdScope resolves the customer accounting is attributed to from the VERIFIED assignment -- the same
-// resolver scd uses -- and the appliance id from the registered public identity.
-//
-// acctd used to read assignment.json raw (Store.Resolved), so a document that failed verification still decided
-// which customer usage was billed to. Anything that does not verify now yields an empty scope, and acctd pauses
-// accounting rather than attributing usage to a tenant it cannot stand behind.
-//
-// ACCTD_TENANT_ID / ACCTD_APPLIANCE_ID are honoured only with NO assignment present and only in an explicit
-// development build (assignment.EnvFallbackAllowed).
+// resolveAcctdScope takes the customer from the VERIFIED assignment: anything that does not verify yields an
+// empty scope and accounting pauses rather than billing a tenant it cannot stand behind. ACCTD_TENANT_ID /
+// ACCTD_APPLIANCE_ID apply only with no assignment present, in an explicit development build.
 func resolveAcctdScope(getenv func(string) string) acctdScope {
 	identityDir := getenv("ACCTD_IDENTITY_DIR")
 	if identityDir == "" {

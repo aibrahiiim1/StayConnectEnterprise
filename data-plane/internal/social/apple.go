@@ -1,56 +1,19 @@
 package social
 
-// Real Sign in with Apple provider.
+// Sign in with Apple. No PKCE (Apple does not document it for web); the nonce plus the signed client-secret
+// JWT bind the exchange to this client and attempt.
 //
-// Flow:
-//   1. AuthorizeURL builds https://appleid.apple.com/auth/authorize with our
-//      Services ID as client_id, redirect_uri, scope "email", state, the
-//      attempt's OIDC nonce and response_mode=form_post. No PKCE: Apple does
-//      not document it for Sign in with Apple on the web, and the nonce plus
-//      the signed client-secret JWT already bind the exchange to this client
-//      and this attempt.
-//   2. Apple POSTs code + state (and, on the very first authorization only, a
-//      `user` JSON blob with the name) back to our callback as a form.
-//   3. Exchange POSTs the code to https://appleid.apple.com/auth/token and
-//      receives an id_token.
-//   4. The id_token is verified: RS256 signature against Apple's key set
-//      (https://appleid.apple.com/auth/keys), iss == https://appleid.apple.com,
-//      aud == our Services ID, exp/iat, nonce == the attempt's.
+// response_mode=form_post is forced: Apple refuses query mode when any scope is requested, and the email
+// scope is required because guest sign-in is keyed on email. So the portal callback also accepts POST. The
+// scd state row still binds the callback to the starting device, and no cookie is used (a cross-site POST
+// would not carry a SameSite=Lax one and captive browsers drop them).
 //
-// WHY form_post, and why the portal callback accepts POST:
-//   Apple refuses response_mode=query whenever any scope is requested, and
-//   without the `email` scope the id_token carries no email — which is the
-//   identity every guest sign-in is keyed on. So the email scope is required,
-//   form_post follows from it, and portald's /auth/social/callback accepts a
-//   POST form alongside the GET query every other provider uses. The state
-//   row in scd still binds the callback to the device that started it, so a
-//   cross-site POST is no weaker than the GET leg. Nothing in the flow uses a
-//   cookie: a cross-site form POST would not carry a SameSite=Lax one, and
-//   captive browsers drop them anyway.
+// Apple has no static client secret: each token request carries a fresh short-lived ES256 JWT signed with
+// the .p8 key (iss = Team ID, sub = Services ID, kid = Key ID). Config: client_id = Services ID,
+// client_secret = PEM of the .p8 (sealed by scd), extra team_id and key_id.
 //
-// THE CLIENT SECRET IS A JWT WE SIGN.
-//   Apple issues no static client secret. The developer downloads a private
-//   key (AuthKey_<KEYID>.p8, EC P-256) and every token request carries an
-//   ES256 JWT signed with it: iss = Team ID, sub = Services ID, aud =
-//   https://appleid.apple.com, kid = Key ID, exp ≤ 6 months after iat. Config
-//   mapping on social_oauth_providers:
-//     client_id          the Services ID
-//     client_secret      the PEM text of the .p8 key (write-only and sealed by scd, as for
-//                        every provider)
-//     extra->>'team_id'  the 10-character Team ID
-//     extra->>'key_id'   the 10-character Key ID
-//   The JWT is minted fresh for each exchange with a short lifetime
-//   (appleClientSecretTTL): signing is cheap, and a short-lived secret that
-//   never leaves the process is strictly better than a long-lived one.
-//
-// Email: Apple returns either the user's real address or a private relay
-// address (…@privaterelay.appleid.com). Both are addresses Apple verifies and
-// delivers to, so both are accepted when email_verified is true. Apple encodes
-// email_verified as a JSON bool or as the string "true" depending on the
-// account; both are read. A missing or unverified email is ErrEmailUnverified.
-//
-// Endpoints are overridable through unexported fields so the httptest fakes
-// in apple_test.go can drive the implementation without reaching Apple.
+// Both a real and a private-relay (@privaterelay.appleid.com) address are accepted when email_verified is
+// true; Apple sends email_verified as a JSON bool or the string "true", and both are read.
 
 import (
 	"context"
@@ -70,20 +33,16 @@ const (
 	defaultAppleTokenURL = "https://appleid.apple.com/auth/token"
 	defaultAppleJWKSURL  = "https://appleid.apple.com/auth/keys"
 	appleIssuer          = "https://appleid.apple.com"
-	// email only (GDPR plan C9): the name is not kept.
+	// email only: the name is deliberately not kept.
 	defaultAppleScope = "email"
 
-	// appleClientSecretTTL is how long each minted client-secret JWT is valid.
-	// Apple's ceiling is 6 months; one exchange needs seconds.
+	// appleClientSecretTTL is far below Apple's 6-month ceiling; one exchange needs seconds.
 	appleClientSecretTTL = 10 * time.Minute
 )
 
-// appleIDRe matches Apple's Team ID and Key ID format: ten uppercase
-// alphanumerics.
 var appleIDRe = regexp.MustCompile(`^[A-Z0-9]{10}$`)
 
-// ValidAppleID reports whether s has the shape of an Apple Team ID or Key ID.
-// Exported for the edged configuration API.
+// ValidAppleID reports whether s has the shape of a Team ID or Key ID (used by the edged configuration API).
 func ValidAppleID(s string) bool { return appleIDRe.MatchString(s) }
 
 type Apple struct {
@@ -107,9 +66,7 @@ type Apple struct {
 	jwks     *jwksCache
 }
 
-// NewApple requires the Services ID, the PEM .p8 private key, the Team ID and
-// the Key ID. The key is parsed here so a bad key fails at load, not at a
-// guest's first sign-in.
+// NewApple parses the key here so a bad key fails at load, not at a guest's first sign-in.
 func NewApple(servicesID, privateKeyPEM, teamID, keyID, scopes string) (*Apple, error) {
 	if servicesID == "" || privateKeyPEM == "" {
 		return nil, errors.New("apple: client_id (Services ID) and client_secret (.p8 private key) are required")
@@ -155,7 +112,6 @@ func (a *Apple) keySet() *jwksCache {
 	return a.jwks
 }
 
-// Binding: the OIDC nonce only (see the file comment for why no PKCE).
 func (a *Apple) Binding() Binding { return Binding{Nonce: true} }
 
 func (a *Apple) AuthorizeURL(r AuthRequest) string {
@@ -167,7 +123,7 @@ func (a *Apple) AuthorizeURL(r AuthRequest) string {
 	q.Set("client_id", a.ClientID)
 	q.Set("redirect_uri", r.RedirectURI)
 	q.Set("response_type", "code")
-	q.Set("response_mode", "form_post") // required by Apple once any scope is requested
+	q.Set("response_mode", "form_post")
 	q.Set("scope", orDefault(a.Scopes, defaultAppleScope))
 	q.Set("state", r.State)
 	if r.Nonce != "" {
@@ -177,7 +133,6 @@ func (a *Apple) AuthorizeURL(r AuthRequest) string {
 	return u.String()
 }
 
-// clientSecret mints the ES256 client-secret JWT for one token request.
 func (a *Apple) clientSecret() (string, error) {
 	now := a.clock()
 	return signES256(a.key,

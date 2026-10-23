@@ -1,27 +1,12 @@
 package main
 
-// SYSTEM-LOG RETENTION (migration 0134; GDPR remediation plan F5; Product-Owner decision D-F5).
-//
-// The appliance's own logs hold device MAC and IP addresses and sign-in identifiers: the guest portal's web
-// access log (Caddy), the address-assignment log (Kea), the code-sender logs and the service journal. They are
-// kept for the site's log_days period (Hotel Admin -> Backups -> Data retention; default 14 days, 1-730), applied
-// here, hourly, by scd, which runs as root:
-//
-//   - the journal: `journalctl --vacuum-time` removes archived journal files older than the period. journald
-//     archives at least daily (deploy/journald/stayconnect-retention.conf, MaxFileSec=1day), so nothing in the
-//     journal outlives the period by more than a day;
-//   - each log file in the directories below is CUT once a day: copied to <name>.<YYYYMMDD> and emptied in
-//     place, which every writer here tolerates because they all append. A cut, or any other file there, whose
-//     last write is older than the period is deleted. A live file nobody has written for longer than the period
-//     is emptied rather than deleted, because a process may still hold it open.
-//
-// Nothing here touches the database, the backups, or a file outside the listed directories.
-//
-// NEVER BY NAME ALONE. These directories are writable by the services that log there (/var/log/stayconnect is
-// group-writable, /var/log/caddy belongs to caddy) and this job runs as root, so a name is not trusted: each file
-// is opened without following symlinks (O_NOFOLLOW), checked on the open descriptor (a regular file, on the
-// directory's filesystem, with no second name), emptied and copied through that descriptor, and unlinked only
-// after the name is re-checked to still be that same file. A symlink or hard link planted there is left alone.
+// System-log retention: the appliance's logs hold device MAC/IP and sign-in identifiers (Caddy access log, Kea, code senders, journal) and are
+// kept for the site's log_days (default 14), applied hourly by scd as root. The journal is vacuumed (journald archives at least daily).
+// Each log file in the listed directories is CUT once a day (copied to <name>.<YYYYMMDD>, emptied in place; writers all append);
+// cuts and other files older than the period are deleted, and a stale live file is emptied, not deleted, since a process may hold it.
+// Never by name alone: the directories are writable by the logging services and this job is root, so each file is opened with O_NOFOLLOW,
+// checked on the open descriptor (regular, same filesystem, one name) and unlinked only after the name is re-checked to be the same file.
+// A planted symlink or hard link is left alone.
 
 import (
 	"context"
@@ -44,10 +29,9 @@ const (
 	logRetentionDefaultDays = 14 // used only when the setting cannot be read (a database before 0134)
 )
 
-// logRetention is the job, with its paths and its journal command injectable for tests.
 type logRetention struct {
 	dirs    []string
-	stamp   string // the file recording the day of the last cut
+	stamp   string
 	journal func(ctx context.Context, days int) error
 	now     func() time.Time
 }
@@ -81,10 +65,8 @@ func (s *server) logRetentionLoop(ctx context.Context) {
 	}
 }
 
-// logRetentionDays is the site's setting. It returns 0 -- "do nothing this hour" -- when the setting exists but
-// could not be read: a database restart at the tick must never fall back to the default and delete logs a hotel
-// chose to keep longer. The default applies only where there is no setting to read (no site yet, or a database
-// that predates the setting).
+// logRetentionDays returns 0 (do nothing this hour) when the setting exists but cannot be read: a database restart at the tick must
+// never fall back to the default and delete logs a hotel chose to keep longer.
 func (s *server) logRetentionDays(ctx context.Context) int {
 	if s.db == nil || s.tenID == "" || s.siteID == "" {
 		return logRetentionDefaultDays
@@ -160,8 +142,7 @@ func (j *logRetention) run(ctx context.Context, days int) {
 	}
 }
 
-// handle opens one file without following links, decides on what the descriptor says (not what the directory
-// listing said), and acts through the descriptor. It answers what it did, or "" for nothing.
+// handle opens one file without following links and acts through the descriptor, not what the directory listing said; it returns what it did, or "" for nothing.
 func (j *logRetention) handle(dirInfo fs.FileInfo, path string, isCut bool, cutoff time.Time, cutToday bool, today string) string {
 	f, err := openLogNoFollow(path, os.O_RDWR)
 	if err != nil {
@@ -195,8 +176,7 @@ func (j *logRetention) handle(dirInfo fs.FileInfo, path string, isCut bool, cuto
 	return ""
 }
 
-// cutLog copies the opened log to dst (refusing to overwrite, or to write through a symlink) and empties it in
-// place, so a writer that keeps the file open goes on appending to it.
+// cutLog copies the opened log to dst (refusing to overwrite or write through a symlink) and empties it in place, so a writer keeping it open goes on appending.
 func cutLog(in *os.File, info fs.FileInfo, dst string) error {
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {

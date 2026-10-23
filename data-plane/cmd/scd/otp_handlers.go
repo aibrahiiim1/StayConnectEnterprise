@@ -22,9 +22,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 )
 
-// ---- /v1/tenant/auth-methods ------------------------------------------------
-// Read-only mirror of tenants.auth_methods with which methods this appliance
-// considers active. portald polls this on landing render to decide tabs.
+// Read-only mirror of tenants.auth_methods with the methods this appliance considers active; portald polls it to decide tabs.
 
 func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	cfg, err := tenantcfg.Load(r.Context(), s.db, s.tenID)
@@ -33,41 +31,23 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "tenant config unavailable")
 		return
 	}
-	// License gating: unlicensed methods never reach the portal. Nor do code or social methods that nothing
-	// can deliver (provider readiness).
+	// Unlicensed methods never reach the portal, nor do code or social methods nothing can deliver (provider readiness).
 	s.applyLicenseToMethods(cfg)
 	s.applyProviderReadiness(r.Context(), cfg)
-	// And a social provider is listed only while it can actually be started: HTTPS active and the canonical
-	// hostname registered in the hotel's app (social_secrets.go). Under the HTTP fallback the buttons go.
+	// A social provider is listed only while it can be started: HTTPS active and the canonical hostname registered in the hotel's app. Under the HTTP fallback the buttons go.
 	s.applySocialOffering(cfg)
 
-	// CAN THIS SITE GIVE A GUEST ANYTHING AT ALL?
-	//
-	// Proving who a guest is and giving them internet are two different things, and a site can be perfectly
-	// configured for the first while having nothing to offer for the second. When that happens the guest
-	// signs in successfully and is then refused, and the portal — which had no way to tell that apart from a
-	// wrong room number — told them to check their details and see reception. Reception cannot fix it; only
-	// an operator publishing a package can.
-	//
-	// This is a SITE-LEVEL fact, computed before and independently of any identity, which is precisely what
-	// makes it safe to publish to an unauthenticated portal. It reveals nothing about any guest, and it is
-	// equally true for everyone on the network, so it creates no oracle for probing room numbers or names.
-	// Per-guest ELIGIBILITY still decides the actual offer set, and that answer stays uniform.
+	// Can this site give a guest anything at all? A site can authenticate guests while having no package to give, and the portal
+	// would tell them to check their details. This is a site-level fact, computed independent of any identity, so it is safe to
+	// publish unauthenticated and creates no oracle for probing rooms or names; per-guest eligibility still decides the offer set uniformly.
 	packagesAvailable := s.sitePackagesAvailable(r.Context())
 
-	// IS THE POST-STAY SURFACE ACTUALLY SERVED? Reported from the one thing that decides it: whether this
-	// daemon mounted the post-stay routes at startup, which happens only when Phase5Config.GuestOn() is true.
-	//
-	// The portal previously showed the Post-Stay tab whenever PMS room sign-in was on. Those are separate
-	// capabilities — PMS proves an in-house guest by room and name; post-stay lets a DEPARTED guest back in
-	// with a PIN — and tying one to the other put a sign-in method in front of guests that the appliance was
-	// not serving. Every PIN typed into it reached a route that does not exist.
+	// Whether the post-stay surface is served: reported from whether this daemon mounted the post-stay routes at startup
+	// (Phase5Config.GuestOn()), not from PMS room sign-in, which is a separate capability.
 	postStayAvailable := s.p5poststay != nil
 
 	if s.p3auth != nil {
-		// The portal needs one extra fact about PMS: whether to submit the room form to the Stay-resolution
-		// flow or the legacy one. It is derived from the flags this daemon started with, so a dark appliance
-		// advertises nothing and the portal keeps using the path it always used.
+		// Whether the portal submits the room form to the Stay-resolution flow or the legacy one; derived from startup flags, so a dark appliance advertises nothing.
 		writeJSON(w, http.StatusOK, struct {
 			*tenantcfg.AuthMethods
 			Phase3PMS         bool `json:"phase3_pms"`
@@ -83,15 +63,9 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	}{cfg, postStayAvailable, packagesAvailable})
 }
 
-// sitePackagesAvailable reports whether this site has at least one internet package a guest could be given.
-//
-// SYSTEM PACKAGES DO NOT COUNT. The emergency checkout-grace catalogue is a package row (is_system = true)
-// that exists so a departing guest's conversion has something to reference; it is never offered on the
-// portal. Counting it would report a site as ready to serve guests when the only thing it can serve is a
-// grace window nobody can ask for.
-//
-// Fails OPEN on error, and deliberately so: this drives an advisory notice, not an authorisation decision.
-// A database hiccup must not make a working portal announce that the hotel has no internet.
+// sitePackagesAvailable reports whether the site has at least one internet package a guest could be given. System packages
+// (is_system, the checkout-grace catalogue) do not count: they are never offered on the portal.
+// Fails open on error, deliberately: this drives an advisory notice, and a database hiccup must not make a working portal announce that the hotel has no internet.
 func (s *server) sitePackagesAvailable(ctx context.Context) bool {
 	var n int
 	err := s.db.QueryRow(ctx, `
@@ -107,29 +81,21 @@ func (s *server) sitePackagesAvailable(ctx context.Context) bool {
 	return n > 0
 }
 
-// ---- /v1/auth/otp/issue ----------------------------------------------------
-
 type otpIssueReq struct {
-	// Channel is "sms" or "whatsapp". The email channel is REMOVED: email sign-in is an Email account now
-	// (self_service.go; contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md), and an email code
-	// request is refused as an unsupported channel.
+	// Channel is "sms" or "whatsapp"; the email channel is removed (Email accounts replace it) and is refused as unsupported.
 	Channel     string `json:"channel"`
 	Destination string `json:"destination"` // a phone number (normalised to E.164)
 	IP          string `json:"ip"`
-	// MAC is the requesting device's hardware address as portald resolved it from the kernel. The challenge is
-	// bound to it (migration 0110): the code, and the SMS link that carries it, verify from this device only.
+	// MAC is the requesting device's hardware address as portald resolved it from the kernel; the challenge is bound to it
+	// (migration 0110), so the code and its SMS link verify from this device only.
 	MAC string `json:"mac"`
-	// PortalBase is the origin the device reached the portal by, as portald saw it. STILL ACCEPTED, NEVER USED
-	// FOR THE LINK: it is the Host header of a guest's request, and a link in an email must not be built from
-	// something a guest typed. The link's origin is the canonical HTTPS hostname scd itself established
-	// (otpLinkBase). Kept so an older portald's request still decodes.
+	// PortalBase is still accepted but never used for the link: it is a guest-supplied Host header. The link origin is the
+	// canonical HTTPS hostname scd established (otpLinkBase). Kept so an older portald's request decodes.
 	PortalBase string `json:"portal_base,omitempty"`
 }
 
-// otpLinkBase is the origin of the tap-to-connect link: https://<canonical hostname> while the portal is on
-// HTTPS, and "" -- no link, the code alone -- on the HTTP fallback (contract section 4). A link to the plain-HTTP
-// portal is deliberately not sent: it would teach clients to follow http:// links from a message, and social
-// sign-in and the browser's own trust indicators exist only on the HTTPS portal.
+// otpLinkBase is https://<canonical hostname> while the portal is on HTTPS and "" (code alone) on the HTTP fallback: a
+// plain-HTTP link would teach clients to follow http:// links from a message, and social sign-in exists only on HTTPS.
 func otpLinkBase(st PortalTLSState) string {
 	if !st.HTTPSActive || st.Canonical == "" {
 		return ""
@@ -137,8 +103,6 @@ func otpLinkBase(st PortalTLSState) string {
 	return "https://" + st.Canonical
 }
 
-// otpIssueResp is the issued challenge. The temporary-internet window that an email code used to open (and its
-// "withheld" explanation) is REMOVED with the email channel: nothing grants pre-sign-in Internet any more.
 type otpIssueResp struct {
 	ChallengeID string `json:"challenge_id"`
 	TTLSeconds  int    `json:"ttl_seconds"`
@@ -150,7 +114,6 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad body")
 		return
 	}
-	// License gating per channel.
 	switch req.Channel {
 	case "sms":
 		if !s.licenseGate(w, licstate.FeatSMSOTP) {
@@ -174,7 +137,6 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Per-channel: validate destination, resolve method config, decide sender.
 	var (
 		dest         string
 		method       *tenantcfg.AuthMethod
@@ -190,8 +152,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		dest = d
 	case "whatsapp":
-		// A WhatsApp code is addressed to a phone number exactly as SMS is, but it is a different channel:
-		// its own method switch, its own provider and an approved template.
+		// WhatsApp is a different channel from SMS: its own method switch, provider and approved template.
 		method = cfg.WhatsApp
 		d, err := phone.Normalize(req.Destination)
 		if err != nil {
@@ -207,9 +168,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusForbidden, channelLabel+" auth disabled for this tenant")
 		return
 	}
-	// A CODE IS ISSUED TO A DEVICE OR NOT AT ALL (migration 0110). The hardware address is the kernel's answer
-	// for the requesting connection, resolved by portald; without it the code could not be bound, and an unbound
-	// code would verify from any device -- so the issue is refused rather than made unbound.
+	// A code is issued to a device or not at all (migration 0110): without the kernel-resolved MAC an unbound code would verify from any device, so the issue is refused.
 	devHW, merr := net.ParseMAC(strings.TrimSpace(req.MAC))
 	if merr != nil || net.ParseIP(req.IP) == nil {
 		httpErr(w, http.StatusBadRequest, "device identity required")
@@ -224,8 +183,7 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Durable throttle on issuance (authoritative; no-op unless enabled). otp.Issue also enforces its
-	// own per-destination cooldown + hourly caps; this adds the restart-surviving cross-method layer.
+	// Durable throttle on issuance (no-op unless enabled); otp.Issue also enforces its own per-destination cooldown and hourly caps.
 	if ok, retry := s.throttleGuard(r.Context(), "otp", net.ParseIP(req.IP), nil, dest); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
@@ -263,19 +221,15 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// THE LINK THE CLIENT CAN TAP FROM THE SMS. It opens the portal in the phone's real browser on a page with one
-	// Connect button; nothing is verified by merely opening it. The code in it is the same secret the message
-	// already carries, single-use and ten minutes long. Only while the portal is on HTTPS (contract section 4); on
-	// the approved HTTP fallback the message carries the code alone.
+	// The tap-to-connect link opens the portal in the phone's real browser on a page with one Connect button; opening it verifies
+	// nothing. The code in it is the same single-use ten-minute secret. Only while the portal is on HTTPS; the HTTP fallback sends the code alone.
 	link := ""
 	if base := otpLinkBase(s.portalTLS.State()); base != "" {
 		link = fmt.Sprintf("%s/connect?c=%s&k=%s", base, url.QueryEscape(issued.ChallengeID), url.QueryEscape(issued.Code))
 	}
 
-	// A FAILED SEND IS A FAILURE. The code used to be reported as sent while the delivery error went to the
-	// log alone, which left the client waiting for a message that was never coming. The sender's error is
-	// recorded on the provider row by the instrumented wrapper (the Delivery page shows it); the client is told
-	// the code could not be sent, with no detail that would say whether the number is known here.
+	// A failed send is a failure: the sender's error is recorded on the provider row (Delivery page), and the client is told
+	// the code could not be sent with no detail that would reveal whether the number is known.
 	_, smsSender, waSender := s.senders()
 	var sendErr error
 	switch channelLabel {
@@ -308,16 +262,13 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.met.OTPIssued.WithLabelValues(channelLabel).Inc()
-	// A sealed copy of the SENT code, readable only by an operator holding the code-reveal permission, for a
-	// client whose message does not arrive (contract §6.7). Gone when the code is used or expires.
+	// A sealed copy of the sent code, readable only by an operator with the code-reveal permission, for a client whose message does not arrive. Gone when the code is used or expires.
 	s.escrowOTPCode(r.Context(), issued.ChallengeID, issued.Code, issued.ExpiresAt)
 	writeJSON(w, http.StatusOK, otpIssueResp{
 		ChallengeID: issued.ChallengeID,
 		TTLSeconds:  int(time.Until(issued.ExpiresAt).Seconds()),
 	})
 }
-
-// ---- /v1/sessions/authorize-otp --------------------------------------------
 
 type authorizeOTPReq struct {
 	IP          string `json:"ip"`
@@ -351,9 +302,8 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FROM THIS DEVICE ONLY: the challenge was bound at issue to the MAC the kernel resolved for the device that
-	// asked (migration 0110). Another device presenting the code -- or the email's link -- is refused before
-	// the code is compared, and the refusal counts as no attempt.
+	// From this device only: the challenge was bound at issue to the MAC the kernel resolved (migration 0110); another device
+	// presenting the code is refused before the compare and counts as no attempt.
 	v, err := otp.VerifyFrom(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code, mac.String())
 	if err != nil {
 		result := "internal"
@@ -384,10 +334,8 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		s.met.OTPVerify.WithLabelValues("unknown", result).Inc()
 		return
 	}
-	// AN EMAIL CODE NO LONGER SIGNS ANYBODY IN. One issued before this software was installed can still be
-	// pending for its ten minutes; it is consumed by the verification above and then refused, because an email
-	// address is no longer an identity factor a code may prove (Email accounts replace it). Mapping it onto a
-	// PHONE factor -- the only kind otpFactorType now knows -- would be a lie about what was proven.
+	// An email code no longer signs anybody in: one issued before this software can still be pending, is consumed above and
+	// then refused, since mapping it onto a PHONE factor would misstate what was proven.
 	if otpFactorType(v.Channel) == "" {
 		s.met.OTPVerify.WithLabelValues(v.Channel, "channel_removed").Inc()
 		writeJSON(w, http.StatusGone, map[string]any{"error": "CHANNEL_REMOVED"})
@@ -395,9 +343,8 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
 	s.dropOTPEscrow(r.Context(), req.ChallengeID)
-	// STAFF-ASSISTED (0114, contract §6.7): the code was shown to the client by a staff member. The sign-in may
-	// create a new Client, marked staff_assisted, and never reaches an existing one. Fails closed: if the record
-	// cannot be read, the verification is treated as staff-assisted.
+	// Staff-assisted: the code was shown to the client by staff, so the sign-in may create a new Client marked staff_assisted
+	// and never reaches an existing one. Fails closed: an unreadable record is treated as staff-assisted.
 	assisted := true
 	if s.db != nil {
 		var revealed bool
@@ -411,17 +358,9 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		credential = iamv2.AssistedCredential(credential)
 	}
 
-	// THE CHALLENGE IS VERIFIED; THE IDENTITY IS IAM-v2's.
-	//
-	// public.auth_otps is a TRANSIENT challenge store and is deliberately not part of the IAM-v2 identity
-	// model -- the accepted decision (D2) is that the OTP challenge is verified upstream and only the
-	// verified factor crosses into iam_v2, where authOTPIdentity maps it to a principal identity. So this
-	// handler verifies the code and then hands the factor to the single guest authority.
-	//
-	// What was REMOVED here is the superseded pipeline that followed: a legacy access-plan lookup to derive
-	// duration and shaping, a public.sessions row, and direct nft/shaping calls. Duration, data cap and
-	// shaping are not properties of the credential in the current model -- they come from the package the
-	// guest selects in the commerce flow after authentication.
+	// The challenge is verified here; identity is IAM-v2's. public.auth_otps is a transient challenge store outside the identity
+	// model: only the verified factor crosses into iam_v2 (authOTPIdentity). Duration, data cap and shaping come from the
+	// package the guest selects after authentication, not from the credential.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
 		FactorType:    otpFactorType(v.Channel),
 		FactorValue:   v.Destination,
@@ -431,9 +370,8 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	}, ip)
 }
 
-// otpFactorType maps a verified challenge's channel onto the IAM-v2 factor it proves. A WhatsApp code, like an
-// SMS code, proves possession of the phone number it was sent to, so both are PHONE factors. Any other channel
-// -- the removed email code above all -- proves nothing a code may still prove, and answers "".
+// otpFactorType maps a verified challenge's channel to the IAM-v2 factor it proves: SMS and WhatsApp codes both prove
+// possession of a phone number (PHONE); any other channel, email above all, proves nothing and answers "".
 func otpFactorType(channel string) string {
 	switch channel {
 	case "sms", "whatsapp":
@@ -442,14 +380,8 @@ func otpFactorType(channel string) string {
 	return ""
 }
 
-// tenantBranding serves the hotel's published portal design to the captive portal.
-//
-// READ-ONLY AND GUEST-SAFE. It returns the PUBLISHED design only -- never the draft an operator is editing,
-// and never the revision history stored beside it. A guest sees what the hotel decided to show, not what it
-// is in the middle of deciding.
-//
-// Failure is an empty object, not an error. The portal has complete defaults of its own, and a guest must
-// never be unable to sign in because branding could not be loaded.
+// tenantBranding serves the hotel's published portal design to the captive portal: the published design only, never the draft
+// or revision history. Failure is an empty object, not an error, because a guest must never be unable to sign in over branding.
 func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -470,13 +402,12 @@ func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 		empty()
 		return
 	}
-	// The document holds the published design, the operator's working draft and the revision history. Only
-	// the first is any of the guest's business.
+	// The document holds the published design, the operator's draft and the revision history; only the first is the guest's business.
 	out := map[string]any{}
 	if d, ok := doc["design"]; ok {
 		out["design"] = d
 	} else {
-		// A document written before designs were versioned IS the design.
+		// A document written before designs were versioned is the design.
 		delete(doc, "draft")
 		delete(doc, "revisions")
 		out["design"] = doc

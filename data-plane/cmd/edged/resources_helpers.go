@@ -1,7 +1,6 @@
 package main
 
-// Shared helpers for the edged resource handlers: license-derived limits,
-// provisioning gate, scd reload fan-out and small SQL error classifiers.
+// Shared helpers for the edged resource handlers.
 
 import (
 	"context"
@@ -18,15 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ONE PAGING CONTRACT FOR EVERY ADMIN CONSOLE LIST THAT GROWS WITH REAL DATA.
-//
-// ?page= (1-based, default 1) and ?page_size= (1..200, default 50). A value outside those bounds is refused
-// with 400 rather than quietly clamped, so a client that asks for page 0 or 10,000 rows learns it at once
-// instead of reading a page it did not ask for. The handler fetches page_size+1 rows: the extra row is how it
-// knows there is a next page (meta.has_more) without a second query.
-//
-// The search text of these lists never travels in the URL: chi's request logger writes every request line,
-// and a free-text box is where an operator types a guest's name. Each list reads its own X-...-Search header.
+// Paging contract for growing lists: ?page= (1-based) and ?page_size= (1..200, default 50); out-of-bounds values
+// get a 400, not a clamp. Handlers fetch page_size+1 rows so meta.has_more needs no second query.
+// Search text never travels in the URL (the request logger writes every request line and operators type guest
+// names there); each list reads its own X-...-Search header.
 const (
 	pageSizeDefault = 50
 	pageSizeMax     = 200
@@ -38,15 +32,12 @@ type pageReq struct {
 	Size int
 }
 
-// Offset is the number of rows before this page.
 func (p pageReq) Offset() int { return (p.Page - 1) * p.Size }
 
-// Fetch is the LIMIT to query with: one more than the page holds, to learn whether another page follows.
+// The LIMIT to query with: one more than the page holds.
 func (p pageReq) Fetch() int { return p.Size + 1 }
 
-// parsePage reads ?page and ?page_size. legacyMax > 0 keeps an older ?limit= working for a client that has not
-// moved to page_size: when page_size is absent, a valid limit becomes the page size, capped at legacyMax (the
-// cap the endpoint always had). An invalid limit falls back to the default, as it always did.
+// legacyMax > 0 keeps an older ?limit= working: when page_size is absent, a valid limit becomes the page size, capped at legacyMax.
 func parsePage(q url.Values, legacyMax int) (pageReq, error) {
 	p := pageReq{Page: 1, Size: pageSizeDefault}
 	if v := q.Get("page"); v != "" {
@@ -70,13 +61,11 @@ func parsePage(q url.Values, legacyMax int) (pageReq, error) {
 	return p, nil
 }
 
-// hasPageParams reports whether the caller asked for paging at all. A list whose existing callers expect the
-// whole set (and always got it) pages only when asked.
+// Reports whether the caller asked for paging; lists whose callers expect the whole set page only when asked.
 func hasPageParams(q url.Values) bool {
 	return q.Get("page") != "" || q.Get("page_size") != ""
 }
 
-// readPage parses the paging parameters and answers 400 itself when they are out of bounds.
 func readPage(w http.ResponseWriter, r *http.Request, legacyMax int) (pageReq, bool) {
 	p, err := parsePage(r.URL.Query(), legacyMax)
 	if err != nil {
@@ -86,15 +75,10 @@ func readPage(w http.ResponseWriter, r *http.Request, legacyMax int) (pageReq, b
 	return p, true
 }
 
-// readSearch reads a list's free-text search from its header, trimmed and bounded. ok=false means a 400 has
-// been written.
-//
-// THE ADMIN CONSOLE PERCENT-ENCODES IT. A browser refuses to put a character outside ISO-8859-1 in a header,
-// so a guest name typed in Arabic or Cyrillic would fail before it left the page; the screen sends
-// encodeURIComponent(text) and this decodes it. A value that is not valid percent-encoding is taken as typed,
-// so a plain-text header from a script still works.
-// headerSearchText is the decoded, trimmed search text of a header (see readSearch) for the lists that bound
-// and refuse it themselves (Stays, Client accounts).
+// readSearch reads a list's free-text search from its header, trimmed and bounded; ok=false means a 400 was written.
+// The console percent-encodes it because browsers refuse non-ISO-8859-1 characters in headers; a value that is not
+// valid percent-encoding is taken as typed.
+// headerSearchText is the decoded, trimmed header search text for lists that bound and refuse it themselves.
 func headerSearchText(r *http.Request, header string) string {
 	v := r.Header.Get(header)
 	if d, err := url.PathUnescape(v); err == nil {
@@ -124,7 +108,6 @@ func likePattern(v string) any {
 	return "%" + likeEscape(v) + "%"
 }
 
-// trimPage cuts the look-ahead row off a fetched page and reports whether it was there.
 func trimPage[T any](rows []T, p pageReq) ([]T, bool) {
 	if rows == nil {
 		rows = []T{}
@@ -135,7 +118,6 @@ func trimPage[T any](rows []T, p pageReq) ([]T, bool) {
 	return rows, false
 }
 
-// slicePage pages a list that is already in memory (one edged fetched whole from another service).
 func slicePage[T any](all []T, p pageReq) ([]T, bool) {
 	start := min(p.Offset(), len(all))
 	end := min(start+p.Size, len(all))
@@ -146,8 +128,6 @@ func slicePage[T any](all []T, p pageReq) ([]T, bool) {
 	return out, end < len(all)
 }
 
-// pagedList is the shape a paged list answers with. data and meta are what writeList always wrote, so a client
-// that ignores the rest reads the response exactly as before.
 type pagedList[T any] struct {
 	Data     []T      `json:"data"`
 	Meta     listMeta `json:"meta"`
@@ -182,8 +162,7 @@ func isFKViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
-// intLimit reads an integer limit from tenant_effective_limits. The second
-// return is false when the key is absent (absent = no limit enforced).
+// The second return is false when the key is absent (absent = no limit enforced).
 func (s *server) intLimit(ctx context.Context, key string) (int64, bool, error) {
 	var v *int64
 	err := s.db.QueryRow(ctx, `
@@ -202,9 +181,7 @@ func (s *server) intLimit(ctx context.Context, key string) (int64, bool, error) 
 	return *v, true, nil
 }
 
-// enforceLimit checks a license limit before creating `delta` new rows.
-// Missing key, -1 and 0 all mean "unlimited". Writes 403 limit_exceeded and
-// returns false when the limit would be breached.
+// Missing key, -1 and 0 all mean "unlimited". Writes 403 limit_exceeded and returns false when breached.
 func (s *server) enforceLimit(ctx context.Context, w http.ResponseWriter, key string, delta int64, countQuery string, countArgs ...any) bool {
 	lim, ok, err := s.intLimit(ctx, key)
 	if err != nil {
@@ -226,9 +203,7 @@ func (s *server) enforceLimit(ctx context.Context, w http.ResponseWriter, key st
 	return true
 }
 
-// scdReloadWarn pokes an scd reload endpoint after a config mutation.
-// Best-effort: failures are logged, never surfaced to the caller — scd will
-// pick the change up from the DB on its next restart regardless.
+// Best-effort: failures are logged, never surfaced; scd picks the change up from the DB on its next restart.
 func (s *server) scdReloadWarn(path string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

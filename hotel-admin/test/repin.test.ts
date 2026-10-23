@@ -1,8 +1,3 @@
-// MOVING A STALE PACKAGE ONTO ITS PLAN'S CURRENT SETTINGS.
-//
-// The real state this exists for: service plan "Free Internet" is on revision 4 (10/5 Mbps) and the "Freee"
-// package still pins revision 3 (2/2 Mbps). The operator could see that and had no way to act on it without
-// publishing yet another plan revision, purely to be offered the repin prompt.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -30,7 +25,6 @@ describe("stalePackagesFor", () => {
   });
 
   it("does NOT offer a package already on the current revision", () => {
-    // Republishing it would add an immutable revision that changes nothing.
     expect(stalePackagesFor(freeInternet, [upToDate])).toEqual([]);
   });
 
@@ -99,11 +93,10 @@ describe("repinPayload", () => {
       "down_kbps\":", "up_kbps\":", "data_quota_bytes", "time_quota_seconds",
       "max_concurrent_devices", "device_limit_policy", "speed_allocation", "time_accounting_mode",
     ]) {
-      // grant tiers legitimately carry down_kbps/up_kbps INSIDE grant, so check the top level only.
+      // Grant tiers may contain speed fields; inspect only the package's top level.
       const top = JSON.parse(raw);
       expect(Object.keys(top)).not.toContain(planField.replace('":', ""));
     }
-    // and the only revision it names is the one it is pinning to
     expect(raw.match(/rev4/g)?.length).toBe(1);
   });
 
@@ -111,7 +104,6 @@ describe("repinPayload", () => {
     const perNight = { ...cur, data_allocation_policy: { mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5 } };
     expect(repinPayload(perNight, "rev4").data_allocation_policy)
       .toEqual({ mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5 });
-    // ...and a package with a flat allowance still sends no policy at all.
     expect("data_allocation_policy" in repinPayload(cur, "rev4")).toBe(false);
     expect("data_allocation_policy" in repinPayload({ ...cur, data_allocation_policy: {} }, "rev4")).toBe(false);
   });
@@ -122,8 +114,7 @@ describe("repinPayload", () => {
   });
 });
 
-// AUDIT O-1: "Apply current settings to packages" republished every chosen package as FREE, because the body
-// named no price, currency, methods or mappings and the server defaulted them.
+// Preserve commercial fields when repinning; omitted values default to a free package.
 describe("repinPayload — the package's commercial terms travel with it", () => {
   const card: PackageCurrentDTO = {
     code: "DAY",
@@ -169,10 +160,9 @@ describe("repinPayload — the package's commercial terms travel with it", () =>
       .toEqual(["currency", "currency_exponent", "acquisition_methods"]);
     expect(commercialTermsOf({ code: "P", currency: "USD", settlement_methods: ["PREPAID"], room_charge_mappings: [] }).missing)
       .toEqual(["price_minor"]);
-    // A reader that does not return the mappings at all is a gap; one that returns null is "none".
+    // Missing mappings mean incomplete data; null explicitly means no mappings.
     expect(commercialTermsOf({ code: "P", price_minor: 0, currency: "USD", settlement_methods: ["NOT_REQUIRED"] }).missing)
       .toEqual(["room_charge_mappings"]);
-    // ...and then the payload carries no commercial field at all, so nothing is posted half-stated.
     const p = repinPayload({ code: "P", price_minor: 900 }, "rev4") as Record<string, unknown>;
     expect("price_minor" in p).toBe(false);
   });

@@ -7,20 +7,19 @@ import type { LicenseTerms } from "@/lib/api";
 import { presetFor, requiresLabel, toggleModule, useModuleCatalog, type ModuleCatalog } from "@/lib/modules";
 import { siteTypeLabel } from "@/lib/site-types";
 
-/** The license terms as typed. Strings, so a half-typed number is not coerced under the operator's cursor. */
+/** Draft numbers stay strings so partial input is not coerced while typing. */
 export type TermsDraft = {
   maxGuests: string;
   validMode: "days" | "date";
   validDays: string;
-  validUntil: string; // yyyy-mm-dd
+  validUntil: string;
   graceDays: string;
-  /** Module ids the license authorises. [] = core only. */
+  /** Empty means core only. */
   modules: string[];
-  /** The operator changed the modules by hand, so a site-type suggestion no longer replaces them. */
+  /** Manual choices override site-type suggestions. */
   modulesTouched: boolean;
 };
 
-/** Central's defaults for a new license: 500 concurrent guests, one year, 30 days' grace, core only. */
 export const DEFAULT_TERMS: TermsDraft = {
   maxGuests: "500",
   validMode: "days",
@@ -35,7 +34,6 @@ const whole = (s: string) => /^\d+$/.test(s.trim());
 
 export type TermsField = "maxGuests" | "validDays" | "validUntil" | "graceDays";
 
-/** The first thing wrong with the draft and the field it belongs to, or null. */
 export function termsIssue(d: TermsDraft, today: Date = new Date()): { field: TermsField; message: string } | null {
   if (!whole(d.maxGuests) || Number(d.maxGuests) < 1) return { field: "maxGuests", message: "Enter how many clients may be online at once (1 or more)." };
   if (d.validMode === "days") {
@@ -48,15 +46,11 @@ export function termsIssue(d: TermsDraft, today: Date = new Date()): { field: Te
   return null;
 }
 
-/** The first thing wrong with the draft, in words, or null. */
 export function termsProblem(d: TermsDraft, today: Date = new Date()): string | null {
   return termsIssue(d, today)?.message ?? null;
 }
 
-/**
- * The §6 license body. A chosen end date is sent as the END of that day in UTC, so "valid until 31 Dec" includes
- * 31 December everywhere.
- */
+/** Send chosen end dates at 23:59:59 UTC so the selected calendar day remains valid. */
 export function termsBody(d: TermsDraft): LicenseTerms {
   const base = {
     max_concurrent_online_guests: Number(d.maxGuests),
@@ -68,10 +62,7 @@ export function termsBody(d: TermsDraft): LicenseTerms {
     : { ...base, valid_until: `${d.validUntil}T23:59:59Z` };
 }
 
-/**
- * The site type's suggested modules, applied to a draft the operator has not edited by hand. A suggestion only:
- * once the operator ticks or unticks a module it is theirs.
- */
+/** Apply site-type suggestions only until the operator edits modules. */
 export function withSuggestedModules(d: TermsDraft, catalog: ModuleCatalog | null, siteType: string | null | undefined): TermsDraft {
   if (!catalog || d.modulesTouched) return d;
   const modules = presetFor(catalog, siteType);
@@ -89,9 +80,7 @@ export function LicenseTermsFields({
 }: {
   value: TermsDraft;
   onChange: (next: TermsDraft) => void;
-  /** The type of the site the license is for, when known: offers its suggested modules. */
   siteType?: string | null;
-  /** A field's error and id (useFieldErrors), so a problem is shown under, and focuses, the field it is about. */
   errorFor?: (field: TermsField) => string | undefined;
   idFor?: (field: TermsField) => string;
 }) {
@@ -147,7 +136,6 @@ export function LicenseTermsFields({
   );
 }
 
-/** The license's modules: one checkbox per registered module, dependencies ticked and unticked with them. */
 export function ModuleFields({
   value,
   onChange,

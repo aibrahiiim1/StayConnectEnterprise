@@ -1,11 +1,7 @@
 package main
 
-// THE READ-ONLY ADDITIONS TO THE VOUCHER SURFACE: the batch list and one card's history.
-//
-// Both sit under `vouchers`, the daily key, because neither returns code material -- a batch is a count of
-// cards and a history is when a card was issued, redeemed or cancelled. What these pin is that placement,
-// in both directions: every role that may read the card list may read them, no role gains anything that
-// reads a code, and neither route accepts a write.
+// The read-only voucher additions (batch list, one card's history) sit under `vouchers` because neither returns code material;
+// this pins that placement in both directions and that neither accepts a write.
 
 import (
 	"encoding/json"

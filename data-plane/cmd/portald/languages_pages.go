@@ -1,20 +1,7 @@
 package main
 
-// THE WORDS OF EVERY PAGE AFTER THE SIGN-IN FORM, AND OF EVERY MESSAGE THE SERVER SENDS BACK.
-//
-// The sign-in form was the only part of the portal a guest could read in their own language. The package
-// choice, "You're online", the device list, the social sign-in failure page and every refusal the server
-// composed arrived in English -- and several of them as raw codes ("Voucher AUTH_DENIED.", "incorrect code").
-// These keys close that gap. They are merged into builtinStrings at start-up, so there is still exactly one
-// dictionary: the page renders it, /api/languages serves it, and Hotel Admin offers every key for override.
-//
-// Placeholders: {n} a number, {t} a duration, {date} a date. Each language places them where its grammar
-// wants them. Units are abbreviated on purpose -- "{n} h" needs no plural rules, which Russian and Arabic
-// would otherwise demand for every number.
-//
-// ROOM SIGN-IN STAYS VAGUE. err.room.credential and err.room.technical are the portal's translations of the
-// server's closed set of sentences (pms_phase3.go). They say exactly what the English says -- never whether a
-// room exists or who is in it -- and a wrong room and a wrong name still produce the same one.
+// The words of every page after the sign-in form and of every server message. Placeholders: {n} number, {t} duration, {date} date; units are abbreviated so no plural rules are needed.
+// Room sign-in stays vague: err.room.credential and err.room.technical never reveal whether a room exists or who is in it.
 var pageStrings = map[string]map[string]string{
 	"en": {
 		"brand.fallback":      "Wi-Fi Access",
@@ -510,8 +497,7 @@ var pageStrings = map[string]map[string]string{
 	},
 }
 
-// The page strings join the one dictionary at start-up. A key defined twice would silently shadow the
-// sign-in wording, so that is refused loudly rather than resolved.
+// A key defined twice would silently shadow sign-in wording, so it is refused loudly.
 func init() {
 	for code, words := range pageStrings {
 		dst := builtinStrings[code]

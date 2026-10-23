@@ -3,12 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-/**
- * Filters that live in the address, so every filtered list can be linked to (the Overview's numbers do exactly
- * that) and survives a reload. Setting a value to "" removes it from the address.
- *
- * Uses useSearchParams, so the calling page must render inside a <Suspense> boundary.
- */
+/** URL filters survive reloads; callers must render useSearchParams inside Suspense. */
 export function useQueryState<K extends string>(keys: readonly K[]): [Record<K, string>, (patch: Partial<Record<K, string>>) => void] {
   const params = useSearchParams();
   const router = useRouter();

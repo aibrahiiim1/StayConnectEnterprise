@@ -3,11 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 
-// STAYS ARE PAGED ON THE SERVER, AND TRAVEL AGENTS ARE CHOSEN FROM WHAT THE PMS SENT.
-//
-// The Stays screen stopped at 200 rows and counted only those, so a hotel with 403 in house saw 200. The
-// travel-agent condition was a free-text box, so a misspelt agent silently matched nobody.
-
 const get = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -60,8 +55,7 @@ describe("Stays page — server paging", () => {
     });
   });
 
-  // A filter changed on page 2 fires the old page's request and then the reset's page-1 request. The answers can
-  // come back in any order; the screen must show the answer to the question the controls now ask.
+  // A filter change can race the page reset; late responses must not replace the newest query.
   it("ignores an older response that arrives after the newer one", async () => {
     const pending: { path: string; headers: any; resolve: (v: any) => void }[] = [];
     let staysCalls = 0;
@@ -78,15 +72,12 @@ describe("Stays page — server paging", () => {
     await userEvent.type(screen.getByRole("searchbox", { name: "Search stays" }), "Andersen");
     await waitFor(() => expect(pending.some((p) => p.headers && p.path.includes("page=1"))).toBe(true));
 
-    // The race exists: the old offset was asked WITH the new search before the reset asked page 1.
     expect(pending.some((p) => p.headers && p.path.includes("page=2"))).toBe(true);
-    // The newest question (search, page 1) answers FIRST...
     const newest = pending[pending.length - 1];
     expect(newest.path).toContain("page=1");
     newest.resolve({ ...pageOf(1, 50, 1), data: [stay(7)] });
     expect(await screen.findByText("Showing 1–1 of 1")).toBeTruthy();
 
-    // ...then every older one arrives late. None may replace it.
     for (const p of pending.slice(0, -1)) p.resolve(pageOf(2, 50, 403));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.getByText("Showing 1–1 of 1")).toBeTruthy();
@@ -141,7 +132,7 @@ describe("Travel-agent picker", () => {
     expect(seen[seen.length - 1]).toEqual(["Blue Sea"]);
   });
 
-  // A PMS may name an agent with a comma in it. Chosen from the list, it is ONE agent: one chip, one entry.
+  // An agent name may contain a comma; keep it as one selected value.
   it("keeps a PMS-provided name with a comma as one agent", async () => {
     get.mockResolvedValue({ data: [
       { name: "Sun Tours, Ltd", in_house: 4, stays: 6 },
@@ -153,7 +144,6 @@ describe("Travel-agent picker", () => {
     await userEvent.click(await screen.findByRole("option", { name: /Sun Tours, Ltd/ }));
     expect(seen[seen.length - 1]).toEqual(["Sun Tours, Ltd"]);
     expect(screen.getByRole("button", { name: "Remove Sun Tours, Ltd" })).toBeTruthy();
-    // The similarly named agent is still a separate, unselected choice.
     expect(screen.getByRole("option", { name: /^Sun Tours1 in house$/ }).getAttribute("aria-selected")).toBe("false");
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Sun Tours, Ltd" }));
@@ -182,8 +172,7 @@ describe("Travel-agent picker", () => {
   });
 });
 
-// THE RULE A PACKAGE STORES. Loading a saved package and saving it again must give back the same agents: a name
-// with a comma used to be joined into text on load and split into two agents on the next save.
+// Preserve comma-bearing agent names through package load and save.
 describe("Travel-agent rule round trip", () => {
   it("serializes each name whole, trimmed, once", async () => {
     const { serializeRule } = await import("@/lib/commerce-form");
@@ -198,7 +187,6 @@ describe("Travel-agent rule round trip", () => {
     const form = rulesToForm([stored] as any);
     expect(form).toEqual([{ type: "TRAVEL_AGENT", travel_agents: ["Sun Tours, Ltd", "Blue Sea"] }]);
     expect(serializeRule(form[0])).toEqual(stored);
-    // Go's capitalised spelling loads the same way.
     expect(rulesToForm([{ Type: "TRAVEL_AGENT", Value: stored.value }] as any)).toEqual(form);
   });
 });

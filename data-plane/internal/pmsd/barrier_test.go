@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// newBarrierSink builds a workerSink over a fakeRepo with an owned runtime generation, for driving the §G/§H
-// state machine directly (the adapter calls these methods serially in one goroutine).
 func newBarrierSink(t *testing.T) (*workerSink, *fakeRepo, string) {
 	t.Helper()
 	repo := newFakeRepo(iface("i1"))
@@ -27,18 +25,14 @@ func counts(r *fakeRepo) (live, staged int) {
 	return len(r.liveRows), len(r.stagedRows)
 }
 
-// TestBarrier_FullResyncLifecycle proves §H + §G end to end at the sink: no LIVE admission before the initial
-// publish; records inside DS→DE are STAGED only; a heartbeat cannot lower the barrier; a valid DE atomically
-// publishes and only THEN does LIVE admission occur.
+// No live admission before the initial publish; records inside DS→DE are staged only; a valid DE publishes atomically.
 func TestBarrier_FullResyncLifecycle(t *testing.T) {
 	s, repo, id := newBarrierSink(t)
 	ctx := context.Background()
 
-	// barrier up at connect
 	if err := s.RequireInitialResync(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// a LIVE GI before any DS → held (zero live, zero staged)
 	if err := s.OnDomainEvent(ctx, ev("A")); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +40,6 @@ func TestBarrier_FullResyncLifecycle(t *testing.T) {
 		t.Fatalf("before DS: live=%d staged=%d, want 0/0", live, staged)
 	}
 
-	// DS opens the window; records are STAGED (never live)
 	if err := s.OnResyncStart(time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +52,7 @@ func TestBarrier_FullResyncLifecycle(t *testing.T) {
 	if live, staged := counts(repo); live != 0 || staged != 2 {
 		t.Fatalf("during window: live=%d staged=%d, want 0/2", live, staged)
 	}
-	// a heartbeat during the window must NOT lower the barrier or admit anything
+	// A heartbeat must not lower the barrier.
 	if err := s.OnHeartbeat(time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -70,14 +63,12 @@ func TestBarrier_FullResyncLifecycle(t *testing.T) {
 		t.Fatal("nothing may be published before DE")
 	}
 
-	// DE publishes the complete generation atomically → barrier down
 	if err := s.OnResyncComplete(time.Now(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if repo.publishedGen[id] == 0 {
 		t.Fatal("valid DE must publish the resync generation")
 	}
-	// now LIVE admission works
 	if err := s.OnDomainEvent(ctx, ev("D")); err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +77,6 @@ func TestBarrier_FullResyncLifecycle(t *testing.T) {
 	}
 }
 
-// TestBarrier_NoPublishWithoutDE proves a partial/failed resync (DS without a valid DE) publishes nothing and
-// leaves the barrier up, and that a malformed record before DE does not publish either.
 func TestBarrier_NoPublishWithoutDE(t *testing.T) {
 	s, repo, id := newBarrierSink(t)
 	ctx := context.Background()
@@ -100,14 +89,12 @@ func TestBarrier_NoPublishWithoutDE(t *testing.T) {
 	if err := s.OnDomainEvent(ctx, ev("R1")); err != nil {
 		t.Fatal(err)
 	}
-	// a malformed record before DE → continuity fault; still nothing published, barrier stays up
 	if err := s.OnContinuityFault(ctx, CodeEventInvalid); err != nil {
 		t.Fatal(err)
 	}
 	if repo.publishedGen[id] != 0 {
 		t.Fatal("a fault before DE must publish nothing")
 	}
-	// a disconnect now (no DE) — nothing was activated; a later LIVE event is still held
 	if err := s.OnDomainEvent(ctx, ev("R2")); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +103,6 @@ func TestBarrier_NoPublishWithoutDE(t *testing.T) {
 	}
 }
 
-// TestBarrier_DEWithoutDSPublishesNothing proves a spurious DE (no preceding DS) is a no-op (never publishes).
 func TestBarrier_DEWithoutDSPublishesNothing(t *testing.T) {
 	s, repo, id := newBarrierSink(t)
 	if err := s.RequireInitialResync(time.Now()); err != nil {
@@ -133,10 +119,8 @@ func TestBarrier_DEWithoutDSPublishesNothing(t *testing.T) {
 	}
 }
 
-// TestBarrier_StaleOwnerAdmitsNothing proves a generation-CAS miss (newer owner) admits/stages nothing.
 func TestBarrier_StaleOwnerAdmitsNothing(t *testing.T) {
 	s, repo, _ := newBarrierSink(t)
-	// a newer owner bumps the stored generation so the sink's pinned gen is stale
 	if _, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{PMSInterfaceID: ifaceUUID("i1")}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,21 +1,10 @@
 package main
 
-// BACKUP KEY HOLDERS (migration 0129; GDPR remediation plan C5; Product-Owner decision D-C5 as revised: hotel-held
-// keys, several holders, a restore-test reminder, no escrow).
+// Under the "backups" key: readers see the encryption state; changing holders or running the test needs backups W.
 //
-//	GET  /edge/v1/backup-keys/                     encryption state, holders, the restore-test reminder
-//	POST /edge/v1/backup-keys/holders              add a holder: the appliance generates the key pair and returns
-//	                                               the private key ONCE (password, loss acknowledgement)
-//	POST /edge/v1/backup-keys/holders/{id}/confirm the check code from the key file or recovery sheet
-//	POST /edge/v1/backup-keys/holders/{id}/remove  password and reason; never the last active holder
-//	POST /edge/v1/backup-keys/test                 the restore test: a holder's key opens the newest backup
-//
-// Under the "backups" key: every role that reads backups sees whether they are encrypted and when the key was
-// last proven; changing the holders or running the test is a site administrator's (backups W).
-//
-// THE PRIVATE KEY. It is generated here, put in the one response that hands it over, and forgotten: it is not
-// stored, logged or audited. The database keeps the public key and a hash of the check code. A key supplied for
-// the restore test is passed to scd for that one request and dropped the same way.
+// The private key is generated here, returned once and forgotten: never stored, logged or audited (the database
+// keeps the public key and a hash of the check code). A key supplied for the restore test goes to scd for that
+// one request and is dropped the same way.
 
 import (
 	"encoding/json"
@@ -57,7 +46,6 @@ type backupKeyHolder struct {
 	LastTestedAt *time.Time `json:"last_tested_at"`
 }
 
-// restoreTestMonths is the hotel's setting (scd's backup settings, RESTORE_TEST_MONTHS), or its default.
 func (s *server) restoreTestMonths(r *http.Request) int {
 	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/settings", nil)
 	if err != nil || code != http.StatusOK {
@@ -86,7 +74,7 @@ func (s *server) getBackupKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// Pending holders older than the hour they have to confirm in are not shown: they can never become active.
+	// Pending holders past their hour to confirm can never become active, so they are hidden.
 	rows, err := s.db.Query(ctx, `SELECT id::text, label, public_key, status, created_at, created_by, confirmed_at,
 	        removed_at, removed_by, remove_reason, last_tested_at
 	   FROM public.backup_key_holders
@@ -127,8 +115,7 @@ func (s *server) getBackupKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// THE REMINDER. The clock starts at the last successful test, or -- before the first -- when encryption was
-	// switched on, so a hotel that has just set up its keys is not told it is already late.
+	// The reminder clock starts at the last successful test, or when encryption was switched on, so a new setup is not already late.
 	months := s.restoreTestMonths(r)
 	test := map[string]any{"interval_months": months, "last_tested_at": lastTest, "overdue": false, "due_at": nil}
 	if active > 0 {
@@ -256,8 +243,8 @@ func (s *server) removeBackupKeyHolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "REMOVED"})
 }
 
-// testBackupKey is the restore test: scd opens the newest encrypted backup with the key supplied. A success is
-// recorded against the holder the key belongs to; a failure is audited and changes nothing.
+// testBackupKey has scd open the newest encrypted backup with the supplied key; success is recorded against the
+// holder, failure is audited and changes nothing.
 func (s *server) testBackupKey(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Identity string `json:"identity"`
@@ -294,7 +281,7 @@ func (s *server) testBackupKey(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var holder, label string
-	// The recording call sits in a CTE so it runs exactly once; in a WHERE clause it ran once per holder row.
+	// The CTE makes the recording call run once; in a WHERE clause it ran once per holder row.
 	if err := s.db.QueryRow(ctx, `WITH t AS (SELECT public.backup_key_holder_tested($1::uuid,$2::uuid,$3,$4) AS id)
 	     SELECT h.id::text, h.label FROM t JOIN public.backup_key_holders h ON h.id = t.id`,
 		s.tenantID, s.siteID, res.PublicKey, protectionActor(sessFrom(r.Context()))).Scan(&holder, &label); err != nil {
@@ -305,7 +292,6 @@ func (s *server) testBackupKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "backup": res.Backup, "holder_id": holder, "holder": label})
 }
 
-// fileSafe turns a holder's name into a file-name fragment: lower-case letters, digits and dashes.
 func fileSafe(label string) string {
 	var b strings.Builder
 	dash := false

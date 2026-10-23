@@ -2,29 +2,10 @@
 
 package checkout
 
-// F9-i — THE CONTRACTUAL RACE: a Cross-PMS Transfer against the REAL Phase-3 Checkout/Grace conversion, on
-// the same Stay, at the same moment.
-//
-// WHY THIS TEST EXISTS AS A FIX-FORWARD. The Phase-5 Plan defines F9-i as "transfer racing checkout or grace:
-// one transaction wins; no split state". The test that carried the F9-i label until now was the
-// opposite-direction deadlock case — valuable, and kept — but it proves a different property: that two
-// TRANSFERS cannot deadlock. It says nothing about a transfer racing the operation that ENDS the stay.
-//
-// The two operations touch the same rows from opposite directions. Checkout terminates the live entitlement
-// and creates a grace one; a transfer terminates the same live entitlement and creates one on another Stay.
-// If they interleaved, the possible wreckage is specific and each piece is asserted against here:
-//
-//   * two live entitlements for one Stay (checkout's grace AND the transfer's destination), which the
-//     one-live-per-subject index should make impossible but which a mis-scoped lock could still attempt;
-//   * a session pointing at a terminated entitlement — a guest the kernel is still forwarding for, whose
-//     authority no longer exists;
-//   * a device authorization interval left open against a terminated entitlement;
-//   * a transfer lineage row whose source is TERMINATED for the wrong reason (CHECKOUT rather than
-//     TRANSFERRED), which would be a durable false statement about where the guest went.
-//
-// It lives in the checkout package so it can drive the REAL ConvertAtCheckout with the real durable event,
-// grace config and emergency catalog its own fixtures build — a re-implementation of checkout here would
-// prove that the re-implementation is safe.
+// F9-i: a Cross-PMS Transfer racing the real Checkout/Grace conversion on the same Stay; one transaction
+// wins, with no split state. Asserted against: two live entitlements on one Stay, a session on a terminated
+// entitlement, an open device interval on a terminated entitlement, and a lineage row whose source ended
+// as CHECKOUT instead of TRANSFERRED. Lives in this package to drive the real ConvertAtCheckout.
 
 import (
 	"context"
@@ -39,8 +20,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/transfer"
 )
 
-// destination adds a SECOND PMS interface with an IN_HOUSE Stay to an existing fixture — the other property
-// a guest can be transferred to.
+// destination adds a second PMS interface with an IN_HOUSE Stay: the property a guest is transferred to.
 func destination(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	t.Helper()
 	var stay string
@@ -67,15 +47,13 @@ type raceState struct {
 	transfers        int
 	srcTerminalRsn   string
 	graceCreated     int
-	// srcLiveAttachments is how much is ATTACHED to whatever the source still holds: authorized devices,
-	// open authorization intervals and live sessions, summed. A grace entitlement left behind by a checkout
-	// that ran after a transfer is legitimate — the Stay did hold an active entitlement at the boundary — but
-	// it must be an EMPTY courtesy shell. Anything attached to it would mean the guest is simultaneously on
-	// two properties.
+	// srcLiveAttachments sums authorized devices, open intervals and live sessions on the source's live
+	// entitlement. A grace left by a checkout after a transfer is legitimate but must be an empty shell, or the
+	// guest is on two properties.
 	srcLiveAttachments int
 }
 
-// observe reads everything the two operations could have disagreed about.
+// observe reads everything the two operations could disagree about.
 func observe(t *testing.T, p *pgxpool.Pool, f fixture, dest, sourceEnt string) raceState {
 	t.Helper()
 	var s raceState
@@ -120,11 +98,10 @@ func observe(t *testing.T, p *pgxpool.Pool, f fixture, dest, sourceEnt string) r
 	return s
 }
 
-// assertCoherent checks the state against BOTH legal outcomes and refuses anything in between.
+// assertCoherent accepts exactly the two legal outcomes and nothing in between.
 func assertCoherent(t *testing.T, s raceState, checkoutErr, transferErr error) {
 	t.Helper()
 
-	// Whatever happened, these are never acceptable.
 	if s.sessionsDangling != 0 {
 		t.Fatalf("SPLIT STATE: %d active session(s) point at a TERMINATED entitlement", s.sessionsDangling)
 	}
@@ -140,8 +117,7 @@ func assertCoherent(t *testing.T, s raceState, checkoutErr, transferErr error) {
 
 	switch {
 	case transferErr == nil:
-		// THE TRANSFER WON. The guest is on the destination, and the source's access ended AS TRANSFERRED —
-		// not as CHECKOUT, which would be the lineage claiming something that did not happen.
+		// The source must end as TRANSFERRED, not CHECKOUT, or the lineage states something false.
 		if s.transfers != 1 {
 			t.Fatalf("the transfer reported success but recorded %d lineage row(s)", s.transfers)
 		}
@@ -151,14 +127,8 @@ func assertCoherent(t *testing.T, s raceState, checkoutErr, transferErr error) {
 		if s.liveOnDest != 1 {
 			t.Fatalf("the transfer won but the destination has %d live entitlement(s)", s.liveOnDest)
 		}
-		// Checkout may still have committed afterwards. When it does, it legitimately creates a CHECKOUT_GRACE
-		// entitlement on the source: the Stay DID hold an active entitlement at the effective-checkout
-		// boundary, which is exactly the contract's eligibility rule, and that is true whatever happened to
-		// the guest afterwards.
-		//
-		// So the source holding one live entitlement is NOT split state. What would be split state is anything
-		// ATTACHED to it — a device still authorized, an interval still open, a session still live — because
-		// that is the guest being on two properties at once. The grace left behind must be an empty shell.
+		// A later checkout may legitimately leave a CHECKOUT_GRACE entitlement on the source; only anything
+		// attached to it (device, open interval, live session) is split state.
 		if s.liveOnSource > 1 {
 			t.Fatalf("the transfer won but the source has %d live entitlements", s.liveOnSource)
 		}
@@ -167,8 +137,6 @@ func assertCoherent(t *testing.T, s raceState, checkoutErr, transferErr error) {
 				s.srcLiveAttachments)
 		}
 	case checkoutErr == nil && transferErr != nil:
-		// CHECKOUT WON. The stay is checked out, no lineage was recorded, and the source ended for a
-		// checkout reason rather than a transfer one.
 		if s.transfers != 0 {
 			t.Fatalf("the transfer failed but recorded %d lineage row(s)", s.transfers)
 		}
@@ -182,19 +150,15 @@ func assertCoherent(t *testing.T, s raceState, checkoutErr, transferErr error) {
 			t.Fatalf("checkout won but the destination gained %d live entitlement(s)", s.liveOnDest)
 		}
 	default:
-		// Both failed. Legal — one of them lost a lock and the other hit an unrelated refusal — but the state
-		// must still be untouched in the ways that matter, which the invariants above already asserted.
+		// Both failing is legal, but no lineage may exist.
 		if s.transfers != 0 {
 			t.Fatalf("both operations failed yet %d lineage row(s) exist", s.transfers)
 		}
 	}
 }
 
-// TestIntegration_F9i_TransferRacesCheckoutGrace is the contractual F9-i.
-//
-// It runs the race many times because a race that is run once has been sampled once: the interleaving that
-// breaks a lock boundary is rarely the first one. Each iteration is a fresh site, so a failure names a state
-// rather than an accumulation.
+// TestIntegration_F9i_TransferRacesCheckoutGrace runs the race repeatedly (a breaking interleaving is rarely
+// the first), each round on a fresh site.
 func TestIntegration_F9i_TransferRacesCheckoutGrace(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -207,8 +171,7 @@ func TestIntegration_F9i_TransferRacesCheckoutGrace(t *testing.T) {
 		f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true,
 			systemGracePackage: true, bootstrapEmergency: true})
 		dest := destination(t, p, f)
-		// A live entitlement with a device authorized and an active session: the state a guest who is
-		// actually online is in, and the only state in which either operation has work to do.
+		// A live entitlement with an authorized device and active session: the only state with work to do.
 		window := f.boundary.Add(4 * time.Hour)
 		ent := seedEnt(t, p, f, &window, []txn{{state: "ACTIVE", at: f.boundary.Add(-time.Hour)}})
 		seedDeviceAuth(t, p, f, ent, i, f.boundary.Add(-time.Hour), nil, f.boundary.Add(-time.Hour), nil)
@@ -248,8 +211,7 @@ func TestIntegration_F9i_TransferRacesCheckoutGrace(t *testing.T) {
 		default:
 			bothFailed++
 		}
-		// A deadlock is never an acceptable outcome of this race: both operations lock the Stay first, so
-		// they serialize on it rather than forming a cycle.
+		// Both operations lock the Stay first, so they serialize; a deadlock is never acceptable.
 		for _, err := range []error{checkoutErr, transferErr} {
 			if err != nil && (strings.Contains(err.Error(), "deadlock") ||
 				strings.Contains(err.Error(), "40P01")) {
@@ -260,15 +222,12 @@ func TestIntegration_F9i_TransferRacesCheckoutGrace(t *testing.T) {
 
 	t.Logf("F9-i over %d rounds: transfer won %d, checkout won %d, both refused %d",
 		rounds, transferWins, checkoutWins, bothFailed)
-	// Both orders must actually occur across the rounds, or the "race" is deterministic and has been
-	// measuring one path twice. If this ever fails, the test is not exercising what it claims.
 	if transferWins == 0 && checkoutWins == 0 {
 		t.Fatalf("neither operation ever succeeded; the race never ran")
 	}
 }
 
-// The same race, one round, with the transfer started first — a crude but real way to bias the interleaving
-// so the OTHER order is exercised deliberately rather than left to the scheduler.
+// The same race with the transfer started first, to bias the interleaving.
 func TestIntegration_F9i_CheckoutArrivesMidTransfer(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -297,7 +256,7 @@ func TestIntegration_F9i_CheckoutArrivesMidTransfer(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			time.Sleep(2 * time.Millisecond) // let the transfer take the Stay lock first
+			time.Sleep(2 * time.Millisecond)
 			_, checkoutErr = NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay,
 				src)
 		}()
@@ -307,19 +266,9 @@ func TestIntegration_F9i_CheckoutArrivesMidTransfer(t *testing.T) {
 	}
 }
 
-// THE OTHER OUTCOME, made deterministic rather than hoped for.
-//
-// The unbiased race above is won by the transfer every time, and a 3ms head start does not change that: the
-// transfer takes both Stay locks in one statement and finishes, while checkout is still doing the reads that
-// precede its own lock. That is a real and correct outcome — checkout then finds the entitlement already
-// TERMINATED(TRANSFERRED), converts nothing, and commits a coherent CHECKED_OUT stay.
-//
-// But it means the CHECKOUT-WINS branch of assertCoherent was never reached, so its assertions were unproven.
-// Rather than tune a sleep until the scheduler cooperates — which would be a flaky test pretending to be a
-// deterministic one — this sequences the two explicitly: checkout is allowed to COMMIT, and the transfer then
-// runs against the state it left. The interleaving is different; the state that must be coherent is the same,
-// and it is the state a real front desk produces when the guest is checked out before anyone asks to move
-// them.
+// The races above are won by the transfer (it takes both Stay locks in one statement before checkout's own
+// lock), leaving the checkout-wins branch unreached. This sequences it deterministically: checkout commits,
+// then the transfer runs against that state.
 func TestIntegration_F9i_TransferAfterCheckoutCommitted(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -350,14 +299,11 @@ func TestIntegration_F9i_TransferAfterCheckoutCommitted(t *testing.T) {
 			GraceValidFor: 2 * time.Hour,
 		})
 		if transferErr == nil {
-			// A guest who has checked out has a GRACE entitlement, not the access they were transferred for.
-			// Moving that to another property would extend a courtesy window across a boundary nobody
-			// authorized, so the transfer must refuse rather than move it.
+			// Grace access must not move to another property, or a courtesy window would cross an unauthorized boundary.
 			t.Fatalf("a transfer succeeded after checkout committed; grace access must not be transferable")
 		}
 
 		s := observe(t, p, f, dest, ent)
-		// The checkout-wins shape, asserted directly rather than through the race's switch.
 		if s.staySrcStatus != "CHECKED_OUT" {
 			t.Fatalf("stay is %q after a committed checkout", s.staySrcStatus)
 		}

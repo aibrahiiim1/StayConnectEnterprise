@@ -1,8 +1,4 @@
-// portald — captive portal for StayConnect.
-//
-// Listens on :8380 (HTTP) and :8343 (HTTPS). nftables DNATs unauthenticated
-// guest HTTP/HTTPS traffic here. On POST /auth/voucher we ask scd (over its
-// Unix socket) to authorize the client; scd updates the nft set and the DB.
+// portald is the captive portal: unauthenticated guest HTTP/HTTPS lands here via nftables DNAT and sign-in is authorized through scd.
 package main
 
 import (
@@ -30,9 +26,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
-// The HTTPS listener's certificates are no longer configured here: scd installs one per portal hostname under
-// /etc/stayconnect/portal-tls and portald serves them by SNI (portal_https.go). PORTALD_CERT / PORTALD_KEY are
-// therefore gone -- a static certificate for a fixed name cannot follow a hostname Central assigns.
+// Portal HTTPS certificates come from scd per hostname (portal_https.go) and are served by SNI; there is no static certificate setting.
 type cfg struct {
 	HTTPAddr   string
 	HTTPSAddr  string
@@ -62,35 +56,27 @@ type handler struct {
 	tmplLand *template.Template
 	tmplSucc *template.Template
 	arpCache arpLookup
-	// pendingOTP holds each device's in-flight one-time code so the landing page can reopen on the code box
-	// after the captive browser was dismissed (otp_pending.go).
+	// pendingOTP holds each device's in-flight code so the landing page can reopen on the code box (otp_pending.go).
 	pendingOTP *pendingOTPStore
-	// arpNudge asks the kernel to resolve a neighbour the cache does not have yet (arp_resolve.go). A seam, so
-	// a test can drive resolution without a network.
+	// arpNudge is a seam so tests can drive resolution without a network.
 	arpNudge arpNudge
-	// arpSleep is the resolver's own wait, kept off the budget's clock so the budget still has exactly one pad.
+	// arpSleep is the resolver's own wait, off the budget's clock so the budget keeps exactly one pad.
 	arpSleep arpSleep
 
-	// Phase 2 DARK commerce bridge. commerceCfg gates whether the guest commerce routes are mounted, and
-	// commerceSessions -- which holds the trusted server-derived pins -- is NIL unless that same gate is on.
-	// Nil is therefore the honest signal that this surface does not exist here, and every reader of this
-	// field is expected to check it rather than assume a store is present.
+	// commerceSessions is nil unless commerceCfg mounts the commerce routes; nil means the surface does not exist here, and every reader must check it.
 	commerceCfg      iamv2.CommerceConfig
 	commerceSessions *commerceSessionStore
 
-	// designs caches the published portal design for a few seconds (see portal_design.go). Nil disables the
-	// cache, which is what the tests' literal handlers get.
+	// designs caches the published portal design briefly; nil disables it.
 	designs *designCache
 
-	// clock drives the Phase-3 guest response-time budget (pms_phase3_budget.go). Nil means the real clock;
-	// only tests set it, so they can assert the budget arithmetic instead of measuring a loaded CI runner.
+	// clock drives the Phase-3 response-time budget; nil is the real clock and only tests set it.
 	clock phase3Clock
 
-	// portalTLS is portald's copy of scd's portal HTTPS state (portal_https.go), refreshed every 15 seconds. Nil
-	// (the tests' literal handlers) means the HTTP fallback: the portal exactly as it was before HTTPS existed.
+	// portalTLS is portald's copy of scd's portal HTTPS state, refreshed every 15 s; nil means the HTTP fallback.
 	portalTLS *tlsStateHolder
 
-	// signIns bounds how fast one device may post to the sign-in routes (throttle.go). Nil disables it.
+	// signIns bounds how fast one device may post to the sign-in routes; nil disables it.
 	signIns *signInDamper
 }
 
@@ -127,30 +113,14 @@ func newHandler(c cfg) (*handler, error) {
 		portalTLS:   &tlsStateHolder{},
 		signIns:     newSignInDamper(),
 	}
-	// THE STORE EXISTS ONLY WHERE THERE IS SOMEWHERE FOR IT TO LEAD.
-	//
-	// It used to be built unconditionally, which quietly disabled every `commerceSessions == nil` guard in
-	// this package -- including the one in tryIAMv2Auth whose whole purpose is to tell a guest, when the
-	// Phase-2 portal surface is off, that packages are unavailable and to ask reception. That branch could
-	// never be reached, so a guest who signed in with a voucher was instead issued a commerce cookie and
-	// redirected to /packages, which calls scd routes that are deliberately absent while commerce is dark.
-	// They landed on an empty page and were told to choose another package.
-	//
-	// Constructing it behind the same gate that mounts the routes puts the two back in step: one flag
-	// decides whether the surface exists at all, and the nil guards become the honest refusals they were
-	// written to be. This enables nothing -- it makes the OFF state tell the truth.
+	// The commerce session store exists only behind the gate that mounts the routes, so the commerceSessions == nil guards (e.g. tryIAMv2Auth's "packages unavailable" refusal) stay reachable when the surface is off.
 	if commCfg.PortalOn() {
 		h.commerceSessions = newCommerceSessionStore()
 	}
 	return h, nil
 }
 
-// clientIP extracts the source address from the CONNECTION, and only from the connection.
-//
-// nftables DNAT preserves the original source address, so RemoteAddr is the real peer on this path. Nothing
-// here consults X-Forwarded-For, X-Real-IP or True-Client-IP, and no middleware may rewrite RemoteAddr from
-// them either -- see the note on the middleware stack in routes(). This address becomes a device and then an
-// entitlement, so anything that can influence it can influence whose devices a request operates on.
+// clientIP uses the connection only: nftables DNAT preserves the source address, and no middleware may rewrite RemoteAddr from forwarding headers (see routes()), because this address becomes a device and then an entitlement.
 func clientIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -162,11 +132,7 @@ func clientIP(r *http.Request) net.IP {
 // portalAssetDir is written by Hotel Admin and served here. Both run as the same service user.
 const portalAssetDir = "/opt/stayconnect/portal-assets"
 
-// neuteredFS serves files and refuses to enumerate directories.
-//
-// http.FileServer lists a directory when it has no index, which would publish every image the hotel has ever
-// uploaded -- including ones it replaced and would rather nobody saw -- to any device on the guest network
-// before sign-in. Files only.
+// neuteredFS serves files only: http.FileServer would list directories and publish every uploaded image, including replaced ones, to the guest network before sign-in.
 type neuteredFS struct{ fs http.FileSystem }
 
 func (n neuteredFS) Open(name string) (http.File, error) {
@@ -190,31 +156,19 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	nonce := setPortalCSP(w)
-	// THE DEVICE'S OWN ADDRESSES, from the connection and the ARP table -- never from a header a guest can
-	// set. Both are legitimately available to a captive portal (the portal must already know them to
-	// authorise the device at all) and both are shown only in the information panel the guest opens
-	// themselves. A guest who cannot tell reception their MAC address cannot be helped by reception.
+	// The device's own addresses come from the connection and ARP table, never a header, and are shown only in the information panel the guest opens.
 	var ipStr, macStr string
 	if ip := clientIP(r); ip != nil {
 		ipStr = ip.String()
-		// Guarded: the ARP lookup is injected, and a portal that panics on the landing page because a
-		// lookup was not wired is a worse failure than one that simply cannot name the MAC.
-		//
-		// DELIBERATELY THE PLAIN CACHE READ, not the resolving lookup every sign-in path now uses. This is the
-		// support line on the landing page -- it names the device so a guest can read it out to reception -- and
-		// the landing page is served to every captive-portal probe on the network, every few seconds per device.
-		// Waiting up to the resolve window there would add that latency to the most-requested page on the
-		// appliance for no decision: nothing is refused here, and a missing MAC only means the line is omitted.
-		// The paths where a cold cache COSTS the guest something are the ones that resolve.
+		// Guarded: an unwired ARP lookup must not panic the landing page.
+		// Deliberately the plain cache read, not the resolving lookup: every captive probe hits this page every few seconds, nothing is refused here, and a missing MAC only omits the support line.
 		if h.arpCache != nil {
 			if mac, ok := h.arpCache(ip); ok {
 				macStr = mac.String()
 			}
 		}
 	}
-	// The published design, so the first paint is already the hotel's layout, name and colours, in the
-	// guest's language (portal_page.go). The message the handler composed is shown in that language; the
-	// handler's choice of message is untouched.
+	// The published design is applied at first paint in the guest's language; the handler's message choice is untouched.
 	d, ok := h.guestDesign(r.Context())
 	if !ok || d == nil {
 		d = map[string]any{}
@@ -228,15 +182,8 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 }
 
 func (h *handler) index(w http.ResponseWriter, r *http.Request) {
-	// A CLIENT WHO HAS SIGNED IN AND NOT YET CHOSEN IS STILL CHOOSING. While their commerce session is valid
-	// (10 minutes from sign-in) a reload of the landing page -- a refused card payment, a tab reopened, the
-	// captive browser popped again -- continues at package selection instead of asking for another code.
-	// Captive-portal probes carry no cookie and are unaffected.
-	//
-	// Two journeys are NOT continued at package selection: one whose card payment is in progress goes back to the
-	// page that asks where that payment stands (audit P-25: it used to be offered the package list -- and a second
-	// purchase -- for ten minutes after paying), and an email account held until its address is verified is not
-	// sent round again to a package it cannot use (audit P-13; the hold page offers Sign out).
+	// A client who has signed in but not chosen continues at package selection while the commerce session is valid (10 minutes); captive probes carry no cookie.
+	// Not continued there: a card payment in progress goes to the page asking where it stands (no second purchase), and an email account held for verification is not sent to a package it cannot use.
 	if r.Method == http.MethodGet {
 		if sess, ok := h.resolveCommerceSession(r); ok && !sess.acquired {
 			switch {
@@ -267,9 +214,7 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, "Unable to detect your device address.")
 		return
 	}
-	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
-	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
-	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	// The MAC comes from the kernel neighbour table and the kernel is asked to resolve it (arp_resolve.go).
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		slog.Warn("device could not be placed on a guest network", "ip", ip.String())
@@ -301,7 +246,7 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(payload, &e)
 		switch {
 		case e.Error == "TOO_MANY_ATTEMPTS" || resp.StatusCode == http.StatusTooManyRequests:
-			// The durable sign-in throttle refused the attempt (audit P-5): the client waits, the code may be fine.
+			// The durable sign-in throttle refused the attempt: the client waits, the code may be fine.
 			msg = msgTooManyAttempts
 		case e.Error == "MAX_DEVICES_REACHED":
 			msg = msgVoucherDevices
@@ -312,13 +257,11 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 		case resp.StatusCode >= 500:
 			msg = "Service unavailable. Please try again."
 		}
-		// Any other refusal is the invalid-voucher sentence. scd's code is never shown or echoed (audit P-31).
+		// Any other refusal is the invalid-voucher sentence; scd's code is never shown or echoed.
 		h.landing(w, r, msg)
 		return
 	}
-	// IAM-v2 replies carry auth_context/device/guest_network and NO session: the guest has authenticated,
-	// not connected. tryIAMv2Auth issues the trusted server-side commerce session and sends them to package
-	// selection. A legacy reply falls through to the unchanged path below.
+	// IAM-v2 replies carry no session: the guest has authenticated, not connected. tryIAMv2Auth issues the commerce session and sends them to package selection; a legacy reply falls through.
 	if h.tryIAMv2Auth(w, r, payload) {
 		return
 	}
@@ -344,18 +287,14 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 	h.credentialsSignIn(w, r, username, password, false)
 }
 
-// credentialsSignIn is the account sign-in both forms share: the Personal account form (username) and the Email
-// panel (the address as the username, emailForm). scd decides which kind of account it is and whether that
-// method is on here; only the wording of a refusal differs between the two forms.
+// credentialsSignIn is the account sign-in both forms share; scd decides the account kind and whether the method is on, and only a refusal's wording differs.
 func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, username, password string, emailForm bool) {
 	ip := clientIP(r)
 	if ip == nil {
 		h.landing(w, r, "Unable to detect your device address.")
 		return
 	}
-	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
-	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
-	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	// The MAC comes from the kernel neighbour table and the kernel is asked to resolve it (arp_resolve.go).
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		h.landing(w, r, "Your device isn't connected to this Wi-Fi network.")
@@ -397,9 +336,7 @@ func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, user
 		h.landing(w, r, msg)
 		return
 	}
-	// AN ACCOUNT'S REPLY CARRIES ITS TOKEN AND STATE (account_handlers.go). The token is kept for Resend and the
-	// reminder; a suspended account authenticated but would be refused at activation, so it is shown the
-	// verification page instead of packages.
+	// An account reply carries its token and state: the token serves Resend and the reminder, and a suspended account is shown the verification page instead of packages.
 	email := ""
 	if emailForm {
 		email = username
@@ -408,9 +345,7 @@ func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, user
 	if done {
 		return
 	}
-	// IAM-v2 replies carry auth_context/device/guest_network and NO session: the guest has authenticated,
-	// not connected. tryIAMv2Auth issues the trusted server-side commerce session and sends them to package
-	// selection. A legacy reply falls through to the unchanged path below.
+	// IAM-v2 replies carry no session: the guest has authenticated, not connected. tryIAMv2Auth issues the commerce session and sends them to package selection; a legacy reply falls through.
 	if h.tryIAMv2Auth(w, r, payload) {
 		return
 	}
@@ -423,25 +358,19 @@ func (h *handler) credentialsSignIn(w http.ResponseWriter, r *http.Request, user
 }
 
 func (h *handler) success(w http.ResponseWriter, r *http.Request) {
-	// WHAT THIS PAGE SAYS IS LOOKED UP, NOT READ FROM ITS ADDRESS (audit P-6, P-32). It used to print the duration
-	// in ?t= and the session in ?s=, which every IAM-v2 sign-in left without t -- so it always said "No time
-	// limit" -- and which anyone could edit. The device is the connection's; scd says whether it is online, which
-	// session it holds and when that access ends.
+	// This page is looked up from scd for the connection's device, not read from the address, where ?t= and ?s= were editable and often missing.
 	st, known := h.deviceStatus(r.Context(), clientIP(r))
 	if known && !st.Active {
-		// Not online: the sign-in page is where this device belongs.
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	nonce := setPortalCSP(w)
-	// Branded and in the guest's language like the sign-in page.
 	p := h.newGuestPage(r, nonce, "tl.", "dev.", "unit.")
 	v := successView{
 		guestPage: p,
-		// An email account not verified yet (and not suspended): a small reminder with its deadline and Resend.
-		Reminder: h.onlineReminderFor(r, p.T),
+		Reminder:  h.onlineReminderFor(r, p.T),
 	}
 	if known {
 		v.SessionID = st.SessionID
@@ -455,10 +384,7 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 			v.Unlimited = true
 		}
 	}
-	// THE PACKAGE PANEL IS GONE FROM THIS PAGE (audit P-16). Every device that reaches it is online, its sign-in
-	// already spent: the panel offered purchases to a client who had just bought, labelled every quote "Free" and
-	// confirmed without a method, so a priced package answered "offer expired". Buying more is a decision for a
-	// later delivery, not something this page should pretend to do.
+	// No package panel here: every device reaching this page is online with its sign-in spent, so a purchase offer was wrong; buying more is a later decision.
 	if sess, ok := h.resolveCommerceSession(r); ok {
 		v.ReturnCode = sess.returnCode
 	}
@@ -468,8 +394,7 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if ip == nil {
-		// Disconnect is a plain form post, so the browser lands on whatever this answers. Same status code; a
-		// page in words for a browser, the old plain answer for anything else.
+		// Disconnect is a plain form post: a browser gets a page in words, anything else the old plain answer.
 		if wantsHTML(r) {
 			h.renderGuestNotice(w, r, 400, "online.disconnect", "err.device.detect", "/", "errpage.back")
 			return
@@ -477,7 +402,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad ip", 400)
 		return
 	}
-	// THIS DEVICE'S OWN PAGE ASKED (leave.go, audit P-8). Without the token nothing is ended: the client is asked.
+	// Without this device's leave token (leave.go) nothing is ended: the client is asked.
 	_ = r.ParseForm()
 	if !validLeaveToken(ip, r.PostFormValue("leave")) {
 		if wantsHTML(r) || r.Header.Get("Accept") == "" {
@@ -494,7 +419,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	if resp, err := h.scd.Do(req); err == nil {
 		resp.Body.Close()
 	}
-	// Signing out also forgets the device (contract §2.3): the next visit asks for a code again.
+	// Signing out also forgets the device: the next visit asks for a code.
 	if token := h.resumeToken(r); token != "" {
 		rb, _ := json.Marshal(map[string]string{"resume_token": token})
 		rq, _ := http.NewRequestWithContext(r.Context(), "POST", "http://unix/v1/sessions/resume-revoke", bytes.NewReader(rb))
@@ -508,20 +433,12 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// endPortalSignIn forgets the portal's own record that this browser signed in: the package-selection session
-// (sc_commerce) and the account token (og_account).
-//
-// WITHOUT IT SIGN-OUT LEFT THE SIGN-IN BEHIND. The landing page continues an unfinished journey at package
-// selection while the commerce session is valid (index, ten minutes), so after a sign-in that ended without a
-// package -- refused at the device limit, a suspended account, a client who signed out from the package page --
-// every visit to the portal went straight back to the packages of the account just signed out of, and the
-// sign-in page could not be reached on that device until the session expired.
+// endPortalSignIn forgets the commerce session (sc_commerce) and account token (og_account); otherwise, with the commerce session still valid, every visit would return to the signed-out account's packages and the sign-in page would be unreachable on that device.
 func (h *handler) endPortalSignIn(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(commerceCookie); err == nil && c.Value != "" && h.commerceSessions != nil {
 		h.commerceSessions.delete(c.Value)
 	}
-	// og_resume too (audit P-12, contract §2.3): an open-selection client who signs out is forgotten on this
-	// device like every other client; the recovery code still brings them back.
+	// og_resume too: an open-selection client who signs out is forgotten like any other; the recovery code still brings them back.
 	for _, name := range []string{commerceCookie, accountCookie, resumeCookie} {
 		if _, err := r.Cookie(name); err == nil {
 			clearPortalCookie(w, r, name)
@@ -529,12 +446,7 @@ func (h *handler) endPortalSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// status answers two different callers from the same scd lookup.
-//
-// A SCRIPT (the online page's own fetch, or any client that does not prefer HTML) gets exactly what it always
-// got: scd's JSON, copied through, and the same plain errors. A BROWSER NAVIGATING HERE -- the guest who taps
-// "Status" -- gets a page: branded, in their language, saying in words what scd said, with the online page's
-// own actions. The lookup, and what it is keyed on (the connection's address), are the same for both.
+// status answers a script (the online page's fetch) with scd's JSON and plain errors unchanged, and a browser navigating here with a branded page; the lookup is keyed on the connection's address for both.
 func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 	page := wantsHTML(r)
 	ip := clientIP(r)
@@ -569,19 +481,15 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !st.Active {
-		// Not online: the sign-in page is where this device belongs, and it says so in the guest's language.
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 	h.renderStatus(w, r, st)
 }
 
-// Well-known captive-detect probes.
-// Unauth: respond with content that triggers the OS's captive-portal UI.
-// Auth (source IP is in nft set; DNAT wouldn't reach us) → N/A here.
+// Well-known captive-detect probes: unauthenticated devices get content that triggers the OS captive-portal UI.
 func (h *handler) appleProbe(w http.ResponseWriter, r *http.Request) {
-	// iOS/macOS expects exactly "Success" HTML to consider the network open.
-	// We deliberately DON'T serve that — we want the captive UI to appear.
+	// We deliberately do not serve the iOS/macOS "Success" page, so the captive UI appears.
 	h.landing(w, r, "")
 }
 func (h *handler) googleProbe(w http.ResponseWriter, r *http.Request) {
@@ -591,9 +499,7 @@ func (h *handler) windowsProbe(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, h.probeTarget(r), http.StatusFound)
 }
 
-// probeTarget is where an Android or Windows captive probe is sent on the HTTP fallback (audit P-21): an address
-// the device can certainly reach (fallbackOrigin). PORTALD_FQDN is used only when no address is known; its
-// default .local name is resolved by multicast DNS on Apple devices, so it is the last choice, not the first.
+// probeTarget is an address the device can certainly reach (fallbackOrigin); PORTALD_FQDN is last because its .local name resolves by mDNS on Apple devices.
 func (h *handler) probeTarget(r *http.Request) string {
 	if o := h.fallbackOrigin(r); o != "" {
 		return o + "/"
@@ -604,42 +510,21 @@ func (h *handler) probeTarget(r *http.Request) string {
 func (h *handler) routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	// middleware.RealIP IS DELIBERATELY ABSENT, and removing it was a security fix rather than a cleanup.
-	//
-	// RealIP overwrites r.RemoteAddr from X-Forwarded-For / X-Real-IP / True-Client-IP. On a fronted service
-	// that is correct, because a trusted proxy sets those headers and strips any the client sent. THIS
-	// SERVICE HAS NO SUCH PROXY: guests reach the portal directly through nftables DNAT, which preserves the
-	// original source address, so every one of those headers arrives entirely under the guest's control.
-	//
-	// With RealIP installed, clientIP() returned whatever the guest typed into a header. That address is then
-	// resolved to a device through the ARP/neighbour table and from the device to an entitlement -- so a
-	// header could redirect the derived SUBJECT. A guest could list, and attempt to release, another guest's
-	// devices by naming their IP. The Phase-6 surface takes no subject parameter precisely so that identity
-	// comes from the connection; a rewritten RemoteAddr silently gave the parameter back.
-	//
-	// If a real reverse proxy is ever introduced, the fix is not to re-add this line: it is to trust exactly
-	// that proxy's address and strip client-supplied forwarding headers at the edge.
-	// QUERY STRINGS ARE NEVER LOGGED. The tap-to-connect link carries the one-time code in its query
-	// (/connect?c=&k=), and an email account's verify and reset links carry their single-use token
-	// (/account/verify?t=, /account/reset?t=). The request log is the journal: the logged line keeps the path
-	// and drops the query.
-	// Handlers read r.URL, which is untouched.
+	// middleware.RealIP is deliberately absent: it rewrites RemoteAddr from X-Forwarded-For/X-Real-IP, but guests reach the portal directly through DNAT, so those headers are guest-controlled and would let a guest name another guest's IP and act on their devices.
+	// If a reverse proxy is ever added, trust exactly that proxy's address and strip client-supplied forwarding headers at the edge instead of re-adding RealIP.
+	// Query strings are never logged: tap-to-connect and email links carry single-use codes and tokens in the query. Handlers read r.URL, which is untouched.
 	r.Use(redactLoggedQuery)
-	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
 	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
-	// The whole of a package acquisition fits (quote 5 s + confirm 5 s + activation 12 s), and a request that
-	// still runs out is answered with a page in words, not a blank 504 (timeout.go, audit P-20).
+	// The timeout fits a whole acquisition (quote 5 s + confirm 5 s + activation 12 s); a request that still runs out gets a page in words, not a blank 504 (timeout.go).
 	r.Use(h.portalTimeout(portalRequestTimeout))
-	// Text responses are gzipped for a client that accepts it (portal_gzip.go); images pass through untouched.
+	// Text responses are gzipped for clients that accept it; images pass through.
 	r.Use(gzipResponses)
 
 	r.Get("/", h.index)
-	// Every route that checks a credential or sends a message passes the flood damper first (throttle.go).
+	// Routes that check a credential or send a message pass the flood damper first (throttle.go).
 	r.Post("/auth/voucher", h.damped(h.authVoucher))
 	r.Post("/auth/credentials", h.damped(h.authCredentials))
-	// Email accounts (account_handlers.go): create, sign in, forgot password; the verification page, Resend and
-	// the extra hour; and the two email links, whose GET only shows a button.
 	r.Post("/auth/account/register", h.damped(h.accountRegister))
 	r.Post("/auth/account/signin", h.damped(h.accountSignIn))
 	r.Post("/auth/account/forgot", h.damped(h.accountForgot))
@@ -650,11 +535,9 @@ func (h *handler) routes() http.Handler {
 	r.Post("/account/verify", h.accountVerify)
 	r.Get("/account/reset", h.accountResetPage)
 	r.Post("/account/reset", h.accountReset)
-	// The remembered device: Connect, and Not-you (client_resume.go).
 	r.Post("/auth/resume", h.damped(h.authResume))
 	r.Post("/auth/resume/forget", h.authResumeForget)
 	r.Post("/auth/otp/request", h.damped(h.authOTPRequest))
-	// The pending code survives the captive browser (otp_pending.go): resend, forget, and the message's link.
 	r.Post("/auth/otp/resend", h.damped(h.authOTPResend))
 	r.Post("/auth/otp/forget", h.authOTPForget)
 	r.Get("/connect", h.connectPage)
@@ -662,61 +545,40 @@ func (h *handler) routes() http.Handler {
 	r.Post("/auth/otp/verify", h.damped(h.authOTPVerify))
 	r.Get("/auth/social/start", h.socialStart)
 	r.Get("/auth/social/callback", h.socialCallback)
-	r.Post("/auth/social/callback", h.socialCallback) // Sign in with Apple: response_mode=form_post
-	// The development OAuth stub exists only in a `-tags devlicense` build (stub_oauth_dev.go); a production
-	// binary has no such route (HTTPS contract section 11, audit P-2).
+	r.Post("/auth/social/callback", h.socialCallback)
+	// The development OAuth stub exists only in a -tags devlicense build; a production binary has no such route.
 	mountStubOAuth(r, h)
-	// The legacy /auth/pms/verify hop is REMOVED; /auth/pms/phase3 below is the current PMS guest flow.
-	// Phase 3 (DARK): the Stay-resolution guest flow. It is mounted unconditionally because it is a pure
-	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
-	// non-success a wrong room gets. A guest can therefore never tell whether the feature exists here.
+	// Phase 3 is mounted unconditionally as a pure proxy: while dark scd answers with the same uniform non-success a wrong room gets, so a guest cannot tell whether the feature exists.
 	r.Post("/auth/pms/phase3", h.authPMSPhase3)
-	// Why the device's last access ended, if it ended. Read-only, and answers "nothing to say" for every
-	// device that has not just run out — which is almost all of them.
+	// Read-only; answers "nothing to say" for every device that has not just run out.
 	r.Post("/access/status", h.accessStatus)
-	// Phase 5 (DARK): the post-stay flow, mounted unconditionally for the same reason as Phase 3 above --
-	// these are pure proxies, scd does not mount its Phase-5 endpoints while dark, and the hop failing
-	// produces the SAME uniform non-success a wrong PIN gets. A guest can therefore never tell whether
-	// post-stay access exists on this appliance.
+	// Phase 5 is mounted unconditionally for the same reason: the hop failing gives the same uniform non-success a wrong PIN gets.
 	r.Post("/poststay/issue", h.postStayIssue)
 	r.Post("/auth/post-stay-pin", h.postStayAuth)
 
-	// Phase 6 (DARK): guest device self-service, mounted unconditionally for the same reason as Phase 3 and
-	// Phase 5 above. Whether the capability EXISTS is decided twice behind this layer -- scd does not mount
-	// its endpoints while the deployment gate is off, and refuses every request while the per-appliance
-	// setting is off -- so either way the guest gets the same uniform answer and the portal never reveals
-	// whether device management exists on this appliance.
+	// Phase 6 likewise: whether device management exists is decided twice behind this layer (deployment gate, per-appliance setting), and the guest gets the same uniform answer either way.
 	r.Post("/devices/list", h.deviceList)
 	r.Post("/devices/release", h.deviceRelease)
-	// A package's devices are all in use: choose the one this device replaces (device_pages.go, 0118).
 	r.Get("/devices/replace", h.replacePage)
 	r.Post("/devices/replace", h.replaceDevice)
 	r.Get("/api/auth-methods", h.authMethods)
 	r.Get("/api/branding", h.branding)
-	// The shipped wording, so Hotel Admin can show an operator what a guest actually reads in Italian rather
-	// than an empty box with the English behind it. Unauthenticated like the rest of /api on this service:
-	// it is the same text already inside the page every device on the guest network is served.
+	// The shipped wording is unauthenticated like the rest of /api here: it is the same text already in every served page.
 	r.Get("/api/languages", h.languages)
 
-	// THE HOTEL'S OWN IMAGES, from the appliance. A captive portal is reached by a device with no internet,
-	// so a logo hosted anywhere else is a logo that does not load exactly when it matters. Served read-only
-	// from a directory only Hotel Admin writes, with the content type decided at upload by inspecting the
-	// bytes -- never guessed here from an extension.
+	// The hotel's images are served from the appliance because a captive device has no internet; read-only, from a directory only Hotel Admin writes, with the content type decided at upload from the bytes, never from an extension.
 	r.Handle("/assets/*", http.StripPrefix("/assets/",
 		http.FileServer(neuteredFS{http.Dir(portalAssetDir)})))
 
-	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While
-	// dark they are absent (404) and no scd commerce call is ever made.
+	// Commerce bridge routes are mounted only when the portal surface is ON; otherwise 404 and no scd commerce call.
 	if h.commerceCfg.PortalOn() {
 		r.Get("/api/commerce/packages", h.commercePackages)
 		r.Post("/api/commerce/quote", h.commerceQuote)
 		r.Post("/api/commerce/confirm", h.commerceConfirm)
 	}
 
-	// Package selection: reachable only with a valid commerce session, which only IAM-v2 auth issues.
 	r.Get("/packages", h.packagesPage)
 	r.Post("/packages/acquire", h.acquirePackage)
-	// Open package selection and the card payment return (acquisition.go).
 	r.Post("/auth/open", h.damped(h.authOpen))
 	r.Get("/pay/return", h.payReturn)
 	r.Get("/api/pay/status", h.payStatusAPI)
@@ -724,17 +586,15 @@ func (h *handler) routes() http.Handler {
 	r.Post("/logout", h.logout)
 	r.Get("/status", h.status)
 
-	// Captive detect probes (OS-specific well-known paths).
 	r.Get("/hotspot-detect.html", h.appleProbe)
 	r.Get("/library/test/success.html", h.appleProbe)
 	r.Get("/generate_204", h.googleProbe)
 	r.Get("/gen_204", h.googleProbe)
 	r.Get("/connecttest.txt", h.windowsProbe)
 	r.Get("/ncsi.txt", h.windowsProbe)
-	// RFC 8908 captive portal API (portal_https.go). Answers over TLS only; over HTTP it is a 404.
+	// RFC 8908 captive portal API: TLS only, 404 over HTTP.
 	r.Get("/captive-portal/api", h.captivePortalAPI)
 
-	// Any other path: show the portal.
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) { h.index(w, req) })
 	return r
 }
@@ -743,7 +603,6 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	// Adaptive crash-loop backoff (see internal/startupbackoff).
 	startupbackoff.Guard("portald")
 
 	c := loadCfg()
@@ -758,11 +617,8 @@ func main() {
 
 	mux := h.routes()
 
-	// The portal's HTTPS state, from scd, at startup and every 15 seconds (portal_https.go).
 	go h.pollTLSState(rootCtx)
 
-	// HTTP: while HTTPS is active every portal page is sent to the canonical HTTPS origin; otherwise httpFront is
-	// transparent. TLS: certificates by SNI, the canonical-hostname rule, and the TLS security headers.
 	httpSrv := &http.Server{Addr: c.HTTPAddr, Handler: h.httpFront(mux), ReadHeaderTimeout: 5 * time.Second}
 	httpsSrv := &http.Server{
 		Addr: c.HTTPSAddr, Handler: h.tlsFront(mux), ReadHeaderTimeout: 5 * time.Second,
@@ -776,9 +632,7 @@ func main() {
 		}
 	}()
 	go func() {
-		// ALWAYS LISTENING. Until scd installs the first certificate every handshake fails, which is harmless:
-		// nothing sends a guest here before scd reports HTTPS active, and a certificate installed later is
-		// picked up by SNI on the next handshake without a restart.
+		// Always listening: until scd installs the first certificate handshakes fail harmlessly, and a later certificate is picked up by SNI without a restart.
 		slog.Info("portald HTTPS", "addr", c.HTTPSAddr)
 		if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("https serve", "err", err)
@@ -804,8 +658,7 @@ func humanDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", m)
 }
 
-// redactLoggedQuery strips the query from r.RequestURI -- the field the request logger prints -- so a code in a
-// link never reaches the journal. Routing and handlers use r.URL and are unaffected.
+// redactLoggedQuery strips the query from r.RequestURI so a code in a link never reaches the journal.
 func redactLoggedQuery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if i := strings.IndexByte(r.RequestURI, '?'); i >= 0 {

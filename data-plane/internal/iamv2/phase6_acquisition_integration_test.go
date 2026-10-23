@@ -8,21 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// THE PHASE-2 FREE-COMMERCE ACQUISITION PATH, GATED — proven against a real database, through CreateQuote
-// and ConfirmFreePurchase rather than through the rule they call.
-//
-// This path shares no code with the PMS/stay grant. That is exactly why it needs its own proof: a rule that
-// only one of two entry points consults is not an invariant, it is a coincidence.
-//
-// What has to be true, and each is a test below:
-//
-//   * a pre-existing immutable AGGREGATE_ONLINE_TIME revision is STORED AND UNCHANGED while the capability
-//     is off -- gating acquisition is not a migration, and must not rewrite history;
-//   * no new quote may be created for it while off;
-//   * a quote created while ON cannot be confirmed after the capability goes off -- and the refusal consumes
-//     nothing, so the guest's auth context and quote are exactly as they were;
-//   * with the capability ON the same immutable revision is acquired normally;
-//   * VALIDITY_WINDOW acquisition is untouched in every configuration.
+// The free-commerce path shares no code with the PMS/stay grant, so it gets its own proof, through CreateQuote
+// and ConfirmFreePurchase against a real database.
 
 func p6Engine(t *testing.T, db *pgxpool.Pool, aggregate bool) *CommerceEngine {
 	t.Helper()
@@ -45,7 +32,7 @@ func aggregateSeed(t *testing.T, db *pgxpool.Pool) seed {
 	})
 }
 
-// counts returns the durable state a refusal must leave completely alone.
+// counts returns the durable state a refusal must leave untouched.
 func counts(t *testing.T, db *pgxpool.Pool, s seed) (quotes, purchases, entitlements int, ctxConsumed bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -60,7 +47,6 @@ func counts(t *testing.T, db *pgxpool.Pool, s seed) (quotes, purchases, entitlem
 	return
 }
 
-// planMode reads the immutable revision back, to prove the gate changed nothing about it.
 func planMode(t *testing.T, db *pgxpool.Pool, s seed) (string, *int64) {
 	t.Helper()
 	var mode string
@@ -73,7 +59,6 @@ func planMode(t *testing.T, db *pgxpool.Pool, s seed) (string, *int64) {
 	return mode, quota
 }
 
-// GATE OFF: no quote, and nothing anywhere is touched.
 func TestPhase6AggregateQuoteIsRefusedWhileTheCapabilityIsOff(t *testing.T) {
 	db := p2DB(t)
 	s := aggregateSeed(t, db)
@@ -99,7 +84,7 @@ func TestPhase6AggregateQuoteIsRefusedWhileTheCapabilityIsOff(t *testing.T) {
 		t.Fatal("a refused quote consumed the guest's auth context")
 	}
 
-	// THE REVISION IS UNCHANGED. Gating acquisition is not a migration.
+	// Gating acquisition must not rewrite the immutable revision.
 	after, quota := planMode(t, db, s)
 	if after != before || after != TimeModeAggregateOnlineTime {
 		t.Fatalf("the immutable revision now reads %q (was %q)", after, before)
@@ -109,9 +94,8 @@ func TestPhase6AggregateQuoteIsRefusedWhileTheCapabilityIsOff(t *testing.T) {
 	}
 }
 
-// A quote minted while the capability was ON must not be confirmable after it goes off -- and the refusal
-// must consume nothing, or a guest loses their auth context to a feature that was switched off underneath
-// them.
+// A quote minted while the capability was ON must not confirm after it goes off, and the refusal must consume
+// nothing.
 func TestPhase6AggregateConfirmIsRefusedAfterTheCapabilityGoesOff(t *testing.T) {
 	db := p2DB(t)
 	s := aggregateSeed(t, db)
@@ -134,8 +118,7 @@ func TestPhase6AggregateConfirmIsRefusedAfterTheCapabilityGoesOff(t *testing.T) 
 		t.Fatalf("the refusal reason is %q", pr.Reason)
 	}
 
-	// NOTHING WAS CONSUMED. The quote is still usable and the auth context is intact, so turning the
-	// capability back on lets the same guest continue rather than start again.
+	// The quote and auth context stay usable, so re-enabling the capability lets the same guest continue.
 	var quoteConsumed, ctxConsumed bool
 	var purchases, ents int
 	if err := db.QueryRow(ctx, `SELECT
@@ -157,7 +140,6 @@ func TestPhase6AggregateConfirmIsRefusedAfterTheCapabilityGoesOff(t *testing.T) 
 	}
 }
 
-// GATE ON: the same immutable revision is acquired normally, and the entitlement carries its mode.
 func TestPhase6AggregateIsAcquirableWhileTheCapabilityIsOn(t *testing.T) {
 	db := p2DB(t)
 	s := aggregateSeed(t, db)
@@ -184,12 +166,11 @@ func TestPhase6AggregateIsAcquirableWhileTheCapabilityIsOn(t *testing.T) {
 	}
 }
 
-// VALIDITY_WINDOW IS UNTOUCHED, whichever way the Phase-6 capability is set. This is the regression that
-// matters most: the gate must be invisible to everything that existed before it.
+// The gate must be invisible to VALIDITY_WINDOW acquisition whichever way the capability is set.
 func TestPhase6GateLeavesValidityWindowAcquisitionUnchanged(t *testing.T) {
 	for _, capable := range []bool{false, true} {
 		db := p2DB(t)
-		s := seedFreeCommerce(t, db, nil) // the default fixture is VALIDITY_WINDOW
+		s := seedFreeCommerce(t, db, nil)
 		ctx := context.Background()
 		e := p6Engine(t, db, capable)
 

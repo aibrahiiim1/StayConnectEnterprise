@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AUDIT_CATEGORIES, auditWords } from "@/lib/audit-words";
 
-// GDPR plan F8: the reads of client data, and the export and erasure beside them, read as sentences under one
-// "Client data" filter in Activity.
 describe("Activity wording for client data", () => {
   it("files every guest_data action under Client data", () => {
     expect(AUDIT_CATEGORIES).toContain("Client data");

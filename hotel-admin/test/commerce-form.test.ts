@@ -42,7 +42,6 @@ describe("form-mapping — loading keeps what the form does not edit (audit O-15
   it("carries package_type, plan_overrides, renewable and max_purchases_per_stay exactly as loaded", () => {
     expect(revisionCarryOf({ package_type: "STAY_BUNDLE", plan_overrides: null, renewable: false, max_purchases_per_stay: 1 }))
       .toEqual({ package_type: "STAY_BUNDLE", plan_overrides: null, renewable: false, max_purchases_per_stay: 1 });
-    // A field the reader did not return is left out: the server carries it.
     expect(revisionCarryOf({})).toEqual({});
   });
   it("reads today's terms the way the form will send them", () => {
@@ -52,10 +51,6 @@ describe("form-mapping — loading keeps what the form does not edit (audit O-15
 });
 
 describe("supported / forbidden rule types", () => {
-  // THE PMS DIMENSIONS ARE NOW OFFERED, and that is a product decision rather than a relaxation. They were
-  // withheld while the engine recognised them but could not evaluate them, because a control that silently
-  // does nothing is worse than an absent one. The engine evaluates every one of them against server-pinned
-  // Stay evidence and refuses when that evidence is missing, so the reason for withholding them has gone.
   it("offers the non-PMS types, the audience, AND the six approved stay dimensions", () => {
     expect([...SUPPORTED_RULE_TYPES].sort()).toEqual(
       [
@@ -65,8 +60,6 @@ describe("supported / forbidden rule types", () => {
     );
   });
   it("never lists a rule type the engine cannot evaluate", () => {
-    // What stays forbidden is what has no evidence behind it: a package carrying one of these would be
-    // ineligible for every guest, permanently, on an immutable revision.
     for (const bad of FORBIDDEN_RULE_TYPES) {
       expect(isSupportedRuleType(bad)).toBe(false);
       expect((SUPPORTED_RULE_TYPES as readonly string[]).includes(bad)).toBe(false);
@@ -86,8 +79,6 @@ describe("serializeRule — only supported types", () => {
     expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior" }))
       .toEqual({ type: "PRIOR_PURCHASE", value: { forbids_prior: true } });
   });
-  // THE FREE ALLOWANCE (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §5): a window and a device switch, sent
-  // only when set -- and an explicit false IS set, because the server's default for a free package is true.
   it("PRIOR_PURCHASE carries the window and the device switch, and only on forbids_prior", () => {
     expect(serializeRule({ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24", also_by_device: true }))
       .toEqual({ type: "PRIOR_PURCHASE", value: { forbids_prior: true, within_hours: 24, also_by_device: true } });
@@ -180,7 +171,6 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     expect(buildPublishPayload({ ...base, code: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, service_plan_revision_id: "" }).error).toBeTruthy();
     expect(buildPublishPayload({ ...base, tiers: [] }).error).toBeTruthy();
-    // Speed steps were never applied (audit O-5): more than one step, or a step with speeds, is refused.
     expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: 20 }] }).error).toBe(SPEED_STEPS_REFUSAL);
     expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: 5000 }] }).error).toBe(SPEED_STEPS_REFUSAL);
     expect(buildPublishPayload({ ...base, tiers: [{ order: 10, down_kbps: "" }] }).error).toBeUndefined();
@@ -188,7 +178,6 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     expect(buildPublishPayload({ ...base, visible_from: "2026-08-02T00:00", visible_until: "2026-08-01T00:00" }).error).toMatch(/before/);
   });
 
-  // AUDIT O-9: the free-access limit and "requires an earlier purchase" together offer the package to nobody.
   it("refuses the free-access limit together with a requires-prior condition, in a sentence", () => {
     const res = buildPublishPayload({ ...base, rules: [
       { type: "PRIOR_PURCHASE", mode: "forbids_prior" },
@@ -200,8 +189,6 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     expect(validateRuleSet([{ type: "PRIOR_PURCHASE", mode: "forbids_prior", within_hours: "24" }])).toBeNull();
   });
 
-  // O-16 and D-C meet here: since D-C a package has one plain step, so a second step (duplicate order or not)
-  // is refused by the speed-steps rule before the order is even compared.
   it("refuses two speed steps with the same order", () => {
     expect(buildPublishPayload({ ...base, tiers: [{ order: 10 }, { order: "10", down_kbps: 1 }] }).error)
       .toBe(SPEED_STEPS_REFUSAL);
@@ -209,7 +196,6 @@ describe("buildPublishPayload — free-only, no PMS/settlement fields", () => {
     expect(validateTiers([{ order: 10 }, { order: 20 }])).toBeNull();
   });
 
-  // AUDIT O-15: what the form does not edit is handed back, not dropped.
   it("merges the name into the loaded display, appends preserved rules verbatim, and keeps tier extras", () => {
     const { payload } = buildPublishPayload({
       ...base, name: "Renamed",

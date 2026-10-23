@@ -18,9 +18,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
-// The reconciliation, the commit endpoint and the secondary-storage setting, against a real database with the 0148 schema and
-// real files: what happens when a copy is missing, damaged, behind, or AHEAD.
-
 type ledgerRig struct {
 	t     *testing.T
 	s     *server
@@ -89,7 +86,6 @@ func (r *ledgerRig) dbSeq() int64 {
 	return n
 }
 
-// appendCheckpoint appends one entry the way the daily checkpoint does: database, both copies, confirm.
 func (r *ledgerRig) appendCheckpoint() ledger.Entry {
 	r.t.Helper()
 	ctx := context.Background()
@@ -116,7 +112,6 @@ func (r *ledgerRig) appendCheckpoint() ledger.Entry {
 	return e
 }
 
-// forgetAfter makes the database forget entries after seq, as a restore from an older backup does.
 func (r *ledgerRig) forgetAfter(seq int64) {
 	r.t.Helper()
 	ctx := context.Background()
@@ -217,7 +212,6 @@ func TestIntegrationLedger_AMissingOrCorruptSecondaryCopyIsPushedAgain(t *testin
 	if p := ledger.ParseChain(readBytes(t, obj)); !p.Intact {
 		t.Fatalf("the secondary copy is still damaged")
 	}
-	// the whole secondary folder gone (an unplugged then replaced disk)
 	if err := os.RemoveAll(r.ext); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +226,6 @@ func TestIntegrationLedger_AMissingOrCorruptSecondaryCopyIsPushedAgain(t *testin
 	}
 }
 
-// Entries the file has and the database lacks (a restore from an older backup, or a crash between the file and the commit) are applied.
 func TestIntegrationLedger_EntriesTheDatabaseLacksAreApplied(t *testing.T) {
 	r := newLedgerRig(t)
 	r.reconcile()
@@ -251,7 +244,6 @@ func TestIntegrationLedger_EntriesTheDatabaseLacksAreApplied(t *testing.T) {
 	}
 }
 
-// THE DANGEROUS CASE: the secondary storage holds erasures the appliance has lost. It must never be overwritten.
 func TestIntegrationLedger_ASecondaryAheadOfTheApplianceIsNeverOverwritten(t *testing.T) {
 	r := newLedgerRig(t)
 	r.reconcile()
@@ -259,7 +251,6 @@ func TestIntegrationLedger_ASecondaryAheadOfTheApplianceIsNeverOverwritten(t *te
 	r.appendCheckpoint()
 	r.appendCheckpoint()
 	ahead := readBytes(t, filepath.Join(r.ext, ledger.ExternalObject))
-	// the appliance loses its own copy and the database goes back to an older backup
 	r.forgetAfter(base)
 	b := readBytes(t, r.local)
 	cut := ledger.ParseChain(b)
@@ -274,7 +265,6 @@ func TestIntegrationLedger_ASecondaryAheadOfTheApplianceIsNeverOverwritten(t *te
 	if !bytes.Equal(readBytes(t, filepath.Join(r.ext, ledger.ExternalObject)), ahead) {
 		t.Fatal("the secondary copy was overwritten with a shorter ledger")
 	}
-	// an erasure attempted now is refused by the commit
 	e := ledger.Entry{}
 	_ = e
 	rec := httptest.NewRecorder()
@@ -282,7 +272,6 @@ func TestIntegrationLedger_ASecondaryAheadOfTheApplianceIsNeverOverwritten(t *te
 	r.s.ledgerCommit(rec, httptest.NewRequest(http.MethodPost, "/v1/ledger/commit", bytes.NewReader(body)))
 	_ = rec // an entry that is already known is idempotent; what matters is the secondary stays intact
 
-	// recovery from the secondary (it is plaintext in this test: no key holder)
 	detail, err := r.s.ledgerRecoverFromExternal(context.Background(), "")
 	if err != nil {
 		t.Fatalf("recover: %v", err)
@@ -303,7 +292,6 @@ func TestIntegrationLedger_ADivergentPrimaryCopyBlocksErasure(t *testing.T) {
 	r.reconcile()
 	r.appendCheckpoint()
 	p := ledger.ParseChain(readBytes(t, r.local))
-	// a primary copy whose last entry differs from the database's, with a valid chain of its own
 	forged := append([]ledger.Entry(nil), p.Entries...)
 	last := len(forged) - 1
 	forged[last].Body = `{"forged":true}`
@@ -333,7 +321,6 @@ func TestIntegrationLedger_CommitEndpointIsAllOrNothing(t *testing.T) {
 	var e ledger.Entry
 	_ = json.Unmarshal(raw, &e)
 	before := readBytes(t, r.local)
-	// the secondary storage disappears
 	if err := os.RemoveAll(r.ext); err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +353,6 @@ func TestIntegrationLedger_DestinationSetupTestsSavesAndRefusesAnotherAppliances
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
 		return rec.Code, out
 	}
-	// a test changes nothing
 	other := filepath.Join(t.TempDir(), "other")
 	if err := os.MkdirAll(other, 0o700); err != nil {
 		t.Fatal(err)
@@ -377,22 +363,19 @@ func TestIntegrationLedger_DestinationSetupTestsSavesAndRefusesAnotherAppliances
 	if got := r.s.ledgerRT.store.Destination().Describe(); got != r.ext {
 		t.Fatalf("a test changed the saved storage: %s", got)
 	}
-	// a missing folder is refused with a reason
 	if code, out := put(map[string]any{"kind": "dir", "path": filepath.Join(other, "nope"), "test_only": true}); code != 422 || out["error"] != "storage_unusable" {
 		t.Fatalf("missing folder = %d %v", code, out)
 	}
-	// a storage already holding ANOTHER appliance's ledger is refused
 	foreign := ledger.NewStore(ledger.Config{LocalPath: filepath.Join(t.TempDir(), "f.jsonl"), Dest: &ledger.DirDest{Root: other}})
 	fe := []ledger.Entry{{Ledger: "99999999-9999-4999-8999-999999999999", Seq: 1, Prev: ledger.GenesisPrev, Kind: "genesis", Tenant: "00000000-0000-0000-0000-000000000000", Site: "00000000-0000-0000-0000-000000000000", AtUS: 1, Body: "{}"}}
 	fe[0].Hash = fe[0].ComputeHash()
 	if err := foreign.Commit(context.Background(), fe); err != nil {
 		t.Fatal(err)
 	}
-	r.appendCheckpoint() // this appliance's ledger now has entries of its own
+	r.appendCheckpoint()
 	if code, out := put(map[string]any{"kind": "dir", "path": other}); code != 409 || out["error"] != "belongs_to_another" {
 		t.Fatalf("another appliance's storage = %d %v", code, out)
 	}
-	// a clean folder is saved and receives the ledger
 	clean := filepath.Join(t.TempDir(), "clean")
 	if err := os.MkdirAll(clean, 0o700); err != nil {
 		t.Fatal(err)
@@ -428,7 +411,6 @@ func TestIntegrationLedger_CheckpointIsWrittenAtMostOnceADay(t *testing.T) {
 	}
 }
 
-// Moving the appliance to another customer starts a new ledger and forgets the previous secondary storage and the local file.
 func TestIntegrationLedger_ReassignmentStartsANewLedgerAndForgetsTheStorage(t *testing.T) {
 	r := newLedgerRig(t)
 	r.reconcile()

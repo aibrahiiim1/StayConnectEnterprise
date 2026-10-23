@@ -10,20 +10,9 @@ import (
 	"testing"
 )
 
-// THE PRE-nftconverge ROLLBACK BOUNDARY, AGAINST A REAL KERNEL AND REAL PACKETS.
-//
-// Live Increment 9's rollback rehearsal started a netd that predates ADR-0003. That binary does not reconcile;
-// it re-asserts the stored bundle, and the bundle begins with `delete table inet stayconnect` — so starting it
-// recreates the authorization sets EMPTY. On the pilot appliance that was harmless, because nobody was
-// authorized. On a property with guests online it is a simultaneous, total deauthorization performed by a
-// command whose whole purpose is to make things safer.
-//
-// The modelled suite in scripts/ci proves the decision with stubs. This proves it where it matters: a REAL
-// populated authorization set in a real kernel, a REAL packet that is passing because of it, the REAL operator
-// script, and the assertion that after the refusal the ruleset is untouched and the packet still passes.
-//
-// These tests never restart anything real. install/restart/exe/state are stubbed, so the only live thing the
-// script touches is the namespace's nft — which is exactly the input the decision is made from.
+// Rollback boundary against a real kernel: a pre-nftconverge netd re-asserts the stored bundle, whose `delete table`
+// empties the authorization sets and deauthorizes every online guest, so the rollback command must refuse and leave
+// the ruleset untouched. install/restart/exe/state are stubbed; only the namespace's nft is real.
 
 func rollbackTool(t *testing.T) string {
 	t.Helper()
@@ -37,13 +26,13 @@ func rollbackTool(t *testing.T) string {
 	return p
 }
 
-// rollbackWorld builds a disposable bin dir whose "previous release" netd either carries the render marker or
-// does not, plus stubs for everything except nft.
+// rollbackWorld builds a disposable bin dir whose previous-release netd carries the render marker or not, with stubs
+// for everything except nft.
 type rollbackWorld struct {
 	dir      string
 	binDir   string
 	env      []string
-	restarts string // file the restart stub appends to; empty means it never ran
+	restarts string
 }
 
 func newRollbackWorld(t *testing.T, targetConverges bool) *rollbackWorld {
@@ -56,15 +45,8 @@ func newRollbackWorld(t *testing.T, targetConverges bool) *rollbackWorld {
 			t.Fatal(err)
 		}
 	}
-	// The rollback TARGET. "netd-render-fp=" is the string a convergence-capable netd carries; its absence is
-	// what marks a pre-ADR-0003 binary. This asks the artifact itself rather than trusting a version string.
-	//
-	// EVERY FIXTURE ALSO CARRIES "stayconnect_production". binary-rollback.sh refuses any target built
-	// without that tag, because it selects the production build profile and edged enforces the
-	// guest-authority lock only on that profile. These cases are about the pre-convergence boundary, not
-	// about the build profile, so their fixtures have to satisfy the profile check in order to reach the
-	// behaviour they actually test -- otherwise all three fail for a reason that has nothing to do with
-	// convergence, which is exactly what happened when the profile guard was first added.
+	// "netd-render-fp=" marks a convergence-capable netd; its absence marks a pre-ADR-0003 binary. Every fixture also
+	// carries "stayconnect_production" because binary-rollback.sh refuses targets built without that tag.
 	const prodTag = " stayconnect_production"
 	target := "OLD-NETD-without-the-render-marker" + prodTag
 	if targetConverges {
@@ -88,7 +70,7 @@ func newRollbackWorld(t *testing.T, targetConverges bool) *rollbackWorld {
 	return &rollbackWorld{
 		dir: d, binDir: binDir, restarts: restarts,
 		env: append(os.Environ(),
-			"SC_ROLLBACK_NFT="+nftWrapper, // the REAL namespace nft — the live state it reads is real
+			"SC_ROLLBACK_NFT="+nftWrapper,
 			"SC_ROLLBACK_RESTART_CMD="+filepath.Join(d, "restart.sh"),
 			"SC_ROLLBACK_RUNNING_EXE="+filepath.Join(d, "runexe.sh"),
 			"SC_ROLLBACK_UNIT_STATE="+filepath.Join(d, "state.sh"),
@@ -126,8 +108,8 @@ func deauthorizeGuest(t *testing.T) {
 		`{ "`+guestIface+`" . `+guestIP+` }`).Run()
 }
 
-// THE CENTRAL CASE: a real guest is online, the rollback target predates convergence, and the command must
-// refuse BEFORE anything is replaced or restarted — with the guest still online afterwards.
+// A guest is online and the rollback target predates convergence: the command must refuse before replacing or
+// restarting anything.
 func TestKernel_RollbackToPreConvergeTargetIsRefusedWhileAGuestIsAuthorized(t *testing.T) {
 	t.Cleanup(func() { deauthorizeGuest(t) })
 	authorizeGuest(t)
@@ -152,20 +134,17 @@ func TestKernel_RollbackToPreConvergeTargetIsRefusedWhileAGuestIsAuthorized(t *t
 		t.Fatalf("it reached the replace phase:\n%s", out)
 	}
 
-	// the live ruleset is untouched...
 	after := run(t, nftWrapper, "list", "table", "inet", "stayconnect")
 	if stableRuleset(before) != stableRuleset(after) {
 		t.Fatalf("the live ruleset changed after the refusal:\n--- before ---\n%s\n--- after ---\n%s",
 			stableRuleset(before), stableRuleset(after))
 	}
-	// ...and the guest is still online, proven with packets.
 	if !reaches(t) {
 		t.Fatal("the authorized guest lost access even though the rollback was refused")
 	}
 }
 
-// THE SUPPORTED CASE: with the authorization set EMPTY there is nothing to lose, so the same rollback proceeds
-// and is verified exactly as before. This is the rehearsal Increment 9 actually ran.
+// With the authorization set empty there is nothing to lose, so the rollback proceeds.
 func TestKernel_RollbackToPreConvergeTargetIsAllowedWhenAuthorizationIsEmpty(t *testing.T) {
 	deauthorizeGuest(t)
 	if reaches(t) {
@@ -189,8 +168,7 @@ func TestKernel_RollbackToPreConvergeTargetIsAllowedWhenAuthorizationIsEmpty(t *
 	}
 }
 
-// A CONVERGENCE-CAPABLE TARGET is unaffected by the boundary: it preserves authorization across the transition
-// by design, so it stays supported even with a guest online.
+// A convergence-capable target preserves authorization by design, so it stays supported with a guest online.
 func TestKernel_RollbackToConvergenceCapableTargetStaysSupportedWithGuestsOnline(t *testing.T) {
 	t.Cleanup(func() { deauthorizeGuest(t) })
 	authorizeGuest(t)
@@ -209,8 +187,7 @@ func TestKernel_RollbackToConvergenceCapableTargetStaysSupportedWithGuestsOnline
 	}
 }
 
-// "CANNOT PROVE EMPTY" IS NOT "IS EMPTY". If the live set cannot be read at all, the command must refuse rather
-// than assume the safe case — the assumption is what turns an unreadable kernel into an outage.
+// An unreadable live set is not an empty set: the command must refuse rather than assume.
 func TestKernel_RollbackRefusesWhenTheLiveSetCannotBeRead(t *testing.T) {
 	t.Cleanup(func() { deauthorizeGuest(t) })
 	authorizeGuest(t)

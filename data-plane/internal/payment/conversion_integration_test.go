@@ -8,10 +8,8 @@ import (
 	"testing"
 )
 
-// PROVIDER-MANAGED CONVERSION ON THE REAL SQL PIPELINE (migration 0112, contract §9). A USD package and a GBP
-// account: refused while the account is not marked provider-converts; accepted once it is; the charge keeps its
-// USD presentment exactly; the provider's report of what it settled (GBP, its rate, fee, net) is recorded once,
-// as stated; a provider that does not convert cannot be marked. Runs under scripts/phase4-pg-integration.sh.
+// Provider-managed conversion on the real SQL pipeline: a USD package on a GBP account is refused until the account is
+// marked provider-converts, and the provider's settlement report is recorded once, as stated.
 func TestIntegration_ProviderManagedConversionKeepsPresentmentAndRecordsTheProvidersSettlement(t *testing.T) {
 	admin := pool(t)
 	s := seedCardChain(t, admin)
@@ -26,14 +24,12 @@ func TestIntegration_ProviderManagedConversionKeepsPresentmentAndRecordsTheProvi
 	e := &CheckoutEngine{Runtime: rolePool(t, "PHASE4_RUNTIME_DSN"), Outcome: rolePool(t, "PHASE4_OUTCOME_DSN"),
 		Adapters: map[string]HostedCheckoutProvider{"stripe": prov}, Key: k, Health: NewProviderHealth()}
 
-	// 1. Not marked: the identity gate refuses a USD charge on a GBP account, before anything reaches a provider.
 	if _, err := e.StartCheckout(ctx, s.tenant, s.site, s.settlement, "WiFi", "http://portal/return", "http://portal/cancel"); err == nil {
 		t.Fatal("a USD charge on a GBP account must be refused without provider conversion")
 	}
 	if prov.creates != 0 {
 		t.Fatal("nothing may reach the provider")
 	}
-	// 2. Marked provider-converts (audited): accepted, presented in USD at the pinned amount.
 	var on bool
 	if err := admin.QueryRow(ctx, `SELECT iam_v2.payment_account_set_conversion($1,$2,$3::uuid,true,'test-operator','proof')`,
 		s.tenant, s.site, acct).Scan(&on); err != nil || !on {
@@ -49,7 +45,6 @@ func TestIntegration_ProviderManagedConversionKeepsPresentmentAndRecordsTheProvi
 	if prov.last.Currency != "USD" || prov.last.AmountMinor != s.amount {
 		t.Fatalf("presentment must be the package currency and price: %+v", prov.last)
 	}
-	// 3. Captured, with the provider's settlement report: granted, and the report recorded once, as stated.
 	prov.status = StatusResult{State: CheckoutCaptured, ProviderTxnRef: "pi_cv", AmountMinor: s.amount, Currency: "usd",
 		Settlement: &SettlementReport{Currency: "gbp", AmountMinor: 823, ExchangeRate: "0.783912", FeeMinor: 44, NetMinor: 779, BalanceRef: "txn_cv"}}
 	for i := 0; i < 3; i++ {
@@ -75,11 +70,9 @@ func TestIntegration_ProviderManagedConversionKeepsPresentmentAndRecordsTheProvi
 	if n := count1(t, admin, `SELECT count(*) FROM iam_v2.payment_transactions WHERE id=$1::uuid AND currency='USD' AND amount_minor=$2 AND status='CAPTURED'`, st.TransactionID, s.amount); n != 1 {
 		t.Fatal("the charge keeps its USD presentment")
 	}
-	// 4. The report cannot be rewritten.
 	if _, err := admin.Exec(ctx, `UPDATE iam_v2.payment_settlement_reports SET exchange_rate='1' WHERE transaction_id=$1::uuid`, st.TransactionID); err == nil {
 		t.Fatal("a settlement report is append-only")
 	}
-	// 5. A provider that does not convert cannot be marked.
 	pm, err := SaveAccount(ctx, admin, k, s.tenant, s.site, "", "paymob", "pm_cv_"+runNonce+s.site[:8], "Paymob", "EGP", ModeTest,
 		"ACTIVE", false, Credentials{"secret_key": "x", "api_key": "y", "integration_id": "1", "region": "egypt"}, "test-operator", "conversion proof")
 	if err != nil {

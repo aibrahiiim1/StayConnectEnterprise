@@ -1,10 +1,7 @@
 "use client";
 
-// PROVIDER FIELDS — one renderer for every provider's configuration, driven by the provider's own schema.
-//
-// Each field becomes the input its type calls for (a web address, a host and port, a number with its unit, a
-// choice, a switch), starts from its default, carries its help, and is checked for shape as it is typed. The
-// server remains the authority: this only catches what is certainly wrong before an operator presses Create.
+// One renderer for every provider's configuration, driven by the provider's own schema. The server remains
+// the authority; this only catches what is certainly wrong before Create.
 
 import { useState } from "react";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -29,7 +26,6 @@ export function ProviderFieldsForm({
   const [advanced, setAdvanced] = useState(false);
   const main = fields.filter((f) => !f.advanced);
   const folded = fields.filter((f) => f.advanced);
-  // An error inside the folded group must not be hidden behind a closed toggle.
   const foldedHasError = folded.some((f) => errors[f.key]);
 
   return (
@@ -109,8 +105,6 @@ function FieldInput({
   );
 }
 
-// ---------------------------------------------------------------- reading a saved configuration
-
 const ms = (v: unknown): string | null => {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n) || n <= 0) return null;
@@ -129,7 +123,7 @@ const shown = (v: unknown): string => {
   return String(v);
 };
 
-/** The settings a saved version carries, as rows of label → value. Nothing is invented; absent is "—". */
+/** Nothing is invented; absent is "—". */
 export function configRows(
   provider: PmsProvider,
   rev: { config?: Record<string, unknown>; source_timezone?: string },

@@ -15,12 +15,9 @@ export type NavItem = {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  /** The capability needed to see this item at all. */
   needs: Capability;
 };
 
-// CENTRAL'S FIVE DESTINATIONS (docs/CENTRAL_CONTROL_PLANE.md §2). One place per job: there is no customer
-// selector, no second appliance list, and no separate onboarding screen — activation happens on the appliance.
 export const NAV_ITEMS: NavItem[] = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, needs: "fleet.read" },
   { href: "/customers", label: "Customers", icon: Building2, needs: "fleet.read" },
@@ -29,7 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/system", label: "System", icon: Settings2, needs: "system.read" },
 ];
 
-/** The System section's pages: out of the daily workflow, platform operators only. */
+/** System navigation is reserved for platform operators. */
 export const SYSTEM_PAGES: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { href: "/system/security-alerts", label: "Security alerts", icon: ShieldAlert },
   { href: "/system/trust", label: "Trust & keys", icon: KeyRound },
@@ -39,13 +36,11 @@ export const SYSTEM_PAGES: { href: string; label: string; icon: React.ComponentT
   { href: "/system/backup-health", label: "Backup health", icon: HardDrive },
 ];
 
-/** The nav item this path is (or is under). */
 export function activeNavHref(path: string): string | null {
   const matches = NAV_ITEMS.map((it) => it.href).filter((href) => path === href || path.startsWith(href + "/"));
   return matches.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 
-/** The top bar's "Section / Page". A detail page names its parent list as a link back to it. */
 const DETAIL_LABEL: Record<string, string> = { "/customers": "Customer", "/appliances": "Appliance" };
 
 export function crumbs(pathname: string): { parent?: { href: string; label: string }; label: string } {
@@ -64,9 +59,7 @@ export function Nav({
 }: {
   onLogout: () => void;
   email?: string;
-  /** Called after a link is followed, so the mobile drawer can close itself. */
   onNavigate?: () => void;
-  /** Icon rail (desktop only; the drawer never passes it). */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }) {
@@ -76,7 +69,6 @@ export function Nav({
   const items = useMemo(
     () =>
       NAV_ITEMS.filter((it) => can[it.needs]).map((it) =>
-        // A customer's own user has one customer, so the menu says so.
         it.href === "/customers" && !can["customers.list"] ? { ...it, label: "Customer" } : it,
       ),
     [can],
@@ -165,8 +157,7 @@ export function Nav({
       <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-2.5")}>
         {collapsed ? (
           <Tooltip side="right" content={<span className="font-medium">{email ?? "—"}</span>}>
-            {/* A button only so the tooltip with the full address can be reached from the keyboard; it does
-                nothing when pressed. */}
+            {/* A button makes the full-address tooltip keyboard-reachable. */}
             <button
               type="button"
               aria-label={`Signed in as ${email ?? "unknown"}`}
@@ -199,7 +190,6 @@ export function Nav({
         )}
 
         {(() => {
-          // The operator's own two-step sign-in (0052).
           const twoStep = (
             <Link
               href="/account/security"

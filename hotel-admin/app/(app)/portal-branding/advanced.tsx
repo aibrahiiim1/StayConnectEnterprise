@@ -1,14 +1,7 @@
 "use client";
 
-// ADVANCED HTML & CSS — the escape hatch, with the server's own verdict beside it.
-//
-// This is the page clients type their sign-in details into -- voucher codes and passwords, and room numbers
-// and surnames where hospitality is licensed. Styling and markup are
-// welcome; anything that could run, load from elsewhere or re-target the sign-in forms is not. The editor does
-// not guess at those rules: it sends the text to /portal-branding/validate and shows what the portal would
-// remove -- "removed the onerror attribute on <img>" -- while the operator is still looking at it, and offers
-// the cleaned version with one click. Saving a change here (including emptying a field) asks for the
-// operator's password.
+// This page collects sign-in details, so anything that could run, load from elsewhere or re-target the forms is
+// refused. The editor does not guess: it sends the text to /portal-branding/validate and shows what the portal would remove.
 
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

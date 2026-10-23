@@ -1,13 +1,7 @@
 "use client";
 
-// REQUEST REGISTER (migration 0147).
-//
-// The law gives the hotel one month to answer a guest who asks for their data or for its erasure, and two more months
-// for a complex request (told within the first month). A refusal must say why and that the person may complain. This
-// page is the hotel's record of each request: when it came, when it is due, how the person was verified and how it was
-// answered. It decides nothing and runs no export or erasure; those are done on the Guest data requests pages, and their
-// reference is written here. Who asked is kept only while the request is open: answering shows it once, as the hotel's
-// own file of the request, and removes it.
+// Requests are answered within one month (two more if complex) and a refusal must say why. Who asked is kept only
+// while the request is open.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";

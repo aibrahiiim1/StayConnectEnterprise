@@ -1,33 +1,8 @@
 "use client";
 
-// HOTEL → ROOM CHARGE — which PMS interface a client's Internet package may be charged to, and whether room
-// charge can work at all on this appliance.
-//
-// ROOM CHARGE IS A FINANCIAL ONBOARDING, NOT A SWITCH. Before OneGate posts a single charge, a site administrator
-// records the posting target (always the RESERVATION: room number + reservation number, Phase-0 Amendment A1 —
-// there is nothing to choose, and no folio is ever modelled or selected), the currency the PMS posts in, and the
-// vendor's confirmation that reservation numbers are unique and never reused. That record is revisioned: the
-// approval carries the revision it was made against (`expected_revision_id`), and a stale one is refused with
-// 409 revision_conflict so two administrators cannot approve different facts about the same interface without
-// one of them seeing it.
-//
-// ANSWER MEANINGS. Protel answers each posting with a status. Only a status the vendor has confirmed, per
-// interface, as "definitely not posted" (NP, NG, NR, NA, RY) fails the purchase with its fixed stay effect;
-// anything else — UR always, and any of those five until confirmed — is UNKNOWN and goes to manual review. The
-// confirmations are append-only (CONFIRM / WITHDRAW with the vendor evidence) and a site administrator's call.
-//
-// ONLY FIAS, AND ONLY A SITE ADMINISTRATOR. Room charge posting is implemented for Protel FIAS only, so only a
-// FIAS interface is offered the approval. The approval is a site administrator's decision — edged refuses it
-// from any other role — so every other role sees the same table with no button and a sentence saying whose
-// decision it is.
-//
-// POSTING MAY STILL BE WITHHELD. An appliance whose room-charge posting is not authorised (readiness
-// PMS_POSTING_NOT_AUTHORISED on the room_charge module) can be configured here in full, but room charge is not
-// offered to clients and nothing is posted to the PMS. The page shows a checklist at the top -- what is done, what
-// is recommended and what is still needed -- because an operator who has just approved an interface will
-// otherwise read "not offered" as a failed approval.
-//
-// The currency exponent is not asked: FIAS posts in minor units with two decimal places, and edged fixes it.
+// Approval is revisioned: a stale `expected_revision_id` is refused with 409 revision_conflict.
+// Only a status the vendor confirmed as "definitely not posted" fails a purchase; any other Protel answer is UNKNOWN and goes to manual review.
+// Only site administrators may approve (edged enforces it), and only FIAS interfaces are offered the approval.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -79,9 +54,7 @@ export default function RoomChargePage() {
   const [approving, setApproving] = useState<OnboardingInterface | null>(null);
   const [answerChange, setAnswerChange] = useState<AnswerChange | null>(null);
   const [mirrorChange, setMirrorChange] = useState<OnboardingInterface | null>(null);
-  // WHO APPROVED, IN WORDS. The approval records the operator by id; the operator directory (the same source the
-  // activity trail uses) turns it into their e-mail, or their display name. A role that cannot read the directory
-  // gets "A site administrator" -- true by construction, since only a site administrator can approve -- never the id.
+  // Maps approver operator ids to names; roles that cannot read the directory see "A site administrator", never the id.
   const [approvers, setApprovers] = useState<Map<string, string> | null>(null);
 
   const load = useCallback(async () => {
@@ -92,8 +65,6 @@ export default function RoomChargePage() {
       setErr(e);
       setData({ interfaces: [], posting_target_models: [] });
     }
-    // Approver names are a convenience; a role that may not read the operator list sees the ids instead and
-    // makes no request it would be refused.
     if (roles !== null && canRead("operators", roles)) {
       try {
         const o = await api.get<{ data: { id: string; email?: string; display_name?: string }[] }>("/operators");
@@ -102,11 +73,10 @@ export default function RoomChargePage() {
     } else {
       setApprovers(new Map());
     }
-    // Module readiness is advisory on this page: the table is still correct without it.
     try {
       const m = await api.get<SiteModules>("/modules");
       setReadiness(m?.modules?.room_charge?.readiness ?? []);
-    } catch { /* readiness unknown; the note is simply not shown */ }
+    } catch { /* readiness is advisory */ }
   }, [roles]);
   useEffect(() => { if (readable) load(); }, [readable, load]);
 
@@ -329,10 +299,7 @@ export default function RoomChargePage() {
   );
 }
 
-// WHAT ROOM CHARGE STILL NEEDS. An operator who has just approved an interface and still sees "not offered" needs
-// to know that their part is done and what is missing -- not a sentence that reads as if the approval failed. The
-// last step is the appliance's posting switch: a safety switch set when the appliance is installed, not a setting
-// on any page, because switching it on makes real charges reach the PMS.
+// The posting switch is a safety switch set at install, deliberately not a page setting: it makes real charges reach the PMS.
 function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
   const fias = interfaces.filter((i) => i.connector_kind === FIAS);
   const approved = fias.filter((i) => i.approved_at || i.posting_target_model === "RESERVATION");
@@ -692,9 +659,7 @@ function AnswerDialog({
   );
 }
 
-// GUEST LIST PROOF (D48). Room charge trusts the local guest list only for a limited time after Protel last sent
-// it COMPLETE (a full resync). A quiet hotel is not a problem -- OneGate asks Protel for a fresh full list by itself
-// at half the limit -- but if no complete list arrives in time, room charge pauses until one does.
+// Room charge pauses if no complete guest list (full resync) has arrived within the trust limit.
 function ago(iso: string | null | undefined): string {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));

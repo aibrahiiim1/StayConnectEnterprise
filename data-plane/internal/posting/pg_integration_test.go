@@ -15,12 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The Phase-4 financial-core integration matrix. It needs a DISPOSABLE PostgreSQL 16 carrying the
-// authoritative chain plus migration 0011, reachable via PHASE4_TEST_DSN — scripts/phase4-pg-integration.sh
-// builds and tears one down. It contacts no appliance, no Production database and no PMS.
-//
-// No test here transmits anything. The only transports in this file are in-process stubs, and the DARK
-// tests assert that even a transport which WOULD accept a send is never reached.
+// Needs a disposable PostgreSQL via PHASE4_TEST_DSN. Nothing here transmits: every transport is an
+// in-process stub.
 
 func pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -41,15 +37,10 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// scope is one completely independent property: its own tenant, site, PMS interface, plans, packages,
-// mappings, stay, purchase and settlement. Every test builds its own, so no test can be affected by
-// another's append-only rows.
-//
-// FULL APPLIANCE SCHEMA (Phase-0 Amendment A1, migration 0100). A room charge targets the RESERVATION:
-// G# is the pinned stay's external_reservation_id, and there is no folio model at all. The fixture is built
-// the way production builds a room charge -- a verified Room sign-in (auth context), a consumed quote, a
-// purchase AWAITING_SETTLEMENT and a PMS_POSTING settlement -- because the settlement now follows the PMS
-// answer (0097) and a PA=OK grants the entitlement, which needs exactly that purchase.
+// scope is one independent property (tenant, site, interface, stay, purchase, settlement), so tests
+// cannot be affected by each other's append-only rows. The fixture is built the way production builds a
+// room charge: a PA=OK grants the entitlement, which needs a verified Room sign-in, a consumed quote, an
+// AWAITING_SETTLEMENT purchase and a PMS_POSTING settlement. G# is the stay's external_reservation_id.
 type scope struct {
 	tenant, site    string
 	operator        string // an active operator of this tenant (administrative posting blocks, answer confirmations)
@@ -82,10 +73,8 @@ func scan1[T any](t *testing.T, p *pgxpool.Pool, sql string, args ...any) T {
 	return v
 }
 
-// p4Controlled runs one statement inside an open controlled operation of the given family and returns the
-// single text value it produces (or "" for a statement that returns nothing). The full schema refuses writes
-// to stays, purchases, quotes and auth contexts outside such an operation, even for a superuser; the old
-// scratch fixture let them through only because the test user happened to own every function.
+// p4Controlled runs one statement inside an open controlled operation and returns its single text value
+// (or ""). The schema refuses writes to stays, purchases, quotes and auth contexts outside one.
 func p4Controlled(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) string {
 	t.Helper()
 	ctx := context.Background()
@@ -117,8 +106,7 @@ func p4Controlled(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any
 	return v
 }
 
-// seedProperty builds one financially onboarded property. currency/exponent are the property's own, so a
-// test can build a EUR property and a USD property side by side and prove they never mix.
+// seedProperty builds one financially onboarded property in the given currency.
 func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16) scope {
 	t.Helper()
 	ctx := context.Background()
@@ -135,7 +123,6 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 	s.iface = scan1[string](t, p, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
 
-	// Three revisions, so a test can pick exactly the onboarding state it wants to prove.
 	s.revUnsetTarget = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
 		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config)
 		VALUES ($1,$2,$3,1,'UTC','UNSET','{}') RETURNING id::text`, s.tenant, s.site, s.iface)
@@ -150,9 +137,7 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 		RETURNING id::text`, s.tenant, s.site, s.iface, currency, exponent)
 	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.rev)
 
-	// Migration 0012 makes the financial boundary consult the SAME Phase-3 runtime axes the resolver uses.
-	// A property with no runtime row fails closed with RUNTIME_UNKNOWN, which is correct -- so a fixture
-	// that wants to test anything else has to record a healthy interface explicitly.
+	// A property with no runtime row fails closed (RUNTIME_UNKNOWN), so the fixture records a healthy interface.
 	mustExec(t, p, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id,site_id,pms_interface_id,pinned_revision_id,credential_mode,runtime_generation,
 		 transport_status,last_connected_at,last_heartbeat_at,continuity_status,last_valid_event_at,
@@ -186,14 +171,11 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 	return s.withCharge(t, p)
 }
 
-// withCharge gives the property ANOTHER in-house stay with its own verified Room sign-in, purchase and
-// PMS_POSTING settlement, and returns the scope pointed at it. A stay may carry only ONE unresolved room
-// charge at a time (A1, contract section 9a rule 4), so a test that needs several concurrent charges on one
-// interface needs one stay per charge.
+// withCharge adds another in-house stay with its own purchase and settlement. A stay may carry only one
+// unresolved room charge at a time, so concurrent charges need one stay each.
 func (s scope) withCharge(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	s.reservation = scan1[string](t, p, `SELECT 'R-'||substr(md5(gen_random_uuid()::text),1,10)`)
-	// posting_allowed is not written: the database computes it (IN_HOUSE, a reservation, no active block).
 	s.stay = p4Controlled(t, p, "stay", `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
 		 normalized_room_number,status)
@@ -223,16 +205,14 @@ func (s scope) withCharge(t *testing.T, p *pgxpool.Pool) scope {
 	s.settle = scan1[string](t, p, `INSERT INTO iam_v2.settlements
 		(tenant_id,site_id,purchase_id,method,status) VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED')
 		RETURNING id::text`, s.tenant, s.site, s.purchase)
-	// A settlement is IN_PROGRESS once its posting exists: production's p4_create_room_charge_posting moves it
-	// in the same statement that creates the posting. engine.CreatePosting -- the Go gate this matrix drives --
-	// only inserts the posting, so the fixture puts the settlement where production has it, which is where the
-	// settlement-follows-the-PMS step (0097) expects to find it.
+	// Production moves the settlement to IN_PROGRESS when the posting is created; engine.CreatePosting
+	// only inserts the posting, so the fixture does it.
 	mustExec(t, p, `UPDATE iam_v2.settlements SET status='IN_PROGRESS' WHERE id=$1`, s.settle)
 	return s
 }
 
-// confirmAnswer records the vendor's confirmation that a PA status means "definitely not posted" on this
-// interface. Since A1 a non-OK answer is REJECTED only for a confirmed code; any other is UNKNOWN.
+// confirmAnswer records that a PA status means "definitely not posted"; only a confirmed code is REJECTED,
+// any other non-OK answer is UNKNOWN.
 func (s scope) confirmAnswer(t *testing.T, p *pgxpool.Pool, as string) {
 	t.Helper()
 	mustExec(t, p, `SELECT iam_v2.pms_answer_confirmation_record($1,$2,$3,$4,'CONFIRM',
@@ -253,17 +233,12 @@ func (s scope) pinned(idem string) Pinned {
 
 func idem(t *testing.T) string { return "idem-" + strings.ReplaceAll(t.Name(), "/", "-") }
 
-// ---- flag presets --------------------------------------------------------------------------------------
-
 var (
-	// darkCfg is the DELIVERED state plus the two flags that let the domain and worker RUN at all. Transmit
-	// stays OFF, which is what makes the no-egress tests meaningful: the worker really executes.
+	// darkCfg runs the worker with transmit OFF, so the no-egress tests are meaningful.
 	darkCfg = Config{MasterEnabled: true, PostingEnabled: true, OutboxEnabled: true, ReviewEnabled: true}
-	// liveCfg is used ONLY against an in-process stub transport, never a socket.
+	// liveCfg is for in-process stub transports only.
 	liveCfg = Config{MasterEnabled: true, PostingEnabled: true, OutboxEnabled: true, TransmitEnabled: true, ReviewEnabled: true}
 )
-
-// ---- stub transports -----------------------------------------------------------------------------------
 
 type stubTransport struct {
 	mu     sync.Mutex
@@ -283,8 +258,6 @@ func (s *stubTransport) SendPS(_ context.Context, _ string, pn int64, body strin
 
 func (s *stubTransport) count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.bodies) }
 
-// ---- helpers -------------------------------------------------------------------------------------------
-
 func pCounter(t *testing.T, p *pgxpool.Pool, iface string) int64 {
 	t.Helper()
 	var n *int64
@@ -302,8 +275,6 @@ func attemptCount(t *testing.T, p *pgxpool.Pool, postingID string) int {
 	t.Helper()
 	return scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.posting_attempts WHERE internal_posting_id=$1`, postingID)
 }
-
-// ---- 1. the happy path ---------------------------------------------------------------------------------
 
 func TestIntegrationPosting_HappyPathPostsOnce(t *testing.T) {
 	p := pool(t)
@@ -346,9 +317,7 @@ func TestIntegrationPosting_HappyPathPostsOnce(t *testing.T) {
 	}
 }
 
-// ---- 2. the fail-closed matrix, against the real database ----------------------------------------------
-
-// Every refusal must cost NOTHING: no posting, no outbox row, no P#, no bytes.
+// Every refusal must cost nothing: no posting, no outbox row, no P#, no bytes.
 func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 	p := pool(t)
 	repo := NewRepo(p)
@@ -359,10 +328,7 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 		mut  func(t *testing.T, s *scope, pin *Pinned)
 		code Code
 	}{
-		// The UNSET revision is also superseded, so two rules would refuse it. The ONBOARDING refusal must
-		// win: "this property has no posting target" is what an operator can act on, and "that revision is
-		// not current" would send them to the wrong place. (A1: the posting target replaced the folio
-		// identity strategy, fail-closed on UNSET exactly as before.)
+		// The UNSET revision is also superseded; the onboarding refusal must win because it is the actionable one.
 		{"posting target UNSET", func(_ *testing.T, s *scope, pin *Pinned) {
 			pin.PostingInterfaceRevisionID = s.revUnsetTarget
 		}, ErrPostingTargetUnset},
@@ -370,8 +336,6 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 			mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.revNoCurrency)
 			pin.PostingInterfaceRevisionID = s.revNoCurrency
 		}, ErrInterfaceNoCurrency},
-		// A1: RN is the reservation's CURRENT room, read from the pinned stay, so an unresolvable or
-		// untransmissible room is the STAY's room, not a caller-supplied value.
 		{"missing RN", func(t *testing.T, s *scope, pin *Pinned) {
 			p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET normalized_room_number=NULL WHERE id=$1`, s.stay)
 			pin.RN = ""
@@ -382,12 +346,10 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 			pin.RN = "14|21"
 		}, ErrRNNotWireSafe},
 		{"stay checked out", func(t *testing.T, s *scope, _ *Pinned) {
-			// status, boundary and posting permission change together (CHECK posting_only_in_house)
 			p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
 				posting_allowed=false WHERE id=$1`, s.stay)
 		}, ErrStayNotInHouse},
-		// posting_allowed is computed by the database now; an administrative posting block is how posting
-		// permission is withdrawn from an in-house stay.
+		// An administrative posting block is how posting is withdrawn from an in-house stay.
 		{"posting not allowed", func(t *testing.T, s *scope, _ *Pinned) {
 			mustExec(t, p, `SELECT iam_v2.p4_admin_posting_block($1,$2,$3,'SET','front office hold',$4)`,
 				s.tenant, s.site, s.stay, s.operator)
@@ -428,8 +390,7 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 			v := 99
 			pin.ExpectStayLifecycleVersion = &v
 		}, ErrEvidenceStale},
-		// A1: there is no folio to put out of scope. The reservation equivalent: a G# that is not the pinned
-		// stay's reservation (here, another property's) is refused before anything is written.
+		// A G# that is not the pinned stay's reservation is refused before anything is written.
 		{"reservation of another stay", func(t *testing.T, s *scope, pin *Pinned) {
 			other := seedProperty(t, p, "USD", 2)
 			pin.GNumber = other.reservation
@@ -457,7 +418,6 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 			if CodeOf(err) != tc.code {
 				t.Fatalf("expected %s, got %s (%v)", tc.code, CodeOf(err), err)
 			}
-			// ---- and it must have cost nothing ----
 			if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.pms_postings WHERE idempotency_key=$1`,
 				pin.IdempotencyKey); n != 0 {
 				t.Fatalf("a refused charge left %d posting rows", n)
@@ -480,10 +440,7 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 	}
 }
 
-// ---- 3. DARK: positive no-egress -----------------------------------------------------------------------
-
-// This is the claim that matters most, so it is proved positively. The worker is RUNNING, the flags are the
-// delivered ones, a real posting is queued, and the inner transport is one that WOULD accept a send.
+// With the worker running and a posting queued, a transport that would accept a send is never reached.
 func TestIntegrationPosting_DarkWorkerProducesNoEgress(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -497,7 +454,6 @@ func TestIntegrationPosting_DarkWorkerProducesNoEgress(t *testing.T) {
 	}
 	before := pCounter(t, p, s.iface)
 
-	// run the lane repeatedly, exactly as a live worker loop would
 	for i := 0; i < 5; i++ {
 		out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
 		if err != nil {
@@ -511,14 +467,13 @@ func TestIntegrationPosting_DarkWorkerProducesNoEgress(t *testing.T) {
 		}
 	}
 
-	// POSITIVE evidence: the worker really tried, five times, and was refused AT THE WIRE.
+	// The worker tried five times and was refused at the wire.
 	if e.TransportRefusals() != 5 {
 		t.Fatalf("expected 5 recorded wire refusals, got %d", e.TransportRefusals())
 	}
 	if !strings.HasPrefix(e.LastRefusedBody(), "PS|RN") {
 		t.Fatalf("the guard should have refused a fully-built PS, got %q", e.LastRefusedBody())
 	}
-	// NEGATIVE evidence: nothing was produced, allocated or sent.
 	if inner.count() != 0 {
 		t.Fatalf("the inner transport was reached %d times while DARK", inner.count())
 	}
@@ -551,8 +506,6 @@ func TestIntegrationPosting_OutboxFlagOffClaimsNothing(t *testing.T) {
 		t.Fatalf("a disabled outbox worker must claim nothing: %+v %v", out, err)
 	}
 }
-
-// ---- 4. P# concurrency ---------------------------------------------------------------------------------
 
 func TestIntegrationPosting_PNumberConcurrencyIsAtomicAndPerInterface(t *testing.T) {
 	p := pool(t)
@@ -641,8 +594,6 @@ func TestIntegrationPosting_PNumberRollbackConsumesNothing(t *testing.T) {
 	}
 }
 
-// ---- 5. outbox concurrency + lane isolation ------------------------------------------------------------
-
 // Two workers racing on ONE queued posting must produce exactly one attempt, never two.
 func TestIntegrationPosting_ConcurrentWorkersProduceOneAttempt(t *testing.T) {
 	p := pool(t)
@@ -724,8 +675,6 @@ func TestIntegrationPosting_LanesAreIndependent(t *testing.T) {
 		t.Fatalf("a provably-not-transmitted attempt must be re-queued, found %d queued rows", n)
 	}
 }
-
-// ---- 6. UNKNOWN ----------------------------------------------------------------------------------------
 
 func TestIntegrationPosting_TransmittedWithoutAnswerBecomesUnknownAndStaysThere(t *testing.T) {
 	p := pool(t)
@@ -842,8 +791,6 @@ func TestIntegrationPosting_UnknownLeavesOnlyThroughAuditedReview(t *testing.T) 
 	}
 }
 
-// ---- 7. reviewer concurrency ---------------------------------------------------------------------------
-
 func TestIntegrationPosting_ConcurrentReviewersCannotBothWin(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -939,10 +886,7 @@ func TestIntegrationPosting_ReviewLedgerHasOneWriter(t *testing.T) {
 	}
 }
 
-// ---- 8. restart persistence ----------------------------------------------------------------------------
-
-// Nothing the worker knows lives in memory. A "restart" is modelled as a brand-new Engine over the same
-// database — which is exactly what the process gets after a reboot.
+// A restart is modelled as a brand-new Engine over the same database; nothing lives in memory.
 func TestIntegrationPosting_StateSurvivesProcessRestart(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -956,7 +900,6 @@ func TestIntegrationPosting_StateSurvivesProcessRestart(t *testing.T) {
 	_, _ = first.RunOnce(ctx, s.tenant, s.site, s.iface) // -> UNKNOWN, HELD_RECOVERY
 	pAfter := pCounter(t, p, s.iface)
 
-	// ---- restart ----
 	restarted := NewEngine(liveCfg, NewRepo(p), silent)
 	st, err := NewRepo(p).ReadState(ctx, id)
 	if err != nil {
@@ -985,8 +928,6 @@ func TestIntegrationPosting_StateSurvivesProcessRestart(t *testing.T) {
 	}
 }
 
-// ---- 9. business idempotency vs protocol identity ------------------------------------------------------
-
 func TestIntegrationPosting_DuplicateIdempotencyKeyIsRefused(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -1004,11 +945,7 @@ func TestIntegrationPosting_DuplicateIdempotencyKeyIsRefused(t *testing.T) {
 	}
 }
 
-// ---- 10. controlled Stay lifecycle -> posting eligibility ----------------------------------------------
-
-// The DB-level charge_gate proof exists in iam_v2_scratch/phase4_0011_financial.sh. This is the OTHER half
-// the audit called for: the same boundary observed end-to-end through the engine, where the stay moves
-// after the posting was already authorized and queued.
+// The stay moves after the posting was authorized and queued; the engine must stop the charge.
 func TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -1021,14 +958,11 @@ func TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge(t *testing.T) {
 	}
 	before := pCounter(t, p, s.iface)
 
-	// the guest checks out through the approved lifecycle move: status, boundary and posting permission
-	// change together, exactly as the Phase-3 contract requires
 	p4Controlled(t, p, "stay", `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(),
 		posting_allowed=false WHERE id=$1`, s.stay)
 
-	// A1 (contract section 9a rule 7, section 16 PENDING -> FAILED_FINAL): a reservation that is no longer
-	// IN_HOUSE before the attempt is built ABORTS the charge as definitely not posted, rather than declining it
-	// back into the queue: the settlement fails, nothing is granted, and the reason is recorded.
+	// A reservation no longer IN_HOUSE before the attempt is built aborts the charge as definitely not
+	// posted (not requeued): the settlement fails, nothing is granted, the reason is recorded.
 	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
 	if out.Result != "ABORTED" || err != nil {
 		t.Fatalf("a checked-out stay must stop the queued charge before sending: %+v %v", out, err)
@@ -1053,13 +987,10 @@ func TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge(t *testing.T) {
 	}
 }
 
-// ---- 11. PA handling on the real ledger ----------------------------------------------------------------
-
 func TestIntegrationPosting_RejectedAnswerIsRecordedNotRetried(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
-	// A1: a non-OK answer is a definite "not posted" only for a code the vendor confirmed on this interface;
-	// an unconfirmed NG would be UNKNOWN. This test is about a CONFIRMED rejection, so the fixture records it.
+	// Only a confirmed code is a definite "not posted"; an unconfirmed NG would be UNKNOWN.
 	s.confirmAnswer(t, p, "NG")
 	ctx := context.Background()
 	tr := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: "NG"}, nil }}
@@ -1104,8 +1035,6 @@ func TestIntegrationPosting_AmbiguousAnswerBecomesUnknown(t *testing.T) {
 	}
 }
 
-// ---- 12. no secrets or PII in the evidence ledger ------------------------------------------------------
-
 func TestIntegrationPosting_AttemptEvidenceCarriesNoSecretsOrPII(t *testing.T) {
 	p := pool(t)
 	s := seedProperty(t, p, "USD", 2)
@@ -1126,12 +1055,8 @@ func TestIntegrationPosting_AttemptEvidenceCarriesNoSecretsOrPII(t *testing.T) {
 	}
 }
 
-// ---- hardening: per-interface lane serialization, with DIFFERENT postings -----------------------------
-
-// The 0011 claim was overstated. outbox_one_active stops two ACTIVE rows for the SAME posting; it says
-// nothing about two DIFFERENT postings on one interface. This is the test that actually proves Contract
-// section 10: many queued postings, many workers, ONE interface -- and at most one in flight at a time,
-// while a second interface is completely unaffected.
+// Many queued postings and workers on one interface: at most one in flight, while a second interface is
+// unaffected. (outbox_one_active only covers two active rows for the same posting.)
 func TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -1163,8 +1088,7 @@ func TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings(t *
 	eb := NewEngine(liveCfg, NewRepo(p), trB)
 
 	const postings = 6
-	// One stay per posting: a stay carries at most one unresolved room charge (A1 rule 4), and this test is
-	// about many DIFFERENT postings sharing one interface lane.
+	// One stay per posting: a stay carries at most one unresolved room charge.
 	for i := 0; i < postings; i++ {
 		if _, err := ea.CreatePosting(ctx, a.withCharge(t, p).pinned(fmt.Sprintf("%s-a-%d", idem(t), i))); err != nil {
 			t.Fatalf("create %d: %v", i, err)
@@ -1209,8 +1133,6 @@ func TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings(t *
 		t.Fatalf("a busy lane must not affect another interface: %+v", st)
 	}
 }
-
-// ---- hardening: DRAINING drains -----------------------------------------------------------------------
 
 func TestIntegrationPosting_DrainingInterfaceStillDrains(t *testing.T) {
 	p := pool(t)
@@ -1260,8 +1182,6 @@ func TestIntegrationPosting_DecommissionRequiresAQuietInterface(t *testing.T) {
 	}
 }
 
-// ---- hardening: freshness is re-checked at TRANSMISSION, not only at authorization --------------------
-
 func TestIntegrationPosting_InterfaceGoingStaleStopsTheBytes(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -1277,8 +1197,7 @@ func TestIntegrationPosting_InterfaceGoingStaleStopsTheBytes(t *testing.T) {
 	mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET continuity_status='GAP_DETECTED', updated_at=now()
 		WHERE pms_interface_id=$1`, s.iface)
 
-	// A1 (contract section 9a rule 7): stale PMS data before the attempt is built ABORTS the charge as
-	// definitely not posted (reason DATA_STALE) instead of declining it back into the queue.
+	// Stale PMS data before the attempt is built aborts the charge as not posted (DATA_STALE), not requeued.
 	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
 	if out.Result != "ABORTED" || err != nil || out.RefusedFor != ErrInterfaceNotFresh {
 		t.Fatalf("a stale interface must stop the bytes: %+v %v", out, err)
@@ -1296,8 +1215,6 @@ func TestIntegrationPosting_InterfaceGoingStaleStopsTheBytes(t *testing.T) {
 		t.Fatalf("a stale interface wrote %d attempts", n)
 	}
 }
-
-// ---- hardening: a PA for another P# never ACKs this attempt -------------------------------------------
 
 func TestIntegrationPosting_PAForAnotherPNumberNeverAcks(t *testing.T) {
 	p := pool(t)
@@ -1326,8 +1243,6 @@ func TestIntegrationPosting_PAForAnotherPNumberNeverAcks(t *testing.T) {
 	}
 }
 
-// ---- hardening: the retry authorization is single-use -------------------------------------------------
-
 func TestIntegrationPosting_RetryAuthorizationIsConsumedExactlyOnce(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -1352,8 +1267,7 @@ func TestIntegrationPosting_RetryAuthorizationIsConsumedExactlyOnce(t *testing.T
 	// the authorized retry runs and goes UNKNOWN again -- the worst case for a hot loop
 	_, _ = e.RunOnce(ctx, s.tenant, s.site, s.iface)
 
-	// The authorization was for ONE attempt and is now spent. A second Requeue must find nothing, and the
-	// item must NOT be sitting QUEUED waiting to be picked up again.
+	// The authorization is spent: a second Requeue finds nothing and the item is not QUEUED again.
 	if err := e.Requeue(ctx, id); CodeOf(err) != ErrRetryNotAuthed {
 		t.Fatalf("a spent retry authorization must not permit a second requeue, got %v", err)
 	}
@@ -1373,8 +1287,6 @@ func TestIntegrationPosting_RetryAuthorizationIsConsumedExactlyOnce(t *testing.T
 		}
 	}
 }
-
-// ---- hardening: a posted charge can never be retried --------------------------------------------------
 
 func TestIntegrationPosting_AckedOKChargeCanNeverBeRetried(t *testing.T) {
 	p := pool(t)
@@ -1403,8 +1315,6 @@ func TestIntegrationPosting_AckedOKChargeCanNeverBeRetried(t *testing.T) {
 	}
 }
 
-// ---- hardening: review evidence is mandatory ----------------------------------------------------------
-
 func TestIntegrationPosting_TerminalReviewRequiresEvidence(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -1425,12 +1335,8 @@ func TestIntegrationPosting_TerminalReviewRequiresEvidence(t *testing.T) {
 	}
 }
 
-// ---- the contract's reversal model: passive ledger row, never executable ------------------------------
-
-// Migration 0012 refused REVERSAL rows outright. That was wrong: §15 says CREATE_REVERSAL produces "a new
-// ledger row referencing the original" and §16 says "reversal is a new REVERSAL row". What is forbidden is
-// the SENDER — §9a rule 5 and Gate 3B make the executable reversal capability=false, with PT=C and a
-// negative TA both unverified. 0013 holds those two apart.
+// A reversal is a passive ledger row referencing the original; the sender stays forbidden (capability
+// false, PT=C and negative TA unverified).
 func TestIntegrationPosting_ReversalIsAPassiveLedgerRowThatCanNeverExecute(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -1512,8 +1418,7 @@ func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
 	repo := NewRepo(p)
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 
-	// a charge the PMS REJECTED: there is nothing to reverse. (A1: NG is a rejection only when the vendor
-	// confirmed it for this interface; unconfirmed it would be UNKNOWN, which IS reversible.)
+	// a charge the PMS rejected has nothing to reverse (an unconfirmed NG would be UNKNOWN, which is reversible)
 	s.confirmAnswer(t, p, "NG")
 	rej := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: "NG"}, nil }}
 	er := NewEngine(liveCfg, repo, rej)
@@ -1525,8 +1430,8 @@ func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
 		t.Fatal("a rejected charge has nothing to reverse and must be refused")
 	}
 
-	// a posted charge, reversed in two partial corrections that together exceed it. It is for ANOTHER stay of
-	// the property: a confirmed NG marks the first stay's reservation data-suspect, which stops its charging.
+	// a posted charge reversed in two partial corrections that together exceed it; on another stay, because
+	// a confirmed NG marks the first stay's reservation data-suspect and stops its charging
 	ok := &stubTransport{}
 	eo := NewEngine(liveCfg, repo, ok)
 	s2 := s.withCharge(t, p)
@@ -1550,11 +1455,7 @@ func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
 	}
 }
 
-// ---- the production construction boundary -------------------------------------------------------------
-
-// Private fields stopped a caller MUTATING an engine; they did not stop production code CONSTRUCTING one
-// with a config and transport of its own. NewProductionEngine is now the only exported constructor, and
-// this asserts what a real build is actually handed.
+// NewProductionEngine is the only exported constructor; this asserts what a real build is handed.
 func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *testing.T) {
 	p := pool(t)
 	repo := NewRepo(p)
@@ -1580,9 +1481,7 @@ func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *t
 	if err != nil || tr != nil {
 		t.Fatalf("this build has no financial transport; expected (nil, nil), got (%v, %v)", tr, err)
 	}
-	// Since D45 this build HAS a financial transport: the hand-off to pmsd, which owns the property's single
-	// FIAS connection. With transmission enabled the production factory -- never a caller -- supplies exactly
-	// that transport, and the engine is no longer DARK.
+	// With transmission enabled the production factory, never a caller, supplies the pmsd hand-off.
 	env[EnvPhase4Transmit] = "true"
 	e3, err := ProductionEngineWithEnv(repo, func(k string) string { return env[k] })
 	if err != nil {

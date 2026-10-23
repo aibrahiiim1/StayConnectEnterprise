@@ -10,22 +10,14 @@ import (
 	"fmt"
 )
 
-// Certificate kinds (portal_certificate_orders.kind).
 const (
 	KindOneGate = "ONEGATE" // <label>.gw.onegate.work
 	KindCustom  = "CUSTOM"  // the hotel's own verified domain
 )
 
-// ParseAndCheckCSR is everything Central demands of an appliance CSR before it is allowed anywhere near the
-// CA (contract §3 "Validation by Central before ordering"). Returns the parsed request and its single name.
-//
-//   - PEM "CERTIFICATE REQUEST", self-signed (CheckSignature: the appliance holds the key);
-//   - exactly one DNS name, and nothing else: no IP, email or URI SANs, which the CA would refuse or, worse,
-//     a different CA would accept;
-//   - a CN that is empty or that same name (a CN that differs is a second name in disguise);
-//   - ECDSA P-256 (what scd generates) or RSA of at least 2048 bits.
-//
-// Whether the name belongs to the appliance is the caller's question; this only answers "is it one name".
+// ParseAndCheckCSR validates an appliance CSR before it goes near the CA: self-signed, exactly one DNS name
+// and no IP/email/URI SANs, a CN that is empty or equal to it (a different CN is a second name in disguise),
+// and ECDSA P-256 or RSA >= 2048. Whether the name belongs to the appliance is the caller's question.
 func ParseAndCheckCSR(csrPEM string) (*x509.CertificateRequest, string, error) {
 	block, rest := pem.Decode([]byte(csrPEM))
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {

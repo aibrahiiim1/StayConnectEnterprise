@@ -1,7 +1,6 @@
 package main
 
-// EMAIL ACCOUNTS ON THE PORTAL (account_handlers.go; docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md).
-// The scd side is a fake speaking contract section 7 exactly; these pin what portald does with each answer.
+// Email accounts: the scd side is a fake speaking contract section 7; these pin what portald does with each answer.
 
 import (
 	"crypto/tls"
@@ -15,7 +14,6 @@ import (
 	"time"
 )
 
-// fakeAccountSCD records every account call portald makes and answers with what the test set.
 type fakeAccountSCD struct {
 	mu      sync.Mutex
 	calls   map[string][]map[string]any
@@ -35,7 +33,6 @@ func (f *fakeAccountSCD) on(path string, fn func(in map[string]any) (int, string
 const acctToken = "acct.tok-0123456789abcdef"
 
 func acctAuthReply(extra string) string {
-	// register and grace replies carry no "authority" (contract section 7); portald knows they are IAM-v2.
 	return `{"auth_context_id":"ac-9","device_id":"dev-9","guest_network_id":"gn-9","method":"ACCOUNT",` +
 		`"live_entitlement_id":null,"account_token":"` + acctToken + `"` + extra + `}`
 }
@@ -93,8 +90,6 @@ func reg(email, pw, confirm string) url.Values {
 	return url.Values{"email": {email}, "password": {pw}, "password_confirm": {confirm}}
 }
 
-// ---- register ----------------------------------------------------------------------------------------------
-
 func TestRegistrationSignsTheClientInAndGoesStraightToThePackages(t *testing.T) {
 	h, f := accountHandler(t)
 	f.on("/v1/auth/account/register", func(map[string]any) (int, string) {
@@ -143,7 +138,6 @@ func TestAnAddressAlreadyRegisteredOffersSignInOrAReset(t *testing.T) {
 	if !strings.Contains(body, esc(builtinStrings["en"]["err.acct.taken"])) {
 		t.Fatal("the client must be told the address already has an account")
 	}
-	// The page opens on Sign in with the address filled in; Forgot password is one tap away; Create is closed.
 	if !strings.Contains(body, `id="form-acct-signin" data-acct="signin">`) {
 		t.Error("the Sign in state must be the one showing")
 	}
@@ -175,7 +169,6 @@ func TestAWeakPasswordAndAMismatchAreSaidInWords(t *testing.T) {
 	if strings.Contains(body, "aaaaaaaa") {
 		t.Fatal("the password must not be given back")
 	}
-	// Two different passwords never reach scd.
 	rec = serveAcct(h, formReq("/auth/account/register", reg("ann@example.com", "correct horse", "correct hors")))
 	if !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["err.acct.mismatch"])) {
 		t.Fatal("a mismatch must be said")
@@ -183,7 +176,6 @@ func TestAWeakPasswordAndAMismatchAreSaidInWords(t *testing.T) {
 	if n := len(f.got("/v1/auth/account/register")); n != 1 {
 		t.Fatalf("a mismatch must not be sent to scd (%d calls)", n)
 	}
-	// The registration limit and the throttle each have their sentence.
 	f.on("/v1/auth/account/register", func(map[string]any) (int, string) { return 429, `{"error":"registration_limit"}` })
 	if body := serveAcct(h, formReq("/auth/account/register", reg("b@example.com", "correct horse", "correct horse"))).Body.String(); !strings.Contains(body, esc(builtinStrings["en"]["err.acct.limit"])) {
 		t.Error("the per-device registration limit must be explained")
@@ -193,8 +185,6 @@ func TestAWeakPasswordAndAMismatchAreSaidInWords(t *testing.T) {
 		t.Error("the throttle must be explained")
 	}
 }
-
-// ---- sign in -----------------------------------------------------------------------------------------------
 
 func TestEmailSignInIsTheAccountSignInWithTheAddress(t *testing.T) {
 	h, f := accountHandler(t)
@@ -214,7 +204,6 @@ func TestEmailSignInIsTheAccountSignInWithTheAddress(t *testing.T) {
 	if c := cookieNamed(rec, accountCookie); c == nil || c.Value != acctToken {
 		t.Fatal("sign-in keeps the account token too")
 	}
-	// A wrong password reads as the email form's sentence, on the Email panel, address kept.
 	rec = serveAcct(h, formReq("/auth/account/signin", url.Values{"email": {"ann@example.com"}, "password": {"nope nope"}}))
 	body := rec.Body.String()
 	if !strings.Contains(body, esc(builtinStrings["en"]["err.acct.invalid"])) || !strings.Contains(body, `value="ann@example.com"`) {
@@ -224,8 +213,6 @@ func TestEmailSignInIsTheAccountSignInWithTheAddress(t *testing.T) {
 		t.Error("the page must reopen on the Email panel")
 	}
 }
-
-// ---- forgot ------------------------------------------------------------------------------------------------
 
 func TestForgotPasswordAlwaysAnswersTheSame(t *testing.T) {
 	h, f := accountHandler(t)
@@ -245,8 +232,6 @@ func TestForgotPasswordAlwaysAnswersTheSame(t *testing.T) {
 		t.Fatalf("forgot carries the address and the device: %v", in)
 	}
 }
-
-// ---- the links in the emails -------------------------------------------------------------------------------
 
 func TestTheVerifyLinkShowsAButtonAndOnlyThePostVerifies(t *testing.T) {
 	h, f := accountHandler(t)
@@ -278,7 +263,6 @@ func TestTheVerifyLinkShowsAButtonAndOnlyThePostVerifies(t *testing.T) {
 	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["acct.verify.expired"])) {
 		t.Fatalf("a spent link says so: %d", rec.Code)
 	}
-	// A malformed token is refused without asking scd.
 	bad := httptest.NewRequest(http.MethodGet, "/account/verify?t=%3Cscript%3E", nil)
 	if rec = serveAcct(h, bad); rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "<script>") {
 		t.Fatalf("malformed link: %d", rec.Code)
@@ -308,7 +292,6 @@ func TestTheResetLinkShowsAFormAndThePostResets(t *testing.T) {
 	if len(f.got("/v1/auth/account/reset")) != 0 {
 		t.Fatal("GET must change nothing")
 	}
-	// A mismatch is refused here; scd is not asked.
 	rec = serveAcct(h, formReq("/account/reset", url.Values{"t": {tok}, "password": {"new password 1"}, "password_confirm": {"new password 2"}}))
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["err.acct.mismatch"])) ||
 		!strings.Contains(rec.Body.String(), `name="t" value="`+tok+`"`) {
@@ -335,8 +318,6 @@ func TestTheResetLinkShowsAFormAndThePostResets(t *testing.T) {
 		t.Fatalf("expired: %d", rec.Code)
 	}
 }
-
-// ---- verification required ---------------------------------------------------------------------------------
 
 func suspendedReply(grace bool) string {
 	g := "false"
@@ -412,24 +393,20 @@ func TestTheExtraHourRequiresThePasswordAgain(t *testing.T) {
 		}
 		return 200, acctAuthReply(`,"account":{"verified":false,"verification_required":true,"suspended":false,"grace_until":"2099-01-01T00:00:00Z"}`)
 	})
-	// No password: nothing is sent.
 	rec := serveAcct(h, formReq("/auth/account/grace", url.Values{"email": {"ann@example.com"}}))
 	if !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["err.acct.empty"])) || len(f.got("/v1/auth/account/grace")) != 0 {
 		t.Fatal("the extra hour without a password must not reach scd")
 	}
-	// A cookie is not a password.
 	req := formReq("/auth/account/grace", url.Values{"email": {"ann@example.com"}})
 	req.AddCookie(&http.Cookie{Name: accountCookie, Value: acctToken})
 	serveAcct(h, req)
 	if len(f.got("/v1/auth/account/grace")) != 0 {
 		t.Fatal("the account cookie must never stand in for the password")
 	}
-	// A wrong password says so on the same page.
 	rec = serveAcct(h, formReq("/auth/account/grace", url.Values{"email": {"ann@example.com"}, "password": {"wrong one"}}))
 	if !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["err.acct.invalid"])) {
 		t.Fatal("a wrong password must be said")
 	}
-	// The right one continues like a sign-in.
 	rec = serveAcct(h, formReq("/auth/account/grace", url.Values{"email": {"ann@example.com"}, "password": {"correct horse"}}))
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/packages" {
 		t.Fatalf("the extra hour continues to activation like a sign-in: %d %q", rec.Code, rec.Header().Get("Location"))
@@ -438,7 +415,6 @@ func TestTheExtraHourRequiresThePasswordAgain(t *testing.T) {
 	if len(in) != 2 || in[1]["email"] != "ann@example.com" || in[1]["mac"] != "aa:bb:cc:dd:ee:ff" {
 		t.Fatalf("grace carries the address, password and device: %v", in)
 	}
-	// Used up: said in words.
 	f.on("/v1/auth/account/grace", func(map[string]any) (int, string) { return 409, `{"error":"grace_unavailable"}` })
 	rec = serveAcct(h, formReq("/auth/account/grace", url.Values{"email": {"ann@example.com"}, "password": {"correct horse"}}))
 	if !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["acct.grace.used"])) {
@@ -473,7 +449,6 @@ func TestResendUsesTheCookieAndSaysWhenToWait(t *testing.T) {
 	if rec = serveAcct(h, withCookie()); !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["acct.resend.limit"])) {
 		t.Fatal("the daily limit must be said")
 	}
-	// Without the cookie nothing is sent, and the client is told to sign in again.
 	rec = serveAcct(h, formReq("/auth/account/resend", url.Values{}))
 	if len(f.got("/v1/auth/account/resend")) != 3 || !strings.Contains(rec.Body.String(), esc(builtinStrings["en"]["err.signin.again"])) {
 		t.Fatal("resend without a recent sign-in must not reach scd")
@@ -488,7 +463,6 @@ func TestYoureOnlineRemindsAnUnverifiedAccount(t *testing.T) {
 	deadline := time.Now().Add(20 * time.Hour).UTC().Format(time.RFC3339)
 	state := `{"account":{"verified":false,"verification_required":true,"deadline":"` + deadline + `","suspended":false}}`
 	f.on("/v1/auth/account/status", func(map[string]any) (int, string) { return 200, state })
-	// The online page looks up this device's session; the reminder's Resend carries the session scd named.
 	f.on("/v1/sessions/status", func(map[string]any) (int, string) {
 		return 200, `{"session_id":"0f0e0d0c-1111-2222-3333-444455556666","active":true}`
 	})
@@ -500,7 +474,6 @@ func TestYoureOnlineRemindsAnUnverifiedAccount(t *testing.T) {
 		!strings.Contains(body, `action="/auth/account/resend"`) || !strings.Contains(body, `name="s" value="0f0e0d0c-1111-2222-3333-444455556666"`) {
 		t.Fatal("the online page must remind an unverified account, with the deadline and Resend")
 	}
-	// Verified: nothing to say. No cookie: scd is not asked.
 	state = `{"account":{"verified":true,"verification_required":true}}`
 	if body = serveAcct(h, req).Body.String(); strings.Contains(body, `id="acct-reminder"`) {
 		t.Fatal("a verified account is not reminded")
@@ -513,8 +486,6 @@ func TestYoureOnlineRemindsAnUnverifiedAccount(t *testing.T) {
 		t.Fatal("without the account cookie the online page asks scd nothing")
 	}
 }
-
-// ---- the page and its words --------------------------------------------------------------------------------
 
 func TestTheEmailPanelIsTheAccountAndTheCodeIsGone(t *testing.T) {
 	for _, want := range []string{"cfg.email_account && cfg.email_account.enabled", "email_account:'email'",
@@ -530,7 +501,6 @@ func TestTheEmailPanelIsTheAccountAndTheCodeIsGone(t *testing.T) {
 			t.Errorf("the landing page still carries the email code: %q", gone)
 		}
 	}
-	// SMS and WhatsApp keep their code boxes and the shared code route.
 	for _, keep := range []string{`data-otp="sms"`, `data-otp="whatsapp"`, "attach('sms')", "attach('whatsapp')", "'/auth/otp/request'"} {
 		if !strings.Contains(landingHTML, keep) {
 			t.Errorf("the phone codes must stay: %q", keep)
@@ -551,7 +521,6 @@ func TestTheAccountSentencesAreTheirKeysEnglish(t *testing.T) {
 			t.Errorf("%q is not localised as %s", msg, key)
 		}
 	}
-	// Every account word ships in every language (the general completeness test covers the rest).
 	for _, l := range portalLanguages {
 		if n, want := len(accountStrings[l.Code]), len(accountStrings["en"]); n != want {
 			t.Errorf("%s has %d account strings, English has %d", l.Code, n, want)

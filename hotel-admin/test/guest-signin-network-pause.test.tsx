@@ -3,9 +3,6 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-// GDPR audit A4 (migration 0136): while Room sign-in is paused on a network, staff see it and can let a genuine
-// client's device try again, or end the pause. Both need a reason; neither signs anyone in.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

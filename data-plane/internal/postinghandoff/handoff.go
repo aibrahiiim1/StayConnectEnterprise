@@ -1,19 +1,6 @@
-// Package postinghandoff is the narrow local hand-off between the financial execution path and pmsd.
-//
-// THE ARCHITECTURE (Product-Owner decision D45, docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md §11):
-// the property's PMS accepts ONE FIAS client connection, and pmsd owns it. A room charge therefore travels
-//
-//	financial validation (scd, internal/posting)  ->  immutable authorised posting command
-//	  ->  this hand-off (a root-only unix socket on the appliance)  ->  pmsd writes the PS on its FIAS link
-//	  ->  the PMS answers with a PA  ->  pmsd returns the matched PA body here, verbatim
-//	  ->  the financial path records the outcome and settles only on PA=OK.
-//
-// pmsd is TRANSPORT. It carries the exact bytes it is handed or it refuses them; it never builds, edits,
-// re-targets, retries or interprets a charge. Everything that decides money lives on the other side of this
-// socket, in the posting engine and the database.
-//
-// This package holds only the wire contract and the client. It imports neither the posting core nor pmsd,
-// dials only a local unix socket (never TCP), and makes no financial decision: it reports what pmsd said.
+// Package postinghandoff is the local unix-socket hand-off from the posting engine to pmsd, which owns the
+// property's single FIAS connection. pmsd only carries the exact bytes or refuses them; money decisions
+// stay in the posting engine and the database.
 package postinghandoff
 
 import (
@@ -28,27 +15,22 @@ import (
 	"time"
 )
 
-// DefaultSocket is where pmsd listens: its own runtime directory (RuntimeDirectory=stayconnect-pmsd, 0750, owned
-// by the pmsd service user) -- the only place the shipped unit (User=stayconnect-pmsd, ProtectSystem=strict) can
-// create a socket. The socket is 0600 and owned by pmsd; scd, which runs as root, is the only other process that
-// can connect. (The former default, /run/stayconnect, is root-owned and read-only to pmsd, so an installed
-// appliance could never open the posting relay.)
+// DefaultSocket lives in pmsd's own runtime directory, the only place its sandboxed unit (ProtectSystem=strict)
+// can create a socket. The socket is 0600 and owned by pmsd; only root (scd) can also connect.
 const DefaultSocket = "/run/stayconnect-pmsd/pmsd-posting.sock"
 
-// EnvSocket overrides DefaultSocket on BOTH sides (tests and non-default layouts).
+// EnvSocket overrides DefaultSocket on both sides.
 const EnvSocket = "STAYCONNECT_POSTING_HANDOFF_SOCKET"
 
-// ProtocolVersion is carried on every request; pmsd refuses any other.
 const ProtocolVersion = 1
 
-// MaxBody bounds a PS record body. A FIAS PS is a few dozen bytes; anything near this is not one.
+// MaxBody bounds a PS record body; a FIAS PS is a few dozen bytes.
 const MaxBody = 512
 
-// MaxWait bounds how long pmsd may wait for the PA. It is a bound, not a retry timer.
+// MaxWait bounds how long pmsd may wait for the PA.
 const MaxWait = 60 * time.Second
 
-// Request is one immutable posting command: the exact PS body the financial path built and durably recorded,
-// its SHA-256, the interface whose link must carry it, and the protocol-attempt reference it owns.
+// Request is one immutable posting command: the exact recorded PS body and its SHA-256.
 type Request struct {
 	Version     int    `json:"v"`
 	InterfaceID string `json:"interface_id"`
@@ -58,32 +40,31 @@ type Request struct {
 	WaitMillis  int64  `json:"wait_ms"`
 }
 
-// Result kinds. They map ONE-TO-ONE onto the posting engine's three-valued UNKNOWN contract.
+// Result kinds map one-to-one onto the posting engine's three-valued UNKNOWN contract.
 const (
-	// Answered: a PA whose P# equals the command's was read on the same link. PABody is that record, verbatim.
+	// Answered: a PA with the command's P# was read on the same link; PABody is that record.
 	Answered = "ANSWERED"
-	// NotTransmitted: pmsd PROVABLY wrote no byte of this command (refused before the writer took it).
+	// NotTransmitted: pmsd provably wrote no byte of this command.
 	NotTransmitted = "NOT_TRANSMITTED"
 	// Unknown: the command may have reached the PMS and no matching PA was read in time. Never retried.
 	Unknown = "UNKNOWN"
 )
 
-// Response is pmsd's single answer to a Request.
 type Response struct {
 	Result string `json:"result"`
-	// Code is a bounded reason (never guest data), e.g. LINK_NOT_READY, COMMAND_NOT_AUTHORISED, ANSWER_TIMEOUT.
+	// Code is a bounded reason, never guest data (e.g. LINK_NOT_READY, ANSWER_TIMEOUT).
 	Code   string `json:"code,omitempty"`
 	PABody string `json:"pa_body,omitempty"`
 }
 
-// BodyHash is the command's identity: lowercase hex SHA-256 of the exact PS body bytes.
+// BodyHash is the command's identity: lowercase hex SHA-256 of the PS body.
 func BodyHash(body string) string {
 	s := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(s[:])
 }
 
-// Validate checks a request's SHAPE: version, bounded wire-safe PS body, hash, P# carried by the body. It
-// decides nothing financial; pmsd additionally asks the database whether the command is authorised.
+// Validate checks shape only (version, bounded wire-safe body, hash, P#); pmsd separately asks the
+// database whether the command is authorised.
 func (r Request) Validate() error {
 	if r.Version != ProtocolVersion {
 		return errors.New("unsupported hand-off version")
@@ -139,14 +120,11 @@ func PNumberOf(body string) int64 {
 	return n
 }
 
-// ErrNotSent means the client PROVABLY delivered no command to pmsd (the socket could not be reached).
+// ErrNotSent means the socket could not be reached, so no command was delivered.
 var ErrNotSent = errors.New("posting hand-off: pmsd could not be reached; nothing was handed off")
 
-// Send hands one command to pmsd and returns pmsd's answer.
-//
-// The ONLY outcome reported as not-sent without pmsd saying so is a failed dial: no connection means no
-// command. Once a connection exists, anything short of a complete, well-formed Response is returned as an
-// error the caller MUST treat as UNKNOWN -- pmsd may already have written the PS.
+// Send hands one command to pmsd. Only a failed dial is reported as not-sent; once connected, anything
+// short of a complete Response is an error the caller must treat as UNKNOWN (pmsd may have written the PS).
 func Send(ctx context.Context, socket string, req Request) (Response, error) {
 	if socket == "" {
 		socket = DefaultSocket

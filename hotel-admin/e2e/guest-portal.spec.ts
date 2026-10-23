@@ -2,15 +2,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Guest Portal browser E2E for "You're online". The portal is served by the Go `portald`; to drive the REAL page
-// in a real browser without running the Linux binary, data-plane/cmd/portald renders it with the real handler
-// into e2e/fixtures (TestE2EPortalFixtures fails when the fixture is stale). The nonce is the inert placeholder
-// "e2e-nonce".
-//
-// THE PACKAGE PANEL IS GONE FROM THIS PAGE (portal audit P-16). Every device that reaches it is online with its
-// sign-in already spent; the panel offered purchases to a client who had just bought, labelled every quote
-// "Free" and confirmed without a method, so a priced package answered "offer expired". What is pinned here is
-// that the page offers nothing to buy and never calls the commerce bridge, with the Phase-2 surface on or off.
+// Exercise portald's rendered fixture rather than copying its page into this test.
 function renderSuccess(): string {
   return readFileSync(join(__dirname, "fixtures", "portal-success.html"), "utf8");
 }

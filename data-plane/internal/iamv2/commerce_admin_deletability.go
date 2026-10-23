@@ -6,63 +6,46 @@ import (
 	"fmt"
 )
 
-// ErrCodeExists is the refusal an "Add" publication gets when the code it asked for already belongs to a
-// package (or plan) at this site.
-//
-// It exists because Add used to be an upsert: typing an existing code into "Add package" quietly published a
-// new revision of the package that owned it -- replacing its name, conditions and plan for every future guest --
-// and reported success. Revising an existing item is what Edit is for; Add now says the code is taken.
+// ErrCodeExists is the refusal an "Add" publication gets when the code already belongs to a package or plan
+// at this site; Add must never silently revise the owner.
 var ErrCodeExists = errors.New("iamv2: code already exists at this site")
 
-// ErrCommerceNotFound means no operator-visible package or plan has that id at this site. System objects (the hidden
-// grace catalogue) answer the same way, because they are not the operator's to inspect or remove.
+// ErrCommerceNotFound also covers system objects (the hidden grace catalogue), which are not the operator's to inspect or remove.
 var ErrCommerceNotFound = errors.New("iamv2: not found")
 
-// ErrCatalogueInUse is the database refusing a deletion because something still depends on the item. The
-// Deletability returned beside it says what.
 var ErrCatalogueInUse = errors.New("iamv2: still in use")
 
-// ErrCatalogueDeleteNeedsReason is the database refusing a deletion with no bounded reason.
 var ErrCatalogueDeleteNeedsReason = errors.New("iamv2: deletion needs a reason")
 
-// ErrCatalogueDeleteUnavailable means this appliance's database predates migration 0091, so the deletion
-// functions do not exist yet. Deletion is refused, never approximated.
+// ErrCatalogueDeleteUnavailable: the database predates the deletion functions (migration 0091); deletion is refused, never approximated.
 var ErrCatalogueDeleteUnavailable = errors.New("iamv2: deletion is not available on this database")
 
-// DeletabilityReason is one thing that stands between an item and its removal, in the words an operator reads.
-//
-// Count is nil when the reason is not a count. It is never a guess: every count comes from the database's own
-// iam_v2.*_deletion_blockers function, the same one the deletion itself refuses on.
+// DeletabilityReason is one blocker in operator words. Count is nil when the reason is not a count; counts
+// come from the database's own deletion_blockers functions, never a guess.
 type DeletabilityReason struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Count   *int64 `json:"count,omitempty"`
 }
 
-// Deletability is the answer to "can I delete this?".
-//
-// A package or plan may be permanently deleted only when nothing has ever used it (migration 0091). The
-// answer comes from the database, which counts every reference -- including ones this service cannot read
-// itself -- and refuses the deletion on exactly the same list. When the answer is no, the reasons say what is
-// attached and Disable remains the way to stop offering it.
+// Deletability: an item may be permanently deleted only when nothing has ever used it. The database counts
+// every reference, including ones this service cannot read, and refuses deletion on the same list.
 type Deletability struct {
 	Deletable bool                 `json:"deletable"`
 	Reasons   []DeletabilityReason `json:"reasons"`
 }
 
-// CatalogueBlocker is one row of iam_v2.internet_package_deletion_blockers / service_plan_deletion_blockers.
 type CatalogueBlocker struct {
 	Code string
 	N    int64
 }
 
-// ReasonDeleteUnavailable is the only reason when the database cannot answer (pre-0091).
+// ReasonDeleteUnavailable is the only reason when the database cannot answer.
 const ReasonDeleteUnavailable = "DELETE_UNAVAILABLE"
 
 const deleteUnavailableMsg = "This appliance's database does not support permanent deletion yet. " +
 	"Disable it instead — it stops being offered and keeps its history."
 
-// PackageDeletability reports whether a package may be permanently deleted, and if not, why.
 func (a *CommerceAdmin) PackageDeletability(ctx context.Context, tenantID, siteID, packageID string) (Deletability, bool, error) {
 	if !a.cfg.AdminOn() {
 		return Deletability{}, true, nil
@@ -71,7 +54,6 @@ func (a *CommerceAdmin) PackageDeletability(ctx context.Context, tenantID, siteI
 	return d, false, err
 }
 
-// PlanDeletability reports whether a service plan may be permanently deleted, and if not, why.
 func (a *CommerceAdmin) PlanDeletability(ctx context.Context, tenantID, siteID, planID string) (Deletability, bool, error) {
 	if !a.cfg.AdminOn() {
 		return Deletability{}, true, nil
@@ -100,9 +82,7 @@ func (a *CommerceAdmin) deletability(ctx context.Context, tenantID, siteID, id s
 	return blockersToDeletability(rows, pkg)
 }
 
-// DeletePackage permanently deletes a package that has never been used. The database re-checks every
-// blocker under a row lock and refuses on any of them; on that refusal the returned Deletability is re-read so
-// the operator sees what appeared.
+// DeletePackage: the database re-checks every blocker under a row lock; on refusal the Deletability is re-read.
 func (a *CommerceAdmin) DeletePackage(ctx context.Context, tenantID, siteID, packageID, operatorID, reason string) (Deletability, bool, error) {
 	if !a.cfg.AdminOn() {
 		return Deletability{}, true, nil
@@ -110,7 +90,6 @@ func (a *CommerceAdmin) DeletePackage(ctx context.Context, tenantID, siteID, pac
 	return a.deleteUnused(ctx, tenantID, siteID, packageID, operatorID, reason, true)
 }
 
-// DeletePlan permanently deletes a service plan that no package revision and no grant has ever used.
 func (a *CommerceAdmin) DeletePlan(ctx context.Context, tenantID, siteID, planID, operatorID, reason string) (Deletability, bool, error) {
 	if !a.cfg.AdminOn() {
 		return Deletability{}, true, nil
@@ -134,8 +113,7 @@ func (a *CommerceAdmin) deleteUnused(ctx context.Context, tenantID, siteID, id, 
 			return Deletability{}, false, ErrCatalogueInUse
 		}
 		if d.Deletable {
-			// The lock saw a reference the explanation no longer sees (it was removed in between). Still a
-			// refusal: say so rather than show an empty list.
+			// The lock saw a reference the explanation no longer sees; still a refusal, not an empty list.
 			d = Deletability{Deletable: false, Reasons: []DeletabilityReason{{Code: "CHANGED",
 				Message: "Something referenced this item while it was being deleted. Try again."}}}
 		}
@@ -148,8 +126,7 @@ func (a *CommerceAdmin) deleteUnused(ctx context.Context, tenantID, siteID, id, 
 	}
 }
 
-// blockersToDeletability turns the database's rows into the operator's answer. Pure, so the wording is tested.
-// NOT_FOUND and SYSTEM_* answer not-found: a system object is not the operator's to inspect or remove.
+// blockersToDeletability: NOT_FOUND and SYSTEM_* answer not-found, since a system object is not the operator's to inspect.
 func blockersToDeletability(rows []CatalogueBlocker, pkg bool) (Deletability, error) {
 	out := Deletability{Deletable: true, Reasons: []DeletabilityReason{}}
 	for _, b := range rows {
@@ -178,8 +155,7 @@ func plural(n int64, one, many string) string {
 	return many
 }
 
-// blockerMessage is the sentence for one blocker code. An unknown code (a newer database) still refuses, in
-// general words, because the database refused.
+// blockerMessage: an unknown code (a newer database) still refuses, in general words.
 func blockerMessage(code string, n int64, pkg bool) string {
 	item := "plan"
 	if pkg {

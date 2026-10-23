@@ -30,13 +30,11 @@ func TestApplyRoomSignInMode(t *testing.T) {
 		want      roomEvidence
 		violation bool
 	}{
-		// room_any: unchanged combined behaviour.
 		{roomModeAny, in{v: "Smith"}, roomEvidence{Last: "SMITH", First: "SMITH", Res: "Smith"}, false},
 		{roomModeAny, in{l: "SMITH", r: "R1"}, roomEvidence{Last: "SMITH", Res: "R1"}, false},
 		{roomModeAny, in{v: "x", l: "SMITH"}, roomEvidence{Last: "SMITH"}, false},
 		{roomModeAny, in{}, roomEvidence{}, false},
 
-		// single-field modes: only that field.
 		{roomModeLastName, in{l: "SMITH"}, roomEvidence{Last: "SMITH"}, false},
 		{roomModeLastName, in{r: "R1"}, roomEvidence{}, true},
 		{roomModeLastName, in{l: "SMITH", r: "R1"}, roomEvidence{}, true},
@@ -49,13 +47,11 @@ func TestApplyRoomSignInMode(t *testing.T) {
 		{roomModeReservation, in{l: "SMITH"}, roomEvidence{}, true},
 		{roomModeReservation, in{v: "R1"}, roomEvidence{}, true},
 
-		// legacy either: last name OR reservation number, exactly one.
 		{roomModeEither, in{l: "SMITH"}, roomEvidence{Last: "SMITH"}, false},
 		{roomModeEither, in{r: "R1"}, roomEvidence{Res: "R1"}, false},
 		{roomModeEither, in{l: "SMITH", r: "R1"}, roomEvidence{}, true},
 		{roomModeEither, in{f: "JO"}, roomEvidence{}, true},
 		{roomModeEither, in{v: "SMITH"}, roomEvidence{}, true},
-		// whitespace is not a field
 		{roomModeLastName, in{l: "SMITH", r: "  "}, roomEvidence{Last: "SMITH"}, false},
 	}
 	for _, c := range cases {

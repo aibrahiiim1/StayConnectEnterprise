@@ -1,20 +1,10 @@
-// WHICH ALLOWANCE A GUEST ACTUALLY RECEIVES.
-//
-// The Data allowance section can show two numbers at once: the service plan's flat quota and the package's
-// per-night one. Nothing on the screen said which of them wins, and the honest reading was a coin toss --
-// the plan is the technical service, the package is the offer, either could plausibly take precedence.
-//
-// It is settled by where the number is written: a PER_STAY_NIGHT package computes its allowance at grant time
-// and freezes it onto the entitlement, and every quota reader prefers the entitlement's own value. So the
-// package wins FOR ITS OWN GUESTS, and the plan is not touched, so packages using the plan's allowance are
-// unaffected. Both halves are asserted here, because an operator who reads only the first will believe
-// editing a package changed the plan.
+// Which allowance a guest receives: a PER_STAY_NIGHT package wins for its own guests (frozen on the entitlement) and
+// the plan is untouched.
 
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-// jsdom implements no ResizeObserver; the Free access control's switch (rendered by default on a new package
-// since it starts at "once per client") measures itself on mount.
+// jsdom implements no ResizeObserver; the Free access switch measures itself on mount.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
@@ -27,12 +17,10 @@ const plans: PlanOption[] = [
     down_kbps: 10000, data_quota_bytes: 5 * GB },
   { plan_id: "plan-20gb", code: "TWENTY", name: "Twenty GB", current_revision_id: "r2",
     down_kbps: 10000, data_quota_bytes: 20 * GB },
-  // A plan that limits speed but sets no data allowance at all.
   { plan_id: "plan-none", code: "NOQUOTA", name: "No quota", current_revision_id: "r3", down_kbps: 10000 },
 ];
 
 function openForm() {
-  // A hotel: the per-night allowance is offered with Hospitality.
   return render(<PackageForm mode="add" plans={plans} onSave={() => {}}
     modules={{ modules: { hospitality: { id: "hospitality", label: "Hospitality", licensed: true, enabled: true, ready: true, readiness: [], reasons: [] } as never } }} />);
 }
@@ -70,7 +58,6 @@ describe("the data-allowance precedence notice", () => {
     openForm();
     setPlan("plan-5gb");
     perNight("1", "3", "20");
-    // 8 nights x 1 GB = 8 GB, above the 3 GB floor and below the 20 GB ceiling.
     expect(screen.getByTestId("allowance-example").textContent)
       .toMatch(new RegExp(`For a stay of ${NOTICE_EXAMPLE_NIGHTS} nights, the client receives\\s*8 GB`));
   });
@@ -78,12 +65,10 @@ describe("the data-allowance precedence notice", () => {
   it("FIXED says plainly that the plan's allowance is what applies", () => {
     openForm();
     setPlan("plan-5gb");
-    // FIXED is the default mode; assert it explicitly rather than relying on that.
     setMode("FIXED");
     const n = notice()!;
     expect(n.textContent).toContain("uses the service plan");
     expect(n.textContent).toContain("5 GB");
-    // No override language anywhere: nothing is being overridden.
     expect(n.textContent).not.toMatch(/precedence|instead|overrid/i);
   });
 
@@ -94,8 +79,7 @@ describe("the data-allowance precedence notice", () => {
     const n = notice()!;
     expect(n.textContent).toMatch(/sets no data allowance of its own/i);
     expect(n.textContent).toContain("2 GB per stay night");
-    // SCOPED TO DATA, DELIBERATELY. "the only allowance a client receives" read as though it also covered the
-    // time, session and device limits the plan still imposes -- it does not; it is the DATA allowance only.
+    // Scoped to DATA: the notice must not read as covering the plan's time, session and device limits.
     expect(n.textContent).toMatch(/data allowance for this package/i);
     expect(n.textContent).not.toMatch(/only allowance a client receives/i);
     expect(n.textContent).not.toMatch(/precedence|takes precedence|instead of/i);
@@ -107,8 +91,7 @@ describe("the data-allowance precedence notice", () => {
     openForm();
     setPlan("plan-none");
     setMode("FIXED");
-    // "does not limit data" read as though the whole package were unrestricted. The limit that is absent is
-    // the DATA-VOLUME one; the plan's speed, time, session and device limits are untouched by this notice.
+    // "does not limit data" must not read as the whole package being unrestricted.
     expect(notice()!.textContent)
       .toMatch(/has no data-usage quota, so this package does not impose a\s+data-volume limit/i);
     expect(notice()!.textContent).not.toMatch(/does not limit data/i);
@@ -147,28 +130,23 @@ describe("the data-allowance precedence notice", () => {
 
     fireEvent.change(screen.getByTestId("gb-per-night"), { target: { value: "2" } });
     expect(notice()!.textContent).toContain("2 GB per stay night");
-    // 8 nights x 2 GB, no clamps configured.
     expect(screen.getByTestId("allowance-example").textContent).toContain("16 GB");
 
     fireEvent.change(screen.getByTestId("max-gb"), { target: { value: "10" } });
     expect(notice()!.textContent).toContain("Maximum 10 GB");
-    // ...and the example now shows the ceiling doing its work.
     expect(screen.getByTestId("allowance-example").textContent).toContain("10 GB");
   });
 
   it("says nothing at all until there is something true to say", () => {
     openForm();
-    // No plan chosen yet: the notice would have to invent an allowance.
     expect(notice()).toBeNull();
     setPlan("plan-5gb");
     setMode("PER_STAY_NIGHT");
-    // Per-night chosen but no rate typed: still nothing truthful to state.
     expect(notice()).toBeNull();
   });
 
   it("is informational and never blocks saving", () => {
-    // Both configurations are legitimate, so the notice must not gate Save. Proven by the notice being a
-    // note rather than an alert, and by the form having no validation tied to it.
+    // The notice is a note, not an alert, and must not gate Save.
     openForm();
     setPlan("plan-5gb");
     perNight("1", "3", "20");

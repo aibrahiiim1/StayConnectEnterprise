@@ -7,15 +7,9 @@ import (
 	"testing"
 )
 
-// THE GUEST-FACING PRESENTATION of device self-service.
-//
-// The durable rules are enforced in the database and the refusals are uniform at the HTTP layer; what is
-// left for this page to get wrong is disclosure and comprehension, and both are real:
-//
-//   - a MAC address on a guest page is a stable identifier for somebody's phone on a shared network;
-//   - a panel that appears on an appliance where the capability is dark tells the guest it exists;
-//   - a "Remove" button on a device that cannot be removed produces a refusal the guest cannot interpret;
-//   - a refusal that explains itself gives a probing guest the oracle the API refuses them.
+// Rules are enforced in the database and refusals are uniform at HTTP; the page can still get disclosure
+// wrong: a MAC is a stable phone identifier, a visible panel reveals the capability, and an explained
+// refusal is an oracle.
 
 func renderSuccess(t *testing.T) string {
 	t.Helper()
@@ -33,8 +27,7 @@ func renderSuccess(t *testing.T) string {
 	return buf.String()
 }
 
-// devicesPanel returns just the device panel and its script, so an assertion about "the page must not
-// mention X" cannot be satisfied or broken by unrelated parts of the page.
+// devicesPanel isolates the panel so "must not mention X" is not affected by the rest of the page.
 func devicesPanel(t *testing.T, page string) string {
 	t.Helper()
 	i := strings.Index(page, `<div id="devices"`)
@@ -44,15 +37,13 @@ func devicesPanel(t *testing.T, page string) string {
 	return page[i:]
 }
 
-// THE PANEL IS HIDDEN UNTIL THE APPLIANCE ANSWERS. On an appliance where Phase 6 is dark or the hotel has
-// the setting off, the list call fails and the guest sees an ordinary success page.
+// Hidden until the appliance answers, so a dark capability shows an ordinary success page.
 func TestGuestDevicePanelStartsHidden(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	head := panel[:strings.Index(panel, ">")+1]
 	if !strings.Contains(head, "hidden") {
 		t.Fatalf("the device panel is not hidden by default: %s", head)
 	}
-	// ...and it is only ever revealed on a successful, non-empty answer.
 	if !strings.Contains(panel, "panel.hidden = false") {
 		t.Fatal("nothing ever reveals the panel")
 	}
@@ -63,7 +54,6 @@ func TestGuestDevicePanelStartsHidden(t *testing.T) {
 	}
 }
 
-// NO MAC, AND NO INTERNAL IDENTITY, ANYWHERE THE GUEST CAN READ.
 func TestGuestDevicePanelExposesNoMACOrInternalIdentity(t *testing.T) {
 	panel := strings.ToLower(devicesPanel(t, renderSuccess(t)))
 	for _, forbidden := range []string{"mac", "entitlement", "stay_id", "room", "pms", "profile", "tenant", "site_id"} {
@@ -71,7 +61,7 @@ func TestGuestDevicePanelExposesNoMACOrInternalIdentity(t *testing.T) {
 			t.Fatalf("the guest device panel mentions %q", forbidden)
 		}
 	}
-	// The opaque id is needed as a release target, and must travel in the request rather than be displayed.
+	// The opaque id travels in the release request and is never displayed.
 	if !strings.Contains(panel, "device_id: id") {
 		t.Fatal("the release call does not carry the device id it was given")
 	}
@@ -80,8 +70,7 @@ func TestGuestDevicePanelExposesNoMACOrInternalIdentity(t *testing.T) {
 	}
 }
 
-// AN ONLINE DEVICE CAN BE DISCONNECTED AND REMOVED (0118): its confirmation says it goes offline now and the
-// package does not change; the device the page is open on is named and never offered for removal.
+// Removing an online device says it goes offline and the package is unchanged; this device is named, not removable.
 func TestGuestDevicePanelExplainsOnlineRemovalAndThisDevice(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "d.removable") {
@@ -104,14 +93,13 @@ func TestGuestDevicePanelExplainsOnlineRemovalAndThisDevice(t *testing.T) {
 	}
 }
 
-// The removal is confirmed IN THE PAGE (in the guest's language, focus on the safe answer, Escape keeps the
-// device -- not the browser's own dialog), states its consequence, and reports a clear result.
+// Removal is confirmed in the page (guest's language, focus on the safe answer, Escape keeps the device),
+// not the browser's dialog.
 func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if strings.Contains(panel, "window.confirm(") {
 		t.Fatal("the removal still uses the browser's own confirm dialog")
 	}
-	// The release call is reachable only from the confirmation's own "Remove" button.
 	ask := panel[strings.Index(panel, "function ask("):]
 	ask = ask[:strings.Index(ask, "function load(")]
 	for _, want := range []string{"'dev.confirm'", "t('dev.yes')", "t('dev.keep')", "release(id, btn, row)", "no.focus()", "'Escape'"} {
@@ -119,7 +107,7 @@ func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 			t.Fatalf("the in-page confirmation is missing %q", want)
 		}
 	}
-	if strings.Count(panel, "release(") != 2 { // the definition and the confirmation's call -- no other caller
+	if strings.Count(panel, "release(") != 2 { // the definition and the confirmation's call only
 		t.Fatalf("release is called from somewhere other than the confirmation")
 	}
 	for code, words := range builtinStrings {
@@ -134,15 +122,12 @@ func TestGuestDeviceRemovalIsConfirmedAndItsResultIsClear(t *testing.T) {
 		!strings.Contains(builtinStrings["en"]["dev.removed"], "its place is free") {
 		t.Fatal("a successful removal has no clear result")
 	}
-	// The list is refreshed afterwards, so the screen and the appliance agree.
 	if !strings.Contains(panel, "load(false)") {
 		t.Fatal("the list is not reloaded after a removal")
 	}
 }
 
-// EVERY REFUSAL IS THE SAME SENTENCE -- except today's limit for changing devices, which is a rule the client
-// must know (0118). The API collapses "not yours", "already gone" and "switched off" into one answer; a page that
-// guessed between them would undo that.
+// Every refusal is the same sentence except today's limit; the page must not guess between collapsed causes.
 func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "t('dev.refused')") ||
@@ -153,7 +138,6 @@ func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 		!strings.Contains(panel, "res.code === 'limit_today'") {
 		t.Fatal("refusals other than today's limit must be one sentence, and today's limit its own")
 	}
-	// ...and in no language does the one refusal sentence explain itself.
 	for code, words := range builtinStrings {
 		low := strings.ToLower(words["dev.refused"])
 		for _, leak := range []string{"too many", "already", "online", "disabled", "switched off", "not yours"} {
@@ -162,8 +146,7 @@ func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 			}
 		}
 	}
-	// Scanned over what the guest can READ -- the lines that put words on the screen -- rather than over the
-	// whole script, so that `btn.disabled = true` is not mistaken for the word "disabled" being shown.
+	// Scan only lines that put words on screen, so `btn.disabled = true` is not mistaken for shown text.
 	for _, line := range strings.Split(panel, "\n") {
 		low := strings.ToLower(line)
 		if !strings.Contains(low, "textcontent") && !strings.Contains(low, "confirm(") {
@@ -178,21 +161,18 @@ func TestGuestDeviceRefusalSaysNothing(t *testing.T) {
 	}
 }
 
-// The panel talks to the two public routes and nothing else.
 func TestGuestDevicePanelUsesOnlyThePublicRoutes(t *testing.T) {
 	panel := devicesPanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "'/devices/list'") || !strings.Contains(panel, "'/devices/release'") {
 		t.Fatal("the panel does not call the public device routes")
 	}
-	// No Central, no cloud, no absolute URL of any kind: this page works on an appliance with no uplink.
+	// No absolute URL: the page works with no uplink.
 	for _, off := range []string{"http://", "https://", "//stayconnect", "cloud", "central"} {
 		if strings.Contains(strings.ToLower(panel), off) {
 			t.Fatalf("the guest device panel reaches outside the appliance: %q", off)
 		}
 	}
 }
-
-// ---- the two clocks an aggregate guest needs --------------------------------------------------------------
 
 func timePanel(t *testing.T, page string) string {
 	t.Helper()
@@ -207,8 +187,7 @@ func timePanel(t *testing.T, page string) string {
 	return page[i : i+j]
 }
 
-// HIDDEN UNLESS THE PACKAGE HAS AN ONLINE-TIME BUDGET. Every package today is VALIDITY_WINDOW, and their
-// success page must be exactly what it was.
+// Hidden unless the package has an online-time budget.
 func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
 	panel := timePanel(t, renderSuccess(t))
 	head := panel[:strings.Index(panel, ">")+1]
@@ -223,9 +202,7 @@ func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
 	}
 }
 
-// BOTH CLOCKS, AND WHAT EACH ONE MEANS. Remaining minutes without the hard expiry is the comfortable
-// half-truth: a guest with ninety minutes left and a window closing in ten would plan around a number that
-// is about to stop mattering.
+// Remaining minutes without the hard expiry would mislead a guest whose window closes first.
 func TestRemainingTimePanelShowsBothClocks(t *testing.T) {
 	panel := timePanel(t, renderSuccess(t))
 	en := builtinStrings["en"]
@@ -244,7 +221,6 @@ func TestRemainingTimePanelShowsBothClocks(t *testing.T) {
 	}
 }
 
-// It reads the status endpoint and nothing else, and exposes no internal identity.
 func TestRemainingTimePanelUsesOnlyTheStatusEndpoint(t *testing.T) {
 	panel := timePanel(t, renderSuccess(t))
 	if !strings.Contains(panel, "'/status'") {
@@ -255,7 +231,6 @@ func TestRemainingTimePanelUsesOnlyTheStatusEndpoint(t *testing.T) {
 			t.Fatalf("the remaining-time panel exposes %q", forbidden)
 		}
 	}
-	// A budget of zero is shown as "no time", never as a negative or a bare 0.
 	if !strings.Contains(panel, "if(s <= 0) return t('tl.none')") {
 		t.Fatal("an exhausted budget has no honest rendering")
 	}

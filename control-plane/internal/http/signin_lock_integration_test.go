@@ -17,9 +17,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// Central migration 0053: signin_lock_failures wrong passwords lock the account for signin_lock_minutes; while
-// locked even the right password is refused; a name with no account is locked exactly like a real one, so the
-// lock tells nobody which accounts exist; and a right password clears the count.
 func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -49,13 +46,12 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 		return rec.Code, e, rec.Header().Get("Retry-After")
 	}
 
-	// A right password clears the count: two wrong, one right, two wrong is not a lock.
+	// A right password clears the count.
 	for _, pw := range []string{"nope-1", "nope-2", "correct-horse-battery", "nope-3", "nope-4"} {
 		if code, _, _ := login("lock@central.test", pw); code == http.StatusTooManyRequests {
 			t.Fatalf("locked after %q, but a right password had cleared the count", pw)
 		}
 	}
-	// The third wrong one in a row locks it, and the lock refuses the right password.
 	if code, e, after := login("LOCK@central.test", "nope-5"); code != 429 || e != "signin_locked" || after == "" {
 		t.Fatalf("third wrong password = %d %q Retry-After=%q", code, e, after)
 	}
@@ -63,7 +59,7 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 		t.Fatalf("the right password during the lock = %d %q", code, e)
 	}
 
-	// An unknown name answers exactly the same way.
+	// An unknown name is locked exactly like a real one, so the lock reveals nothing about accounts.
 	for i := 0; i < 2; i++ {
 		if code, _, _ := login("nobody@central.test", "x"); code != 401 {
 			t.Fatalf("unknown name, attempt %d = %d", i+1, code)
@@ -73,13 +69,12 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 		t.Fatalf("unknown name, third attempt = %d %q", code, e)
 	}
 
-	// The throttle holds no address, and the lock is audited.
 	var n int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM operator_signin_throttle WHERE key_hash LIKE '%@%'`).Scan(&n)
 	if n != 0 {
 		t.Fatal("the throttle stores an email address")
 	}
-	// Nor a plain hash of one, which a list of addresses would reverse (GDPR audit A8): the key is an HMAC.
+	// A plain hash would be reversible from a list of addresses; the key is an HMAC.
 	plain := sha256.Sum256([]byte("lock@central.test"))
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM operator_signin_throttle WHERE key_hash = $1`, hex.EncodeToString(plain[:])).Scan(&n)
 	if n != 0 {
@@ -90,7 +85,6 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 		t.Fatalf("auth.signin_locked audited %d times, want 2", n)
 	}
 
-	// The lock runs out by itself.
 	if _, err := pool.Exec(ctx, `UPDATE operator_signin_throttle SET locked_until = now() - interval '1 second'`); err != nil {
 		t.Fatal(err)
 	}

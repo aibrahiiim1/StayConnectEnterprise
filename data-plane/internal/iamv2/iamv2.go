@@ -1,18 +1,5 @@
-// Package iamv2 is the DARK Phase 1B application layer for the clean-slate IAM schema (iam_v2).
-//
-// It defines the credential-validation contracts, the normalized subject/principal, device and
-// authentication-context models, deterministic typed errors, repository/transaction interfaces, a
-// configuration model (master kill switch + per-method flags, all default OFF), redacted
-// observability, and method adapters (voucher/account/OTP/social).
-//
-// DARK / production invariants (D1, D3, decision D10 scope):
-//   - Every flag defaults OFF; nothing self-activates.
-//   - When a method is not enabled, the Authenticator returns DecisionDisabled WITHOUT invoking any
-//     repository method — so in production (flags OFF) there is NO iam_v2 read, write, or shadow
-//     execution, and no rolled-back write attempt.
-//   - All functional iam_v2 repository execution therefore happens ONLY in scratch/test, where the
-//     flags are explicitly enabled and a scratch Repository is provided.
-//   - Production must refuse the social "Stub" provider.
+// Package iamv2 is the application layer over the iam_v2 schema: credential validation, auth contexts,
+// commerce and grace.
 package iamv2
 
 import (
@@ -22,7 +9,6 @@ import (
 	"time"
 )
 
-// Method is the Phase 1B credential method (subset of the auth_contexts CHECK domain).
 type Method string
 
 const (
@@ -32,26 +18,20 @@ const (
 	MethodSocial  Method = "SOCIAL"
 )
 
-// Config is deployment-controlled (env/config only; no DB flag table/UI in Phase 1B). Every flag
-// defaults OFF.
 type Config struct {
 	MasterEnabled   bool            // master kill switch; when false nothing in iam_v2 runs
 	Methods         map[Method]bool // per-method enable flags (absent/false = OFF)
 	AllowSocialStub bool            // production MUST leave this false (refuse the Stub provider)
 }
 
-// DefaultConfig returns the safe production default: everything OFF.
 func DefaultConfig() Config {
 	return Config{MasterEnabled: false, Methods: map[Method]bool{}, AllowSocialStub: false}
 }
 
-// Enabled reports whether a method may run (master on AND that method on).
 func (c Config) Enabled(m Method) bool {
 	return c.MasterEnabled && c.Methods[m]
 }
 
-// Validate checks the configuration at startup. It never enables anything; it only rejects an
-// incoherent configuration (fail closed).
 func (c Config) Validate() error {
 	for m := range c.Methods {
 		switch m {
@@ -63,7 +43,6 @@ func (c Config) Validate() error {
 	if !c.MasterEnabled {
 		for m, on := range c.Methods {
 			if on {
-				// A per-method flag on while the master switch is off is a misconfiguration.
 				return &Error{Code: ErrConfig, Msg: "method " + string(m) + " enabled but master switch is OFF"}
 			}
 		}
@@ -71,7 +50,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Decision is the outcome classification.
 type Decision string
 
 const (
@@ -80,40 +58,34 @@ const (
 	DecisionDisabled Decision = "disabled" // method flag OFF; no repository was invoked
 )
 
-// Request is a credential-validation request. Secrets (Secret) are never logged.
+// Request is a credential-validation request; Secret is never logged.
 type Request struct {
-	Method   Method
-	TenantID string
-	SiteID   string
-	// Method-specific inputs:
+	Method       Method
+	TenantID     string
+	SiteID       string
 	Username     string // ACCOUNT
 	Secret       string // ACCOUNT password / VOUCHER code / OTP code (never logged)
 	FactorType   string // OTP: EMAIL|PHONE ; SOCIAL: SOCIAL_SUBJECT
 	FactorIssuer string // SOCIAL issuer
 	FactorValue  string // OTP verified email/phone ; SOCIAL subject (the provider's sub)
 	Provider     string // SOCIAL provider name (Stub is refused in production)
-	// FactorAttrs are verified claims about the primary factor (hd, tid, email, source), written to the
-	// identity row's attrs. Never populated from anything the browser sent.
-	FactorAttrs map[string]string
-	// SecondaryFactors are further factors the same proof established (a trusted issuer's verified email),
-	// used to find and link an existing Client (identity.go). Optional.
+	// Verified claims about the primary factor (hd, tid, email, source); never populated from anything the
+	// browser sent.
+	FactorAttrs      map[string]string
 	SecondaryFactors []FactorClaim
-	// ResumedPrincipalID is set ONLY by the remembered-device path: scd has already verified a device-bound
-	// resume credential for this principal, so no factor is re-proven; the Client's stored factors decide the
-	// group and an ordinary auth context is minted for the method the credential was issued under.
+	// Set only by the remembered-device path, where scd has already verified a device-bound resume credential;
+	// no factor is re-proven.
 	ResumedPrincipalID string
-	// Credential names HOW the Client proved themselves this time, for the operator: EMAIL_OTP, SMS_OTP,
-	// WHATSAPP_OTP, SOCIAL_GOOGLE, VOUCHER, ACCOUNT ... (credential.go). The method says which authority
-	// decided; the credential says which channel or provider the client actually used, which is what the
-	// Admin Console's "Signed in with" needs. A remembered device carries the credential it was issued under.
+	// Credential names how the Client proved themselves (EMAIL_OTP, SOCIAL_GOOGLE, VOUCHER, ...) for the
+	// operator; Method says which authority decided.
 	Credential string
-	// StaffAssisted is set by scd when the OTP code was read to the client by a staff member (contract §6.7).
-	// Such a sign-in may create a NEW Client, marked staff_assisted, but never signs in to an existing one.
+	// Set by scd when staff read the OTP to the client. Such a sign-in may create a new Client
+	// (staff_assisted) but never signs in to an existing one.
 	StaffAssisted bool
 	Device        DeviceContext
 }
 
-// DeviceContext is the device/network the request arrived on. MAC identifies a device, never a person.
+// DeviceContext is the device/network the request arrived on; a MAC identifies a device, never a person.
 type DeviceContext struct {
 	MAC            string
 	ApplianceID    string
@@ -121,61 +93,46 @@ type DeviceContext struct {
 	IP             string
 }
 
-// Subject is the normalized resolved subject of a successful validation (exactly one is set).
 type Subject struct {
 	VoucherID      string
 	GuestAccountID string
 	PrincipalID    string
 }
 
-// Result is the outcome of Authenticate.
 type Result struct {
-	Decision      Decision
-	Method        Method
-	Subject       Subject
-	DeviceID      string
-	AuthContextID string // set when an auth_context was created (scratch/enabled path)
-	Reason        string // deterministic, non-sensitive reason code
-	// ClientGroupID / ClientGroupName: the effective Client Group pinned on the context ("" = Public).
+	Decision        Decision
+	Method          Method
+	Subject         Subject
+	DeviceID        string
+	AuthContextID   string // set when an auth_context was created (scratch/enabled path)
+	Reason          string // deterministic, non-sensitive reason code
 	ClientGroupID   string
 	ClientGroupName string
-	// IdentityLabel is the masked primary factor for guest pages (a•••@example.com); never the full value.
-	IdentityLabel string
-	// IdentityLinked / IdentityConflicts report what resolution did, for logs and metrics (factor keys only).
+	// The masked primary factor for guest pages; never the full value.
+	IdentityLabel     string
 	IdentityLinked    []string
 	IdentityConflicts []string
 }
 
-// Repository is the iam_v2 data-access boundary. In production it is NEVER invoked (flags OFF); a
-// scratch implementation is supplied only in tests / enabled scratch runs.
 type Repository interface {
 	WithTx(ctx context.Context, fn func(Tx) error) error
 }
 
-// Tx is the transactional surface the adapters use.
 type Tx interface {
-	// ResolveVoucherByHMAC returns the voucher id + whether it is currently redeemable.
 	ResolveVoucherByHMAC(ctx context.Context, tenantID, siteID string, codeHMAC []byte, now time.Time) (id string, redeemable bool, err error)
-	// LookupAccount returns the account row needed for validation, scoped to (tenant, site). An
-	// account on a different site returns "" (treated like a nonexistent account).
+	// An account on a different site returns "" and is treated as nonexistent.
 	LookupAccount(ctx context.Context, tenantID, siteID, username string) (id, passwordHash string, enabled bool, validFrom, validUntil *time.Time, lockedUntil *time.Time, err error)
-	// ResolvePrincipalByFactors finds or creates the Client for a verified primary factor, linking the
-	// secondary factors the same proof established (identity.go). Deterministic; never merges two Clients.
+	// Deterministic; never merges two Clients.
 	ResolvePrincipalByFactors(ctx context.Context, tenantID string, primary FactorClaim, secondary []FactorClaim, now time.Time) (PrincipalResolution, error)
-	// LoadPrincipalFactors returns every verified factor of a Client (type, issuer, value, attrs).
 	LoadPrincipalFactors(ctx context.Context, tenantID, principalID string) ([]FactorClaim, error)
-	// LoadClientGroups returns a site's groups with their rules (enabled and disabled alike).
 	LoadClientGroups(ctx context.Context, tenantID, siteID string) ([]ClientGroup, error)
-	// UpsertDevice resolves a device by (tenant, mac) and records the network appearance.
 	UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, mac, guestNetworkID, ip string, now time.Time) (deviceID string, err error)
-	// CreateAuthContext writes a one-time auth_context (method<->subject enforced by DB CHECKs).
 	CreateAuthContext(ctx context.Context, spec AuthContextSpec) (id string, err error)
-	// ConsumeAuthContext atomically consumes a one-time auth_context pinned to tenant/site/method/
-	// device/guest-network (TTL + one-time; exactly one concurrent winner). Dark contract (scratch only).
+	// Atomically consumes a one-time auth_context pinned to tenant/site/method/device/guest-network; exactly
+	// one concurrent winner.
 	ConsumeAuthContext(ctx context.Context, req ConsumeAuthContextRequest) (ConsumedContext, error)
 }
 
-// AuthContextSpec is the one-time authentication context to create.
 type AuthContextSpec struct {
 	TenantID       string
 	SiteID         string
@@ -185,17 +142,12 @@ type AuthContextSpec struct {
 	GuestNetworkID string
 	TTL            time.Duration
 	Now            time.Time
-	// ClientGroupID is the effective Client Group decided for this sign-in ("" = Public), with its evidence.
-	// Pinned here so eligibility reads a recorded decision rather than re-deriving one.
+	// Pinned so eligibility reads a recorded decision rather than re-deriving one.
 	ClientGroupID       string
 	ClientGroupEvidence map[string]any
-	// Credential is the channel or provider the client proved themselves with (Request.Credential), recorded
-	// on the context so the session opened from it can say so to an operator.
-	Credential string
+	Credential          string
 }
 
-// subjectFor returns the single subject identifier a method requires, and whether the subject shape is
-// method-compatible (exactly the one field for that method is set, and no other).
 func (s Subject) subjectFor(m Method) (string, bool) {
 	switch m {
 	case MethodVoucher:
@@ -208,10 +160,8 @@ func (s Subject) subjectFor(m Method) (string, bool) {
 	return "", false
 }
 
-// validate checks every auth_context pin BEFORE any SQL so a malformed spec yields a deterministic
-// ErrInvalidInput (never a NOT NULL / FK / CHECK violation surfaced from the database). Requires
-// tenant, site, a resolved (non-empty) device, a guest network, exactly one method-compatible subject
-// and a strictly positive TTL.
+// Validates every pin before any SQL so a malformed spec yields ErrInvalidInput rather than a database
+// constraint error.
 func (s AuthContextSpec) validate() error {
 	if s.TenantID == "" {
 		return &Error{Code: ErrInvalidInput, Msg: "auth_context: missing tenant"}
@@ -234,11 +184,9 @@ func (s AuthContextSpec) validate() error {
 	return nil
 }
 
-// Clock is injectable.
 type Clock func() time.Time
 
-// Authenticator is the dark entry point. When a method is disabled it returns DecisionDisabled
-// WITHOUT touching the repository — the core production-safety property.
+// When a method is disabled it returns DecisionDisabled without touching the repository.
 type Authenticator struct {
 	cfg      Config
 	repo     Repository
@@ -249,7 +197,6 @@ type Authenticator struct {
 	vhmacAll VoucherHMACCandidates // one index per key generation; preferred when set (rotation)
 }
 
-// New builds an Authenticator. repo may be nil in production (it is never used while flags are OFF).
 func New(cfg Config, repo Repository, obs Observer, opts ...Option) (*Authenticator, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -267,43 +214,27 @@ func New(cfg Config, repo Repository, obs Observer, opts ...Option) (*Authentica
 	return a, nil
 }
 
-// Option configures the Authenticator.
 type Option func(*Authenticator)
 
-// WithClock overrides the time source.
 func WithClock(f Clock) Option { return func(a *Authenticator) { a.now = f } }
 
-// WithTTL sets the auth_context TTL.
 func WithTTL(d time.Duration) Option { return func(a *Authenticator) { a.ttl = d } }
 
-// WithVoucherHMAC sets the voucher HMAC computer.
 func WithVoucherHMAC(v VoucherHMAC) Option { return func(a *Authenticator) { a.vhmac = v } }
 
-// WithVoucherHMACCandidates supplies EVERY blind index a submitted code could have, newest key generation
-// first. Rotation is why this exists.
-//
-// A voucher's code_hmac is computed at issuance under the key of the generation it pins. After a rotation
-// the active generation's key is different, so an index computed under the active key alone can never match
-// a voucher issued under the previous one -- every unredeemed voucher would silently stop working the moment
-// a new generation was created. The accepted design requires the opposite ("old-unsuperseded/unredeemed
-// voucher usability"), and the per-voucher code_key_generation_id pin only makes sense if lookup considers
-// more than one generation.
-//
-// When set, this takes precedence over WithVoucherHMAC.
+// Supplies every blind index a submitted code could have, newest key generation first. A voucher's code_hmac
+// is computed under the generation it pins, so after a rotation an index under the active key alone would
+// orphan unredeemed vouchers. Takes precedence over WithVoucherHMAC.
 func WithVoucherHMACCandidates(v VoucherHMACCandidates) Option {
 	return func(a *Authenticator) { a.vhmacAll = v }
 }
 
-// VoucherHMACCandidates returns one blind index per usable key generation, newest first.
 type VoucherHMACCandidates func(ctx context.Context, tenantID, siteID, code string) ([][]byte, error)
 
-// VoucherHMAC computes the blind-index HMAC of a voucher code for a tenant/site.
 type VoucherHMAC func(ctx context.Context, tenantID, siteID, code string) ([]byte, error)
 
-// Authenticate validates a credential in the DARK model. With the method disabled it returns
-// DecisionDisabled and NEVER calls the repository.
 func (a *Authenticator) Authenticate(ctx context.Context, req Request) (Result, error) {
-	// Production-safety gate: disabled method => no repository invocation at all.
+	// Disabled method means no repository invocation at all.
 	if !a.cfg.Enabled(req.Method) {
 		a.obs.Event("iamv2.disabled", map[string]string{"method": string(req.Method)})
 		return Result{Decision: DecisionDisabled, Method: req.Method, Reason: "method_disabled"}, nil
@@ -311,7 +242,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, req Request) (Result, 
 	if a.repo == nil {
 		return Result{}, &Error{Code: ErrConfig, Msg: "no repository"}
 	}
-	// Production must refuse the social Stub provider.
 	if req.Method == MethodSocial && !a.cfg.AllowSocialStub && strings.EqualFold(strings.TrimSpace(req.Provider), "stub") {
 		a.obs.Event("iamv2.social.stub_refused", nil)
 		return Result{Decision: DecisionDeny, Method: MethodSocial, Reason: "social_stub_refused"}, ErrSocialStubRefusedErr
@@ -334,5 +264,4 @@ func (a *Authenticator) Authenticate(ctx context.Context, req Request) (Result, 
 	}
 }
 
-// ErrSocialStubRefusedErr is returned (alongside a deny Result) when production refuses the Stub.
 var ErrSocialStubRefusedErr = errors.New("iamv2: social Stub provider refused in production")

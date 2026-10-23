@@ -2,13 +2,6 @@
 
 package main
 
-// COMPOSITION-ROOT tests for Phase-3 accounting, driven through the function the acctd tick actually calls,
-// against a real PostgreSQL 16 with synthetic absolute tc counters.
-//
-// These are written adversarially on purpose. Accounting is the subsystem where a plausible-looking bug is
-// invisible until a guest is billed for traffic they did not use, or the hotel loses usage nobody can
-// reconstruct — so each test states the failure it exists to prevent.
-
 import (
 	"context"
 	"errors"
@@ -19,7 +12,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
-// fakeCounters serves synthetic tc class readings, and can be made to fail per interface.
 type fakeCounters struct {
 	byIface map[string]map[int]uint64
 	failing map[string]error
@@ -49,7 +41,7 @@ func (f *fakeCounters) ReadClasses(ctx context.Context, iface string) (map[int]s
 	return out, nil
 }
 
-// absolutes sets a session's cumulative counters (upload lands on the bridge's IFB, download on the bridge).
+// absolutes sets cumulative counters: upload lands on the bridge's IFB, download on the bridge.
 func (f *fakeCounters) absolutes(t *testing.T, bridge, ip string, up, down uint64) {
 	t.Helper()
 	minor, ok := shape.MinorForIP(mustIP(t, ip))
@@ -69,7 +61,6 @@ func mustIP(t *testing.T, s string) net.IP {
 	return ip
 }
 
-// fakeEpochs stands in for netd's managed-class generations.
 type fakeEpochs struct {
 	epochs map[string]int64
 	err    error
@@ -89,7 +80,6 @@ func (f *fakeEpochs) ClassEpochs(ctx context.Context) (map[string]int64, error) 
 }
 func (f *fakeEpochs) set(bridge, session string, gen int64) { f.epochs[bridge+"|"+session] = gen }
 
-// live builds an entitlement + session + shaped class, the ordinary starting point for these tests.
 func (f *ingestFixture) live(t *testing.T, ip, bridge string, quotaEnt ...string) (ent, sess string, ep *fakeEpochs) {
 	t.Helper()
 	started := time.Now().Add(-3 * time.Hour)
@@ -110,7 +100,7 @@ func (f *ingestFixture) checkpoint(t *testing.T, sess string) (up, down int64, e
 	return
 }
 
-// ORDINARY: a first observation baselines (bills nothing), the next one bills exactly the difference.
+// A first observation baselines (bills nothing); the next bills exactly the difference.
 func TestIntegration_Acct_OrdinaryAbsoluteAccounting(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -137,21 +127,17 @@ func TestIntegration_Acct_OrdinaryAbsoluteAccounting(t *testing.T) {
 	}
 }
 
-// RESTART WITH UNSAMPLED TRAFFIC — the case a memory-based baseline gets wrong. The checkpoint says 1000/2000,
-// the kernel advanced to 1400/2600 while acctd was stopped, and a brand-new process must bill exactly 400/600:
-// nothing lost, nothing counted twice, and no "fresh zero baseline" that silently discards the gap.
+// A memory-based baseline would lose the traffic while acctd was down; a new process must bill exactly the gap.
 func TestIntegration_Acct_RestartBillsTheGapExactlyOnce(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	ent, sess, ep := f.live(t, "10.9.0.1", "br-guest")
 	c := newFakeCounters()
 	c.absolutes(t, "br-guest", "10.9.0.1", 1000, 2000)
-	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()) // baseline 1000/2000
+	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// acctd is stopped; the guest keeps browsing
 	c.absolutes(t, "br-guest", "10.9.0.1", 1400, 2600)
 
-	// a NEW process, with no memory whatsoever
 	restarted := &phase3{cfg: f.p3.cfg, enf: f.p3.enf, tenant: f.tenant, site: f.site}
 	if n := restarted.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 1 {
 		t.Fatalf("the first pass after a restart accepted %d observations, want 1", n)
@@ -164,8 +150,7 @@ func TestIntegration_Acct_RestartBillsTheGapExactlyOnce(t *testing.T) {
 	}
 }
 
-// UNCERTAIN COMMIT: the database committed but the caller never learned it. The retry — later, in another
-// wall-clock second, from a fresh process — must find the persisted state and bill nothing more.
+// After an uncertain commit, a retry from a fresh process must find the persisted state and bill nothing more.
 func TestIntegration_Acct_UncertainCommitIsSafeToRetry(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -178,8 +163,7 @@ func TestIntegration_Acct_UncertainCommitIsSafeToRetry(t *testing.T) {
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 1 {
 		t.Fatal("the observation was not accepted")
 	}
-	// the caller "never saw" that result; a different process retries the SAME physical observation later
-	time.Sleep(1100 * time.Millisecond) // deliberately a different wall-clock second
+	time.Sleep(1100 * time.Millisecond) // a different wall-clock second
 	retry := &phase3{cfg: f.p3.cfg, enf: f.p3.enf, tenant: f.tenant, site: f.site}
 	if n := retry.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
 		t.Fatalf("the retry billed %d observations; the delta was already stored", n)
@@ -192,8 +176,7 @@ func TestIntegration_Acct_UncertainCommitIsSafeToRetry(t *testing.T) {
 	}
 }
 
-// TWO OBSERVATIONS IN ONE WALL-CLOCK SECOND are both real usage. A second-granularity identity would have
-// silently dropped the second one.
+// Two observations in one second are both real usage; second-granularity identity would drop one.
 func TestIntegration_Acct_TwoObservationsInOneSecond(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -215,8 +198,7 @@ func TestIntegration_Acct_TwoObservationsInOneSecond(t *testing.T) {
 	}
 }
 
-// A COUNTER DECREASE WITHOUT A NEW EPOCH is ambiguous and must fail closed; a TRUSTED NEW EPOCH establishes a
-// safe new baseline and later deltas count normally.
+// A counter decrease without a new epoch is ambiguous and fails closed; a trusted new epoch re-baselines.
 func TestIntegration_Acct_ResetRequiresATrustedEpoch(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -227,7 +209,6 @@ func TestIntegration_Acct_ResetRequiresATrustedEpoch(t *testing.T) {
 	c.absolutes(t, "br-guest", "10.9.0.1", 5000, 5000)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// counters drop with the SAME generation: refused, checkpoint preserved
 	c.absolutes(t, "br-guest", "10.9.0.1", 40, 60)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
 		t.Fatal("an ambiguous regression was billed")
@@ -242,7 +223,6 @@ func TestIntegration_Acct_ResetRequiresATrustedEpoch(t *testing.T) {
 		t.Fatalf("usage changed on a refused observation: %d/%d", u, d)
 	}
 
-	// the TC owner reports a replaced class: the new absolutes become the baseline
 	ep.set("br-guest", sess, 2)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
 		t.Fatal("a trusted reset billed usage instead of re-baselining")
@@ -250,7 +230,6 @@ func TestIntegration_Acct_ResetRequiresATrustedEpoch(t *testing.T) {
 	if _, _, epoch, class := f.checkpoint(t, sess); epoch != 2 || class != "RESET_BASELINED" {
 		t.Fatalf("checkpoint after reset: epoch=%d class=%s", epoch, class)
 	}
-	// and traffic after the reset counts normally
 	c.absolutes(t, "br-guest", "10.9.0.1", 140, 160)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 1 {
 		t.Fatal("post-reset traffic was not billed")
@@ -260,8 +239,7 @@ func TestIntegration_Acct_ResetRequiresATrustedEpoch(t *testing.T) {
 	}
 }
 
-// A TC READ FAILURE must not be treated as "no traffic": the session is skipped, its checkpoint preserved, and
-// the next successful read bills only the real difference rather than replaying history.
+// A tc read failure is not "no traffic": the session is skipped and the next good read bills only the difference.
 func TestIntegration_Acct_ReadFailureIsNotZeroUsage(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -281,7 +259,6 @@ func TestIntegration_Acct_ReadFailureIsNotZeroUsage(t *testing.T) {
 		t.Fatalf("a failed read disturbed the checkpoint: %d/%d", up, down)
 	}
 
-	// recovery: only the genuine difference is billed
 	delete(c.failing, "br-guest")
 	c.absolutes(t, "br-guest", "10.9.0.1", 1250, 1400)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 1 {
@@ -295,14 +272,12 @@ func TestIntegration_Acct_ReadFailureIsNotZeroUsage(t *testing.T) {
 	}
 }
 
-// A class minor is reused when a class is destroyed and recreated. A checkpoint must never be inherited by a
-// different session that lands on the same minor, and a session's counters must belong to ITS device.
+// A class minor is reused when a class is recreated; a checkpoint must never pass to another session on it.
 func TestIntegration_Acct_CheckpointsAreNotInheritedAcrossSessions(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	_, sessA, _ := f.live(t, "10.9.0.1", "br-guest")
 
-	// a DIFFERENT session on a different device, same address (hence same class minor) after the first ended
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='TEST' WHERE id=$1`, sessA); err != nil {
 		t.Fatal(err)
 	}
@@ -312,16 +287,14 @@ func TestIntegration_Acct_CheckpointsAreNotInheritedAcrossSessions(t *testing.T)
 	ep := newEpochs()
 	ep.set("br-guest", sessB, 1)
 	c := newFakeCounters()
-	c.absolutes(t, "br-guest", "10.9.0.1", 9999, 9999) // the previous guest's high counters
+	c.absolutes(t, "br-guest", "10.9.0.1", 9999, 9999) // the previous guest's counters
 
-	// the new session must BASELINE against those counters, not bill them
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
 		t.Fatalf("a reused class minor billed %d observations of another guest's traffic", n)
 	}
 	if u, d := f.usage(t, entB); u != 0 || d != 0 {
 		t.Fatalf("the new session was billed %d/%d for the previous guest's usage", u, d)
 	}
-	// the checkpoint belongs to the NEW session alone — the ended one never acquires or shares it
 	if n := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id=$1`, sessB); n != 1 {
 		t.Fatalf("the new session has %d checkpoints, want exactly its own", n)
 	}
@@ -330,7 +303,6 @@ func TestIntegration_Acct_CheckpointsAreNotInheritedAcrossSessions(t *testing.T)
 	}
 }
 
-// Two acctd instances observing the same counters must not both bill the delta.
 func TestIntegration_Acct_TwoInstancesBillOnce(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -354,22 +326,18 @@ func TestIntegration_Acct_TwoInstancesBillOnce(t *testing.T) {
 	}
 }
 
-// Fail-closed cases that must never produce accounting.
 func TestIntegration_Acct_FailsClosedOnBadScopeAndBinding(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	_, sess, _ := f.live(t, "10.9.0.1", "br-guest")
 
-	// wrong tenant/site
 	other := newIngest(t, 0)
 	if _, err := other.p3.ingestAbsolute(ctx, phase3Session{ID: sess, DeviceID: f.device}, "br-guest", 1, 1, 10, 10, time.Now()); err == nil {
 		t.Fatal("a cross-scope session was accounted")
 	}
-	// wrong device for the session's counters
 	if _, err := f.p3.ingestAbsolute(ctx, phase3Session{ID: sess, DeviceID: f.device2}, "br-guest", 1, 1, 10, 10, time.Now()); err == nil {
 		t.Fatal("counters from another device were accepted for this session")
 	}
-	// an ended session whose binding interval has closed has no owner for later traffic
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now() - interval '1 minute' WHERE id=$1`, sess); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +346,6 @@ func TestIntegration_Acct_FailsClosedOnBadScopeAndBinding(t *testing.T) {
 	}
 }
 
-// While dark the pass reads nothing, asks nothing and writes nothing.
 func TestIntegration_Acct_DarkDoesNothing(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()

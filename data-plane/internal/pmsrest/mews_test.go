@@ -1,11 +1,6 @@
 package pmsrest
 
-// MEWS CONNECTOR API CONTRACT TESTS.
-//
-// The fixtures below are shaped exactly like the documented request/response samples at
-// https://docs.mews.com/connector-api/operations/reservations (getAll/2023-06-06), .../customers,
-// .../companionships and .../resources, with pagination per .../guidelines/pagination and rate limiting per
-// .../guidelines/requests. No request here reaches Mews.
+// Contract tests with fixtures shaped like Mews's documented samples, pagination and rate limiting; nothing reaches Mews.
 
 import (
 	"encoding/json"

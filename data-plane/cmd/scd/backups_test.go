@@ -58,13 +58,11 @@ func TestNextScheduledBackup(t *testing.T) {
 	if want := time.Date(2026, 10, 22, 4, 0, 0, 0, time.Local); !got.Equal(want) {
 		t.Errorf("next = %v, want %v", got, want)
 	}
-	// never taken and past the hour: due now
 	if got := nextScheduledBackup(set, now, time.Time{}); !got.Equal(now) {
 		t.Errorf("never taken: next = %v, want now", got)
 	}
 }
 
-// useRetentionConf points the retention settings at a temporary file for the test.
 func useRetentionConf(t *testing.T, content string) {
 	t.Helper()
 	old := retentionConf
@@ -77,7 +75,6 @@ func useRetentionConf(t *testing.T, content string) {
 	t.Cleanup(func() { retentionConf = old })
 }
 
-// seedBackup writes a backup set (database, configuration, note, marker) as takeBackup leaves it.
 func seedBackup(t *testing.T, kind string, taken time.Time) backupMeta {
 	t.Helper()
 	stamp := taken.UTC().Format("20060102T150405Z")
@@ -124,7 +121,6 @@ func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *t
 		}
 		protective = append(protective, seedBackup(t, kind, base.Add(time.Duration(i)*time.Hour+30*time.Minute)))
 	}
-	// a dump without a note (an earlier backup) is never touched
 	earlier := filepath.Join(scdBackupDir, "db-20260901T090000Z.sql.gz.age")
 	if err := os.WriteFile(earlier, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -152,7 +148,6 @@ func TestRotationKeepsTheNewestSevenRegularAndThreeProtectiveAndNothingElse(t *t
 	if _, err := os.Stat(earlier); err != nil {
 		t.Errorf("an earlier backup was removed by rotation")
 	}
-	// tightening the settings trims each pool to its new count
 	useRetentionConf(t, "BACKUP_KEEP=1\nSAFETY_BACKUP_KEEP=2\n")
 	s.rotateBackups()
 	var nreg, nprot int
@@ -187,12 +182,10 @@ func TestEarlierBackupsAreListedKeptAndRemovedOnlyWithAVerifiedNewOne(t *testing
 	if sets := earlierSets(); len(sets) != 2 {
 		t.Fatalf("earlier sets = %+v", sets)
 	}
-	// rotation never touches them
 	(&server{}).rotateBackups()
 	if _, err := os.Stat(oldDump); err != nil {
 		t.Fatal("rotation removed an earlier dump")
 	}
-	// no new-kind backup yet: removal is refused and nothing is removed
 	if _, _, err := removeEarlierBackups(); err == nil {
 		t.Fatal("earlier backups were removed with no verified backup of the new kind")
 	}
@@ -210,7 +203,6 @@ func TestEarlierBackupsAreListedKeptAndRemovedOnlyWithAVerifiedNewOne(t *testing
 	if _, err := os.Stat(filepath.Join(scdBackupDir, m.Name)); err != nil {
 		t.Error("the new backup was removed with the earlier ones")
 	}
-	// a corrupted stored backup blocks removal
 	_ = os.WriteFile(oldDump, []byte("old dump"), 0o600)
 	b, _ := os.ReadFile(filepath.Join(scdBackupDir, m.Name))
 	b[3] ^= 1
@@ -255,7 +247,6 @@ func TestStoredBackupsAreCheckedAgainstTheirNotes(t *testing.T) {
 	if p := verifyStoredBackups(); len(p) != 0 {
 		t.Fatalf("a good set reported %v", p)
 	}
-	// bit rot: same size, one byte different
 	full := filepath.Join(scdBackupDir, m.Name)
 	b, _ := os.ReadFile(full)
 	b[3] ^= 0x01

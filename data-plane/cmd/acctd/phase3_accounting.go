@@ -1,15 +1,9 @@
 package main
 
-// PHASE-3 ACCOUNTING PASS.
-//
-// The runtime submits what it can actually see — the ABSOLUTE tc counters — and the database decides what that
-// means. acctd keeps NO baseline of its own: the durable checkpoint is the baseline, which is the only way a
-// restart can be safe. A process that came back and adopted the current counter as "zero" would silently lose
-// every byte the guest used while it was down, and nothing anywhere would say so.
-//
-// The trusted reset signal comes from netd, the only process that creates or replaces these managed classes.
-// A counter that went backwards is otherwise ambiguous — a recreated class, a misread, or a minor reused by a
-// different guest — and accounting must never guess between those.
+// acctd submits absolute tc counters and keeps no baseline of its own: the durable checkpoint is the baseline,
+// otherwise a restart would adopt the current counter as zero and silently lose the bytes used meanwhile.
+// Reset detection comes from netd, which owns the managed classes; a backwards counter is otherwise ambiguous
+// (recreated class, misread, reused minor) and must never be guessed.
 
 import (
 	"context"
@@ -20,8 +14,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
-// The bounded reasons an accounting pass can be degraded for. They are constants rather than formatted
-// strings so that no error text, statement or identifier can reach a health reader through this path.
+// Degradation reasons are fixed phrases so no error text, SQL or identifier can reach a health reader.
 const (
 	reasonSessionsUnreadable = "phase3 session inventory unreadable"
 	reasonNoClassGenerations = "managed-class generations unavailable"
@@ -31,7 +24,6 @@ const (
 	reasonNoRecentPass       = "no accounting pass has completed within the freshness window"
 )
 
-// phase3Session is one live Phase-3 session as the accounting pass sees it.
 type phase3Session struct {
 	ID       string
 	DeviceID string
@@ -39,19 +31,15 @@ type phase3Session struct {
 	Bridge   string
 }
 
-// counterReader reads the tc classes of one interface. It is an interface so the pass can be driven with
-// synthetic counters in a composition-root test.
 type counterReader interface {
 	ReadClasses(ctx context.Context, iface string) (map[int]shape.ClassBytes, error)
 }
 
-// epochSource supplies the TC owner's generation per managed class. acctd never invents one: if netd cannot be
-// asked, the affected sessions are skipped rather than accounted against an unknown generation.
+// epochSource supplies netd's generation per managed class; acctd never invents one.
 type epochSource interface {
 	ClassEpochs(ctx context.Context) (map[string]int64, error)
 }
 
-// livePhase3Sessions returns the site's active Phase-3 sessions with the addressing the counters are keyed by.
 func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error) {
 	rows, err := p.enf.Pool().Query(ctx, `SELECT s.id::text, s.device_id::text, COALESCE(host(s.ip),''),
 			COALESCE(s.ingress_interface,'')
@@ -70,8 +58,7 @@ func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error
 		}
 		parsed := net.ParseIP(ip)
 		if parsed == nil {
-			// A session with no address cannot be measured. Skipping it is right; guessing an address would
-			// attribute somebody else's traffic to this guest.
+			// Guessing an address would attribute somebody else's traffic to this guest.
 			continue
 		}
 		out = append(out, phase3Session{ID: id, DeviceID: dev, IP: parsed, Bridge: bridge})
@@ -79,12 +66,10 @@ func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error
 	return out, rows.Err()
 }
 
-// accountingPass reads each live Phase-3 session's absolute counters once and submits them to the controlled
-// operation. fallbackBridge is used only to decide which interfaces to READ; it is never substituted into a
-// Session's identity, because the database validates the bridge against the Session's own row. It returns how many observations the database ACCEPTED as usage (baselines and duplicates are not
-// usage). A tc read failure for an interface skips every session on it — never a zero substitution, which
-// would look like "the guest stopped using the network" and, worse, would make the next real reading look like
-// a huge burst.
+// accountingPass submits each live session's absolute counters and returns how many observations the database
+// accepted as usage. fallbackBridge only picks interfaces to read; it is never put into a session's identity
+// (the database validates the bridge against the session's row). A tc read failure skips every session on
+// that interface rather than substituting zero, which would make the next real reading look like a huge burst.
 func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochSource, fallbackBridge string, now time.Time) int {
 	if p == nil || !p.ownsAccounting() {
 		return 0
@@ -96,22 +81,20 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		return 0
 	}
 	if len(sessions) == 0 {
-		// Nothing to measure is a CLEAN pass, not a missing one: an appliance with no guests online must not
-		// drift into "stale" and page somebody at 3am.
+		// Nothing to measure is a clean pass, so an appliance with no guests online does not go stale.
 		p.acctDegraded = ""
 		p.lastPassOK = now
 		return 0
 	}
 	epochs, err := ep.ClassEpochs(ctx)
 	if err != nil {
-		// Without the TC owner's generation a backwards counter cannot be told from a reset. Skipping the pass
-		// preserves every checkpoint; the next tick tries again.
+		// Without netd's generation a backwards counter cannot be told from a reset; skip and keep checkpoints.
 		p.acctDegraded = reasonNoClassGenerations
 		slog.Warn("phase3: class generations unavailable; accounting deferred", "err", err)
 		return 0
 	}
 
-	// counters are read once per interface, and a failed read poisons only that interface
+	// Counters are read once per interface; a failed read poisons only that interface.
 	type reading struct {
 		classes map[int]shape.ClassBytes
 		err     error
@@ -130,9 +113,8 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 	accepted, degraded := 0, ""
 	for _, s := range sessions {
 		if s.Bridge == "" {
-			// A Session that does not record its own interface cannot be measured. Substituting a default
-			// here would be the daemon DECIDING where the counters came from — and the controlled operation
-			// re-derives that from the Session's row precisely so the daemon cannot. Report it; do not guess.
+			// Substituting a default would let the daemon decide where counters came from; the controlled
+			// operation re-derives that from the session's row precisely so it cannot.
 			degraded = reasonSourceIncoherent
 			slog.Warn("phase3: session has no ingress interface; not accounted", "session", s.ID)
 			continue
@@ -146,14 +128,12 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		down := read(bridge)
 		up := read(shape.IFBName(bridge))
 		if down.err != nil || up.err != nil {
-			// preserve the checkpoint and this session's history; retry next tick
 			degraded = reasonCountersUnreadable
 			continue
 		}
 		epoch, known := epochs[bridge+"|"+s.ID]
 		if !known {
-			// netd is not managing a class for this session yet (it has not been shaped, or the plan has not
-			// been applied). There is no trustworthy generation, so the observation is not submitted.
+			// netd has no class for this session yet, so there is no trustworthy generation.
 			continue
 		}
 		class, err := p.ingestAbsolute(ctx, s, bridge, minor, epoch,
@@ -165,9 +145,7 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		}
 		switch class {
 		case "ACCEPTED", "DELAYED":
-			// genuinely new usage. A REPLAY:* classification means the database recognised this exact
-			// observation and stored nothing further — counting it would make every retry look like fresh
-			// traffic in this daemon's own tallies.
+			// A REPLAY:* classification stored nothing further; counting it would make retries look like traffic.
 			accepted++
 		}
 	}
@@ -178,7 +156,6 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 	return accepted
 }
 
-// ingestAbsolute submits one session's absolute counters through the controlled operation.
 func (p *phase3) ingestAbsolute(ctx context.Context, s phase3Session, bridge string, minor int, epoch, absUp, absDown int64, at time.Time) (string, error) {
 	var class string
 	err := p.enf.Pool().QueryRow(ctx, `SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)`,
@@ -189,13 +166,8 @@ func (p *phase3) ingestAbsolute(ctx context.Context, s phase3Session, bridge str
 	return class, nil
 }
 
-// AccountingDegraded reports the truthful accounting state for health: empty when the last pass completed
-// cleanly, otherwise why it did not.
-//
-// The reason is a BOUNDED phrase, never raw SQL and never a guest or session identifier. A health endpoint is
-// read by people and by machines that were not authorised to see who is staying at the property, and an error
-// string pasted straight through is the easiest way for a session id or a PostgreSQL statement to end up in a
-// monitoring system, a screenshot, or a support ticket.
+// AccountingDegraded returns a fixed reason phrase, never raw SQL or a guest/session identifier: health
+// readers are not authorised to see who is staying at the property.
 func (p *phase3) AccountingDegraded() string {
 	if p == nil {
 		return ""
@@ -203,12 +175,9 @@ func (p *phase3) AccountingDegraded() string {
 	return p.acctDegraded
 }
 
-// STALENESS. A pass that has not completed for longer than this is degraded even if nothing errored: silence
-// is indistinguishable from success from the outside, and an accounting loop that stopped producing is
-// exactly the failure nobody notices until a Folio is short.
+// A pass older than this is degraded even if nothing errored: a silently stopped loop looks like success.
 const accountingFreshness = 5 * time.Minute
 
-// accountingHealth is the whole truthful answer, for the health supervisor.
 func (p *phase3) accountingHealth(now time.Time) map[string]any {
 	if p == nil {
 		return map[string]any{"active": false}

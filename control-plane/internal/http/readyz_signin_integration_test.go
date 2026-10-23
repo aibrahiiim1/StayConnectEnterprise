@@ -14,9 +14,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// /readyz says whether console sign-in can work. central-deploy.sh's smoke test requires "signin":"available",
-// so a release that comes up without the two-step sign-in key -- every console sign-in refused -- is rolled back
-// instead of passing on "ready". Needs a database and CTRLAPI_TEST_REDIS_URL.
+// central-deploy.sh's smoke test requires "signin":"available", so a release without the two-step key is rolled back.
 func TestReadyzReportsWhetherSignInIsAvailable(t *testing.T) {
 	pool := testdb.New(t)
 	url := os.Getenv("CTRLAPI_TEST_REDIS_URL")

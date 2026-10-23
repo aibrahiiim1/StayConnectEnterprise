@@ -49,17 +49,16 @@ func TestParseColourReadsEveryFormADesignMayCarry(t *testing.T) {
 }
 
 func TestAPaleBrandGetsDarkButtonText(t *testing.T) {
-	// White on this yellow is about 1.7:1; the Login label is 16px/600 and needs 4.5:1.
+	// White on this yellow is about 1.7:1; the 16px/600 label needs 4.5:1.
 	for _, brand := range []string{"#f5c518", "#f5c518ff", "rgb(245, 197, 24)", "rgba(245,197,24,1)"} {
 		if got := derivedMap(brand, "", "", defaultOverlay, false)["--sc-on-brand"]; got != inkDark {
 			t.Errorf("brand %s: on-brand %q, want the dark ink", brand, got)
 		}
 	}
-	// The portal's own blue keeps white, and says nothing (the stylesheet's default is white).
+	// White is the stylesheet default, so the portal's own blue emits nothing.
 	if got, ok := derivedMap("#1773bd", "", "", defaultOverlay, false)["--sc-on-brand"]; ok {
 		t.Errorf("the default blue was given %q; white already reads on it", got)
 	}
-	// A dark brand keeps white.
 	if got, ok := derivedMap("rgb(20, 40, 90)", "", "", defaultOverlay, false)["--sc-on-brand"]; ok {
 		t.Errorf("a dark rgb() brand was given %q", got)
 	}
@@ -91,7 +90,6 @@ func TestTheHoverShadeAndLinksAreCheckedToo(t *testing.T) {
 	if _, ok := m["--sc-on-brand-dark"]; ok {
 		t.Errorf("the default darker shade was given %q; white reads on it", m["--sc-on-brand-dark"])
 	}
-	// A readable darker shade is used as it is.
 	if _, ok := derivedMap("#1773bd", "#125c97", "", defaultOverlay, false)["--sc-link"]; ok {
 		t.Error("a readable link colour was replaced")
 	}
@@ -115,7 +113,6 @@ func TestTheHeroWordsReadOnTheBrandGradient(t *testing.T) {
 	if m["--sc-on-hero"] != inkDark || m["--sc-hero-shade"] != "transparent" {
 		t.Errorf("hero ink on a yellow gradient: %v", m)
 	}
-	// A photograph keeps white words.
 	if _, ok := derivedMap("#f5c518", "#e0b000", "", defaultOverlay, true)["--sc-on-hero"]; ok {
 		t.Error("the hero words changed colour over a photograph")
 	}
@@ -143,29 +140,25 @@ func TestBrandForDerivesAndDoesNotRepeatThePhoto(t *testing.T) {
 	if strings.Contains(style, "--sc-ink") {
 		t.Errorf("a pale text colour reached the page: %s", style)
 	}
-	// 0% darkening over a photograph is raised to the minimum.
 	if !strings.Contains(style, "--sc-overlay:0.56") {
 		t.Errorf("the photograph's darkening was not raised to 0.56: %s", style)
 	}
 	if !b.HeroLogo || b.CardLogo {
 		t.Errorf("split shows the logo in the hero only; got hero=%v card=%v", b.HeroLogo, b.CardLogo)
 	}
-	// With no photograph, 0% darkening is the hotel's choice.
 	if s := string(brandFor(map[string]any{"template_options": map[string]any{"overlay": float64(0)}}).Style); !strings.Contains(s, "--sc-overlay:0.00") {
 		t.Errorf("no photograph: %s", s)
 	}
-	// A photograph with no darkening chosen gets the floor too: the stylesheet's default is below it.
 	if s := string(brandFor(map[string]any{"hero_image_url": "/assets/hero.jpg"}).Style); !strings.Contains(s, "--sc-overlay:0.56") {
 		t.Errorf("the default darkening over a photograph was not raised: %s", s)
 	}
-	// And the script that re-applies the design for the admin preview uses the same floor.
+	// The admin-preview script must use the same floor.
 	if !strings.Contains(landingHTML, "MIN_PHOTO_OVERLAY = 0.56") || !strings.Contains(landingHTML, "hasOverlay || raised") {
 		t.Error("the page script's darkening floor is not the server's")
 	}
 }
 
-// THE FLOOR IS SIZED FOR A WHITE PHOTOGRAPH (WCAG 1.4.3): white text over minPhotoOverlay of black on white
-// reaches 4.5:1, and so does the welcome line, drawn at 0.95 opacity.
+// The floor is sized for a white photograph (WCAG 1.4.3), including the welcome line at 0.95 opacity.
 func TestThePhotoDarkeningFloorKeepsWhiteTextReadable(t *testing.T) {
 	under := shade(white, minPhotoOverlay)
 	if c := contrast(white, under); c < minTextContrast {
@@ -174,7 +167,7 @@ func TestThePhotoDarkeningFloorKeepsWhiteTextReadable(t *testing.T) {
 	if c := contrast(over(colour{255, 255, 255, 0.95}, under), under); c < minTextContrast {
 		t.Errorf("the welcome line on a white photograph under %.2f darkening is %.2f:1", minPhotoOverlay, c)
 	}
-	// And it is the smallest such floor, to the hundredth: the photograph is darkened no more than it must be.
+	// And the smallest such floor, to the hundredth.
 	if c := contrast(over(colour{255, 255, 255, 0.95}, shade(white, minPhotoOverlay-0.01)), shade(white, minPhotoOverlay-0.01)); c >= minTextContrast {
 		t.Errorf("%.2f is not the least darkening that reads (%.2f already gives %.2f:1)", minPhotoOverlay, minPhotoOverlay-0.01, c)
 	}
@@ -231,8 +224,6 @@ func TestAServerRefusalIsFocusedAndPointsAtTheField(t *testing.T) {
 	if strings.Contains(html, `id="server-error" role="alert" aria-live`) {
 		t.Error("role=alert and aria-live are both set on the server's refusal")
 	}
-	// A refused personal account comes back with the personal-account form showing, the username kept and the
-	// password not.
 	w = httptest.NewRecorder()
 	r = httptest.NewRequest(http.MethodPost, "/auth/credentials", strings.NewReader("username=guest7&password=hunter2"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -269,7 +260,6 @@ func TestTextResponsesAreCompressed(t *testing.T) {
 	if err != nil || !strings.Contains(string(body), "Semantics Demo Hotel") {
 		t.Errorf("the compressed page does not decompress to the page (%v)", err)
 	}
-	// Without Accept-Encoding the page is sent as it always was.
 	if w := get(t, h, "/"); w.Header().Get("Content-Encoding") != "" || !strings.Contains(w.Body.String(), "<!doctype html>") {
 		t.Error("a client that did not ask for gzip got it")
 	}

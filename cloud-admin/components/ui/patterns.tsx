@@ -1,23 +1,9 @@
 "use client";
 
-/*
-  ONEGATE PRODUCT PATTERNS — the recurring situations every screen needs, designed once.
-
-  The primitives (Button, Card, Badge, Dialog…) say how a thing looks. These say how a SITUATION looks: data
-  that refreshes on its own, and a block that is absent (not found, not available to this role) rather than
-  merely empty.
-
-  See design-system/README.md, "Patterns".
-*/
-
 import * as React from "react";
 import { EyeOff, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* LiveStatus — "Updated x ago" for polling screens                                                        */
-/* ------------------------------------------------------------------------------------------------------ */
 
 function relative(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -29,11 +15,7 @@ function relative(ms: number): string {
   return `${h} h ago`;
 }
 
-/**
- * Tells the operator the numbers are live and how fresh they are, without moving anything else on the
- * screen. A polling screen DIMS its content while refreshing (see `refreshingClass`) rather than blanking
- * it, so a reload never makes rows jump.
- */
+/** Keep prior content visible while a refresh runs so rows do not jump. */
 export function LiveStatus({
   updatedAt,
   refreshing,
@@ -56,10 +38,7 @@ export function LiveStatus({
   }, []);
   const at = updatedAt instanceof Date ? updatedAt.getTime() : updatedAt ?? null;
 
-  // WHAT A SCREEN READER HEARS IS AN EVENT, NOT THE CLOCK. The visible "Updated 25 s ago" re-renders every five
-  // seconds; inside a live region that would be an announcement every five seconds. The live region below
-  // changes only when something happened: a refresh failed, recovered, or a refresh the operator asked for
-  // finished.
+  // Announce refresh events, not the changing clock, to avoid repeated screen-reader announcements.
   const [announcement, setAnnouncement] = React.useState("");
   const prev = React.useRef({ error, refreshing });
   React.useEffect(() => {
@@ -98,17 +77,8 @@ export function LiveStatus({
   );
 }
 
-/** Apply to a container while it reloads: it stays readable and in place, just visibly quieter. */
 export const refreshingClass = "opacity-60 transition-opacity duration-base";
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* NotAvailable                                                                                            */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/**
- * A block the operator cannot see, or a record that is not there. Dashed, so it is visibly an absence and not
- * an empty result; always with the reason.
- */
 export function NotAvailable({
   title = "Not available",
   reason,

@@ -1,30 +1,13 @@
 package main
 
-// PACKAGE ACTIVITY — what the internet packages actually did, for the operator who runs them.
-//
-// WHY A NEW READ PATH. The guest-activity listing starts from OFFER QUOTES, and most access on this appliance
-// is never quoted: a voucher, a guest account's automatic grant, checkout grace, emergency grace and a staff
-// grant all create a PURCHASE with no quote (purchases.trigger says which). Starting from quotes made every
-// one of those grants invisible and made every visible row claim the guest "was offered" something. So this
-// view starts from PURCHASES -- the record of every grant, whatever produced it -- and walks forward:
-//
-//     purchases  ->  entitlements (the access it produced: status, activation, end, usage counters)
-//                ->  sessions     (how the guest actually connected, what it moved, on how many devices)
-//     and, only where a quote genuinely exists, offer_quotes (so "offered" is said only when it is true).
-//
-// NOTHING HERE IS INVENTED. purchases carry no timestamp of their own, so a grant is placed in time by the
-// moment its access was activated or, failing that, the moment its quote was taken. A purchase with neither
-// cannot be placed in a range at all; it is counted and reported as "undated" rather than given a time. An
-// offer quote records when it expires and when it was taken, never when it was made, so no offer time is shown.
-//
-// PRIVACY is the same as the screens this replaces: a room always travels with the PMS interface that gives
-// it meaning, and no guest name, account username, voucher code, device address or credential is returned.
-// The search matches room and reservation only.
-//
-// PRIVILEGES: every relation read here is granted SELECT to svc_edged by the Gate-P allowlist -- purchases,
-// entitlements, offer_quotes, sessions, stays, pms_interfaces, internet_packages, internet_package_revisions,
-// service_plan_revisions. commerce_activity_test.go checks both the tables and the columns against the
-// production baseline so a typo or an ungranted column is a test failure rather than a 500 on the appliance.
+// Package activity starts from purchases (the record of every grant; most access is never quoted) and walks
+// forward to entitlements, sessions and, only where a quote exists, offer_quotes. Purchases carry no timestamp,
+// so a grant is placed by its access activation or quote-taken time; one with neither is reported "undated".
+// No offer time is shown (quotes record expiry and consumption only).
+// Privacy: a room always travels with its PMS interface; no guest name, username, voucher code, device address
+// or credential is returned, and search matches room and reservation only.
+// Privileges: every relation read must be SELECT-granted to svc_edged; commerce_activity_test.go checks tables
+// and columns against the production baseline.
 
 import (
 	"encoding/json"
@@ -43,7 +26,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// activitySources are purchases_trigger_check, verbatim, with the words an operator reads.
+// activitySources mirrors purchases_trigger_check with operator wording.
 var activitySources = map[string]string{
 	"GUEST_SELECTION":      "Chosen on the portal",
 	"VOUCHER_REDEMPTION":   "Voucher",
@@ -74,20 +57,18 @@ const (
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// activityFilter is everything the operator can narrow the view by. Tenant and site are NOT here: they come
-// from the appliance's own assignment (s.tenantID / s.siteID) and nothing in a request can move them.
+// activityFilter holds the operator's filters. Tenant and site come only from the appliance assignment, never a request.
 type activityFilter struct {
 	From, To  time.Time
 	PackageID string
-	Status    string // "" | active | ended | other
-	Source    string // "" | a purchases.trigger value
-	Q         string // room or reservation
+	Status    string
+	Source    string
+	Q         string
 	Limit     int
 	Offset    int
 }
 
-// parseActivityFilter reads and bounds the query string. A value it cannot use is a 400 naming the parameter,
-// never a silently different query.
+// parseActivityFilter bounds the query string; an unusable value is a 400, never a silently different query.
 func parseActivityFilter(q url.Values, now time.Time) (activityFilter, error) {
 	f := activityFilter{To: now.UTC(), Limit: activityDefaultLimit}
 	switch rng := q.Get("range"); rng {
@@ -158,17 +139,15 @@ func likeEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
-// activityBaseSQL is the grant set with the operator's filters applied, as two CTEs: `act` (every purchase at
-// this site, joined forward) and `f` (the filtered rows). $1 tenant, $2 site, $3 from, $4 to; further
-// parameters follow in args. withStatus=false drops the status filter, which is how the status chip counts are
-// computed over everything else the operator chose.
+// activityBaseSQL builds two CTEs: `act` (every purchase at this site, joined forward) and `f` (filtered rows).
+// $1 tenant, $2 site, $3 from, $4 to; further parameters follow in args. withStatus=false drops the status
+// filter so the status chip counts cover everything else chosen.
 func activityBaseSQL(f activityFilter, tenantID, siteID string, withStatus bool) (string, []any) {
 	args := []any{tenantID, siteID, f.From, f.To}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
 
 	where := []string{
-		// A grant is in the range when its access overlaps it: it began before the range ended, and it had not
-		// ended before the range began. Access that is still live has no end yet.
+		// A grant is in range when its access overlaps it; live access has no end yet.
 		"a.occurred_at IS NOT NULL",
 		"a.occurred_at < $4",
 		"COALESCE(a.terminated_at, CASE WHEN a.status IN ('ACTIVE','SUSPENDED','PENDING') THEN 'infinity'::timestamptz END, a.occurred_at) >= $3",
@@ -238,10 +217,7 @@ func activityBaseSQL(f activityFilter, tenantID, siteID string, withStatus bool)
 	return sql, args
 }
 
-// activityListSQL pages the filtered set, newest first, and attaches each page row's session totals.
-//
-// The session aggregate runs for the PAGE only, not for every matching grant: the window count is taken first,
-// the page is cut, and only then are sessions summed.
+// activityListSQL pages the filtered set, newest first. The session aggregate runs for the page only (count, cut, then sum).
 func activityListSQL(f activityFilter, tenantID, siteID string) (string, []any) {
 	base, args := activityBaseSQL(f, tenantID, siteID, true)
 	args = append(args, f.Limit, f.Offset)
@@ -280,8 +256,7 @@ func activityListSQL(f activityFilter, tenantID, siteID string) (string, []any) 
 	 ORDER BY page.occurred_at DESC NULLS LAST, page.purchase_id`, args
 }
 
-// activitySummarySQL aggregates the filtered set, ignoring the status filter (status is what the chips count).
-// One row: in-range total, started in range, the three status counts, measured bytes, and two JSON rankings.
+// activitySummarySQL aggregates the filtered set, ignoring the status filter (the chips count it).
 func activitySummarySQL(f activityFilter, tenantID, siteID string) (string, []any) {
 	base, args := activityBaseSQL(f, tenantID, siteID, false)
 	return base + `
@@ -312,8 +287,6 @@ func activitySummarySQL(f activityFilter, tenantID, siteID string) (string, []an
 	            GROUP BY ipr.package_id) z)`, args
 }
 
-// ---------------------------------------------------------------------------------------- shapes --------
-
 type activityRow struct {
 	PurchaseID        string `json:"purchase_id"`
 	EntitlementID     string `json:"entitlement_id,omitempty"`
@@ -325,8 +298,7 @@ type activityRow struct {
 	RevisionNo        int    `json:"revision_no"`
 	PackageType       string `json:"package_type,omitempty"`
 
-	// The price the PURCHASE recorded, with the currency and exponent recorded alongside it (the revision's
-	// pair when the purchase carries none). CurrencyExponent is nil when neither recorded one.
+	// The price the purchase recorded (the revision's currency pair when it carries none); CurrencyExponent is nil when neither recorded one.
 	PriceMinor       int64  `json:"price_minor"`
 	Currency         string `json:"currency,omitempty"`
 	CurrencyExponent *int   `json:"currency_exponent,omitempty"`
@@ -334,21 +306,19 @@ type activityRow struct {
 	Source        string `json:"source"`
 	SourceLabel   string `json:"source_label"`
 	PurchaseState string `json:"purchase_state"`
-	// Status is the entitlement's (PENDING, ACTIVE, SUSPENDED, TERMINATED), or NOT_GRANTED when the purchase
-	// produced no access at all -- the case worth investigating.
+	// Status is the entitlement's, or NOT_GRANTED when the purchase produced no access.
 	Status         string `json:"status"`
 	EndReason      string `json:"end_reason,omitempty"`
 	EmergencyGrace bool   `json:"emergency_grace,omitempty"`
 
-	// WHO, only as far as the existing screens already say: a stay's room with its PMS interface, or the kind
-	// of sign-in. Never a name, a username, a voucher code or a device.
-	SignInKind   string `json:"sign_in_kind,omitempty"` // STAY | GUEST_ACCOUNT | VOUCHER | SIGN_IN
+	// Never a name, username, voucher code or device.
+	SignInKind   string `json:"sign_in_kind,omitempty"`
 	StayID       string `json:"stay_id,omitempty"`
 	Room         string `json:"room,omitempty"`
 	PMSInterface string `json:"pms_interface,omitempty"`
 	Reservation  string `json:"reservation,omitempty"`
 
-	// The offer, ONLY when a quote exists. No offer time: the quote does not record one.
+	// The offer, only when a quote exists.
 	HadOffer       bool       `json:"had_offer"`
 	OfferTakenAt   *time.Time `json:"offer_taken_at,omitempty"`
 	OfferExpiresAt *time.Time `json:"offer_expires_at,omitempty"`
@@ -371,7 +341,6 @@ type activityRow struct {
 	OnlineNow      bool       `json:"online_now"`
 	SignInMethod   string     `json:"sign_in_method,omitempty"`
 
-	// UsageHref is where the stay's own usage view lives, when there is a stay to look at.
 	UsageHref string `json:"usage_href,omitempty"`
 }
 
@@ -398,7 +367,7 @@ type activitySummary struct {
 	Undated        int64                  `json:"undated"`
 	ByPackage      []activityPackageCount `json:"by_package"`
 	BySource       []activitySourceCount  `json:"by_source"`
-	// ActiveByPackage is site-wide and ignores every filter: guests each package is serving right now.
+	// ActiveByPackage is site-wide and ignores every filter.
 	ActiveByPackage []activeByPackage `json:"active_by_package"`
 }
 
@@ -426,8 +395,7 @@ type activityRange struct {
 	To   time.Time `json:"to"`
 }
 
-// packageDisplayName is what a row is called when its revision has no display name: the system grace packages
-// carry reserved codes nobody should have to read, so they are named by what they are.
+// packageDisplayName names a row whose revision has no display name; system grace packages get a readable name.
 func packageDisplayName(name, code string, system bool, trigger string) string {
 	if name != "" {
 		return name
@@ -442,8 +410,6 @@ func packageDisplayName(name, code string, system bool, trigger string) string {
 	}
 	return code
 }
-
-// ------------------------------------------------------------------------------------- handlers --------
 
 func (s *server) listPackageActivity(w http.ResponseWriter, r *http.Request) {
 	if !s.commerceCfg.AdminOn() {
@@ -502,7 +468,7 @@ func (s *server) listPackageActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(out.Data) == 0 && f.Offset > 0 {
-		// Past the end: the window count is only known from a row, so ask for it directly rather than report 0.
+		// Past the end the window count is unknown from rows; ask directly rather than report 0.
 		cntSQL, cntArgs := activityBaseSQL(f, s.tenantID, s.siteID, true)
 		_ = s.db.QueryRow(ctx, cntSQL+` SELECT count(*) FROM f`, cntArgs...).Scan(&out.Meta.Total)
 	}
@@ -525,7 +491,6 @@ func (s *server) listPackageActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// finishActivityRow applies the decisions that are the same for every row, and is unit-tested on its own.
 func finishActivityRow(x *activityRow, entitlementStatus string) {
 	x.SourceLabel = sourceLabel(x.Source)
 	x.PackageName = packageDisplayName(x.PackageName, x.PackageCode, x.SystemPackage, x.Source)
@@ -534,7 +499,7 @@ func finishActivityRow(x *activityRow, entitlementStatus string) {
 	} else {
 		x.Status = entitlementStatus
 	}
-	// "Offered" is said only when a quote exists; without one the offer fields stay empty.
+	// Offer fields are only meaningful when a quote exists.
 	if !x.HadOffer {
 		x.OfferTakenAt, x.OfferExpiresAt = nil, nil
 	}
@@ -560,8 +525,6 @@ func decodeActivityRankings(byPkg, bySrc []byte) ([]activityPackageCount, []acti
 	}
 	return pk, sr
 }
-
-// ---------------------------------------------------------------------------------- deletability ------
 
 func (s *server) getCommercialPackageDeletability(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -599,18 +562,13 @@ func writeDeletability(w http.ResponseWriter, d iamv2.Deletability, disabled boo
 	writeJSON(w, http.StatusOK, d)
 }
 
-// ---------------------------------------------------------------------------------- deletion ----------
-
-// deleteCommercialPackage permanently removes a package that nothing has ever used.
-//
-// The decision is the database's (iam_v2.internet_package_delete_unused, migration 0091): it locks the package,
-// re-counts every reference and refuses on any of them, so a guest buying the package a second before this
-// runs makes it a 409, never a lost purchase. This handler adds the step-up, the bounded reason and the audit.
+// deleteCommercialPackage permanently removes a never-used package. The database decides
+// (iam_v2.internet_package_delete_unused locks and re-counts references), so a concurrent purchase yields a 409,
+// never a lost purchase; this handler adds step-up, the bounded reason and the audit.
 func (s *server) deleteCommercialPackage(w http.ResponseWriter, r *http.Request) {
 	s.deleteCatalogueItem(w, r, true)
 }
 
-// deleteServicePlan permanently removes a service plan no package version and no grant has ever used.
 func (s *server) deleteServicePlan(w http.ResponseWriter, r *http.Request) {
 	s.deleteCatalogueItem(w, r, false)
 }

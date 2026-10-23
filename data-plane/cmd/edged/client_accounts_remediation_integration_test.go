@@ -2,11 +2,6 @@
 
 package main
 
-// CLIENT ACCOUNTS, AUDIT REMEDIATION (2026-10-16): Disable/Enable (decision D-A, migration 0120), a removed
-// account stays removed (C-2), edits can clear a field and refuse an impossible window (C-9), the portal switch
-// is a sign-in method decision (C-3), Mark verified is a vouching power (C-4) and Remove needs the password
-// (C-19). Real router, real role matrix, real database, a stand-in scd that ends rows the way scd does.
-
 import (
 	"context"
 	"net/http"
@@ -14,7 +9,6 @@ import (
 	"time"
 )
 
-// entHead is an entitlement's status and the reason on its live transition head.
 func entHead(t *testing.T, f *apiFixture, ent string) (status, reason, window string) {
 	t.Helper()
 	if err := f.pool.QueryRow(context.Background(), `
@@ -58,7 +52,6 @@ func TestIntegration_ClientAccountDisable_EndsSessionsAndSuspendsThePackage_Enab
 	if window != windowBefore {
 		t.Fatalf("Disable moved the validity window %s -> %s; the clock must keep running", windowBefore, window)
 	}
-	// Another account is untouched.
 	if s, _, _ := entHead(t, f, otherEnt); s != "ACTIVE" {
 		t.Fatalf("another account's package became %s", s)
 	}
@@ -81,7 +74,6 @@ func TestIntegration_ClientAccountDisable_EndsSessionsAndSuspendsThePackage_Enab
 	if auditCount(t, f, "guest_account.enabled", acct) != 1 {
 		t.Fatal("Enable was not audited as guest_account.enabled")
 	}
-	// An edit that does not touch enabled moves no package.
 	st, body = f.do(t, "PATCH", "/guest-accounts/"+acct, map[string]any{"notes": "front desk note"})
 	if st != 200 || body["packages_suspended"] != nil || body["packages_resumed"] != nil {
 		t.Fatalf("a notes edit = %d %v", st, body)
@@ -94,7 +86,7 @@ func TestIntegration_ClientAccountEnable_DoesNotLiftAnotherSuspensionOrAnEndedWi
 	f.app.scd = client
 	ctx := context.Background()
 
-	// Suspended for being over its online-time budget: re-enabling the account must not lift that.
+	// Re-enabling must not lift a suspension for being over the online-time budget.
 	acct, ent, _ := seedAccountWithSessions(t, f, "da-budget", 0)
 	if _, err := f.pool.Exec(ctx,
 		`SELECT iam_v2.apply_entitlement_transition($1,'SUSPENDED',now(),'AGGREGATE_OVER_BUDGET')`, ent); err != nil {
@@ -112,7 +104,7 @@ func TestIntegration_ClientAccountEnable_DoesNotLiftAnotherSuspensionOrAnEndedWi
 		t.Fatalf("Enable lifted a suspension it did not make: %s/%s", s, r)
 	}
 
-	// Window ended while disabled: Enable leaves it suspended for the expiry sweep to end.
+	// A window that ended while disabled stays suspended for the expiry sweep to end.
 	acct2, ent2, _ := seedAccountWithSessions(t, f, "da-window", 0)
 	if st, _ := f.do(t, "PATCH", "/guest-accounts/"+acct2, map[string]any{"enabled": false}); st != 200 {
 		t.Fatal("disable failed")
@@ -136,7 +128,7 @@ func TestIntegration_ClientAccountEnable_DoesNotLiftAnotherSuspensionOrAnEndedWi
 
 func TestIntegration_ClientAccountDisable_RefusesFirstWhenDevicesCannotBeTakenOff(t *testing.T) {
 	f := newAPI(t)
-	f.app.scd = nil // no enforcement channel on this appliance right now
+	f.app.scd = nil // no enforcement channel
 	acct, ent, sessions := seedAccountWithSessions(t, f, "da-noscd", 0, "10.91.1.11")
 	st, body := f.do(t, "PATCH", "/guest-accounts/"+acct, map[string]any{"enabled": false})
 	if st != http.StatusServiceUnavailable || body["error"] != "enforcement_unavailable" {
@@ -176,7 +168,7 @@ func TestIntegration_RemovedClientAccount_CannotBeEnabledRenamedOrEdited(t *test
 	if st, b := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password", map[string]any{"password": "x1"}); st != http.StatusConflict {
 		t.Fatalf("set-password on a removed account = %d %v", st, b)
 	}
-	// AND UNDERNEATH THE API: the database refuses it for any writer.
+	// The database refuses it for any writer, not only the API.
 	_, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.guest_access_accounts SET enabled = true WHERE id=$1`, acct)
 	if err == nil {
 		t.Fatal("the database let a removed account be enabled again")
@@ -185,8 +177,7 @@ func TestIntegration_RemovedClientAccount_CannotBeEnabledRenamedOrEdited(t *test
 	if err == nil {
 		t.Fatal("the database let a removed account be renamed back")
 	}
-	// The guard is narrow on purpose: only enabled and username are final, so scd's sweeps that touch other
-	// columns of the row are not refused.
+	// The guard is narrow: only enabled and username are final, so scd's sweeps of other columns still work.
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.guest_access_accounts SET grace_until = NULL WHERE id=$1`, acct); err != nil {
 		t.Fatalf("the guard refused a column it does not govern: %v", err)
 	}
@@ -218,7 +209,6 @@ func TestIntegration_ClientAccountEdit_ExplicitNullClearsAndTheWindowMustBeOrder
 	if b["notes"] != "a note" || b["valid_from"] == nil {
 		t.Fatalf("an absent field was changed: %v", b)
 	}
-	// From after until is refused, on create and on edit.
 	if st, b := f.do(t, "PATCH", "/guest-accounts/"+id, map[string]any{"valid_until": from,
 		"valid_from": until}); st != 400 {
 		t.Fatalf("an inverted window = %d %v", st, b)

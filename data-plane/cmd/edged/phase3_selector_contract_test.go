@@ -2,10 +2,8 @@
 
 package main
 
-// The selector must offer EXACTLY what publication accepts. Any package listed here that publication would
-// then refuse is a trap: the operator picks it, gets an error they cannot act on, and learns to distrust the
-// screen. These tests poison one attribute at a time and prove each poisoned candidate is absent from the
-// list, present in the diagnostics, and refused by publication.
+// The selector must offer exactly what publication accepts. These tests poison one attribute at a time and
+// prove each candidate is absent from the list, present in the diagnostics, and refused by publication.
 
 import (
 	"context"
@@ -14,8 +12,7 @@ import (
 	"time"
 )
 
-// seedCandidate creates a CHECKOUT_GRACE package whose duration policy and plan can be poisoned per test.
-// durationPolicy is raw JSON so a test can supply a malformed one.
+// seedCandidate creates a CHECKOUT_GRACE package; durationPolicy is raw JSON so a test can supply a malformed one.
 func (f *apiFixture) seedCandidate(t *testing.T, code, durationPolicy string, planCode string, timeAccounting string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -44,7 +41,6 @@ func (f *apiFixture) seedCandidate(t *testing.T, code, durationPolicy string, pl
 
 const goodDuration = `{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":3600,"policy_version":"CHECKOUT_GRACE_V1"}`
 
-// mismatchReason asks the authoritative validator directly.
 func (f *apiFixture) mismatchReason(t *testing.T, rev string, duration, down, up int, quota int64, devLimit int, devPolicy string) string {
 	t.Helper()
 	var reason *string
@@ -59,8 +55,7 @@ func (f *apiFixture) mismatchReason(t *testing.T, rev string, duration, down, up
 	return *reason
 }
 
-// The approved policy version is REQUIRED and must be an exact scalar string. "No declared version" is not the
-// same as "the approved version", and a number or object is a malformed declaration rather than a version.
+// The approved policy version is required and must be an exact scalar string; a number or object is malformed.
 func TestIntegration_API_PolicyVersionMustBeExactlyApproved(t *testing.T) {
 	f := newAPI(t)
 	cases := []struct {
@@ -81,7 +76,6 @@ func TestIntegration_API_PolicyVersionMustBeExactlyApproved(t *testing.T) {
 		if got := f.mismatchReason(t, rev, 3600, 4000, 1500, 524288000, 2, "REJECT_NEW_DEVICE"); got != tc.wantReason {
 			t.Fatalf("%s: mismatch reason %q, want %q", tc.name, got, tc.wantReason)
 		}
-		// the selector agrees with the validator, and so does publication
 		_, body := f.do(t, "GET", "/checkout-grace/packages", nil)
 		listed := false
 		for _, r := range body["data"].([]any) {
@@ -94,10 +88,7 @@ func TestIntegration_API_PolicyVersionMustBeExactlyApproved(t *testing.T) {
 		}
 	}
 
-	// AND THE DERIVED PACKAGE CARRIES THE APPROVED VERSION. The cases above prove the matcher refuses every
-	// wrong declaration; this proves the system's own derivation is not among them. Publication no longer
-	// takes a package -- it builds one -- so the risk moved from "the operator picked a bad package" to
-	// "the derivation writes a bad one", and that is what is checked here.
+	// Publication builds its own package, so also check the derivation writes the approved version.
 	status, body := f.do(t, "PUT", "/checkout-grace",
 		policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE"))
 	if status != 200 {
@@ -116,15 +107,13 @@ func TestIntegration_API_PolicyVersionMustBeExactlyApproved(t *testing.T) {
 	}
 }
 
-// The whole reserved Emergency catalog is off limits — including through the side door of an ordinary-looking
-// package that pins the reserved Emergency SERVICE PLAN.
+// The reserved Emergency catalog is off limits, including via an ordinary-looking package pinning its service plan.
 func TestIntegration_API_ReservedEmergencyPlanCannotBeRepurposed(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
 	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.bootstrap_emergency_grace($1,$2)`, f.tenant, f.site); err != nil {
 		t.Fatal(err)
 	}
-	// an ordinary-looking package pinned to the canonical Emergency plan revision
 	var rev string
 	if err := f.pool.QueryRow(ctx, `WITH
 	  spr AS (SELECT spr.id FROM iam_v2.service_plans sp
@@ -154,8 +143,7 @@ func TestIntegration_API_ReservedEmergencyPlanCannotBeRepurposed(t *testing.T) {
 	}
 }
 
-// Every other way a candidate can be unpublishable must also keep it OUT of the list — and a malformed
-// duration policy must exclude that one candidate rather than breaking the endpoint.
+// Every other unpublishable candidate stays out of the list; a malformed duration policy excludes only that one.
 func TestIntegration_API_SelectorExcludesEveryUnpublishableCandidate(t *testing.T) {
 	f := newAPI(t)
 	good := f.seedCandidate(t, "pkg-good", goodDuration, "plan-good", "VALIDITY_WINDOW")
@@ -187,9 +175,7 @@ func TestIntegration_API_SelectorExcludesEveryUnpublishableCandidate(t *testing.
 			t.Fatalf("%s was offered but publication would refuse it", p.code)
 		}
 	}
-	// AND A POISONED CATALOG DOES NOT POISON PUBLICATION. The operator publishes policy; the system derives
-	// its own package and must not adopt one of these candidates on the way past. The derived revision is
-	// therefore asserted to be none of them.
+	// Publication derives its own package and must not adopt any of these candidates.
 	if status, resp := f.do(t, "PUT", "/checkout-grace",
 		policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE")); status != 200 {
 		t.Fatalf("publication was refused while unpublishable candidates existed: %d %v", status, resp)
@@ -208,8 +194,7 @@ func TestIntegration_API_SelectorExcludesEveryUnpublishableCandidate(t *testing.
 	_ = good
 }
 
-// The selector carries the whole immutable description an operator needs to choose — and nothing a guest
-// should never see.
+// The selector carries the immutable description an operator needs, and nothing a guest should never see.
 func TestIntegration_API_SelectorCarriesCompleteImmutableMetadata(t *testing.T) {
 	f := newAPI(t)
 	f.seedCandidate(t, "pkg-meta", goodDuration, "plan-meta", "VALIDITY_WINDOW")

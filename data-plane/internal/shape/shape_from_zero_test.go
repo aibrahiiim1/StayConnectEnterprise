@@ -1,19 +1,8 @@
 package shape
 
-// NETD REBUILDS THE GUEST SHAPING INFRASTRUCTURE FROM NOTHING. NO PRIMING UNIT IS INVOLVED.
-//
-// An oneshot unit, stayconnect-tc-setup, used to prime HTB roots at boot for a shaping model scd owned. It was
-// retired because it had become three kinds of wrong at once: it primed ens160 (the WAN/management interface)
-// and br-lan (a bridge that does not exist under the dynamic guest-network architecture), it described
-// per-session classids as `1:<last octet>` when the current scheme is MinorForIP in 0x1000-0x1fff plus SHARED
-// groups in 0x2000-0x2fff, and its prime() opened with `tc qdisc del dev <IF> root` — which, pointed at a real
-// guest bridge, would delete the netd-owned root and every live class beneath it.
-//
-// What replaced it is not a different unit. It is this: EnsureBridgeInfra builds everything the enforcement
-// plane needs, idempotently, on every submit pass — so a boot with ZERO tc state is fully reconstructed by the
-// first pass, with nothing scheduled and nothing to fail 203/EXEC.
-//
-// These cases pin that contract at the command level, which is where the ownership boundary actually lives.
+// EnsureBridgeInfra builds everything the enforcement plane needs, idempotently, on every submit pass, so
+// a boot with zero tc state is rebuilt by the first pass with no priming unit. These cases pin that at the
+// command level.
 
 import (
 	"context"
@@ -21,7 +10,7 @@ import (
 	"testing"
 )
 
-// FROM ZERO. Nothing exists: no IFB, no root qdisc, no ingress, no redirect. One call must create all of it.
+// With nothing existing (no IFB, root qdisc, ingress or redirect), one call must create all of it.
 func TestFromZero_EnsureBridgeInfraBuildsEverythingNeeded(t *testing.T) {
 	c, rec := newTestClient()
 	if err := c.EnsureBridgeInfra(context.Background(), "br-g-00d1fa1a"); err != nil {
@@ -29,13 +18,10 @@ func TestFromZero_EnsureBridgeInfraBuildsEverythingNeeded(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		// the IFB device that makes upload measurable, and its own root
 		"link add ifb-g-00d1fa1a type ifb",
 		"link set ifb-g-00d1fa1a up",
 		"qdisc add dev ifb-g-00d1fa1a root handle 1: htb",
-		// the bridge egress root that download classes hang off — THE thing tc-setup used to claim to prime
 		"qdisc add dev br-g-00d1fa1a root handle 1: htb",
-		// and the ingress redirect that feeds the IFB
 		"qdisc add dev br-g-00d1fa1a handle ffff: ingress",
 		"mirred egress redirect dev ifb-g-00d1fa1a",
 	} {
@@ -45,9 +31,8 @@ func TestFromZero_EnsureBridgeInfraBuildsEverythingNeeded(t *testing.T) {
 	}
 }
 
-// AND IT NEVER DELETES A ROOT QDISC. This is the exact destructive act the retired script opened with, and the
-// reason it could not be left installed: a root deletion takes every live per-session and SHARED class with
-// it. netd deletes only the ingress qdisc (whose filters it fully owns and rebuilds) and per-class leaves.
+// It must never delete a root qdisc: that takes every live per-session and SHARED class with it. Only the
+// ingress qdisc (whose filters netd owns) and per-class leaves are deleted.
 func TestFromZero_InfrastructureSetupNeverDeletesARootQdisc(t *testing.T) {
 	c, rec := newTestClient()
 	if err := c.EnsureBridgeInfra(context.Background(), "br-g-00d1fa1a"); err != nil {
@@ -67,8 +52,8 @@ func TestFromZero_InfrastructureSetupNeverDeletesARootQdisc(t *testing.T) {
 	}
 }
 
-// IDEMPOTENT. The second call must not re-issue link/qdisc creation: acctd submits about once a second, and a
-// setup path that churned kernel state on every pass would reset counters continuously.
+// The second call must not re-issue link/qdisc creation: acctd submits about once a second, and churning
+// kernel state each pass would reset counters.
 func TestFromZero_SecondCallIsAQuietNoOp(t *testing.T) {
 	c, rec := newTestClient()
 	ctx := context.Background()
@@ -85,9 +70,7 @@ func TestFromZero_SecondCallIsAQuietNoOp(t *testing.T) {
 	}
 }
 
-// THE BRIDGE NAME IS A PARAMETER, NOT A CONSTANT. The retired script hardcoded ens160 and br-lan; the current
-// plane learns the interface per session from sessions.ingress_interface, which is why it survived a bridge
-// being renamed from br-lan to a per-network br-g-<id> without anyone editing a script.
+// The bridge name is a parameter (learned per session from sessions.ingress_interface), never a constant.
 func TestFromZero_NoInterfaceNameIsHardcoded(t *testing.T) {
 	c, rec := newTestClient()
 	if err := c.EnsureBridgeInfra(context.Background(), "br-somewhere-else"); err != nil {

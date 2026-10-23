@@ -16,11 +16,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
-// Migration 0148: an erasure survives a restore. A restore brings the database back as it was, with every guest erased since
-// in it again and every request answered since open again. The ledger records what was erased and how requests were closed
-// (kinds, ids, references, dates and codes; nothing about who), and replaying it puts all of that right. These tests make the
-// "restore" by writing the identifying values back, forgetting the ledger entries after the backup point and the proof rows,
-// which is exactly what an older backup is, and then replay the ledger COPY ON THE APPLIANCE (the file), not the database's.
+// An erasure survives a restore: the "restore" writes identifying values back and forgets ledger entries after
+// the backup point, then replays the ledger copy on the appliance (the file), not the database's.
 
 func ledgerSeq(t *testing.T, f *apiFixture) int64 {
 	t.Helper()
@@ -31,8 +28,6 @@ func ledgerSeq(t *testing.T, f *apiFixture) int64 {
 	return n
 }
 
-// replayLedger forgets every ledger entry after base (the backup point) and the erasure proof of this tenant, then applies what
-// the primary file holds beyond base.
 func replayLedger(t *testing.T, f *apiFixture, base int64) map[string]any {
 	t.Helper()
 	ctx := context.Background()
@@ -341,8 +336,6 @@ func TestIntegration_RestoreReplay_ATamperedEntryIsRefused(t *testing.T) {
 		t.Errorf("the forged entry entered the ledger (head %d, want %d)", got, base)
 	}
 }
-
-// ---- fail closed -----------------------------------------------------------------------------------------------------
 
 type failingDest struct {
 	ledger.Destination

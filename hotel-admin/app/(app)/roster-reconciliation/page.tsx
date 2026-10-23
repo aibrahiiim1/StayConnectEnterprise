@@ -1,31 +1,8 @@
 "use client";
 
-// ROSTER RECONCILIATION — closing the stays the PMS no longer lists, and showing why that is safe to do.
-//
-// THE SISTER PAGE HAS NO ACTION, AND STILL DOES NOT. /pms-reconciliation lists departures the engine could
-// not place, and those are answered by the PMS: stay_events is one-way and a checkout boundary must be an
-// APPLIED departure event. Nothing here changes that.
-//
-// WHAT IS DIFFERENT HERE IS THE EVIDENCE. A COMPLETE published roster is the PMS stating, in full, who is in
-// the building. A stay it does not mention has ended — a deduction from a complete statement, not a re-read
-// of an old message. That is the only evidence this page acts on.
-//
-// SO THE PAGE LEADS WITH THE PROOF, NOT THE BUTTON. "Rooms named 589 of 589" is the sentence that makes the
-// action legitimate, and if it ever reads 300 of 589 the run refuses and the operator can see exactly why
-// without being told to trust anything. Six named refusals, each shown as a reason rather than an error.
-//
-// AND THE NUMBER NOBODY SHOULD HAVE TO ASK FOR: how many stays were held back because the PMS said something
-// about them after the snapshot. A guest who checked in ten minutes ago is absent from a roster taken
-// fifteen minutes ago, and closing them would disconnect somebody who just arrived. That is shown as a
-// protection, permanently, not hidden because it is usually small.
-//
-// OPENING THE PAGE RUNS NOTHING (audit H-13). It used to compute a dry run on every open, which wrote a run
-// row -- a READ permission writing, and the ledger growing every time anybody looked. The figures are now the
-// LAST RECORDED run; "Run dry run" is an explicit action for the roles that own the integration.
-//
-// A CLOSED STAY IS CHECKED OUT LIKE ANY OTHER (audit H-2). A stay the roster no longer lists is handed to the
-// same checkout a PMS departure goes through: its internet access ends or moves to the departure grace
-// package, and its devices and sessions are closed.
+// Only a COMPLETE published roster is acted on: a stay it omits has ended.
+// Opening the page must run nothing (a READ must not write a run row); figures come from the last recorded run.
+// Stays with newer PMS events than the snapshot are held back so a just-arrived guest is never disconnected.
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -65,7 +42,6 @@ const REFUSAL_MEANING: Record<string, string> = {
     "More stays would close than one run is allowed to close. This is deliberate: a surprise stops for a person.",
 };
 
-// The run outcome in words: "completed" or the refusal, without the REFUSED_ prefix the table already implies.
 const outcomeWords = (o: string) =>
   o === "COMPLETED" ? "completed" : `refused: ${o.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}`;
 
@@ -103,7 +79,7 @@ export default function RosterReconciliationPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // "Run dry run": what a run would do now, recorded as a DRY_RUN in the ledger. Changes no stay.
+  // Recorded as a DRY_RUN in the ledger; changes no stay.
   async function runDry() {
     setDryBusy(true);
     setDryErr(null);
@@ -120,7 +96,7 @@ export default function RosterReconciliationPage() {
     }
   }
 
-  // A blocker either clears itself or it does not, and the screen must not imply the wrong one.
+  // Operational blockers clear themselves; the historical exception does not.
   const operational = (state?.blockers ?? []).filter((b) => b.blocker !== "DEPARTURE_FOR_UNKNOWN_STAY");
   const historical = (state?.blockers ?? []).filter((b) => b.blocker === "DEPARTURE_FOR_UNKNOWN_STAY");
 
@@ -183,11 +159,7 @@ export default function RosterReconciliationPage() {
         </div>
       )}
 
-      {/* TWO KINDS OF THING, AND THEY MUST NOT SHARE A FOOTER.
-          The operational blockers below describe conditions that end -- a link that comes back, a feed that
-          starts describing the building again -- and the line "these clear themselves" is true of them.
-          The historical exception does NOT clear, and printing that line under it said the opposite of the
-          exception's own text, three lines apart, on the same card. */}
+      {/* Operational and historical blockers must not share a footer: "these clear themselves" is false for the historical one. */}
       {operational.length > 0 && (
         <Card>
           <CardHeader>
@@ -267,7 +239,6 @@ export default function RosterReconciliationPage() {
         </Card>
       )}
 
-      {/* THE PROOF, BEFORE THE ACTION. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={<Building2 />}
@@ -286,10 +257,7 @@ export default function RosterReconciliationPage() {
         />
       </div>
 
-      {/* WHAT THE NEXT AUTOMATIC RUN WOULD DO. There is no button: reconciliation runs itself on every
-          complete published generation, and a manual trigger for the same audited action would be a repair
-          control for work that is not outstanding. This card exists so an operator can SEE the decision
-          before it is taken, and see why it was refused when it is. */}
+      {/* No manual trigger: reconciliation runs itself on every complete published generation. */}
       {(state?.interfaces?.length ?? 0) > 1 && (
         <Card>
           <CardBody>
@@ -357,9 +325,6 @@ export default function RosterReconciliationPage() {
 
       {state && <RosterSettingsCard settings={state.settings} writable={writable} onSaved={() => void load()} />}
 
-      {/* THE HISTORICAL SNAPSHOT ARTIFACTS. Answered once, in bulk, from the fact that a resync mentions
-          every room and an empty one has no booking to name. There is no button because there is nothing
-          left to answer and nothing new can arrive: the connector no longer admits those records at all. */}
       <Card>
         <CardHeader><CardTitle>Historical roster-snapshot artifacts</CardTitle></CardHeader>
         <CardBody className="space-y-2">
@@ -379,9 +344,6 @@ export default function RosterReconciliationPage() {
         </CardBody>
       </Card>
 
-      {/* THE RECOVERY SETTINGS LIVE WITH THE CONNECTION THEY GOVERN.
-          They are reconnect bounds for the PMS link, which is configured on PMS connection, not here. An
-          administrator changing how the link retries was being asked to find a diagnostic page to do it. */}
       <Card>
         <CardHeader><CardTitle>Connection recovery</CardTitle></CardHeader>
         <CardBody className="space-y-1">
@@ -446,9 +408,7 @@ export default function RosterReconciliationPage() {
   );
 }
 
-// THE ROSTER-TRUST SETTINGS (audit H-5), shown to everyone who can open the page and changed only by the roles
-// that own the integration: the password, the version that was on screen and a reason are required, the
-// database re-checks the bounds and keeps the change history, and the change is in the activity log.
+// Visible to all; changes need an integration-owning role, password, the on-screen version and a reason.
 function RosterSettingsCard({
   settings, writable, onSaved,
 }: {

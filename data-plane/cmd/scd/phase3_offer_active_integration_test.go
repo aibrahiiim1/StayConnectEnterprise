@@ -2,27 +2,14 @@
 
 package main
 
-// A PACKAGE TURNED OFF IN HOTEL ADMIN MUST NOT BE OFFERED TO GUESTS.
-//
-// It was. The offer predicate filtered on current revision, system flag, package type, visibility window,
-// price and settlement, and never once looked at `internet_packages.active` — the operator's own switch. A
-// package deactivated in Hotel Admin carried on being offered.
-//
-// This was found in production configuration rather than in a test: a deactivated 2 Gbps "Free Internet
-// Package" was still guest-selectable beside its 2 Mbps replacement. Two consequences, and the second is
-// worse than the first. The guest saw a choice screen where the operator intended automatic access; and one
-// of the two choices was the plan the operator believed they had retired.
-//
-// The admin UI showing "inactive" while the portal offers the thing is the failure mode these tests exist to
-// prevent. visible_until is not the fix — it dates a package, it does not disable one, and an operator who
-// has to date-fence a package to turn it off has no way to say "off, indefinitely".
+// A package deactivated in Hotel Admin (`internet_packages.active`) must not be offered; visible_until only
+// dates a package, it cannot disable one indefinitely.
 
 import (
 	"context"
 	"testing"
 )
 
-// setPackageActive drives the operator's switch through the column Hotel Admin writes.
 func setPackageActive(t *testing.T, f *authFixture, pkgRevID string, active bool) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -33,12 +20,10 @@ func setPackageActive(t *testing.T, f *authFixture, pkgRevID string, active bool
 	}
 }
 
-// THE REGRESSION. Deactivate the only offer and the guest is offered nothing — not the deactivated package.
 func TestIntegration_Phase3Offers_InactivePackageIsNotOffered(t *testing.T) {
 	f := newAuthFixture(t)
 
-	// Baseline: while active, this package IS offered. Asserting it first means the refusal below is
-	// attributable to the flag rather than to some unrelated part of the fixture.
+	// Baseline: offered while active, so the refusal below is attributable to the flag.
 	_, before := post(t, f.p3.resolveHandler,
 		f.resolveBody("412", "Okonkwo", "", "00000051-0000-4000-8000-000000000000"))
 	if before.Outcome != outcomeVerified || len(before.Offers) != 1 {
@@ -57,8 +42,6 @@ func TestIntegration_Phase3Offers_InactivePackageIsNotOffered(t *testing.T) {
 	}
 }
 
-// REACTIVATION RESTORES THE OFFER. `active` is a switch, not a one-way retirement, and an operator who turns
-// a package off during a problem must be able to turn it back on without republishing a revision.
 func TestIntegration_Phase3Offers_ReactivatedPackageIsOfferedAgain(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -72,21 +55,13 @@ func TestIntegration_Phase3Offers_ReactivatedPackageIsOfferedAgain(t *testing.T)
 	}
 }
 
-// THE EXACT PRODUCTION SHAPE: one active package and one inactive one, both otherwise offerable. Before the
-// fix this produced two offers and therefore a choice screen. It must now produce exactly one, automatically
-// granted, and it must be the active one.
-//
-// The priced package in the fixture is deliberately left alone — it is already excluded on price, and having
-// it present proves the `active` term did not accidentally become the only thing doing the filtering.
+// One active and one inactive package, both otherwise offerable, must yield exactly one offer: the active one.
+// The fixture's priced package stays, to show `active` is not the only filter.
 func TestIntegration_Phase3Offers_OnlyTheActivePackageSurvives(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
-	// Clone the fixture's free package into a second, deactivated package — the retired predecessor.
-	//
-	// Three statements rather than one CTE: a data-modifying CTE cannot see rows its sibling CTEs insert,
-	// because every arm reads the same snapshot taken before the statement began. The single-statement
-	// version updated nothing and returned no rows.
+	// Three statements rather than one CTE: a data-modifying CTE cannot see rows its siblings insert.
 	var retiredPkg string
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO iam_v2.internet_packages (id, tenant_id, site_id, code, active, is_system)
@@ -126,7 +101,7 @@ func TestIntegration_Phase3Offers_OnlyTheActivePackageSurvives(t *testing.T) {
 			res.Offers)
 	}
 	if res.Offers[0].PackageRevisionID != retiredRev {
-		return // the surviving offer is the active one, which is the point
+		return
 	}
 	t.Fatalf("the surviving offer is the RETIRED package %s", retiredRev)
 }

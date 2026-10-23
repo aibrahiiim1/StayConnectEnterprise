@@ -1,20 +1,7 @@
 package pmsd
 
-// SUPERVISED RECONCILIATION of the Stay-Event application loops.
-//
-// Interfaces are not static: one is published, another is put into DRAINING before decommissioning, a third is
-// re-activated after maintenance. Listing them once at startup meant a new Interface silently accumulated
-// unapplied events until somebody restarted the daemon, and a decommissioned one kept a worker running against
-// a scope nobody owned any more.
-//
-// So the applier reconciles, on the same authoritative discovery the connector supervision uses:
-//
-//   - an Interface that appears gets a loop, without touching any other Interface;
-//   - an Interface that stops being ACTIVE has its loop cancelled and drained, cleanly;
-//   - an Interface that comes back gets a fresh loop (never a resurrected one);
-//   - exactly one loop exists per Interface at any moment — reconciling twice concurrently cannot double it;
-//   - the durable inbox stays the source of truth, so a stopped-and-restarted loop simply resumes the events
-//     that are still PENDING.
+// The applier reconciles its loops against the ACTIVE Interface set: new Interfaces get a loop, ones that stop
+// being ACTIVE are cancelled and drained, and exactly one loop exists per Interface at any moment.
 
 import (
 	"context"
@@ -22,33 +9,26 @@ import (
 	"time"
 )
 
-// defaultApplierReconcileInterval bounds how quickly an Interface change is picked up. It is a poll rather
-// than a notification because the authoritative answer lives in the database, and a poll cannot miss an edge.
+// defaultApplierReconcileInterval is a poll, not a notification, because the authoritative answer lives in the database.
 const defaultApplierReconcileInterval = 15 * time.Second
 
-// runningLoop is one Interface's live application loop. generation increases every time a loop is created for
-// that Interface, so a test (and an operator reading logs) can tell a REPLACEMENT loop from a duplicate one.
+// runningLoop is one Interface's live loop; generation increases per creation, distinguishing a replacement from a duplicate.
 type runningLoop struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 	generation int
 }
 
-// loopObserver is how a test watches the loop lifecycle from OUTSIDE the supervisor. Production leaves it nil.
-// Without it, "exactly one loop per Interface" can only be asserted indirectly, and the previous four-supervisor
-// test proved nothing of the sort: four supervisors keep four independent loop maps.
+// loopObserver lets a test watch the loop lifecycle from outside the supervisor; production leaves it nil.
 type loopObserver interface {
 	loopStarted(iface string, generation int)
 	loopStopped(iface string, generation int)
 }
 
-// runApplierSupervisor keeps the set of application loops equal to the set of ACTIVE Interfaces until ctx ends,
-// then cancels and drains every loop it started.
 func runApplierSupervisor(ctx context.Context, a Assignment, repo Repo, ap StayApplier, deps *Deps) {
 	runApplierSupervisorObserved(ctx, a, repo, ap, deps, nil)
 }
 
-// runApplierSupervisorObserved is runApplierSupervisor with an optional lifecycle observer for tests.
 func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, ap StayApplier, deps *Deps, obs loopObserver) {
 	var mu sync.Mutex
 	loops := map[string]*runningLoop{}
@@ -68,15 +48,13 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 	reconcile := func() {
 		ifaces, err := repo.ListActiveInterfaces(ctx, a.TenantID, a.SiteID)
 		if err != nil {
-			// A discovery failure is transient by nature: keep the loops we have (they are still applying
-			// real events) and try again on the next tick rather than tearing down working application.
+			// A discovery failure is transient: keep the running loops and retry on the next tick.
 			logEvent(deps.log(), EventSupervisorNoAssignment, Classify(err), SafeFields{Stage: StageDiscover})
 			return
 		}
 		want := make(map[string]struct{}, len(ifaces))
 		for _, i := range ifaces {
-			// The listing also carries DRAINING interfaces that still have room charges to finish (their
-			// connector keeps the link for that). Stay events are applied for ACTIVE interfaces only, as before.
+			// The listing also carries DRAINING interfaces (room charges to finish); stay events apply for ACTIVE only.
 			if i.LifecycleState != "" && i.LifecycleState != "ACTIVE" {
 				continue
 			}
@@ -86,7 +64,6 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 
 		mu.Lock()
 		defer mu.Unlock()
-		// stop loops whose Interface is no longer ACTIVE (disabled, draining, decommissioned or removed)
 		for id, l := range loops {
 			if _, ok := want[id]; ok {
 				continue
@@ -97,8 +74,7 @@ func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, 
 			mu.Lock()
 			delete(loops, id)
 		}
-		// start loops for Interfaces that do not have one. The map is the single source of truth for "is there
-		// already a loop", so a second concurrent reconcile cannot create a duplicate.
+		// The map is the single source of truth for "is there a loop", so concurrent reconciles cannot duplicate one.
 		for id := range want {
 			if _, exists := loops[id]; exists {
 				continue

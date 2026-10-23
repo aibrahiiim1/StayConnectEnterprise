@@ -32,7 +32,6 @@ function Conn({ ok, label }: { ok: boolean; label: string }) {
 function LinkBadge({ up }: { up: boolean }) {
   return <Badge tone={up ? "ok" : "err"}>{up ? "Link up" : "Link down"}</Badge>;
 }
-/** The history's timestamps come as text; show them localised when they parse, verbatim when they do not. */
 function when(s: string): string {
   const t = Date.parse(/[+-]\d{2}$/.test(s) ? `${s}:00` : s);
   return Number.isFinite(t) ? new Date(t).toLocaleString() : s;
@@ -46,7 +45,6 @@ export default function NetworkSettingsPage() {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
-  // edit form (seeded from current state)
   const [wanIp, setWanIp] = useState("");
   const [wanPrefix, setWanPrefix] = useState(24);
   const [wanGw, setWanGw] = useState("");
@@ -83,7 +81,7 @@ export default function NetworkSettingsPage() {
   }
   async function loadHistory() {
     try { setHistory((await api.get<{ history: SysNetAudit[] }>("/network/system/history")).history ?? []); }
-    catch { setHistory((h) => h ?? []); /* non-fatal */ }
+    catch { setHistory((h) => h ?? []); }
   }
 
   useEffect(() => {
@@ -123,8 +121,6 @@ export default function NetworkSettingsPage() {
     tick(); timer.current = setInterval(tick, 1000);
   }
 
-  // Applying a WAN/LAN change needs the operator's password (the server requires it). It is asked for in a
-  // masked field inside the confirmation, which also says what applying will do.
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState<string | null>(null);
 
@@ -152,8 +148,7 @@ export default function NetworkSettingsPage() {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   }
 
-  // Rolling back needs the password too (the server requires it). It is typed into a masked field — never a
-  // browser prompt, which shows what is typed, often with somebody standing next to the operator.
+  // The password goes in a masked field, never a browser prompt, which shows what is typed.
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackErr, setRollbackErr] = useState<string | null>(null);
 
@@ -290,7 +285,6 @@ export default function NetworkSettingsPage() {
         </PendingChangeBanner>
       )}
 
-      {/* status cards */}
       <div className="grid gap-5 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -331,7 +325,6 @@ export default function NetworkSettingsPage() {
           </CardBody>
         </Card>
 
-        {/* Guest networks pointer — the real guest-facing config lives there, NOT on the legacy base bridge below. */}
         <Card>
           <CardHeader>
             <div className="space-y-1">
@@ -354,7 +347,6 @@ export default function NetworkSettingsPage() {
         </Card>
       </div>
 
-      {/* Legacy base bridge — clearly demarcated so it is never mistaken for an active guest network. */}
       <details className="group rounded-lg border border-border bg-card shadow-card">
         <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 px-5 py-4 text-emphasis [&::-webkit-details-marker]:hidden">
           <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
@@ -376,7 +368,6 @@ export default function NetworkSettingsPage() {
               { label: "Physical interface", value: mono(state.lan.physical_interface) },
               { label: "Bridge", value: mono(state.lan.bridge) },
               { label: "MAC address", value: mono(state.lan.mac) },
-              // DHCP on the legacy bridge is informational, NOT a warning — guests use guest networks.
               { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — clients use client networks"}</Badge> },
               ...(state.lan.dhcp_enabled ? [
                 { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`) },
@@ -389,7 +380,6 @@ export default function NetworkSettingsPage() {
         </div>
       </details>
 
-      {/* edit form */}
       {writable && (
         <Card>
           <CardHeader>
@@ -415,8 +405,6 @@ export default function NetworkSettingsPage() {
                 </legend>
                 <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => { setLanIp(e.target.value);}} className="font-mono" /></Field>
                 <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => { setLanPrefix(Number(e.target.value));}} /></Field>
-                {/* DHCP has ONE source of truth: the guest network pages. Shown read-only here to avoid a second,
-                    conflicting editor for the same scope. */}
                 <p className="text-caption text-muted-foreground">
                   DHCP is not edited here; see{" "}
                   <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link>.
@@ -431,7 +419,6 @@ export default function NetworkSettingsPage() {
               </Callout>
             )}
 
-            {/* validation + before/after */}
             {validation && (
               <div className="space-y-4">
                 {validation.validation.ok ? (
@@ -479,7 +466,6 @@ export default function NetworkSettingsPage() {
         </Card>
       )}
 
-      {/* diagnostics */}
       <Card>
         <CardHeader>
           <div className="space-y-1">
@@ -505,7 +491,6 @@ export default function NetworkSettingsPage() {
         )}
       </Card>
 
-      {/* history */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><History className="size-4" aria-hidden /> Change history</CardTitle>

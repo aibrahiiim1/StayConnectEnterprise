@@ -13,7 +13,6 @@ func TestValidateProposal_WANOnlyChangeIsNotBlockedByAnUnaddressedLAN(t *testing
 	if r := ValidateProposal(w, l, cur, p); !r.OK {
 		t.Fatalf("a WAN-only change was blocked by the LAN: %+v", r.Issues)
 	}
-	// ...but a WAN problem is still a problem.
 	bad := Proposal{WAN: &WANConfig{Interface: "ens160", Mode: "static", IP: "192.0.2.30", PrefixLen: 24}}
 	w, l = Merge(goodWAN(), cur, bad)
 	if r := ValidateProposal(w, l, cur, bad); r.OK || !hasCode(r, "no_gateway") {
@@ -21,11 +20,10 @@ func TestValidateProposal_WANOnlyChangeIsNotBlockedByAnUnaddressedLAN(t *testing
 	}
 }
 
-// When the LAN IS changed, or is configured, every LAN rule applies.
 func TestValidateProposal_LANRulesApplyWhenTheLANIsInPlay(t *testing.T) {
 	cur := goodLAN()
 	lan := goodLAN()
-	lan.IP = "10.10.0.0" // network address
+	lan.IP = "10.10.0.0"
 	p := Proposal{LAN: &lan}
 	w, l := Merge(goodWAN(), cur, p)
 	if r := ValidateProposal(w, l, cur, p); r.OK || !hasCode(r, "network_address") {
@@ -33,8 +31,7 @@ func TestValidateProposal_LANRulesApplyWhenTheLANIsInPlay(t *testing.T) {
 	}
 }
 
-// DHCP on the base LAN is not edited on this screen. Sending the values in force is fine; sending different
-// ones is refused, so nobody believes a change was made that would be discarded.
+// Different DHCP values are refused rather than silently discarded.
 func TestValidateProposal_DHCPIsNotEditedHere(t *testing.T) {
 	cur := goodLAN()
 	same := goodLAN()

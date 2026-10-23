@@ -35,13 +35,8 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 const PAGE_SIZES = [25, 50, 100, 200];
-// THERE IS NO "Locked out" FILTER, AND THERE IS NO "Locked out" COUNT.
-//
-// Both used to be here, reading iam_v2.guest_access_accounts.locked_until. Nothing in the product ever sets
-// that column — protection against repeated failed sign-ins is per DEVICE (Client sign-in protection) — so the
-// card always read 0 and the filter could only ever return an empty page. An operator reads "0 locked out" as a
-// measurement and concludes nobody is being locked out, which says nothing at all about the devices that ARE
-// being restricted. The screen now points at the place that measures it instead of inventing a number.
+// No "Locked out" filter or count: protection is per device, and guest_access_accounts.locked_until is never set, so it
+// would always read 0.
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "", label: "All accounts" },
   { value: "enabled", label: "Can sign in" },
@@ -58,24 +53,16 @@ function weakPassword(pw: string): boolean {
   return pw.length > 0 && pw.length < 8;
 }
 
-// THE ONE-TIME PASSWORD REVEAL is the kit's OneTimeReveal, shown once after create or reset. The password is
-// NEVER retrievable afterwards.
-//
-// It is a modal, and for this screen that is a correctness property rather than a presentation one. It used to
-// be a card inserted above the table: on a list of accounts the operator scrolled to find, creating an account
-// put the only copy of its password off-screen, and the next click anywhere could scroll it out of reach for good.
-// A password shown exactly once must be impossible to miss.
+// The one-time password reveal is a modal so the only copy cannot scroll off-screen; the password is never
+// retrievable afterwards.
 
 export default function GuestAccountsPage() {
   const toast = useToast();
-  // A room number is an alternative to an account only where hospitality is licensed; elsewhere the help does
-  // not describe a hotel.
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [rows, setRows] = useState<GuestAccount[] | null>(null);
   const [portalOn, setPortalOn] = useState<boolean>(false);
   const [err, setErr] = useState<string | null>(null);
-  // Errors of the open create / edit / password form, shown INSIDE that dialog: a failure reported on the page
-  // behind a modal is a failure nobody reads.
+  // Form errors show inside the dialog; one on the page behind a modal goes unread.
   const [formErr, setFormErr] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,63 +74,35 @@ export default function GuestAccountsPage() {
   const [editing, setEditing] = useState<GuestAccount | null>(null);
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
-  // The two destructive actions, held while the operator confirms. They used to be `window.confirm` calls, which
-  // could not say how many devices were about to be cut off or that a disabled account is the reversible option.
   const [disconnecting, setDisconnecting] = useState<GuestAccount | null>(null);
   const [deleting, setDeleting] = useState<GuestAccount | null>(null);
-  // What Remove will do, when the Manage view has said (delete: never used; remove: history kept). Null from the
-  // row action, where the dialog describes both outcomes.
   const [removal, setRemoval] = useState<GuestAccountManage["removal"] | null>(null);
   const [managing, setManaging] = useState<GuestAccount | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
-  // THE LIST HAS THREE OUTCOMES, NOT TWO. `rows === null` was doing double duty as "still loading" and "the
-  // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
-  // screen contradicting itself.
+  // Loading has three outcomes (loading, failed, loaded); null alone conflated the first two.
   const [loadFailed, setLoadFailed] = useState(false);
 
-  // THE ROLE DECIDES WHICH CONTROLS EXIST. Every write on this screen is refused by edged to a role without
-  // write on guest-accounts (site_viewer, payments_operator); offering those roles an Add button, a switch and
-  // five row actions that all answer 403 was the "buttons shown to roles that cannot use them" the redesign
-  // handoff lists against this screen. Fails closed while the roles load.
+  // The role decides which controls exist; edged refuses writes to other roles. Fails closed while roles load.
   const roles = useOperatorRoles();
   const mayWrite = roles === null ? false : canWrite("guest-accounts", roles);
-  // The generated-password FORMAT is a separate key: the desk creates accounts, it does not decide how strong
-  // every generated password is.
+  // The generated-password format is a separate key from creating accounts.
   const mayEditFormat = roles === null ? false : canWrite("account-password-settings", roles);
-  // THE PORTAL SWITCH IS A SIGN-IN METHOD, so it follows auth-methods (edged refuses it otherwise): the desk
-  // creates accounts, it does not decide which ways clients may sign in.
+  // The portal switch is a sign-in method, so it follows auth-methods.
   const mayOfferOnPortal = roles === null ? false : canWrite("auth-methods", roles);
-  // What the Manage dialog may offer: device actions follow the sessions key, vouching for an address follows
-  // code-reveal -- the voucher station holds neither.
+  // Device actions follow the sessions key and vouching follows code-reveal; the voucher station holds neither.
   const mayReadDevices = roles === null ? false : canRead("sessions", roles);
   const mayActOnDevices = roles === null ? false : canWrite("sessions", roles);
   const mayVouch = roles === null ? false : canWrite("code-reveal", roles);
 
-  // THERE IS NO AUTHORITY DIMENSION ANY MORE.
-  //
-  // This screen used to carry a full second personality: an `authority` state, a legacy plan picker, a
-  // four-state lifecycle for a "guest access plans" request, and prose that differed depending on which
-  // authority the site turned out to be running. All of it existed because a superseded guest-IAM
-  // implementation sat behind the same URLs. That implementation and its tables are gone, so the branches
-  // are gone with them -- not defaulted to the IAM-v2 side and left in place, which would leave the screen
-  // still able to render sentences no site can be true for.
-  //
-  // A credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY RULES evaluated
-  // when packages are listed, which is why there is no plan control here and no plans request at all.
+  // A credential carries no plan: what a guest may acquire is decided by package eligibility rules.
 
-  // A new question starts at its first page.
   useEffect(() => { setOffset(0); }, [q, status, pageSize]);
 
-  // PAGED, SEARCHED AND COUNTED ON THE SERVER, newest account first. The search text goes in a header, not the
-  // URL: it is a username or a person's name, and edged logs request lines.
-  //
-  // ONLY THE LATEST QUESTION MAY ANSWER (the Stays pattern): responses can return in any order, so each request
-  // takes a number and is applied only if no newer request has started since.
+  // Paged and searched on the server; the search text goes in a header (a username or name; edged logs request
+  // lines). Responses can return in any order, so only the latest request may apply its answer.
   const latest = useRef(0);
   const load = useCallback(async () => {
     const mine = ++latest.current;
-    // Clearing both at entry matters for the RETRY path: without it a successful reload leaves the previous
-    // failure's banner sitting above fresh, correct data.
     setErr(null);
     setLoadFailed(false);
     try {
@@ -252,10 +211,8 @@ export default function GuestAccountsPage() {
       const uname = pwFor.username;
       setPwFor(null);
       if (shown) setReveal({ username: uname, password: shown });
-      // WHAT THE TOAST MAY CLAIM is what the appliance confirmed. `disconnected_sessions` is the number of
-      // sessions actually ended; a count of 0 with the box ticked means there was nothing online, and is said
-      // so rather than left out. Devices the appliance could not take off the network are reported separately,
-      // because a partial disconnect announced as a success is the defect this replaces.
+      // The toast claims only what the appliance confirmed: sessions ended, with devices it could not disconnect
+      // reported separately.
       const ended = resp.disconnected_sessions;
       toast.success(
         `Password updated for ${uname}.`,
@@ -275,8 +232,7 @@ export default function GuestAccountsPage() {
     } finally { setBusy(false); }
   }
 
-  // DISABLE ENDS THE ACCOUNT'S SESSIONS AND PAUSES ITS PACKAGE (decision D-A), so it is confirmed first and the
-  // toast says what the appliance actually did. Enable needs no confirmation: it gives back what Disable paused.
+  // Disable ends the account's sessions and pauses its package, so it is confirmed first.
   const [disabling, setDisabling] = useState<GuestAccount | null>(null);
   async function onToggle(a: GuestAccount) {
     setActionErr(null);
@@ -325,8 +281,7 @@ export default function GuestAccountsPage() {
     finally { setBusy(false); }
   }
 
-  // RESEND THE VERIFICATION EMAIL (self-service contract §7). scd owns the outbox and the limits, so a refusal is
-  // its words: a wait, the daily limit, or -- on an appliance whose sign-in service cannot do it yet -- that.
+  // scd owns the outbox and limits, so a refusal is shown in its words.
   const [resending, setResending] = useState<string | null>(null);
   async function onResend(a: GuestAccount) {
     setResending(a.id);
@@ -367,7 +322,7 @@ export default function GuestAccountsPage() {
     finally { setBusy(false); }
   }
 
-  // Totals over EVERY account that matches, from the server -- not over the page on screen.
+  // Totals come from the server over every matching account, not the page on screen.
   const totals = useMemo(() => {
     const sm = resp?.summary;
     const list = rows ?? [];
@@ -413,8 +368,6 @@ export default function GuestAccountsPage() {
           </>
         }
         actions={
-          // This button used to be disabled whenever there were no active guest access plans, which under
-          // IAM-v2 meant permanently. It is no longer gated on anything but the operator's role.
           mayWrite ? (
             <Button onClick={openNew}>
               <Plus /> Add account
@@ -436,9 +389,6 @@ export default function GuestAccountsPage() {
         />
       </div>
 
-      {/* THE PORTAL SWITCH, as a switch card. It was a button whose label was its state ("On"), which reads as
-          the action rather than the setting — so an operator could not tell whether pressing it would turn the
-          tab on or report that it already was. The state is also stated in words, never by the switch alone. */}
       <Card>
         <CardBody className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 space-y-1">
@@ -512,8 +462,6 @@ export default function GuestAccountsPage() {
           <ResultsCount count={rows === null ? null : filtered.length} noun="client account" />
         </CardBody>
         {loadFailed ? (
-          // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
-          // that can help, beats a spinner that will never finish.
           <EmptyState
             title="Could not load client accounts"
             hint="The appliance did not answer. Nothing has been changed."
@@ -593,8 +541,8 @@ export default function GuestAccountsPage() {
                           <Button size="sm" variant="ghost" aria-label={`Edit ${a.username}`} onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
                             <Pencil /> Edit
                           </Button>
-                          {/* A self-service account's password is the client's, recovered only by the reset email
-                              (contract §5): staff are not offered to set or show it. */}
+                          {/* A self-service account's password is the client's, recovered only by reset email;
+                              staff cannot set or show it. */}
                           {!a.self_registered && (
                             <Button size="sm" variant="ghost" aria-label={`Password for ${a.username}`} onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
                               <KeyRound /> Password
@@ -640,7 +588,6 @@ export default function GuestAccountsPage() {
         )}
       </Card>
 
-      {/* ------------------------------------------------------------------ create / edit / password */}
       <Dialog open={showNew} onOpenChange={(v) => !v && !busy && setShowNew(false)}>
         <DialogContent size="lg">
           <DialogHeader>
@@ -688,7 +635,6 @@ export default function GuestAccountsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ------------------------------------------------------------------ destructive confirmations */}
       <ConfirmDialog
         open={disconnecting !== null}
         onOpenChange={(v) => !v && setDisconnecting(null)}
@@ -767,8 +713,6 @@ export default function GuestAccountsPage() {
   );
 }
 
-// AccountForm is shared by create and edit. `withPassword` shows the create-time
-// password controls; edit uses the separate Set-password panel.
 function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
   account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
@@ -846,14 +790,6 @@ function AccountForm({ account, onSubmit, busy, withPassword, onCancel }: {
         <Input name="notes" maxLength={ACCOUNT_NOTES_MAX} defaultValue={account?.notes ?? ""} placeholder="Optional" />
       </Field>
 
-      {/*
-        WHERE THE PLAN CONTROL USED TO BE.
-
-        An account carries no plan, so there is nothing to choose here and nothing to wait for. This block
-        used to be a five-way branch -- authority unknown, plans loading, plans failed, plans empty, plans
-        present -- every arm of which existed to describe a superseded prerequisite. It says the one thing
-        that is now true instead. One line, visible while the form is filled: it answers "where do I pick the plan?".
-      */}
       <p className="text-caption text-muted-foreground">
         What this client can take is decided by the eligibility rules on each internet package.
       </p>

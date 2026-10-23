@@ -60,9 +60,7 @@ export default function DhcpPage() {
 
   const netName = (gid: string) => networks.find((n) => n.id === gid)?.name ?? gid;
 
-  // BOTH LISTS ARE PAGED AND SEARCHED IN EDGED. A property's pools hold thousands of leases; the screen used to
-  // draw them all and filter in the browser. The search (an address, a MAC, a device name) goes in a header,
-  // like every other list's, and a new search starts at the first page.
+  // Search server-side and reset pagination because a property may have thousands of leases.
   const needle = q.trim();
   const headers = useMemo(
     () => (needle ? { "X-Dhcp-Search": encodeURIComponent(needle) } : undefined),

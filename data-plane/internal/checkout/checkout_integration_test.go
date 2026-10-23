@@ -34,12 +34,9 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// guarded runs fn in ONE transaction that first opens the named controlled-operation families. On the full
-// production schema the controlled-writer triggers (stays/stay_events -> 'stay', purchases -> 'commerce_intent',
-// checkout_grace_audit/entitlement_boundary_watermarks -> 'checkout_conversion', ...) no longer let the
-// superuser through merely for owning the objects, so a seed opens the family exactly as the product's own
-// writers do. The error is returned so a test asserting a GENUINE refusal (append-only, provenance, legal
-// edges) still sees it -- for the right reason, not because the writer guard fired first.
+// guarded runs fn in one transaction that first opens the controlled-operation families the controlled-writer
+// triggers require, as the product's writers do. The error is returned so a test of a genuine refusal sees it
+// for the right reason, not because the writer guard fired first.
 func guarded(p *pgxpool.Pool, families []string, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	ctx := context.Background()
 	tx, err := p.Begin(ctx)
@@ -58,7 +55,6 @@ func guarded(p *pgxpool.Pool, families []string, fn func(ctx context.Context, tx
 	return tx.Commit(ctx)
 }
 
-// guardedExec is guarded for a single statement.
 func guardedExec(p *pgxpool.Pool, families []string, q string, args ...any) error {
 	return guarded(p, families, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, q, args...)
@@ -66,11 +62,9 @@ func guardedExec(p *pgxpool.Pool, families []string, q string, args ...any) erro
 	})
 }
 
-// asOwnerExec runs ONE seed write as iam_v2_owner (SET LOCAL ROLE). Only for OWNER-guarded tables
-// (site_checkout_grace_config, accounting_records) where the seed needs a shape no operation produces (a
-// NULL/unconfigured grace config, an accounting sample at an explicit sequence and time). It reproduces exactly
-// what the historical fixture did -- the test user WAS the owner there. Never used in a code path under test,
-// and never where the test asserts that such a write is refused.
+// asOwnerExec runs one seed write as iam_v2_owner, only for owner-guarded tables
+// (site_checkout_grace_config, accounting_records) where the seed needs a shape no operation produces. Never
+// use it in a path under test or where a refusal is asserted.
 func asOwnerExec(p *pgxpool.Pool, q string, args ...any) error {
 	ctx := context.Background()
 	tx, err := p.Begin(ctx)
@@ -115,9 +109,8 @@ func mv(o seedOpts, field string, def int) int {
 	return def
 }
 
-// seedBase builds tenant/site/interface + a system CHECKOUT_GRACE package whose Service-Plan revision EXACTLY
-// matches the typed grace policy (unless mismatchField forces one field to differ), an IN_HOUSE Stay (episode 1,
-// last_applied_event_version 5), and a grace config. Optionally bootstraps the Emergency catalog.
+// seedBase builds a site with a system CHECKOUT_GRACE package matching the typed policy (unless mismatchField
+// differs), an IN_HOUSE Stay (episode 1, last_applied_event_version 5) and a grace config.
 func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	t.Helper()
 	ctx := context.Background()
@@ -182,7 +175,6 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 		args = append(args, f.gracePkgRev)
 	}
 	if o.configureTypedPolicy {
-		// owner-guarded table; raw seed as iam_v2_owner (see asOwnerExec)
 		if err := asOwnerExec(p, `INSERT INTO iam_v2.site_checkout_grace_config
 			(tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy)
 			VALUES ($1,$2,`+pkg+`,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE')`, args...); err != nil {
@@ -201,8 +193,7 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	return f
 }
 
-// seedEvent inserts the durable checkout Stay Event (PENDING then APPLIED, obeying the append-only lifecycle),
-// returning its id. ts is the normalized boundary timestamp; suspect/seq/admission are configurable.
+// seedEvent inserts the checkout Stay Event (PENDING then APPLIED) and returns its id.
 func seedEvent(t *testing.T, p *pgxpool.Pool, f fixture, ts *time.Time, suspect bool, seq int, admission string, resyncGen int, stayForApply string) string {
 	t.Helper()
 	if stayForApply == "" {
@@ -221,9 +212,8 @@ func seedEvent(t *testing.T, p *pgxpool.Pool, f fixture, ts *time.Time, suspect 
 	return eid
 }
 
-// applyEvent mirrors what the Stay engine's finishEvent does: it moves the event PENDING->APPLIED with its Stay
-// lineage AND pins stays.last_applied_event_id. Exact lineage is MANDATORY on every path, so a test that applies
-// an event without pinning it would (correctly) be refused as an unverifiable boundary.
+// applyEvent mirrors the Stay engine's finishEvent, including pinning stays.last_applied_event_id; an unpinned
+// event is refused as an unverifiable boundary.
 func applyEvent(t *testing.T, p *pgxpool.Pool, eid, stay string) {
 	t.Helper()
 	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stay_events SET stay_id=$2, processing_status='APPLIED', processed_at=now() WHERE id=$1`, eid, stay); err != nil {
@@ -234,7 +224,6 @@ func applyEvent(t *testing.T, p *pgxpool.Pool, eid, stay string) {
 	}
 }
 
-// checkoutEvent seeds + applies a trusted LIVE checkout event at the fixture boundary and returns the source.
 func checkoutEvent(t *testing.T, p *pgxpool.Pool, f fixture) BoundarySource {
 	eid := seedEvent(t, p, f, &f.boundary, false, 5, "LIVE", 0, "")
 	applyEvent(t, p, eid, f.stay)
@@ -246,20 +235,17 @@ type txn struct {
 	at    time.Time
 }
 
-// seedEnt inserts a non-grace entitlement whose lifecycle history is built entirely through the CONTROLLED
-// transition operation (apply_entitlement_transition), so the seed produces the same coherent status+history a
-// real Commerce/Stay path would. The entitlement's final status is txns[len-1].state.
+// seedEnt builds history through apply_entitlement_transition; the final status is txns[len-1].state.
 func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, txns []txn) string {
 	t.Helper()
 	ctx := context.Background()
-	// The entitlement INSERT and its initial transition MUST be in ONE transaction — the deferred
-	// status<->history coherence constraint (item 3/5) forbids an entitlement committing without its history.
+	// Insert and initial transition must share one transaction: the deferred status/history coherence
+	// constraint forbids committing an entitlement without its history.
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// purchases are a controlled-writer table ('commerce_intent') on the full schema
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +323,6 @@ func ptr(tm time.Time) *time.Time { return &tm }
 // sample inserts one accounting record for a session at an explicit sample time.
 func sample(t *testing.T, p *pgxpool.Pool, f fixture, sess string, seq int, up, down int64, at time.Time) {
 	t.Helper()
-	// owner-guarded ledger; raw seed sample as iam_v2_owner (see asOwnerExec)
 	if err := asOwnerExec(p, `INSERT INTO iam_v2.accounting_records
 		(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		f.tenant, f.site, sess, seq, up, down, at); err != nil {
@@ -345,14 +330,12 @@ func sample(t *testing.T, p *pgxpool.Pool, f fixture, sess string, seq int, up, 
 	}
 }
 
-// activeEnt is a helper for an entitlement ACTIVE at the boundary (single transition to ACTIVE before it).
 func activeEnt(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	act := f.boundary.Add(-30 * time.Minute)
 	win := f.boundary.Add(48 * time.Hour)
 	return seedEnt(t, p, f, &win, []txn{{"ACTIVE", act}})
 }
 
-// TestIntegration_ConvertCreatesGrace: normal conversion; devices grandfathered strictly by interval-containment.
 func TestIntegration_ConvertCreatesGrace(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -393,10 +376,8 @@ func TestIntegration_ConvertCreatesGrace(t *testing.T) {
 	}
 }
 
-// TestIntegration_TerminatesNonTerminal (item 1): a non-terminal pre-checkout Entitlement that is NOT eligible
-// (PENDING/SUSPENDED at the boundary) is still TERMINATED by a committed checkout — no state can later activate.
-// The ent_live_stay unique index structurally forbids >1 live Entitlement per Stay, so "terminate all" reduces
-// to terminating the single live row deterministically (proven for both PENDING and SUSPENDED).
+// An ineligible non-terminal Entitlement (PENDING/SUSPENDED at the boundary) is still terminated by a committed
+// checkout so it cannot activate later. ent_live_stay allows only one live row per Stay.
 func TestIntegration_TerminatesNonTerminal(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -427,7 +408,6 @@ func TestIntegration_TerminatesNonTerminal(t *testing.T) {
 	}
 }
 
-// TestIntegration_EligibilityAtBoundary (item 2): history-driven state-at-boundary decisions.
 func TestIntegration_EligibilityAtBoundary(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -471,8 +451,7 @@ func TestIntegration_EligibilityAtBoundary(t *testing.T) {
 	}, false, false)
 }
 
-// TestIntegration_OverlappingActiveManualReview (item 2): two entitlements ACTIVE at boundary -> deterministic
-// manual review, both terminated, no grace.
+// Two entitlements ACTIVE at the boundary go to manual review: both terminated, no grace.
 func TestIntegration_OverlappingActiveManualReview(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -481,9 +460,7 @@ func TestIntegration_OverlappingActiveManualReview(t *testing.T) {
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	b := f.boundary
 	win := b.Add(48 * time.Hour)
-	// the ent_live_stay unique index forbids two CURRENTLY-live rows, so one is currently TERMINATED-after-boundary
-	// while still ACTIVE AT the boundary — both are ACTIVE at the boundary per history. Seed the TERMINATED-ending
-	// one FIRST so it is no longer live when the second (currently-ACTIVE) row is inserted.
+	// ent_live_stay forbids two currently-live rows, so seed the one terminated after the boundary first.
 	seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}, {"TERMINATED", b.Add(time.Hour)}})
 	seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}})
 
@@ -502,7 +479,6 @@ func TestIntegration_OverlappingActiveManualReview(t *testing.T) {
 	}
 }
 
-// TestIntegration_QuotaWindowAtBoundary (item 3): window elapsed / data quota exhausted at boundary -> ineligible.
 func TestIntegration_QuotaWindowAtBoundary(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -536,8 +512,6 @@ func TestIntegration_QuotaWindowAtBoundary(t *testing.T) {
 	}
 }
 
-// TestIntegration_BoundaryEventVerification (item 5): reject cross-stay / cross-interface / unprocessed /
-// unpublished-RESYNC / stale-version events; fall back clock-suspect on a future timestamp.
 func TestIntegration_BoundaryEventVerification(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -552,9 +526,7 @@ func TestIntegration_BoundaryEventVerification(t *testing.T) {
 		t.Fatalf("unprocessed event = %v, want ErrInvalidBoundaryEvent", err)
 	}
 
-	// EXACT LINEAGE: when the Stay engine has pinned the event whose application advanced the Stay, a DIFFERENT
-	// applied GO event is not a valid boundary source. (stay_events.sequence_version is the PMS protocol version
-	// and last_applied_event_version is a per-application counter — different domains, never compared.)
+	// Exact lineage: a different applied GO event is not a valid source once the Stay pins its applied event.
 	f = seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	activeEnt(t, p, f)
 	pinned := seedEvent(t, p, f, &f.boundary, false, 5, "LIVE", 0, "")
@@ -612,8 +584,6 @@ func TestIntegration_BoundaryEventVerification(t *testing.T) {
 	}
 }
 
-// TestIntegration_EmergencyReadsCatalog (item 6/7): unconfigured policy -> Emergency via the PRE-PROVISIONED
-// catalog; an absent catalog fails closed; the reserved namespace is protected.
 func TestIntegration_EmergencyReadsCatalog(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -651,10 +621,8 @@ func TestIntegration_EmergencyReadsCatalog(t *testing.T) {
 	}
 }
 
-// TestIntegration_AlertLifecycleAndProvenance covers the resolvable alert model (item 12) and the DB-enforced
-// audit provenance (item 11): an Emergency conversion opens an operational alert; OPEN/ACKNOWLEDGED keep it
-// active; RESOLVED removes it from the active view (evidence stays immutable); and a mismatched boundary event
-// is rejected by the provenance guard.
+// An Emergency conversion opens an alert (OPEN/ACKNOWLEDGED active, RESOLVED not; evidence immutable), and a
+// mismatched boundary event is rejected by the provenance guard.
 func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -670,8 +638,7 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, f.stay).Scan(&auditID); err != nil {
 		t.Fatal(err)
 	}
-	// the alert OPENED ITSELF with the audit row, in the same transaction: an alert that exists but has no
-	// lifecycle would be invisible to the operator queue and impossible to acknowledge.
+	// The alert opens with the audit row in the same transaction, or it would be invisible to the operator queue.
 	if count(t, p, `SELECT count(*) FROM iam_v2.checkout_grace_alert_actions
 		WHERE audit_id=$1 AND seq=1 AND action='OPEN'`, auditID) != 1 {
 		t.Fatal("an alert-bearing audit must open its own lifecycle")
@@ -712,7 +679,7 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	wrongEv := seedEvent(t, p, f2, &f2.boundary, false, 5, "LIVE", 0, "")
 	applyEvent(t, p, wrongEv, f2.stay)
 	// craft an audit for f2.stay but citing wrongEv with a MISMATCHED seq → provenance guard rejects
-	// the 'checkout_conversion' family is opened so the refusal is the provenance guard, not the writer guard
+	// The family is opened so the refusal is the provenance guard, not the writer guard.
 	if err := guardedExec(p, convFamily, `INSERT INTO iam_v2.checkout_grace_audit
 		(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,reason_code,
 		 boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version,boundary_at)
@@ -722,8 +689,7 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	}
 }
 
-// TestIntegration_ExactPolicyEqualityRoutesEmergency (item 8): any single field mismatch between the typed site
-// policy and the pinned Service-Plan revision routes the eligible Guest to Emergency.
+// Any single field mismatch between the site policy and the plan revision routes to Emergency.
 func TestIntegration_ExactPolicyEqualityRoutesEmergency(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -742,8 +708,6 @@ func TestIntegration_ExactPolicyEqualityRoutesEmergency(t *testing.T) {
 	}
 }
 
-// TestIntegration_IdempotentAndConcurrent: duplicate/delayed preserves boundary + no second grace; >=24
-// concurrent handlers -> exactly one grace + one audit + no live original.
 func TestIntegration_IdempotentAndConcurrent(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -804,10 +768,8 @@ func TestIntegration_IdempotentAndConcurrent(t *testing.T) {
 	}
 }
 
-// TestIntegration_BoundaryTerminationIsNotClamped proves the conversion terminates the original Entitlement at
-// the TRUE checkout boundary even when a later lifecycle fact was already recorded: the termination keeps the
-// boundary's effective_at (never clamped forward), the post-boundary fact is explicitly INVALIDATED rather than
-// deleted or ignored, and recorded_at (system time) stays distinct from effective_at (business time).
+// Termination keeps the true boundary as effective_at (never clamped forward) even when a later fact exists;
+// that fact is invalidated, not deleted, and recorded_at stays distinct from effective_at.
 func TestIntegration_BoundaryTerminationIsNotClamped(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -857,11 +819,8 @@ func TestIntegration_BoundaryTerminationIsNotClamped(t *testing.T) {
 	}
 }
 
-// TestIntegration_PostBoundaryRevocation proves that no access survives the boundary outside the grace cohort:
-// a device whose authorization interval contains the boundary is grandfathered and its live session is rebound
-// WITHOUT a logout, while a device authorized only AFTER the boundary loses access — its interval is closed at
-// the boundary and its session ends there. The original Entitlement is left with no open interval and no live
-// session at all.
+// No access survives the boundary outside the grace cohort: a cohort device is rebound without a logout, a
+// device authorized only after the boundary is cut at it, and the original is left with nothing live.
 func TestIntegration_PostBoundaryRevocation(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -912,9 +871,7 @@ func TestIntegration_PostBoundaryRevocation(t *testing.T) {
 	}
 }
 
-// TestIntegration_RevocationWithoutGrace proves the revocation also runs when NO grace is created (the guest
-// was not eligible at the boundary): every device and session on the terminated Entitlement is cut at the
-// boundary, so a non-eligible Stay cannot keep browsing after checkout.
+// Revocation also runs when no grace is created, so an ineligible Stay cannot keep browsing after checkout.
 func TestIntegration_RevocationWithoutGrace(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -943,12 +900,8 @@ func TestIntegration_RevocationWithoutGrace(t *testing.T) {
 	}
 }
 
-// TestIntegration_BoundaryWatermarkAndDelayedAccounting proves the accounting side of the boundary:
-//   - usage is attributed by BINDING INTERVAL, so a rebound session's pre-boundary samples stay with the
-//     original Entitlement instead of following the session onto the grace Entitlement;
-//   - the boundary decision's usage evidence is FROZEN in a watermark;
-//   - a sample ingested AFTER the decision but belonging to the frozen period is recorded as DELAYED and does
-//     NOT rewrite the watermark.
+// Usage is attributed by binding interval, the decision's evidence is frozen in a watermark, and a late sample
+// for the frozen period is recorded as DELAYED without rewriting it.
 func TestIntegration_BoundaryWatermarkAndDelayedAccounting(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

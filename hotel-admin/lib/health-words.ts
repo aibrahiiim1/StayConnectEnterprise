@@ -1,16 +1,10 @@
-// PLAIN LANGUAGE FOR THE FIGURES THE ADMIN REPORTS.
-//
-// Everything below turns one of the appliance's internal states into a sentence an operator can act on, plus a
-// tone so the UI can colour it consistently. The rules are kept here rather than in a component because the same
-// figures appear on the dashboard, in the top-bar health pill, on Diagnostics and on Appliance & licence, and
-// independent descriptions of one number is how a product ends up contradicting itself.
+// Plain-language health states with a tone. Kept here so the dashboard, health pill, Diagnostics and Appliance &
+// licence cannot contradict each other.
 
 export type Tone = "ok" | "warn" | "err" | "default";
 
 export type Explained = {
-  /** One line, safe to show as the value itself. */
   headline: string;
-  /** A sentence or two of what it means and what to do. */
   summary: string;
   tone: Tone;
 };
@@ -18,7 +12,6 @@ export type Explained = {
 const n = (v?: number | null) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const num = (v: number) => v.toLocaleString();
 
-/** The site database. Shown as its own row because every screen in the admin reads from it. */
 export function describeDatabase(ok: boolean): Explained {
   return ok
     ? {
@@ -35,10 +28,6 @@ export function describeDatabase(ok: boolean): Explained {
       };
 }
 
-/**
- * The session controller (scd). Named for what it does rather than by its process name: it is what actually
- * lets a device onto the internet and what enforces speed and quota.
- */
 export function describeSessionController(ok: boolean): Explained {
   return ok
     ? {
@@ -57,13 +46,8 @@ export function describeSessionController(ok: boolean): Explained {
 }
 
 /**
- * Licence state, in terms of what it stops rather than what it is called.
- *
- * The state is the appliance's own section 8 vocabulary (docs/CENTRAL_CONTROL_PLANE.md): none, active,
- * expiring, grace, expired, suspended, revoked, wrong_hardware -- computed once by the appliance, so the
- * dashboard and Appliance & licence cannot disagree. (This used to key on "Unlicensed" while the appliance sent
- * "unlicensed", and it told operators an unlicensed appliance "runs in a permissive mode". It does not: a
- * production appliance with no licence signs in no guests at all.)
+ * Licence state in terms of what it stops. States are the appliance's section 8 vocabulary
+ * (docs/CENTRAL_CONTROL_PLANE.md), keyed lowercase.
  */
 export function describeLicense(state: string | null | undefined): Explained {
   switch (state) {
@@ -85,8 +69,7 @@ export function describeLicense(state: string | null | undefined): Explained {
         tone: "warn",
       };
     case "grace":
-      // Grace is entered because the licence's own end date passed. Losing the connection to Central does not
-      // change the licence state at all.
+      // Grace begins when the licence's own end date passes; losing Central changes nothing.
       return {
         headline: "Grace period",
         summary:
@@ -132,12 +115,7 @@ export function describeLicense(state: string | null | undefined): Explained {
   }
 }
 
-/**
- * PMS transport/sync, as ONE sentence about whether room sign-in works right now.
- *
- * The PMS screens already break this into four axes, which is right there. Everywhere else — the dashboard, the
- * health pill — what is needed is the consequence: can a guest type their room number and get online.
- */
+/** PMS transport/sync as one sentence: can a guest type their room number and get online now. */
 export function describePmsReadiness(args: {
   transport?: string;
   sync?: string;
@@ -182,5 +160,4 @@ export function describePmsReadiness(args: {
   };
 }
 
-/** Maps a tone onto the Badge component's tone vocabulary. */
 export const badgeTone = (t: Tone): "ok" | "warn" | "err" | "default" => t;

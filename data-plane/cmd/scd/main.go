@@ -1,7 +1,4 @@
-// scd — Session Controller Daemon.
-//
-// Owns the nftables auth_ipv4 set and the `sessions` table.
-// Listens on a Unix socket; portald is the primary client.
+// scd is the Session Controller Daemon: it owns the nftables auth_ipv4 set and the `sessions` table; portald is its primary client over a Unix socket.
 package main
 
 import (
@@ -73,50 +70,35 @@ type cfg struct {
 	// WhatsAppLogPath is the development stub's file for WhatsApp codes (used only when no provider is set).
 	WhatsAppLogPath string
 
-	// Appliance identity. identity.json (appliance id + public key) and the
-	// private key live in IdentityDir. A factory-clean appliance registers itself
-	// with Central at CtrlAPIBase, token-less; enrollment tokens no longer exist.
+	// Appliance identity (identity.json and the private key live in IdentityDir); a factory-clean appliance registers token-less with Central at CtrlAPIBase.
 	IdentityDir string
 	CtrlAPIBase string
 	Serial      string
-	// AutoRegister: a factory-clean appliance self-registers (token-less) with
-	// Central using its signed identity so it appears as waiting for activation.
-	// Default true; SCD_AUTO_REGISTER=false leaves offline activation as the only
-	// way in (a site with no route to Central).
+	// AutoRegister: a factory-clean appliance self-registers token-less so it appears as waiting for activation.
+	// SCD_AUTO_REGISTER=false leaves offline activation as the only way in (a site with no route to Central).
 	AutoRegister bool
 
-	// Phase 13 — optional TCP listener for /metrics. Empty = disabled.
+	// Optional TCP listener for /metrics; empty = disabled.
 	MetricsAddr string
 
-	// Edge-first refactor — signed license enforcement. LicenseDir holds
-	// the installed envelope + anti-rollback state; VendorPub is the vendor
-	// verification key. LicenseRequired=false keeps pre-cutover pilots
-	// permissive when no license material exists yet.
+	// Signed license enforcement: LicenseDir holds the installed envelope and anti-rollback state, VendorPub the verification key.
+	// LicenseRequired=false keeps pilots permissive when no license material exists.
 	LicenseDir      string
 	VendorPub       string
 	LicenseRequired bool
 
-	// mTLS transport (Phase B). CertDir holds the client cert + CA bundle;
-	// MTLSBase is the Central mutual-TLS listener. Empty MTLSBase disables the
-	// mTLS cutover (signed-JWT over the HTTPS ingress remains).
+	// mTLS: CertDir holds the client cert + CA bundle, MTLSBase is Central's mutual-TLS listener; empty MTLSBase keeps signed-JWT over the HTTPS ingress.
 	CertDir  string
 	MTLSBase string
 
-	// Phase 1B dark-auth. All default OFF so a normal build is byte-for-byte legacy.
-	//   SecretsDir       — appliance-local key files (throttle.key, otp_hmac_<gen>.key)
-	//   DurableThrottle  — when true, load throttle.key (fail startup if absent) and enforce the
-	//                      durable DB throttle on every auth handler; legacy in-memory stays as a
-	//                      fast pre-filter only.
-	//   OTPHMAC          — when true, load the OTP key ring + validate DB metadata (fail startup on
-	//                      mismatch) and issue keyed-HMAC OTPs; existing legacy rows still verify.
-	// IAM-v2 flags are read separately by iamv2.LoadConfigFromEnv (STAYCONNECT_IAMV2_*), all OFF.
+	// Dark-auth flags, all default OFF. SecretsDir holds appliance-local key files. DurableThrottle loads throttle.key
+	// (startup fails if absent) and enforces the DB throttle on every auth handler. OTPHMAC loads the OTP key ring and
+	// issues keyed-HMAC OTPs (legacy rows still verify). IAM-v2 flags are read by iamv2.LoadConfigFromEnv.
 	SecretsDir      string
 	DurableThrottle bool
 	OTPHMAC         bool
 
-	// The Client Portal's HTTPS certificates (portal_tls.go). PortalTLSExtraRoots is an OPT-IN PEM bundle of extra
-	// trust anchors for staging or test issuance (Let's Encrypt staging, Pebble); empty -- the default and the
-	// only production value -- trusts the system roots alone.
+	// PortalTLSExtraRoots is an opt-in PEM bundle of extra trust anchors for staging issuance (Let's Encrypt staging, Pebble); empty, the production value, trusts the system roots only.
 	PortalTLSDir        string
 	PortalTLSExtraRoots string
 }
@@ -155,7 +137,6 @@ func loadCfg() cfg {
 	}
 }
 
-// scdVersion is stamped into every signed control-plane request and reported on the appliance card.
 const scdVersion = "0.0.3-dev"
 
 func envOr(k, d string) string {
@@ -165,13 +146,10 @@ func envOr(k, d string) string {
 	return d
 }
 
-// restartSCDUnit restarts this service through systemd so every subsystem starts over.
 func restartSCDUnit() {
 	_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
 }
 
-// removeDirContents best-effort deletes everything inside dir (used for orphan
-// self-reset), leaving the directory itself in place.
 func removeDirContents(dir string) error {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -184,84 +162,60 @@ func removeDirContents(dir string) error {
 }
 
 type server struct {
-	// methodSwitches reads Hotel Admin's guest sign-in method switches; nil means tenants.auth_methods via
-	// tenantcfg.Load. A test with no database supplies its own (guest_method_switch.go).
+	// methodSwitches reads Hotel Admin's sign-in method switches; nil means tenantcfg.Load. Tests without a database supply their own.
 	methodSwitches func(ctx context.Context) (*tenantcfg.AuthMethods, error)
 	nft            *localNFT
 	shp            *shape.Client
-	// flows ends an address's access and open flows through netd (netd_flows.go); nil in tests without netd.
-	flows flowEnder
-	mail  mail.Mailer
-	sms   sms.Sender
-	// whatsapp delivers one-time codes as a WhatsApp authentication template (its own channel, not SMS).
-	whatsapp whatsapp.Sender
+	flows          flowEnder
+	mail           mail.Mailer
+	sms            sms.Sender
+	whatsapp       whatsapp.Sender
 	// otpIssuer issues a challenge; nil means otp.Issue against s.db. A test with no database supplies its own.
 	otpIssuer func(ctx context.Context, p otp.IssueParams) (*otp.Issued, error)
-	// Social sign-in (social_secrets.go): the live provider registry generation, swapped whole on reload;
-	// socialBase is what every generation starts from (the development stub, and nothing in production);
-	// socialKey seals provider secrets; socialMu serialises reloads.
+	// Social sign-in: the live provider registry generation (swapped whole on reload), socialBase (dev stub only, never in production), socialKey (seals provider secrets), socialMu (serialises reloads).
 	socialSet  atomic.Pointer[socialSet]
 	socialBase []social.Provider
 	socialKey  sealbox.Key
 	socialMu   sync.Mutex
-	// socialPortal reports whether the portal is served over HTTPS and its canonical hostname, for social
-	// sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real social provider is offered). It is the
-	// portal certificate agent (portalTLS) once that starts.
+	// socialPortal reports HTTPS state and canonical hostname for social sign-in; nil or noPortalHTTPS{} means the HTTP fallback (no real provider offered).
 	socialPortal portalHosts
 	loginRL      *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
 
-	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
-	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
-	//   - otpRing:      keyed-HMAC OTP ring (D7). nil => legacy per-row salt:sha256.
-	//   - iamv2Auth:    dark IAM-v2 authenticator; constructed with all method flags OFF, so it never
-	//                   touches its repository (which is nil when the master flag is off).
+	// Dark-auth machinery, inert unless enabled: authThrottle (durable DB throttle; nil = in-memory only), otpRing
+	// (keyed-HMAC OTPs; nil = legacy), iamv2Auth (all method flags OFF, never touches its nil repository).
 	authThrottle *throttle.Store
 	otpRing      *otpkey.Ring
 	iamv2Auth    *iamv2.Authenticator
-	// iamv2Cfg is the SAME config iamv2Auth was constructed from. The guest entry points consult it to
-	// decide who the authority is, so the switch at the entry point and the Authenticator's own gate can
-	// never disagree -- a disagreement is what let "flag ON" coexist with "legacy served the request".
-	iamv2Cfg iamv2.Config
-	// applianceID is part of IAM-v2 device identity (tenant, site, appliance, MAC).
+	// iamv2Cfg is the config iamv2Auth was built from; entry points consult it so their switch and the Authenticator's gate cannot disagree.
+	iamv2Cfg    iamv2.Config
 	applianceID string
 
-	// signInAttemptKeyring seals the credential half of a guest sign-in attempt record. Nil when the key file
-	// is absent, which is DELIBERATELY not fatal: see loadSignInAttemptKeyring.
+	// signInAttemptKeyring seals the credential half of a sign-in attempt record; nil when the key file is absent, deliberately not fatal (see loadSignInAttemptKeyring).
 	signInAttemptKeyring signinattempt.Keyring
 
-	// Phase 2 dark commerce (commercial packages). commerce is ALWAYS constructed but holds a nil
-	// repository while the master flag is OFF, so it issues zero Phase-2 SQL; commerceCfg gates whether
-	// the guest portal commerce routes are mounted at all (they are absent unless PortalOn()).
+	// commerce is always constructed but holds a nil repository while the master flag is OFF; commerceCfg gates whether the commerce routes are mounted.
 	commerce    *iamv2.CommerceEngine
 	commerceCfg iamv2.CommerceConfig
 
-	// Phase 3 (DARK): the PMS auth vertical slice. nil while dark, and its routes are not mounted at all —
-	// an absent surface cannot be probed for behaviour the way a present-but-refusing one can.
+	// The PMS auth slice: nil while dark, routes not mounted (an absent surface cannot be probed).
 	p3auth     *phase3Auth
 	p5poststay *phase5PostStay
 	p6devices  *phase6Devices
-	// p6cfg is the Phase-6 flag set, kept so surfaces that are mounted UNCONDITIONALLY (the status endpoint)
-	// can still tell whether the aggregate mode may be reported at all. It is not a second gate: the routes
-	// Phase 6 owns are still absent while dark.
+	// p6cfg lets unconditionally mounted surfaces (the status endpoint) tell whether aggregate mode may be reported; not a second gate.
 	p6cfg iamv2.Phase6Config
 
-	// ceiling is the deployment ceiling and modules the four-gate module resolver (modules.go). New product
-	// logic asks these, never the phase flags directly.
+	// ceiling is the deployment ceiling and modules the module resolver (modules.go); product logic asks these, never the phase flags.
 	ceiling deployment.Ceiling
 	// providerReadiness overrides the sender/social-application lookup (tests); nil reads the database.
 	providerReadiness providerReadinessFunc
 	modules           *modules.Resolver
-	// card is the card-payment wiring (card_checkout.go); never nil after initCard.
-	card *cardState
-	// openAccess issues OPEN auth contexts (open_access.go); nil when its key is missing.
-	openAccess  *iamv2.OpenAccess
-	openLimiter *recoveryLimiter
-	// resumeKey / resumeLimiter: the remembered-device credential (client_resume.go); nil = not remembered.
-	// The Email accounts link and account-token keys are derived from resumeKey (self_service.go).
+	card              *cardState
+	openAccess        *iamv2.OpenAccess
+	openLimiter       *recoveryLimiter
+	// resumeKey / resumeLimiter: the remembered-device credential; nil = not remembered. Email account link and token keys derive from resumeKey.
 	resumeKey     []byte
 	resumeLimiter *recoveryLimiter
-	// selfService is the Email accounts state: settings cache, outbox kick, loop ticks (self_service.go).
-	selfService selfServiceState
+	selfService   selfServiceState
 	// notify: the live sender trio, swappable on reload (notify_admin.go); notifyKey seals sender secrets.
 	notify         notifySet
 	notifyFallback struct {
@@ -270,19 +224,13 @@ type server struct {
 		whatsapp whatsapp.Sender
 	}
 	notifyKey sealbox.Key
-	// otpEscrowKey seals the staff-readable copy of a live code (temp_access_admin.go); same local key file,
-	// its own domain.
+	// otpEscrowKey seals the staff-readable copy of a live code; same local key file, its own domain.
 	otpEscrowKey sealbox.Key
-	// ledgerRT is the erasure ledger's runtime: the primary copy, the secondary storage, the last reconciliation (ledger_service.go).
-	ledgerRT ledgerRuntime
-	// operatorMFA seals the Admin Console operators' authenticator secrets and MACs their recovery codes
-	// (operator_mfa.go, 0132).
+	ledgerRT     ledgerRuntime
+	// operatorMFA seals operators' authenticator secrets and MACs their recovery codes.
 	operatorMFA operatorMFAKeys
 
-	// PMS registry is live-reloadable (phase 5.3). All readers must go
-	// through currentPMSReg(); the reload path atomically swaps it under
-	// pmsMu. pmsBuilt holds the current generation's providers so we can
-	// Stop() them during the next reload.
+	// The PMS registry is live-reloadable: readers use currentPMSReg(); reload swaps it under pmsMu, and pmsBuilt holds the generation's providers to Stop() on the next reload.
 	pmsMu    sync.RWMutex
 	pmsReg   *pms.Registry
 	pmsBuilt []pms.Provider
@@ -292,75 +240,51 @@ type server struct {
 	siteID string
 	applID string
 
-	// tenantBlocked is set when a cross-tenant data purge could not complete. While
-	// set, the appliance authorizes NO guests (fail-closed) — a transition is never
-	// treated as complete on a partial cleanup. tenantBlockReason carries a short
-	// operator-facing explanation.
+	// tenantBlocked is set when a cross-tenant purge could not complete: the appliance authorizes NO guests (fail-closed) until it does. tenantBlockReason is the operator-facing explanation.
 	tenantBlocked     atomic.Bool
 	tenantBlockReason string
 
-	// The Central endpoint and this appliance's serial, surfaced read-only in the Hotel Admin appliance card.
 	ctrlBase string
 	serial   string
 
-	// certMgr owns the mTLS client-certificate lifecycle (nil if disabled).
 	certMgr *appliancecert.Manager
-	// noMTLSLogged counts consecutive assignment polls skipped because the mTLS certificate is not ready.
-	// Only the assignment agent touches it, and only from its own goroutine, so it needs no lock. It
-	// exists to make "waiting for the certificate" visible without writing a line every 30 seconds.
+	// noMTLSLogged counts consecutive assignment polls skipped for lack of an mTLS certificate; only the assignment agent's goroutine touches it, so it needs no lock.
 	noMTLSLogged int
-	// identityKeyFpr is the fingerprint of the identity-signing public key
-	// (distinct from the mTLS cert fingerprint) — shown under Technical details.
+	// identityKeyFpr is the identity-signing key fingerprint, distinct from the mTLS cert fingerprint.
 	identityKeyFpr string
 	identityPubB64 string
-	// idStore holds the identity (offline first activation writes to it).
-	idStore *identity.Store
-	idPriv  ed25519.PrivateKey // identity-signing key (for signed reconcile calls)
+	idStore        *identity.Store
+	idPriv         ed25519.PrivateKey // identity-signing key (for signed reconcile calls)
 
-	// central tracks the last successful / failed authenticated contact with Central (central.go); reg is the
-	// background registration loop while unregistered (registration.go); asgKick wakes the assignment agent.
 	central *centralContact
 	reg     *registrar
 	asgKick chan struct{}
-	// certReconcile asks the certificate agent to check, now, that Central still honours the installed
-	// certificate (appliancecert.Reconcile). Sent when an mTLS call is refused with 401/403.
+	// certReconcile asks the certificate agent to check that Central still honours the installed certificate; sent on a 401/403 from an mTLS call.
 	certReconcile chan struct{}
 
-	// The two messages to Central that are retried until Central confirms (central_retry.go): the
-	// terminal-assignment acknowledgement and the offline-package reconciliation. centralTransport overrides
-	// the mTLS transport in tests; nil means s.mtlsTransport.
+	// Messages to Central retried until confirmed (central_retry.go): the terminal-assignment ack and the offline-package reconciliation. centralTransport overrides the mTLS transport in tests.
 	centralTransport func() (*http.Client, string, bool)
 	ackRunner        terminalAckRunner
 	reconcileKick    chan struct{}
 
-	// legacyBridge is the fallback ingress interface for sessions whose IP
-	// matches no configured guest network (pre-Phase-19 / legacy network).
+	// legacyBridge is the fallback ingress interface for sessions whose IP matches no configured guest network.
 	legacyBridge string
 
-	// hw is the appliance's stable hardware identity (StayConnect serial derived
-	// from the DMI product UUID + permanent WAN/LAN MACs). Detected once at boot;
-	// deterministic, so it survives reboot / de-enrollment / factory reset.
+	// hw is the stable hardware identity (DMI product UUID + permanent MACs), detected once; it survives reboot, de-enrollment and factory reset.
 	hw hwid.Info
 
 	met *metrics.Registry // phase 7
 
-	// Edge-first refactor: signed-license manager.
 	lic *licstate.Manager
 
-	// permissiveBlocked is non-empty when a production appliance rejected an
-	// attempt to enable permissive/dev licensing (env var or dev-mode marker).
-	// Surfaced in the license status so Hotel Admin shows the critical alert.
+	// permissiveBlocked is non-empty when a production appliance rejected an attempt to enable permissive/dev licensing; Hotel Admin shows a critical alert.
 	permissiveBlocked string
 
-	// removed is set when Central deleted this appliance after it had held a customer
-	// (removed_from_central.go). While set: no new guests, no registration, no Central agent, no licence or
-	// activation import -- a factory-clean install is the only way back. It survives restarts on disk.
-	removed atomic.Pointer[removedRecord]
-	// restartFn replaces the systemd restart in tests.
+	// removed is set when Central deleted this appliance after it held a customer: no new guests, registration, Central agent, or licence/activation import; only a factory-clean install undoes it. Persisted on disk.
+	removed   atomic.Pointer[removedRecord]
 	restartFn func()
 
-	// portalTLS is the Client Portal's HTTPS certificate agent and the one answer to "is the portal on HTTPS"
-	// (portal_tls.go). Nil-safe: a nil agent reports the HTTP fallback.
+	// portalTLS is the portal HTTPS certificate agent and the one answer to "is the portal on HTTPS"; a nil agent reports the HTTP fallback.
 	portalTLS *portalTLSAgent
 }
 
@@ -370,9 +294,7 @@ func (s *server) currentPMSReg() *pms.Registry {
 	return s.pmsReg
 }
 
-// pmsReloadSafetyLoop fires reloadPMS every 10 minutes (Hotel Admin changes also reload immediately through
-// /v1/admin/pms/reload). Cheap; the no-op case (no DB changes) just re-Configure()s the same providers on a
-// new generation.
+// pmsReloadSafetyLoop reloads every 10 minutes as a safety net; Hotel Admin changes reload immediately through /v1/admin/pms/reload.
 func (s *server) pmsReloadSafetyLoop(ctx context.Context) {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
@@ -390,18 +312,14 @@ func (s *server) pmsReloadSafetyLoop(ctx context.Context) {
 	}
 }
 
-// reloadPMS re-reads pms_providers from the DB, builds a fresh provider set,
-// swaps it in atomically, then stops the previous generation. Callers that
-// fail mid-build leave the old registry intact.
+// reloadPMS swaps in a freshly built provider set, then stops the previous generation; a failure mid-build leaves the old registry intact.
 func (s *server) reloadPMS(ctx context.Context) error {
 	reg, built, err := pmsloader.Load(ctx, s.db, s.tenID, s.siteID)
 	if err != nil {
 		return fmt.Errorf("reloadPMS load: %w", err)
 	}
 	pmsloader.StartAll(ctx, built)
-	// Re-seed stub reservations if SCD_PMS_STUB_SEED=true. A fresh Stub
-	// instance was built by pmsloader.Load above, so seed data from the
-	// previous generation is gone.
+	// Re-seed stub reservations if SCD_PMS_STUB_SEED=true: the fresh Stub lost the previous generation's seed.
 	maybeSeedPMSStubs(built)
 
 	s.pmsMu.Lock()
@@ -410,9 +328,7 @@ func (s *server) reloadPMS(ctx context.Context) error {
 	s.pmsBuilt = built
 	s.pmsMu.Unlock()
 
-	// Stop the prior generation *after* the swap — any in-flight request
-	// that already grabbed the old registry can finish without racing on
-	// torn-down resources.
+	// Stop the prior generation after the swap so in-flight requests holding the old registry finish without racing on torn-down resources.
 	pmsloader.StopAll(oldBuilt)
 	slog.Info("pms reloaded", "count", len(built))
 	return nil
@@ -436,8 +352,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad body")
 		return
 	}
-	// Voucher is the basic-access method: gated only on the license state
-	// permitting new sessions (works through Restricted/Suspended).
+	// Voucher is the basic-access method: gated only on the license permitting new sessions (works through Restricted/Suspended).
 	if !s.licenseGate(w, "") {
 		return
 	}
@@ -454,18 +369,13 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	if s.refuseDisabledMethod(w, r, guestMethodVoucher) {
 		return
 	}
-	// Durable auth throttle (authoritative; no-op unless enabled). Charged before validation so a
-	// throttled attempt creates no session/nft/shaping/accounting.
+	// Durable throttle (no-op unless enabled), charged before validation so a throttled attempt creates no session/nft/shaping/accounting.
 	if ok, retry := s.throttleGuard(r.Context(), "voucher", ip, mac, ""); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
-	// IAM-v2 IS THE GUEST AUTHORITY. There is no second implementation to fall back to and no switch to
-	// choose one: the superseded voucher and public.sessions pipelines that used to sit below this point have
-	// been REMOVED from the product, not merely made unreachable.
-	//
-	// authorizeViaIAMv2 always handles the request -- success or refusal -- so there is nothing after it.
+	// IAM-v2 is the guest authority and always handles the request, success or refusal; there is no fallback.
 	s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
 		iamv2.Request{Secret: req.Voucher, Credential: iamv2.CredentialVoucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
@@ -486,21 +396,16 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad ip")
 		return
 	}
-	// Clamp to a known reason, so a caller passing an unexpected one ends the session cleanly instead of 500.
-	// The metric keeps these lower-case labels; the session row records the upper-case code (sessionEndCode).
+	// Clamp to a known reason so an unexpected one ends the session cleanly instead of 500. Metrics keep lower-case labels; the session row records the upper-case code (sessionEndCode).
 	switch req.Reason {
-	// "logout" is the guest's own sign-out from the portal (audit P-30): it used to be recorded as "admin", so a
-	// guest who tapped Disconnect read in the console as if staff had disconnected them.
+	// "logout" is the guest's own sign-out, recorded as such so the console does not show it as staff disconnecting them.
 	case "quota_bytes", "quota_time", "admin", "idle", "dhcp_expired", "policy", "logout":
 	default:
 		req.Reason = "admin"
 	}
-	// THE ROW ENDS FIRST, then the kernel (audit F-14). The shaping class is netd's; deleting it while the row
-	// still said active/PENDING_ENFORCEMENT left a session claiming enforcement that no longer existed (and, for
-	// a pending one the guard refused to end, kept it that way). Ended first, netd's convergence can only agree.
+	// The row ends first, then the kernel: deleting netd's shaping class while the row still said active left a session claiming enforcement that no longer existed.
 	_, endErr := s.endActiveSessionByIP(r.Context(), ip, req.Reason)
-	// The kernel step runs either way: an operator asked for this address to be off the network, and a database
-	// failure is not a reason to leave it admitted until netd's next pass.
+	// The kernel step runs either way: a database failure is not a reason to leave an address admitted that an operator took off the network.
 	s.denyAtGate(r.Context(), ip)
 	if endErr != nil {
 		slog.Error("session end", "err", endErr)
@@ -511,16 +416,10 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
 }
 
-// denyAtGate is the kernel half of an operator disconnect: the address leaves the guest authorization set on its
-// ingress bridge and its shaping class goes. The session row is ended by the caller, with the caller's reason --
-// /v1/sessions/revoke by address, the Email accounts sweep and password reset by session (self_service.go).
-// Both kernel steps are best effort and logged: netd also converges the set from iam_v2.sessions, so an ended
-// session cannot stay admitted for longer than its next pass.
-//
-// THE ORDER IS: legacy set, then netd (Phase-3 authorization revoked and the address's open flows ended,
-// netd_flows.go), then -- only for an address netd does NOT manage -- the legacy tc class. Deleting a class while
-// the address is still authorized is how an open flow ended up unshaped and uncounted in the bridge's default
-// class (audit B-1).
+// denyAtGate is the kernel half of an operator disconnect (the caller ends the session row): the address leaves the guest
+// authorization set and its shaping class goes. Both steps are best effort; netd also converges from iam_v2.sessions.
+// Order: legacy set, then netd (authorization revoked, open flows ended), then, only for an address netd does not manage,
+// the legacy tc class. Deleting a class while the address is still authorized leaves an open flow unshaped and uncounted.
 func (s *server) denyAtGate(ctx context.Context, ip net.IP) {
 	nc := s.resolveNetwork(ctx, ip)
 	if s.nft != nil && s.nft.client != nil {
@@ -564,9 +463,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		"session_id": id,
 		"active":     active,
 	}
-	// When the access ends by the calendar (the entitlement's window), for the portal's "You're online" page and the
-	// captive API (audit P-6): the page used to read a duration from its own URL, which every IAM-v2 sign-in left
-	// empty, so it always said "No time limit". Absent for access with no end.
+	// When the access ends by the calendar (the entitlement's window), for the "You're online" page and captive API. Absent for access with no end.
 	if active && id != "" && s.db != nil {
 		var ends *time.Time
 		if err := s.db.QueryRow(r.Context(), `SELECT e.window_ends_at FROM iam_v2.sessions x
@@ -575,10 +472,8 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 			out["access_ends_at"] = ends.UTC().Format(time.RFC3339)
 		}
 	}
-	// A guest with an online-time budget needs both of their clocks. For the Phase-6 aggregate mode that stays
-	// behind its (DARK by default) flag, exactly as before. A VALIDITY_WINDOW plan's time allowance is enforced
-	// on every appliance since 0122, so its remaining time is answered whatever the flag says: the portal must
-	// show the same number the accrual is spending.
+	// A guest with an online-time budget needs both clocks. Aggregate mode stays behind its dark flag; a VALIDITY_WINDOW
+	// plan's time allowance is enforced everywhere, so its remaining time is answered regardless, matching what accrual spends.
 	if id != "" {
 		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil &&
 			(agg.TimeMode != "AGGREGATE_ONLINE_TIME" || s.p6cfg.AggregateTimeOn()) {
@@ -604,15 +499,12 @@ func httpErr(w http.ResponseWriter, code int, msg string) {
 }
 
 func main() {
-	// Build guard: `scd --print-build-profile` prints the compiled licensing
-	// profile ("production"/"development") and exits, so CI/deploy can refuse to
-	// ship a non-production binary.
+	// `scd --print-build-profile` prints the compiled licensing profile and exits, so CI/deploy can refuse to ship a non-production binary.
 	if len(os.Args) > 1 && os.Args[1] == "--print-build-profile" {
 		fmt.Println(buildprofile.Name)
 		return
 	}
-	// `scd backup-crypt ...` encrypts the nightly backup to the hotel's keys, and decrypts one for an engineer
-	// restoring it (backup_crypt.go). One implementation for every backup the appliance writes.
+	// `scd backup-crypt ...` encrypts the nightly backup to the hotel's keys and decrypts one for an engineer restoring it (backup_crypt.go).
 	if len(os.Args) > 1 && os.Args[1] == "backup-now" {
 		os.Exit(backupNowMain(os.Args[2:]))
 	}
@@ -629,33 +521,25 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	// Adaptive crash-loop backoff: if scd is restarting rapidly (a persistent
-	// config/software fault) this sleeps with bounded jittered exponential
-	// backoff before doing any work, so a broken scd never becomes a restart
-	// storm. A transient failure returns immediately (fast recovery).
+	// Adaptive crash-loop backoff: a rapidly restarting scd sleeps with bounded jittered exponential backoff so a persistent fault never becomes a restart storm; a transient failure returns immediately.
 	startupbackoff.Guard("scd")
 
 	c := loadCfg()
 
-	// Stamp the software version into every signed control-plane request.
 	applianceauth.SetVersion(scdVersion)
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// APPLIANCE IDENTITY. A registered identity is loaded from disk. A factory-clean appliance registers itself
-	// with Central, token-less (identity.Register); the first attempt happens here, and if Central cannot be
-	// reached the registration loop keeps retrying in the background (registration.go).
+	// Appliance identity: a registered identity is loaded from disk; a factory-clean appliance registers token-less with Central, and if unreachable the registration loop retries in the background (registration.go).
 	central := &centralContact{}
-	// REMOVED FROM CENTRAL (removed_from_central.go): an appliance Central deleted after it held a customer
-	// never registers again, under any key, until it is factory-reset. Read before anything could register.
+	// Removed from Central: such an appliance never registers again, under any key, until factory-reset; read before anything could register.
 	removedRec := loadRemoved(removedMarkerPath())
 	if removedRec != nil {
 		slog.Warn("this appliance was removed from OneGate Central after holding a customer: it admits no new guests, "+
 			"does not register and does not contact Central until it is factory-reset", "since", removedRec.At)
 	}
-	// The site database is opened before registration: a registration reports whose customer data it still
-	// holds (held_customer.go). pgxpool.New does not connect; the first query does.
+	// The site database is opened before registration, which reports whose customer data it still holds (held_customer.go). pgxpool.New does not connect.
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
 	if err != nil {
 		slog.Error("db open", "err", err)
@@ -681,25 +565,19 @@ func main() {
 			ident = nil
 		}
 	}
-	// Tenant/site are NEVER authoritative from identity.json or env: a generic appliance ships with NO customer
-	// identity. The authoritative source is the signed ASSIGNMENT document, re-verified on every boot. The legacy
-	// SCD_TENANT_ID/SITE_ID pair is honoured only when NO assignment exists at all, and only in an explicit
-	// development build (assignment.EnvFallbackAllowed) -- never when an assignment is present but fails
-	// verification, and never in a production binary.
+	// Tenant/site are never authoritative from identity.json or env: the signed ASSIGNMENT document, re-verified every boot, is.
+	// The legacy SCD_TENANT_ID/SITE_ID pair is honoured only with no assignment at all and only in a development build (assignment.EnvFallbackAllowed).
 	envTenant, envSite := c.TenantID, c.SiteID
 	c.TenantID, c.SiteID = "", ""
 	asgStore := &assignment.Store{Dir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
 	if ident != nil {
 		slog.Info("identity loaded", "appliance_id", ident.ApplianceID, "serial", ident.Serial)
 		c.ApplianceID = ident.ApplianceID
-		// The identity serial is the authoritative hardware-derived serial that Central bound the signed
-		// assignment + license to. It MUST win over any stale SCD_SERIAL env, otherwise assignment adoption
-		// fails with "serial mismatch" and the box never converges.
+		// The identity serial must win over a stale SCD_SERIAL env, or assignment adoption fails with "serial mismatch" and the box never converges.
 		if ident.Serial != "" {
 			c.Serial = ident.Serial
 		}
-		// Re-verified on every boot against the local trust registry (signature by a trusted assignment key +
-		// binding to this appliance). An appliance never operates under an assignment it cannot verify.
+		// Re-verified every boot against the local trust registry (trusted signature + binding to this appliance); an appliance never operates under an assignment it cannot verify.
 		res := verifiedAssignment(asgStore, ident)
 		switch {
 		case res.Assigned():
@@ -714,30 +592,23 @@ func main() {
 				"assignment_outcome", res.Outcome.String(), "assignment_state", res.State)
 		}
 	} else {
-		// No registered identity → waiting for registration (or offline activation). scd still boots to serve
-		// Hotel Admin; the guest plane is pre-license until activated.
+		// No registered identity: wait for registration or offline activation; scd still serves Hotel Admin, and the guest plane is pre-license.
 		c.ApplianceID = ""
 		slog.Warn("awaiting registration: this appliance has no registered identity yet")
 	}
 
-	// Social provider base. A DEVELOPMENT build keeps the in-process Stub for "google" so dev environments work
-	// without OAuth credentials (SCD_OAUTH_STUB_BASE, unchanged). A production build registers no stub: the stub
-	// mints whatever identity its code names, so a stub left standing in for an unconfigured provider would be
-	// a sign-in as anyone. The real providers are built from sealed secrets after the key loads (below).
+	// A development build keeps the in-process Stub for "google" (SCD_OAUTH_STUB_BASE). Production registers none: the stub
+	// mints whatever identity its code names, i.e. a sign-in as anyone. Real providers are built from sealed secrets after the key loads.
 	var socialBase []social.Provider
 	if !buildprofile.Production {
 		stubAuthBase := envOr("SCD_OAUTH_STUB_BASE", "http://portal.stayconnect.local:8380/api/oauth/stub/authorize")
 		socialBase = append(socialBase, &social.Stub{ProviderName: "google", AuthorizeBase: stubAuthBase})
 	}
 
-	// awaiting = enrolled-but-unassigned OR un-enrolled: there is no tenant/site,
-	// so the tenant-scoped guest-plane subsystems (social/PMS providers, which
-	// query by tenant/site UUID) are skipped. scd still boots to serve the setup
-	// wizard + run the assignment agent; the guest data plane is pre-license until
-	// a signed assignment arrives, after which scd re-execs into the full path.
+	// awaiting = enrolled-but-unassigned or un-enrolled: no tenant/site, so tenant-scoped subsystems are skipped; scd serves
+	// the setup wizard and runs the assignment agent, then re-execs once a signed assignment arrives.
 	awaiting := c.TenantID == "" || c.SiteID == ""
 
-	// PMS provider registry — config-driven from pms_providers (Phase 4.5.5a).
 	var pmsReg *pms.Registry
 	var pmsBuilt []pms.Provider
 	if awaiting {
@@ -779,35 +650,23 @@ func main() {
 			"appliance_id": c.ApplianceID,
 		}),
 	}
-	// Hand the metric registry to the nft wrapper, which was constructed before s existed.
 	s.nft.SetMetrics(s.met)
-	// The portal's HTTPS state for social sign-in (social_secrets.go portalHosts): the HTTP fallback until the
-	// portal certificate agent starts below and takes over (contract §4).
+	// The portal's HTTPS state for social sign-in: the HTTP fallback until the portal certificate agent starts below.
 	s.socialPortal = noPortalHTTPS{}
 
-	// Phase 1B dark-auth machinery (durable throttle, keyed-HMAC OTP ring, dark IAM-v2). Constructed
-	// here so handlers can reference the fields. All features are OFF unless explicitly enabled; an
-	// enabled feature with missing/invalid key material fails startup (fail closed). IAM-v2 is
-	// constructed dark (all flags OFF, nil repo) and issues zero SQL.
+	// Dark-auth machinery: all OFF unless enabled; an enabled feature with missing or invalid key material fails startup (fail closed).
 	if err := s.initAuthSecurity(rootCtx, pool, c, slog.Default()); err != nil {
 		slog.Error("auth-security init failed", "err", err)
 		os.Exit(1)
 	}
 
-	// Ensure the appliance-local tenant/site mirror rows exist for the current
-	// assignment on EVERY boot (idempotent). Guest-domain tables FK to these, so a
-	// (re)assigned appliance whose tenant/site was not previously mirrored locally
-	// would otherwise 500 on any tenant-scoped insert (plans, vouchers, …). The
-	// assignment-adoption path also seeds them, but adoption only fires on a
-	// version change, so a plain restart / re-exec must reconcile too.
+	// Ensure the local tenant/site mirror rows exist on every boot (idempotent): guest tables FK to them, and adoption
+	// seeds them only on a version change, so a plain restart must reconcile too.
 	if s.db != nil && s.tenID != "" && s.siteID != "" {
 		s.seedTenantSiteMirror(rootCtx, s.tenID, s.siteID, "", "")
 
-		// Secure cross-tenant transition: if the site DB still holds data owned by a
-		// PREVIOUS tenant (cross-tenant reassignment / deleted+recreated Customer /
-		// ownership transfer), securely purge it before any guest is authorized. On
-		// failure the appliance is held fail-closed so a partial cleanup can never
-		// expose one customer's data to another.
+		// If the site DB holds data owned by a previous tenant, purge it securely before any guest is authorized; on
+		// failure the appliance is held fail-closed so a partial cleanup never exposes one customer's data to another.
 		if err := s.reconcileTenantOwnership(rootCtx); err != nil {
 			s.tenantBlockReason = "cross-tenant data cleanup failed; guest access is disabled until it succeeds"
 			s.tenantBlocked.Store(true)
@@ -819,10 +678,8 @@ func main() {
 	if removedRec != nil {
 		s.removed.Store(removedRec)
 	}
-	// Central agents run only for an appliance Central still knows.
 	talksToCentral := c.CtrlAPIBase != "" && removedRec == nil
 
-	// Identity state + Central contact tracking.
 	s.idStore = idStore
 	s.central = central
 	s.asgKick = make(chan struct{}, 1)
@@ -835,8 +692,7 @@ func main() {
 			s.identityKeyFpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 		}
 	} else if mayRegister(c.AutoRegister, c.CtrlAPIBase, removedRec) {
-		// KEEP TRYING while unregistered (F2). On success scd re-executes so every Central agent starts with the
-		// new identity (registration.go explains why a re-exec rather than a late start).
+		// Keep trying while unregistered; on success scd re-executes so every Central agent starts with the new identity (registration.go).
 		s.reg = newRegistrar(
 			func(ctx context.Context) (*identity.Identity, error) {
 				return idStore.Register(ctx, c.CtrlAPIBase, nil)
@@ -850,39 +706,25 @@ func main() {
 		go s.reg.run(rootCtx)
 	}
 
-	// Assignment agent — the ONLY channel by which this appliance adopts or changes
-	// its tenant/site. Started EARLY and deliberately independent of the mTLS
-	// client certificate: it authenticates with the identity-signing JWT over the
-	// HTTPS ingress, so a freshly-enrolled appliance can be assigned before (or
-	// without) a certificate being issued. It verifies the vendor signature + its
-	// own binding + a monotonic version, persists atomically, repoints local
-	// guest-network ownership, and re-execs scd so every subsystem adopts it.
+	// Assignment agent: the only channel by which the appliance adopts or changes its tenant/site. Deliberately independent
+	// of the mTLS certificate (it authenticates with the identity-signing JWT), so a fresh appliance can be assigned before a
+	// certificate exists. Verifies signature, binding and monotonic version, persists atomically, then re-execs scd.
 	if ident != nil && talksToCentral {
 		s.startAssignmentAgent(rootCtx, c.CtrlAPIBase)
-		// Offline packages consumed locally are offered to Central until it confirms them (central_retry.go).
 		go s.offlineReconcileLoop(rootCtx)
 	}
 
-	// Edge-first refactor: signed-license manager. Evaluates the on-disk
-	// envelope offline; bridges limits into tenant_effective_limits; gates
-	// auth methods per entitlement.
-	//
-	// PRODUCTION SAFETY: on a production build (the default — see
-	// internal/buildprofile) a real signed license is ALWAYS required; there is
-	// no permissive unlicensed-dev path in the binary and no environment variable
-	// or config file can enable one. Permissive mode is possible only in an
-	// explicit `-tags devlicense` build. An /etc/stayconnect/production marker
-	// also forces production even on a dev binary (defence in depth).
+	// Signed license manager. A production build always requires a real signed license: no environment variable or config
+	// file enables permissive mode, which exists only in a `-tags devlicense` build. An /etc/stayconnect/production marker
+	// forces production even on a dev binary.
 	licRequired, devAttempt := resolveLicenseRequired(c.LicenseRequired)
 	s.lic = licstate.New(pool, c.TenantID, c.LicenseDir, c.VendorPub, licRequired)
 	s.permissiveBlocked = devAttempt
 	if devAttempt != "" {
-		// Rejected: enforcement stays ON (licRequired is already true). Raise a
-		// local critical alert + audit record.
+		// Rejected: enforcement stays ON; raise a local critical alert and audit record.
 		s.reportPermissiveAttempt(rootCtx, devAttempt)
 	}
-	// Bind license verification to THIS box: identity key (primary anchor) +
-	// serial / hardware fingerprint / WAN MAC (mismatch + clone signals).
+	// Bind license verification to this box: identity key (primary anchor) plus serial / hardware fingerprint / WAN MAC (mismatch and clone signals).
 	s.lic.SetLocalIdentity(lic.LocalIdentity{
 		ApplianceID:            s.applID,
 		IdentityKeyFingerprint: s.identityKeyFpr,
@@ -903,9 +745,8 @@ func main() {
 	s.initOperatorMFAKey(c.SecretsDir)
 	s.portalTLS = s.initPortalTLS(c, ident != nil && talksToCentral)
 	s.socialPortal = s.portalTLS
-	// Social sign-in: load the sealing key, seal any plaintext secret still in the provider table, build the
-	// providers from sealed secrets, and keep them current (social_secrets.go). An appliance awaiting its
-	// assignment has no tenant, and reloadSocial then serves only the base providers.
+	// Social sign-in: load the sealing key, seal any plaintext provider secret, build providers from sealed secrets and keep
+	// them current; an appliance awaiting assignment serves only the base providers.
 	s.initSocialKey(c.SecretsDir)
 	if err := s.reloadSocial(rootCtx, true); err != nil {
 		slog.Warn("social sign-in: initial provider load failed", "err", err)
@@ -914,34 +755,24 @@ func main() {
 		go s.socialReloadLoop(rootCtx)
 	}
 	s.registerModuleProbes()
-	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
-	// whether an interrupted activation completed means asking whether the licence actually landed. Either
-	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
+	// Crash recovery for offline first activation runs after the licence state loads, because deciding whether an interrupted
+	// activation completed means asking whether the licence landed: it finishes the activation or rolls back to unassigned.
 	s.recoverInterruptedActivation()
-	// The concurrent-online-guest cap still comes DIRECTLY from the local signed licence and is still
-	// enforced atomically inside session creation -- it now lives in the IAM-v2 activation transaction
-	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
-	// authorization.
+	// The concurrent-guest cap comes from the local signed licence and is enforced atomically in the activation transaction;
+	// Central availability plays no part in guest authorization.
 	if ident != nil && talksToCentral {
-		// Every fetch outcome feeds the Central contact record. While no licence is installed the loop asks
-		// every minute (F10); once licensed, every six hours; Check now and a newly adopted assignment kick it.
+		// Every fetch outcome feeds the Central contact record. Asks every minute while unlicensed, every six hours once licensed; Check now and a new assignment kick it.
 		s.lic.OnFetch(func(err error) { central.record(err, time.Now()) })
 		s.lic.StartLoops(rootCtx, c.CtrlAPIBase, ident.ApplianceID, ident.PrivateKey(), 6*time.Hour)
 	} else {
 		s.lic.StartLoops(rootCtx, "", "", nil, 0)
 	}
 
-	// Phase 8 — resolve real notification providers from the DB. Falls
-	// back to the existing Stubs when no row exists for a channel. The
-	// chosen impl is then wrapped with metric instrumentation so every
-	// Send() emits scd_notification_send_* and updates the DB health
-	// columns (last_success_at / last_error_at) for the admin UI.
-	// Senders are resolved here and again on every reload (notify_admin.go), so a change in the Admin
-	// Console is live without a restart. Sealed secrets are preferred; plaintext rows still work.
+	// Resolve notification providers from the DB (Stubs when no row exists), wrapped with metric instrumentation. Resolved again
+	// on every reload (notify_admin.go) so Admin Console changes are live; sealed secrets are preferred, plaintext rows still work.
 	s.notifyFallback.mail, s.notifyFallback.sms, s.notifyFallback.whatsapp = s.mail, s.sms, s.whatsapp
 	s.loadNotify(rootCtx)
-	// Email accounts: loop cadences (SCD_SELF_SERVICE_SEND_TICK / _SWEEP_TICK) and the outbox kick, before any
-	// route can register an account.
+	// Email accounts: loop cadences and the outbox kick, before any route can register an account.
 	s.initSelfService(os.Getenv)
 
 	r := chi.NewRouter()
@@ -950,24 +781,15 @@ func main() {
 	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
-	// WHO MAY ASK FOR WHAT. One socket carries the guest-authentication routes portald needs and the
-	// administrative routes edged drives -- backups, licence install, appliance enrolment, voucher codes --
-	// and reaching it is a single group-membership fact. This gate splits the two by the caller's identity;
-	// admin_surface.go holds the classification and the reasoning.
-	//
-	// AFTER Recoverer and Timeout, and before every route: a refusal should still be logged, recovered and
-	// bounded like any other response.
+	// Splits guest-authentication routes (portald) from administrative routes (edged: backups, licence install, enrolment,
+	// voucher codes) by the caller's identity; see admin_surface.go. After Recoverer and Timeout and before every route, so a
+	// refusal is still logged, recovered and bounded.
 	r.Use(s.peerGate)
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
-	// The voucher surface lives here because the DEK does: scd is root and unix-socket only, edged is the
-	// unprivileged HTTP service. edged proxies to these routes -- which, until the operator surface existed,
-	// this comment claimed and no caller did.
-	//
-	// Reveal and export recover a code in the clear. edged has already authenticated the operator, checked
-	// the permission, re-verified the password and taken a bounded reason before anything reaches here;
-	// this socket is not reachable from the network. What these handlers own is the part edged cannot do:
-	// opening the ciphertext, and writing the append-only record in the same transaction.
+	// The voucher surface lives here because the DEK does: scd is root and unix-socket only. Reveal and export recover a code in
+	// the clear; edged has already authenticated the operator, checked permission, re-verified the password and taken a reason.
+	// These handlers open the ciphertext and write the append-only record in the same transaction.
 	r.Post("/v1/vouchers/issue", s.issueVouchersIAMv2)
 	r.Get("/v1/vouchers", s.listVouchers)
 	r.Get("/v1/vouchers/summary", s.voucherSummary)
@@ -976,14 +798,11 @@ func main() {
 	r.Post("/v1/vouchers/{id}/reveal", s.revealVoucherCode)
 	r.Post("/v1/vouchers/{id}/revoke", s.revokeVoucher)
 	r.Post("/v1/voucher-batches/{id}/revoke", s.revokeVoucherBatch)
-	// Key rotation. superseded_at was read by issuance and written by nothing, so a per-generation blind
-	// index key was the key forever; this is the deliberate audited path the grant file always described.
+	// Key rotation: the deliberate audited path for superseding a per-generation blind index key.
 	r.Get("/v1/voucher-key-generations", s.listVoucherKeyGenerations)
 	r.Post("/v1/voucher-key-generations/{id}/supersede", s.rotateVoucherKeyGeneration)
-	// Entitlement -> session. Authentication and commerce both land in iam_v2; this is what turns the
-	// resulting entitlement into something the enforcement plane can act on.
+	// Entitlement -> session: turns the iam_v2 entitlement into something the enforcement plane can act on.
 	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
-	// A client's devices on their package: list, release, replace (client_devices.go, migration 0118).
 	r.Post("/v1/devices/list", s.clientDevicesList)
 	r.Post("/v1/devices/release", s.clientDevicesRelease)
 	r.Post("/v1/devices/replace", s.clientDevicesReplace)
@@ -995,9 +814,7 @@ func main() {
 	r.Post("/v1/sessions/revoke", s.revoke)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
-	// Email accounts (self_service_handlers.go): register, status, resend, grace, verify, forgot, reset -- guest
-	// routes portald calls -- and the operator's resend, which edged proxies after its own permission check.
-	// Registered here, not in a helper, so admin_surface_test.go reads and classifies every one of them.
+	// Email accounts: guest routes portald calls, plus the operator's resend that edged proxies. Registered here, not in a helper, so admin_surface_test.go classifies every one.
 	r.Post("/v1/auth/account/register", s.accountRegister)
 	r.Post("/v1/auth/account/status", s.accountStatus)
 	r.Post("/v1/auth/account/resend", s.accountResend)
@@ -1006,24 +823,19 @@ func main() {
 	r.Post("/v1/auth/account/forgot", s.accountForgot)
 	r.Post("/v1/auth/account/reset", s.accountReset)
 	r.Post("/v1/admin/accounts/{id}/resend-verification", s.adminAccountResendVerification)
-	// The Admin Console operator's authenticator (operator_mfa.go, 0132): edged only, under /v1/admin/.
+	// The Admin Console operator's authenticator: edged only, under /v1/admin/.
 	s.operatorMFARoutes(r)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
-	// The remembered device (client_resume.go): peek for the Welcome-back line, Connect, and sign-out.
 	r.Post("/v1/sessions/resume-peek", s.resumePeek)
 	r.Post("/v1/sessions/authorize-resume", s.authorizeResume)
 	r.Post("/v1/sessions/resume-revoke", s.resumeRevoke)
-	// /v1/auth/pms/verify is REMOVED. It resolved a stay and then created a public.sessions row through the
-	// superseded pipeline. The current PMS guest path is Phase 3: /v1/phase3/auth/pms/resolve then
-	// /v1/phase3/auth/pms/grant, which derives identity from the connection rather than the body and grants
-	// through the IAM-v2 entitlement model.
+	// /v1/auth/pms/verify is removed; the PMS guest path is /v1/phase3/auth/pms/resolve then /grant, which derives identity from the connection rather than the body.
 	r.Post("/v1/admin/pms/{name}/test", s.pmsAdminTest)
 	r.Get("/v1/admin/pms/{name}/cache", s.pmsAdminCache)
 	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
 	r.Get("/v1/tenant/auth-methods", s.tenantAuthMethods)
 	r.Get("/v1/tenant/branding", s.tenantBranding)
-	// THE ERASURE LEDGER (ledger_service.go): edged commits every erasure through here before it tells anyone it is done.
 	r.Get("/v1/ledger/status", s.ledgerStatusGet)
 	r.Post("/v1/ledger/prepare", s.ledgerPrepare)
 	r.Post("/v1/ledger/commit", s.ledgerCommit)
@@ -1036,49 +848,40 @@ func main() {
 	r.Post("/v1/backup/earlier/remove", s.earlierBackupsRemove)
 	r.Post("/v1/backup/verify", s.backupVerify)
 	r.Post("/v1/backup/key-test", s.backupKeyTest)
-	// THE DESTRUCTIVE ONE. edged performs the password step-up, the permission check and the audit record
-	// before it reaches here; this socket is not reachable from the network. See restore.go.
+	// The destructive one: edged performs step-up, the permission check and the audit record before reaching here. See restore.go.
 	r.Post("/v1/backup/restore", s.backupRestore)
 	r.Get("/v1/backup/last-restore", s.lastRestore)
 	r.Get("/v1/maintenance", s.maintenanceStatus)
 	r.Get("/v1/backup/settings", s.backupSettingsGet)
 	r.Post("/v1/backup/settings", s.backupSettingsSet)
-	// Edge-first refactor: license + local-admin plumbing for edged.
-	// Appliance activation, licence and the link to Central (docs/CENTRAL_CONTROL_PLANE.md section 8). edged
-	// proxies these for Hotel Admin; central.go holds the one computation of every state they report.
+	// Appliance activation, licence and the link to Central: edged proxies these; central.go holds the one computation of every state they report.
 	r.Get("/v1/central/status", s.centralStatus)
 	r.Get("/v1/modules", s.modulesStatus)
 	s.paymentAdminRoutes(r)
 	r.Post("/v1/central/refresh", s.centralRefresh)
-	// OFFLINE ACTIVATION: the request this appliance emits, and the package (first activation OR a licence
-	// package for an activated appliance) that comes back. See offline_first_activation.go / offline_import.go.
+	// Offline activation: the request this appliance emits and the package (first activation or licence package) that comes back.
 	r.Get("/v1/central/offline-request", s.setupActivationRequest)
 	r.Post("/v1/central/offline-package", s.centralOfflinePackage)
 	r.Post("/v1/license/install", s.licenseInstall)
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	s.notifyAdminRoutes(r)
-	// Social sign-in administration for edged (social_secrets.go): the write-only secret, its yes/no state,
-	// the reload edged pokes after a provider write, and the offered/why-not status line.
+	// Social sign-in administration for edged: the write-only secret, its yes/no state, reload, and the offered/why-not status.
 	r.Put("/v1/social/providers/{id}/secret", s.socialSecretStore)
 	r.Get("/v1/social/providers/{id}/secret-state", s.socialSecretState)
 	r.Post("/v1/social/reload", s.socialReload)
 	r.Get("/v1/social/status", s.socialStatus)
 	s.tempAccessAdminRoutes(r)
-	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
-	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
-	// already enforced Hotel-IT permission + step-up before proxying to us.
+	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged manager (edged is sandboxed with NoNewPrivileges); edged already enforced permission and step-up.
 	r.Post("/v1/hotel-admin-cert/check", s.hotelAdminCertCheck)
 	r.Post("/v1/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 	r.Post("/v1/hotel-admin-cert/renew", s.hotelAdminCertRenew)
-	// The Client Portal's HTTPS state (portal_tls.go): read by portald every 15 seconds and by edged; kick and
-	// renew are edged's, after the operator's permission and step-up.
+	// The portal HTTPS state: read by portald every 15 seconds and by edged; kick and renew are edged's, after the operator's permission and step-up.
 	r.Get("/v1/portal/tls-state", s.portalTLSState)
 	r.Post("/v1/portal/tls/kick", s.portalTLSKick)
 	r.Post("/v1/portal/tls/renew", s.portalTLSRenew)
 
-	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
-	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
+	// Commerce routes are mounted only when the portal surface is ON; while dark they are absent (404) and the engine holds a nil repository.
 	if s.commerceCfg.PortalOn() {
 		r.Get("/v1/commerce/packages", s.commercePackages)
 		r.Post("/v1/commerce/quote", s.commerceQuote)
@@ -1088,10 +891,8 @@ func main() {
 		slog.Info("phase2 portal commerce routes mounted")
 	}
 
-	// Phase 3 (DARK): the PMS auth slice. Constructed and mounted ONLY with the master + PMS-auth flags on.
-	// While dark, scd issues zero Phase-3 SQL and these paths do not exist.
-	// The sealing key is loaded BEFORE the arm is constructed, because the arm's recorder is built from it.
-	// Its absence is logged, not fatal: a missing audit key must not take a property's guest internet offline.
+	// The PMS auth slice is constructed and mounted only with the master and PMS-auth flags on. The sealing key loads before
+	// the arm is built (its recorder uses it); its absence is logged, not fatal, so a missing audit key never takes a property's guest internet offline.
 	s.signInAttemptKeyring = loadSignInAttemptKeyring(c.SecretsDir)
 	if pmsCfg3, err := iamv2.LoadPMSConfigFromEnv(os.Getenv); err != nil {
 		slog.Error("scd: phase3 config fail-closed", "err", err)
@@ -1103,19 +904,15 @@ func main() {
 			os.Exit(1)
 		}
 		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
-		// The sealed half of a recorded attempt, opened for edged on an authorised operator's behalf. It is
-		// here rather than in edged because scd holds the key and edged does not — see the handler.
+		// The sealed half of a recorded attempt, opened for edged on an authorised operator's behalf; scd holds the key.
 		r.Post("/v1/phase3/signin-attempts/credentials", s.p3auth.signInAttemptCredentialsHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
-		// Read-only: why the device's most recent access ended, so the portal can say so instead of showing
-		// the ordinary sign-in page to a guest whose package ran out. Answers DATA, TIME or nothing.
+		// Read-only: why the device's most recent access ended (DATA, TIME or nothing), so the portal can say so.
 		r.Post("/v1/phase3/access/status", s.p3auth.accessStatusHandler)
 		slog.Info("phase3 pms auth routes mounted", "flags", pmsCfg3.SafeFlagSummary())
 	}
 
-	// PHASE 5 (DARK): the guest post-stay surface. It depends on the Phase-3 arm for device identity, so it
-	// cannot be mounted without it -- and a Phase-5 guest flag set while Phase-3 auth is off is a deployment
-	// mistake that must be loud, exactly like a child flag without its master.
+	// The guest post-stay surface depends on the Phase-3 arm for device identity: a Phase-5 flag set while Phase-3 auth is off is a deployment mistake and must be loud.
 	p5cfg, err := iamv2.LoadPhase5ConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase-5 flags are incoherent", "err", err)
@@ -1135,10 +932,7 @@ func main() {
 		slog.Info("phase5 post-stay guest surface is DARK (routes absent)", "flags", p5cfg.SafeFlagSummary())
 	}
 
-	// ---- Phase 6: guest device self-service (DARK by default) ----------------------------------------
-	// Two controls, and this is only the first. The deployment gate decides whether the routes exist at all;
-	// the per-appliance product setting is read from the site database on every request inside the handler,
-	// so an operator turning the feature off takes effect without a restart and with no Central call.
+	// Guest device self-service: the deployment gate decides whether routes exist; the per-appliance setting is read from the DB on every request, so turning it off needs no restart or Central call.
 	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase6 configuration", "err", err)
@@ -1177,9 +971,7 @@ func main() {
 		slog.Warn("scd socket: no socket group resolves; the socket is root-only", "err", err)
 	}
 
-	// ConnContext reads the peer credentials ONCE, at accept time, so the code-recovery routes can
-	// refuse a caller that is not edged. See peer_identity_linux.go for what that does and does not
-	// prove: portald shares edged's uid, so this stops a mistake and not a compromise.
+	// ConnContext reads peer credentials once at accept time so code-recovery routes can refuse a non-edged caller. portald shares edged's uid, so this stops a mistake, not a compromise (peer_identity_linux.go).
 	srv := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, ConnContext: withPeerCred}
 	go func() {
 		slog.Info("scd listening", "socket", c.SocketPath)
@@ -1188,11 +980,7 @@ func main() {
 		}
 	}()
 
-	// Phase 13 — optional TCP listener for Prometheus scraping. Unix
-	// sockets can't be scraped by a Prometheus running elsewhere, so when
-	// SCD_METRICS_ADDR is set we stand up a second server that ONLY
-	// serves /metrics. Bind to localhost or a management interface, never
-	// the guest LAN.
+	// Optional TCP listener serving only /metrics for a remote Prometheus (SCD_METRICS_ADDR); bind to localhost or a management interface, never the guest LAN.
 	var metricsSrv *http.Server
 	if c.MetricsAddr != "" {
 		metricsMux := http.NewServeMux()
@@ -1212,70 +1000,47 @@ func main() {
 		}()
 	}
 	go s.pmsHealthFlushLoop(rootCtx)
-	// The Client Portal's HTTPS certificates (portal_tls.go). Runs on every appliance: one that cannot reach
-	// Central still decides HTTPS from the certificate it has, and keeps serving it until it expires.
+	// The portal HTTPS certificate agent runs on every appliance: one that cannot reach Central still decides HTTPS from the certificate it has until it expires.
 	go s.portalTLS.run(rootCtx)
-	// The legacy session reaper is REMOVED with the public.sessions domain it swept. Expiry in the current
-	// model is entitlement exhaustion, owned by internal/enforce over iam_v2.sessions and its entitlement
-	// bindings -- a single authority deciding when access ends.
-	// Edge-first refactor: walled-garden rules from the (site) DB are now
-	// actually enforced — reconciled into the nft walled_garden_ip set.
+	// Walled-garden rules from the site DB are reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
-	// Email accounts: the emailed-link outbox and the verification sweep (suspension, reminders) (self_service.go).
-	// The temporary verification window loop that ran here is REMOVED with the email code it served; the pruning
-	// of SMS / WhatsApp code copies it also did now runs in gardenReconcileLoop.
+	// Email accounts: the emailed-link outbox and the verification sweep (suspension, reminders).
 	if !awaiting {
 		go s.selfServiceSendLoop(rootCtx)
 		go s.selfServiceSweepLoop(rootCtx)
 	}
 	go s.cardReconcileLoop(rootCtx)
 	go s.postingLoop(rootCtx, s.initPostingWorker(rootCtx))
-	// Periodic safety-net reload: Hotel Admin changes reload immediately through /v1/admin/pms/reload, and a
-	// 10-minute background sweep guarantees eventual consistency from the DB if one was missed.
+	// Safety-net reload every 10 minutes in case a Hotel Admin reload was missed.
 	go s.pmsReloadSafetyLoop(rootCtx)
 
-	// Phase 1B — bounded-retention cleanup of durable throttle buckets (only when enabled).
+	// Bounded-retention cleanup of durable throttle buckets (only when enabled).
 	if s.authThrottle != nil {
 		go s.authThrottle.RunCleanup(rootCtx, 5*time.Minute, time.Minute)
 	}
 
-	// THE THIRTY-DAY SWEEP for guest sign-in attempt records. Same shape as the throttle cleanup above,
-	// deliberately: this appliance has no database scheduler, and the owning service doing its own bounded
-	// DELETE on a ticker is the pattern that is already proven here. It runs only where the Phase-3 arm exists,
-	// because nothing else writes the table.
+	// Thirty-day sweep of guest sign-in attempt records: a bounded DELETE on a ticker (no DB scheduler here), only where the Phase-3 arm exists.
 	if s.p3auth != nil && s.p3auth.attempts != nil {
 		go s.p3auth.attempts.RunPurge(rootCtx, time.Hour)
 	}
 
-	// GUEST-DATA RETENTION (data_retention.go, migration 0127): hourly anonymisation of what has outlived the
-	// site's retention settings.
+	// Hourly anonymisation of guest data that outlived the site's retention settings.
 	go s.dataRetentionLoop(rootCtx)
 	go s.ledgerLoop(rootCtx)
 	go s.backupLoop(rootCtx)
-	// SYSTEM-LOG RETENTION (log_retention.go, migration 0134): the appliance's logs follow the site's log period.
+	// System logs follow the site's log period.
 	go s.logRetentionLoop(rootCtx)
 
-	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
-	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
-	// knows this appliance (its row was deleted from the control panel), our
-	// identity is orphaned. We require the reply to be SUSTAINED (orphanTracker), then self-reset so the
-	// box re-registers as a fresh Pending and STOPS serving on its now-stale
-	// cached license — no manual factory reset needed.
-	//
-	// Running periodically (not only on boot) is essential: a deletion that
-	// happens while the appliance is already running must be detected within one
-	// interval, not left serving on the cached license until license expiry or a
-	// manual restart. Offline-safety is preserved — a transient Central outage
-	// yields connection errors / 5xx / timeouts, never a definitive 401
-	// "not enrolled", so a reset can only ever be triggered by a real deletion
-	// (and only after several consecutive replies over at least orphanConfirmWindow).
+	// Signed hello against ctrlapi on boot and periodically: orphan recovery. If Central deleted this appliance, a sustained
+	// definitive reply (orphanTracker) self-resets it to re-register as Pending and stop serving on its stale cached license.
+	// Periodic because a deletion while running must be noticed; offline-safe because outages yield connection errors, 5xx or
+	// timeouts, never a definitive 401.
 	if ident != nil && talksToCentral {
 		orphan := func(code int, b []byte) bool {
 			l := strings.ToLower(string(b))
 			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
 		}
-		// A deletion is acted on only when it is SUSTAINED (orphanTracker, removed_from_central.go): several
-		// consecutive "not found" replies over a minimum window, reset by any other reply.
+		// Acted on only when sustained: several consecutive "not found" replies over a minimum window, reset by any other reply.
 		tracker := &orphanTracker{}
 		helloProbe := func() {
 			code, body, err := s.helloRaw(rootCtx)
@@ -1321,21 +1086,15 @@ func main() {
 		}()
 	}
 
-	// Phase B — appliance-side mTLS. Ensure a client certificate exists
-	// (CSR→issue→fetch→store), verify the mTLS transport, then rotate before
-	// expiry. Runs alongside the signed-JWT layer (defence in depth); a failure
-	// here never affects local guest operation.
+	// Appliance-side mTLS: ensure a client certificate exists (CSR, issue, fetch, store), verify the transport, rotate before expiry. A failure here never affects local guest operation.
 	if ident != nil && talksToCentral && c.MTLSBase != "" {
 		certMgr := appliancecert.New(c.CertDir, c.CtrlAPIBase, c.MTLSBase, ident.ApplianceID, ident.PrivateKey())
 		s.certMgr = certMgr
-		// Every bootstrap attempt tells us whether Central is answering -- including while the appliance waits
-		// for an operator to activate it (a pending certificate is a successful conversation).
+		// Every bootstrap attempt tells us whether Central is answering, including while it waits for an operator to activate.
 		certMgr.OnAttempt(func(err error) { central.record(err, time.Now()) })
 		go func() {
-			// KEEP TRYING. This used to be a single Ensure() whose ten-minute window started at boot; on
-			// expiry it logged a warning and returned, ending the certificate lifecycle for the life of the
-			// process and taking the assignment channel (mTLS-only), the licence and convergence with it.
-			// First issuance waits on a human pressing Activate, which is not an event with a deadline.
+			// Keep trying: first issuance waits on a human pressing Activate, which has no deadline; giving up would end the
+			// certificate lifecycle and take the mTLS-only assignment channel, the licence and convergence with it.
 			if err := certMgr.EnsureUntilInstalled(rootCtx); err != nil {
 				slog.Warn("appliancecert: certificate bootstrap stopped", "err", err)
 				return
@@ -1350,9 +1109,7 @@ func main() {
 					slog.Info("license fetch cut over to mTLS transport", "base", base)
 				}
 			}
-			// A NEW CERTIFICATE MUST REACH EVERY USER OF IT. The assignment agent asks certMgr for the client on
-			// every call; the licence fetcher was handed one client once, so after a rotation or a reissue it would
-			// have kept presenting the old certificate. Re-handed after every change.
+			// A new certificate must reach every user of it: the licence fetcher holds one client, so it is re-handed after every change or it keeps presenting the old certificate.
 			rehand := func() {
 				if cl, base, ok := certMgr.Transport(); ok {
 					s.lic.SetMTLSTransport(cl, base)

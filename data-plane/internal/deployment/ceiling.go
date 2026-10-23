@@ -1,10 +1,5 @@
-// Package deployment is the DEPLOYMENT CEILING: whether the software deployed on this appliance may run a
-// capability at all. It is the first of OneGate's four module gates (ceiling, licence, local enablement,
-// readiness) and the only place new product logic learns anything from the historical STAYCONNECT_PHASE*
-// environment flags. New code asks the ceiling about a CAPABILITY or a MODULE; it never names a phase.
-//
-// The ceiling is set by whoever deploys the appliance and changes only with a controlled redeploy. It is not
-// a commercial switch (that is the licence) and not a site choice (that is local enablement).
+// Package deployment is the deployment ceiling: whether the deployed software may run a capability at all.
+// New code asks about a capability or module, never a phase. It is set by the deployer, not the licence or site.
 package deployment
 
 import (
@@ -19,49 +14,43 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// EnvPaymentLiveAllowed is the ONLY switch that lets a LIVE-mode provider account execute. It is not set on
-// any appliance. Setting it moves real money and requires a separate Product-Owner authorisation.
+// EnvPaymentLiveAllowed is the only switch that lets a LIVE-mode provider account execute (moves real money).
 const EnvPaymentLiveAllowed = "STAYCONNECT_PAYMENT_LIVE_ALLOWED"
 
-// Capability names what the deployed software can do, independent of phase numbering.
 type Capability string
 
 const (
-	CapClientPackages     Capability = "client_packages"      // clients choose Internet Packages in the portal
-	CapPackageAdmin       Capability = "package_admin"        // the Admin Console edits Internet Packages
-	CapHospitality        Capability = "hospitality"          // PMS, Room sign-in, stays (the Hotel section)
-	CapPaidAccess         Capability = "paid_access"          // priced packages exist in the commerce engine
-	CapCardPayment        Capability = "card_payment"         // the payment domain and a provider adapter may run
-	CapCardLive           Capability = "card_payment_live"    // LIVE-mode (real money) provider execution
-	CapRoomChargeConfig   Capability = "room_charge_config"   // posting domain: onboarding, mappings, quotes
-	CapRoomChargeReview   Capability = "room_charge_review"   // financial review and recovery surfaces
+	CapClientPackages     Capability = "client_packages"
+	CapPackageAdmin       Capability = "package_admin"
+	CapHospitality        Capability = "hospitality"
+	CapPaidAccess         Capability = "paid_access"
+	CapCardPayment        Capability = "card_payment"
+	CapCardLive           Capability = "card_payment_live" // LIVE-mode (real money) provider execution
+	CapRoomChargeConfig   Capability = "room_charge_config"
+	CapRoomChargeReview   Capability = "room_charge_review"
 	CapRoomChargeTransmit Capability = "room_charge_transmit" // PS bytes may reach a PMS (real posting)
-	CapOTPSignIn          Capability = "otp_sign_in"          // IAM-v2 accepts a verified one-time code (SMS, WhatsApp)
-	CapSocialSignIn       Capability = "social_sign_in"       // IAM-v2 accepts a verified social identity
-	CapEmailAccounts      Capability = "email_accounts"       // IAM-v2 authenticates accounts (Email accounts are ACCOUNT subjects)
+	CapOTPSignIn          Capability = "otp_sign_in"
+	CapSocialSignIn       Capability = "social_sign_in"
+	CapEmailAccounts      Capability = "email_accounts" // Email accounts are ACCOUNT subjects
 )
 
-// Ceiling is the evaluated deployment state. The zero value allows nothing optional.
+// Ceiling's zero value allows nothing optional.
 type Ceiling struct {
 	commerce    iamv2.CommerceConfig
 	pms         iamv2.PMSConfig
 	pay         payment.Config
 	post        posting.Config
 	liveAllowed bool
-	// otp and social: the IAM-v2 guest authority accepts that kind of identity. Without it a verified code or
-	// social sign-in has nowhere to go, so the identity modules are not deployed and no screen offers them.
+	// otp and social: IAM-v2 accepts that kind of identity; without it the identity modules are not deployed.
 	otp, social bool
-	// account: the IAM-v2 guest authority authenticates ACCOUNT subjects. Email accounts are self-registered
-	// ACCOUNT subjects, so the email sign-in module (email_otp, whose meaning is now "email sign-in") is deployed
-	// exactly when this is -- not when one-time codes are, which they no longer use.
+	// account: IAM-v2 authenticates ACCOUNT subjects. The email sign-in module (email_otp) is deployed exactly
+	// when this is set, not when one-time codes are.
 	account bool
 }
 
-// Getenv reads one variable.
 type Getenv func(string) string
 
-// Load evaluates the ceiling from the environment. A malformed or incoherent flag set is a startup failure,
-// exactly as it already is for each underlying configuration.
+// Load fails on a malformed or incoherent flag set.
 func Load(get Getenv) (Ceiling, error) {
 	if get == nil {
 		get = os.Getenv
@@ -114,8 +103,7 @@ func Load(get Getenv) (Ceiling, error) {
 	if c.account, err = flag(iamv2.EnvAccount); err != nil {
 		return Ceiling{}, err
 	}
-	// A production build locks ACCOUNT on whatever the environment says (iamv2 guest authority lock: IAM-v2 is
-	// the only guest authority), so the ceiling must say what the authenticator will actually do.
+	// A production build locks ACCOUNT on regardless of the environment; the ceiling must match the authenticator.
 	if iamv2.BuildProfile() == "production" && iamv2.GuestAuthorityLocked(iamv2.MethodAccount) {
 		c.account = true
 	}
@@ -123,26 +111,20 @@ func Load(get Getenv) (Ceiling, error) {
 	return c, nil
 }
 
-// WithIdentity returns the ceiling with the IAM-v2 identity methods set (tests and callers that build a
-// ceiling with New).
 func (c Ceiling) WithIdentity(otp, social bool) Ceiling {
 	c.otp, c.social = otp, social
 	return c
 }
 
-// WithAccounts returns the ceiling with the IAM-v2 ACCOUNT method set (tests and callers that build a ceiling
-// with New).
 func (c Ceiling) WithAccounts(account bool) Ceiling {
 	c.account = account
 	return c
 }
 
-// New builds a ceiling from already-loaded configurations (tests and callers that load them anyway).
 func New(commerce iamv2.CommerceConfig, pms iamv2.PMSConfig, pay payment.Config, post posting.Config, liveAllowed bool) Ceiling {
 	return Ceiling{commerce: commerce, pms: pms, pay: pay, post: post, liveAllowed: liveAllowed && pay.ProviderOn()}
 }
 
-// Available reports whether the deployed software may run a capability.
 func (c Ceiling) Available(cp Capability) bool {
 	switch cp {
 	case CapClientPackages:
@@ -173,8 +155,7 @@ func (c Ceiling) Available(cp Capability) bool {
 	return false
 }
 
-// ModuleDeployed reports whether the software for a licensable module is deployed here. The identity add-ons
-// need their IAM-v2 method; modules with no optional code path (white label, HA) are always deployed.
+// ModuleDeployed: identity add-ons need their IAM-v2 method; modules with no optional code path are always deployed.
 func (c Ceiling) ModuleDeployed(id string) bool {
 	switch id {
 	case lic.ModuleHospitality:
@@ -196,7 +177,6 @@ func (c Ceiling) ModuleDeployed(id string) bool {
 	return known
 }
 
-// Summary is a log-safe description.
 func (c Ceiling) Summary() string {
 	parts := []string{}
 	for _, cp := range []Capability{CapClientPackages, CapPackageAdmin, CapHospitality, CapPaidAccess, CapCardPayment,

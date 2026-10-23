@@ -11,8 +11,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// memSessions holds sessions in memory in place of Redis; the policy under test is RequireAuth +
-// DBSessionChecker against the real database.
+// memSessions holds sessions in memory in place of Redis.
 type memSessions struct {
 	mu        sync.Mutex
 	m         map[string]*auth.Session
@@ -24,7 +23,7 @@ func (s *memSessions) Get(_ context.Context, tok string) (*auth.Session, error) 
 	defer s.mu.Unlock()
 	if v, ok := s.m[tok]; ok {
 		c := *v
-		c.Token = tok // as SessionStore.Get does
+		c.Token = tok
 		return &c, nil
 	}
 	return nil, nil
@@ -47,7 +46,6 @@ func (s *memSessions) Destroy(_ context.Context, tok string) error {
 	return nil
 }
 
-// guarded runs one request through RequireAuth + a permission check and reports the status.
 func guarded(store *memSessions, f *fixture, tok, perm string) int {
 	return guardedAt(store, f, tok, perm, "/cloud/v1/appliances")
 }
@@ -62,8 +60,6 @@ func guardedAt(store *memSessions, f *fixture, tok, perm, path string) int {
 	return rec.Code
 }
 
-// X-3: disabling, demoting, re-passwording or removing an operator ends their open sessions at the next
-// request; the absolute lifetime setting ends old sessions however active they are.
 func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 	f := newFixture(t)
 	mk := func(email, role string) (string, *auth.Session) {
@@ -114,7 +110,6 @@ func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 		t.Fatalf("each change must record that sessions were ended, got %d", n)
 	}
 
-	// A new sign-in of the demoted operator works, with the NEW role only.
 	_, fresh := mk("fresh@central.test", "platform_admin")
 	store.m["t-new"] = fresh
 	if _, err := f.pool.Exec(f.ctx, `DELETE FROM operator_roles WHERE operator_id=$1`, fresh.OperatorID); err != nil {
@@ -130,7 +125,6 @@ func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 		t.Fatalf("the remaining role still works, got %d", c)
 	}
 
-	// The absolute lifetime: a 3-hour-old, still active session ends once the cap is set to 2 hours.
 	_, old := mk("old@central.test", "platform_admin")
 	old.CreatedAt = time.Now().Add(-3 * time.Hour)
 	store.m["t-old"] = old
@@ -154,7 +148,7 @@ func TestOperatorSessionsEndWhenAccessChanges(t *testing.T) {
 		t.Fatal("the setting change must be audited with from/to")
 	}
 
-	// THE IDLE LIMIT (0052, GDPR plan C10): 30 minutes by default; the background whoami poll is not activity.
+	// Idle limit: 30 minutes by default; the background whoami poll is not activity.
 	_, idle := mk("idle@central.test", "platform_admin")
 	idle.LastSeenAt = time.Now().Add(-10 * time.Minute)
 	store.m["t-idle"] = idle

@@ -1,10 +1,7 @@
 package main
 
-// THE PROVIDER CATALOGUE AND PROVIDER-AWARE AUTHORING.
-//
-// Two halves: the protel-fias path must be byte-for-byte what it was (fingerprint, validation, stored config),
-// and the REST connectors must be validated against the registry's schema with unknown keys refused and the
-// credential kept out of the revision.
+// The protel-fias path must be unchanged (fingerprint, validation, stored config); REST connectors are
+// validated against the registry schema with unknown keys refused and the credential kept out of the revision.
 
 import (
 	"context"
@@ -21,7 +18,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
-// oldPMSSourceFingerprint is a verbatim copy of the function edged used before the registry existed.
+// oldPMSSourceFingerprint is a verbatim copy of the pre-registry fingerprint function.
 func oldPMSSourceFingerprint(connectorKind, endpoint string) string {
 	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(connectorKind)) + "|" +
 		strings.ToLower(strings.TrimSpace(endpoint))))
@@ -224,12 +221,9 @@ func TestProvidersCatalogue_Contract(t *testing.T) {
 		m := f.(map[string]any)
 		keys[m["key"].(string)] = m["type"].(string)
 	}
-	// The catalogue must describe EXACTLY the operator-settable fields authorRevisionReq accepts: every JSON field
-	// of the request struct, minus the ones validateRevisionConfig fixes for protel-fias (the operator cannot
-	// choose them) and provider_config itself. Derived from the struct by reflection rather than listed by hand,
-	// so a field added to the request but forgotten in the catalogue fails here instead of silently vanishing
-	// from the UI. (A hand-written list also collided with a text guard in scripts/pmsd-pg-integration.sh that
-	// looks for Phase-4 schema names: two of these request fields share their names with Phase-4 columns.)
+	// The catalogue must list exactly the operator-settable fields authorRevisionReq accepts (request JSON fields minus
+	// those fixed for protel-fias and provider_config). Derived by reflection, not a hand list, which would collide with a
+	// Phase-4 schema-name text guard in scripts/pmsd-pg-integration.sh.
 	fixedByValidation := map[string]bool{
 		"posting_target_model": true, "normalization_version": true, "credential_mode": true,
 		"read_only": true, "resync_supported": true, "provider_config": true,
@@ -288,8 +282,7 @@ func TestProviderMeta_RowFields(t *testing.T) {
 	}
 }
 
-// GDPR plan C8: TLS on the FIAS link is stored only when switched on, with the fingerprint normalised, and a
-// fingerprint without TLS is refused rather than saved as a setting that does nothing.
+// TLS on the FIAS link is stored only when on, with a normalised fingerprint; a fingerprint without TLS is refused.
 func TestProtelProviderConfig_TLS(t *testing.T) {
 	off, err := validateRevisionConfig(validRevisionReq())
 	if err != nil {

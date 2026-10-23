@@ -1,24 +1,7 @@
 package main
 
-// ADVERSARIAL TESTS FOR THE BOUNDED KERNEL LEASE AND FAIL-CLOSED ACTIVATION.
-//
-// The enforcement suite proves that a guest is never authorized without an accountable class. These prove the
-// property that only shows up once everything STOPS:
-//
-//	A GUEST CANNOT REMAIN ON THE INTERNET BECAUSE THE PROCESSES THAT WERE SUPPOSED TO REMOVE THEM DIED.
-//
-// Every other mechanism in the system needs something to be running. The plan needs acctd; the teardown needs
-// netd; the revocation needs the database. The kernel lease needs nothing, which is why it is the only thing
-// that can be trusted to end access when everything else has stopped being able to.
-//
-// The second half proves the other end of the same argument: enforcement that is in force but whose durable
-// ACTIVE state was never confirmed must not become permanent either. It is held on a SHORT lease, and if
-// nothing ever proves the promotion it is failed closed rather than renewed forever.
-//
-// These are FAKE-KERNEL tests: nft and tc are modelled, and the fake gate expires leases when time is
-// advanced, exactly as the kernel would with nothing running. They prove orchestration, ordering and
-// arithmetic. They are NOT live evidence, and the real nft timeout behaviour they depend on is proven
-// separately by the disposable-namespace kernel suite (internal/kerneltest).
+// Fake-kernel tests: a guest cannot stay online because the daemons that should remove them died, and an
+// unconfirmed activation never becomes permanent. Real nft timeout behaviour is proven in internal/kerneltest.
 
 import (
 	"errors"
@@ -30,16 +13,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// leasePlan is one entitled session with an optional hard access boundary.
 func leasePlan(gen int64, endsAt *time.Time) shapeplan.Envelope {
 	return envelopeOn([]string{"br-guest"}, gen,
 		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-1", IP: provIP, Bridge: "br-guest",
 			DownKbps: 8000, UpKbps: 3000, Entitled: true, AccessEndsAt: endsAt})
 }
 
-// leasePlanAt is the same plan stamped at a SIMULATED time. These tests move time forward by minutes, and an
-// envelope stamped from the wall clock would be refused as expired long before the property under test is
-// reached — which would make a lease test fail for a reason that has nothing to do with leases.
+// leasePlanAt stamps the plan at simulated time; a wall-clock envelope would be refused as expired.
 func leasePlanAt(gen int64, endsAt *time.Time, now time.Time) shapeplan.Envelope {
 	env := leasePlan(gen, endsAt)
 	env.GeneratedAt = now.UTC()
@@ -59,11 +39,6 @@ func mustConverge(t *testing.T, p *phase3Shaping, env shapeplan.Envelope, now ti
 	return res
 }
 
-// ---- A. the lease is real, bounded, and renewed only by health ---------------
-
-// The gate refuses ttl<=0, so a provisioning that ever asked for a permanent element would fail outright.
-// Asserting the happy path succeeds AND that the lease it asked for is the bounded one is what makes this a
-// statement about the design rather than about the fake.
 func TestLease_AuthorizationIsAlwaysBounded(t *testing.T) {
 	_, g, gens, origins, enf, p := sysSetup()
 	_, _, _ = gens, origins, enf
@@ -85,14 +60,12 @@ func TestLease_AuthorizationIsAlwaysBounded(t *testing.T) {
 			t.Fatalf("lease %v exceeds the documented bound %v", ttl, phase3LeaseTTL)
 		}
 	}
-	// and the settled lease, once durable ACTIVE is proven, is the full one
 	if got := g.leaseOf("br-guest", provIP); got != phase3LeaseTTL {
 		t.Fatalf("settled lease = %v, want %v", got, phase3LeaseTTL)
 	}
 }
 
-// A proven session is admitted on the SHORT provisional lease first and only extended once durable state
-// confirms it. The order matters: it is what makes a crash between the two harmless.
+// Admission is on the short provisional lease first, so a crash before the promotion is harmless.
 func TestLease_ProvisionalFirstThenFullOnProvenActivation(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	mustConverge(t, p, leasePlan(1, nil), time.Now())
@@ -110,42 +83,37 @@ func TestLease_ProvisionalFirstThenFullOnProvenActivation(t *testing.T) {
 	}
 }
 
-// THE CENTRAL PROPERTY. Nothing renews, so the kernel ends the access by itself.
+// Nothing renews, so the kernel ends the access by itself.
 func TestLease_ExpiresWhenNobodyRenews(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
 	mustConverge(t, p, leasePlan(1, nil), time.Now())
 
-	// Everything stops here: no plans, no reconciliation, no database, no daemons. Only the kernel runs.
 	g.advance(phase3LeaseTTL)
 
 	if g.isAuthorized("br-guest", provIP) {
 		t.Fatal("the guest is still authorized after the lease elapsed with nobody renewing it")
 	}
-	// And the tc class is deliberately still there: nothing removed it, because nothing was running. That is
-	// the point — the class is not what ended the access, the lease is.
+	// The tc class must still be there, so the lease is what ended the access.
 	minor, _ := shape.MinorForIP(mustIP(provIP))
 	if !tc.hasForwarding("br-guest", minor) {
 		t.Fatal("the tc class disappeared, which would make this test prove nothing about the lease")
 	}
 }
 
-// The §I timeline, end to end: an ACTIVE guest, then acctd dies, then netd dies, then the entitlement window
-// elapses — with neither daemon ever recovering.
+// Both acctd and netd die and never recover.
 func TestLease_ProducerAndApplierBothDie_AccessStillEnds(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	start := time.Now()
 	ends := start.Add(45 * time.Second)
 	mustConverge(t, p, leasePlan(1, &ends), start)
 
-	// acctd dies: no further plans are ever produced. netd dies: nothing applies anything. The writer is
-	// simply never called again — which is what makes this an honest model of both being gone.
-	g.advance(46 * time.Second) // past the entitlement window
+	g.advance(46 * time.Second) // past the entitlement window; the writer is never called again
 	if g.isAuthorized("br-guest", provIP) {
 		t.Fatal("access outlived the entitlement window with both daemons dead")
 	}
 }
 
-// A lease is clamped by the hard boundary, and renewal re-derives the clamp rather than resetting to full.
+// Renewal re-derives the clamp rather than resetting to a full lease.
 func TestLease_NeverExtendsBeyondTheAccessBoundary(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	start := time.Now()
@@ -155,24 +123,20 @@ func TestLease_NeverExtendsBeyondTheAccessBoundary(t *testing.T) {
 	if got := g.leaseOf("br-guest", provIP); got > 20*time.Second {
 		t.Fatalf("lease %v reaches past the access boundary at +20s", got)
 	}
-	// Ten seconds later a healthy pass renews. The renewal must be for the REMAINING ten, not a fresh full
-	// lease: otherwise every reconciliation would quietly push the guest's deadline further away, and a
-	// long-lived session would never reach it at all.
+	// The renewal must be for the remaining ten seconds, not a fresh full lease.
 	at := start.Add(10 * time.Second)
 	g.advance(10 * time.Second)
 	mustConverge(t, p, leasePlan(2, &ends), at)
 	if got := g.leaseOf("br-guest", provIP); got > 10*time.Second {
 		t.Fatalf("renewal extended the lease to %v, past the boundary that is now only 10s away", got)
 	}
-	// and after the boundary, nothing keeps it alive
 	g.advance(11 * time.Second)
 	if g.isAuthorized("br-guest", provIP) {
 		t.Fatal("the guest is still authorized past their entitlement window")
 	}
 }
 
-// An entitlement that has ALREADY expired is never leased, even though the plan still lists the session (the
-// producer derives from durable state; the expiry sweep runs on its own schedule).
+// The plan may still list a session whose entitlement already expired; it is never leased.
 func TestLease_AlreadyExpiredEntitlementIsNeverAuthorized(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
 	now := time.Now()
@@ -190,7 +154,7 @@ func TestLease_AlreadyExpiredEntitlementIsNeverAuthorized(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// A session already online whose boundary passes is DENIED on the next pass, not merely left to expire.
+// Denied on the next pass, not merely left to expire.
 func TestLease_BoundaryPassingRevokesOnTheNextPass(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
 	start := time.Now()
@@ -212,8 +176,7 @@ func TestLease_BoundaryPassingRevokesOnTheNextPass(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// Renewal refreshes ONE element. A renewal that added a second would be a leak that grows with uptime, and a
-// stray sweep would then find and remove an element that a live guest depends on.
+// Renewal refreshes one element; a second would leak with uptime.
 func TestLease_RenewalDoesNotDuplicateTheElement(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	now := time.Now()
@@ -231,9 +194,7 @@ func TestLease_RenewalDoesNotDuplicateTheElement(t *testing.T) {
 	}
 }
 
-// A healthy pass over an unchanged session does NOT rewrite the kernel every tick. This is a cost property,
-// but it is a correctness one too: an nft transaction per guest per second on a busy property is how a
-// renewal mechanism becomes the thing that takes the appliance down.
+// A healthy pass over an unchanged session must not rewrite the kernel every tick.
 func TestLease_SteadyStateDoesNotRewriteTheKernelEveryPass(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	now := time.Now()
@@ -251,8 +212,7 @@ func TestLease_SteadyStateDoesNotRewriteTheKernelEveryPass(t *testing.T) {
 	}
 }
 
-// A REBOOT flushes nftables. The first plan afterwards must re-establish exactly the access that is still
-// valid — and nothing else.
+// A reboot flushes nftables; the first plan afterwards re-establishes only still-valid access.
 func TestLease_RebootReestablishesOnlyCurrentlyValidAccess(t *testing.T) {
 	tc, _, gens, origins, enf, p := sysSetup()
 	start := time.Now()
@@ -267,8 +227,7 @@ func TestLease_RebootReestablishesOnlyCurrentlyValidAccess(t *testing.T) {
 		t.Fatalf("plan refused: %v", err)
 	}
 
-	// REBOOT: the ruleset is regenerated (the Phase-3 set comes back EMPTY) and tc is gone with it. A fresh
-	// writer with a new boot id is what netd is after a restart.
+	// Reboot: the Phase-3 set comes back empty and tc is gone.
 	g2 := newFakeGate()
 	tc2 := newFakeTC()
 	p2 := sysWriter(tc2, g2, gens, origins, enf)
@@ -290,13 +249,11 @@ func TestLease_RebootReestablishesOnlyCurrentlyValidAccess(t *testing.T) {
 	_ = tc
 }
 
-// A stale plan cannot preserve access. netd reports ACTIVE_STALE, and the kernel enforces what that means.
 func TestLease_StalePlanCannotPreserveAccessIndefinitely(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	start := time.Now()
 	mustConverge(t, p, leasePlan(1, nil), start)
 
-	// The producer goes quiet. The plan expires; nothing replaces it.
 	late := start.Add(2 * time.Minute)
 	if state, _ := p.shapingState(late); state != shapingStale {
 		t.Fatalf("health = %s, want %s once the plan has expired without a replacement", state, shapingStale)
@@ -307,10 +264,7 @@ func TestLease_StalePlanCannotPreserveAccessIndefinitely(t *testing.T) {
 	}
 }
 
-// ---- B. an unconfirmed durable activation never becomes permanent access -----
-
-// The commit LANDED and the acknowledgement was lost. The re-read proves it, exactly one Session is active,
-// and the guest gets the full lease. This is the case that must NOT be treated as failure.
+// The commit landed but the ack was lost: the re-read proves it and this must not count as failure.
 func TestActivation_CommitLandsButAckIsLost_ConvergesWithoutASecondGrant(t *testing.T) {
 	_, g, _, _, enf, p := sysSetup()
 	enf.commitThenLoseAck["live-1"] = true
@@ -333,7 +287,7 @@ func TestActivation_CommitLandsButAckIsLost_ConvergesWithoutASecondGrant(t *test
 	}
 }
 
-// The transaction GENUINELY failed and state is unreadable. The guest keeps only the provisional lease.
+// The transaction failed and state is unreadable: only the provisional lease.
 func TestActivation_UnprovableActivationHoldsOnlyTheProvisionalLease(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	enf.err = errors.New("could not begin transaction")
@@ -355,11 +309,10 @@ func TestActivation_UnprovableActivationHoldsOnlyTheProvisionalLease(t *testing.
 				ttl, phase3ProvisionalLease)
 		}
 	}
-	// It is still accountable while it holds that lease — this is a bounded provisional state, not a bypass.
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// AND IT EXPIRES. netd dies while the activation is unproven; nothing else ever runs.
+// netd dies while the activation is unproven; the lease expires in the kernel.
 func TestActivation_UnprovenAndAbandoned_ExpiresInTheKernel(t *testing.T) {
 	_, g, _, _, enf, p := sysSetup()
 	enf.err = errors.New("database down")
@@ -376,8 +329,7 @@ func TestActivation_UnprovenAndAbandoned_ExpiresInTheKernel(t *testing.T) {
 	}
 }
 
-// AND IF NETD KEEPS RUNNING, the provisional state is still not allowed to become permanent: past the grace
-// the session is failed closed — packet authorization denied first, then the class torn down.
+// If netd keeps running, past the grace the session fails closed: deny first, then tear down.
 func TestActivation_ProvisionalStateIsNotRenewedForever(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	enf.err = errors.New("database down")
@@ -387,8 +339,7 @@ func TestActivation_ProvisionalStateIsNotRenewedForever(t *testing.T) {
 		t.Fatalf("plan refused: %v", err)
 	}
 
-	// Passes keep arriving and the database stays down. The MONOTONIC security clock advances with them —
-	// that clock, not the wall clock, is what the activation bound is measured against.
+	// The monotonic security clock, not the wall clock, measures the activation bound.
 	at := start
 	for i := int64(2); i <= 8; i++ {
 		at = at.Add(10 * time.Second)
@@ -407,12 +358,10 @@ func TestActivation_ProvisionalStateIsNotRenewedForever(t *testing.T) {
 	if tc.countForwarding() != 0 {
 		t.Fatal("packet authorization was denied but the class was left classifying")
 	}
-	// deny BEFORE teardown, as everywhere else
 	assertDenyBeforeTeardown(t, g)
 }
 
-// A guest whose activation could not be proven must not be told they are connected. The Session stays
-// PENDING_ENFORCEMENT, which is exactly what scd's grant waits on.
+// The Session stays PENDING_ENFORCEMENT, which scd's grant waits on.
 func TestActivation_UnprovenSessionIsNeverReportedActive(t *testing.T) {
 	_, _, _, _, enf, p := sysSetup()
 	enf.err = errors.New("database down")
@@ -425,8 +374,7 @@ func TestActivation_UnprovenSessionIsNeverReportedActive(t *testing.T) {
 	}
 }
 
-// Recovery: the database comes back inside the grace, the promotion lands, and the guest is extended to a
-// full lease without ever having been disconnected.
+// Recovery inside the grace extends to a full lease without a disconnect.
 func TestActivation_RecoveryInsideTheGraceRestoresTheFullLease(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	enf.err = errors.New("database down")
@@ -458,7 +406,6 @@ func TestActivation_RecoveryInsideTheGraceRestoresTheFullLease(t *testing.T) {
 	}
 }
 
-// Repeated ambiguity must converge on exactly ONE active session, never a second grant.
 func TestActivation_RepeatedAmbiguityYieldsExactlyOneActiveSession(t *testing.T) {
 	_, _, _, _, enf, p := sysSetup()
 	enf.commitThenLoseAck["live-1"] = true
@@ -471,15 +418,12 @@ func TestActivation_RepeatedAmbiguityYieldsExactlyOneActiveSession(t *testing.T)
 	if enf.sessionState("live-1") != "active" {
 		t.Fatal("the session never converged to active")
 	}
-	// the first pass commits (and loses the ack); every later pass finds it already active via the re-read or
-	// the idempotent promotion, and neither creates anything new
 	if n := enf.activateCount(); n > 5 {
 		t.Fatalf("%d activation attempts across 5 passes", n)
 	}
 }
 
-// assertDenyBeforeTeardown checks the gate saw a revoke — the fail-closed order is asserted in detail by the
-// enforcement suite; here it only has to have happened.
+// The detailed fail-closed order is asserted by the enforcement suite; here a revoke only has to have happened.
 func assertDenyBeforeTeardown(t *testing.T, g *fakeGate) {
 	t.Helper()
 	for _, c := range g.callLog() {
@@ -492,22 +436,14 @@ func assertDenyBeforeTeardown(t *testing.T, g *fakeGate) {
 
 func mustIP(s string) net.IP { return net.ParseIP(s) }
 
-// advanceSecurityClock moves the MONOTONIC clock the activation bound is measured against. Tests that let
-// wall time pass must move this too, because the bound deliberately ignores the wall clock.
+// The activation bound ignores the wall clock, so tests that let wall time pass must also move this.
 func advanceSecurityClock(p *phase3Shaping, d time.Duration) {
 	if c, ok := p.secClock.(*fixedSecurityClock); ok {
 		c.ms += d.Milliseconds()
 	}
 }
 
-// ---- A. the hard boundary, at every timestamp precision ---------------------
-//
-// nft's element timeout granularity is whole seconds, so every boundary that does not land exactly on a
-// second has to be resolved somehow, and only one direction is safe. Rounding up would let a lease clamped to
-// a business deadline expire PAST that deadline — by up to 999ms, on almost every real boundary, silently.
-//
-// These pin the resolution at each precision the instruction named.
-
+// nft timeouts are whole seconds; only rounding down keeps the lease within the boundary.
 func TestLease_BoundaryIsNeverExceededAtAnyPrecision(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -542,7 +478,6 @@ func TestLease_BoundaryIsNeverExceededAtAnyPrecision(t *testing.T) {
 			if got != tc.wantLease {
 				t.Fatalf("lease = %v, want %v", got, tc.wantLease)
 			}
-			// THE INVARIANT, stated directly: the kernel expiry may never be later than the boundary.
 			if now.Add(got).After(ends) {
 				t.Fatalf("a %v lease against %v remaining expires %v PAST the hard boundary",
 					got, tc.remaining, now.Add(got).Sub(ends))
@@ -551,8 +486,6 @@ func TestLease_BoundaryIsNeverExceededAtAnyPrecision(t *testing.T) {
 	}
 }
 
-// A session with NO wall-clock boundary keeps the ordinary 90-second lease. None of the clamping applies to
-// it, and this is here so a future change to the clamp cannot quietly shorten every ordinary guest's lease.
 func TestLease_NoBoundaryKeepsTheOrdinaryLease(t *testing.T) {
 	got, ok, _ := leaseFor(shapeplan.Session{}, time.Now())
 	if !ok || got != phase3LeaseTTL {
@@ -560,13 +493,11 @@ func TestLease_NoBoundaryKeepsTheOrdinaryLease(t *testing.T) {
 	}
 }
 
-// REPEATED RENEWAL APPROACHING THE BOUNDARY. Every pass re-derives the clamp, so the installed expiry walks
-// down to the boundary and stops there — it never steps over it, and the guest is denied for the final
-// sub-second remainder rather than being given one more whole second.
+// Every pass re-derives the clamp, so the expiry walks down to the boundary and never steps over it.
 func TestLease_RepeatedRenewalWalksDownToTheBoundaryAndStops(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	start := time.Now()
-	// A deliberately "awkward" boundary: not a whole number of seconds from any pass.
+	// Not a whole number of seconds from any pass.
 	ends := start.Add(6300 * time.Millisecond)
 	mustConverge(t, p, leasePlanAt(1, &ends, start), start)
 
@@ -583,7 +514,6 @@ func TestLease_RepeatedRenewalWalksDownToTheBoundaryAndStops(t *testing.T) {
 				t.Fatalf("pass %d installed a lease expiring %v past the boundary", i, expiry.Sub(ends))
 			}
 		}
-		// past the boundary the session must be refused outright
 		if !at.Before(ends) && !res.Degraded {
 			t.Fatalf("pass %d past the boundary reported a clean convergence", i)
 		}
@@ -594,15 +524,14 @@ func TestLease_RepeatedRenewalWalksDownToTheBoundaryAndStops(t *testing.T) {
 	}
 }
 
-// RESTART IMMEDIATELY BEFORE THE BOUNDARY. A fresh netd must not treat a nearly-expired entitlement as a new
-// full-length grant: it re-derives the clamp from the same durable boundary the plan carries.
+// A fresh netd must re-derive the clamp, not treat a nearly-expired entitlement as a full grant.
 func TestLease_RestartImmediatelyBeforeTheBoundaryDoesNotExtendIt(t *testing.T) {
 	_, _, gens, origins, enf, p := sysSetup()
 	start := time.Now()
 	ends := start.Add(30 * time.Second)
 	mustConverge(t, p, leasePlanAt(1, &ends, start), start)
 
-	// RESTART, 1.4 seconds before the boundary. The kernel kept its state; netd lost its memory of it.
+	// Restart 1.4s before the boundary; the kernel kept its state, netd lost its memory.
 	at := ends.Add(-1400 * time.Millisecond)
 	tc2, g2 := newFakeTC(), newFakeGate()
 	p2 := sysWriter(tc2, g2, gens, origins, enf)

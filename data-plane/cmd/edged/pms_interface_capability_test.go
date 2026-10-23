@@ -1,25 +1,14 @@
 package main
 
-// THE CANONICAL PMS INTERFACE ONLY OFFERS WHAT pmsd CAN ACTUALLY RUN.
-//
-// These are unit tests on the authoring contract rather than HTTP tests, because the properties being
-// asserted live in the allowlist and the validator — the two things a request has to get past — and proving
-// them there covers every caller, not just the one a handler test would exercise.
-//
-// pmsd already refuses an unsupported kind: it declares supportedConnectorKinds and Revision.Validate
-// returns REVISION_INVALID for anything else. What these assert is that the unsupported configuration
-// cannot be AUTHORED — so an operator never creates, configures and publishes an Interface only to have the
-// connector reject it at the last step. Hiding the option in the dropdown alone would leave it reachable
-// from a script, a restored fixture, or the next screen somebody writes.
+// The authoring allowlist and validator offer only what pmsd can run, so an unsupported configuration cannot
+// be authored (hiding it in the UI alone would leave it reachable from a script).
 
 import (
 	"strings"
 	"testing"
 )
 
-// The authoring allowlist is EXACTLY the set pmsd runs: both derive from the provider registry. When this
-// test was written that set was {protel-fias}; pmsd now runs polled REST adapters for Mews, Apaleo and OPERA
-// Cloud (internal/pmsd/adapter_rest.go), so they are offered -- and nothing pmsd cannot run is.
+// The authoring allowlist is exactly the set pmsd runs; both derive from the provider registry.
 func TestPMSAllowedKinds_OnlyTheConnectorPMSDCanRun(t *testing.T) {
 	want := map[string]bool{"protel-fias": true, "mews": true, "apaleo": true, "opera-cloud": true}
 	if len(pmsAllowedKinds) != len(want) {
@@ -30,8 +19,7 @@ func TestPMSAllowedKinds_OnlyTheConnectorPMSDCanRun(t *testing.T) {
 			t.Fatalf("%q missing from the authoring allowlist", k)
 		}
 	}
-	// Named individually so that re-adding any one of them fails loudly rather than slipping in with a map
-	// literal edit. These are legacy scd kinds with no pmsd adapter; their old implementations are untouched.
+	// Legacy scd kinds with no pmsd adapter, named individually so re-adding any one fails loudly.
 	for _, unsupported := range []string{"opera-fias", "fidelio-fias", "stub"} {
 		if pmsAllowedKinds[unsupported] {
 			t.Fatalf("%q is offered as a canonical PMS Interface but pmsd does not support it: the revision "+
@@ -40,8 +28,7 @@ func TestPMSAllowedKinds_OnlyTheConnectorPMSDCanRun(t *testing.T) {
 	}
 }
 
-// A new revision is authored UNSET and cannot be talked into a posting target from a form: RESERVATION is
-// recorded only by financial onboarding (Phase-0 Amendment A1), and a legacy folio strategy is no value at all.
+// A new revision is authored unset; RESERVATION is recorded only by financial onboarding, and a legacy folio strategy is invalid.
 func TestValidateRevisionConfig_ForcesUnsetFolioIdentity(t *testing.T) {
 	for _, strategy := range []string{"RESERVATION", "GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"} {
 		in := validRevisionReq()
@@ -52,7 +39,7 @@ func TestValidateRevisionConfig_ForcesUnsetFolioIdentity(t *testing.T) {
 			t.Fatalf("the refusal must name the required value, got %v", err)
 		}
 	}
-	// Omitted entirely is the normal case from the form, and must default rather than fail.
+	// Omitted entirely must default rather than fail.
 	in := validRevisionReq()
 	in.PostingTargetModel = ""
 	if _, err := validateRevisionConfig(in); err != nil {
@@ -63,7 +50,7 @@ func TestValidateRevisionConfig_ForcesUnsetFolioIdentity(t *testing.T) {
 	}
 }
 
-// Values the implementation controls are stamped, and anything the caller sent for them is discarded.
+// Implementation-controlled values are stamped; caller-sent values are discarded.
 func TestValidateRevisionConfig_StampsImplementationControlledValues(t *testing.T) {
 	in := validRevisionReq()
 	in.NormalizationVersion = 99 // a number no build implements
@@ -85,8 +72,7 @@ func TestValidateRevisionConfig_StampsImplementationControlledValues(t *testing.
 	}
 }
 
-// The supported link is unauthenticated, so NONE is the only truthful credential mode. An interface saved as
-// AUTH_KEY waits for a secret that will never exist and never connects.
+// The supported link is unauthenticated, so NONE is the only valid credential mode (AUTH_KEY would never connect).
 func TestValidateRevisionConfig_CredentialModeFollowsTheConnector(t *testing.T) {
 	in := validRevisionReq()
 	in.CredentialMode = "AUTH_KEY"
@@ -104,7 +90,7 @@ func TestValidateRevisionConfig_CredentialModeFollowsTheConnector(t *testing.T) 
 	}
 }
 
-// Read-only stays fixed: an explicit false is still refused, so the default is a convenience and not a hole.
+// Read-only stays fixed: an explicit false is refused.
 func TestValidateRevisionConfig_ReadOnlyCannotBeTurnedOff(t *testing.T) {
 	in := validRevisionReq()
 	writable := false
@@ -114,7 +100,6 @@ func TestValidateRevisionConfig_ReadOnlyCannotBeTurnedOff(t *testing.T) {
 	}
 }
 
-// The genuinely site-specific fields are still the operator's, and are still validated.
 func TestValidateRevisionConfig_KeepsOperatorFieldsConfigurable(t *testing.T) {
 	in := validRevisionReq()
 	in.Endpoint = "pms.example.local:5010"
@@ -134,7 +119,7 @@ func TestValidateRevisionConfig_KeepsOperatorFieldsConfigurable(t *testing.T) {
 	}
 }
 
-// validRevisionReq is the shape the form now submits: endpoint, timezone, timeouts and currency only.
+// validRevisionReq is the shape the form submits: endpoint, timezone, timeouts and currency only.
 func validRevisionReq() *authorRevisionReq {
 	return &authorRevisionReq{
 		Endpoint:            "150.0.0.18:5003",

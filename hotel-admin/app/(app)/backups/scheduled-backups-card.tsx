@@ -1,12 +1,5 @@
 "use client";
 
-// SCHEDULED BACKUPS, MANUAL BACKUPS AND THE EARLIER BACKUPS (GDPR final mission: one backup system).
-//
-// There is one backup engine on the appliance: every backup is encrypted to the hotel's key holders, loaded into a scratch database
-// to prove it restores, and kept with a note of why it was taken. Scheduled backups are OFF until an administrator switches them
-// on here; what a restore, a migration or a deployment take first does not depend on that switch. The backups the retired nightly
-// job and the older on-demand dumps left behind are listed as earlier backups and are removed only by an administrator.
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type BackupSettings } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";

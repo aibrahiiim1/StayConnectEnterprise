@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
-// D-H: how long usage detail is kept -- 365 days by default (0131), Unlimited or a number of days only with a
-// reason and the password, and nothing offered to a role that cannot change it.
-
 const get = vi.fn();
 const put = vi.fn();
 vi.mock("@/lib/api", async () => {

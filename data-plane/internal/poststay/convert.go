@@ -1,20 +1,10 @@
 package poststay
 
-// THE ZERO-PRICE POST-STAY CONVERSION.
-//
-// This is the only place in Phase 5 that grants access, and the whole of its financial behaviour is a
-// refusal. Post-Stay v1 grants INCLUDED package revisions only: a revision carrying a price, or requiring any
-// settlement method other than NOT_REQUIRED, is refused with ErrSettlementRequired. It is refused rather than
-// granted-for-free deliberately — silently giving away a paid package would be a financial event nobody
-// authorized, and it would be invisible precisely because no money moved.
-//
-// Nothing here allocates a P#, writes an outbox row, contacts a PMS or touches a payment provider. The Stay
-// moves CHECKED_OUT -> POST_STAY_ACTIVE, which the database's own posting_only_in_house CHECK makes
-// permanently unable to post.
-//
-// It is ONE transaction, in the approved lock order (L1 Stay -> L2 context -> L3 entitlement): the auth
-// context is consumed, the Purchase and Entitlement are created, and the Stay is converted, or none of it
-// happens. A guest never ends up with a consumed context and no access.
+// Zero-price post-stay conversion. Only INCLUDED package revisions are granted; a priced revision or any
+// settlement method other than NOT_REQUIRED is refused (ErrSettlementRequired) rather than given away free.
+// No PMS or payment traffic: the Stay moves CHECKED_OUT -> POST_STAY_ACTIVE, which posting_only_in_house
+// keeps unable to post. It is one transaction in lock order L1 Stay -> L2 context -> L3 entitlement, so a
+// guest never ends up with a consumed context and no access.
 
 import (
 	"context"
@@ -28,20 +18,17 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// ConvertRequest is a post-stay purchase. The subject comes from the CONSUMED auth context, never from the
-// caller: a caller that could name the profile could convert someone else's.
+// ConvertRequest's subject comes from the consumed auth context, never the caller; a caller naming the
+// profile could convert someone else's.
 type ConvertRequest struct {
 	Tenant, Site string
-	// Context is the one-time POST_STAY_PIN auth context id, and Presenter is the device/network it was
-	// pinned to. Consuming it re-verifies the episode, so a reinstatement between authentication and purchase
-	// invalidates the whole conversion.
-	Context   string
-	Presenter authctx.Presenter
-	// PackageRevision is the POST_STAY package revision to grant. It must be zero-price.
+	// Context is the one-time POST_STAY_PIN auth context; consuming it re-verifies the episode, so a
+	// reinstatement in between invalidates the conversion.
+	Context         string
+	Presenter       authctx.Presenter
 	PackageRevision string
 }
 
-// Converted is the result of a successful conversion.
 type Converted struct {
 	Profile     string
 	Stay        string
@@ -50,7 +37,6 @@ type Converted struct {
 	WindowEnds  time.Time
 }
 
-// Convert consumes the post-stay auth context and grants the zero-price POST_STAY package in one transaction.
 func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Store) (Converted, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -67,30 +53,23 @@ func (s *Store) Convert(ctx context.Context, req ConvertRequest, ac *authctx.Sto
 	return out, nil
 }
 
-// ConvertTx is Convert inside the caller's transaction, so the guest-facing conversion can open the device's
-// session in the SAME commit -- exactly as the room grant does (staygrant.GrantTx then openSessionTx). A
-// conversion that committed without a session would be an entitlement the guest cannot use, behind a consumed
-// one-time context they cannot present again.
-//
-// No package is no grant: an empty PackageRevision is refused here as not grantable, before anything is
-// consumed. The guest chooses from GrantableOffers, which the PIN verification returns.
+// ConvertTx runs inside the caller's transaction so the device's session opens in the same commit; a
+// conversion without a session would strand the guest behind a consumed one-time context. An empty
+// PackageRevision is refused before anything is consumed.
 func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac *authctx.Store) (Converted, error) {
 	if req.PackageRevision == "" {
 		return Converted{}, ErrPackageNotGrantable
 	}
-	// (L1/L2) Consume the context. This locks the origin Stay and re-asserts the episode before flipping the
-	// context to consumed, so everything below is serialized against Checkout and Reinstatement.
+	// Consuming locks the origin Stay and re-asserts the episode, serializing the rest against Checkout and Reinstatement.
 	consumed, err := ac.ConsumeTx(ctx, tx, req.Context, req.Presenter)
 	if err != nil {
 		return Converted{}, err
 	}
 	if consumed.Method != "POST_STAY_PIN" || consumed.PostStayProfile == "" {
-		// A context of another method is not a post-stay authorization, however valid it is in its own right.
 		return Converted{}, authctx.ErrContextInvalid
 	}
 
-	// The package must be a currently-visible POST_STAY revision in this scope, and it must be free. Both are
-	// read INSIDE the transaction so a revision published a moment ago cannot change underneath the grant.
+	// Must be a current, free POST_STAY revision in this scope, read inside the transaction so it cannot change under the grant.
 	var priceMinor int64
 	var settlement []string
 	var planRevision string
@@ -111,12 +90,10 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		return Converted{}, err
 	}
 	if priceMinor != 0 || !onlyNotRequired(settlement) {
-		// The refusal that keeps Phase 5 out of the financial system. Granting it free instead would be a
-		// giveaway nobody authorized; charging for it would be financial traffic this phase must not perform.
+		// Never grant a priced package free, and never charge for it here.
 		return Converted{}, ErrSettlementRequired
 	}
 
-	// Resolve the origin Stay from the PROFILE. The caller never names it.
 	var stay string
 	var lifecycleVersion int
 	if err := tx.QueryRow(ctx, `SELECT psp.origin_stay_id::text, psp.origin_lifecycle_version
@@ -126,9 +103,7 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		return Converted{}, err
 	}
 
-	// One conversion per episode. The partial unique index on entitlements already permits only one live
-	// entitlement per Stay, but this refusal is explicit so a second attempt gets an answer it can act on
-	// rather than a constraint violation.
+	// One conversion per episode; explicit so a second attempt gets an actionable answer, not a constraint violation.
 	var existing int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements e
 		JOIN iam_v2.purchases pu ON pu.tenant_id=e.tenant_id AND pu.site_id=e.site_id AND pu.id=e.purchase_id
@@ -144,13 +119,9 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		return Converted{}, err
 	}
 	var purchase string
-	// amount_minor is written as a literal 0 rather than from the revision: this path grants free access and
-	// nothing else, so the row cannot carry an amount even if a revision were mis-priced.
-	//
-	// auth_context_id records WHICH sign-in acquired it -- the consumed POST_STAY_PIN context, issued to the
-	// presenting device. It is the acquisition chain session activation reads (entitlement -> purchase ->
-	// auth context -> device) to know which device the entitlement belongs to; without it the device that
-	// converted could never be admitted again after its first session ended.
+	// amount_minor is a literal 0, not read from the revision, so a mis-priced revision cannot carry an amount.
+	// auth_context_id is the acquisition chain session activation follows to find the entitlement's device;
+	// without it that device could not be readmitted after its first session.
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id, site_id, package_revision_id, stay_id, auth_context_id, trigger, amount_minor, state)
 		VALUES ($1,$2,$3,$4,$5::uuid,'POST_STAY_CONVERSION',0,'GRANTED')
@@ -172,22 +143,18 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		window.Seconds()).Scan(&entitlement, &windowEnds); err != nil {
 		return Converted{}, err
 	}
-	// The status is moved through the APPROVED operation, which writes the history the coherence trigger
-	// requires. Writing 'ACTIVE' directly would leave a status no transition backs.
+	// Use the approved transition, which writes the history the coherence trigger requires.
 	if _, err := tx.Exec(ctx,
 		`SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now(),NULL)`, entitlement); err != nil {
 		return Converted{}, err
 	}
-	// The presenting device is admitted to the entitlement through the controlled operation, as the room grant
-	// admits its device: a session may only exist for a device holding an AUTHORIZED binding (the database
-	// refuses the insert otherwise), and the plan's device limit is enforced here under the entitlement lock.
+	// A session needs an AUTHORIZED device binding; the plan's device limit is enforced here under the entitlement lock.
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`,
 		entitlement, req.Presenter.Device); err != nil {
 		return Converted{}, err
 	}
 
-	// The Stay conversion, last, while its lock is still held. posting_allowed is already false after
-	// checkout and the posting_only_in_house CHECK keeps it that way for POST_STAY_ACTIVE.
+	// Convert the Stay last, while its lock is held.
 	if err := writerguard.Open(ctx, tx, "stay"); err != nil {
 		return Converted{}, err
 	}
@@ -200,7 +167,7 @@ func (s *Store) ConvertTx(ctx context.Context, tx pgx.Tx, req ConvertRequest, ac
 		return Converted{}, err
 	}
 	if ct.RowsAffected() == 0 {
-		// The Stay left the episode between consumption and here, or was never checked out. Fail closed.
+		// The Stay left the episode since consumption, or was never checked out: fail closed.
 		return Converted{}, ErrNotAuthenticable
 	}
 	return Converted{Profile: consumed.PostStayProfile, Stay: stay, Purchase: purchase,
@@ -219,7 +186,6 @@ func onlyNotRequired(methods []string) bool {
 	return true
 }
 
-// Offer is one package a verified post-stay guest may convert to.
 type Offer struct {
 	PackageRevisionID string `json:"package_revision_id"`
 	Code              string `json:"code"`
@@ -227,10 +193,7 @@ type Offer struct {
 	UpKbps            int    `json:"up_kbps"`
 }
 
-// GrantableOffers lists what ConvertTx would grant on this site: the CURRENT revision of an active POST_STAY
-// package, zero-price and taken only with NOT_REQUIRED. It is the same predicate ConvertTx applies, so an
-// offer shown to the guest is one the conversion accepts, and a priced post-stay package is never offered
-// (ConvertTx would refuse it with ErrSettlementRequired).
+// GrantableOffers uses the same predicate as ConvertTx, so every offer shown is one the conversion accepts.
 func (s *Store) GrantableOffers(ctx context.Context, tenant, site string) ([]Offer, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT ipr.id::text, ip.code, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0)
@@ -260,9 +223,7 @@ func (s *Store) GrantableOffers(ctx context.Context, tenant, site string) ([]Off
 	return out, rows.Err()
 }
 
-// windowFromPolicy reads the revision's duration policy. An absent or malformed policy yields a SHORT
-// conservative window rather than a long one: the failure direction for "how long does this free access last"
-// must be too little, never too much.
+// windowFromPolicy falls back to a short window on an absent or malformed policy: free access must fail short, never long.
 func windowFromPolicy(raw []byte) time.Duration {
 	const fallback = 60 * time.Minute
 	var p struct {

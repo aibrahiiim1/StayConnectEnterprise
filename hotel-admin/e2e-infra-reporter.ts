@@ -1,29 +1,7 @@
 import type { Reporter, TestCase, TestResult, FullResult } from "@playwright/test/reporter";
 
-/**
- * Report a dead dev server ONCE, as infrastructure, instead of as N product regressions.
- *
- * THE FAILURE THIS EXISTS FOR. The suite runs `workers: 1`, `fullyParallel: false`, `retries: 0`, against a
- * `next dev` server Playwright starts. Playwright waits for that server once, at startup, and never checks
- * it again. If it dies mid-run -- an out-of-memory kill during an on-demand compile is the usual way -- every
- * remaining spec still executes, each navigation burns up to `navigationTimeout` (90s) and then fails with
- * ERR_CONNECTION_REFUSED, and the report is a wall of red assertions that is indistinguishable from a mass
- * product regression.
- *
- * That is not a hypothetical: it produced a 20-failed run on a workstation during the PR #108 delivery and
- * sent a developer looking for a UI bug that did not exist. The correct reading -- "the server died, none of
- * these results mean anything" -- was recoverable only by scrolling to the first failure and noticing the
- * error was a connection error rather than an assertion.
- *
- * MEASURED HONESTLY: this never caused a CI failure. Across the 34 gate attempts of PRs #108/#109 the
- * E2E-INFRASTRUCTURE category was ZERO. This is a local-time and diagnosis-quality fix, and a guard against
- * a class of failure that would be extremely expensive to misread on a runner.
- *
- * WHAT IT DOES NOT DO. It does not convert failures into passes, does not retry, and does not change the exit
- * status. A run with infrastructure death still FAILS. It only makes the report say the true thing.
- */
+/** Report a dead dev server once as infrastructure failure while preserving the failed exit status. */
 
-/** Signatures that mean "nothing was listening", never "the product is wrong". */
 const INFRA_SIGNATURES = [
   "ERR_CONNECTION_REFUSED",
   "ECONNREFUSED",

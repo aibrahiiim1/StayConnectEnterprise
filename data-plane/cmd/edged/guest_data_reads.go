@@ -1,30 +1,10 @@
 package main
 
-// WHO LOOKED AT A GUEST (GDPR remediation plan F8, decision D-F8).
-//
-// Changes to guest data were already audited; reading it was not. Two kinds of read are recorded now, the level
-// the standards ask for (accountability, Art. 5(2) and 32; OWASP ASVS V7 "log access to sensitive data"):
-//
-//   - guest_data.viewed:   opening ONE guest's record -- a client account, a device, a session, a stay, a sign-in
-//                          attempt, one stay's or one device's usage, a post-stay profile;
-//   - guest_data.searched: every search of a guest list, with the text searched for.
-//
-// Browsing a list without a search is not recorded: it names no one in particular, and recording it would bury
-// the entries that matter.
-//
-// THE PAGE NEVER WAITS. The request hands the entry to a queue and returns; one background writer drains it.
-// If the queue is ever full the entry is dropped with a warning rather than slowing the console.
-//
-// TWO THINGS KEEP THE LOG READABLE, both decided on the server so no screen can get them wrong:
-//   - a search typed letter by letter ("J", "Jo", "Joh", "John") is ONE entry: a search waits briefly, and a
-//     newer search by the same person in the same list that extends or shortens it replaces it;
-//   - the same read repeated (a list refreshing itself every 10 seconds, a record opened twice) is recorded once
-//     per repeatWindow.
-//
-// Each entry carries the time of the read itself, not of the write.
-//
-// Erasure (0128) and retention (0127) already cover these entries: a detail read is stored with the record's id
-// as its target, and a search's text is in its payload, both of which they find and anonymise.
+// Records who opened one guest's record (guest_data.viewed) or searched a guest list (guest_data.searched).
+// Plain list browsing is not recorded. Entries go to a queue so the request never waits.
+// Typed-letter searches collapse into one entry and repeated reads are recorded once per repeatWindow, decided
+// server-side. A detail read's target is the record id and a search's text is in the payload, so erasure and
+// retention find and anonymise both.
 
 import (
 	"context"
@@ -38,8 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// guestRead says what one route reveals. A route with idParams is a detail read; one with searchHeaders or
-// searchQuery is a list that is recorded only when it was searched.
+// guestRead: a route with idParams is a detail read; one with searchHeaders or searchQuery is a list recorded only when searched.
 type guestRead struct {
 	targetType    string
 	idParams      []string // URL parameters naming the record; the first is the target id
@@ -47,9 +26,8 @@ type guestRead struct {
 	searchQuery   []string // query parameters that narrow the list to someone
 }
 
-// guestDataReads is every route that shows guest data, by its full pattern as chi.Context.RoutePattern reports
-// it (so a list mounted at "/" has no trailing slash). guest-signin-credentials is not
-// here: revealing what a guest typed is already audited by its handler, with the password step-up.
+// guestDataReads lists every route that shows guest data, by the pattern chi.Context.RoutePattern reports (a list mounted
+// at "/" has no trailing slash). guest-signin-credentials is audited by its own handler.
 var guestDataReads = map[string]guestRead{
 	"/edge/v1/guest-accounts/{id}":                 {targetType: "client_account", idParams: []string{"id"}},
 	"/edge/v1/guest-accounts/{id}/manage":          {targetType: "client_account", idParams: []string{"id"}},
@@ -111,7 +89,7 @@ func newReadRecorder(write func(context.Context, readEntry) error) *readRecorder
 }
 
 // record hands the entry to the writer. When the queue is full it writes the entry itself rather than drop it
-// (D-F8 records every search): the response has already gone, so only this rare request waits for the write.
+// (every search must be recorded): the response has already gone, so only this rare request waits for the write.
 func (rr *readRecorder) record(e readEntry) {
 	select {
 	case rr.in <- e:

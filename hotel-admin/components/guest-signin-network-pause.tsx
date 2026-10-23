@@ -1,13 +1,7 @@
 "use client";
 
-// THE NETWORK PAUSE (migration 0136; GDPR audit A4).
-//
-// The device rule (GuestSignInProtectionCard) is defeated by a device that keeps changing its address, so many
-// wrong room sign-ins on one client network pause Room sign-in there. Two parts here:
-//
-//   - NetworkPauseSettingsCard: the three numbers, changed with a reason and the password, like the device rule;
-//   - NetworkPausesNotice: the alert while a pause runs, with the two things staff can do about it — let a
-//     genuine client's device try again, or end the pause when it is a false alarm. Neither signs anyone in.
+// Network pauses limit room-sign-in guessing even when a device changes its address.
+// Releasing a device or pause only permits another attempt; it never signs anyone in.
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
@@ -62,7 +56,7 @@ function invalid(value: string, min: number, max: number): string | undefined {
     ? `Enter a whole number between ${min} and ${max}.` : undefined;
 }
 
-/** The three numbers. Minutes on screen; seconds on the wire, like the server's bounds. */
+/** Display minutes while the server's bounds and payload use seconds. */
 export function NetworkPauseSettingsCard({ canWrite }: { canWrite: boolean }) {
   const toast = useToast();
   const [p, setP] = useState<NetworkPausePolicy | null>(null);
@@ -181,7 +175,6 @@ export function NetworkPauseSettingsCard({ canWrite }: { canWrite: boolean }) {
   );
 }
 
-/** The alert while a pause runs, with the staff actions. Renders nothing when no network is paused. */
 export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
   const toast = useToast();
   const [pauses, setPauses] = useState<NetworkPause[]>([]);
@@ -196,7 +189,7 @@ export function NetworkPausesNotice({ canAct }: { canAct: boolean }) {
     try {
       const r = await api.get<{ pauses?: NetworkPause[] }>("/guest-signin-restrictions/network-pauses");
       setPauses(Array.isArray(r?.pauses) ? r.pauses : []);
-    } catch { /* the notice is advisory: no pause shown rather than an error on an unrelated screen */ }
+    } catch { /* Advisory pause status must not break an unrelated screen. */ }
   }, []);
   useEffect(() => {
     void load();

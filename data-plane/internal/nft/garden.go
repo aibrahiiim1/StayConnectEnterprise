@@ -9,22 +9,11 @@ import (
 	"strings"
 )
 
-// THE WALLED GARDEN IS THREE SETS, NOT ONE.
-//
-// walled_garden_ip opened every port to every address in it, and that was the whole garden: the "Ports" an
-// operator wrote on a rule were stored and ignored, the three baseline resolvers were reachable on 443 (DNS
-// over HTTPS, and whatever else those addresses serve), and every email service or identity provider added
-// for a sign-in opened its addresses to any protocol. Measured on PRE-LIVE 2026-10-11 from a device that had
-// not signed in: port 80, UDP 443 and any TCP port to a Google address, and a page from a rule's address on a
-// port the rule did not name.
-//
-//	walled_garden_ip   address only -- every port (an operator rule written without ports; unchanged meaning)
-//	walled_garden_tcp  address . TCP port
-//	walled_garden_udp  address . UDP port
-//
-// What this cannot do, and is not claimed to: a NAME behind a shared front end resolves to addresses that
-// serve many names, and the kernel sees only the address. Isolation by host name needs the TLS server name,
-// which is a different mechanism and a separate decision.
+// The walled garden is three sets: walled_garden_ip (address only, every port, for operator rules written without
+// ports) and walled_garden_tcp / walled_garden_udp (address . port). A single address-only set ignored rule Ports,
+// left the baseline resolvers reachable on 443 (DNS over HTTPS) and opened every added service to any protocol.
+// Not claimed: a name behind a shared front end resolves to addresses that serve many names and the kernel sees only
+// the address; host-name isolation needs the TLS server name, a separate decision.
 const (
 	GardenV4  = "walled_garden_ip"
 	GardenTCP = "walled_garden_tcp"
@@ -39,8 +28,7 @@ type GardenPlan struct {
 	UDP []string
 }
 
-// GardenList returns the current elements of walled_garden_ip. Elements may
-// be single addresses or CIDR ranges (the set has flags interval).
+// GardenList returns the current elements of walled_garden_ip (addresses or CIDR ranges).
 func (c *Client) GardenList(ctx context.Context) ([]string, error) {
 	out, err := exec.CommandContext(ctx, c.NftPath, "-j", "list", "set", "inet", "stayconnect", GardenV4).Output()
 	if err != nil {
@@ -49,10 +37,9 @@ func (c *Client) GardenList(ctx context.Context) ([]string, error) {
 	return parseGardenJSON(out)
 }
 
-// GardenSync replaces the contents of all three sets in ONE nft -f transaction (flush + add per set), so the
-// garden is never momentarily empty for the forward chain and the three sets can never describe two moments.
-// A set the live table does not declare (an appliance whose netd has not been re-rendered yet) is skipped on
-// a second attempt rather than failing the whole sync, so the address-only set keeps reconciling.
+// GardenSync replaces all three sets in one nft -f transaction so the garden is never momentarily empty. A set the
+// live table does not declare (netd not yet re-rendered) is skipped on a second attempt so the address-only set
+// keeps reconciling.
 func (c *Client) GardenSync(ctx context.Context, plan GardenPlan) error {
 	script := gardenScript(plan, map[string]bool{GardenV4: true, GardenTCP: true, GardenUDP: true})
 	if err := c.runScript(ctx, script); err == nil {
@@ -60,7 +47,6 @@ func (c *Client) GardenSync(ctx context.Context, plan GardenPlan) error {
 	} else if !strings.Contains(err.Error(), "No such file or directory") && !strings.Contains(err.Error(), "does not exist") {
 		return fmt.Errorf("nft garden sync: %w", err)
 	}
-	// Something named in the script is missing: find out which sets exist and sync the ones that do.
 	have := map[string]bool{}
 	for _, s := range []string{GardenV4, GardenTCP, GardenUDP} {
 		if _, err := exec.CommandContext(ctx, c.NftPath, "list", "set", "inet", "stayconnect", s).Output(); err == nil {
@@ -86,7 +72,6 @@ func (c *Client) runScript(ctx context.Context, script string) error {
 	return nil
 }
 
-// gardenScript is the transaction text, deterministic for a given plan (tests compare it).
 func gardenScript(plan GardenPlan, have map[string]bool) string {
 	var b strings.Builder
 	add := func(set string, elems []string) {
@@ -104,8 +89,7 @@ func gardenScript(plan GardenPlan, have map[string]bool) string {
 	return b.String()
 }
 
-// parseGardenJSON decodes `nft -j list set` output into element strings,
-// handling plain addresses, prefixes and auto-merged ranges.
+// parseGardenJSON decodes `nft -j list set` output into element strings (addresses, prefixes, merged ranges).
 func parseGardenJSON(raw []byte) ([]string, error) {
 	var doc struct {
 		Nftables []map[string]json.RawMessage `json:"nftables"`
@@ -152,13 +136,10 @@ func parseGardenJSON(raw []byte) ([]string, error) {
 	return out, nil
 }
 
-// ValidGardenElem reports whether s is an IPv4 address or CIDR usable as a
-// walled-garden element.
-//
-// THE ENFORCEMENT FLOOR (audit N-7). Whatever a rule says, the garden never opens 0.0.0.0, loopback, multicast or
-// anything wider than a /8: one stored 0.0.0.0/0 rule used to open the whole internet before sign-in. The
-// hotel's own, narrower limit is enforced where rules are written (edged, migration 0125); this is the line no
-// stored row can cross.
+// ValidGardenElem reports whether s is an IPv4 address or CIDR usable as a walled-garden element. Enforcement floor:
+// whatever a rule says, the garden never opens 0.0.0.0, loopback, multicast or anything wider than a /8 (a stored
+// 0.0.0.0/0 rule once opened the internet before sign-in). The hotel's narrower limit is enforced where rules are
+// written (edged).
 func ValidGardenElem(s string) bool {
 	if ip := net.ParseIP(s); ip != nil {
 		v4 := ip.To4()
@@ -171,17 +152,15 @@ func ValidGardenElem(s string) bool {
 	return false
 }
 
-// GardenFloorPrefix is the widest network the garden will ever install.
 const GardenFloorPrefix = 8
 
 func gardenAddrUsable(ip net.IP) bool {
 	return !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsMulticast() && !ip.Equal(net.IPv4bcast)
 }
 
-// GardenTargetRefusal explains why an operator-supplied IP or CIDR may not be a walled-garden target, or "" when
-// it may. widest is the hotel's setting (the smallest prefix length allowed). Beyond the enforcement floor it
-// refuses the addresses a garden entry is meaningless for: private, shared (CGNAT), link-local and reserved
-// ranges -- a sign-in or payment service is a public address, and a private one would open the hotel's own
+// GardenTargetRefusal explains why an IP or CIDR may not be a walled-garden target, or "" when it may. widest is the
+// hotel's setting (smallest allowed prefix length). Beyond the floor it refuses private, shared (CGNAT), link-local
+// and reserved ranges: sign-in and payment services are public, and a private entry would open the hotel's own
 // networks to clients that have not signed in.
 func GardenTargetRefusal(value string, widest int) string {
 	var ip net.IP
@@ -217,7 +196,6 @@ func inCIDR(ip net.IP, cidr string) bool {
 	return n.Contains(ip)
 }
 
-// GardenPortElem formats one `address . port` element for the TCP/UDP sets, or "" when either part is invalid.
 func GardenPortElem(addr string, port int) string {
 	if !ValidGardenElem(addr) || port < 1 || port > 65535 {
 		return ""

@@ -1,7 +1,3 @@
-// Package migrations holds Central's SQL migrations. These tests guard properties that must never regress:
-// 0046 refused to drop a table that held data and archived commercial history; 0047 deletes that archive by
-// Product-Owner decision but never takes a live table with it, keeps the signed licence format, and hard-codes
-// no appliance; and every up has a down.
 package migrations
 
 import (
@@ -31,7 +27,6 @@ func Test0046GuardRefusesToDropData(t *testing.T) {
 	if firstDrop == nil || firstDrop[0] < guardAt {
 		t.Fatal("the guard must run before the first DROP TABLE")
 	}
-	// Every dropped table is in the guard's list.
 	guard := up[:strings.Index(up, "] LOOP")]
 	for _, m := range regexp.MustCompile(`(?m)^DROP TABLE IF EXISTS (\w+);`).FindAllStringSubmatch(up, -1) {
 		if !strings.Contains(guard, "'"+m[1]+"'") {
@@ -76,7 +71,7 @@ func Test0046DownRecreatesEveryDroppedTable(t *testing.T) {
 
 func TestEveryUpHasADown(t *testing.T) {
 	ups, _ := filepath.Glob("*.up.sql")
-	for _, u := range ups { // 0023–0036 predated the rule and got their downs later; there are no exceptions now
+	for _, u := range ups {
 		if _, err := os.Stat(strings.TrimSuffix(u, ".up.sql") + ".down.sql"); err != nil {
 			t.Errorf("%s has no down migration", u)
 		}
@@ -93,7 +88,6 @@ func Test0047DropsTheArchiveBehindAGuard(t *testing.T) {
 	if !strings.Contains(up, "_timescaledb_catalog.hypertable") {
 		t.Error("hypertables in the archive must be dropped through TimescaleDB first")
 	}
-	// CASCADE is used for the archive only.
 	if n := strings.Count(strings.ToUpper(up), "CASCADE;"); n != 1 {
 		t.Errorf("0047 uses CASCADE %d times; only the archive schema may be dropped with CASCADE", n)
 	}
@@ -135,8 +129,8 @@ func Test0047DownRestoresStructure(t *testing.T) {
 	}
 }
 
-// 0048 records whose customer data an appliance still holds. It must carry NO foreign key -- the customer may
-// have been deleted from Central while the appliance still holds its data -- and must touch no existing row.
+// held_customer_id must carry no foreign key: the customer may be deleted from Central while the appliance
+// still holds its data.
 func Test0048HeldCustomerHasNoForeignKeyAndNoData(t *testing.T) {
 	up := read(t, "0048_appliance_held_customer.up.sql")
 	if !strings.Contains(up, "ALTER TABLE appliances ADD COLUMN IF NOT EXISTS held_customer_id uuid NULL;") {
@@ -154,9 +148,7 @@ func Test0048HeldCustomerHasNoForeignKeyAndNoData(t *testing.T) {
 	}
 }
 
-// 0049 adds the descriptive site type and the licence module projection. The site type is a forward-compatible
-// SHAPE (no enum list: a new type must not need a migration), both columns have defaults so no existing row is
-// touched, and no module is invented for an existing licence.
+// The site type is a pattern, not an enum, so a new type needs no migration; defaults leave existing rows untouched.
 func Test0049SiteTypeAndLicenceModulesShape(t *testing.T) {
 	up := read(t, "0049_site_type_and_licence_modules.up.sql")
 	for _, want := range []string{

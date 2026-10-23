@@ -1,6 +1,4 @@
-// Command sitemigrate copies one tenant+site's guest-domain data from the
-// central cloud database (which today holds ALL data) into an isolated
-// site-local (edge) database whose schema is migrations/0001_edge_init.up.sql.
+// Command sitemigrate copies one tenant+site of guest-domain data from the central cloud database into an isolated site-local (edge) database.
 //
 // Usage:
 //
@@ -8,37 +6,9 @@
 //	    --tenant <tenant uuid> --site <site uuid> \
 //	    [--dry-run] [--rollback-dir <dir>] [--force-append]
 //
-// Guarantees / behavior:
-//
-//   - FK-safe copy order (see migrationTables in tables.go).
-//   - Idempotent: every INSERT on a table with a primary key uses
-//     ON CONFLICT (<pk>) DO NOTHING; re-running copies zero new rows.
-//   - Hypertables (accounting_records, audit_log) have NO primary key, so
-//     ON CONFLICT cannot dedupe them. Strategy: if the destination already
-//     holds >0 scoped rows for such a table, the table is skipped entirely
-//     and reported as "skipped (dest non-empty)" unless --force-append is
-//     passed, in which case rows are appended verbatim.
-//   - Column lists are read from the catalogs of BOTH databases at runtime
-//     and intersected, so schema drift on either side (e.g. the edge-only
-//     tenants.branding column, or central-only columns the edge lacks) does
-//     not break the copy. Values round-trip through text casts, preserving
-//     timestamps and every other type exactly.
-//   - Orphan rows (FK target missing in the scoped set, e.g. a session
-//     referencing another tenant's voucher) are detected, counted, logged
-//     and skipped cleanly; they never abort the run.
-//   - --dry-run prints the plan (source_count / already_in_dest /
-//     would_copy) without writing anything.
-//   - --rollback-dir dumps the DEST database's current scoped rows per
-//     table as CSV (COPY TO STDOUT) plus manifest.json BEFORE any write.
-//   - Never TRUNCATEs or DELETEs anything, in either database.
-//   - Exit codes: 0 success, 1 fatal error, 2 post-copy verification
-//     mismatch.
-//
-// Multi-site caveat: vouchers, ticket_templates, guests, voucher_batches,
-// auth_otps, pms_attempts and the provider/config tables are tenant-scoped
-// (no site_id column). For today's single-site tenants copying all tenant
-// rows is correct; multi-site tenants must be split by site manually where
-// the schema lacks site_id.
+// Idempotent (ON CONFLICT DO NOTHING); PK-less hypertables are skipped when dest already holds scoped rows unless --force-append. Orphan rows are skipped,
+// never fatal. --rollback-dir dumps the dest scoped rows before any write. Never TRUNCATEs or DELETEs. Exit codes: 0 success, 1 fatal, 2 verification mismatch.
+// Multi-site caveat: tenant-scoped tables without site_id are copied whole; split multi-site tenants manually.
 package main
 
 import (
@@ -72,10 +42,8 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 
 func isUUID(s string) bool { return uuidRe.MatchString(s) }
 
-// redactDSN removes the password from a URL-style or keyword-style DSN so it
-// can be logged / written into the rollback manifest safely.
+// Removes the password so the DSN can be logged and written into the rollback manifest.
 func redactDSN(dsn string) string {
-	// URL form: scheme://user:password@host...
 	if i := strings.Index(dsn, "://"); i >= 0 {
 		rest := dsn[i+3:]
 		if at := strings.LastIndex(rest, "@"); at >= 0 {
@@ -86,7 +54,6 @@ func redactDSN(dsn string) string {
 		}
 		return dsn
 	}
-	// keyword form: password=secret
 	return regexp.MustCompile(`(?i)(password\s*=\s*)\S+`).ReplaceAllString(dsn, "${1}***")
 }
 
@@ -210,8 +177,7 @@ func connect(ctx context.Context, dsn string) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A consistent session timezone makes timestamptz text round-trips
-	// byte-identical (the stored instant is preserved regardless).
+	// A consistent session timezone keeps timestamptz text round-trips byte-identical.
 	if _, err := c.Exec(ctx, "SET TIME ZONE 'UTC'"); err != nil {
 		c.Close(ctx)
 		return nil, fmt.Errorf("set timezone: %w", err)
@@ -219,8 +185,6 @@ func connect(ctx context.Context, dsn string) (*pgx.Conn, error) {
 	return c, nil
 }
 
-// validateScope ensures the tenant and site exist in the SOURCE and belong
-// together before anything else happens.
 func validateScope(ctx context.Context, src *pgx.Conn, cfg config) error {
 	var n int64
 	if err := src.QueryRow(ctx, "SELECT count(*) FROM tenants WHERE id = $1", cfg.Tenant).Scan(&n); err != nil {
@@ -238,7 +202,6 @@ func validateScope(ctx context.Context, src *pgx.Conn, cfg config) error {
 	return nil
 }
 
-// planRow is one line of the --dry-run plan.
 type planRow struct {
 	Table         string
 	SourceCount   int64
@@ -277,8 +240,7 @@ func gatherPlan(ctx context.Context, src, dst *pgx.Conn, cfg config) ([]planRow,
 	return plan, nil
 }
 
-// wouldCopyCount computes, exactly, how many scoped source rows are absent
-// from dest by primary key (all migrated PK tables have single-column PKs).
+// How many scoped source rows are absent from dest by primary key (all migrated PK tables have single-column PKs).
 func wouldCopyCount(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg config) (int64, error) {
 	rows, err := dst.Query(ctx,
 		fmt.Sprintf("SELECT %s::text FROM %s WHERE %s", spec.PK, spec.Name, spec.Where),

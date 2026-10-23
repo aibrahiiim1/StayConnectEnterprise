@@ -1,9 +1,3 @@
-// PRICE AND HOW CLIENTS GET IT — the package form's price section.
-//
-// The server is authoritative on every rule here; these tests hold the client to the same rules so the operator
-// is told before a round trip, and hold the form to the one property that matters most on Edit: a save hands
-// the stored price, methods and room-charge posting codes back unchanged.
-
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
@@ -77,7 +71,6 @@ describe("price section logic", () => {
     expect(buildAcquisition({ ...f, room_charge: [{ ...row, tax_rate_pct: "abc" }] }).error).toMatch(/tax rate/);
     expect(buildAcquisition({ ...f, room_charge: [{ ...row, tax_code: "VAT", tax_rate_pct: "14" }] }).fields?.room_charge_mappings)
       .toEqual([{ pms_interface_id: "if-1", posting_code: "WIFI", tax_code: "VAT", tax_rate_bp: 1400 }]);
-    // Rows kept in the form while Room charge is unticked are not sent: the server forbids them.
     expect(buildAcquisition({ ...f, methods: ["PREPAID"], room_charge: [row] }).fields)
       .not.toHaveProperty("room_charge_mappings");
   });
@@ -153,7 +146,6 @@ describe("PackageForm price section", () => {
       roomChargeInterfaces: IFACES,
     });
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "25" } });
-    // A site not licensed for Card payment does not see it.
     expect(screen.queryByTestId("method-ONLINE_PAYMENT")).toBeNull();
     expect(box("PMS_POSTING").disabled).toBe(true);
     expect(screen.getByTestId("method-PMS_POSTING").textContent).toMatch(/Switched off in System › Modules/);
@@ -189,12 +181,10 @@ describe("PackageForm price section", () => {
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "150" } });
     fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "EGP" } });
     fireEvent.click(box("PMS_POSTING"));
-    // One row opens on the first interface.
     expect((screen.getByTestId("room-charge-interface-0") as HTMLSelectElement).value).toBe("if-1");
     fireEvent.change(screen.getByLabelText("Room charge mapping 1: posting code"), { target: { value: "WIFI" } });
     fireEvent.change(screen.getByLabelText("Room charge mapping 1: tax rate percent (optional)"), { target: { value: "14" } });
 
-    // A second interface: not approved, and posting in another currency.
     fireEvent.click(screen.getByTestId("add-room-charge-mapping"));
     expect((screen.getByTestId("room-charge-interface-1") as HTMLSelectElement).value).toBe("if-2");
     expect(screen.getByTestId("room-charge-not-ready-1").textContent).toMatch(/Approve the interface for room charge/);
@@ -228,7 +218,6 @@ describe("PackageForm price section", () => {
       roomChargeInterfaces: "error",
     });
     expect(screen.getByTestId("interfaces-error-note")).toBeInTheDocument();
-    // Ticked and switched off: still untickable, so the package can always be saved again.
     expect(box("PMS_POSTING").checked).toBe(true);
     expect(box("PMS_POSTING").disabled).toBe(false);
     fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });

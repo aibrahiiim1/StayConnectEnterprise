@@ -1,7 +1,5 @@
-// Package pmsloader reads pms_providers rows from the control-plane DB and
-// turns them into configured, registered (and possibly started) provider
-// instances. scd calls Load on boot and again on /v1/admin/pms/reload (Hotel Admin changes) and on a
-// periodic safety-net sweep, so admin UI changes apply without an scd restart.
+// Package pmsloader turns pms_providers rows into registered provider instances; scd reloads them on boot,
+// on /v1/admin/pms/reload and periodically.
 package pmsloader
 
 import (
@@ -16,21 +14,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// Load fetches every enabled pms_providers row reachable from this
-// appliance (tenant-wide rows + site-scoped rows for siteID), resolves
-// name collisions by preferring site-scoped rows, constructs the matching
-// provider implementation, applies its config, and registers it.
-//
-// Pass siteID="" on dev/single-site deployments: the loader then treats
-// all rows as tenant-wide (site-scoped rows are ignored — they'd be
-// unreachable without a site to anchor them).
-//
-// Returns the populated registry and the list of constructed providers so
-// callers can run dev-only side effects (e.g. seeding the Stub).
+// Load prefers site-scoped rows on a name collision. With siteID="" site-scoped rows are ignored.
 func Load(ctx context.Context, db *pgxpool.Pool, tenantID, siteID string) (*pms.Registry, []pms.Provider, error) {
-	// Fetch BOTH tenant-wide and site-scoped rows; we'll resolve collisions
-	// in Go (prefer site-scoped). Deterministic ORDER BY so the "first
-	// seen wins"/"site wins" decision is repeatable for tests.
+	// The ORDER BY makes "site-scoped first, first seen wins" deterministic.
 	var siteArg any
 	if siteID != "" {
 		siteArg = siteID
@@ -55,7 +41,7 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID, siteID string) (*pms.
 
 	reg := pms.NewRegistry()
 	var built []pms.Provider
-	seen := map[string]bool{} // tracks names already registered (site-scoped won via ORDER BY)
+	seen := map[string]bool{}
 
 	for rows.Next() {
 		var (
@@ -70,8 +56,6 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID, siteID string) (*pms.
 			return nil, nil, fmt.Errorf("pmsloader: scan: %w", err)
 		}
 		if seen[name] {
-			// A site-scoped row already won for this name; skip the
-			// tenant-wide duplicate.
 			slog.Info("pmsloader: overridden by site-scoped row", "name", name)
 			continue
 		}
@@ -96,10 +80,8 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID, siteID string) (*pms.
 
 		prov, err := buildByKind(kind, name)
 		if err != nil {
-			// A retired socket-owning kind is a DIFFERENT event from an unrecognised one, and it is the one
-			// somebody needs to act on: an enabled legacy FIAS row means a database toggle is trying to
-			// create a second PMS owner. Logged at ERROR with the reason, while the row is skipped and the
-			// remaining providers load normally.
+			// A retired socket-owning kind is logged at ERROR (an enabled legacy FIAS row is trying to create a
+			// second PMS owner); the row is skipped and the rest load.
 			if errors.Is(err, ErrLegacySocketOwnerRetired) {
 				slog.Error("pmsloader: REFUSED an enabled legacy FIAS provider row; pmsd owns the PMS socket",
 					"name", name, "kind", kind)
@@ -127,22 +109,11 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID, siteID string) (*pms.
 	return reg, built, nil
 }
 
-// StartAll calls Start on every provider that implements pms.Starter, EXCEPT a FIAS socket owner.
-//
-// THE SECOND HALF OF THE SINGLE-OWNER GUARANTEE, and it is here rather than only in buildByKind because the
-// two chokepoints fail differently. buildByKind stops the currently-known FIAS kinds from being built; this
-// stops a FIAS socket owner from being started at all, including one that reached this slice by some future
-// route. Together they mean scd cannot hold a long-lived PMS socket regardless of what the database says or
-// which kinds the construction switch grows.
-//
-// IT IS SCOPED TO THE SOCKET OWNER, NOT TO EVERYTHING STARTABLE. Mews and Apaleo also implement Starter, and
-// their loops are HTTP pollers — refreshSpaces / refreshUnits over REST. They hold no single-client socket
-// and cannot contend with pmsd for one, so refusing them would disable working cloud-PMS providers for no
-// safety gain. *pms.ProtelFIAS is the type that dials and holds the FIAS connection, and it backs all three
-// FIAS kinds, so naming the type is what makes this a structural check rather than a string comparison.
-//
-// The refusal is loud: a socket owner reaching this point means the invariant was already broken upstream,
-// and that belongs in the log rather than being silently skipped.
+// StartAll starts every pms.Starter except a FIAS socket owner. This is the second guard of the single-owner
+// rule (buildByKind is the first): it stops a FIAS owner that reached this slice by any route, so scd can
+// never hold a long-lived PMS socket. It is scoped to *pms.ProtelFIAS by type; Mews and Apaleo are HTTP
+// pollers that contend for no socket and must keep starting. A refusal is logged loudly since the invariant
+// was already broken upstream.
 func StartAll(ctx context.Context, providers []pms.Provider) {
 	for _, p := range providers {
 		if _, isFIAS := p.(*pms.ProtelFIAS); isFIAS {
@@ -156,8 +127,6 @@ func StartAll(ctx context.Context, providers []pms.Provider) {
 	}
 }
 
-// StopAll calls Stop on every provider that implements pms.Stopper. Used
-// during live reload to tear down the previous generation cleanly.
 func StopAll(providers []pms.Provider) {
 	for _, p := range providers {
 		if s, ok := p.(pms.Stopper); ok {
@@ -166,49 +135,24 @@ func StopAll(providers []pms.Provider) {
 	}
 }
 
-// ---- internals ------------------------------------------------------------
-
-// socketOwningLegacyKinds are the legacy provider kinds that open a LONG-LIVED PMS SOCKET.
-//
-// All three are built by pms.NewProtelFIAS, which is the only Provider in this package implementing
-// pms.Starter — so this set is exactly the set of legacy kinds that can become a PMS connection owner.
+// socketOwningLegacyKinds are the legacy kinds that open a long-lived PMS socket (all built by pms.NewProtelFIAS).
 var socketOwningLegacyKinds = map[string]bool{
 	"protel-fias":  true,
 	"opera-fias":   true,
 	"fidelio-fias": true,
 }
 
-// ErrLegacySocketOwnerRetired is returned for any legacy kind that would open a PMS socket.
-//
-// pmsd IS THE SOLE OWNER OF A PMS INTERFACE SOCKET. That is an architectural invariant, not a deployment
-// preference, and it has to hold against the state of a database row rather than because of it.
-//
-// The legacy path could still reach a live socket. pmsloader.Load filtered on `enabled = true` and nothing
-// else, buildByKind happily constructed a FIAS client, and scd's STARTUP called
-// pmsloader.StartAll(rootCtx, ...) — a process-lifetime context. The three reload paths each pass a context
-// that dies within 30 seconds, so toggling the row at runtime looked harmless; the next scd restart or
-// appliance reboot was what turned it into a permanent second owner, dialling the same listener pmsd owns
-// and competing for a single-client slot. A disabled row and a removed admin page are procedural
-// protections, and procedure is not what should stand between a database UPDATE and two PMS owners.
-//
-// So the kind is refused HERE, at construction. Nothing downstream can start what was never built, which
-// makes one guard cover process startup and all three reload paths at once. Load treats a build error as
-// "skip this row and carry on", so a retained enabled row degrades to a logged refusal rather than
-// preventing the other providers from loading.
-//
-// This deliberately does NOT repair the old connector's lifecycle or context handling. The goal is to make
-// that path unreachable from the current runtime, not to make it work better.
-//
-// ROLLBACK IS A SOFTWARE DECISION. public.pms_providers is retained for history and for a possible rollback
-// to the legacy connector, and that rollback now requires deploying a build without this guard — which is a
-// reviewed, deliberate act. It can no longer be performed accidentally with an UPDATE statement.
+// ErrLegacySocketOwnerRetired: pmsd is the sole owner of a PMS Interface socket, and that must hold regardless
+// of a database row. An enabled legacy FIAS row would otherwise make scd a permanent second owner at its next
+// restart (StartAll gets a process-lifetime context), so the kind is refused at construction, covering
+// startup and all reload paths. Load skips the row and carries on. Rolling back to the legacy connector
+// requires deploying a build without this guard, never an UPDATE.
 var ErrLegacySocketOwnerRetired = errors.New(
 	"pmsloader: legacy FIAS provider kinds are retired in this build — pmsd is the sole PMS Interface " +
 		"socket owner; configure the PMS through a PMS Interface instead")
 
 func buildByKind(kind, name string) (pms.Provider, error) {
-	// Checked BEFORE the switch so that adding a FIAS kind back to the switch cannot silently re-open the
-	// path: the refusal is keyed to the kind, not to the branch that would have built it.
+	// Checked before the switch so re-adding a FIAS case cannot silently re-open the path.
 	if socketOwningLegacyKinds[kind] {
 		return nil, fmt.Errorf("%w (kind %q, provider %q)", ErrLegacySocketOwnerRetired, kind, name)
 	}

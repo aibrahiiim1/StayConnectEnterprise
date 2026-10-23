@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// The per-style minimums are not free choices: each is ceil(40 / log2(alphabet size)). Holding the constants
-// to the formula means a changed alphabet cannot quietly leave a style below the floor.
+// Each minimum is ceil(40 / log2(alphabet size)); a changed alphabet must not leave a style below the floor.
 func TestPasswordStyleMinimumsMeetTheEntropyFloor(t *testing.T) {
 	want := map[string]int{"mixed": 7, "upper_digits": 9, "lower_digits": 8, "digits": 14}
 	if len(passwordStyles) != len(want) {
@@ -50,7 +49,6 @@ func TestPasswordAlphabetsExcludeAmbiguousCharacters(t *testing.T) {
 			seen[r] = true
 		}
 	}
-	// The default is exactly what the hardcoded generator used before 0104.
 	mixed, _ := lookupPasswordStyle(defaultPasswordStyle)
 	if mixed.Alphabet != "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789" || defaultPasswordLength != 14 {
 		t.Errorf("default changed: %q / %d", mixed.Alphabet, defaultPasswordLength)
@@ -109,7 +107,6 @@ func TestGeneratedPasswordsMatchStyleAndLength(t *testing.T) {
 	}
 }
 
-// The bounds the UI receives are the bounds the server enforces.
 func TestPasswordFormatLimitsAreTheEnforcedBounds(t *testing.T) {
 	l := passwordFormatLimits()
 	if l.EntropyFloorBits != 40 || l.MaxLength != 32 || l.DefaultStyle != "mixed" || l.DefaultLength != 14 {
@@ -126,8 +123,7 @@ func TestPasswordFormatLimitsAreTheEnforcedBounds(t *testing.T) {
 	}
 }
 
-// The SQL setter and the table CHECK carry the same per-style minimums as Go. Read from the migration itself,
-// so the three copies cannot drift apart without a test noticing.
+// The SQL setter and table CHECK must carry the same minimums as Go.
 func TestMigrationCarriesTheSameMinimums(t *testing.T) {
 	raw, err := os.ReadFile("../../migrations/0104_the_property_decides_what_a_generated_account_password_looks_like.up.sql")
 	if err != nil {
@@ -154,7 +150,6 @@ func TestMigrationCarriesTheSameMinimums(t *testing.T) {
 	}
 }
 
-// The account-password-settings key exists for the roles that hold voucher-code-settings, with the same power.
 func TestAccountPasswordSettingsFollowsVoucherCodeSettings(t *testing.T) {
 	for role := range rolePerms {
 		for _, want := range []perm{permRead, permWrite} {

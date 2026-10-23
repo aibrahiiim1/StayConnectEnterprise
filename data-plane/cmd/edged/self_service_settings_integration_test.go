@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// EMAIL ACCOUNTS against a real database (migration 0117), guarded like every edged API+PG test by
-// PHASE3_TEST_DSN: the settings' defaults, bounds, step-up, change log and audit; the accounts list's verification
-// state; and the staff password refusal for a self-service account.
+// Email accounts against a real database, guarded by PHASE3_TEST_DSN.
 
 func selfServiceBody(f *apiFixture, over map[string]any) map[string]any {
 	m := map[string]any{

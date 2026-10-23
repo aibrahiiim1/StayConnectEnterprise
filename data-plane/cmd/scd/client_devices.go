@@ -1,28 +1,10 @@
 package main
 
-// A CLIENT'S DEVICES ON THEIR PACKAGE: see them, release one, or replace one with the device in their hand
-// (contract docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md; migration 0118).
-//
-// A package allows a number of devices (the service plan's max_concurrent_devices). Every device that has used it
-// holds a slot, and keeps it after signing out -- otherwise "sign out, hand the password on" would make the limit
-// meaningless. Moving a slot is therefore an explicit, limited, audited act, and it happens only here, through
-// iam_v2.client_device_action, which derives the package from proof the device holds and never from the request:
-//
-//	list     POST /v1/devices/list     the package's devices, for the device asking. Which package: the one the
-//	                                   device is online on, or -- with auth_context_id -- the one its fresh
-//	                                   sign-in's subject owns (the device refused at the limit has no slot yet).
-//	release  POST /v1/devices/release  from a device online on the package: free another device's slot.
-//	replace  POST /v1/devices/replace  from a device that has just signed in and was refused at the device limit:
-//	                                   it takes the chosen device's slot, in one transaction.
-//
-// The target device is taken off the network first, through enforcement (nft deny, session ended
-// DEVICE_RELEASED / DEVICE_REPLACED), exactly as an operator disconnect is. The package's window, data, online
-// time and owner are never touched. At most site_device_settings.client_device_changes_per_day successful changes
-// per package per 24 hours.
-//
-// Refusals are NOT explained to the client beyond what they can act on: "too many changes today" and "try again"
-// are distinct (the first is a rule the client must know about), everything else is one answer. The audit row in
-// iam_v2.device_slot_actions carries the exact outcome.
+// A client's devices on their package: list, release, or replace one (docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md).
+// Devices keep their slot after signing out, so moving one is an explicit, limited, audited act made only through
+// iam_v2.client_device_action, which derives the package from proof the device holds, never from the request.
+// The target is taken off the network first through enforcement; the package's window, data, time and owner are untouched.
+// Refusals reveal only "too many changes today" versus "try again"; iam_v2.device_slot_actions records the exact outcome.
 
 import (
 	"context"
@@ -60,20 +42,16 @@ type clientDeviceView struct {
 type clientDevicesOut struct {
 	Outcome string `json:"outcome"`
 	Limit   int    `json:"limit"`
-	// Unlimited: the package's plan sets no device limit (max_concurrent_devices NULL, which the database reads as
-	// unlimited); Limit is then 0 and means nothing. A device always joins such a package, so it never needs a
-	// replacement (audit B-24).
-	Unlimited   bool               `json:"unlimited,omitempty"`
-	InUse       int                `json:"in_use"`
-	ChangesLeft int                `json:"changes_left"`
-	Devices     []clientDeviceView `json:"devices"`
-	// replace: the package the device now holds a slot on, for activation.
-	EntitlementID string `json:"entitlement_id,omitempty"`
-	DeviceID      string `json:"device_id,omitempty"`
+	// Unlimited: the plan sets no device limit (Limit is then 0 and means nothing), so a device always joins.
+	Unlimited     bool               `json:"unlimited,omitempty"`
+	InUse         int                `json:"in_use"`
+	ChangesLeft   int                `json:"changes_left"`
+	Devices       []clientDeviceView `json:"devices"`
+	EntitlementID string             `json:"entitlement_id,omitempty"`
+	DeviceID      string             `json:"device_id,omitempty"`
 }
 
-// clientDeviceOf resolves the device asking: its address must be well formed and its hardware address must be a
-// device of this site. portald derives both from the connection and the kernel, never from the client.
+// clientDeviceOf resolves the device asking; portald derives address and MAC from the connection, never from the client.
 func (s *server) clientDeviceOf(ctx context.Context, req clientDeviceReq) (string, net.IP, bool) {
 	ip := net.ParseIP(req.IP)
 	mac, err := net.ParseMAC(req.MAC)
@@ -89,7 +67,6 @@ func (s *server) clientDeviceOf(ctx context.Context, req clientDeviceReq) (strin
 	return id, ip, true
 }
 
-// clientPackageOf is the package the request is about, by the same rule the database function applies.
 func (s *server) clientPackageOf(ctx context.Context, deviceID, authContextID string) (string, bool) {
 	var ent string
 	var err error
@@ -117,7 +94,6 @@ func (s *server) clientPackageOf(ctx context.Context, deviceID, authContextID st
 	return ent, err == nil
 }
 
-// clientDevicesOn lists the devices holding a slot on the package, with the limit and the changes left today.
 func (s *server) clientDevicesOn(ctx context.Context, ent, thisDevice string) (clientDevicesOut, error) {
 	out := clientDevicesOut{Outcome: "LISTED", Devices: []clientDeviceView{}}
 	var limit *int
@@ -162,8 +138,7 @@ func (s *server) clientDevicesOn(ctx context.Context, ent, thisDevice string) (c
 	return out, rows.Err()
 }
 
-// clientChangesLeft is what the database function will still allow today: the setting minus the client's
-// successful changes on this package in the last 24 hours, counted from the same audit table it counts.
+// clientChangesLeft is what the database function will still allow today: the setting minus successful changes in the last 24 hours.
 func (s *server) clientChangesLeft(ctx context.Context, ent string, allowed int) int {
 	var used int
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int FROM iam_v2.device_slot_actions
@@ -224,7 +199,6 @@ func (s *server) clientDevicesReplace(w http.ResponseWriter, r *http.Request) {
 	s.clientDeviceChange(w, r, "REPLACE")
 }
 
-// clientDeviceChange takes the target off the network and moves its slot through the database function.
 func (s *server) clientDeviceChange(w http.ResponseWriter, r *http.Request, action string) {
 	req, ok := s.decodeClientDeviceReq(w, r)
 	if !ok {
@@ -236,17 +210,14 @@ func (s *server) clientDeviceChange(w http.ResponseWriter, r *http.Request, acti
 		writeJSON(w, http.StatusOK, clientDevicesOut{Outcome: "UNAVAILABLE"})
 		return
 	}
-	// An unproven request still goes to the database function, which refuses it and RECORDS the refusal: probing
-	// for another client's devices leaves a trace. Only a proven package has its target taken offline.
+	// An unproven request still goes to the database function, which refuses and records it so probing leaves a trace; only a proven package has its target taken offline.
 	ent, proven := s.clientPackageOf(ctx, dev, req.AuthContextID)
 	reason := endReasonDeviceReleased
 	if action == "REPLACE" {
 		reason = endReasonDeviceReplaced
 	}
-	// Off the network first, by the operator-disconnect path: only sessions of THIS package on THAT device -- and
-	// only when the change can go through. A change the database will refuse (today's limit reached, or a place
-	// is free so nothing needs replacing) must leave the target exactly as it was, so those are checked here
-	// first; the function checks them again under the package lock, and records the attempt either way.
+	// Off the network first, but only when the change can go through: a change the database will refuse must leave the target
+	// untouched, so pre-check here (the function re-checks under the package lock).
 	if proven && req.DeviceID != dev && s.clientChangeWouldProceed(ctx, ent, action) {
 		s.endTargetSessions(ctx, ent, req.DeviceID, reason)
 	}
@@ -279,15 +250,13 @@ func (s *server) clientDeviceChange(w http.ResponseWriter, r *http.Request, acti
 	case "REFUSED_THROTTLED":
 		writeJSON(w, http.StatusOK, clientDevicesOut{Outcome: "LIMIT_TODAY"})
 	case "REFUSED_LIMIT_NOT_REACHED":
-		// A slot is free after all (another device released one): the device can simply join.
 		writeJSON(w, http.StatusOK, clientDevicesOut{Outcome: "SLOT_FREE", EntitlementID: ent, DeviceID: dev})
 	default:
 		writeJSON(w, http.StatusOK, clientDevicesOut{Outcome: "UNAVAILABLE"})
 	}
 }
 
-// endTargetSessions ends the target device's live sessions on the package through enforcement (endSessionNow:
-// the row ended with the reason, then nft deny and the shaping class removed).
+// endTargetSessions ends the target device's live sessions on the package through enforcement.
 func (s *server) endTargetSessions(ctx context.Context, ent, device, reason string) {
 	rows, err := s.db.Query(ctx, `SELECT id::text, COALESCE(host(ip),'') FROM iam_v2.sessions
 	     WHERE tenant_id=$1 AND site_id=$2 AND entitlement_id=$3::uuid AND device_id=$4::uuid
@@ -312,9 +281,7 @@ func (s *server) endTargetSessions(ctx context.Context, ent, device, reason stri
 	}
 }
 
-// clientChangeWouldProceed is the pre-check before a target is taken offline: changes are left today, and (for a
-// replacement) every place on the package is taken. Any failure to read answers false -- nothing is disconnected,
-// and the database function decides.
+// clientChangeWouldProceed is the pre-check before a target is taken offline; any read failure answers false and the database function decides.
 func (s *server) clientChangeWouldProceed(ctx context.Context, ent, action string) bool {
 	var allowed int
 	if err := s.db.QueryRow(ctx, `SELECT client_device_changes_per_day FROM iam_v2.device_settings_get($1::uuid,$2::uuid)`,

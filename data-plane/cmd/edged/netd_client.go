@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// netdClient talks to the privileged netd daemon over its unix socket. edged is
-// unprivileged; all actual network changes happen inside netd. This mirrors the
-// scdClient pattern.
+// netdClient talks to the privileged netd over its unix socket; edged is unprivileged.
 type netdClient struct {
 	http *http.Client
 }

@@ -2,8 +2,6 @@ import { AlertCircle, CheckCircle2, Info, AlertTriangle } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// formatError accepts either a thrown ApiError, a free-form string, or null.
-// Returns the user-visible message + optional trace id for support tickets.
 export function ErrorBanner({ err, className }: { err: unknown; className?: string }) {
   if (err == null || err === "") return null;
   let message = "";
@@ -19,10 +17,7 @@ export function ErrorBanner({ err, className }: { err: unknown; className?: stri
     message = String(err);
   }
   return (
-    // role="alert" + aria-live: an error that only appears visually is an error a screen-reader user is
-    // never told about, and this component is how most of the admin reports failures. Pages that hand-rolled
-    // a <p role="alert"> already announced; those switching to this shared banner silently stopped, which is
-    // how the gap surfaced.
+    // Announce errors to screen readers as they appear.
     <div
       role="alert"
       aria-live="assertive"
@@ -48,9 +43,6 @@ export function ErrorBanner({ err, className }: { err: unknown; className?: stri
   );
 }
 
-// Callout — the same shape for the three non-error notices the admin keeps re-inventing: a confirmation, a
-// caveat, an explanation. Pages were producing these as bare `<p className="text-sm text-success-subtle-foreground">`, which
-// is invisible on a dark card and unannounced to a screen reader.
 const CALLOUT_TONES = {
   info: {
     box: "border-info/25 bg-info-subtle text-info-subtle-foreground",

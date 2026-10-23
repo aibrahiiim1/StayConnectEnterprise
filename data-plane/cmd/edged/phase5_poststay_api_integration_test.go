@@ -2,21 +2,9 @@
 
 package main
 
-// THE OPERATOR POST-STAY API, against the real router, the real RBAC middleware and a real database.
-//
-// The two things worth proving here are not "the endpoints work":
-//
-//  1. RESET AND REVOKE ARE DIFFERENT ACTS. Reset rotates an ACTIVE profile's credential and leaves everything
-//     else alone; revoke ends post-stay access for that Stay EPISODE and cannot be undone. A system that
-//     treated revoke as a strong reset would let an operator take access away and hand it straight back, and
-//     the audit would show two rotations rather than one termination.
-//
-//  2. NEITHER IS REACHABLE WITHOUT THE FULL WEIGHT. Permission on the resource key, password step-up on top
-//     of the session, a bounded reason, and an audit row whose actor comes from the SESSION. Each of those is
-//     tested by REMOVING it and watching the call fail.
-//
-// The PIN a reset returns is shown once. Nothing in this file, and no endpoint anywhere, can read a stored
-// one back — pin_revealed_at says the server RETURNED a plaintext, never that anyone received it.
+// Operator post-stay API against the real router, RBAC middleware and database.
+// Reset rotates an active profile's credential; revoke ends post-stay access for the stay episode and is terminal.
+// Each guard (permission, step-up, bounded reason, session-derived audit actor) is tested by removing it.
 
 import (
 	"context"
@@ -30,8 +18,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// mountPostStay adds the Phase-5 operator surface to a fixture's router. The fixture's own router is built
-// for Phase 3/4, so the Phase-5 tests get their own server over the same database and session store.
 func newPostStayAPI(t *testing.T, roles ...string) *apiFixture {
 	t.Helper()
 	f := newAPI(t, roles...)
@@ -47,20 +33,16 @@ func newPostStayAPI(t *testing.T, roles ...string) *apiFixture {
 			mountResource(r, s, "post-stay-profiles", s.postStayProfilesRoutes)
 		})
 	})
-	// The fixture's server is already listening with the Phase-3/4 router, and assigning Config.Handler after
-	// that has no effect -- the running server captured the old one. Replace the server itself; the fixture's
-	// cleanup closes whatever f.srv points at, so exactly one Close still happens.
+	// Assigning Config.Handler after listening has no effect; replace the server (cleanup closes f.srv).
 	f.srv.Close()
 	f.srv = httptest.NewServer(r)
 	return f
 }
 
-// seedProfile builds a CHECKED_OUT stay with a post-stay profile, through the Phase-5 controlled operation
-// because that is the only way the table accepts a write.
+// seedProfile builds a CHECKED_OUT stay with a post-stay profile via the controlled operation, the only write path.
 func seedProfile(t *testing.T, f *apiFixture) (stay, profile string) {
 	t.Helper()
 	ctx := context.Background()
-	// stays are stay-family-guarded on the full appliance schema.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `WITH
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -101,8 +83,7 @@ func TestIntegration_PostStayAPI_ListAndGetNeverExposeASecret(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("list: %d %s", code, raw)
 	}
-	// The operator screen shows WHETHER a profile can authenticate. It must not carry the hash, and there is
-	// no field anywhere that could carry the plaintext.
+	// The operator screen must not carry the hash or any plaintext.
 	for _, forbidden := range []string{"pin_hash", "argon2id", "\"pin\""} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("the list response contains %q: %s", forbidden, raw)
@@ -122,8 +103,7 @@ func TestIntegration_PostStayAPI_ListAndGetNeverExposeASecret(t *testing.T) {
 	}
 }
 
-// Each guard removed in turn. A step-up that is only tested in its happy path is a step-up nobody has seen
-// refuse anything.
+// Each guard removed in turn.
 func TestIntegration_PostStayAPI_MutationsRequireTheFullWeight(t *testing.T) {
 	f := newPostStayAPI(t)
 	_, profile := seedProfile(t, f)
@@ -267,8 +247,7 @@ func TestIntegration_PostStayAPI_RevokeIsTerminal(t *testing.T) {
 		t.Fatalf("revoke left status=%s reason=%v", status, reason)
 	}
 
-	// A revoked profile cannot be rotated back into service -- that would be a resurrection wearing a
-	// rotation's clothes, and it is the single most important difference between the two actions.
+	// A revoked profile cannot be rotated back into service.
 	code, raw := f.doRaw(t, http.MethodPost, base+"/reset",
 		map[string]any{"password": f.password, "reason": "undo the revocation"})
 	if code != http.StatusConflict {
@@ -293,8 +272,7 @@ func TestIntegration_PostStayAPI_RevokeIsTerminal(t *testing.T) {
 	}
 }
 
-// An out-of-scope profile is indistinguishable from an absent one: the operator surface must not be an
-// enumeration oracle across sites either.
+// An out-of-scope profile is indistinguishable from an absent one (no cross-site enumeration oracle).
 func TestIntegration_PostStayAPI_CrossSiteIsIndistinguishable(t *testing.T) {
 	f := newPostStayAPI(t)
 	other := newPostStayAPI(t)

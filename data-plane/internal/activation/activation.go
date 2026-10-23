@@ -1,31 +1,13 @@
-// Package activation is the OFFLINE FIRST-ACTIVATION protocol: an appliance that has never been activated
-// and has no route to Central is activated by carrying two files by hand.
+// Package activation is the OFFLINE FIRST-ACTIVATION protocol: an appliance never activated and with no route to Central is activated by carrying two
+// files by hand. Deliberately SEPARATE from package offline (licence transport for an ALREADY assigned appliance), whose envelope must not change.
 //
-// It is deliberately SEPARATE from package offline, which transports a signed licence to an appliance that
-// is ALREADY assigned. That path keeps its semantics and its signed bytes untouched; nothing here changes
-// it. Mixing the two would have meant changing an envelope already in service, invalidating every
-// unconsumed package in the field.
+// Request (appliance -> Central): hardware evidence plus the PUBLIC half of a locally generated identity key, self-signed with the private half, which
+// never leaves the appliance. Package (Central -> appliance): signed assignment, trust material and signed licence, bound to that request and identity,
+// single-use, expiring, signed by the vendor key.
 //
-// THE TWO FILES
-//
-//	Request  appliance -> operator -> Central. Carries the appliance's own hardware evidence and the PUBLIC
-//	         half of an identity keypair it generated locally, SELF-SIGNED with the private half. The private
-//	         key never leaves the appliance, and the self-signature is what proves the requester holds it.
-//
-//	Package  Central -> operator -> appliance. Carries everything first activation needs -- the signed
-//	         assignment, the trust material and the signed licence -- bound to that exact request and that
-//	         exact identity, single-use and expiring, signed with the vendor key the appliance trusts.
-//
-// WHAT MAKES IT SAFE
-//
-//	wrong appliance  the package names the identity key fingerprint from the request; an appliance that does
-//	                 not hold that private key refuses it.
-//	replay           single-use nonce, recorded in a reboot-persistent local ledger before anything applies.
-//	rollback         the assignment and the licence each carry their own version and their own anti-rollback
-//	                 check, which this envelope does not bypass -- it only transports them.
-//	tampering        one vendor signature covers every field, including the two inner signed documents.
-//
-// Mirrored in control-plane/internal/activation. THE SIGNED BYTES MUST MATCH BYTE FOR BYTE.
+// Safety: a wrong appliance is refused by identity-key fingerprint; replay by a single-use nonce recorded in a reboot-persistent ledger before anything
+// applies; rollback by the assignment and licence own version checks, which this envelope does not bypass; tampering by one vendor signature over every field.
+// Mirrored in control-plane/internal/activation: THE SIGNED BYTES MUST MATCH BYTE FOR BYTE.
 package activation
 
 import (
@@ -36,12 +18,10 @@ import (
 	"time"
 )
 
-// SchemaVersion is the wire version of both documents below. It is part of the signed bytes, so an older
-// appliance cannot be talked into accepting a newer shape it does not understand, and a newer appliance can
-// refuse an older one explicitly instead of misreading it.
+// SchemaVersion is part of the signed bytes, so an older appliance cannot be talked into a newer shape and a newer one refuses an older one explicitly.
 const SchemaVersion = 1
 
-// Request is what a factory-clean appliance emits. It contains no secret.
+// Emitted by a factory-clean appliance; contains no secret.
 type Request struct {
 	SchemaVersion int    `json:"schema_version"`
 	RequestID     string `json:"request_id"`
@@ -54,14 +34,11 @@ type Request struct {
 	Model         string `json:"model"`
 	CreatedAt     int64  `json:"created_at"`
 	Nonce         string `json:"nonce"`
-	// HoldsCustomerID is the customer (tenant) whose data the appliance's local site database still holds;
-	// empty for a factory-clean appliance. Central refuses to activate the appliance for any other customer.
-	// It is signed when present and omitted from the signed bytes when empty, so a request from an appliance
-	// that predates the field verifies exactly as before.
+	// HoldsCustomerID is the tenant whose data the local site database still holds (empty if factory-clean); Central refuses any other customer.
+	// Omitted from the signed bytes when empty, so requests predating the field verify as before.
 	HoldsCustomerID string `json:"holds_customer_id,omitempty"`
-	// Signature is made by the private half of PublicKey over requestSigningBytes. It proves the emitter
-	// holds the key it is asking to be bound to -- without it, anyone could submit someone else's hardware
-	// facts and receive a package bound to a key they control.
+	// Signature, by the private half of PublicKey over requestSigningBytes, proves the emitter holds the key; without it anyone could submit another
+	// appliance hardware facts and receive a package bound to a key they control.
 	Signature string `json:"signature"`
 }
 
@@ -89,14 +66,11 @@ func requestSigningBytes(r *Request) []byte {
 	return b
 }
 
-// SignRequest self-signs a request with the appliance's identity private key.
 func SignRequest(priv ed25519.PrivateKey, r *Request) {
 	r.Signature = base64.RawStdEncoding.EncodeToString(ed25519.Sign(priv, requestSigningBytes(r)))
 }
 
-// VerifyRequest checks the self-signature against the public key the request carries. Central calls this
-// before creating anything: a request that cannot prove possession of its own key is not evidence of an
-// appliance, it is just a file somebody wrote.
+// Checked before creating anything: a request that cannot prove possession of its own key is just a file somebody wrote.
 func VerifyRequest(r *Request) bool {
 	if r == nil || r.SchemaVersion != SchemaVersion || r.PublicKey == "" || r.Signature == "" {
 		return false
@@ -112,7 +86,6 @@ func VerifyRequest(r *Request) bool {
 	return ed25519.Verify(ed25519.PublicKey(pub), requestSigningBytes(r), sig)
 }
 
-// Package is what Central returns for one request. Every field is covered by Signature.
 type Package struct {
 	SchemaVersion  int    `json:"schema_version"`
 	PackageID      string `json:"package_id"`
@@ -123,16 +96,12 @@ type Package struct {
 	IdentityKeyFpr string `json:"identity_key_fingerprint"`
 	TenantID       string `json:"tenant_id"`
 	SiteID         string `json:"site_id"`
-	// Assignment is the vendor-signed assignment Document -- the ONLY authority for tenant and site. It is
-	// transported here, not replaced: the appliance verifies its own signature and version separately.
-	Assignment json.RawMessage `json:"assignment"`
-	// LicenseEnvelope is the vendor-signed licence, likewise verified on its own terms.
+	// Assignment is the vendor-signed Document, the ONLY authority for tenant and site; the appliance verifies its signature and version separately.
+	Assignment      json.RawMessage `json:"assignment"`
 	LicenseEnvelope json.RawMessage `json:"license_envelope"`
 	Entitlements    json.RawMessage `json:"entitlements"`
-	// CABundlePEM is the trust material the appliance installs so it can later reach Central over mTLS.
-	CABundlePEM string `json:"ca_bundle_pem"`
-	// CentralBase is the appliance-facing Central endpoint (a stable HTTPS FQDN). Carried so an offline
-	// appliance learns where to reconcile without anyone typing an address into it.
+	CABundlePEM     string          `json:"ca_bundle_pem"`
+	// CentralBase is a stable HTTPS FQDN so an offline appliance learns where to reconcile.
 	CentralBase string `json:"central_base"`
 	IssuedAt    int64  `json:"issued_at"`
 	ExpiresAt   int64  `json:"expires_at"`
@@ -171,13 +140,11 @@ func packageSigningBytes(p *Package) []byte {
 	return b
 }
 
-// KeyID is the short fingerprint used for both signer and identity keys.
 func KeyID(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
 	return base64.RawURLEncoding.EncodeToString(sum[:8])
 }
 
-// SignPackage signs with the vendor key.
 func SignPackage(priv ed25519.PrivateKey, p *Package) {
 	p.SchemaVersion = SchemaVersion
 	p.SignerKeyID = KeyID(priv.Public().(ed25519.PublicKey))
@@ -196,12 +163,8 @@ func VerifyPackage(pub ed25519.PublicKey, p *Package) bool {
 	return ed25519.Verify(pub, packageSigningBytes(p), sig)
 }
 
-// AcceptForFirstActivation decides whether this appliance may apply this package, and returns "" when it may.
-//
-// It is written for the FIRST activation case and says so: the appliance has no appliance id yet, so binding
-// rests on the identity key fingerprint -- the one thing a factory-clean appliance can prove. Every field
-// that could be used to point a package at the wrong box is checked, and an empty value on the package side
-// is never treated as "matches anything".
+// Decides whether this appliance may apply the package; returns empty when it may. Binding rests on the identity key fingerprint (no appliance id yet),
+// and an empty value on the package side never matches anything.
 func AcceptForFirstActivation(pub ed25519.PublicKey, p *Package, serial, identityFpr, requestID,
 	requestNonce string, alreadyAssigned bool, now time.Time) string {
 	if p == nil {
@@ -216,9 +179,8 @@ func AcceptForFirstActivation(pub ed25519.PublicKey, p *Package, serial, identit
 	if now.Unix() > p.ExpiresAt {
 		return "package expired"
 	}
-	// FAIL CLOSED on an appliance that already has an assignment. First activation is for a factory-clean
-	// box; re-pointing an assigned appliance is a deliberate lifecycle action with its own authority, not
-	// something a file left on a USB stick may do.
+	// FAIL CLOSED on an appliance that already has an assignment: first activation is for a factory-clean box; re-pointing an assigned one is a
+	// deliberate lifecycle action, not something a file on a USB stick may do.
 	if alreadyAssigned {
 		return "appliance is already assigned — use licence renewal, not first activation"
 	}

@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// The register records a request, its deadline and how it was answered; answering removes who asked.
 func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 	f := newAPI(t)
 	sfx := fmt.Sprint(time.Now().UnixNano())
@@ -26,7 +25,6 @@ func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 		t.Fatalf("no reference: %v", body)
 	}
 
-	// a future date, an unknown kind and a missing requester are refused
 	if st, _ := f.do(t, "POST", "/guest-data-rights/register", map[string]any{"kind": "ACCESS", "received_at": time.Now().UTC().AddDate(0, 0, 3).Format("2006-01-02"), "requester": who}); st == 201 {
 		t.Errorf("a request from the future was recorded")
 	}
@@ -37,7 +35,6 @@ func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 		t.Errorf("a request with no requester was recorded")
 	}
 
-	// it is listed with days left; extending works once
 	st, list := f.do(t, "GET", "/guest-data-rights/register", nil)
 	if st != 200 || !strings.Contains(fmt.Sprint(list), who) {
 		t.Fatalf("list = %d %v", st, list)
@@ -49,7 +46,6 @@ func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 		t.Errorf("a second extension = %d, want 409", st)
 	}
 
-	// a refusal must name its ground
 	if st, _ := f.do(t, "POST", "/guest-data-rights/register/"+id+"/answer", map[string]any{"status": "REFUSED", "outcome": "NONE"}); st == 200 {
 		t.Errorf("a refusal without a ground was accepted")
 	}
@@ -59,7 +55,6 @@ func TestIntegration_GuestDataRegister_DeadlineAnswerAndRemoval(t *testing.T) {
 		t.Fatalf("answer = %d %v", st, ans)
 	}
 
-	// the requester is gone from the register, and an answered request is closed for good
 	if n := gdStr(t, f, `SELECT requester_ref FROM iam_v2.guest_data_request_register WHERE id=$1`, id); n != "[removed]" {
 		t.Errorf("requester kept: %q", n)
 	}

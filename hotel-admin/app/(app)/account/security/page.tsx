@@ -1,12 +1,6 @@
 "use client";
 
-// TWO-STEP SIGN-IN — the operator's own authenticator (migration 0132, GDPR plan C10). Reached from the account
-// area at the foot of the sidebar. The app is set up at sign-in, so this page shows the state and makes a new set
-// of recovery codes. Losing the phone is solved by a recovery code or by a site administrator's reset on the
-// Operators screen, never from here: a stolen session plus a password must not be able to remove the second step.
-//
-// A NEW SET NEEDS THE PASSWORD AND A CURRENT CODE FROM THE APP (Product-Owner decision D-R3): with the password
-// alone, a stolen session could mint codes that later sign in without the app. A recovery code is not accepted.
+// New recovery codes require the password and a current authenticator code so a stolen session cannot bypass MFA.
 
 import { useCallback, useEffect, useState } from "react";
 import { Smartphone } from "lucide-react";

@@ -8,11 +8,7 @@ import { NotAvailable } from "@/components/ui/patterns";
 import { usePermissions } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-/**
- * SYSTEM: the platform's own housekeeping, out of the daily workflow. One menu entry in the sidebar; its pages
- * are this secondary bar. Platform operators only (a customer's user never reaches it from the menu, and gets
- * this notice when they arrive by address).
- */
+/** Customer users who enter by URL still see the platform-only notice. */
 export default function SystemLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname() ?? "";
   const { can } = usePermissions();

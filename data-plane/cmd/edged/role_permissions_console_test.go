@@ -1,20 +1,11 @@
 package main
 
-// THE ADMIN CONSOLE'S ROLE TABLE IS GENERATED FROM THIS ONE, AND THIS TEST IS THE GENERATOR AND THE GUARD.
-//
-// hotel-admin/lib/roles.ts used to carry a hand-copied matrix, and it drifted: the menu offered Usage explorer to
-// three roles the server refused (every call 403), hid Internet packages and Service plans from the Site IT
-// manager the server lets edit them, and sent the payments role to a page whose data it could not read (audit
-// L-2). A comment saying "when that file changes, this one has to change with it" is not a mechanism.
-//
-// So the console imports hotel-admin/lib/role-permissions.generated.json, rendered from rolePerms by this test.
-// The test FAILS when the file does not match the server table byte for byte. To regenerate after changing
-// rolePerms:
+// The Admin Console's role table is generated from rolePerms by this test, which fails when
+// hotel-admin/lib/role-permissions.generated.json differs from it byte for byte. Regenerate after changing rolePerms:
 //
 //	UPDATE_ROLE_PERMISSIONS=1 go test ./cmd/edged -run TestConsoleRolePermissionsAreGeneratedFromTheServerTable
 //
-// site_admin is not a row: it holds write on everything, implicitly, on both sides. The legacy tenant_* aliases
-// are resolved on both sides the same way (tenant_admin -> site_admin, tenant_operator -> hotel_it_manager).
+// site_admin is not a row: it holds write on everything. Legacy tenant_* aliases resolve the same way on both sides.
 
 import (
 	"bytes"
@@ -74,7 +65,6 @@ func TestConsoleRolePermissionsAreGeneratedFromTheServerTable(t *testing.T) {
 	}
 }
 
-// The drift the audit measured is closed on the SERVER side, where the documented intent is a grant.
 func TestRoleDrift_TheDocumentedGrantsAreServed(t *testing.T) {
 	for _, c := range []struct {
 		role, resource string
@@ -96,14 +86,11 @@ func TestRoleDrift_TheDocumentedGrantsAreServed(t *testing.T) {
 			t.Errorf("%s holds WRITE on %s", c[0], c[1])
 		}
 	}
-	// A print station still reads no consumption.
 	if permFor([]string{"voucher_operator"}, "usage", permRead) {
 		t.Error("voucher_operator reads usage")
 	}
 }
 
-// The two rows added to docs/ROLE_AND_SCOPE_MATRIX.md for these keys are enforced cell by cell, the way the
-// Phase-6 and voucher rows are (phase6_role_matrix_doc_test.go).
 func TestUsageAndPackagesMatchTheDocumentedRoleMatrix(t *testing.T) {
 	for _, resource := range []string{"usage", "commercial-packages"} {
 		row := docMatrixRow(t, resource)

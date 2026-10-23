@@ -4,8 +4,7 @@ package iamv2
 
 import "testing"
 
-// The DEVELOPMENT build must still load the accepted all-off dark default. This is the counterpart of the
-// production end-to-end test: whichever way the tree is compiled, one of the two runs.
+// The development build keeps the all-off dark default (counterpart of the production e2e test).
 func TestDevelopmentBuildLoaderKeepsTheDarkDefault(t *testing.T) {
 	if productionBuild || BuildProfile() != "development" {
 		t.Fatal("this file is built only WITHOUT -tags stayconnect_production")

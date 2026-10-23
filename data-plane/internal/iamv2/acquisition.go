@@ -1,18 +1,13 @@
 package iamv2
 
-// INTERNET PACKAGE ACQUISITION.
-//
-// A package revision says how it may be acquired, in settlement_methods (migration 0095 constrains it):
+// Acquisition methods per package revision (settlement_methods):
 //
 //	NOT_REQUIRED   Free           price 0; no settlement
 //	PREPAID        Voucher        a valid voucher backed by this revision, burned in the grant
 //	ONLINE_PAYMENT Card payment   a provider-verified capture
 //	PMS_POSTING    Room charge    an authoritative PMS PA=OK
 //
-// What a CLIENT is offered is the intersection of: the method being effective at this site (the four-gate
-// module resolver, supplied to the engine as a MethodGate), the package listing the method, and the method
-// being applicable to this client and package right now. Every gate is re-checked when the quote is created
-// and again when it is confirmed; nothing the page showed earlier is trusted.
+// Every gate is re-checked at quote creation and again at confirm; nothing the page showed earlier is trusted.
 
 import (
 	"context"
@@ -20,7 +15,6 @@ import (
 	"strings"
 )
 
-// Acquisition methods, as stored in settlement_methods and settlements.method.
 const (
 	AcquireFree       = "NOT_REQUIRED"
 	AcquireVoucher    = "PREPAID"
@@ -28,17 +22,13 @@ const (
 	AcquireRoomCharge = "PMS_POSTING"
 )
 
-// AcquisitionMethods is the stable order methods are presented in.
 var AcquisitionMethods = []string{AcquireFree, AcquireVoucher, AcquireCard, AcquireRoomCharge}
 
-// SubjectAnonymous is the subject of open package selection: a server-generated anonymous access subject.
 const SubjectAnonymous SubjectKind = "ANONYMOUS"
 
-// MethodOpen is the auth-context method of open package selection.
 const MethodOpen Method = "OPEN"
 
-// ValidateAcquisitionMethods is the domain form of the ipr_acquisition_methods CHECK: the same rule, with
-// operator-readable messages. It is checked before publishing and again by the database.
+// ValidateAcquisitionMethods mirrors the ipr_acquisition_methods CHECK with operator-readable messages.
 func ValidateAcquisitionMethods(priceMinor int64, methods []string) error {
 	if priceMinor < 0 {
 		return fmt.Errorf("price cannot be negative")
@@ -67,32 +57,23 @@ func ValidateAcquisitionMethods(priceMinor int64, methods []string) error {
 	return nil
 }
 
-// SiteMethods is what the module resolver says is effective at this site right now (all four gates,
-// including readiness). Free and Voucher are core and always available.
+// SiteMethods is what the module resolver says is effective at this site now. Free and Voucher are core and
+// always available.
 type SiteMethods struct {
 	PaidAccess bool
 	Card       bool
 	RoomCharge bool
-	// CardCurrencies holds the settlement currency of the site's DEFAULT active payment account -- the one a
-	// checkout uses (p4_resolve_payment_account_v2). The client always pays in the package currency
-	// (presentment); unless the account converts (below), a package in another currency would be chosen and
-	// then refused by the payment identity gate (PAYMENT_ACCOUNT_CURRENCY) a step later -- what the Product
-	// Owner hit on PRE-LIVE with a GBP test account and a USD package. Empty means "unknown", which offers
-	// nothing by card.
+	// CardCurrencies holds the settlement currency of the DEFAULT active payment account. Empty means
+	// unknown, which offers nothing by card; a package in another currency would otherwise be refused by the
+	// payment identity gate only after being chosen.
 	CardCurrencies []string
-	// CardAccepts, when set, answers for a presentment currency the provider converts from: the default
-	// account is marked provider-converts and its provider converts (migration 0112; approved policy
-	// 2026-10-11 -- a provider-converts Stripe account settles in its own currency at the provider's rate).
-	// nil = no conversion: only CardCurrencies.
+	// CardAccepts, when set, answers for presentment currencies the provider converts from. nil means no
+	// conversion: only CardCurrencies.
 	CardAccepts func(currency string) bool
 }
 
-// CardApplicable is THE card-currency applicability rule. A package priced in cur may be offered, quoted,
-// chosen and confirmed by card only when the default account settles cur, or its provider converts cur.
-// Every path asks this one function -- the non-room listing and quote (applicableMethods), the confirm
-// (revalidateQuote) and the Room sign-in offer and choice (scd stayMethods) -- so no path offers what the
-// payment gate would refuse after the purchase had been written (contract ONEGATE_MODULES_AND_ACQUISITION.md:
-// every gate is re-checked when the quote is created and when it is confirmed).
+// CardApplicable is the single card-currency rule (listing, quote, confirm and Room sign-in all use it): a
+// package may be offered by card only when the default account settles cur or its provider converts cur.
 func (s SiteMethods) CardApplicable(cur string) bool {
 	cur = strings.ToUpper(strings.TrimSpace(cur))
 	if cur == "" {
@@ -112,7 +93,6 @@ func (s SiteMethods) CardApplicable(cur string) bool {
 // MethodGate reports the site's effective acquisition modules. Nil means only the core (Free, Voucher).
 type MethodGate func(ctx context.Context) SiteMethods
 
-// WithMethodGate installs the site-effective method gate (scd wires it to the module resolver).
 func WithMethodGate(g MethodGate) CommerceOption { return func(e *CommerceEngine) { e.methodGate = g } }
 
 func (e *CommerceEngine) siteMethods(ctx context.Context) SiteMethods {
@@ -131,15 +111,12 @@ func hasMethod(methods []string, m string) bool {
 	return false
 }
 
-// applicableMethods is what a NON-PMS client may use to acquire pkg right now. Room charge is never
-// applicable here: it needs a verified stay, which only the Room sign-in path carries. A voucher subject is
-// offered only its own printed revision, by Voucher.
+// applicableMethods is what a non-PMS client may use to acquire pkg. Room charge is never applicable here
+// (it needs a verified stay); a voucher subject is offered only Voucher.
 func applicableMethods(pkg PackageRevisionRow, ac AuthContextRow, site SiteMethods) []string {
 	var out []string
-	// A PER-NIGHT DATA ALLOWANCE NEEDS A STAY. The allowance is computed from the stay's nights at grant time
-	// (staygrant). No client on this path carries a stay -- CreateQuote refuses a stay-bound context -- so such
-	// a package is neither offered nor quoted here, not even to a voucher (whose issue is refused for it as
-	// well). Granting it would hand out the plan's flat quota, or unlimited data, under a package sold per night.
+	// A per-night allowance needs a stay, which no client on this path carries; offering it would grant the
+	// plan's flat quota or unlimited data under a package sold per night.
 	if pkg.DataAllocationMode == AllocPerStayNight {
 		return nil
 	}

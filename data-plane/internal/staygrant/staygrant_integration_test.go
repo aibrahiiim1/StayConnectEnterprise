@@ -39,16 +39,14 @@ type fixture struct {
 	pkgRev                                          string
 }
 
-// seed builds a tenant/site/interface/revision + IN_HOUSE Stay with fresh occupancy evidence + a guest
-// network + a device, plus an INCLUDED (zero-price, NOT_REQUIRED) guest package whose current revision is
-// pinned — the exact shape a real grant runs against.
+// seed builds the scope, an IN_HOUSE Stay with fresh occupancy evidence, a guest network, a device and a
+// guest package with its current revision pinned.
 func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType string, devices int) fixture {
 	t.Helper()
 	ctx := context.Background()
 	cfg := `{"endpoint":"x","max_auth_cache_age_seconds":3600}`
 	var f fixture
-	// Stays are a controlled-writer family on the production schema: the seed opens the 'stay' operation in
-	// the same transaction that writes them (postgres no longer owns the opener, so the owner shortcut is gone).
+	// Stays are a controlled-writer family: open the 'stay' operation in the writing transaction.
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
@@ -95,10 +93,7 @@ func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType s
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkgRev); err != nil {
 		t.Fatalf("pin revision: %v", err)
 	}
-	// A HEALTHY runtime row. Issuing a PMS Auth Context now depends on the FEED being connected and in sync,
-	// not only on the Stay — a guest cannot be authorised by a PMS that is not currently telling us anything.
-	// These fixtures exist to exercise grant/commerce behaviour, so the feed is put in the state where those
-	// are the only things under test; the feed rule itself is exercised in internal/authctx.
+	// Issuing a PMS Auth Context requires a connected, in-sync feed (that rule is tested in internal/authctx).
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
 		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
@@ -138,9 +133,6 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
-// TestIntegration_GrantIsOneTransaction proves the whole chain commits together and produces exactly the
-// history a later Checkout reads: context consumed once, quote + purchase pinned to it, entitlement ACTIVE
-// with its INITIAL transition, and the device's authorization interval open.
 func TestIntegration_GrantIsOneTransaction(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -155,16 +147,13 @@ func TestIntegration_GrantIsOneTransaction(t *testing.T) {
 	if r.Stay != f.stay || r.Interface != f.iface {
 		t.Fatalf("grant resolved stay=%s iface=%s, want %s/%s", r.Stay, r.Interface, f.stay, f.iface)
 	}
-	// auth context consumed exactly once
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.auth_contexts WHERE id=$1 AND consumed_at IS NOT NULL`, acID); n != 1 {
 		t.Fatalf("auth context not consumed (%d)", n)
 	}
-	// quote + purchase are pinned to that context
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.purchases WHERE id=$1 AND offer_quote_id=$2 AND auth_context_id=$3
 		AND trigger='GUEST_SELECTION' AND state='GRANTED' AND amount_minor=0`, r.PurchaseID, r.QuoteID, acID); n != 1 {
 		t.Fatal("purchase not pinned to the consumed context + quote")
 	}
-	// entitlement ACTIVE, backed by its INITIAL transition (seq=1, from_state NULL)
 	var status, endMode string
 	var window *time.Time
 	if err := p.QueryRow(ctx, `SELECT status, end_mode, window_ends_at FROM iam_v2.entitlements WHERE id=$1`,
@@ -178,7 +167,6 @@ func TestIntegration_GrantIsOneTransaction(t *testing.T) {
 		WHERE entitlement_id=$1 AND seq=1 AND from_state IS NULL AND to_state='ACTIVE' AND superseded_by IS NULL`, r.EntitlementID); n != 1 {
 		t.Fatal("entitlement has no initial ACTIVE history")
 	}
-	// device authorized: current view + an OPEN append-only interval
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_devices
 		WHERE entitlement_id=$1 AND device_id=$2 AND status='AUTHORIZED'`, r.EntitlementID, f.device); n != 1 {
 		t.Fatal("device not authorized in the current view")
@@ -189,16 +177,13 @@ func TestIntegration_GrantIsOneTransaction(t *testing.T) {
 	}
 }
 
-// TestIntegration_GrantRollsBackTogether proves there is no partially-granted state: when a late step fails,
-// the Auth Context is NOT consumed and no quote/purchase/entitlement survives.
 func TestIntegration_GrantRollsBackTogether(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 	f := seedIncluded(t, p)
 	acID := issue(t, p, f)
-	// the grant composes into a CALLER transaction: when anything the caller does afterwards fails, the WHOLE
-	// chain — including the one-time Auth Context consumption — must roll back with it.
+	// A later failure in the caller's transaction must roll back the whole chain, including the context consumption.
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +213,6 @@ func TestIntegration_GrantRollsBackTogether(t *testing.T) {
 	}
 }
 
-// TestIntegration_PaidPackageFailsClosed proves paid access is refused rather than silently granted for free.
 func TestIntegration_PaidPackageFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -238,11 +222,8 @@ func TestIntegration_PaidPackageFailsClosed(t *testing.T) {
 		price      int64
 		settlement string
 	}{
-		// The production schema's ipr_acquisition_methods CHECK makes the two historical fixtures unrepresentable
-		// (a priced revision may not carry NOT_REQUIRED, and ROOM_CHARGE is not a settlement method; the
-		// vocabulary is NOT_REQUIRED/PREPAID/ONLINE_PAYMENT/PMS_POSTING). The same two refusal branches are
-		// exercised with the nearest representable revisions: a PRICED one (settled by PMS posting) and a
-		// ZERO-PRICE one that still requires a settlement method beyond NOT_REQUIRED (PREPAID).
+		// ipr_acquisition_methods forbids NOT_REQUIRED on a priced revision, so cover the two refusal branches
+		// with a priced PMS_POSTING one and a zero-price PREPAID-only one.
 		{"priced", 1500, "PMS_POSTING"},
 		{"settlement-required", 0, "PREPAID"},
 	} {
@@ -261,9 +242,7 @@ func TestIntegration_PaidPackageFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_FreePackageThatAlsoTakesVouchersIsGranted: a zero-price package whose acquisition methods are
-// Free AND Voucher is free for a verified stay. Accepting a voucher too does not make it paid; the room sign-in
-// offer set includes it, so refusing it at the grant left the guest with an offer they could not take.
+// A zero-price package that also accepts vouchers is still free; the sign-in offer set includes it.
 func TestIntegration_FreePackageThatAlsoTakesVouchersIsGranted(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -278,8 +257,6 @@ func TestIntegration_FreePackageThatAlsoTakesVouchersIsGranted(t *testing.T) {
 	}
 }
 
-// TestIntegration_GraceCatalogNotGuestPurchasable proves the system grace catalogs can never be granted
-// through the guest path.
 func TestIntegration_GraceCatalogNotGuestPurchasable(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -291,15 +268,11 @@ func TestIntegration_GraceCatalogNotGuestPurchasable(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConcurrentGrantsOneWinner proves >=24 concurrent grants against the SAME Stay produce
-// exactly ONE entitlement, one purchase and one consumed context — the one-time context and the one-live-
-// entitlement rule both hold under contention, with no deadlock and no partial state.
 func TestIntegration_ConcurrentGrantsOneWinner(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	f := seedIncluded(t, p)
 	const n = 24
-	// every racer presents the SAME one-time context
 	acID := issue(t, p, f)
 	s := New(p)
 	var wg sync.WaitGroup
@@ -336,14 +309,11 @@ func TestIntegration_ConcurrentGrantsOneWinner(t *testing.T) {
 	}
 }
 
-// TestIntegration_DeviceAuthorizationLifecycle proves the controlled device operations keep the current view
-// and the append-only interval history in step, are idempotent, enforce the plan's device limit atomically
-// under concurrency, and allow a clean re-authorization after a deauthorization.
 func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
-	f := seed(t, p, 0, "NOT_REQUIRED", "FREE_STAY", 2) // plan allows 2 concurrent devices
+	f := seed(t, p, 0, "NOT_REQUIRED", "FREE_STAY", 2)
 	acID := issue(t, p, f)
 	r, err := New(p).Grant(ctx, f.tenant, f.site, Request{AuthContextID: acID, Presenter: presenter(f), PackageRevID: f.pkgRev})
 	if err != nil {
@@ -351,7 +321,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 	}
 	ent := r.EntitlementID
 
-	// idempotent: re-authorizing the same device does not open a second interval
 	var again string
 	if err := p.QueryRow(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())::text`, ent, f.device).Scan(&again); err != nil {
 		t.Fatal(err)
@@ -363,7 +332,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 		t.Fatalf("intervals for the device = %d, want 1", n)
 	}
 
-	// a second device fits the limit of 2; a third is refused
 	devs := make([]string, 0, 2)
 	for i := 2; i <= 3; i++ {
 		var d string
@@ -381,7 +349,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 		t.Fatal("third device must be refused by the plan's device limit")
 	}
 
-	// deauthorize device 2, then the third fits — and the closed interval stays readable
 	var closed bool
 	if err := p.QueryRow(ctx, `SELECT iam_v2.deauthorize_entitlement_device($1,$2,now(),'GUEST_LOGOUT')`, ent, devs[0]).Scan(&closed); err != nil {
 		t.Fatal(err)
@@ -397,7 +364,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 		WHERE entitlement_id=$1 AND device_id=$2 AND status='DISCONNECTED' AND disconnected_reason='GUEST_LOGOUT'`, ent, devs[0]); n != 1 {
 		t.Fatal("current view not updated by the deauthorization")
 	}
-	// deauthorizing again is a no-op, not an error
 	if err := p.QueryRow(ctx, `SELECT iam_v2.deauthorize_entitlement_device($1,$2,now(),'GUEST_LOGOUT')`, ent, devs[0]).Scan(&closed); err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +373,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, devs[1]); err != nil {
 		t.Fatalf("third device should fit after a deauthorization: %v", err)
 	}
-	// re-authorizing device 2 opens a NEW interval (seq 2) rather than reopening the closed one
 	if _, err := p.Exec(ctx, `SELECT iam_v2.deauthorize_entitlement_device($1,$2,now(),'ADMIN')`, ent, devs[1]); err != nil {
 		t.Fatal(err)
 	}
@@ -420,8 +385,6 @@ func TestIntegration_DeviceAuthorizationLifecycle(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConcurrentDeviceAuthorizationsRespectLimit proves the device limit is enforced atomically:
-// 24 racers authorizing 24 distinct devices against a 2-device plan leave exactly 2 open intervals.
 func TestIntegration_ConcurrentDeviceAuthorizationsRespectLimit(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -432,7 +395,7 @@ func TestIntegration_ConcurrentDeviceAuthorizationsRespectLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// the granting device already holds 1 of the 2 slots
+	// The granting device already holds 1 of the 2 slots.
 	const n = 24
 	devs := make([]string, n)
 	for i := range devs {
@@ -463,8 +426,6 @@ func TestIntegration_ConcurrentDeviceAuthorizationsRespectLimit(t *testing.T) {
 	}
 }
 
-// TestIntegration_DeviceMustBeInScope proves the controlled authorization refuses a device from another
-// tenant/site — an entitlement can never authorize someone else's hardware.
 func TestIntegration_DeviceMustBeInScope(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

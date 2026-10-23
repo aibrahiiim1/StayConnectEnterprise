@@ -24,7 +24,6 @@ func TestSMTPConfigValidation(t *testing.T) {
 		{Host: "h", Port: 587, Security: SMTPStartTLS, Username: "u", FromAddress: "a@b.c"},
 		{Host: "h", Port: 587, Security: SMTPStartTLS, Password: "p", FromAddress: "a@b.c"},
 		{Host: "h", Port: 587, Security: SMTPStartTLS, FromAddress: "not an address"},
-		// B9: plain SMTP to a public address.
 		{Host: "8.8.8.8", Port: 25, Security: SMTPNone, FromAddress: "a@b.c"},
 	}
 	for i, c := range bad {
@@ -114,8 +113,7 @@ func TestSMTPSendsOneMessageInTheClearWhenToldTo(t *testing.T) {
 				t.Errorf("message lacks %q:\n%s", want, body)
 			}
 		}
-		// A plain-ASCII subject is sent as it is (mime.QEncoding leaves it unencoded); a non-ASCII header is
-		// encoded, as the From name above shows. The Subject line must be exactly the subject.
+		// A plain-ASCII subject is sent as is; a non-ASCII header is encoded. The Subject line must be exactly the subject.
 		subject := ""
 		for _, line := range strings.Split(body, "\n") {
 			if strings.HasPrefix(line, "Subject: ") {

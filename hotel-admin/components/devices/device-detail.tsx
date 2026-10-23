@@ -1,13 +1,6 @@
 "use client";
 
-// ONE CLIENT DEVICE: what it holds and what staff may do to it (edged /client-devices/{id}, migration 0118).
-//
-// The actions are deliberately separate, each saying exactly what it changes and what it does not:
-//   Disconnect             ends its live sessions. It keeps its places and can sign in again.
-//   Release place          on one package: disconnects it there and frees the place for another device.
-//   Require fresh sign-in  disconnects it and forgets its remembered sign-in, so the full sign-in page shows.
-//   Prepare for a test     all three, for a device reused in a sign-in test.
-// None deletes a record, resets a quota, or lets the device take a one-time free package again.
+// Device actions affect sessions or places; none resets quota or restores one-time free-package eligibility.
 
 import { reasonOk as reasonWithinBounds } from "@/lib/reason";
 import { useCallback, useEffect, useState } from "react";
@@ -27,9 +20,7 @@ import { formatBytes, formatDate } from "@/lib/utils";
 
 type ActionKind = "disconnect" | "release" | "require-signin" | "prepare-test";
 
-// A PHONE THAT CLOSED ITS SIGN-IN SHEET MAY NOT REOPEN IT BY ITSELF. iOS and Android decide when to check a
-// network again; the appliance answers correctly whenever they ask (measured on PRE-LIVE 2026-10-15). Staff are
-// told what the client does, so the action is not mistaken for having failed.
+// Phones may not reopen their sign-in sheet until iOS or Android checks the network again.
 const PHONE_TIP = "The phone itself may not open the sign-in page again on its own if it was closed before: ask the client to turn Wi-Fi off for a few seconds and back on, or to open any website starting with http:// (for example http://neverssl.com).";
 
 const ACTIONS: Record<ActionKind, { title: string; does: string; keeps: string; confirm: string; reason: boolean }> = {

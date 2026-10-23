@@ -13,9 +13,6 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// ---- unit (no DB) ----------------------------------------------------------
-
-// spyRepo records whether the repository was ever entered.
 type spyRepo struct{ calls int }
 
 func (s *spyRepo) WithTx(ctx context.Context, fn func(Tx) error) error {
@@ -52,12 +49,10 @@ func TestConfigValidateFailClosed(t *testing.T) {
 	if err := DefaultConfig().Validate(); err != nil {
 		t.Fatalf("default (all off) must be valid: %v", err)
 	}
-	// per-method on while master off => misconfiguration
 	bad := Config{MasterEnabled: false, Methods: map[Method]bool{MethodOTP: true}}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("method-on-while-master-off must be rejected")
 	}
-	// unknown method flag
 	if err := (Config{MasterEnabled: true, Methods: map[Method]bool{"BOGUS": true}}).Validate(); err == nil {
 		t.Fatal("unknown method flag must be rejected")
 	}
@@ -65,7 +60,7 @@ func TestConfigValidateFailClosed(t *testing.T) {
 
 func TestDisabledNeverInvokesRepository(t *testing.T) {
 	repo := &spyRepo{}
-	a, err := New(DefaultConfig(), repo, NopObserver{}) // all flags OFF
+	a, err := New(DefaultConfig(), repo, NopObserver{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +114,6 @@ func TestRedactScrubsSecrets(t *testing.T) {
 	}
 }
 
-// ---- scratch integration (disposable iam_v2 DB) ----------------------------
-
 func argon2idHash(pw string) string {
 	salt := []byte("abcdef0123456789")
 	key := argon2.IDKey([]byte(pw), salt, 1, 64*1024, 4, 32)
@@ -139,7 +132,6 @@ func scratchDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// clean the tables this test writes
 	_, _ = db.Exec(context.Background(), `TRUNCATE iam_v2.auth_contexts, iam_v2.device_network_appearances, iam_v2.devices, iam_v2.guest_access_accounts, iam_v2.guest_principal_identities, iam_v2.guest_principals CASCADE`)
 	return db
 }
@@ -176,12 +168,10 @@ func TestAccountScratchIntegration(t *testing.T) {
 	cfg := Config{MasterEnabled: true, Methods: map[Method]bool{MethodAccount: true}}
 	a, _ := New(cfg, NewPgRepository(db), NopObserver{})
 
-	// wrong password -> deny, no auth_context
 	res, err := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "alice", Secret: "nope", Device: gnDevice("aa:bb:cc:00:11:22")})
 	if err != nil || res.Decision != DecisionDeny {
 		t.Fatalf("wrong pw: %+v err=%v", res, err)
 	}
-	// correct password -> allow + auth_context + device
 	res, err = a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "alice", Secret: "correcthorse", Device: gnDevice("aa:bb:cc:00:11:22")})
 	if err != nil {
 		t.Fatalf("correct pw err: %v", err)
@@ -203,13 +193,11 @@ func TestOTPIdentityScratchIntegration(t *testing.T) {
 	cfg := Config{MasterEnabled: true, Methods: map[Method]bool{MethodOTP: true}}
 	a, _ := New(cfg, NewPgRepository(db), NopObserver{})
 	req := Request{Method: MethodOTP, TenantID: testTenant, SiteID: testSite, FactorType: "EMAIL", FactorValue: "bob@example.com", Device: gnDevice("aa:bb:cc:33:44:55")}
-	// first call creates principal+identity
 	res, err := a.Authenticate(ctx, req)
 	if err != nil || res.Decision != DecisionAllow || res.Subject.PrincipalID == "" {
 		t.Fatalf("otp allow: %+v err=%v", res, err)
 	}
 	first := res.Subject.PrincipalID
-	// second call for same identity resolves the SAME principal (idempotent identity)
 	res2, err := a.Authenticate(ctx, req)
 	if err != nil || res2.Subject.PrincipalID != first {
 		t.Fatalf("otp identity not stable: %v %v", res2.Subject.PrincipalID, err)

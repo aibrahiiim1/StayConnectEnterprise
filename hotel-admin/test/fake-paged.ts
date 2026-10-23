@@ -1,8 +1,5 @@
-// FAKE PAGED LIST ANSWERS, shaped the way edged answers since the lists moved to server paging.
-//
-// Tests mock api.get. A mock that returned the old unpaged shape would let a screen pass that cannot read the
-// real one; these return data, meta.has_more, page, page_size and total exactly as edged does, and apply the
-// page parameters to the rows they were given.
+// Fake paged list answers shaped like edged's (data, meta.has_more, page, page_size, total), so screens that cannot
+// read the real shape fail.
 
 export type AuditRowLike = { action: string; [k: string]: unknown };
 
@@ -13,7 +10,6 @@ const pageParams = (path: string) => {
   return { u, page, size };
 };
 
-/** One page of `rows` for the request's page parameters, with the paging fields edged adds. */
 export function pageOf<T>(path: string, rows: T[], extra: Record<string, unknown> = {}) {
   const { page, size } = pageParams(path);
   const from = (page - 1) * size;
@@ -21,7 +17,6 @@ export function pageOf<T>(path: string, rows: T[], extra: Record<string, unknown
   return { data, meta: { has_more: from + size < rows.length }, page, page_size: size, total: rows.length, ...extra };
 }
 
-/** A fake GET /audit: applies action=, answers the period's per-action counts, and pages. */
 export function fakeAudit(rows: AuditRowLike[]) {
   return (path: string) => {
     const { u } = pageParams(path);
@@ -45,7 +40,6 @@ const SETTLEMENT_VIEWS: Record<string, (r: SettlementLike) => boolean> = {
   free: (r) => r.method === "NOT_REQUIRED",
 };
 
-/** A fake GET /financial-ops/settlements: applies ?view=, pages, and answers the counts and collected totals. */
 export function fakeSettlements<T extends SettlementLike>(rows: T[]) {
   return (path: string) => {
     const { u } = pageParams(path);

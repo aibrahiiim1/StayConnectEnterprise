@@ -1,13 +1,7 @@
 package iamv2
 
-// CLIENT GROUPS: WHO A CLIENT IS, SEPARATED FROM WHAT THEY MAY HAVE.
-//
-// Contract: docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §3. A group is a site policy object
-// with OR-ed membership rules. Membership is a PURE FUNCTION of a Client's verified identity factors, evaluated
-// when scd creates the auth context and pinned on it, so eligibility reads a recorded decision.
-//
-// Nothing here can be satisfied by what a client typed: an EMAIL factor exists only after a code or a trusted
-// issuer verified the mailbox, and the IdP claims live in attrs that only scd writes from a verified id_token.
+// Client groups: membership is a pure function of a Client's verified factors, evaluated when scd creates the
+// auth context and pinned on it. Nothing here may be satisfiable by what a client typed.
 
 import (
 	"regexp"
@@ -22,14 +16,12 @@ const (
 	GroupRuleIDPHostedDomain = "IDP_HOSTED_DOMAIN" // {provider, domains:[]}
 )
 
-// ClientGroupRule is one membership rule.
 type ClientGroupRule struct {
 	ID    string
 	Type  string
 	Value map[string]any
 }
 
-// ClientGroup is a site's group with its rules.
 type ClientGroup struct {
 	ID       string
 	Name     string
@@ -38,12 +30,10 @@ type ClientGroup struct {
 	Rules    []ClientGroupRule
 }
 
-// GroupDecision is the effective group of a sign-in, with the evidence that decided it.
 type GroupDecision struct {
 	GroupID   string
 	GroupName string
-	// Evidence is what is pinned on the auth context: {group, rule, factor, matched:[group ids]}. It names
-	// rule ids and factor kinds, never an address.
+	// Evidence is pinned on the auth context; it names rule ids and factor kinds, never an address.
 	Evidence map[string]any
 }
 
@@ -52,8 +42,8 @@ var (
 	reGUID   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
-// ValidateClientGroupRule refuses a rule that could never match or that names a verification this product
-// cannot perform. Shared by the Admin Console write path (edged) and the evaluator's fail-closed branch.
+// ValidateClientGroupRule refuses a rule that could never match or names a verification this product cannot
+// perform. Shared by the edged write path and the evaluator's fail-closed branch.
 func ValidateClientGroupRule(t string, v map[string]any) error {
 	bad := func(m string) error { return &Error{Code: ErrInvalidInput, Msg: m} }
 	switch t {
@@ -124,8 +114,7 @@ func ValidateClientGroupRule(t string, v map[string]any) error {
 	return bad("unknown membership rule type " + t)
 }
 
-// EvaluateClientGroup decides the effective group for a set of verified factors. It returns ok=false when the
-// Client is in no enabled group (the implicit Public group). A malformed rule never matches (fail closed).
+// EvaluateClientGroup returns ok=false for the implicit Public group. A malformed rule never matches (fail closed).
 func EvaluateClientGroup(groups []ClientGroup, factors []FactorClaim) (GroupDecision, bool) {
 	type hit struct {
 		g    ClientGroup
@@ -155,7 +144,7 @@ func EvaluateClientGroup(groups []ClientGroup, factors []FactorClaim) (GroupDeci
 	if len(hits) == 0 {
 		return GroupDecision{}, false
 	}
-	// Deterministic: lowest priority, then name, then id.
+	// Order: lowest priority, then name, then id.
 	sort.SliceStable(hits, func(i, j int) bool {
 		a, b := hits[i].g, hits[j].g
 		if a.Priority != b.Priority {
@@ -234,7 +223,6 @@ func ruleMatches(r ClientGroupRule, f FactorClaim) bool {
 	return false
 }
 
-// stringList reads a JSON list of non-empty strings; anything else is an empty list.
 func stringList(v any) []string {
 	raw, ok := v.([]any)
 	if !ok {

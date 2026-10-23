@@ -2,12 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// TWO DUPLICATIONS THAT KEPT COMING BACK, PINNED AS SOURCE PROPERTIES.
-//
-// Both are about a screen saying a thing twice. Neither is catchable by rendering a component in isolation:
-// the first is about what is ABSENT from a healthy dashboard, and the second about a control that must
-// disappear once an appliance reaches a state the test harness would have to fake its way into. Asserting on
-// the source is the honest way to hold them, and it states the reason where the next editor will read it.
+// Source properties for two duplications that kept returning; rendering one component cannot catch an absence or an
+// unreachable state.
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
@@ -15,14 +11,12 @@ describe("the dashboard states licensing once", () => {
   const src = read("app/(app)/dashboard/page.tsx");
 
   it("does not list the cloud as a runtime dependency", () => {
-    // Central serves this property's activation and LICENCE and nothing else. The appliance reports nothing
-    // to it (the cloud telemetry subsystem is removed), so there is no "reporting to the cloud" row to show,
-    // healthy or otherwise -- and nothing on the dashboard may suggest reconnecting one.
+    // Central serves activation and licence only and the appliance reports nothing to it, so the dashboard must show no
+    // "reporting to the cloud" row.
     expect(src).not.toContain("Reporting to the OneGate cloud");
     expect(src).not.toContain("sync_outbox");
     expect(src).not.toContain("describeOutbox");
 
-    // And the old explanatory box, which was honest but still permanent, must not come back.
     expect(src).not.toContain("Used for this appliance");
     expect(src).not.toMatch(/Operational reporting is intentionally\s*\n?\s*off/);
   });

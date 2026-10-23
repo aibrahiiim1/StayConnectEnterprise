@@ -1,19 +1,6 @@
 "use client";
 
-// PACKAGE PAYMENTS (formerly "Settlements").
-//
-// The question this screen answers is the one a front-office manager actually asks: "who got which package,
-// when, how was it paid for, and does anything need my attention?" Every Internet package a client receives
-// creates one payment record here -- a free package, a voucher, a card payment or a room charge -- and this
-// screen says, in words, whether that payment is complete.
-//
-// The backend codes (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT, PMS_POSTING; REQUIRED, IN_PROGRESS, SETTLED,
-// MANUAL_REVIEW, FAILED, REVERSED ...) are never shown as the answer; they are turned into one sentence per row.
-//
-// WHAT IT DOES NOT OFFER, deliberately. There is no refund button. The backend can record a refund raised by the
-// provider, but no operator-initiated refund flow is authorized, so a button here would imply money can be moved
-// from this screen. The detail renders its affordances from the API's own available_actions list. A payment that
-// needs a decision is decided on Manual review, and the detail links there.
+// Refunds come from the provider; operator actions follow the API's available_actions list.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -37,7 +24,6 @@ import { currencyExponent } from "@/lib/commerce-form";
 
 type Tone = "ok" | "warn" | "err" | "info" | "default";
 
-/** How the package was paid for, in words. */
 export const PAID_BY: Record<string, string> = {
   NOT_REQUIRED: "Free",
   PREPAID: "Voucher",
@@ -46,7 +32,6 @@ export const PAID_BY: Record<string, string> = {
   MANUAL_APPROVAL: "Manual approval",
 };
 
-/** Where the client's access came from. */
 function sourceWords(r: FinancialSettlement): string {
   switch (r.source) {
     case "ROOM": return r.room ? `Room ${r.room}` : "Room sign-in";
@@ -57,7 +42,6 @@ function sourceWords(r: FinancialSettlement): string {
   }
 }
 
-/** One plain-language state per payment: what an operator needs to know, and its tone. */
 export function paymentState(method: string, status: string): { label: string; tone: Tone; explain: string } {
   if (method === "NOT_REQUIRED" || status === "NOT_REQUIRED") {
     return { label: "Free — nothing to pay", tone: "default", explain: "The package is free, so there was nothing to collect." };
@@ -95,14 +79,12 @@ const ACCESS_WORDS: Record<string, string> = {
   FAILED: "No access given",
   CANCELLED: "Cancelled",
 };
-// The views are applied by edged (?view=), with the definitions this screen used when it filtered in the
-// browser: attention = waiting, in progress, failed or to review (and not free); paid = card or room charge;
-// voucher = prepaid; free = nothing to pay.
+// Server-side views keep counts consistent across every payment, not only the loaded page.
 type View = "" | "attention" | "paid" | "voucher" | "free";
 
 type SettlementsResp = PagedFields & {
   settlements?: FinancialSettlement[];
-  /** Counts and collected totals over every payment -- not the page, and not narrowed by the view. */
+  /** Counts and collected totals cover all payments, independent of page and view. */
   summary?: {
     all?: number; attention?: number; paid?: number; voucher?: number; free?: number;
     collected?: { currency: string; currency_exponent: number; amount_minor: number }[];
@@ -122,8 +104,7 @@ export function SettlementsView() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailErr, setDetailErr] = useState<string | null>(null);
 
-  // PAGED ON THE SERVER. The list used to stop at the newest 200 payments, and its counts and the collected
-  // total counted those 200. A view change starts again at the first page.
+  // Reset to page one when the view changes.
   const list = useServerPage<SettlementsResp>({
     path: view ? `/financial-ops/settlements?view=${view}` : "/financial-ops/settlements",
     rowsOf: (r) => r.settlements,
@@ -353,7 +334,6 @@ export function SettlementsView() {
                                 <TD>{humanize(p.transaction_type)}</TD>
                                 <TD className="tabular">
                                   {money(p.amount_minor, p.currency, p.currency_exponent)}
-                                  {/* What the provider settled it as, exactly as it reported it (migration 0112). */}
                                   {p.settlement_report && (
                                     <div className="text-2xs text-muted-foreground" data-testid="settlement-report">
                                       Settled as {money(p.settlement_report.settlement_amount_minor, p.settlement_report.settlement_currency, currencyExponent(p.settlement_report.settlement_currency) ?? 2)}

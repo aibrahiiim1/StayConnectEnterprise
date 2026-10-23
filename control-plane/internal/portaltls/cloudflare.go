@@ -13,19 +13,16 @@ import (
 	"time"
 )
 
-// CloudflareAPI is the v4 REST API base.
 const CloudflareAPI = "https://api.cloudflare.com/client/v4"
 
-// Cloudflare is the production DNS provider: the onegate.work zone is hosted at Cloudflare (registrar
-// GoDaddy). The token should be scoped to that one zone with Zone:Read and DNS:Edit; nothing else.
-//
-// Records Central writes are DNS-only (proxied=false): a proxied name would resolve to Cloudflare's edge, not
-// the appliance's private portal address, and the portal would never be reached.
+// Cloudflare is the production DNS provider. The token should be scoped to the one zone (Zone:Read, DNS:Edit).
+// Records are DNS-only (proxied=false): a proxied name would resolve to Cloudflare's edge, not the appliance's
+// private portal address.
 type Cloudflare struct {
-	Token    string // never logged; errors carry Cloudflare's messages, never the request headers
+	Token    string // never logged
 	ZoneName string
-	ZoneID   string // cached in portal_tls_settings.zone_id; looked up by name when empty
-	BaseURL  string // CloudflareAPI unless a test points elsewhere
+	ZoneID   string // looked up by name when empty
+	BaseURL  string
 	HTTP     *http.Client
 }
 
@@ -50,7 +47,7 @@ type cfRecord struct {
 	Proxied *bool          `json:"proxied,omitempty"`
 }
 
-// do calls the API and decodes result into out. The Authorization header is the only place the token goes.
+// do keeps the token in the Authorization header only; errors never carry request headers.
 func (c *Cloudflare) do(ctx context.Context, method, path string, body, out any) error {
 	base := c.BaseURL
 	if base == "" {
@@ -78,7 +75,6 @@ func (c *Cloudflare) do(ctx context.Context, method, path string, body, out any)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		// net/http errors name the URL, never headers: safe to surface.
 		return fmt.Errorf("cloudflare %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
@@ -165,8 +161,7 @@ func (c *Cloudflare) UpsertA(ctx context.Context, fqdn, ip string) (string, erro
 		}
 		return out.ID, nil
 	}
-	// One name, one address: update the first, remove any strays (a second A would split guests between a
-	// live portal address and a dead one).
+	// One name, one address: remove strays, or guests would split between a live and a dead portal address.
 	if err := c.do(ctx, http.MethodPut, "/zones/"+zid+"/dns_records/"+existing[0].ID, rec, &out); err != nil {
 		return "", err
 	}
@@ -215,9 +210,8 @@ func (c *Cloudflare) ListAuthoritativeNS(ctx context.Context) ([]string, error) 
 	return z.NameServers, nil
 }
 
-// ApplyCAA upserts the two apex CAA records the contract names. The `issue` record for letsencrypt.org is
-// updated in place (its accounturi changes when the account does); `issuewild` is forced to ";" (no wildcard
-// certificate, ever); every other record -- including other CAs' issue records -- is left alone and reported.
+// ApplyCAA upserts the apex `issue` record for letsencrypt.org (accounturi changes with the account) and forces
+// `issuewild` to ";" (no wildcards); other records, including other CAs' issue records, are left alone and reported.
 func (c *Cloudflare) ApplyCAA(ctx context.Context, issueValue string) ([]string, error) {
 	zid, err := c.zoneID(ctx)
 	if err != nil {
@@ -245,7 +239,6 @@ func (c *Cloudflare) ApplyCAA(ctx context.Context, issueValue string) ([]string,
 		}
 		t := strings.ToLower(tag)
 		if done[t] {
-			// A duplicate of a record we own: remove it so exactly one policy remains.
 			if err := c.DeleteRecord(ctx, r.ID); err != nil {
 				return others, err
 			}
@@ -273,13 +266,13 @@ func (c *Cloudflare) ApplyCAA(ctx context.Context, issueValue string) ([]string,
 }
 
 func (c *Cloudflare) Verify(ctx context.Context) (ZoneInfo, error) {
-	c.ZoneID = "" // always prove it afresh
+	c.ZoneID = ""
 	z, err := c.zone(ctx)
 	if err != nil {
 		return ZoneInfo{}, err
 	}
 	c.ZoneID = z.ID
-	// Reading the records proves the DNS permission, not just Zone:Read.
+	// Reading records proves the DNS permission, not just Zone:Read.
 	if _, err := c.records(ctx, "CAA", c.ZoneName); err != nil {
 		return ZoneInfo{}, err
 	}

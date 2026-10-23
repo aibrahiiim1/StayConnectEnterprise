@@ -2,26 +2,21 @@ package main
 
 import "testing"
 
-// The Phase-3 Hotel-Admin surface is DARK by default and RBAC-gated. These tests pin the authorization matrix
-// itself (edged enforces it on every request; the UI only hides controls), so a role can never silently gain
-// the ability to change the checkout-grace policy or read resolution evidence.
+// Pins the authorization matrix: edged enforces it on every request, the UI only hides controls.
 func TestPhase3RoleMatrix(t *testing.T) {
 	cases := []struct {
 		role     string
 		resource string
 		want     perm
 	}{
-		// the IT manager owns the PMS integration
 		{"hotel_it_manager", "checkout-grace", permWrite},
 		{"hotel_it_manager", "operational-alerts", permWrite},
 		{"hotel_it_manager", "pms-stays", permRead},
 		{"hotel_it_manager", "pms-resolutions", permRead},
-		// front desk triages alerts but never edits the policy
 		{"front_office_operator", "operational-alerts", permWrite},
 		{"front_office_operator", "checkout-grace", permRead},
 		{"guest_relations_operator", "operational-alerts", permWrite},
 		{"guest_relations_operator", "checkout-grace", permRead},
-		// a viewer only ever reads
 		{"site_viewer", "pms-stays", permRead},
 		{"site_viewer", "operational-alerts", permRead},
 		{"site_viewer", "checkout-grace", permRead},
@@ -53,8 +48,7 @@ func TestPhase3WriteIsRefusedForReadOnlyRoles(t *testing.T) {
 	}
 }
 
-// Resolution evidence must never carry guest identity: the row type is the contract, so a future change that
-// adds a name/room/reservation field to it fails here.
+// Resolution evidence must never carry guest identity; the row type is the contract.
 func TestResolutionEvidenceCarriesNoGuestIdentity(t *testing.T) {
 	var r resolutionRow
 	_ = r
@@ -67,7 +61,6 @@ func TestResolutionEvidenceCarriesNoGuestIdentity(t *testing.T) {
 			}
 		}
 	}
-	// Resolved is a BOOLEAN, not the resolved stay id — an operator learns that it worked, not who it was.
 	if _, ok := any(r.Resolved).(bool); !ok {
 		t.Error("resolution evidence must expose only whether a stay was resolved, never which one")
 	}

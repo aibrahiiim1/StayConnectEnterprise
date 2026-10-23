@@ -1,20 +1,7 @@
 "use client";
 
-// ONLINE-TIME BUDGETS, as the front desk sees them (Phase 6, DARK).
-//
-// The desk is asked "how much internet time do I have left?" and must be able to answer it truthfully. So
-// this screen shows the SAME two numbers the guest's own page shows, from the same durable state the
-// accounting writes: if the desk and the guest's phone could disagree about the remaining minutes, the desk
-// would be the one telling a guest something untrue, to their face.
-//
-// TWO CLOCKS, NEVER ONE. Remaining time counts down only while a device is connected; the hard expiry is a
-// calendar instant that arrives whether the minutes were used or not. An operator reading only the first
-// would promise time that is about to stop being usable.
-//
-// No guest identity appears here -- no name, no room, no stay. An operator looking at time budgets does not
-// need to know whose they are, and the screens that do need that already have their own authorization. The
-// page's own copy obeys the same rule (a test reads the whole page for those words), so the wording below
-// talks about "packages" and "devices" only.
+// Show the same durable time budget as the guest page: connected-time remaining and calendar expiry.
+// Omit guest identity because operators need only package and device time totals here.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Hourglass, Timer, Wifi } from "lucide-react";
@@ -49,7 +36,6 @@ function humanSeconds(s: number): string {
   return "under a minute";
 }
 
-// The cause codes are internal vocabulary; an operator gets the sentence.
 const CAUSE_TEXT: Record<string, string> = {
   AGGREGATE_ONLINE_TIME_EXHAUSTED: "Used all of its online time",
   AGGREGATE_OUTER_WINDOW_EXPIRED: "Reached its end date with time still unused",

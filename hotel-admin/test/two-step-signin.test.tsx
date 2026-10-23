@@ -2,14 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// TWO-STEP SIGN-IN, AS THE CONSOLE PRESENTS IT (edged migration 0132, GDPR plan C10).
-//
-//   - the password opens nothing: the console asks for the authenticator code, and only that signs in;
-//   - the first time, the app is set up here (QR code and the key to type) and the ten recovery codes are shown
-//     once before the console opens;
-//   - a wrong code says so and keeps the operator on the code step; an expired step goes back to the password;
-//   - an administrator can reset a colleague's two-step sign-in with a reason and their password, never their own.
-
 const get = vi.fn();
 const post = vi.fn();
 const replace = vi.fn();

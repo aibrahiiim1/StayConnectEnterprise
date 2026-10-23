@@ -1,26 +1,11 @@
 package main
 
-// GET /edge/v1/reports/overview?range=24h|7d|30d — THE OVERVIEW.
-//
-// /reports/dashboard answers "what does tonight look like". This answers the wider question a duty manager or an
-// IT manager asks of a property: how busy has it been, how much did guests use, is anybody failing to get in,
-// what are they on, are the networks and pools healthy, and is the appliance itself all right. It is additive:
-// /reports/dashboard is untouched and still served.
-//
-// The rules are the dashboard's rules, and they are what keeps the figures defensible:
-//
-//  1. NOTHING IS INVENTED. Every figure traces to a row, a lease or a kernel counter this service may read. What
-//     is not measured anywhere — voucher, account and one-time-code sign-in FAILURES, DNS query statistics — is
-//     named as not recorded, never estimated.
-//  2. EVERY BLOCK FAILS ALONE. Each block carries its own `available`/`reason`. A Kea that cannot be reached
-//     blanks the lease figures and nothing else.
-//  3. A BLOCK THE CALLER'S ROLE MAY NOT READ IS NOT SENT. The route is gated on `reports`; the blocks drawn from
-//     other surfaces are additionally gated on that surface's own key (network, diagnostics, license), and a
-//     role without it receives `not_permitted_for_role` rather than the data. Attention items are derived only
-//     from blocks the caller could read, so they cannot leak around the gate.
-//  4. NO GUEST IS NAMED, and no address, MAC or room appears. Leases are counted, never listed.
-//  5. EVERY QUERY IS BOUNDED: by the window (at most 30 days), by a LIMIT, and — for the one expensive read, the
-//     accounting samples — by a statement timeout and a short-lived cache.
+// GET /edge/v1/reports/overview?range=24h|7d|30d. Rules: nothing is invented (unmeasured figures such as
+// voucher/account/OTC sign-in failures and DNS statistics are named as not recorded); every block fails alone
+// with its own `available`/`reason`; a block the caller's role may not read is not sent (gated on the surface's
+// own key, and attention items derive only from blocks the caller could read); no guest, address, MAC or room
+// appears; every query is bounded by window (30 days), LIMIT, and for the accounting samples a statement
+// timeout and short-lived cache.
 
 import (
 	"context"
@@ -39,10 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ---------------------------------------------------------------------------------------------------------
-// wire shapes
-// ---------------------------------------------------------------------------------------------------------
-
 const reasonNotPermitted = "not_permitted_for_role"
 
 type ovMethod struct {
@@ -53,8 +34,7 @@ type ovMethod struct {
 
 type ovConcurrency struct {
 	section
-	// Definition is stated in the payload because "concurrent devices" can mean two things and a chart that
-	// does not say which is a chart two people will read differently.
+	// Stated in the payload because "concurrent devices" can mean two things.
 	Definition  string    `json:"definition"`
 	Peak        []int     `json:"peak"`
 	Average     []float64 `json:"average"`
@@ -97,8 +77,7 @@ type ovTraffic struct {
 	Sessions    int            `json:"sessions_with_traffic"`
 	ComputedAt  time.Time      `json:"computed_at"`
 	Source      string         `json:"source"`
-	// byIface is every network's figure, not only the top eight, for the per-network table.
-	byIface map[string][2]int64
+	byIface     map[string][2]int64
 }
 
 type ovResultRow struct {
@@ -120,9 +99,8 @@ type ovSignIn struct {
 	SeriesVerified []int64       `json:"series_verified"`
 	SeriesFailed   []int64       `json:"series_failed"`
 	Latency        ovLatency     `json:"latency"`
-	// Covered names what the attempt ledger records; NotRecorded names what nothing on this appliance records.
-	Covered     string   `json:"covered"`
-	NotRecorded []string `json:"not_recorded"`
+	Covered        string        `json:"covered"`
+	NotRecorded    []string      `json:"not_recorded"`
 }
 
 type ovPackageRow struct {
@@ -165,8 +143,7 @@ type ovNetwork struct {
 	CaptivePortal bool     `json:"captive_portal_enabled"`
 	Internet      bool     `json:"internet_access_enabled"`
 	PoolSize      int64    `json:"pool_size"`
-	// InvalidPools counts configured ranges that are not a valid IPv4 range, so a zero pool size caused by a
-	// bad row is distinguishable from "no range configured".
+	// Counts invalid ranges, so a zero pool size from a bad row is distinguishable from "no range configured".
 	InvalidPools  int      `json:"invalid_pools,omitempty"`
 	DevicesOnline int64    `json:"devices_online"`
 	LeasesKnown   bool     `json:"leases_known"`
@@ -246,9 +223,7 @@ type ovServices struct {
 	Services []ovService    `json:"services"`
 }
 
-// ovLicense is the licence block of the overview, in the section 8 vocabulary (state:
-// none|active|expiring|grace|expired|suspended|revoked|wrong_hardware), from the same scd computation as
-// /central/status.
+// The licence block, from the same scd computation as /central/status.
 type ovLicense struct {
 	section
 	State      string `json:"state,omitempty"`
@@ -318,8 +293,7 @@ type overviewResp struct {
 	Attention     []attentionItem `json:"attention"`
 }
 
-// overviewBlockKeys is the permission each block needs IN ADDITION to `reports`, which gates the route. It is
-// a table rather than scattered if-statements so the test can hold it against the role matrix.
+// The permission each block needs in addition to `reports`; a table so the test can hold it against the role matrix.
 var overviewBlockKeys = map[string]string{
 	"dhcp":                "network",
 	"dns":                 "network",
@@ -331,20 +305,13 @@ var overviewBlockKeys = map[string]string{
 	"appliance.license":   "license",
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// bounded reads
-// ---------------------------------------------------------------------------------------------------------
-
-// overviewStatementTimeout bounds each statement against the accounting samples. The samples table grows by up
-// to one row per active device per second and has no time index, so a mistaken plan must be cut off rather
-// than left to hold a connection the portal needs.
+// Bounds each statement against the accounting samples: the table has no time index, so a mistaken plan must be
+// cut off rather than hold a connection the portal needs.
 const overviewStatementTimeout = 4 * time.Second
 
-// overviewSessionCap bounds the candidate-session read. Beyond it the traffic and concurrency figures are
-// reported as unavailable for this range — a truncated candidate list would silently under-report.
+// Beyond it traffic and concurrency are reported unavailable: a truncated candidate list would silently under-report.
 const overviewSessionCap = 100000
 
-// overviewSampleBatch is how many session ids go into one `= ANY($1)` probe of the samples index.
 const overviewSampleBatch = 1000
 
 func (s *server) boundedRead(ctx context.Context, timeout time.Duration, fn func(pgx.Tx) error) error {
@@ -367,8 +334,7 @@ func isStatementTimeout(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded)
 }
 
-// ttlCache holds the few results that are expensive to compute and cheap to be slightly stale. The key always
-// includes the window's end, so a new bucket starting is a new key rather than a stale hit.
+// The key always includes the window's end, so a new bucket is a new key rather than a stale hit.
 type ttlCache struct {
 	mu sync.Mutex
 	m  map[string]ttlEntry
@@ -395,7 +361,6 @@ func (c *ttlCache) put(key string, v any) {
 	if c.m == nil {
 		c.m = map[string]ttlEntry{}
 	}
-	// Bounded: three ranges times a handful of keys. Anything older than an hour is dropped on write.
 	for k, e := range c.m {
 		if time.Since(e.at) > time.Hour {
 			delete(c.m, k)
@@ -407,10 +372,6 @@ func (c *ttlCache) put(key string, v any) {
 var overviewCache ttlCache
 
 var trafficTTL = map[string]time.Duration{"24h": time.Minute, "7d": 5 * time.Minute, "30d": 10 * time.Minute}
-
-// ---------------------------------------------------------------------------------------------------------
-// the handler
-// ---------------------------------------------------------------------------------------------------------
 
 func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.URL.Query().Get("range"))
@@ -424,8 +385,7 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
-	// The window is placed on the DATABASE's clock and local midnight, which is what every timestamp below is
-	// compared with; the browser's clock and timezone play no part.
+	// The window is placed on the database's clock and local midnight; the browser's clock plays no part.
 	var now, dayStart time.Time
 	var tz string
 	if err := s.db.QueryRow(ctx, `SELECT now(), date_trunc('day', now()), current_setting('TimeZone')`).
@@ -449,7 +409,6 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 		BucketSeconds: int64(win.Bucket / time.Second), Buckets: win.bucketStarts(), Timezone: tz,
 	}
 
-	// The slow, independent reads run alongside the database blocks.
 	var wg sync.WaitGroup
 	var leases []keaLeaseRow
 	var leasesErr string
@@ -538,10 +497,8 @@ func (s *server) reportsOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// moduleScopedAttention removes attention items that belong to a module this site does not have. A site
-// without Hospitality is not told that a PMS connection is not ready for room sign-in; PMS messages or room
-// charges waiting for a decision are still raised while those records exist (history and recovery), because
-// they are real work on real records. Unreadable module state keeps only the core (fail closed).
+// Removes attention items for modules this site lacks. PMS messages or room charges awaiting a decision are
+// still raised while those records exist. Unreadable module state keeps only the core (fail closed).
 func (s *server) moduleScopedAttention(ctx context.Context, in attentionInput) attentionInput {
 	if s.modCache == nil {
 		return in
@@ -564,10 +521,6 @@ func (s *server) moduleScopedAttention(ctx context.Context, in attentionInput) a
 	return in
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// guests and traffic
-// ---------------------------------------------------------------------------------------------------------
-
 type overviewCandidate struct {
 	ID        string
 	Started   time.Time
@@ -577,11 +530,8 @@ type overviewCandidate struct {
 	HasBytes  bool
 }
 
-// overviewCandidates reads every session that overlaps the window, once, for both concurrency and traffic.
-//
-// iam_v2.sessions has no index on started/ended, so this is a scan of the site's sessions — the same scan the
-// existing dashboard's aggregate makes on every poll, and a table that grows by one row per sign-in rather than
-// per second. The LIMIT is the cap above plus one, so exceeding it is detectable rather than silent.
+// iam_v2.sessions has no index on started/ended, so this scans the site's sessions. The LIMIT is the cap plus one,
+// so exceeding it is detectable rather than silent.
 func (s *server) overviewCandidates(ctx context.Context, win overviewWindow) ([]overviewCandidate, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT se.id::text, se.started, se.ended, COALESCE(se.ingress_interface, ''),
@@ -644,8 +594,7 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 		g.Heatmap.Values[i] = make([]int64, 24)
 	}
 
-	// Online now, with the dashboard's own definitions (so the two screens cannot disagree), plus the distinct
-	// devices that had any session overlapping the window.
+	// Online now uses the dashboard's definitions so the two screens cannot disagree.
 	if err := s.db.QueryRow(ctx, `
 		SELECT count(DISTINCT mac) FILTER (WHERE state = 'active'),
 		       count(DISTINCT entitlement_id) FILTER (WHERE state = 'active'),
@@ -658,7 +607,6 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 		return g
 	}
 
-	// Sign-ins over time by method. A sign-in is a session STARTING; every session begins with one.
 	methods := map[string]*ovMethod{}
 	rows, err := s.db.Query(ctx, `
 		SELECT floor(extract(epoch FROM (started - $3::timestamptz)) / $5)::int,
@@ -697,7 +645,7 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 		return g.ByMethod[i].Total > g.ByMethod[j].Total
 	})
 
-	// Day-of-week x hour, in the database's local time. ISO day-of-week: Monday = 1.
+	// Day-of-week x hour in the database's local time; ISO day-of-week, Monday = 1.
 	if hrows, err := s.db.Query(ctx, `
 		SELECT extract(isodow FROM started)::int, extract(hour FROM started)::int, count(*)
 		  FROM iam_v2.sessions
@@ -733,28 +681,12 @@ func (s *server) overviewGuests(ctx context.Context, win overviewWindow, cands [
 	return g
 }
 
-// overviewTraffic reads the accounting samples for the window.
-//
-// HOW THE SAMPLES ARE READ WITHOUT SCANNING THE TABLE. iam_v2.accounting_records has two indexes — its primary
-// key and the UNIQUE (session_id, sample_seq) constraint — and none on sampled_at. A predicate on sampled_at
-// alone therefore plans as a sequential scan of every sample the appliance has ever recorded (Seq Scan on
-// accounting_records, Filter: sampled_at >= ... ), which grows by up to one row per active device per second.
-// So the candidate sessions are chosen first, from iam_v2.sessions (above), and the samples are then probed by
-// `session_id = ANY($1)` in batches: that predicate is the leading column of the unique index, which gives
-//
-//	Bitmap Heap Scan on accounting_records ar
-//	  Recheck Cond: (session_id = ANY ($1))
-//	  Filter: ((sampled_at >= $2) AND (sampled_at < $3))
-//	  ->  Bitmap Index Scan on accounting_records_session_id_sample_seq_key
-//	        Index Cond: (session_id = ANY ($1))
-//
-// (or an Index Scan on the same index for a small batch). The cost is then proportional to the samples of the
-// sessions in the window, not to the table's history. That is the EXPECTED plan from the index definitions; it
-// was not measured on the appliance from this workstation, which is why every statement additionally runs under
-// SET LOCAL statement_timeout, and a timeout reports the block as unavailable instead of hanging the page.
-//
-// Only sessions that recorded any bytes are probed: the ingestion function adds each row's delta to the
-// session's own totals in the same transaction, so a session whose totals are zero has no non-zero samples.
+// accounting_records has no index on sampled_at, so a predicate on it alone is a sequential scan of every sample
+// ever recorded. Candidate sessions are chosen first from iam_v2.sessions and probed by `session_id = ANY($1)` in
+// batches, the leading column of the unique (session_id, sample_seq) index. That plan is expected from the index
+// definitions and was not measured, so every statement also runs under SET LOCAL statement_timeout and a timeout
+// reports the block unavailable. Only sessions with non-zero totals are probed: ingestion adds each delta to the
+// session totals in the same transaction.
 func (s *server) overviewTraffic(ctx context.Context, win overviewWindow, cands []overviewCandidate, candErr error) ovTraffic {
 	t := ovTraffic{SeriesDown: make([]int64, win.N), SeriesUp: make([]int64, win.N),
 		TopNetworks: []ovTrafficRow{}, TopPackages: []ovTrafficRow{}, Source: "accounting_samples"}
@@ -868,14 +800,8 @@ func (s *server) packageNames(ctx context.Context) map[string]string {
 	return out
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// sign-in outcomes
-// ---------------------------------------------------------------------------------------------------------
-
-// overviewSignIn reads the room sign-in attempt ledger. It records ROOM (PMS) attempts only, with a thirty-day
-// retention — which is why no range here exceeds thirty days. Successful sign-ins for every method are counted
-// from sessions in the guests block; FAILED voucher, account and one-time-code attempts are recorded nowhere on
-// this appliance, and the payload says so instead of implying there were none.
+// Reads the room (PMS) attempt ledger only, with thirty-day retention, so no range exceeds thirty days. FAILED
+// voucher, account and one-time-code attempts are recorded nowhere, and the payload says so.
 func (s *server) overviewSignIn(ctx context.Context, win overviewWindow) ovSignIn {
 	o := ovSignIn{
 		ByResult: []ovResultRow{}, SeriesVerified: make([]int64, win.N), SeriesFailed: make([]int64, win.N),
@@ -936,10 +862,6 @@ func (s *server) overviewSignIn(ctx context.Context, win overviewWindow) ovSignI
 	return o
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// packages
-// ---------------------------------------------------------------------------------------------------------
-
 func (s *server) overviewPackages(ctx context.Context, win overviewWindow) ovPackages {
 	p := ovPackages{ActiveNow: []ovPackageRow{}, Grants: []ovPackageRow{}, Terminations: []ovReasonRow{}}
 	byPackage := func(filter string, args ...any) ([]ovPackageRow, error) {
@@ -997,10 +919,6 @@ func (s *server) overviewPackages(ctx context.Context, win overviewWindow) ovPac
 	return p
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// PMS — the dashboard's own derivation, called, not repeated
-// ---------------------------------------------------------------------------------------------------------
-
 func (s *server) overviewPMS(ctx context.Context) ovPMS {
 	p := ovPMS{dashPms: s.dashPMS(ctx), Occupancy: s.dashOccupancy(ctx), Postings: s.dashPostings(ctx)}
 	for _, i := range p.Interfaces {
@@ -1013,10 +931,6 @@ func (s *server) overviewPMS(ctx context.Context) ovPMS {
 	}
 	return p
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// networks, DHCP, DNS
-// ---------------------------------------------------------------------------------------------------------
 
 type ovNetRow struct {
 	ovNetwork
@@ -1124,12 +1038,9 @@ func (s *server) overviewLeases(ctx context.Context) ([]keaLeaseRow, string) {
 	return v.Leases, ""
 }
 
-// leaseExpiringWithin is the display definition of "expiring soon" on the overview: nothing acts on it.
 const leaseExpiringWithin = 10 * time.Minute
 
-// assembleNetworkBlocks joins configuration, leases and traffic into the networks, DHCP and DNS blocks. It is a
-// pure function of its inputs so the permission rule — no lease or configuration detail for a role without
-// `network` — is testable without a database.
+// A pure function of its inputs so the permission rule (no lease or configuration detail without `network`) is testable without a database.
 func assembleNetworkBlocks(nets []ovNetRow, pools []ovPoolRow, traffic ovTraffic, leases []keaLeaseRow,
 	leasesErr string, kea keaView, keaReachable, canNetwork bool, now time.Time) (ovNetworks, ovDHCP, ovDNS) {
 
@@ -1193,8 +1104,7 @@ func assembleNetworkBlocks(nets []ovNetRow, pools []ovPoolRow, traffic ovTraffic
 			row.TrafficKnown = traffic.Available
 		}
 		if !canNetwork {
-			// The configuration detail this role may not read is withheld; what remains is what the
-			// dashboard's networks list has always shown under `reports`.
+			// Configuration detail this role may not read is withheld.
 			row.DNSServers = []string{}
 		} else if c, ok := leaseCounts[n.ID]; ok && leasesOK {
 			a, in, soon := c.Active, c.InPools, c.ExpiringSoon
@@ -1215,8 +1125,7 @@ func assembleNetworkBlocks(nets []ovNetRow, pools []ovPoolRow, traffic ovTraffic
 		if canNetwork && n.Enabled {
 			if n.DhcpMode == "local" {
 				dh.LocalNetworks++
-				// Option 114 (RFC 8910) is rendered into a local network's Kea subnet exactly when the captive
-				// portal is enabled on it (netcfg.RenderKeaDhcp4).
+				// Option 114 (RFC 8910) is rendered exactly when the captive portal is enabled on the network (netcfg.RenderKeaDhcp4).
 				if n.CaptivePortal {
 					dh.CaptiveOptionNetworks = append(dh.CaptiveOptionNetworks, n.Name)
 				}
@@ -1249,8 +1158,7 @@ func assembleNetworkBlocks(nets []ovNetRow, pools []ovPoolRow, traffic ovTraffic
 	return nb, dh, dn
 }
 
-// withResolverHealth fills the resolver state from the persisted health record — the one the health
-// supervisor writes after its own 127.0.0.1:53 round trip. It deliberately runs no probe of its own.
+// Fills resolver state from the persisted health record; deliberately runs no probe of its own.
 func (s *server) withResolverHealth(ctx context.Context, dn ovDNS) ovDNS {
 	if !dn.Available {
 		return dn
@@ -1265,10 +1173,6 @@ func (s *server) withResolverHealth(ctx context.Context, dn ovDNS) ovDNS {
 	}
 	return dn
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// services, appliance
-// ---------------------------------------------------------------------------------------------------------
 
 func (s *server) overviewServices(ctx context.Context, win overviewWindow) ovServices {
 	out := ovServices{Services: []ovService{}, Counts: map[string]int{}}
@@ -1321,9 +1225,7 @@ func (s *server) overviewLicense(ctx context.Context) ovLicense {
 		Activation: sum.Activation, ValidUntil: sum.ValidUntil, GraceUntil: sum.GraceEndsAt, DaysLeft: sum.DaysLeft}
 }
 
-// overviewSystemNetwork reads the WAN/LAN state from netd. That read includes a gateway and an internet
-// reachability probe, so it is cached for a minute: an overview left open must not ping out every thirty
-// seconds on its behalf.
+// Includes a gateway and internet reachability probe, so it is cached for a minute: an open overview must not ping out every thirty seconds.
 func (s *server) overviewSystemNetwork(ctx context.Context) ovNetworkConfig {
 	key := "sysnet"
 	if v, ok := overviewCache.get(key, time.Minute); ok {
@@ -1411,8 +1313,7 @@ func (s *server) overviewRevisions(ctx context.Context) ovRevisions {
 	return out
 }
 
-// attentionInputFrom reads only blocks the caller received, so an item can never reveal a fact from a block
-// the caller's role was refused.
+// Reads only blocks the caller received, so an item can never reveal a fact from a refused block.
 func attentionInputFrom(o overviewResp) attentionInput {
 	in := attentionInput{}
 	if o.PMS.Available {
@@ -1432,7 +1333,6 @@ func attentionInputFrom(o overviewResp) attentionInput {
 	}
 	if o.DHCP.Available && o.DHCP.ServerConfigured != nil && o.DHCP.ServerHealthy != nil {
 		in.KeaKnown, in.KeaConfigured, in.KeaHealthy = true, *o.DHCP.ServerConfigured, *o.DHCP.ServerHealthy
-		// The service list already raises Kea when its supervisor record is unhealthy; do not say it twice.
 		for _, sv := range in.Services {
 			if sv.Name == "kea" && sv.Critical && sv.State != stHealthy && sv.State != stWaiting {
 				in.KeaKnown = false
@@ -1465,8 +1365,6 @@ func attentionInputFrom(o overviewResp) attentionInput {
 	return in
 }
 
-// nameTrafficNetworks labels each traffic row with the guest network whose bridge carried it. A session with
-// no recorded ingress bridge keeps an empty name, and the UI says it could not be attributed.
 func nameTrafficNetworks(rows []ovTrafficRow, nets []ovNetRow) []ovTrafficRow {
 	byBridge := map[string]string{}
 	for _, n := range nets {
@@ -1489,9 +1387,8 @@ func twoDigit(i int) string {
 	return strconv.Itoa(i)
 }
 
-// packageSaleIssues lists live packages sold by card that cannot be paid by card here, by the rule scd applies
-// when it lists packages (siteAcquisitionMethods): only the DEFAULT ACTIVE card account settles, in its own
-// currency, unless it is marked provider-converts. Raised only while card payment is in effect at this site.
+// Follows scd's rule (siteAcquisitionMethods): only the default active card account settles, in its own currency,
+// unless marked provider-converts. Raised only while card payment is in effect at this site.
 func (s *server) packageSaleIssues(ctx context.Context) []attentionPackage {
 	if s.db == nil || s.tenantID == "" || s.siteID == "" {
 		return nil

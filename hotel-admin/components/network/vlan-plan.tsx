@@ -1,15 +1,6 @@
 "use client";
 
-// ONE TRUNK, SEVERAL CLIENT NETWORKS.
-//
-// A tagged port can carry the client VLANs of two hotel extensions, or a staff VLAN beside the guest one. Each
-// VLAN is its OWN client network: its own subnet, its own gateway and its own DHCP scope, so two VLANs never
-// share an address range or a broadcast domain. OneGate serves them all from one local DHCP service; that is
-// one service with several scopes, never one scope shared between VLANs.
-//
-// What OneGate configures is its own LAN side. The switch port must be a trunk carrying these VLAN ids, and the
-// wireless controller must tag each SSID onto the matching VLAN — neither is configured from here, so the
-// review step says so plainly rather than implying OneGate has done it.
+// Each VLAN needs its own subnet and DHCP scope; the switch trunk and SSID tagging are configured separately.
 
 import { Field, Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,9 +17,8 @@ export type VlanRow = {
   gateway: string;
   poolStart: string;
   poolEnd: string;
-  /** The operator edited the addressing, so a VLAN change must not overwrite it. */
+  /** Preserve manually edited addressing when the VLAN changes. */
   touched: boolean;
-  /** Per-VLAN DHCP/DNS, used only in "separate" mode. */
   dnsMode: "appliance" | "custom";
   dnsServers: string;
   domainName: string;
@@ -48,7 +38,7 @@ export function newVlanRow(defaults?: Partial<VlanRow>): VlanRow {
   };
 }
 
-/** Fill a row's addressing from a free /24, unless the operator has already chosen it. */
+/** Preserve operator-selected addressing rather than replacing it with an automatic /24. */
 export function withSuggestedAddressing(row: VlanRow, used: Set<string>): VlanRow {
   const v = Number(row.vlan);
   if (row.touched || !Number.isInteger(v) || v < 1 || v > 4094) return row;
@@ -56,7 +46,6 @@ export function withSuggestedAddressing(row: VlanRow, used: Set<string>): VlanRo
   return { ...row, subnet, ...addressingFor(subnet), name: row.name || `VLAN ${v}` };
 }
 
-/** Everything wrong with the plan, by row key, plus a general message. Empty means it can be created. */
 export function vlanPlanProblems(
   rows: VlanRow[],
   usedVLANs: Set<number>,
@@ -81,7 +70,6 @@ export function vlanPlanProblems(
   return out;
 }
 
-/** The VLAN ids carried on the chosen trunk. */
 export function VlanIdList({
   rows, onChange, problems,
 }: { rows: VlanRow[]; onChange: (rows: VlanRow[]) => void; problems: Record<number, string> }) {
@@ -108,7 +96,6 @@ export function VlanIdList({
   );
 }
 
-/** Per-VLAN addressing, and (in "separate" mode) per-VLAN DHCP and DNS. */
 export function VlanAddressingTable({
   rows, onChange, problems, separate,
 }: {

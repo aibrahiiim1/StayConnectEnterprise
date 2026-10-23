@@ -1,16 +1,7 @@
 package main
 
-// EVERY HANDLER MUST BE REACHABLE.
-//
-// The backup settings handlers were written, built, vetted, unit-tested and merged through four green gates
-// while being mounted on NOTHING. scd had no route for them, so edged proxied to a path that answered 404 and
-// the operator saw "404 page not found" where a retention policy should have been. Nothing in the build or
-// the test suite noticed, because an unreferenced-but-exported method is perfectly legal Go and every test
-// called the handler directly rather than through the router.
-//
-// This reads the routes actually registered on scd's mux and asserts the ones edged depends on are there. It
-// is deliberately about REACHABILITY, not behaviour: the behaviour is tested elsewhere, and the thing that
-// went wrong was the wiring.
+// Every handler must be reachable: backup handlers once shipped mounted on nothing, so edged proxied to a 404 and no test noticed.
+// This reads the routes registered on the scd mux and asserts the ones edged depends on; it checks wiring, not behaviour.
 
 import (
 	"os"
@@ -19,11 +10,7 @@ import (
 	"testing"
 )
 
-// edgedDependsOn lists the scd paths edged calls. When edged gains a new proxy target, it belongs here — that
-// is the point: this file is where "I added a handler" and "the caller can reach it" are reconciled.
-// METHOD AND PATH, not path alone. The first version of this checked paths only, and a probe that deleted the
-// GET route still passed because the POST on the same path kept the path "registered" — a test that would
-// have missed half of the very defect it exists for.
+// edgedDependsOn lists the scd paths edged calls; a new edged proxy target belongs here. Keyed by METHOD AND PATH, since a GET probe once passed on the POST.
 var edgedDependsOn = []struct{ method, path string }{
 	{"Post", "/v1/backup/run"},
 	{"Post", "/v1/backup/verify"},
@@ -36,9 +23,7 @@ var edgedDependsOn = []struct{ method, path string }{
 	{"Get", "/v1/central/offline-request"},
 	{"Post", "/v1/central/offline-package"},
 	{"Post", "/v1/license/install"},
-	// The voucher operator surface. Issuance was routed here for a whole delivery with no caller anywhere
-	// -- the inverse of the defect this file exists for, and just as invisible: a reachable route nothing
-	// reaches is as useless as an unreachable handler. edged now proxies all six.
+	// The voucher operator surface: a route with no caller is as useless as an unreachable handler. edged proxies all six.
 	{"Post", "/v1/vouchers/issue"},
 	{"Get", "/v1/vouchers"},
 	{"Get", "/v1/vouchers/summary"},
@@ -55,8 +40,7 @@ func TestEveryPathEdgedCallsIsRoutedOnSCD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read scd routes: %v", err)
 	}
-	// Matches r.Get("/v1/..."), r.Post(...), r.Put(...), r.Delete(...) — the registration itself, rather than
-	// a mention of the path in a comment or a string somewhere else.
+	// Matches the registration itself (r.Get, r.Post, ...), not a mention of the path in a comment or string.
 	registered := map[string]bool{}
 	re := regexp.MustCompile(`r\.(Get|Post|Put|Delete|Patch|Handle)\(\s*"([^"]+)"`)
 	for _, m := range re.FindAllStringSubmatch(string(src), -1) {
@@ -74,8 +58,7 @@ func TestEveryPathEdgedCallsIsRoutedOnSCD(t *testing.T) {
 }
 
 func TestSCDRouteHandlersAreNotOrphaned(t *testing.T) {
-	// The mirror of the test above: a handler defined in this package and never mounted is either dead or a
-	// route somebody forgot. Checked for the backup surface specifically, which is where it happened.
+	// A handler defined here and never mounted is dead or a forgotten route; checked for the backup surface.
 	src, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)

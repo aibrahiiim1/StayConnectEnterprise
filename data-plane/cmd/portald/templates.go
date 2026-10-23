@@ -1,17 +1,6 @@
 package main
 
-// THE GUEST PORTAL'S PAGES.
-//
-// Four pages, one look: the sign-in page (landingHTML), the package choice (packagesHTML), "You're online"
-// (successHTML) and the friendly failure page (errorHTML). All four are drawn from the same token sheet and
-// the same six layouts (portal_css.go), carry the hotel's name, logo and colours from the published design,
-// and are rendered in the guest's language with the direction that language reads in.
-//
-// Nothing here decides anything. Every form posts where it always did, with the fields it always had; every
-// fetch goes to the route and carries the body it always carried; every refusal is the sentence the server
-// chose, shown in the guest's language. What changed is how it looks and which language it is read in.
-
-// ---- icons: inline, drawn with currentColor, never meaning on their own --------------------------------------
+// Guest portal page templates. Presentation only: forms, routes and refusal text are decided by the server.
 
 const (
 	svgOpen      = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"`
@@ -26,36 +15,28 @@ const (
 	iconClose    = svgOpen + ` stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>`
 )
 
-// ---- the help sheet and the product attribution, on every guest page ---------------------------------------
-
-// helpOpen opens the lightbulb and its sheet. It is a <details>: with no script the lightbulb is a native
-// disclosure that shows the tips in place, keyboard-operable with nothing added. guestHelpScript upgrades it
-// to a modal sheet (role="dialog", focus kept inside, Esc and the backdrop close it, focus returns to the
-// lightbulb). The tips explain; they never carry an error, a countdown or a notice -- those stay on the page.
+// helpOpen is a <details> that works without script; guestHelpScript upgrades it to a modal sheet.
+// Errors, countdowns and notices never go in the tips.
 const helpOpen = `
 <details class="sc-help" id="sc-help"><summary class="help-btn" data-i18n-aria="help.button" aria-label="{{index .T "help.button"}}" title="{{index .T "help.button"}}">` + iconBulb + `</summary><div class="help-sheet" id="sc-help-sheet"><div class="help-card">
 <div class="help-head"><h2 class="help-title" id="sc-help-title" data-i18n="help.title" data-i18n-en="Help with signing in">{{index .T "help.title"}}</h2><button type="button" class="help-close" data-help-close data-i18n-aria="help.close" aria-label="{{index .T "help.close"}}" title="{{index .T "help.close"}}">` + iconClose + `</button></div>`
 
-// helpClose ends the sheet: what to do when something does not work, and the hotel's own help line.
+// helpClose ends the sheet with the failure advice and the hotel's help line.
 const helpClose = `
 <p class="help-fail" data-i18n="help.fail" data-i18n-en="Something not working? Please contact the site team for assistance.">{{index .T "help.fail"}}</p>
 <p class="help-hotel" id="help-hotel" dir="auto"{{if not .Brand.Help}} hidden{{end}}>{{.Brand.Help}}</p>
 </div></div></details>`
 
-// ogAttribution is the product's one line on a guest page: small, at the foot, after everything the hotel
-// says. "OneGate" is a name and is never translated; it sits on a light chip so the black half stays black on
-// any surface a hotel chooses, and it is isolated left-to-right so an Arabic page keeps it whole.
+// ogAttribution: "OneGate" is never translated; it sits on a light chip and is isolated left-to-right so Arabic pages keep it whole.
 const ogAttribution = `
 <p class="sc-by"><span data-i18n="brand.by" data-i18n-en="Wi-Fi by">{{index .T "brand.by"}}</span> <bdi class="og-mark" dir="ltr" lang="en"><b class="og-one">One</b><b class="og-gate">Gate</b></bdi></p>`
 
-// guestFoot is the foot of every page after sign-in: the lightbulb (general help and the hotel's line) and the
-// attribution.
+// guestFoot is the foot of every page after sign-in.
 const guestFoot = `
 <div class="sc-foot sc-foot--page">` + helpOpen + helpClose + ogAttribution + `
 </div>`
 
-// guestHelpScript turns the <details> into a modal sheet. Presentation only: it opens and closes a panel that
-// is already on the page.
+// guestHelpScript turns the <details> into a modal sheet.
 const guestHelpScript = `
 <script nonce="{{.Nonce}}">
 (function () {
@@ -117,12 +98,8 @@ const guestHelpScript = `
 })();
 </script>`
 
-// guestHead opens every page after sign-in: language, direction, the hotel's layout attributes and colours
-// on <html>, and the stylesheets in the SAME cascade as the sign-in page -- the portal's styling and the
-// template in layers, the hotel's custom CSS in `@layer hotel` above them, and an unlayered guard sheet over the
-// controls these pages need (portalPageGuardCSS). The hotel's sheet is rendered by the server here (HotelSheet,
-// built by hotelSheet in portal_page.go from the design ForGuests already sanitised), so the hotel's look
-// carries on after sign-in and its CSS still cannot hide Disconnect, Back or a package button.
+// guestHead uses the same cascade as the sign-in page: portal layers, the hotel's `@layer hotel` CSS above them,
+// then an unlayered guard sheet so hotel CSS cannot hide Disconnect, Back or a package button.
 const guestHead = `<!doctype html>
 <html lang="{{.Lang}}" dir="{{.Dir}}" data-template="{{.Brand.Template}}" data-density="{{.Brand.Density}}" data-panel="{{.Brand.Panel}}" data-hero="{{.Brand.HeroHeight}}" data-surface="{{.Brand.Surface}}"{{with .Brand.Style}} style="{{.}}"{{end}}><head>
 <meta charset="utf-8">
@@ -147,11 +124,8 @@ const guestHead = `<!doctype html>
 {{with .HotelSheet}}{{.}}{{end}}
 <style id="sc-guard">` + portalPageGuardCSS + `</style>` + layerFallbackScript
 
-// layerFallbackScript: CASCADE LAYERS, AND THE BROWSERS THAT PREDATE THEM. A browser without cascade layers
-// (iOS before 15.4, for one) drops an entire layered block as an unknown rule -- which here would be the
-// portal's whole stylesheet. On those browsers the layer wrappers are removed before anything paints, and the
-// page falls back to plain source order: base, template, hotel, guard. Every page carries this one copy; on
-// the sign-in page the hotel's sheet does not exist yet (its script inserts it before the guard later).
+// layerFallbackScript: browsers without cascade layers (iOS before 15.4) drop a whole layered block, so
+// the layer wrappers are stripped before paint and source order applies.
 const layerFallbackScript = `
 <script nonce="{{.Nonce}}">
   (function () {
@@ -166,21 +140,17 @@ const layerFallbackScript = `
   })();
 </script>`
 
-// guestChrome is the hero (decoration, for the photographic and bar layouts) and the language pill.
+// guestChrome is the hero and the language pill.
 const guestChrome = `
 <div class="sc-hero" aria-hidden="true"><div class="sc-hero-inner">{{if .Brand.HeroLogo}}<img class="sc-hero-logo" src="{{.Brand.Logo}}" alt="" data-logo>{{end}}<div class="sc-hero-name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</div>{{with .Brand.Welcome}}<p class="sc-hero-welcome" dir="auto">{{.}}</p>{{end}}</div></div>
 {{if gt (len .Languages) 1}}<div class="langbar"><label class="lang">` + iconGlobe + `<select id="lang" aria-label="{{index .T "lang.label"}}">{{range .Languages}}<option value="{{.Code}}" lang="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Label}}</option>{{end}}</select>` + iconChevDown + `</label></div>{{end}}`
 
-// guestBrandblock is the hotel's logo, or the Wi-Fi mark when there is none, and its name.
+// guestBrandblock is the hotel's logo (or the Wi-Fi mark) and name.
 const guestBrandblock = `
 <div class="sc-brandblock"><div class="brand{{if .Brand.CardLogo}} has-logo{{end}}">{{if .Brand.CardLogo}}<img src="{{.Brand.Logo}}" alt="" data-logo>{{end}}<span class="brand-mark" aria-hidden="true">` + iconWifi + `</span><p class="name" dir="auto">{{if .Brand.Name}}{{.Brand.Name}}{{else}}{{index .T "brand.fallback"}}{{end}}</p></div></div>`
 
-// guestScripts: a logo that fails to load leaves nothing behind, and the language pill remembers the
-// guest's choice exactly as the sign-in page does (cookie and localStorage) before redrawing the page in it.
-// These pages are redrawn by the server, so choosing a language reloads the page -- and a reload on every
-// change would fire at each arrow-key step through a closed select (WCAG 3.2.2). A choice made with the
-// keyboard is applied on Enter or when focus leaves the pill; a choice from the pointer or a phone's picker
-// (one change, no keys) is applied at once.
+// guestScripts: the language choice reloads the page, so a keyboard choice is applied on Enter or blur
+// rather than at each arrow key (WCAG 3.2.2); pointer and phone-picker choices apply at once.
 const guestScripts = `
 <script nonce="{{.Nonce}}">
 (function () {
@@ -226,8 +196,7 @@ const guestScripts = `
 </script>` + guestHelpScript + `
 `
 
-// deviceFacts is the device's own addresses, which reception may ask for. The sign-in page shows them in the
-// help sheet and behind the information button -- the same words from this one source.
+// deviceFacts is the device's own addresses, which reception may ask for.
 const deviceFacts = `
 <strong data-i18n="info.device" data-i18n-en="Your device">{{index .T "info.device"}}</strong>
 <dl>
@@ -236,10 +205,6 @@ const deviceFacts = `
 </dl>
 <p data-i18n="info.help" data-i18n-en="The site team may ask for these if you need help connecting.">{{index .T "info.help"}}</p>
 `
-
-// ============================================================================================================
-// THE SIGN-IN PAGE
-// ============================================================================================================
 
 const landingHTML = `<!doctype html>
 <html lang="{{.Lang}}" dir="{{.Dir}}" data-template="{{.Brand.Template}}" data-density="{{.Brand.Density}}" data-panel="{{.Brand.Panel}}" data-hero="{{.Brand.HeroHeight}}" data-surface="{{.Brand.Surface}}"{{with .Brand.Style}} style="{{.}}"{{end}}><head>
@@ -1896,12 +1861,7 @@ const landingHTML = `<!doctype html>
 
 </body></html>`
 
-// ============================================================================================================
-// CHOOSE YOUR PACKAGE
-// ============================================================================================================
-
-// packagesHTML: one large button per package, name and a detail line. Each is its own form posting the one
-// opaque id it always posted; the page adds no field and no script to the acquisition.
+// packagesHTML: one form per package, each posting only its opaque id.
 const packagesHTML = guestHead + `
 <title>{{index .T "pkg.title"}}</title>
 </head><body>
@@ -1973,13 +1933,8 @@ const packagesHTML = guestHead + `
 </script>
 </body></html>`
 
-// ============================================================================================================
-// CONFIRMING A PAYMENT (the page a card provider sends the client back to)
-// ============================================================================================================
-
-// payHTML asks the portal, every few seconds, where the purchase stands. The answer comes from scd, which asks
-// the payment provider; this page proves nothing and grants nothing. It works without any cookie: the device
-// is identified from the connection.
+// payHTML polls where the purchase stands (answered by scd); it proves and grants nothing, and needs no cookie
+// because the device is identified from the connection.
 const payHTML = guestHead + `
 <title>{{index .T "pay.title"}}</title>
 </head><body>
@@ -2033,10 +1988,6 @@ const payHTML = guestHead + `
 </script>
 </body></html>`
 
-// ============================================================================================================
-// SIGN-IN DID NOT WORK (a flow that has left the sign-in page, e.g. the social provider's return)
-// ============================================================================================================
-
 const errorHTML = guestHead + `
 <title>{{.Title}}</title>
 </head><body>
@@ -2052,14 +2003,8 @@ const errorHTML = guestHead + `
 </div>` + guestScripts + `
 </body></html>`
 
-// ============================================================================================================
-// CONNECTION STATUS (a guest who follows the "Status" link, or otherwise navigates to /status)
-// ============================================================================================================
-
-// statusHTML draws what scd's session status says, in words: the device is online, and -- only on a package
-// that has an online-time allowance, the one case where scd reports it -- how much of that time is left and
-// when the access ends regardless. A script-driven fetch of /status still gets scd's JSON (main.go); only a
-// browser navigating here gets this page. The actions are the online page's own: back to it, and Disconnect.
+// statusHTML shows scd's session status; time left appears only for packages with an online-time allowance.
+// Script fetches of /status still get scd's JSON (main.go).
 const statusHTML = guestHead + `
 <title>{{index .T "online.status"}}</title>
 </head><body>
@@ -2095,10 +2040,6 @@ const statusHTML = guestHead + `
   })();
 </script>
 </body></html>`
-
-// ============================================================================================================
-// YOU'RE ONLINE
-// ============================================================================================================
 
 const successHTML = guestHead + `
 <title>{{index .T "online.title"}}</title>

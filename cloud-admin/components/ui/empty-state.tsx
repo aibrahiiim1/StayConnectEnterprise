@@ -1,8 +1,5 @@
 import { cn } from "@/lib/utils";
 
-// EmptyState kept its `{ title, hint }` signature — roughly thirty screens call it that way. `icon` and
-// `action` are optional additions, so an empty list can now offer the thing that would fill it instead of
-// only reporting that it is empty.
 export function EmptyState({
   title,
   hint,

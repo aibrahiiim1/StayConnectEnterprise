@@ -15,10 +15,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/totp"
 )
 
-// fakeMFA stands in for scd in edged's tests: the same answers, real TOTP codes, the secret in memory instead of
-// sealed. It mirrors a confirmed authenticator into public.operator_mfa (with a dummy ciphertext) so what edged
-// reads from the database -- the Operators list -- sees what scd would have written. scd's own handling of the
-// sealed secret, replay and recovery codes is tested in cmd/scd.
+// fakeMFA stands in for scd: real TOTP codes with the secret in memory, mirroring a confirmed authenticator into
+// public.operator_mfa (dummy ciphertext) so the Operators list sees what scd would have written.
 type fakeMFA struct {
 	mu  sync.Mutex
 	ops map[string]*fakeAuthenticator
@@ -36,7 +34,6 @@ func newFakeMFA(db *pgxpool.Pool) *fakeMFA {
 	return &fakeMFA{ops: map[string]*fakeAuthenticator{}, db: db}
 }
 
-// codeFor is what the operator's phone shows now.
 func (f *fakeMFA) codeFor(operatorID string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

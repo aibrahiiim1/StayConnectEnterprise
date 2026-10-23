@@ -1,22 +1,7 @@
 package iamv2
 
-// AN UNUSED PRINTED VOUCHER SURVIVES A CLIENT-NETWORK REPLACEMENT.
-//
-// THE DEFECT. A voucher is pinned at issuance to the package REVISION it was printed against, and redeems that
-// revision directly — deliberately, so republishing or deactivating a package never invalidates printed codes.
-// A revision is immutable and names client networks by id. Replacing a client network — moving a LAN port onto a
-// tagged trunk, changing a VLAN id, re-addressing a subnet — gives that network a NEW id. So from the moment a
-// cable moved, a SITE_NETWORK rule in the pinned revision named an id the guest could not possibly be on: the
-// original is disabled, and the appliance can only resolve the source IP to the successor. The card answered
-// "unavailable", the front desk had nothing to go on, and the operator's only remedy would have been to reissue
-// every valid unused voucher after an ordinary cabling change.
-//
-// The forward republish performed at confirm cannot fix this. It publishes a LATER revision, and the card is
-// pinned to the earlier one on purpose.
-//
-// WHAT FIXES IT is the successor keeping the retired network's LOGICAL identity (migration 0106): a rule naming
-// a predecessor is satisfied by a device on the network that replaced it. History is not rewritten and the
-// retired id is not re-pointed.
+// An unused printed voucher survives a client-network replacement: a replaced network gets a new id, but a rule
+// naming a predecessor is satisfied by the network that replaced it (the pinned revision is immutable).
 
 import (
 	"context"
@@ -30,7 +15,6 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 	db := p2DB(t)
 	ctx := context.Background()
 
-	// The package is limited to ONE client network: the one that is about to be replaced.
 	var retired string
 	if err := db.QueryRow(ctx, `INSERT INTO public.guest_networks
 		  (tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
@@ -42,7 +26,6 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		o.rules = `[{"type":"SITE_NETWORK","value":{"guest_network_ids":["` + retired + `"]}}]`
 	})
 
-	// A card printed against that revision, still UNUSED and inside its window.
 	keyGen := mustOne(t, db, `INSERT INTO iam_v2.voucher_code_key_generations
 		  (tenant_id,site_id,generation_no,hmac_key_ciphertext,aead_params,encryption_key_id)
 		VALUES ($1,$2,1,'\x00','{}'::jsonb,gen_random_uuid()) RETURNING id::text`, p2Tenant, p2Site)
@@ -52,7 +35,6 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		VALUES ($1,$2,$3,'\x00','\x00',$4::uuid,'1234',$5,'UNUSED', now()-interval '1 day', now()+interval '30 days')
 		RETURNING id::text`, p2Tenant, p2Site, []byte("voucher-blind-index-survives-replacement"), keyGen, s.pkgRevID)
 
-	// The guest is on the SUCCESSOR network — the only one the appliance can resolve now.
 	voucherCtx := mustOneGuarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts
 		  (tenant_id,site_id,method,voucher_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'VOUCHER',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`,
@@ -68,14 +50,11 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		return q
 	}
 
-	// WITHOUT a recorded replacement the refusal is correct and must stay correct: this network is simply not
-	// the one the card is for. If this ever starts passing, the lineage has stopped being scoped and is
-	// widening eligibility to networks nobody connected.
+	// Without a recorded replacement the refusal must stand, or lineage is widening eligibility.
 	if q := quote(); q.QuoteID != "" || q.Reason != "ineligible:guest_network_not_allowed" {
 		t.Fatalf("with no replacement recorded, quote = %+v; a card for another network must be refused", q)
 	}
 
-	// Now record that the guest's network REPLACED the one the card names, applied and confirmed.
 	replID := mustOne(t, db, `INSERT INTO iam_v2.guest_network_replacements
 		  (tenant_id,site_id,original_network_id,successor_network_id,state,network_type,parent_interface,
 		   vlan_id,reason,created_by,applied_at,settled_at)
@@ -87,8 +66,7 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		t.Fatalf("after the replacement the printed card must still redeem, got %+v", q)
 	}
 
-	// ...and the lineage is scoped to a replacement that actually took effect. Rolled back means it never
-	// happened on the wire, and the card is for a network that is live again somewhere else.
+	// Only a replacement that took effect counts; a reverted one never happened on the wire.
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET state='REVERTED' WHERE id=$1`, replID); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +74,7 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		t.Fatalf("a REVERTED replacement must continue nothing, got %+v", q)
 	}
 
-	// A PENDING one has not happened either: nothing is on the wire until the operator applies it.
+	// A pending one has not happened either.
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements
 		   SET state='PENDING', successor_network_id=NULL WHERE id=$1`, replID); err != nil {
 		t.Fatal(err)
@@ -105,7 +83,6 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 		t.Fatalf("a PENDING replacement must continue nothing, got %+v", q)
 	}
 
-	// Through the whole test the card was never burned: a refused quote must not consume it.
 	var state string
 	if err := db.QueryRow(ctx, `SELECT state FROM iam_v2.vouchers WHERE id=$1`, voucherID).Scan(&state); err != nil {
 		t.Fatal(err)
@@ -115,8 +92,7 @@ func TestAnUnusedVoucherStillRedeemsAfterItsClientNetworkWasReplaced(t *testing.
 	}
 }
 
-// TRANSITIVELY. A network replaced twice still continues the first one, because a hotel that moves a port onto a
-// trunk and later re-addresses it has not changed who the package was written for either time.
+// Lineage is transitive: a network replaced twice still continues the first one.
 func TestLineageIsTransitiveAcrossSeveralReplacements(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
@@ -129,9 +105,7 @@ func TestLineageIsTransitiveAcrossSeveralReplacements(t *testing.T) {
 		  (tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
 		VALUES ($1,$2,'gen2','br-lan','br-g-gen2','10.82.0.1/24','10.82.0.1','10.82.0.0/24',false) RETURNING id::text`,
 		p2Tenant, p2Site)
-	// Its OWN current network, not the shared fixture network p2GN. Replacement rows are append-only history and
-	// are never cleaned up, so chaining onto p2GN added another pair of ancestors to p2GN's lineage on every run:
-	// the test passed on a fresh database and failed on every later run against the same one.
+	// Not the shared p2GN: replacement rows are never cleaned up, so chaining onto it grows its lineage every run.
 	current := mustOne(t, db, `INSERT INTO public.guest_networks
 		  (tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
 		VALUES ($1,$2,'gen3','br-lan','br-g-gen3','10.83.0.1/24','10.83.0.1','10.83.0.0/24',false) RETURNING id::text`,
@@ -166,9 +140,7 @@ func TestLineageIsTransitiveAcrossSeveralReplacements(t *testing.T) {
 	}
 }
 
-// mustOneGuarded is mustOne inside an open controlled operation. The auth_context family refuses a write from
-// any caller that has not declared one (p3_auth_context_controlled_writer), which is the invariant that keeps a
-// context from being forged outside the authenticator -- a test is no exception.
+// mustOneGuarded is mustOne inside an open controlled operation; auth_context writes are refused otherwise.
 func mustOneGuarded(t *testing.T, db *pgxpool.Pool, op, q string, args ...any) string {
 	t.Helper()
 	ctx := context.Background()
@@ -190,7 +162,6 @@ func mustOneGuarded(t *testing.T, db *pgxpool.Pool, op, q string, args ...any) s
 	return out
 }
 
-// mustOne runs a one-column query that has to produce exactly one row.
 func mustOne(t *testing.T, db *pgxpool.Pool, q string, args ...any) string {
 	t.Helper()
 	var out string

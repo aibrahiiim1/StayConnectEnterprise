@@ -2,16 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// THE PMS INTERFACE ADMIN PAGES, in jsdom with a mocked edged.
-//
-// The API contract itself is proven against a real PostgreSQL in edged's integration tests. What is asserted
-// here is what the OPERATOR sees and can do — the parts a backend test cannot reach:
-//
-//   the PUBLISHED revision is the one the interface points at, even when a newer one exists;
-//   publishing sends the revision the operator BELIEVED was live, so a concurrent change is refused;
-//   the credential form never renders a value and never asks the server for one;
-//   an interface nobody routes to, and a network mapped to nobody, are both stated rather than left blank.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
@@ -23,8 +13,7 @@ vi.mock("@/lib/api", () => ({
     put: (...a: any[]) => put(...a),
     del: (...a: any[]) => del(...a),
   },
-  // The ApiError class is re-exported by the real module and is used by the pages' error handling. A bare object
-  // mock with no ApiError makes `e instanceof ApiError` throw rather than return false.
+  // ApiError is re-exported by the real module and pages do `e instanceof ApiError`; a bare mock would make that throw.
   ApiError: class ApiError extends Error {},
 }));
 
@@ -63,7 +52,6 @@ const health = {
 };
 
 const revisions = [
-  // deliberately newest-first, with the OLDER one published
   { id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, config: { host: "pms.local", password: "[redacted]" }, published: false },
   { id: "r1", revision_no: 1, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
@@ -86,7 +74,6 @@ function mockInterfacePage(overrides: Record<string, any> = {}) {
   });
 }
 
-// Opens a connection's side sheet from its card, then (optionally) one of its tabs.
 async function openSheet(tab?: string) {
   await screen.findByText("Main PMS");
   await userEvent.click(await screen.findByRole("button", { name: "Manage" }));
@@ -100,8 +87,6 @@ describe("PMS interfaces page", () => {
     render(<Page />);
     await openSheet("Configuration");
 
-    // THE LIVE SECTION SHOWS WHAT IS IN FORCE, not the newest thing saved. Version 1 is in use even though
-    // version 2 exists and is newer; version 2 is offered as a draft to put live, never labelled as in use.
     await screen.findByRole("heading", { name: "Live configuration" });
     const sheet = screen.getByRole("dialog");
     expect(await within(sheet).findByText("Version 1")).toBeTruthy();
@@ -113,13 +98,10 @@ describe("PMS interfaces page", () => {
   it("states plainly when an interface has nothing published", async () => {
     mockInterfacePage({
       iface: { ...iface, published: false, current_revision_id: undefined, current_revision_no: null },
-      // The server would never report an interface with nothing published as ready; saying so in the fixture is
-      // what makes this a test of the screen rather than of an impossible state.
       health: { ...health, room_auth_ready: false, room_auth_reason: "NO_PUBLISHED_REVISION" },
     });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
-    // Stated as the CONSEQUENCE, on the card itself: no live configuration, and why room sign-in is closed.
     expect(await screen.findByText(/No configuration has been put live/i)).toBeTruthy();
     expect(screen.getByText("None published")).toBeTruthy();
   });
@@ -131,12 +113,10 @@ describe("PMS interfaces page", () => {
     await openSheet();
 
     await screen.findByText("The checks room sign-in depends on");
-    // separate, because they fail separately and each has a different response
     expect(screen.getAllByText("Connection").length).toBeGreaterThan(0);
     expect(screen.getByText("Live updates")).toBeTruthy();
     expect(screen.getAllByText("Guest list").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/12/).length).toBeGreaterThan(0);
-    // the age of the oldest waiting event is what separates a busy morning from a stuck processor
     expect(screen.getByText(/^Oldest waiting message arrived/)).toBeTruthy();
   });
 
@@ -157,8 +137,8 @@ describe("PMS interfaces page", () => {
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
     expect(path).toBe("/pms-interfaces/i1/publish");
-    // THE OPTIMISTIC CHECK: without expected_revision_id the server cannot tell a deliberate change from one
-    // that would silently revert whoever published while this form was open.
+    // expected_revision_id is required: without it the server cannot tell a deliberate change from one that reverts a
+    // concurrent publish.
     expect(body).toEqual({ revision_id: "r2", expected_revision_id: "r1", reason_code: "ENDPOINT_CHANGE", password: "pw" });
   });
 
@@ -205,11 +185,8 @@ describe("PMS interfaces page", () => {
     expect(alert.textContent).toMatch(/reload/i);
   });
 
-  // THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so the page must not present one.
-  //
-  // The Protel FIAS link carries no transport authentication (credential_mode=NONE), so a Credentials tab — or a
-  // "never set" warning — would describe a missing secret that is not supposed to exist, and read as a fault on a
-  // correctly configured interface. The tab exists only for providers that sign in with a key.
+  // The Protel FIAS link has no transport credential (credential_mode=NONE), so no Credentials tab or "never set"
+  // warning is shown.
   it("presents no credential surface for a connector that needs none", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
@@ -222,8 +199,6 @@ describe("PMS interfaces page", () => {
     for (const [p] of get.mock.calls) expect(String(p)).not.toMatch(/secret/);
   });
 
-  // THE PROVIDER LIST COMES FROM THE CATALOGUE. A provider the catalogue does not list is never offered, and
-  // without a catalogue at all only Protel (FIAS) — the connector every appliance carries — is offered.
   it("offers only Protel when the provider catalogue is unavailable", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
@@ -258,8 +233,6 @@ describe("PMS interfaces page", () => {
     }
   });
 
-  // A Protel revision form must not ask for values the implementation controls. Each of these was a way to
-  // save a revision that could never work, and folio identity was a financial assertion on a dropdown.
   it("does not ask the operator for implementation-controlled revision settings", async () => {
     mockInterfacePage();
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
@@ -278,7 +251,6 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await openSheet("Client networks");
-    // configured but unreachable looks identical to healthy everywhere else on the page
     expect(await screen.findByText(/No Wi-Fi network points at this connection/)).toBeTruthy();
   });
 });
@@ -307,23 +279,12 @@ describe("Guest network routing page", () => {
 
     expect(await screen.findByText("Guest VLAN 10")).toBeTruthy();
     expect(screen.getByText("Main PMS")).toBeTruthy();
-    // the point of the page: an absence is invisible in a list of what exists
     expect(await screen.findByText("Conference VLAN 20")).toBeTruthy();
     expect(screen.getByText(/will not be recognised/i)).toBeTruthy();
   });
 
-  // THE PAGE CAN NOW SET THE MAPPING, AND THE PREVIOUS DECISION IS REVERSED ON PURPOSE.
-  //
-  // It used to be read-only, on the reasoning that which PMS a VLAN resolves against follows the network
-  // topology and should therefore be changed "where the networks are configured". The reasoning is sound; the
-  // problem is that it was not true. The guest-network API has no PMS field, so the conclusion in practice was
-  // that the mapping could be set NOWHERE in the product -- it existed only as a row written by integration-test
-  // fixtures, which is how a deployment reached "PMS connected, stays ingested, nothing authenticates" with no
-  // product action available to fix it. edged has carried PUT/DELETE on this resource since; this is the screen
-  // finally using them.
-  //
-  // WRITE is site_admin only, matching edged's rolePerms, and the test below pins that the controls are HIDDEN
-  // for a reader rather than offered and refused.
+  // The page can set the PMS mapping for a VLAN (the guest-network API has no PMS field); WRITE is site_admin only and
+  // hidden for readers.
   it("lets a site admin point a network at a PMS", async () => {
     routingMock({ unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }] });
     put.mockResolvedValue({});
@@ -371,7 +332,6 @@ describe("Source conflicts page", () => {
     expect(await screen.findByText("Main PMS")).toBeTruthy();
     expect(screen.getByText("Spa PMS")).toBeTruthy();
     expect(screen.getByText("high")).toBeTruthy();
-    // a conflict rendered as two UUIDs is a conflict nobody resolves
     expect(screen.queryByText("i1")).toBeNull();
     expect(screen.queryByText("i2")).toBeNull();
   });
@@ -393,7 +353,6 @@ describe("Resolution evidence page", () => {
         { id: "a3", guest_network_id: "gn1", outcome_code: "AMBIGUOUS_DISCRIMINATOR_REQUIRED", resolved: false, resolved_at: new Date().toISOString() },
       ],
       meta: { has_more: false }, page: 1, page_size: 50, total: 3,
-      // edged summarises the recent window itself; the table is paged.
       summary: {
         window: 200, total: 3, verified: 1, newest_resolved_at: new Date().toISOString(),
         outcomes: [{ outcome_code: "AMBIGUOUS_DISCRIMINATOR_REQUIRED", count: 2 }, { outcome_code: "VERIFIED", count: 1 }],
@@ -403,16 +362,11 @@ describe("Resolution evidence page", () => {
     const Page = (await import("@/app/(app)/pms-resolutions/page")).default;
     const { container } = render(<Page />);
 
-    // The split is stated as a figure plus a proportion now, rather than as one "1 of 3 verified" string.
     expect(await screen.findByText("Checks recorded")).toBeTruthy();
     expect(screen.getAllByText("Let online").length).toBeGreaterThan(0);
-    // a hundred NO_MATCH rows is a different problem from a hundred INDETERMINATE ones, and the difference
-    // is invisible while scrolling, so the outcome breakdown carries its own counts
     expect(screen.getAllByText("2").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/ambiguous discriminator required/i).length).toBeGreaterThan(0);
-    // And the DATA carries no guest identity — a resolution list that named rooms or reservations would be a
-    // way to enumerate who is staying at the property. The check is scoped to the table because the page's
-    // own explanatory copy legitimately uses the word "room" to say that no room is named.
+    // The data carries no guest identity: naming rooms or reservations would let someone enumerate who is staying.
     const table = container.querySelector("table")!.innerHTML.toLowerCase();
     for (const forbidden of ["room", "reservation", "guest_name", "stay_id", "folio"]) {
       expect(table).not.toContain(forbidden);

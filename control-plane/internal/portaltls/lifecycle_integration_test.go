@@ -16,7 +16,6 @@ func refusalCode(err error) string {
 	return ""
 }
 
-// X-6: a released portal hostname is never handed back, not even to the same appliance row activated again.
 func TestReleasedHostnameIsNeverRestored(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -46,8 +45,6 @@ func TestReleasedHostnameIsNeverRestored(t *testing.T) {
 	}
 }
 
-// X-7: CAA is applied only on production (it pins the account), and once applied Central does not leave
-// production.
 func TestCAAOrderingIsProductionFirst(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()

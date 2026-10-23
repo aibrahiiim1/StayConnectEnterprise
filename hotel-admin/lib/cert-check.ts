@@ -1,5 +1,4 @@
-// The Hotel Admin certificate check's own reason, for the Admin Console (network/certificate).
-/** The validator's reason from its last output line ("INVALID: <reason>" or "OK (renewal due: <reason>)"). */
+// The validator's final output line carries the certificate result.
 export function certCheckDetail(tail: string | undefined): string {
   const lines = (tail ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {

@@ -1,17 +1,8 @@
 package main
 
-// PHASE-3 SHAPING CONTROL PLANE — the admission side of the single tc writer.
-//
-// Choosing netd as the only code that writes tc (ADR-0002) was necessary but not sufficient. Three things
-// still had to be true before a submitted plan could be trusted:
-//
-//  1. WHO is asking. netd's socket is group-readable by every service in the stayconnect group, so "a local
-//     caller" is not an identity. The producer is authenticated by SO_PEERCRED against an exact allowlisted
-//     uid — the kernel's statement, not a header, which any local process could write.
-//  2. WHETHER Phase 3 is live AT ALL. netd resolves the flags and its own scope (see phase3_mode.go) instead
-//     of trusting that acctd would never submit while dark. A dark appliance must be unable to mutate tc even
-//     if something upstream is misconfigured.
-//  3. WHETHER THIS PLAN IS THE CURRENT ONE. Handled by the shared contract in internal/shapeplan.
+// Admission side of the single tc writer. netd's socket is group-readable by every stayconnect service, so the
+// producer is authenticated by SO_PEERCRED against one allowlisted uid. netd resolves the Phase-3 flags and its
+// own scope itself (phase3_mode.go) so a dark appliance cannot mutate tc; plan currency is in internal/shapeplan.
 
 import (
 	"encoding/json"
@@ -26,16 +17,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// producerIdentity is the authenticated local caller, as the kernel reports it.
 type producerIdentity struct {
 	UID int
 	PID int
 }
 
-// shapingAuthz decides whether a caller may submit plans.
 type shapingAuthz struct {
-	// allowedUID is the dedicated acctd service uid. Exactly one producer is allowed: "any member of the
-	// stayconnect group" would include scd, edged, portald and pmsd, none of which own enforcement.
+	// allowedUID is the acctd service uid; the group would include services that do not own enforcement.
 	allowedUID int
 	configured bool
 }
@@ -52,11 +40,9 @@ func newShapingAuthz(getenv func(string) string) shapingAuthz {
 	return shapingAuthz{allowedUID: uid, configured: true}
 }
 
-// authorize accepts only the exact configured producer uid.
 func (a shapingAuthz) authorize(id producerIdentity, credErr error) error {
 	if !a.configured {
-		// Fail closed: without an explicit producer uid there is no way to tell acctd from any other local
-		// process, and "probably acctd" is not an authorization decision.
+		// Fail closed: without an explicit producer uid acctd cannot be told from any other local process.
 		return errors.New("no Phase-3 shaping producer uid is configured")
 	}
 	if credErr != nil {
@@ -68,8 +54,7 @@ func (a shapingAuthz) authorize(id producerIdentity, credErr error) error {
 	return nil
 }
 
-// planStore persists the last accepted plan so a netd restart cannot be talked into accepting a plan older
-// than one it already applied — the exact way a reconciliation loop silently reinstates revoked access.
+// planStore persists the last accepted plan so a restart cannot accept an older plan (which would reinstate revoked access).
 type planStore struct {
 	mu   sync.Mutex
 	path string
@@ -116,10 +101,8 @@ func filepathDir(p string) string {
 	return "."
 }
 
-// peerConnKey carries the authenticated identity from the listener into the handler.
 type peerConnKey struct{}
 
-// peerListener wraps netd's unix listener so every accepted connection carries its verified peer identity.
 type peerListener struct {
 	net.Listener
 	authz shapingAuthz

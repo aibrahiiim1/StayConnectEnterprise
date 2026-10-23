@@ -1,18 +1,7 @@
 "use client";
 
-// ISSUE VOUCHERS — a guided print run.
-//
-// Package → quantity and validity → review → issue → the codes, shown once. Issuing IS a step-up action: a
-// batch of cards is access (and, for a priced package, money) handed out in bulk, so the review step asks for
-// the operator's password and the server refuses the batch without it (401 reauth_required, audit O-21).
-//
-// The server also refuses, with a sentence, a package that can never be redeemed from a voucher -- a
-// per-night data allowance, an audience of client groups only, a hotel (PMS) condition. That sentence is shown
-// as the server wrote it.
-//
-// The one-time nature is real: the issue response is the only moment the codes exist outside the server's
-// encryption. They live in this component's state and nowhere else, and closing the dialog drops them.
-// Recovering them later is the audited export on the Batches tab.
+// Issuing bulk access requires password step-up; codes remain in component state until the dialog closes.
+// Later recovery requires an audited export.
 
 import * as React from "react";
 import { Package, RefreshCw, Ticket } from "lucide-react";
@@ -31,7 +20,6 @@ import { stepUpError } from "./shared";
 
 const STEPS = ["Package", "Quantity & validity", "Review"];
 
-/** `datetime-local` value → RFC 3339 in UTC, or undefined when empty. */
 function toIso(local: string): string | undefined {
   if (!local) return undefined;
   const t = new Date(local);
@@ -76,7 +64,7 @@ export function IssueDialog({
     if (open) loadGrantable();
   }, [open, loadGrantable]);
 
-  // Everything -- above all the codes -- is dropped when the dialog closes.
+  // Drop the issued codes when the dialog closes.
   React.useEffect(() => {
     if (!open) {
       setStep(0);
@@ -119,8 +107,7 @@ export function IssueDialog({
       toast.success(`${out.count} voucher${out.count === 1 ? "" : "s"} issued`, "Print or save the codes before closing.");
       onIssued();
     } catch (e) {
-      // A wrong password is said in words; any other refusal (409: the package can never be redeemed from a
-      // voucher) is the server's own sentence.
+      // Preserve the server's reason when the selected package cannot be redeemed by voucher.
       setErr(stepUpError(e, "No vouchers were issued."));
     } finally {
       setBusy(false);

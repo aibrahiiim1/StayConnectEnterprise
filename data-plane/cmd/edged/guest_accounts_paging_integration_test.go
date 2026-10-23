@@ -12,8 +12,6 @@ import (
 	"testing"
 )
 
-// CLIENT ACCOUNTS: the generated-password format setting (migration 0104) and the paged, newest-first list.
-
 func (f *apiFixture) getAccounts(t *testing.T, query, search string) (int, map[string]any) {
 	t.Helper()
 	req, err := http.NewRequest("GET", f.srv.URL+"/edge/v1/guest-accounts/"+query, bytes.NewReader(nil))
@@ -56,7 +54,6 @@ func TestIntegration_AccountPasswordFormat_DefaultsBoundsAndRefusals(t *testing.
 		t.Fatalf("style minimums = %v", mins)
 	}
 
-	// Below the floor, unknown style, missing reason: all refused, nothing stored.
 	for _, bad := range []map[string]any{
 		{"password_style": "digits", "password_length": 13, "reason": "keypad"},
 		{"password_style": "mixed", "password_length": 33, "reason": "long"},
@@ -69,7 +66,7 @@ func TestIntegration_AccountPasswordFormat_DefaultsBoundsAndRefusals(t *testing.
 		}
 	}
 
-	// The setter enforces the floor itself, and so does the table, for a caller that skipped edged.
+	// The table enforces the floor too, for a caller that skipped edged.
 	if _, err := f.pool.Exec(ctx, `SELECT iam_v2.account_password_settings_set($1,$2,'upper_digits',8,'x','floor test')`,
 		f.tenant, f.site); err == nil {
 		t.Fatal("the SQL setter stored upper_digits/8, below the 40-bit floor")
@@ -127,7 +124,6 @@ func TestIntegration_AccountPasswordFormat_ReadOnlyRoleCannotChangeIt(t *testing
 func TestIntegration_GeneratedPasswordFollowsTheFormat(t *testing.T) {
 	f := newAPI(t)
 
-	// Default: mixed, 14 -- what the generator produced before 0104.
 	st, body := f.do(t, "POST", "/guest-accounts/", map[string]any{"username": "gen-default", "generate": true})
 	if st != 201 {
 		t.Fatalf("create = %d %v", st, body)
@@ -161,7 +157,6 @@ func TestIntegration_GeneratedPasswordFollowsTheFormat(t *testing.T) {
 		t.Fatalf("upper_digits/10 generated %q", pw)
 	}
 
-	// An operator-typed password keeps its own rules: one character is still allowed.
 	if st, b := f.do(t, "POST", "/guest-accounts/", map[string]any{"username": "typed", "password": "x"}); st != 201 {
 		t.Fatalf("typed one-character password refused: %d %v", st, b)
 	}
@@ -170,9 +165,7 @@ func TestIntegration_GeneratedPasswordFollowsTheFormat(t *testing.T) {
 func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
-	// 115 accounts with creation times (acct-001 oldest), 10 from before 0104 with none, three disabled. Two carry
-	// a locked_until value, which the summary must NOT count: nothing in the product sets that column and an
-	// always-zero "locked out" counter was a measurement the domain cannot make (guest_account_disconnect_integration_test.go).
+	// Two accounts carry locked_until, which the summary must not count: nothing sets that column.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts
 		  (tenant_id, site_id, username, password_hash, display_name, enabled, created_at, locked_until)
 		SELECT $1, $2, 'acct-' || lpad(i::text, 3, '0'), 'x', 'Guest ' || i, i % 40 <> 0,
@@ -221,12 +214,11 @@ func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *t
 	if order[0] != "acct-115" || order[114] != "acct-001" {
 		t.Fatalf("newest first: got %s ... %s", order[0], order[114])
 	}
-	// Undated accounts sort last, by username.
 	if order[115] != "legacy-a" || order[124] != "legacy-j" {
 		t.Fatalf("undated tail = %v", order[115:])
 	}
 
-	// Search is server-side, over every account, by username or name; % is literal.
+	// % in a search is literal.
 	st, body := f.getAccounts(t, "?page_size=10", "acct-00")
 	if st != 200 || body["summary"].(map[string]any)["total"] != float64(9) {
 		t.Fatalf("search = %d %v", st, body["summary"])
@@ -251,7 +243,6 @@ func TestIntegration_GuestAccounts_PagedNewestFirstWithTotalsOverEveryMatch(t *t
 		t.Fatalf("oversized page = %d", st)
 	}
 
-	// A newly created account goes to the top, with its creation time.
 	if st, b := f.do(t, "POST", "/guest-accounts/", map[string]any{"username": "zz-newest", "password": "pw"}); st != 201 {
 		t.Fatalf("create = %d %v", st, b)
 	}

@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// GDPR C5 (decision D-C5): backups encrypted to the hotel's own keys. The screen says plainly when they are not,
-// hands a new key over once and asks for its check code back, warns when the restore test is overdue, and asks
-// for a key holder's key whenever an encrypted backup must be opened.
-
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api", async () => {

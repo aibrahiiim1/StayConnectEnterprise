@@ -2,18 +2,6 @@
 
 package main
 
-// AUDIT REMEDIATION, STREAM 6 (Hotel / PMS), over real HTTP against the full appliance schema.
-//
-//	H-15  a review message can be acknowledged or linked to a re-matchable stay, step-up and audit; the
-//	      "needs a decision" count drops; the expiry setting expires only messages received after it was on.
-//	H-13  opening Roster reconciliation writes nothing; a dry run is an explicit write action.
-//	H-5   roster settings need the password, the version and a reason, and are audited.
-//	H-7   a site viewer does not see guest names or reservation numbers on Stays or PMS activity.
-//	H-3   publishing a version that would take room charge off a connection needs confirmation.
-//	H-11  a second Protel FIAS connection is refused; a duplicate source is reported.
-//	H-18  a transfer accepts the PMS reservation number and never answers a raw 500.
-//	H-22  a malformed id is a 404, not a 500.
-
 import (
 	"context"
 	"fmt"
@@ -102,7 +90,6 @@ func TestIntegration_API_ReviewMessageIsAcknowledgedOrLinkedOnce(t *testing.T) {
 		t.Fatalf("undecided before = %v, want 2", got)
 	}
 
-	// Step-up and a reason are required.
 	if st, _ := f.do(t, http.MethodPost, "/pms-event-decisions/"+ack+"/acknowledge",
 		map[string]any{"reason": "duplicate of a message already handled"}); st != http.StatusUnauthorized {
 		t.Fatalf("acknowledge without password = %d, want 401", st)
@@ -143,7 +130,6 @@ func TestIntegration_API_ReviewMessageIsAcknowledgedOrLinkedOnce(t *testing.T) {
 	if got := f.undecided(t); got != 0 {
 		t.Fatalf("undecided after two decisions = %v, want 0", got)
 	}
-	// Neither decision touched the stay.
 	var status string
 	_ = f.pool.QueryRow(context.Background(), `SELECT status FROM iam_v2.stays WHERE id=$1::uuid`, stay).Scan(&status)
 	if status != "IN_HOUSE" {
@@ -309,7 +295,6 @@ func TestIntegration_API_ViewerDoesNotSeeTheRoomCredential(t *testing.T) {
 	if !strings.Contains(raw, `"identity_hidden":true`) || !strings.Contains(raw, "770") {
 		t.Fatalf("the viewer should still see the room and be told identity is hidden: %s", raw)
 	}
-	// Searching by the name answers nothing for a viewer.
 	st, page := viewer.getWithHeader(t, "/pms-stays/", map[string]string{staySearchHeader: "Lindqvist"})
 	if st != http.StatusOK || page["summary"].(map[string]any)["total"].(float64) != 0 {
 		t.Fatalf("a viewer could find a stay by guest name: %v", page)
@@ -394,7 +379,6 @@ func TestIntegration_API_TransferAcceptsTheReservationNumber(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
 	f.seedStay(t, iface, "RES-FROM-1", "101", "")
-	// An unknown reference is a 404 naming the side, never a raw 500.
 	st, body := f.do(t, http.MethodPost, "/stay-transfers/preview",
 		map[string]any{"from_stay_id": "RES-FROM-1", "to_stay_id": "RES-NOWHERE"})
 	if st != http.StatusNotFound || body["error"] != "to_stay_not_found" {

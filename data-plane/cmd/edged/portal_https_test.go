@@ -62,10 +62,6 @@ func withSession(r *http.Request, roles ...string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), sessKey, sess))
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// validation
-// ---------------------------------------------------------------------------------------------------------
-
 func TestValidatePortalIP(t *testing.T) {
 	for in, want := range map[string]string{
 		"10.255.255.1":     "10.255.255.1",
@@ -121,10 +117,6 @@ func TestValidatePortalDomain(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// the portal_https health check
-// ---------------------------------------------------------------------------------------------------------
 
 func TestEvaluatePortalHTTPS(t *testing.T) {
 	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
@@ -193,10 +185,6 @@ func TestPortalHTTPSAttention(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// permissions and step-up
-// ---------------------------------------------------------------------------------------------------------
-
 func TestPortalHTTPSRoleMatrix(t *testing.T) {
 	for role, want := range map[string]perm{
 		"site_admin": permWrite, "hotel_it_manager": permWrite, "tenant_operator": permWrite,
@@ -241,8 +229,7 @@ func TestPortalHTTPSMatchesTheDocumentedRoleMatrix(t *testing.T) {
 	}
 }
 
-// The middleware is what makes portal_https.manage server-enforced: a read-only role reaches GET and is
-// refused every write before any handler runs.
+// The middleware enforces portal_https.manage: a read-only role gets GET and is refused writes before any handler.
 func TestPortalHTTPSWritesNeedManage(t *testing.T) {
 	s := &server{}
 	reached := false
@@ -273,8 +260,7 @@ func TestPortalHTTPSWritesNeedManage(t *testing.T) {
 	}
 }
 
-// Every change that moves the portal or its certificates requires the password. Without one the handler
-// refuses with reauth_required, and nothing downstream -- netd, the database, scd -- is touched.
+// Changes to the portal or its certificates require the password; without one nothing downstream is touched.
 func TestPortalHTTPSChangesRequireStepUp(t *testing.T) {
 	rec := &callRecorder{}
 	sock := fakeUnixService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +286,6 @@ func TestPortalHTTPSChangesRequireStepUp(t *testing.T) {
 	}
 }
 
-// A malformed address or domain is refused before the password is even checked, with the reason.
 func TestPortalHTTPSRefusesBadInputFirst(t *testing.T) {
 	s := &server{}
 	h := s.portalHTTPSRoutes()
@@ -317,10 +302,6 @@ func TestPortalHTTPSRefusesBadInputFirst(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// the netd and scd calls
-// ---------------------------------------------------------------------------------------------------------
 
 func TestPortalIPValidationAsksNetdAndFailsClosed(t *testing.T) {
 	rec := &callRecorder{}

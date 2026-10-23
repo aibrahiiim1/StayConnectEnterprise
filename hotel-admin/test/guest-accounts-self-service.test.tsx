@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// CLIENT ACCOUNTS: SELF-SERVICE EMAIL ACCOUNTS (self-service contract §2-§7). A self-registered account carries a
-// Self-service badge and its verification state; staff are offered no password action for it, and can resend the
-// verification email; a staff-created account is unchanged.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -75,7 +71,6 @@ describe("Client accounts — self-service email accounts", () => {
     expect(within(done).queryByRole("button", { name: /resend verification email/i })).toBeNull();
     expect(within(done).queryByRole("button", { name: /password/i })).toBeNull();
 
-    // A staff-created account is unchanged: no badge, no verification state, the Password action.
     const staff = row("room-desk");
     expect(within(staff).queryByText("Self-service")).toBeNull();
     expect(within(staff).getByRole("button", { name: /password/i })).toBeTruthy();

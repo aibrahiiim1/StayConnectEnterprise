@@ -3,13 +3,8 @@ import { render, screen, waitFor, within, cleanup } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { fakeAudit, fakeSettlements, pageOf } from "./fake-paged";
 
-// THE GROWING LISTS PAGE ON THE SERVER: Activity, Active sessions, PMS activity, guest sign-in attempts, guest
-// sign-in checks, DHCP leases and reservations, and package payments.
-//
-// Each used to load a fixed window (500 or 200 rows) and search, filter and count it in the browser. What is
-// pinned here is the shared behaviour: the page parameters reach edged, Next asks for the next page, a new
-// filter or search starts at page 1, and the search text travels in a header -- never in the URL, which edged
-// writes to its request log.
+// Growing lists page on the server: page params reach edged, a new filter/search starts at page 1, and search text
+// travels in a header (edged logs URLs).
 
 const get = vi.fn();
 vi.mock("@/lib/api", async () => {
@@ -21,12 +16,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
 }));
 
-// A block, not an arrow returning mockReset(): vitest runs a function returned from beforeEach as teardown, and
-// that would call the mock -- which, in the ordering test below, never resolves.
+// A block, not an arrow returning mockReset(): vitest runs a function returned from beforeEach as teardown.
 beforeEach(() => { get.mockReset(); });
 afterEach(() => { cleanup(); vi.resetModules(); });
 
-/** Calls to one list, as [path, headers]. */
 const callsTo = (prefix: string) =>
   get.mock.calls.filter(([p]) => typeof p === "string" && p.startsWith(prefix)) as [string, Record<string, string> | undefined][];
 const lastCall = (prefix: string) => {
@@ -46,7 +39,6 @@ function serve(map: Record<string, (path: string, headers?: Record<string, strin
   });
 }
 
-// ------------------------------------------------------------------------------------------------ Activity
 const auditRows = Array.from({ length: 120 }, (_, i) => ({
   ts: new Date(Date.UTC(2026, 8, 20, 10, 0, 0) - i * 60_000).toISOString(),
   actor_type: "system",
@@ -62,17 +54,14 @@ describe("Activity — server paging", () => {
 
     expect(await screen.findByText("120 entries")).toBeTruthy();
     expect(screen.getByText("Showing 1–50 of 120")).toBeTruthy();
-    // The filter counts are the server's count of the whole period, not of the page on screen.
     const chips = screen.getByRole("radiogroup", { name: "Show" });
     expect(within(chips).getByRole("radio", { name: /Security/ }).textContent).toContain("30");
-    // The old "first 500 only" limitation is gone.
     expect(screen.queryByText(/Only the first/)).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: /Next/ }));
     expect(await screen.findByText("Showing 51–100 of 120")).toBeTruthy();
     expect(param(lastCall("/audit")[0], "page")).toBe("2");
 
-    // A filter sends the exact action codes the server filters by, and starts at page 1.
     await userEvent.click(within(chips).getByRole("radio", { name: /Security/ }));
     expect(await screen.findByText("30 entries")).toBeTruthy();
     const [path] = lastCall("/audit");
@@ -90,7 +79,6 @@ describe("Activity — server paging", () => {
     await waitFor(() => {
       const [path, headers] = lastCall("/audit");
       expect(headers?.["X-Audit-Search"]).toBe(encodeURIComponent("downloaded a"));
-      // The readable title "Downloaded a backup" lives here, so the code it names goes along with the search.
       expect(headers?.["X-Audit-Search-Actions"]).toBe("backup.downloaded");
       expect(path).not.toContain("downloaded");
       expect(param(path, "page")).toBe("1");
@@ -98,7 +86,6 @@ describe("Activity — server paging", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------ Active sessions
 const session = (i: number) => ({
   id: "s" + i, ip: "10.0.0." + i, mac: "02:00:00:00:00:" + String(i).padStart(2, "0"),
   state: "active", started_at: new Date().toISOString(), bytes_down: 1, bytes_up: 1, subject_kind: "voucher",
@@ -116,7 +103,6 @@ describe("Active sessions — server paging", () => {
     render(<Page />);
 
     expect(await screen.findByText("Showing 1–50 of 130")).toBeTruthy();
-    // The tiles describe every session online, not the 50 on screen.
     expect(screen.getByText("90")).toBeTruthy();
     expect(param(lastCall("/sessions")[0], "state")).toBe("active");
 
@@ -151,7 +137,6 @@ describe("Active sessions — server paging", () => {
   });
 });
 
-// --------------------------------------------------------------------------------------------- PMS activity
 const event = (i: number) => ({
   id: "e" + i, pms_interface_id: "i1", external_event_identity: "EV-" + i, event_type: "GI",
   processing_status: "APPLIED", received_at: new Date().toISOString(), room: String(100 + i), stay_id: "st" + i,
@@ -175,7 +160,6 @@ describe("PMS activity — server paging", () => {
     expect(await screen.findByText("Showing 51–75 of 75")).toBeTruthy();
     expect(param(lastCall("/pms-events")[0], "page")).toBe("2");
 
-    // A status filter goes to the server and starts again at page 1.
     await userEvent.selectOptions(screen.getByLabelText(/Filter by what happened to the message/), "REJECTED");
     await waitFor(() => {
       const [path] = lastCall("/pms-events");
@@ -187,14 +171,12 @@ describe("PMS activity — server paging", () => {
     await userEvent.type(screen.getByRole("searchbox", { name: "Search PMS activity" }), "Müller");
     await waitFor(() => {
       const [path, headers] = lastCall("/pms-events");
-      // Percent-encoded, because a browser refuses a header value outside ISO-8859-1.
       expect(headers).toEqual({ "X-Pms-Event-Search": encodeURIComponent("Müller") });
       expect(path).not.toContain("ller");
     });
   });
 });
 
-// -------------------------------------------------------------------------------- guest sign-in attempts
 const attempt = (i: number) => ({
   id: "a" + i, occurred_at: new Date().toISOString(), room: String(100 + i), guest_network: "Lobby",
   result: "VERIFIED", result_label: "Verified", succeeded: true, verifier_kind: "FULL_NAME",
@@ -231,7 +213,6 @@ describe("Guest sign-in attempts — server paging", () => {
   });
 });
 
-// ------------------------------------------------------------------------------- guest sign-in checks
 describe("Guest sign-in checks — server paging", () => {
   it("pages the table and keeps the server's summary of the recent window", async () => {
     const rs = Array.from({ length: 70 }, (_, i) => ({
@@ -254,7 +235,6 @@ describe("Guest sign-in checks — server paging", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------------ DHCP
 describe("DHCP & leases — server paging", () => {
   it("pages leases and reservations in edged and searches both in a header", async () => {
     const leases = Array.from({ length: 55 }, (_, i) => ({ "ip-address": "10.20.0." + (i + 1), "hw-address": "02:00:00:00:00:" + i }));
@@ -284,7 +264,6 @@ describe("DHCP & leases — server paging", () => {
   });
 });
 
-// ----------------------------------------------------------------------------------------- package payments
 describe("Package payments — server paging", () => {
   it("asks the server for a view, from page 1, and keeps the counts over every payment", async () => {
     const rows = Array.from({ length: 60 }, (_, i) => ({
@@ -307,13 +286,11 @@ describe("Package payments — server paging", () => {
       expect(param(path, "view")).toBe("paid");
       expect(param(path, "page")).toBe("1");
     });
-    // Thirty paid packages fit on one page: no pager.
     await waitFor(() => expect(screen.queryByText(/^Showing/)).toBeNull());
     expect(screen.getByText("30.00 USD")).toBeTruthy(); // collected over every payment, not the page
   });
 });
 
-// ------------------------------------------------------------------------------------------ the shared hook
 describe("useServerPage", () => {
   it("applies only the newest question's answer, and a new question starts at page 1 on the same render", async () => {
     const { useServerPage } = await import("@/lib/use-server-page");
@@ -332,13 +309,11 @@ describe("useServerPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "p2" }));
     await waitFor(() => expect(pending.some((p) => p.path === "/x?q=a&page=2&page_size=50")).toBe(true));
 
-    // A new question: the very next request is page 1 -- the old offset is never asked with the new question.
     view.rerender(<Probe q="b" />);
     await waitFor(() => expect(pending[pending.length - 1].path).toBe("/x?q=b&page=1&page_size=50"));
     expect(pending.some((p) => p.path === "/x?q=b&page=2&page_size=50")).toBe(false);
     expect(screen.getByText(/offset:0/)).toBeTruthy();
 
-    // The newest answers first; the older page-2 answer arrives late and must not replace it.
     pending[pending.length - 1].resolve({ data: ["b1"], meta: { has_more: false } });
     expect(await screen.findByText(/rows:b1/)).toBeTruthy();
     pending.find((p) => p.path.includes("page=2"))!.resolve({ data: ["a51"], meta: { has_more: false } });

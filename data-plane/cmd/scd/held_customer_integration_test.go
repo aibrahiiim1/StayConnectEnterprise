@@ -11,8 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The site database is the authoritative record of whose data this appliance holds: an identity reset keeps
-// it, so it must decide holds_customer_id even with no assignment on disk.
+// The site database decides holds_customer_id even with no assignment on disk, since an identity reset keeps it.
 func TestIntegration_HeldCustomerFromSiteDatabase(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {
@@ -32,7 +31,6 @@ func TestIntegration_HeldCustomerFromSiteDatabase(t *testing.T) {
 		t.Skip("the test database already holds tenants; this test needs an empty tenants table")
 	}
 
-	// Factory-clean: no tenant rows, no assignment.
 	if got, err := heldCustomerID(ctx, p, t.TempDir()); err != nil || got != "" {
 		t.Fatalf("empty database reported %q (%v)", got, err)
 	}

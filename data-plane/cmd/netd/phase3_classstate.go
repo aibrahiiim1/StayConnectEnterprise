@@ -1,31 +1,7 @@
 package main
 
-// DURABLE MANAGED-CLASS STATE AND GENERATION AUTHORITY.
-//
-// The generation ("epoch") is the only trustworthy answer to "did this counter series restart?". Getting it
-// wrong fails in two opposite, equally silent ways:
-//
-//   RESTART. netd restarts, the kernel classes survive untouched, but in-memory state is empty. If the class
-//   is treated as new, acctd — holding a checkpoint at the older generation — refuses every observation as
-//   stale. Accounting stops for those sessions with nothing but a warning.
-//
-//   REBOOT / RESTORE. Every tc class is genuinely gone. If a recreated class reuses a generation a checkpoint
-//   still pins, a counter that restarted at zero is measured against the old series: a regression, or a
-//   phantom delta billed to whoever now occupies the class.
-//
-// Two separate guarantees are needed, and neither substitutes for the other:
-//
-//   AUTHORITY — where a new generation comes from. A durable, appliance-scoped, database-backed allocator
-//   that reconciles against the highest generation any surviving accounting checkpoint pins. Explicitly NOT
-//   the wall clock: system time moves backwards on RTC reset, NTP correction, offline operation and image
-//   restore, and a generation that went backwards is exactly the collision this value exists to prevent. If
-//   the allocator cannot be reached, no generation is manufactured — the class is not made accountable.
-//
-//   CONTINUITY — when an existing generation may be carried forward. A matching Linux boot id is not enough:
-//   it says the machine has not rebooted, not that a particular class still exists. A qdisc can be flushed, a
-//   class recreated by hand, a minor reused by a different session — all within one boot. Continuity is
-//   therefore proven against the ACTUAL kernel inventory, and anything not found there is dropped so its
-//   successor allocates a fresh generation.
+// Durable managed-class state. The class generation (epoch) tells acctd whether a counter series restarted:
+// it comes from a DB allocator (never the wall clock) and is carried forward only when proven in the kernel.
 
 import (
 	"context"
@@ -50,8 +26,7 @@ type managedClass struct {
 	Bridge    string `json:"bridge"`
 	Minor     int    `json:"minor"`
 	Epoch     int64  `json:"epoch"`
-	// BootID records which boot issued the generation. It is evidence for an operator reading the file, and a
-	// cheap first filter — but it is never the proof that the class still exists.
+	// BootID is a cheap first filter, never proof that the class still exists.
 	BootID string `json:"boot_id"`
 }
 
@@ -64,26 +39,14 @@ type classState struct {
 	Classes     map[string]managedClass `json:"classes"`
 }
 
-// NOTE: the activation-uncertainty clock deliberately does NOT live here any more. It is written WRITE-AHEAD,
-// before a guest is provisionally authorized, and this file is written once at the end of a reconciliation
-// pass — far too late to bound access that has already begun. See phase3_journal.go.
-
-// classStore persists the inventory. Writes are atomic and fsynced: a torn file after a power cut would be
-// indistinguishable from corruption, and this file's whole purpose is to be trustworthy after exactly that.
+// classStore persists the inventory with atomic, fsynced writes: a torn file after a power cut is indistinguishable from corruption.
 type classStore struct {
 	mu   sync.Mutex
 	path string
 }
 
-// load reads the durable inventory. The second value says whether a usable state was read; the third says
-// whether the file was UNREADABLE OR CORRUPT, as distinct from legitimately absent.
-//
-// That distinction did not used to matter, because everything in the file was a class generation and the safe
-// answer to "I cannot read it" was the same as the safe answer to "there is nothing yet": re-prove everything
-// against the kernel. It matters now, because the file also carries the activation-uncertainty clock. An
-// absent file on a first run means no session has ever failed to activate. An unreadable or corrupt file
-// means we DO NOT KNOW, and treating that as "no session has ever failed" would hand every guest a fresh
-// grace period — which makes corrupting one file a way to buy unbounded provisional authorization.
+// load returns (state, usable, unreadableOrCorrupt). Unreadable or corrupt must stay distinct from absent:
+// treating it as "nothing ever failed" would grant every guest a fresh grace period.
 func (c *classStore) load() (classState, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -94,16 +57,14 @@ func (c *classStore) load() (classState, bool, bool) {
 	raw, err := os.ReadFile(c.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return empty, false, false // legitimately absent: nothing has ever been written
+			return empty, false, false
 		}
-		return empty, false, true // present but unreadable — permissions, I/O error, a mount that vanished
+		return empty, false, true
 	}
 	var st classState
 	if json.Unmarshal(raw, &st) != nil {
-		// A partial or corrupted file is treated as ABSENT for classes, never as "no classes at their old
-		// generations". Absent means every surviving class is re-proved against the kernel and re-generated
-		// from the allocator; "no classes" would silently authorise reuse. For the activation clock it is
-		// treated as UNKNOWN, which fails closed.
+		// Corrupt means absent for classes (re-proved and re-generated), never "no classes", which would
+		// silently authorise reuse; for the activation clock it means unknown, which fails closed.
 		return empty, false, true
 	}
 	if st.Classes == nil {
@@ -135,8 +96,7 @@ func (c *classStore) save(st classState) error {
 		_ = f.Close()
 		return err
 	}
-	// fsync the file, then the directory: without the second, the rename itself can be lost to a power cut
-	// and the appliance comes back with the OLD inventory while the kernel has the new classes.
+	// fsync the file, then the directory: otherwise the rename can be lost to a power cut.
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err
@@ -163,8 +123,6 @@ func readBootID(path string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// ---- generation authority ---------------------------------------------------
-
 // generationAllocator hands out strictly increasing, never-reissued class generations for this appliance.
 type generationAllocator interface {
 	AllocateClassGeneration(ctx context.Context, tenant, site, appliance string) (int64, error)
@@ -183,13 +141,10 @@ func (g *pgGenerations) AllocateClassGeneration(ctx context.Context, tenant, sit
 	return gen, err
 }
 
-// errNoGenerationAuthority is returned when a class cannot be made accountable because no generation could be
-// allocated. It is deliberately not recoverable by guessing.
+// errNoGenerationAuthority means no generation could be allocated; never recover by guessing.
 var errNoGenerationAuthority = errors.New("no class-generation authority available")
 
-// allocEpoch obtains the next generation. It never invents one: if the allocator is unreachable the class is
-// left unshaped and the reason is reported, because a class installed without an accountable generation is a
-// class whose traffic cannot be attributed to anyone.
+// allocEpoch never invents a generation: without one the class is left unshaped, since its traffic could not be attributed.
 func (p *phase3Shaping) allocEpoch(ctx context.Context) (int64, error) {
 	if p.generations == nil {
 		return 0, errNoGenerationAuthority
@@ -204,15 +159,8 @@ func (p *phase3Shaping) allocEpoch(ctx context.Context) (int64, error) {
 	return gen, nil
 }
 
-// ---- continuity, proven against the kernel ----------------------------------
-
-// restore rebuilds in-memory state from durable state, keeping ONLY classes the kernel still has.
-//
-// installed reports which (bridge, minor) slots are actually present; verified says whether that reading
-// could be taken at all. A persisted entry is carried forward only when its slot is present and the boot is
-// unchanged; anything else — removed, replaced by hand, or a minor now used by a different session — is
-// dropped, so its successor allocates a new generation rather than inheriting a checkpoint that describes a
-// different counter series.
+// restore keeps only persisted classes whose slot is present in the kernel and whose boot is unchanged;
+// the rest are dropped so successors allocate a new generation instead of inheriting a stale checkpoint.
 func (p *phase3Shaping) restore(st classState, bootID string, installed map[string]map[int]bool, verified bool) {
 	p.epochs = map[string]int64{}
 	p.minorOwner = map[string]string{}
@@ -220,16 +168,14 @@ func (p *phase3Shaping) restore(st classState, bootID string, installed map[stri
 	p.bootID = bootID
 	p.restoreNote = ""
 
-	// Scope: an inventory written under a different tenant/site/appliance describes someone else's classes.
+	// An inventory from another tenant/site/appliance describes someone else's classes.
 	if st.TenantID != "" && (st.TenantID != p.mode.TenantID || st.SiteID != p.mode.SiteID ||
 		st.ApplianceID != p.mode.ApplianceID) {
 		p.restoreNote = "durable class state belongs to a different appliance scope; every class re-generated"
 		return
 	}
 	if !verified {
-		// The kernel could not be read, so no claim of continuity can be proved. Dropping the inventory is
-		// the safe direction: successors allocate new generations, which is never wrong — carrying one
-		// forward without proof can be.
+		// Without a kernel reading, continuity is unprovable; new generations are never wrong, carried-forward ones can be.
 		p.restoreNote = "kernel inventory unreadable at startup; no class generation carried forward"
 		return
 	}

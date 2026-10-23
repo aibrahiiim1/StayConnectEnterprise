@@ -1,16 +1,7 @@
 "use client";
 
-// EMAIL ACCOUNTS — THE TERMS (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §6, migration 0117).
-//
-// How long a client who registered with their email address has to verify it, what happens if they do not, how
-// often they may ask for the email again, the one-time extra hour, and how many new accounts one device may open
-// a day. A persisted, per-site, audited setting (docs/OPERATIONAL_SETTINGS_POLICY.md): every range, unit and
-// default on this card comes from the appliance (edged GET /self-service-settings), so the browser never offers a
-// value the appliance would refuse. A save takes a reason and the operator's password, and is recorded in the
-// change history shown below the form.
-//
-// Who may change it is who may change the sign-in methods (the auth-methods key); every role that may see the
-// methods sees the terms.
+// Read ranges, units, and defaults from the appliance so the form cannot offer invalid settings.
+// Saving site-wide terms requires a reason and operator password.
 
 import * as React from "react";
 import { History, Mail, RefreshCw } from "lucide-react";
@@ -33,7 +24,6 @@ import { formatRelative } from "@/lib/utils";
 
 type NumericKey = Exclude<keyof SelfServiceSettings, "verification_required" | "suspension_policy">;
 
-/** The words for each setting. The numbers (range, unit, default) are the server's. */
 export const SELF_SERVICE_WORDS: Record<NumericKey, { label: string; explanation: string }> = {
   verification_deadline_hours: {
     label: "Time to verify",
@@ -94,7 +84,6 @@ function valueWords(key: keyof SelfServiceSettings, v: unknown): string {
   return String(v);
 }
 
-/** One change-log row in words: the values that changed, old → new, as far as the row carries them. */
 export function changeSummary(c: SelfServiceChange): string {
   const parts: string[] = [];
   for (const k of ALL_KEYS) {
@@ -109,7 +98,7 @@ export function changeSummary(c: SelfServiceChange): string {
   return first ? "First saved settings" : "Settings saved";
 }
 
-/** The same bound the server applies to a reason (4-500 characters). */
+/** Server reasons require 4–500 characters. */
 function reasonProblem(reason: string): string | null {
   const n = reason.trim().length;
   if (n < 4) return "Give a reason of at least 4 characters. It is recorded with your name.";
@@ -125,7 +114,6 @@ function draftOf(s: SelfServiceSettings): Draft {
   return { required: s.verification_required, policy: s.suspension_policy, nums };
 }
 
-/** The first problem with a draft, checked against the server's bounds; null when it can be saved. */
 export function draftProblem(d: Draft, bounds: SelfServiceBound[]): string | null {
   for (const b of bounds) {
     if (!(b.key in d.nums)) continue;

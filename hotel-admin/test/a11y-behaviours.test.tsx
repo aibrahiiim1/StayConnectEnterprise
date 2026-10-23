@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { useState } from "react";
 
-// ACCESSIBILITY BEHAVIOURS (WCAG 2.2 AA audit of the Admin Console). Each block is one finding: what a keyboard
-// or screen-reader user now gets that they did not before.
-
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard" }));
 vi.mock("@/lib/capabilities", async (importOriginal) => {
@@ -41,7 +38,6 @@ describe("after sign-in, only a path on this console is followed (open redirect)
   ])("%s goes to the dashboard instead", (raw) => {
     const out = safeNextPath(raw as string | null);
     if (raw === "/%0d%0aLocation: x") {
-      // Encoded, it is a harmless path on this console; it never leaves it.
       expect(out.startsWith("/") && !out.startsWith("//")).toBe(true);
     } else {
       expect(out).toBe(DEFAULT_AFTER_LOGIN);
@@ -61,7 +57,6 @@ describe("required fields say so to assistive tech (1.3.1, 3.3.2)", () => {
         <Input />
       </Field>,
     );
-    // By accessible name, which the hidden asterisk is no longer part of.
     const input = screen.getByRole("textbox", { name: "Reason" });
     expect(input).toHaveAttribute("aria-required", "true");
     // No native `required`: forms that validate themselves must not meet the browser's bubble.
@@ -160,9 +155,7 @@ describe("the idle warning (2.2.1)", () => {
     await act(async () => { vi.advanceTimersByTime(2000); });
     const dialog = screen.getByRole("alertdialog");
     expect(within(dialog).getByText("You are about to be signed out")).toBeTruthy();
-    // Focus starts on the safe choice.
     expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Stay signed in" }));
-    // The countdown is visual only; the polite line speaks at one minute, not every second.
     expect(screen.getByTestId("idle-countdown")).toHaveAttribute("aria-hidden", "true");
     const status = within(dialog).getByRole("status");
     expect(status.textContent).toBe("");

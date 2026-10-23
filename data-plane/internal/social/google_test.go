@@ -10,9 +10,8 @@ import (
 	"time"
 )
 
-// Google is driven against the shared fake OpenID Provider (oidc_fake_test.go): a JWKS endpoint publishing
-// one test RSA key and a token endpoint answering with the id_token the test signed. The fake fails the test
-// on any other path, so a userinfo call -- which Google no longer needs -- would be caught.
+// Driven against the shared fake OpenID Provider (oidc_fake_test.go), which fails on any other path, so a
+// userinfo call would be caught.
 
 func newGoogleAt(t *testing.T) (*Google, *fakeIdP) {
 	t.Helper()
@@ -224,8 +223,6 @@ func TestGoogleConstructorValidation(t *testing.T) {
 	}
 }
 
-// The key set is fetched by scd from the appliance's own WAN; the guest's browser never needs it, so it is
-// not opened in the walled garden before sign-in.
 func TestGoogleKeySetHostIsNotAPreSignInDomain(t *testing.T) {
 	for _, d := range PreAuthDomains("google") {
 		if d == "www.googleapis.com" || d == "oauth2.googleapis.com" {

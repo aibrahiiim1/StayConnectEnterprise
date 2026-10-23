@@ -14,12 +14,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// store is netd's view of the site database: it loads guest-network intent and
-// records revisions / apply events / health checks.
 type store struct{ db *pgxpool.Pool }
 
-// uuidOrNil returns s only if it is a valid UUID, else nil — so an operator id
-// column stays NULL for system/CLI actors that aren't real operators.
+// uuidOrNil returns s only if it is a valid UUID, so operator id stays NULL for non-operator actors.
 func uuidOrNil(s string) any {
 	if len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' {
 		return s
@@ -27,8 +24,6 @@ func uuidOrNil(s string) any {
 	return nil
 }
 
-// LoadIntent returns all guest networks (flattened with pools + reservations)
-// for rendering. onlyEnabled filters to enabled networks.
 func (s *store) LoadIntent(ctx context.Context) ([]netcfg.GuestNetwork, error) {
 	rows, err := s.db.Query(ctx, `
         SELECT id::text, name, COALESCE(ssid_label,''), enabled, network_type,
@@ -63,7 +58,6 @@ func (s *store) LoadIntent(ctx context.Context) ([]netcfg.GuestNetwork, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// pools + reservations per network
 	for i := range nets {
 		if err := s.loadPools(ctx, &nets[i]); err != nil {
 			return nil, err
@@ -109,18 +103,8 @@ func (s *store) loadReservations(ctx context.Context, n *netcfg.GuestNetwork) er
 	return rows.Err()
 }
 
-// SyncInterfaces refreshes the network_interfaces INVENTORY from a discovery sweep.
-//
-// THE INVENTORY IS NOT THE PRESENCE ORACLE, and must never become one again. Guest-network validation
-// observes presence live at the moment of the decision (see applier.presenceSets), because any answer read
-// out of this table is only as current as the last sweep — and a sweep happens at boot and on
-// GET /v1/interfaces, not on a timer. This table exists for the operator's own columns (role, is_protected,
-// mode), for the UI, and for history: what the appliance HAS EVER had, which is a different question from
-// what it has now.
-//
-// A SWEEP IS STILL ONE INSTANT, not one instant per row. Stamping now() per statement would spread a single
-// sweep across a range of microseconds and make any later reading of this table a question about clock skew;
-// one timestamp per sweep keeps the inventory coherent for the things that legitimately read it.
+// SyncInterfaces refreshes the interface inventory, which is not a presence oracle: validation observes presence live (see applier.presenceSets) because this table is only as current as the last sweep.
+// One timestamp per sweep keeps the inventory coherent.
 func (s *store) SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wan string) error {
 	sweptAt := time.Now().UTC()
 	for _, f := range ifaces {
@@ -149,9 +133,7 @@ func (s *store) SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wa
 	return nil
 }
 
-// KnownIfaceSet returns every interface the inventory has EVER recorded, present or not. It exists so a
-// caller can tell "this appliance has no such interface" apart from "it had one and it is gone now" — two
-// situations an operator resolves very differently.
+// KnownIfaceSet returns every interface ever recorded, to tell "no such interface" from "had one, now gone".
 func (s *store) KnownIfaceSet(ctx context.Context) (map[string]bool, error) {
 	rows, err := s.db.Query(ctx, `SELECT name FROM network_interfaces`)
 	if err != nil {
@@ -169,15 +151,11 @@ func (s *store) KnownIfaceSet(ctx context.Context) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-// IfaceMeta is the operator-assigned classification of an interface.
 type IfaceMeta struct {
 	Role      string
 	Protected bool
 }
 
-// InterfaceMeta returns name -> {role, protected} from the inventory, so the
-// /v1/interfaces response can carry the role the operator assigned (which is what
-// the guest-network wizard filters on).
 func (s *store) InterfaceMeta(ctx context.Context) (map[string]IfaceMeta, error) {
 	rows, err := s.db.Query(ctx, `SELECT name, COALESCE(role,'unused'), is_protected FROM network_interfaces`)
 	if err != nil {
@@ -196,8 +174,6 @@ func (s *store) InterfaceMeta(ctx context.Context) (map[string]IfaceMeta, error)
 	return out, rows.Err()
 }
 
-// --- revisions ---
-
 func (s *store) CreateRevision(ctx context.Context, summary string, intent []netcfg.GuestNetwork, createdBy string) (string, int64, error) {
 	intentRaw, _ := json.Marshal(intent)
 	var id string
@@ -210,12 +186,7 @@ func (s *store) CreateRevision(ctx context.Context, summary string, intent []net
 	return id, seq, err
 }
 
-// RevisionState is the current state of one revision, or "" when no such revision exists.
-//
-// It exists for the operator rollback guard: whether a rollback has a target depends entirely on whether the
-// revision is still mid-flight (applying / pending_confirmation, where the PREVIOUS revision is still the
-// active one) or has been confirmed (active, where the previous revision has become superseded and there is
-// no stored target left). See applier.Rollback.
+// RevisionState feeds the rollback guard: mid-flight revisions still have the previous revision active, confirmed ones have no stored target. See applier.Rollback.
 func (s *store) RevisionState(ctx context.Context, id string) (string, error) {
 	var state string
 	err := s.db.QueryRow(ctx,
@@ -241,15 +212,7 @@ func (s *store) SetRevisionValidation(ctx context.Context, id string, v netcfg.V
 	return err
 }
 
-// MarkApplying takes the single in-flight slot (ncr_single_inflight) and RECORDS THE CONFIRM DEADLINE.
-//
-// The deadline used to be accepted and then not written -- the query bound three parameters and ignored the
-// fourth -- so confirm_deadline stayed NULL until MarkPending wrote it. That is the difference between a
-// recoverable appliance and a wedged one: if anything failed between here and MarkPending, the row stayed
-// 'applying' with a NULL deadline, PendingRevision only ever looks for 'pending_confirmation', and so the
-// watchdog could never reclaim it. The one in-flight slot was then held forever and EVERY later apply failed on
-// the unique index with a raw Postgres error. Writing it here means an apply that dies mid-flight is overdue
-// like any other and gets rolled back.
+// MarkApplying takes the single in-flight slot and records the confirm deadline; without it an apply that dies mid-flight stays 'applying' forever, the watchdog never reclaims it and every later apply fails on the unique index.
 func (s *store) MarkApplying(ctx context.Context, id, bundlePath, appliedBy string, confirmDeadline any) error {
 	by := uuidOrNil(appliedBy)
 	_, err := s.db.Exec(ctx, `
@@ -267,28 +230,8 @@ func (s *store) MarkPending(ctx context.Context, id string, deadline any) error 
 
 var errNotPending = errors.New("revision is not pending confirmation")
 
-// MarkActive confirms a revision, and IS THE ONLY WAY A REVISION BECOMES ACTIVE.
-//
-// It refuses anything that is not currently pending_confirmation, which can only be reached by an apply that
-// rendered the configuration, put it on the wire and passed its health checks. That is the whole provenance
-// guarantee of this subsystem: the active revision is, by construction, one the appliance has actually applied
-// and verified -- which matters because netd's boot reconcile treats the active revision's intent as the truth
-// about what this appliance is supposed to be forwarding.
-//
-// THERE USED TO BE A SECOND WAY IN, and it had none of that. markActiveAdopt took a `requirePending=false`
-// variant of this function for POST /v1/adopt, which read the EDITABLE guest_networks rows -- the rows the Hotel
-// Admin UI writes directly, which may hold a draft nobody has applied -- created a revision from them, and
-// declared it active. No ValidateSet, no apply, no health check, no confirmation window, and not one check that
-// the live Linux network resembled what it had just recorded as live. An unapplied edit could therefore become
-// the appliance's definition of reality at the next reboot, with no apply record and nothing to roll back to.
-//
-// It was reachable only by calling the API directly: no screen, script, runbook, test or capability contract
-// referenced it, and across the whole life of the only appliance it had been used zero times (no revision with
-// an adopt summary, no network.adopt audit entry). It also could not be made honest: proving that the live
-// network matches an intent means inspecting bridges, addressing, nftables, Kea and DNS and reacting when they
-// differ, which is precisely what apply and its health checks do. An adopt that proves all of that IS an apply;
-// one that proves none of it is the defect. So it is retired, the parameter is gone, and the invariant is
-// structural rather than a flag a future caller could pass as false.
+// MarkActive is the only way a revision becomes active and refuses anything not pending_confirmation, so the active revision was applied and health-checked; boot reconcile trusts its intent as the truth about what to forward.
+// There is deliberately no unverified adopt variant: an unapplied draft must never become the appliance's reality.
 func (s *store) MarkActive(ctx context.Context, id, confirmedBy string) error {
 	by := uuidOrNil(confirmedBy)
 	tx, err := s.db.Begin(ctx)
@@ -303,7 +246,6 @@ func (s *store) MarkActive(ctx context.Context, id, confirmedBy string) error {
 	if state != "pending_confirmation" {
 		return errNotPending
 	}
-	// supersede the previous active revision
 	if _, err := tx.Exec(ctx, `UPDATE network_config_revisions SET state='superseded' WHERE state='active' AND id<>$1`, id); err != nil {
 		return err
 	}
@@ -323,18 +265,8 @@ func (s *store) MarkFailed(ctx context.Context, id, reason string) error {
 // errNotRollbackable means the revision is no longer in a state a rollback may finish against.
 var errNotRollbackable = errors.New("revision is no longer rollbackable")
 
-// MarkRolledBack moves an in-flight revision to rolled_back, AND ONLY AN IN-FLIGHT ONE.
-//
-// IT USED TO BE AN UNGUARDED UPDATE, which lost a race that cost everything. The watchdog reads a pending
-// revision, finds it overdue and begins rolling back; the operator confirms in the same moment; markActive
-// (which IS guarded) legitimately moves the revision to 'active' and supersedes its predecessor; and then the
-// watchdog's rollback arrived here and stamped 'rolled_back' over that 'active' row. The appliance was then left
-// with NO active revision at all, so CurrentActiveIntent failed and boot reconcile reconciled nothing, for
-// good -- while the operator had been told, truthfully at the time, that their change was confirmed.
-//
-// Requiring 'applying' or 'pending_confirmation' makes the two racers mutually exclusive: whichever commits
-// first wins, and the loser is told so instead of overwriting it. The caller must treat errNotRollbackable as
-// "someone else already decided this revision's fate" and stop -- not retry.
+// MarkRolledBack moves only an in-flight revision. An unguarded update let the watchdog's rollback overwrite a just-confirmed 'active' row, leaving no active revision so boot reconcile reconciled nothing.
+// Whichever racer commits first wins; on errNotRollbackable the caller must stop, not retry.
 func (s *store) MarkRolledBack(ctx context.Context, id, reason string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -356,8 +288,6 @@ func (s *store) MarkRolledBack(ctx context.Context, id, reason string) error {
 	return tx.Commit(ctx)
 }
 
-// CurrentActive returns the id + bundle path of the active revision (used for
-// boot reconciliation), or ("","") if none.
 func (s *store) CurrentActive(ctx context.Context) (id, bundlePath string, err error) {
 	var p *string
 	err = s.db.QueryRow(ctx, `
@@ -372,27 +302,10 @@ func (s *store) CurrentActive(ctx context.Context) (id, bundlePath string, err e
 	return id, bundlePath, err
 }
 
-// ErrNoConfirmedActiveRevision means no revision has ever been applied AND confirmed. There is no network
-// configuration this appliance has committed to, so there is nothing to reconcile the OS back to.
+// ErrNoConfirmedActiveRevision means nothing was ever applied and confirmed, so there is nothing to reconcile to.
 var ErrNoConfirmedActiveRevision = errors.New("no confirmed active network revision")
 
-// CurrentActiveIntent returns the CONFIRMED active revision's id, bundle path and its own immutable intent
-// snapshot.
-//
-// THE INTENT MUST COME FROM THE REVISION, NOT FROM guest_networks.
-//
-// `LoadIntent` reads the live `guest_networks` rows, which the Hotel-Admin UI edits directly. Those edits are
-// drafts: they become the appliance's configuration only when an operator Applies them and then Confirms
-// inside the watchdog window — that is the entire point of the validate → apply → pending_confirmation →
-// active pipeline, and of the automatic rollback when confirmation never arrives.
-//
-// Reconciling on boot from `guest_networks` would quietly bypass all of it. An operator who edited a VLAN and
-// walked away without applying would have that edit take effect on the next reboot, with no apply record, no
-// health check, no confirmation and no watchdog — and a change that was rolled back precisely because it broke
-// connectivity would come back by itself the next time the appliance restarted.
-//
-// The revision row already stores the exact intent it was applied with, as jsonb. That snapshot is immutable
-// and is what "the active network configuration" means, so it is what a restart reconstructs.
+// CurrentActiveIntent returns the confirmed revision's own immutable intent, never guest_networks: those rows are UI drafts, and reconciling from them on boot would apply unapplied or rolled-back edits with no apply record, health check or confirmation.
 func (s *store) CurrentActiveIntent(ctx context.Context) (id, bundlePath string, intent []netcfg.GuestNetwork, err error) {
 	var p *string
 	var raw []byte
@@ -409,8 +322,7 @@ func (s *store) CurrentActiveIntent(ctx context.Context) (id, bundlePath string,
 		bundlePath = *p
 	}
 	if len(raw) == 0 {
-		// An active revision with no recorded intent cannot be reconstructed. Guessing from the mutable
-		// tables is exactly what this function exists to avoid, so it is an error.
+		// An active revision with no recorded intent is an error; guessing from the mutable tables is what this avoids.
 		return id, bundlePath, nil, fmt.Errorf("active revision %s has no stored intent", id)
 	}
 	if err := json.Unmarshal(raw, &intent); err != nil {
@@ -419,8 +331,6 @@ func (s *store) CurrentActiveIntent(ctx context.Context) (id, bundlePath string,
 	return id, bundlePath, intent, nil
 }
 
-// ActiveBundlePath returns the bundle path of the current active revision (the
-// known-good to roll back to), or "" if none.
 func (s *store) ActiveBundlePath(ctx context.Context, exceptID string) (string, error) {
 	var p *string
 	err := s.db.QueryRow(ctx, `
@@ -435,12 +345,7 @@ func (s *store) ActiveBundlePath(ctx context.Context, exceptID string) (string, 
 	return *p, nil
 }
 
-// ActiveIntent returns the stored intent of the current active revision (the known-good to roll back to).
-//
-// Rollback needs the previous revision's INTENT, not its rendered file: the file was produced by whatever
-// binary was running when that revision was applied, and re-running it reinstates that binary's idea of the
-// ruleset structure. Every revision already carries its intent as jsonb, so the correct artifact is one render
-// away and never goes stale.
+// ActiveIntent returns the stored intent of the active revision. Rollback needs the intent, not the rendered file, because the file embeds the ruleset structure of whichever binary applied it.
 func (s *store) ActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error) {
 	var raw []byte
 	err := s.db.QueryRow(ctx, `
@@ -459,8 +364,6 @@ func (s *store) ActiveIntent(ctx context.Context, exceptID string) ([]netcfg.Gue
 	return nets, nil
 }
 
-// PendingRevision returns the single in-flight pending_confirmation revision,
-// if any (used by the watchdog on netd startup and by confirm/rollback).
 func (s *store) PendingRevision(ctx context.Context) (id, bundlePath string, deadlinePassed bool, err error) {
 	var p *string
 	err = s.db.QueryRow(ctx, `
@@ -476,16 +379,12 @@ func (s *store) PendingRevision(ctx context.Context) (id, bundlePath string, dea
 	return id, bundlePath, deadlinePassed, err
 }
 
-// --- the portal address and the portal's HTTPS state (0116) ---
-
-// undefinedTable reports a schema that predates 0116. That is not a fault netd should stop for: an appliance
-// whose database has no portal tables simply has no portal address, and renders exactly what it rendered before.
+// undefinedTable: a schema without the portal tables has no portal address, which is not a fault.
 func undefinedTable(err error) bool {
 	var pg *pgconn.PgError
 	return errors.As(err, &pg) && pg.Code == "42P01"
 }
 
-// LoadPortalIP returns the configured portal address (bare IPv4), or "" when none is configured.
 func (s *store) LoadPortalIP(ctx context.Context) (string, error) {
 	var ip *string
 	err := s.db.QueryRow(ctx, `SELECT host(portal_ip) FROM public.portal_https_settings LIMIT 1`).Scan(&ip)
@@ -501,9 +400,7 @@ func (s *store) LoadPortalIP(ctx context.Context) (string, error) {
 	return *ip, nil
 }
 
-// LoadPortalTLS returns scd's last word on the portal's HTTPS state. The hotel's domain is returned ONLY while
-// it is VERIFIED: an unverified name must never be answered by the appliance's resolver, because it is not yet
-// proven to belong to this hotel.
+// The hotel's domain is returned only while VERIFIED: an unverified name must never be answered by the resolver.
 func (s *store) LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
 	var p netcfg.PortalTLS
 	err := s.db.QueryRow(ctx, `

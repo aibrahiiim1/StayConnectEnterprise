@@ -1,19 +1,8 @@
 package iamv2
 
-// THE CONNECTOR GETS THE ANSWER, NEVER THE TABLE.
-//
-// iam_v2.entitlement_usage_bytes read iam_v2.accounting_records with the CALLER's rights. svc_acctd holds
-// SELECT on that table so it never noticed; svc_pmsd does not, deliberately -- Gate-P lists accounting_records
-// among the financial/metering tables the PMS connector must never hold. So pmsd's checkout-boundary call
-// failed with "permission denied for table accounting_records", the stay-event applier stopped, and
-// p3_feed_authorizes then refused every PMS Auth Context on the interface, which surfaced to guests as the
-// uniform "we could not verify your stay".
-//
-// The fix is the pattern p3_entitlement_data_usage already uses: SECURITY DEFINER, owned by iam_v2_owner, with
-// a pinned search_path. These prove both halves -- the call now succeeds AND the table is still forbidden --
-// because a fix that quietly granted the table would make the first half pass and the system less safe.
-//
-// Set MIGRATION_TEST_DSN to run; skipped otherwise.
+// svc_pmsd must get the usage answer without any privilege on accounting_records (Gate-P forbids it). The
+// helper is SECURITY DEFINER with a pinned search_path; this proves the call succeeds AND the table stays
+// forbidden. Needs MIGRATION_TEST_DSN; skipped otherwise.
 
 import (
 	"context"
@@ -81,7 +70,7 @@ $$;
 const mig0065Up = "0065_the_usage_helper_reads_on_its_own_authority.up.sql"
 const mig0065Down = "0065_the_usage_helper_reads_on_its_own_authority.down.sql"
 
-// usageProbeRole stands in for svc_pmsd: it may execute the helper and holds NO privilege on the table.
+// t_usage_caller stands in for svc_pmsd: it may execute the helper and has no privilege on the table.
 const mig0065Roles = `
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='t_usage_caller') THEN CREATE ROLE t_usage_caller; END IF;
@@ -92,7 +81,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO t
 `
 
 func TestMigration0065(t *testing.T) {
-	c := mig0064Conn(t) // same guard: refuses any database named for a real site
+	c := mig0064Conn(t)
 	ctx := context.Background()
 	if _, err := c.Exec(ctx, mig0065Fixture); err != nil {
 		t.Fatalf("fixture: %v", err)
@@ -101,8 +90,7 @@ func TestMigration0065(t *testing.T) {
 		t.Fatalf("roles: %v", err)
 	}
 
-	// 1. THE DEFECT REPRODUCES. As SECURITY INVOKER, a caller without the table is refused -- which is the
-	//    error the appliance logged every seven seconds while stay events piled up.
+	// As SECURITY INVOKER a caller without the table is refused; the test must reproduce that first.
 	if _, err := c.Exec(ctx, `SET ROLE t_usage_caller`); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +106,7 @@ func TestMigration0065(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	// The value the owner sees, before the migration, is the value the caller must see after it.
+	// The owner's pre-migration value is what the caller must see afterwards.
 	var wantUp, wantDown, wantRecords int64
 	var wantLatest time.Time
 	if err := c.QueryRow(ctx,
@@ -132,7 +120,6 @@ func TestMigration0065(t *testing.T) {
 
 	applySQLFile(t, c, mig0065Up)
 
-	// 2. THE CALL NOW SUCCEEDS for a role that still has no table privilege.
 	if _, err := c.Exec(ctx, `GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO t_usage_caller`); err != nil {
 		t.Fatal(err)
 	}
@@ -147,13 +134,12 @@ func TestMigration0065(t *testing.T) {
 		t.Fatalf("after 0065 the caller still cannot read its own answer: %v", err)
 	}
 
-	// 3. SEMANTICS ARE UNCHANGED -- same four numbers the owner got before the migration.
 	if gotUp != wantUp || gotDown != wantDown || gotRecords != wantRecords || !gotLatest.Equal(wantLatest) {
 		t.Errorf("the aggregate changed: got %d/%d/%d/%v, want %d/%d/%d/%v",
 			gotUp, gotDown, gotRecords, gotLatest, wantUp, wantDown, wantRecords, wantLatest)
 	}
 
-	// 4. THE <= p_at BOUND still bounds. Two samples at or before 01:00.
+	// The <= p_at bound still bounds: two samples at or before 01:00.
 	if err := c.QueryRow(ctx,
 		`SELECT bytes_up, records FROM iam_v2.entitlement_usage_bytes($1, '2026-03-01T01:00:00Z'::timestamptz)`,
 		"44444444-4444-4444-4444-444444444444").Scan(&gotUp, &gotRecords); err != nil {
@@ -163,7 +149,7 @@ func TestMigration0065(t *testing.T) {
 		t.Errorf("the instant bound broke: up=%d records=%d at 01:00, want 2/2", gotUp, gotRecords)
 	}
 
-	// 5. THE NO-BINDING FALLBACK still applies, and only to its own entitlement.
+	// The no-binding fallback still applies, only to its own entitlement.
 	if err := c.QueryRow(ctx,
 		`SELECT bytes_up, bytes_down FROM iam_v2.entitlement_usage_bytes($1, now())`,
 		"77777777-7777-7777-7777-777777777777").Scan(&gotUp, &gotDown); err != nil {
@@ -173,8 +159,7 @@ func TestMigration0065(t *testing.T) {
 		t.Errorf("the no-binding fallback changed: got %d/%d, want 5/7", gotUp, gotDown)
 	}
 
-	// 6. CROSS-SCOPE READS STAY EMPTY. A definer function is a privilege boundary, so an unknown entitlement
-	//    must yield zeroes -- never another entitlement's bytes.
+	// A definer function is a privilege boundary: an unknown entitlement yields zeroes, never another's bytes.
 	if err := c.QueryRow(ctx,
 		`SELECT bytes_up, bytes_down, records FROM iam_v2.entitlement_usage_bytes($1, now())`,
 		"00000000-0000-0000-0000-000000000000").Scan(&gotUp, &gotDown, &gotRecords); err != nil {
@@ -184,7 +169,7 @@ func TestMigration0065(t *testing.T) {
 		t.Errorf("an unknown entitlement returned %d/%d/%d, want zeroes", gotUp, gotDown, gotRecords)
 	}
 
-	// 7. THE TABLE IS STILL FORBIDDEN. The definer boundary must not have become a table grant.
+	// The table itself must still be forbidden.
 	var n int
 	if err := c.QueryRow(ctx, `SELECT count(*) FROM iam_v2.accounting_records`).Scan(&n); err == nil {
 		t.Error("the caller can now SELECT accounting_records directly; the fix widened privilege instead of " +
@@ -194,7 +179,7 @@ func TestMigration0065(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 8. THE FUNCTION'S OWN SHAPE: definer, owned by the schema owner, pinned search_path, not public.
+	// Shape: definer, owned by the schema owner, pinned search_path, not executable by PUBLIC.
 	var secdef bool
 	var owner string
 	var cfg []string
@@ -230,7 +215,6 @@ func TestMigration0065(t *testing.T) {
 		t.Error("PUBLIC can execute the helper")
 	}
 
-	// 9. THE DOWN MIGRATION restores SECURITY INVOKER, and with it the original refusal.
 	applySQLFile(t, c, mig0065Down)
 	if err := c.QueryRow(ctx, `
 		SELECT p.prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -252,5 +236,5 @@ func TestMigration0065(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = c.Exec(ctx, `DROP OWNED BY t_usage_caller; DROP ROLE IF EXISTS t_usage_caller`)
-	_ = os.Getenv("") // keep os imported for the DSN guard shared with 0064
+	_ = os.Getenv("")
 }

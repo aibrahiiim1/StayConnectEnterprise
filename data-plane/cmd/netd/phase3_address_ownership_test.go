@@ -1,14 +1,7 @@
 package main
 
-// THE APPLIER MUST NOT AUTHORIZE AN ADDRESS ON THE PRODUCER'S WORD ALONE.
-//
-// The producer retires an attachment when the device turns up somewhere newer. It cannot see the other case:
-// the device that left and never came back. Durable state contains no evidence of an absence — but DHCP does,
-// because DHCP is what assigned the address, and netd owns it.
-//
-// This is the case that actually happened. An iPhone authenticated on 192.168.77.139 and was switched off; the
-// lease lapsed; Kea reissued .139 to a different device; and the appliance went on authorizing .139 and
-// metering its traffic onto the absent guest's entitlement.
+// The applier must not authorize an address on the producer's word alone: a device that left and never came
+// back leaves no durable-state evidence, but DHCP (which assigned the address) does.
 
 import (
 	"context"
@@ -20,8 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// fakeLeases is the DHCP evidence, staged. A nil error with no rows is a server that answered "nobody holds
-// anything", which is a different fact from a server that could not be asked.
+// fakeLeases stages DHCP evidence; nil error with no rows means "nobody holds anything", unlike a server that could not be asked.
 type fakeLeases struct {
 	rows []KeaLease
 	err  error
@@ -29,8 +21,7 @@ type fakeLeases struct {
 
 func (f fakeLeases) Leases() ([]KeaLease, error) { return f.rows, f.err }
 
-// switchableLeases is the same evidence source with a failure that can be turned on and off between passes,
-// so an outage and its recovery are one continuous scenario rather than two unrelated tests.
+// switchableLeases lets a failure be turned on and off between passes.
 type switchableLeases struct {
 	rows []KeaLease
 	err  error
@@ -38,8 +29,7 @@ type switchableLeases struct {
 
 func (f *switchableLeases) Leases() ([]KeaLease, error) { return f.rows, f.err }
 
-// lease is a lease somebody holds right NOW — stamped at this instant, because a lease's identity is only half
-// of the evidence and the other half is that it has not lapsed.
+// lease is a lease held now: stamped at this instant, since it must also not have lapsed.
 func lease(ip, mac string) KeaLease {
 	return KeaLease{IPAddress: ip, HWAddr: mac, ValidLft: 600, State: 0, CLTT: time.Now().Unix()}
 }
@@ -49,13 +39,13 @@ func TestAddressOwner_LeasedToThisDeviceIsOwned(t *testing.T) {
 	if got := o.Owns(context.Background(), net.ParseIP("10.0.0.5"), "96:48:f9:7a:9b:09"); got != addressOwned {
 		t.Fatalf("ownership = %v, want owned", got)
 	}
-	// MAC formatting must not decide a security answer.
+	// MAC case must not decide the answer.
 	if got := o.Owns(context.Background(), net.ParseIP("10.0.0.5"), "96:48:F9:7A:9B:09"); got != addressOwned {
 		t.Fatalf("case-different MAC = %v, want owned", got)
 	}
 }
 
-// THE EXPOSURE, IN ONE ASSERTION. The address is live, and it belongs to somebody else.
+// The address is live and belongs to somebody else.
 func TestAddressOwner_ReassignedToAnotherDeviceIsForeign(t *testing.T) {
 	o := addressOwner{src: fakeLeases{rows: []KeaLease{lease("192.168.77.139", "d6:5a:1c:d2:12:d6")}}}
 	if got := o.Owns(context.Background(), net.ParseIP("192.168.77.139"), "96:48:f9:7a:9b:09"); got != addressForeign {
@@ -63,9 +53,7 @@ func TestAddressOwner_ReassignedToAnotherDeviceIsForeign(t *testing.T) {
 	}
 }
 
-// No live lease at all. Guests here are addressed by DHCP, so an address nobody holds is an address this
-// session does not hold either — and an authorization for it protects nobody while waiting for whoever picks
-// it up next.
+// No live lease at all: nobody holds the address, so this session does not either.
 func TestAddressOwner_NoLeaseIsForeign(t *testing.T) {
 	o := addressOwner{src: fakeLeases{rows: []KeaLease{lease("10.0.0.9", "aa:bb:cc:dd:ee:ff")}}}
 	if got := o.Owns(context.Background(), net.ParseIP("10.0.0.5"), "96:48:f9:7a:9b:09"); got != addressForeign {
@@ -73,7 +61,7 @@ func TestAddressOwner_NoLeaseIsForeign(t *testing.T) {
 	}
 }
 
-// An expired or released lease is history. Its former holder is not the current owner.
+// An expired or released lease is history.
 func TestAddressOwner_AnExpiredLeaseIsNotOwnership(t *testing.T) {
 	expired := lease("10.0.0.5", "96:48:f9:7a:9b:09")
 	expired.State = keaLeaseStateExpired
@@ -83,20 +71,18 @@ func TestAddressOwner_AnExpiredLeaseIsNotOwnership(t *testing.T) {
 	}
 }
 
-// EVIDENCE OUTAGE IS NOT EVIDENCE. Kea being unreachable must never disconnect every guest on the property.
+// An evidence outage is not evidence: Kea being unreachable must never disconnect every guest.
 func TestAddressOwner_UnreadableEvidenceIsUnknown(t *testing.T) {
 	o := addressOwner{src: fakeLeases{err: errors.New("control socket unavailable")}}
 	if got := o.Owns(context.Background(), net.ParseIP("10.0.0.5"), "96:48:f9:7a:9b:09"); got != addressUnknown {
 		t.Fatalf("ownership = %v, want unknown", got)
 	}
-	// ...and so is a plan that carries no MAC to check against, which is every plan built before this contract.
+	// A plan carrying no MAC is also unknown.
 	o2 := addressOwner{src: fakeLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}}
 	if got := o2.Owns(context.Background(), net.ParseIP("10.0.0.5"), ""); got != addressUnknown {
 		t.Fatalf("a session with no MAC read as %v, want unknown", got)
 	}
 }
-
-// ---- the applier's behaviour on each answer ---------------------------------------------------------------
 
 func ownershipWriter(t *testing.T, tc *fakeTC, g *fakeGate, src leaseSource) *phase3Shaping {
 	t.Helper()
@@ -111,8 +97,7 @@ func sessionOn(ip, mac string) shapeplan.Session {
 		EntitlementID: "ent-1", DownKbps: 9000, UpKbps: 4000, Entitled: true}
 }
 
-// A FOREIGN ADDRESS IS WITHDRAWN, NOT WAITED OUT. The bounded nft lease is the backstop for netd dying, not
-// the plan: while netd is running the authorization goes immediately.
+// A foreign address is withdrawn immediately; the bounded nft lease is only the backstop for netd dying.
 func TestApplier_ForeignAddressIsRevokedAndTornDown(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := ownershipWriter(t, tc, g, fakeLeases{rows: []KeaLease{lease("10.0.0.5", "d6:5a:1c:d2:12:d6")}})
@@ -132,18 +117,14 @@ func TestApplier_ForeignAddressIsRevokedAndTornDown(t *testing.T) {
 	}
 }
 
-// UNKNOWN WITHHOLDS THE RENEWAL AND DESTROYS NOTHING.
-//
-// Durable state alone must never renew an address indefinitely, so a pass that cannot verify ownership does
-// not renew. It also does not tear anything down: the authorization already installed is a bounded lease, and
-// letting it run out on its own is the transient tolerance a brief Kea outage needs. The account is untouched.
+// Unknown ownership withholds the renewal (durable state alone must not renew indefinitely) but tears nothing
+// down: the installed bounded lease runs out on its own, tolerating a brief Kea outage.
 func TestApplier_UnknownOwnershipWithholdsRenewalWithoutEndingAnything(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	src := &switchableLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
 	p := ownershipWriter(t, tc, g, src)
 	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
 
-	// A healthy pass first, so there is a live lease to let run down.
 	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
 		t.Fatalf("setup: %+v %v", res, err)
 	}
@@ -152,7 +133,7 @@ func TestApplier_UnknownOwnershipWithholdsRenewalWithoutEndingAnything(t *testin
 		t.Fatal("setup: no lease was installed")
 	}
 
-	// Kea goes away. The pass must not renew, must not revoke, and must say so.
+	// Kea goes away: the pass must not renew or revoke, and must say so.
 	src.err = errors.New("kea down")
 	g.advance(30 * time.Second)
 	res, err := p.submit(context.Background(), envelope(2, s), time.Now())
@@ -184,7 +165,7 @@ func TestApplier_UnknownOwnershipWithholdsRenewalWithoutEndingAnything(t *testin
 	}
 }
 
-// ...AND EVIDENCE RETURNING BEFORE EXPIRY RESUMES NORMAL RENEWAL. The guest never notices the gap.
+// Evidence returning before expiry resumes normal renewal.
 func TestApplier_OwnershipConfirmedBeforeExpiryResumesRenewal(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	src := &switchableLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
@@ -203,7 +184,6 @@ func TestApplier_OwnershipConfirmedBeforeExpiryResumesRenewal(t *testing.T) {
 		t.Fatalf("setup: the session was not marked unverified")
 	}
 
-	// Kea comes back, still naming this device, and the lease is refreshed to full length.
 	src.err = nil
 	g.advance(30 * time.Second)
 	res, err := p.submit(context.Background(), envelope(3, s), time.Now())
@@ -221,7 +201,6 @@ func TestApplier_OwnershipConfirmedBeforeExpiryResumesRenewal(t *testing.T) {
 	}
 }
 
-// The ordinary case must be untouched: verified ownership shapes and authorizes exactly as before.
 func TestApplier_OwnedAddressIsEnforcedNormally(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := ownershipWriter(t, tc, g, fakeLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}})
@@ -238,8 +217,7 @@ func TestApplier_OwnedAddressIsEnforcedNormally(t *testing.T) {
 	}
 }
 
-// RESTART AND RECOVERY. A fresh applier — empty state directory, no memory — re-verifies ownership on its
-// first pass rather than inheriting a decision it cannot see. A stale address must not survive a restart.
+// A fresh applier re-verifies ownership on its first pass; a stale address must not survive a restart.
 func TestApplier_ForeignAddressIsStillRefusedAfterRestart(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	first := ownershipWriter(t, tc, g, fakeLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}})
@@ -247,7 +225,6 @@ func TestApplier_ForeignAddressIsStillRefusedAfterRestart(t *testing.T) {
 		t.Fatalf("setup: %+v %v", res, err)
 	}
 
-	// The device leaves; Kea reissues the address; netd restarts with no memory of any of it.
 	tc2, g2 := newFakeTC(), newFakeGate()
 	second := ownershipWriter(t, tc2, g2, fakeLeases{rows: []KeaLease{lease("10.0.0.5", "d6:5a:1c:d2:12:d6")}})
 	res, err := second.submit(context.Background(), envelope(2, sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")), time.Now())
@@ -259,12 +236,7 @@ func TestApplier_ForeignAddressIsStillRefusedAfterRestart(t *testing.T) {
 	}
 }
 
-// A LAPSED LEASE THAT KEA STILL CARRIES IS NOT OWNERSHIP.
-//
-// Found on the PRE-LIVE appliance: memfile was holding ninety-two lease rows whose six hundred second lifetime
-// had run out days earlier, every one of them still labelled state 0 because nothing had reclaimed the address
-// yet. A check that reads only the state field calls all ninety-two of them owned, and the guest who walked out
-// on Tuesday still owns their address on Sunday.
+// A lapsed lease Kea still carries (state 0 until reclaimed) is not ownership.
 func TestOwnership_ALeaseThatHasLapsedIsNotCurrent(t *testing.T) {
 	stale := KeaLease{IPAddress: "192.168.77.102", HWAddr: "96:48:f9:7a:9b:09", ValidLft: 600, State: 0,
 		CLTT: time.Now().Add(-72 * time.Hour).Unix()}
@@ -273,7 +245,6 @@ func TestOwnership_ALeaseThatHasLapsedIsNotCurrent(t *testing.T) {
 	if got := o.Owns(context.Background(), net.ParseIP("192.168.77.102"), "96:48:f9:7a:9b:09"); got != addressForeign {
 		t.Fatalf("a lease three days past its lifetime was read as %v, want foreign", got)
 	}
-	// The same row, renewed a moment ago, IS ownership — the rule is about currency, not about age of acquaintance.
 	fresh := stale
 	fresh.CLTT = time.Now().Unix()
 	o2 := addressOwner{src: fakeLeases{rows: []KeaLease{fresh}}}
@@ -282,7 +253,7 @@ func TestOwnership_ALeaseThatHasLapsedIsNotCurrent(t *testing.T) {
 	}
 }
 
-// The boundary is the lease's own expiry, evaluated against a clock the test controls rather than the wall.
+// The boundary is the lease's own expiry, against a controlled clock.
 func TestOwnership_CurrencyIsDecidedAtTheLeaseExpiry(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	l := KeaLease{IPAddress: "10.0.0.5", HWAddr: "96:48:f9:7a:9b:09", ValidLft: 600, State: 0, CLTT: base.Unix()}

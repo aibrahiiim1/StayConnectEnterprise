@@ -9,24 +9,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/payment"
 )
 
-// PHASE-4 FINANCIAL OPERATIONS API (WS-I read surface + WS-H operator actions).
-//
-// The Manual Review routes next door decide about ONE posting. These routes are about the financial
-// subsystem as a whole: is it healthy, what has been paid, and -- after a restore -- what is being held and
-// who releases it.
-//
-// AUTHORIZATION. Mounted under resourcePermission("financial-review"), the same permission the review
-// surface uses, because the readership is the same: the people who reconcile money. The two RECOVERY
-// actions additionally require a password step-up, for the same reason a review decision does -- they are
-// assertions about what happened to real money, made by a named person.
-//
-// REDACTION. Every response here is either a bounded projection or the health struct, which cannot carry
-// identifiers by construction. The payment history rows deliberately omit provider_ref and idempotency_key:
-// an operator reconciling a settlement needs to know an amount was captured, not the correlation handle
-// that would let them act on it out of band.
-//
-// DARK. These routes mount only when the Phase-4 master and review flags are on, exactly like the review
-// routes, so on the delivered appliance they do not exist.
+// Financial operations API: health, payments and post-restore recovery. Mounted under
+// resourcePermission("financial-review"); the two recovery actions also require a password step-up because they
+// assert what happened to real money. Responses are bounded projections: payment history omits provider_ref and
+// idempotency_key so an operator cannot act on the correlation handle out of band. Mounted only when the Phase-4
+// master and review flags are on, like the review routes.
 func (s *server) financialOpsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/health", s.getFinancialHealth)
@@ -36,14 +23,11 @@ func (s *server) financialOpsRoutes() http.Handler {
 	r.Get("/recovery/holds", s.listRecoveryHolds)
 	r.Post("/recovery/holds/{id}/resolve", s.resolveRecoveryHold)
 	r.Post("/recovery/release", s.releaseRecovery)
-	// The zero-attempt path. It lives here rather than under financial-review because the postings it lists
-	// are recovery holds, and an operator reaches them from the recovery screen.
+	// Lives here, not under financial-review: these postings are recovery holds reached from the recovery screen.
 	r.Get("/recovery/zero-attempt", s.listZeroAttemptQueue)
 	r.Post("/recovery/zero-attempt/{id}/authorize", s.authorizeZeroAttemptRetry)
 	return r
 }
-
-// ---------------------------------------------------------------- health
 
 func (s *server) getFinancialHealth(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
@@ -65,26 +49,21 @@ func (s *server) getFinancialHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------- settlements and payments
-
 type settlementRow struct {
-	SettlementID  string `json:"settlement_id"`
-	PurchaseID    string `json:"purchase_id"`
-	Method        string `json:"method"`
-	Status        string `json:"status"`
-	PurchaseState string `json:"purchase_state"`
-	AmountMinor   int64  `json:"amount_minor"`
-	Currency      string `json:"currency"`
-	Exponent      int16  `json:"currency_exponent"`
-	// What an operator needs to recognise the charge: which package, when, and how the client got access
-	// (ROOM with its room number, VOUCHER, ACCOUNT, OPEN). The same facts the Stays and Sessions screens show.
-	PackageName *string    `json:"package_name"`
-	At          *time.Time `json:"at"`
-	Source      string     `json:"source"`
-	Room        *string    `json:"room"`
+	SettlementID  string     `json:"settlement_id"`
+	PurchaseID    string     `json:"purchase_id"`
+	Method        string     `json:"method"`
+	Status        string     `json:"status"`
+	PurchaseState string     `json:"purchase_state"`
+	AmountMinor   int64      `json:"amount_minor"`
+	Currency      string     `json:"currency"`
+	Exponent      int16      `json:"currency_exponent"`
+	PackageName   *string    `json:"package_name"`
+	At            *time.Time `json:"at"`
+	Source        string     `json:"source"`
+	Room          *string    `json:"room"`
 }
 
-// settlementSelect reads a settlement with the context above. Every join is to a table edged already reads.
 const settlementSelect = `
 SELECT v.settlement_id::text, v.purchase_id::text, v.method, v.status, v.purchase_state,
        coalesce(v.amount_minor,0), coalesce(v.currency,''), coalesce(v.currency_exponent,0),
@@ -109,8 +88,7 @@ func scanSettlement(row interface{ Scan(...any) error }, e *settlementRow) error
 		&e.AmountMinor, &e.Currency, &e.Exponent, &e.PackageName, &e.At, &e.Source, &e.Room)
 }
 
-// settlementViews are the screen's views of the list, applied in SQL so a view pages over every payment rather
-// than over the page on screen. They are the definitions the screen used when it filtered in the browser.
+// Applied in SQL so a view pages over every payment, not just the page on screen.
 var settlementViews = map[string]string{
 	"attention": `v.status IN ('MANUAL_REVIEW','FAILED','REQUIRED','IN_PROGRESS') AND v.method <> 'NOT_REQUIRED'`,
 	"paid":      `v.method IN ('ONLINE_PAYMENT','PMS_POSTING')`,
@@ -124,8 +102,7 @@ type settlementCollected struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 
-// settlementsSummary describes every payment the status filter selects -- not the page and not the view, so
-// the view counts stay put while the operator moves between views.
+// Describes every payment the status filter selects, not the page or the view, so view counts stay put.
 type settlementsSummary struct {
 	All       int                   `json:"all"`
 	Attention int                   `json:"attention"`
@@ -151,7 +128,6 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 		}
 		viewClause = c
 	}
-	// PAGED. The list used to stop at the newest 200, and its counts and totals counted those 200.
 	pg, ok := readPage(w, r, 0)
 	if !ok {
 		return
@@ -159,7 +135,6 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 	scope := `
  WHERE v.tenant_id=$1 AND v.site_id=$2 AND ($3::text IS NULL OR v.status=$3::text)`
 
-	// The counts and the collected totals read the view alone: no join is needed to classify a payment.
 	sum := settlementsSummary{Collected: []settlementCollected{}}
 	var total int
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
@@ -220,7 +195,7 @@ func (s *server) listSettlements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, more := trimPage(out, pg)
-	// "settlements" and "limit" are the keys this answer always had; limit is now the page size.
+	// "settlements" and "limit" are the keys this answer always had; limit is the page size.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settlements": out, "limit": pg.Size,
 		"page": pg.Page, "page_size": pg.Size, "meta": listMeta{HasMore: more}, "total": total, "summary": sum,
@@ -236,8 +211,7 @@ type finopsPaymentRow struct {
 	Currency    string  `json:"currency"`
 	Exponent    int16   `json:"currency_exponent"`
 	ParentID    *string `json:"parent_transaction_id"`
-	// Settlement is the provider's report of what it settled a captured card charge as (migration 0112):
-	// presentment above, settlement here, exactly as the provider stated it. Absent when not reported.
+	// The provider's report of what it settled a captured card charge as, as the provider stated it; absent when not reported.
 	Settlement *finopsSettlementReport `json:"settlement_report,omitempty"`
 }
 
@@ -251,16 +225,13 @@ type finopsSettlementReport struct {
 	Converted    bool    `json:"converted"`
 }
 
-// getSettlement returns one settlement with its payment history: the charge, and every refund or chargeback
-// that followed. This is the view an operator needs to answer "was this guest actually charged, and what
-// has been given back".
+// One settlement with its payment history (the charge and every refund or chargeback that followed).
 func (s *server) getSettlement(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	id := chi.URLParam(r, "id")
 	var se settlementRow
-	// Scoped by tenant AND site. A settlement id from another property of the same customer must read as
-	// absent, not as forbidden -- the response is identical either way.
+	// Scoped by tenant AND site; a settlement of another property must read as absent, not forbidden.
 	err := scanSettlement(s.db.QueryRow(ctx, settlementSelect+`
  WHERE v.tenant_id=$1 AND v.site_id=$2 AND v.settlement_id=$3::uuid`, s.tenantID, s.siteID, id), &se)
 	if err != nil {
@@ -306,17 +277,14 @@ SELECT payment_id::text, transaction_type, status, provider, amount_minor, curre
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"settlement": se,
-		"payments":   pay,
-		// The UI renders its affordances from this rather than deciding for itself what Phase 4 allows.
+		"settlement":        se,
+		"payments":          pay,
 		"available_actions": []string{},
 		"note": "Refund and chargeback initiation are NOT available from this surface in Phase 4. The " +
 			"backend can record them, but no provider adapter exists and no operator-initiated refund " +
 			"path has been authorized, so offering the button would imply a capability that is not there.",
 	})
 }
-
-// ---------------------------------------------------------------- recovery
 
 func (s *server) getRecoveryState(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
@@ -384,8 +352,7 @@ func (s *server) resolveRecoveryHold(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed body")
 		return
 	}
-	// The actor is the AUTHENTICATED session, never a field in the body. A reconciliation decision that
-	// could name its own author would be worthless as an audit record.
+	// The actor is the authenticated session, never a body field; a self-named author makes the audit worthless.
 	actor, ok := s.stepUpActor(w, r, req.Password)
 	if !ok {
 		return
@@ -436,14 +403,8 @@ func (s *server) releaseRecovery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"released": true, "epoch": epoch})
 }
 
-// ---------------------------------------------------------------- helpers
-
-// stepUpActor re-authenticates the operator and returns their id from the SESSION.
-//
-// There is deliberately no actor parameter anywhere in this file's request types. An audit record whose
-// author is supplied by the request is not an audit record, and the password is a step-up on top of an
-// already-authenticated session -- it proves the person at the keyboard is still the session's owner, which
-// a stolen cookie alone does not.
+// Re-authenticates the operator and returns their id from the SESSION. No request type carries an actor: the
+// password proves the person at the keyboard still owns the session, which a stolen cookie alone does not.
 func (s *server) stepUpActor(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
@@ -457,21 +418,15 @@ func (s *server) stepUpActor(w http.ResponseWriter, r *http.Request, password st
 	return sess.OperatorID, true
 }
 
-// paymentEngine builds the payment runtime over this server's pool.
-//
-// It is constructed per request rather than held on the server because the engine is a thin coordinator
-// with no state of its own, and because building it here keeps the DARK posture in one place: the same
-// NewProductionEngine every other caller uses, reading the same environment.
+// Constructed per request: the engine is stateless, and this keeps the DARK posture in one place.
 func (s *server) paymentEngine() (*payment.Engine, error) {
 	return payment.NewProductionEngine(s.db, nil)
 }
 
-// financialOpErr maps the payment package's typed refusals onto HTTP without leaking internals.
 func financialOpErr(w http.ResponseWriter, err error) {
 	switch payment.CodeOf(err) {
 	case payment.ErrUntrustedInput:
-		// The database's own words: these are deterministic RECOVERY_* codes describing what the decision
-		// is missing, never guest data, and hiding them just makes a correctable mistake unfixable.
+		// The database's own words: deterministic RECOVERY_* codes, never guest data; hiding them makes a correctable mistake unfixable.
 		jsonErr(w, http.StatusBadRequest, "invalid", err.Error())
 	case payment.ErrRecoveryHeld:
 		jsonErr(w, http.StatusConflict, "holds_unresolved",
@@ -485,17 +440,9 @@ func financialOpErr(w http.ResponseWriter, err error) {
 	}
 }
 
-// ---------------------------------------------------------------- the zero-attempt recovery path
-//
-// A posting restored with NO surviving attempts cannot appear in the ordinary review queue, which keys on
-// attempts, and record_posting_review_action refuses it for the same reason. Before these two routes the
-// only safe way out of that state existed in the database and was reachable from nowhere -- which is not a
-// path, it is a function.
-//
-// The authorization model is the EXISTING financial-review one, unchanged: this surface is mounted under
-// resourcePermission("financial-ops"), the write requires a password step-up, the actor is taken from the
-// session and cannot be named by the request, and the reason and evidence go through the same bounded,
-// screened contract every other financial decision uses.
+// A posting restored with no surviving attempts cannot appear in the ordinary review queue (it keys on attempts)
+// and record_posting_review_action refuses it. This surface is the way out. Authorization is the existing
+// financial-review model: step-up for the write, actor from the session, bounded and screened reason/evidence.
 
 type zeroAttemptRow struct {
 	PostingID    string  `json:"posting_id"`
@@ -510,10 +457,7 @@ type zeroAttemptRow struct {
 	Eligible     bool    `json:"eligible_for_retry_authorization"`
 }
 
-// listZeroAttemptQueue shows postings held by recovery that have never been transmitted, together with
-// WHY each one is or is not eligible. The eligibility comes from the database view rather than being
-// recomputed here: a screen that disagreed with the function about what is allowed would send an operator
-// to be refused, and two copies of those rules is how that starts.
+// Eligibility comes from the database view, not recomputed here: a screen that disagreed with the function would send operators to be refused.
 func (s *server) listZeroAttemptQueue(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -542,8 +486,7 @@ SELECT posting_id::text, outbox_id::text, pms_interface_id::text, amount_minor, 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queue": out,
 		"limit": 200,
-		// The evidence contract travels with the queue, exactly as it does on the review surface. A second
-		// copy of it in the frontend is a copy that drifts.
+		// The evidence contract travels with the queue so the frontend has no drifting copy.
 		"evidence_contract": map[string]any{"source_types": evidenceSourceTypeNames()},
 		"note": "These postings were held by recovery and have never been transmitted. Authorizing a retry " +
 			"sends nothing: it authorises exactly ONE future attempt, and only after an operator has " +
@@ -559,10 +502,8 @@ type zeroAttemptRetryReq struct {
 	Password string              `json:"password"`
 }
 
-// authorizeZeroAttemptRetry is the operator route to the safe audited path. It TRANSMITS NOTHING: the
-// database records the decision in the same append-only review ledger every other financial decision uses,
-// authorises attempt number one, and returns the posting to the queue. No attempt row and no P# are
-// created, so the posting's history stays honestly empty until a real transmission happens.
+// The operator route to the audited path. It transmits nothing: the DB records the decision in the review
+// ledger, authorizes attempt one and returns the posting to the queue; no attempt row or P# is created.
 func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Request) {
 	var in zeroAttemptRetryReq
 	if err := decodeJSON(r, &in); err != nil {
@@ -574,8 +515,7 @@ func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusBadRequest, "reason_invalid", rerr.Error())
 		return
 	}
-	// Evidence is REQUIRED here. The whole authorization rests on somebody having actually looked at the
-	// folio, so "I checked" without saying where is not a decision anyone can audit later.
+	// Evidence is required: the authorization rests on somebody having looked at the folio, so "I checked" is not auditable.
 	evidence, everr := validateEvidence(in.Evidence, true)
 	if everr != nil {
 		jsonErr(w, http.StatusBadRequest, "evidence_invalid", everr.Error())
@@ -590,9 +530,8 @@ func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	id := chi.URLParam(r, "id")
 
-	// Scope FIRST, and by tenant AND site. A valid operator of one property must not be able to authorize
-	// another property's money, even within the same customer. 404 rather than 403 so the API does not
-	// confirm that an out-of-scope posting exists.
+	// Scope first, by tenant AND site: an operator of one property must not authorize another's money. 404, not
+	// 403, so the API does not confirm an out-of-scope posting exists.
 	var owned bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.pms_postings
 		WHERE id=$1 AND tenant_id=$2 AND site_id=$3)`, id, s.tenantID, s.siteID).Scan(&owned); err != nil || !owned {

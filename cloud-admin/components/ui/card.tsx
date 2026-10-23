@@ -1,11 +1,5 @@
 import { cn } from "@/lib/utils";
 
-// A card is the one container the whole admin is built from, so its job is to be quiet: one hairline border,
-// the faintest elevation, and generous padding. The previous version carried a fake inner highlight
-// (`shadow-panel` as two inset white rings) that only read correctly on a near-black page.
-//
-// The exported names and signatures are unchanged, so every existing screen picks the new treatment up without
-// being edited. `CardDescription` and `CardFooter` are additions.
 export function Card({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div

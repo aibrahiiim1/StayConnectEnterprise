@@ -1,16 +1,5 @@
 "use client";
 
-// THE SIDE SHEET.
-//
-// A dialog is right for a decision ("disable this package?"). It is wrong for a record: a voucher, a PMS
-// connection, a package's activity. Those want the list to stay visible behind them, so the operator can move
-// from one row to the next without losing their place — and they want the full viewport height, because a PMS
-// connection's diagnostics do not fit in a centred box.
-//
-// Built on the same Radix Dialog as `dialog.tsx`, so focus trapping, Escape, restoring focus to the row that
-// opened it and the inert background are correct rather than approximated. Below `sm` it becomes a full-width
-// panel, since a 420px drawer on a 390px phone is a clipped page.
-
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -72,7 +61,6 @@ export function SheetContent({
   );
 }
 
-/** The fixed top of the sheet: an optional icon/eyebrow, the title, a description and status badges. */
 export function SheetHeader({
   eyebrow,
   title,
@@ -111,7 +99,7 @@ export function SheetHeader({
               {description}
             </DialogPrimitive.Description>
           ) : (
-            // Radix warns when a Content has no Description; an empty one satisfies it without adding text.
+            // Radix requires a Description even when no visible description is supplied.
             <DialogPrimitive.Description className="sr-only">{typeof title === "string" ? title : ""}</DialogPrimitive.Description>
           )}
           {badges && <div className="flex flex-wrap items-center gap-1.5 pt-1">{badges}</div>}
@@ -122,12 +110,10 @@ export function SheetHeader({
   );
 }
 
-/** The scrolling middle. */
 export function SheetBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5", className)} {...p} />;
 }
 
-/** The fixed bottom, for the record's actions. */
 export function SheetFooter({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
@@ -140,7 +126,6 @@ export function SheetFooter({ className, ...p }: React.HTMLAttributes<HTMLDivEle
   );
 }
 
-/** A titled group inside a sheet body. */
 export function SheetSection({
   title,
   description,

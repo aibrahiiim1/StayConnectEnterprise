@@ -14,13 +14,9 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// CENTRAL SIGN-INS: the Team (Central's own operators, platform roles, no customer) and each customer's
-// users (customer roles, bound to that customer). Both are rows in operators + operator_roles.
-//
-// A user holds exactly one Central role here. Legacy roles still present in the database are shown as they
-// are but grant nothing (§7) and cannot be assigned.
+// Users are the Team (platform roles, no customer) and each customer's users (customer roles). A user holds
+// exactly one role; legacy roles in the database are shown but grant nothing and cannot be assigned.
 
-// UserRow is a Team member or a customer user.
 type UserRow struct {
 	ID          string    `json:"id"`
 	Email       string    `json:"email"`
@@ -32,7 +28,7 @@ type UserRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// LastLoginAt is the last successful console sign-in; null when the user never signed in.
 	LastLoginAt *time.Time `json:"last_login_at"`
-	// TwoStepEnrolled: an authenticator app is set up (0052). Without one, the next sign-in sets one up.
+	// TwoStepEnrolled: an authenticator app is set up; without one, the next sign-in sets one up.
 	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
@@ -134,9 +130,8 @@ func hasRole(s *auth.Session, role string) bool {
 	return false
 }
 
-// validUserEmail is the one check for a Central user's email, at creation and at a correction: a single plain
-// address (no display name, no comment, no spaces), with a dotted domain, at most 254 characters. The caller has
-// lower-cased and trimmed it.
+// validUserEmail accepts a single plain address (no display name, comment or spaces) with a dotted domain, at most
+// 254 characters; the caller lower-cases and trims it.
 func validUserEmail(e string) bool {
 	if e == "" || len(e) > 254 || strings.ContainsAny(e, " \t\r\n<>\"(),;:\\") {
 		return false
@@ -217,8 +212,6 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body (a user holds exactly one role)")
 		return
 	}
-	// AN EMAIL CAN BE CORRECTED (GDPR audit B5, Art. 16). The history then names the person by the corrected
-	// address, so a correction is not a second identity.
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	if in.Email != "" && !validUserEmail(in.Email) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "a valid email is required")
@@ -284,9 +277,8 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 			return
 		}
-		// Only what is attributable to this user follows the correction (0056): the who-acted columns holding the old
-		// address and the audit entries made by or about them -- never a matching string anywhere else in the
-		// platform's history, which a customer's administrator must not be able to rewrite.
+		// Only what is attributable to this user follows the correction; a customer administrator must not be able to
+		// rewrite matching strings elsewhere in the platform history.
 		if _, err := tx.Exec(ctx, `SELECT central_correct_actor_email($1::uuid, $2, $3)`, id, cur[0].Email, in.Email); err != nil {
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 			return
@@ -328,8 +320,7 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 			return
 		}
 	}
-	// Losing access, changing role or getting a new password ends every console session the user has open:
-	// they stop at their next request instead of running out the sliding lifetime on the old access.
+	// Losing access, changing role or password (or email) ends the user's open sessions at their next request.
 	sessionsEnded := in.Status == "disabled" || (in.Role != "" && in.Role != cur[0].Role) || in.Password != "" || emailChanged
 	if sessionsEnded {
 		if err := auth.EndOperatorSessions(ctx, tx, id); err != nil {
@@ -348,10 +339,9 @@ func (b *Base) updateUser(w http.ResponseWriter, r *http.Request, customerID, id
 	b.writeUser(w, r, http.StatusOK, customerID, id)
 }
 
-// removeUser is DELETE: the sign-in is removed. The audit log keeps what the user did (it records the actor
-// id and has no foreign key); licences they issued keep their history with created_by cleared. Deleting the row
-// replaces their email everywhere the history keeps it as text (migration 0055, GDPR audit B5), so the entry
-// for the removal itself does not repeat it either.
+// removeUser deletes the sign-in. The audit log keeps what the user did (by actor id, no foreign key); licences keep
+// their history with created_by cleared. Deleting the row replaces their email wherever history keeps it as text,
+// so the removal entry does not repeat it either.
 func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id string) {
 	if s := auth.FromContext(r.Context()); s != nil && s.OperatorID == id {
 		Fail(w, r, http.StatusConflict, CodeConflict, "you cannot remove yourself")
@@ -372,8 +362,7 @@ func (b *Base) removeUser(w http.ResponseWriter, r *http.Request, customerID, id
 		Fail(w, r, http.StatusConflict, CodeConflict, "this is the last active platform administrator")
 		return
 	}
-	// Removing the row also ends the user's console sessions: the next request finds no operator
-	// (session_policy.go) and the session is destroyed.
+	// Removing the row also ends their sessions: the next request finds no operator (session_policy.go).
 	if _, err := b.DB.Exec(ctx, `DELETE FROM operators WHERE id=$1`, id); err != nil {
 		slog.Warn("remove user failed", "operator_id", id, "err", err)
 		Fail(w, r, http.StatusConflict, CodeConflict, "The user could not be removed. Try again.")
@@ -396,8 +385,6 @@ func (b *Base) isLastAdministrator(ctx context.Context, id string) bool {
 		Scan(&others, &self)
 	return self > 0 && others == 0
 }
-
-// ---- Team: /cloud/v1/team ----
 
 func (b *Base) listTeam(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
@@ -481,11 +468,9 @@ func (b *Base) customerUserMFAReset(w http.ResponseWriter, r *http.Request) {
 	b.resetUserMFA(w, r, id, chi.URLParam(r, "uid"))
 }
 
-// resetUserMFA removes a colleague's authenticator and recovery codes (0052, GDPR plan C10): their sessions end
-// and they set up a new authenticator at their next sign-in. Never one's own -- a stolen session plus the
-// password must not be enough to remove the second factor -- and with a reason, audited. It also lifts every
-// wrong-password lock on their account, from every address (0056, decision D-R1), so a colleague locked out
-// can be let back in from the console.
+// resetUserMFA removes a colleague's authenticator and recovery codes, ends their sessions and lifts every
+// wrong-password lock on their account. Never one's own (a stolen session plus the password must not remove the
+// second factor); a reason is required and it is audited.
 func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, id string) {
 	var in struct {
 		Reason string `json:"reason"`
@@ -536,8 +521,6 @@ func (b *Base) resetUserMFA(w http.ResponseWriter, r *http.Request, customerID, 
 		"signin_locks_cleared": unlocked})
 	WriteJSON(w, http.StatusOK, map[string]any{"removed": had})
 }
-
-// ---- Customer users: /cloud/v1/customers/{id}/users ----
 
 func (b *Base) listCustomerUsers(w http.ResponseWriter, r *http.Request) {
 	scope, ok := readScope(w, r)
@@ -594,9 +577,8 @@ func (b *Base) deleteCustomerUser(w http.ResponseWriter, r *http.Request) {
 	b.removeUser(w, r, id, chi.URLParam(r, "uid"))
 }
 
-// userDataExport: POST /cloud/v1/users/{id}/data-export {reason}. One user's data as a JSON document, for the
-// platform to hand to them (GDPR audit B5, Art. 15/20; migration 0055). Platform-only (Team management), with
-// the password re-confirmed and a reason, and audited. Works for Team members and customer users alike.
+// userDataExport: POST /cloud/v1/users/{id}/data-export {reason}. One user's data as JSON. Platform-only, with the
+// password re-confirmed and a reason, and audited; works for Team members and customer users.
 func (b *Base) userDataExport(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// canaries are values that MUST NEVER appear in a persisted/exported error code or structured log line.
+// canaries must never appear in a persisted error code or log line.
 var canaries = []string{
 	"hunter2password",               // secret / password
 	"svcuser",                       // endpoint username
@@ -51,24 +51,19 @@ func TestTypedErr_HidesRawDetail(t *testing.T) {
 		if Classify(e) != CodeDialFailed {
 			t.Errorf("Classify(coded) = %q, want DIAL_FAILED", Classify(e))
 		}
-		// Unwrap still exposes the raw error for LOCAL debugging only (never persisted).
 		if !strings.Contains(errors.Unwrap(e).Error(), cn) {
 			t.Errorf("Unwrap should retain raw detail for local debug")
 		}
 	}
 }
 
-// TestLogEvent_NoCanaryInCapturedOutput inspects the ACTUAL bytes logEvent emits and proves that even when
-// a canary drives control flow OR is smuggled into an Interface identity / Stage / LogEvent, nothing
-// sensitive reaches the log line — invalid inputs render as fixed placeholders, and the raw error never
-// reaches logEvent at all.
+// Even with a canary smuggled into the identity, Stage or LogEvent, nothing sensitive reaches the log line;
+// invalid inputs render as fixed placeholders.
 func TestLogEvent_NoCanaryInCapturedOutput(t *testing.T) {
 	for _, cn := range canaries {
 		var buf bytes.Buffer
 		log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		raw := fmt.Errorf("dial %q endpoint failed frame=%q", cn, cn)
-		// canary smuggled into every free-ish field: raw error (control flow only), interface string,
-		// invalid Stage, invalid LogEvent.
 		logEvent(log, LogEvent(cn), Classify(coded(CodeDialFailed, raw)),
 			SafeFields{InterfaceID: NewUUIDValue(cn), Generation: 7, Stage: Stage(cn), Attempt: 2})
 		out := buf.String()
@@ -88,7 +83,6 @@ func TestLogEvent_PanicValueNeverRendered(t *testing.T) {
 	for _, cn := range canaries {
 		var buf bytes.Buffer
 		log := slog.New(slog.NewJSONHandler(&buf, nil))
-		// simulate the supervisor panic-recovery log: only the closed event + safe fields, never the value
 		_ = recoverToLog(log, cn)
 		if strings.Contains(buf.String(), cn) {
 			t.Errorf("panic value canary %q leaked: %s", cn, buf.String())
@@ -99,8 +93,7 @@ func TestLogEvent_PanicValueNeverRendered(t *testing.T) {
 	}
 }
 
-// recoverToLog models the supervisor's panic path: the recovered value is discarded, only the closed event
-// + safe fields are logged.
+// recoverToLog models the supervisor's panic path: the recovered value is discarded.
 func recoverToLog(log *slog.Logger, panicValue string) (rec any) {
 	rec = panicValue // stand-in for recover()
 	logEvent(log, EventWorkerPanicRecovered, CodePanicRecovered,
@@ -126,7 +119,6 @@ func TestAllCodes_InVocabulary(t *testing.T) {
 			t.Errorf("code %q not valid per its own set", c)
 		}
 	}
-	// an invented code is rejected
 	if Code("SOMETHING_ELSE").Valid() {
 		t.Error("out-of-set code reported valid")
 	}

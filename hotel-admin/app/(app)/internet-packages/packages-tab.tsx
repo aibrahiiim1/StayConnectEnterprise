@@ -1,12 +1,7 @@
 "use client";
 
-// THE PACKAGE CATALOGUE — what guests are offered, how many are using each package now, and every action on a
-// package in one place.
-//
-// The list shows what each package GIVES (not a code and a revision count). A row opens the package's record
-// in a side sheet: what it gives, its saved versions, and Edit / Disable / Delete…. The revision chain underneath
-// is unchanged and still immutable — lib/package-save decides which revision a save pins, and a save always
-// records a new permanent version.
+// Revisions are immutable: lib/package-save decides which revision a save pins, and a save always records a
+// new permanent version.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -48,10 +43,8 @@ import {
 
 type PlanSummary = PlanOption & { used_by_active_packages?: number };
 
-// A refusal of the price section arrives as "invalid_currency: …" (and a duration one as
-// "invalid_duration_policy: …"); it is shown naming the part of the form it concerns, followed by the server's
-// own reason. Every other refusal -- module_not_enabled, commercial_fields_required, a validation sentence --
-// already reads as a sentence and is shown exactly as the server wrote it, never swallowed.
+// Price and duration refusals ("invalid_currency: …") are shown naming their form section; every other
+// refusal already reads as a sentence and is shown as the server wrote it.
 function readableRefusal(e: unknown): unknown {
   const readable = e instanceof Error ? describePublishRefusal(e.message) : null;
   return readable ?? e;
@@ -66,8 +59,7 @@ export function PackagesTab({
   const toast = useToast();
   const [rows, setRows] = useState<PackageSummary[] | null>(null);
   const [plans, setPlans] = useState<PlanSummary[]>([]);
-  // Guests on each package right now, from the activity summary. null = that read failed, which is shown as
-  // "—" rather than as zero: an unknown count is not an empty package.
+  // null = the read failed, shown as "—" because an unknown count is not an empty package.
   const [activeBy, setActiveBy] = useState<Record<string, number> | null>(null);
   const [activeNow, setActiveNow] = useState<number | null>(null);
   const [stayWarnings, setStayWarnings] = useState<string[]>([]);
@@ -83,30 +75,24 @@ export function PackagesTab({
   const [formErr, setFormErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  // THE DISABLE CONFIRMATION — a reason and a password in one dialog, never two window.prompt() calls.
   const [disabling, setDisabling] = useState<PackageSummary | null>(null);
   const [deleting, setDeleting] = useState<PackageSummary | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
-  // WHAT THE PRICE SECTION MAY OFFER: the site's module state and the PMS interfaces room charge can be mapped
-  // to. Read each time the form opens, because an operator may have just switched a module on in another tab.
-  // null = loading; "error" = could not be read, which the form treats as not selectable (fail closed).
+  // Modules, room-charge interfaces and client groups are re-read each time the form opens, since they may
+  // have changed in another tab. null = loading; "error" is treated as not selectable (fail closed).
   const [modules, setModules] = useState<ModulesReport | "error" | null>(null);
   const [roomIfaces, setRoomIfaces] = useState<RoomChargeInterface[] | "error" | null>(null);
-  // THE CLIENT GROUPS AN AUDIENCE CAN NAME, read with the module state for the same reason: a group created in
-  // another tab must be offered the next time the form opens, not the next time the page loads.
   const [clientGroups, setClientGroups] = useState<ClientGroupOption[] | "error" | null>(null);
-  // THE DEFAULT ACTIVE PAYMENT ACCOUNT -- the one every card checkout uses. A package is offered by card only in
-  // its currency, or in one its provider converts when it is marked provider-converts (lib/card-currency, the
-  // rule scd applies). null = unknown (not licensed, or not readable): no claim is made.
+  // The default active payment account, which every card checkout uses (lib/card-currency, scd's rule).
+  // null = unknown (not licensed or unreadable): no claim is made.
   const [cardAccount, setCardAccount] = useState<CardAccountView | "none" | null>(null);
-  // WHAT THE PACKAGE BEING EDITED CHARGES AND GRANTS TODAY, and the fields the form does not edit. A save that
-  // changes the terms needs the operator's password; the carried fields go back exactly as loaded.
+  // What the edited package charges and grants today, plus the fields the form does not edit. Changing the
+  // terms needs the operator's password; carried fields go back as loaded.
   const [editBase, setEditBase] = useState<{ terms: RevisionTerms; carry: RevisionCarry } | null>(null);
-  // A SAVE WAITING FOR THE PASSWORD. Set when the revision changes price, currency, methods or plan (or when
-  // the server asks for the password anyway); the dialog then sends the same body with the password.
+  // A save waiting for the password (terms changed, or the server asked for it).
   const [pendingSave, setPendingSave] = useState<{ body: Record<string, unknown>; planChanged: boolean } | null>(null);
   const [pendingErr, setPendingErr] = useState<unknown>(null);
-  // REACTIVATION is a step-up too: switching a package back on offers it to clients again.
+  // Reactivation is a step-up too: it offers the package to clients again.
   const [enabling, setEnabling] = useState<PackageSummary | null>(null);
   const formOpen = adding || editing !== null;
   useEffect(() => {
@@ -116,8 +102,7 @@ export function PackagesTab({
     api.get<ListResp<ClientGroupOption>>("/client-groups")
       .then((g) => { if (live) setClientGroups(g?.data ?? []); })
       .catch(() => { if (live) setClientGroups("error"); });
-    // The PMS interfaces room charge can map to are asked for only when Room charge is licensed: a site
-    // without it never calls the room-charge surface.
+    // Room-charge interfaces are asked for only when Room charge is licensed.
     api.get<ModulesReport>("/modules")
       .then((m) => {
         if (!live) return;
@@ -132,7 +117,7 @@ export function PackagesTab({
         if (m?.modules?.card_payment?.licensed) {
           api.get<AccountsResp>("/payment-providers/accounts")
             .then((a) => { if (live) setCardAccount(defaultCardAccount(a?.accounts ?? [])); })
-            .catch(() => { /* unknown: the form makes no claim about card currencies */ });
+            .catch(() => {});
         }
       })
       .catch(() => { if (live) { setModules("error"); setRoomIfaces([]); } });
@@ -149,7 +134,7 @@ export function PackagesTab({
       setRows(pkgs); setPlans(pl.data ?? []);
       setSelected((s) => (s ? pkgs.find((p) => p.package_id === s.package_id) ?? null : s));
 
-      // Guests on each package now. A failure here must not take the catalogue down with it.
+      // A failure here must not take the catalogue down with it.
       getActivity({ range: "24h", limit: 1 })
         .then((a) => {
           const m: Record<string, number> = {};
@@ -158,12 +143,9 @@ export function PackagesTab({
         })
         .catch(() => { setActiveBy(null); setActiveNow(null); });
 
-      // THE STAY-LENGTH OVERLAP CHECK. The list does not carry eligibility rules — edged authors them and
-      // cannot read the table back — so they come one package at a time through the scoped reader. It is a
-      // WARNING: overlapping ranges are legitimate when the operator wants the guest to choose.
-      // A package with NO current revision has no conditions to read: asking the server for them returns a
-      // correct 404 ("no current configuration") that the browser then logs as an error on every load. Such a
-      // package is shown as not configured instead, and cannot overlap anything.
+      // Stay-length overlap is a warning only (overlap is legitimate when the guest should choose). The list
+      // carries no eligibility rules, so they are read per package. A package with no current revision is
+      // skipped: asking would 404 and log an error on every load.
       const active = pkgs.filter((p) => p.active && !!p.current_revision_id);
       const ranges = await Promise.all(active.map(async (p): Promise<PackageStayRange> => {
         try {
@@ -175,7 +157,6 @@ export function PackagesTab({
             }))),
           };
         } catch {
-          // A package whose conditions cannot be read is not evidence of an overlap.
           return { package_id: p.package_id, name: p.name || p.code, active: true, range: null };
         }
       }));
@@ -186,12 +167,11 @@ export function PackagesTab({
   }, [guard, setErr]);
   useEffect(() => { load(); }, [load]);
 
-  // "Add package" lives in the page header; each press arrives here as a new request number.
+  // The header's "Add package" arrives as a new request number.
   useEffect(() => {
     if (addRequest > 0 && writable) { setFormErr(null); setEditing(null); setAdding(true); onAddHandled?.(); }
   }, [addRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The record's history loads when its sheet opens.
   useEffect(() => {
     if (!selected) { setHistory(null); setHistoryErr(null); return; }
     let live = true;
@@ -214,7 +194,7 @@ export function PackagesTab({
       (!needle || (p.name ?? "").toLowerCase().includes(needle) || p.code.toLowerCase().includes(needle)));
   }, [rows, chip, q]);
 
-  // EDIT loads the CURRENT configuration so nothing the form does not display is dropped on save.
+  // Loads the current configuration so nothing the form does not display is dropped on save.
   async function startEdit(p: PackageSummary) {
     setErr(null); setNotice(null); setFormErr(null);
     try {
@@ -226,25 +206,22 @@ export function PackagesTab({
         planID: p.service_plan_id ?? "",
         planRevisionID: cur.service_plan_revision_id,
         rules: rulesToForm(cur.eligibility_rules),
-        // Kept verbatim: conditions of a type the form has no control for, and the whole display object.
         preservedRules: preservedRulesOf(cur.eligibility_rules),
         display: cur.display ?? null,
         tiers: tiersToForm(cur.grant_tiers),
         duration: durationToForm(cur.duration_policy),
         visibleFrom: toLocalInput(cur.visible_from),
         visibleUntil: toLocalInput(cur.visible_until),
-        // Loaded, not defaulted: an edit meant only to rename must not flatten a per-night allowance.
+        // Loaded, not defaulted: a rename must not flatten a per-night allowance or make a priced package free.
         allocation: allocationFromPolicy(cur.data_allocation_policy),
-        // Loaded, not defaulted, for the same reason: a rename must not make a priced package free.
         acquisition: acquisitionToForm(cur),
       });
       setAdding(false);
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
   }
 
-  // SAVE publishes a new immutable package revision pinned to the selected plan's current revision, and never
-  // creates or edits a service plan. ADD sends create_only, so a code that is already taken is refused
-  // (409 code_exists) instead of quietly becoming a new version of the package that owns it.
+  // Publishes a new immutable package revision and never edits a service plan. ADD sends create_only so a
+  // taken code is refused (409 code_exists) instead of becoming a new version of the package that owns it.
   async function save(v: PackageFormValue, mode: "add" | "edit") {
     setBusy(true); setFormErr(null); setNotice(null);
     try {
@@ -264,9 +241,7 @@ export function PackagesTab({
         ...(mode === "add" ? { create_only: true } : {}),
       };
       if (mode === "edit") {
-        // A REVISION OF AN EXISTING PACKAGE STATES ITS COMMERCIAL TERMS IN FULL. The server refuses one that
-        // leaves any out (commercial_fields_required) rather than defaulting it to Free; room-charge mappings
-        // are sent as [] when the package has none.
+        // A revision states its commercial terms in full; the server refuses omissions (commercial_fields_required).
         body.room_charge_mappings = v.payload.room_charge_mappings ?? [];
         Object.assign(body, editBase?.carry ?? {});
         const after: RevisionTerms = {
@@ -277,7 +252,6 @@ export function PackagesTab({
           service_plan_revision_id: decision.pinPlanRevisionID,
         };
         if (revisionNeedsPassword(editBase?.terms, after)) {
-          // Changing what clients pay or receive is a step-up: ask for the password, then send this body.
           setPendingErr(null); setPendingSave({ body, planChanged: decision.planChanged });
           return;
         }
@@ -286,7 +260,6 @@ export function PackagesTab({
     } catch (e) {
       if (guard(e)) return;
       if (mode === "edit" && e instanceof ApiError && e.code === "reauth_required" && lastBody.current) {
-        // The server judged this save a change of terms after all: ask for the password and send it again.
         setPendingErr(null); setPendingSave({ body: lastBody.current, planChanged: lastPlanChanged.current });
         return;
       }
@@ -295,7 +268,7 @@ export function PackagesTab({
     finally { setBusy(false); }
   }
 
-  // The body of the last publish attempt, so a step-up the server asks for can resend exactly the same thing.
+  // The last publish body, so a server-requested step-up can resend it unchanged.
   const lastBody = useRef<Record<string, unknown> | null>(null);
   const lastPlanChanged = useRef(false);
 
@@ -322,7 +295,6 @@ export function PackagesTab({
         setPendingErr(new Error("That password is not correct. Nothing was saved."));
         return;
       }
-      // Any other refusal concerns the form, not the password: close the prompt and show it there.
       setPendingSave(null);
       setFormErr(readableRefusal(e));
     } finally { setBusy(false); }
@@ -429,7 +401,6 @@ export function PackagesTab({
                         onClick={(e) => { e.stopPropagation(); setSelected(p); }}>
                         {p.name || p.code}
                       </button>
-                      {/* Only when it adds something: a package with no separate name printed its code twice. */}
                       {p.name && p.name !== p.code && <div className="text-xs text-muted-foreground">{p.code}</div>}
                       {p.plan_has_newer_revision && (
                         <div className="mt-0.5 inline-flex items-center gap-1 text-xs text-warning-subtle-foreground">
@@ -474,7 +445,6 @@ export function PackagesTab({
         </CardBody>
       </Card>
 
-      {/* THE PACKAGE RECORD. */}
       <Sheet open={selected !== null} onOpenChange={(v) => !v && setSelected(null)}>
         <SheetContent width="md" onOpenAutoFocus={focusSheetItself}>
           {selected && (() => {
@@ -488,7 +458,6 @@ export function PackagesTab({
                   title={p.name || p.code}
                   description={p.name && p.name !== p.code ? `Code ${p.code}` : undefined}
                   badges={<>
-                    {/* A package with no published configuration cannot be offered, whatever its active flag says. */}
                     {!p.current_revision_id ? (
                       <Badge tone="warn" dot>Not configured — not offered to clients</Badge>
                     ) : p.active ? (
@@ -507,14 +476,9 @@ export function PackagesTab({
                     { label: "Clients now", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
                   ]} />
 
-                  {/* THIS USED TO TELL THE OPERATOR TO DO SOMETHING THE PRODUCT DELIBERATELY REFUSES.
-                      It said "Choose Edit and save to bring it up to date". Saving a package KEEPS the service-plan
-                      revision it is pinned to when the plan selection has not changed -- decideSave does that on
-                      purpose, because advancing the pin just because someone renamed a package would apply a
-                      technical change nobody approved on this screen. So the operator would edit, save, read
-                      "Changes saved", and the package would still be on the old revision with nothing to say the
-                      instruction had not worked. The supported action already exists on Service plans, where it
-                      asks which packages should move, one by one. */}
+                  {/* Saving keeps the pinned plan revision (decideSave, on purpose: a rename must not apply an
+                      unapproved technical change), so do not tell the operator to edit and save; "Apply current
+                      settings" on Service plans moves packages one by one. */}
                   {p.plan_has_newer_revision && (
                     <Callout tone="warning" title="The service plan has newer settings">
                       The <strong>{p.service_plan_code}</strong> service plan has newer settings that this package
@@ -585,7 +549,6 @@ export function PackagesTab({
         </SheetContent>
       </Sheet>
 
-      {/* ADD and EDIT are dialogs over the list, so the operator never loses their place. */}
       <Dialog open={adding} onOpenChange={(v) => !v && !busy && setAdding(false)}>
         <DialogContent size="xl">
           <DialogHeader>
@@ -620,9 +583,6 @@ export function PackagesTab({
         </DialogContent>
       </Dialog>
 
-      {/* THE STEP-UP FOR A CHANGE OF TERMS. Changing the price, currency, how clients get the package or the
-          service plan it hands out changes what future clients pay or receive, so the server asks for the
-          operator's password. Asked once, here, and sent with the same body the form produced. */}
       <ConfirmDialog
         open={pendingSave !== null}
         onOpenChange={(v) => { if (!v && !busy) { setPendingSave(null); setPendingErr(null); } }}

@@ -1,12 +1,8 @@
 package main
 
-// THE DATABASE STILL ACCEPTS ITS DEFAULT SUPERUSER PASSWORD (GDPR audit 2026-10-19, C5; Product-Owner decision
-// 2026-10-19: warn, do not change it automatically; docs/SECURITY_HARDENING.md, audit N-10).
-//
-// An appliance whose database was initialised before provisioning generated a password keeps the published
-// default. The database listens on the appliance only, so the risk is limited, but it holds guest data
-// (GDPR Art. 32). edged tries that one login itself -- no query, the connection is closed at once -- and the
-// Overview warns until it is refused. The answer is kept for six hours, so the database sees one attempt then.
+// An appliance initialised before provisioning generated a password keeps the published default. edged tries
+// that login (no query, closed at once) and the Overview warns until it is refused; it warns only and never
+// changes the password. The answer is cached for six hours.
 
 import (
 	"context"
@@ -29,8 +25,7 @@ type defaultDBPasswordCheck struct {
 	checked time.Time
 	known   bool
 	found   bool
-	// probe reports whether the default login succeeds; ok is false when the answer is not known (the database
-	// is unreachable, or refused for another reason), which raises nothing.
+	// probe: ok is false when the answer is unknown (unreachable, or refused for another reason), which raises nothing.
 	probe func(ctx context.Context) (found, ok bool)
 }
 
@@ -55,7 +50,6 @@ func newDefaultDBPasswordCheck(host string, port uint16) *defaultDBPasswordCheck
 	}}
 }
 
-// inUse reports whether the default password is known to be accepted. The probe runs at most every six hours.
 func (c *defaultDBPasswordCheck) inUse(ctx context.Context) bool {
 	if c == nil || c.probe == nil {
 		return false

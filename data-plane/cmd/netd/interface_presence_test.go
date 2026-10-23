@@ -7,25 +7,16 @@ import (
 	"testing"
 )
 
-// PRESENCE IS OBSERVED AT THE MOMENT OF THE DECISION, AND A FAILURE TO OBSERVE IT REFUSES.
-//
-// The design this replaces derived presence from the inventory: each row's last_seen_at against the newest
-// one in the table. That is a RELATIVE reference and it fails open in the case that matters most — if netd
-// stops sweeping, the table freezes as a whole, every surviving row stays newest-relative, and an interface
-// that vanished afterwards reads as present forever. The stored observations remain internally consistent
-// while being collectively wrong.
-//
-// These cases pin the replacement: the answer comes from discovery run now, and an unusable discovery is a
-// refusal rather than a fallback.
+// Presence comes from discovery run now, never from the inventory's last_seen_at: if sweeping stopped, every
+// stored row would stay "newest" and a vanished interface would read as present forever. An unusable
+// discovery is a refusal, not a fallback.
 
-// presenceApplier builds an applier whose discovery and inventory are both stated by the test.
 func presenceApplier(discover func(ctx context.Context) ([]Interface, error)) *applier {
 	return &applier{discoverFn: discover}
 }
 
 func TestPresenceComesFromLiveDiscoveryNotTheInventory(t *testing.T) {
 	a := presenceApplier(func(context.Context) ([]Interface, error) {
-		// The kernel says these two exist right now.
 		return []Interface{{Name: "ens160"}, {Name: "ens192"}}, nil
 	})
 	present, _, err := a.presenceSets(context.Background())
@@ -40,11 +31,10 @@ func TestPresenceComesFromLiveDiscoveryNotTheInventory(t *testing.T) {
 	}
 }
 
-// THE GAP THIS FIX CLOSES. An interface the inventory still records — however recently, and however
-// self-consistent the stored sweep looks — is NOT present if discovery does not see it now.
+// An interface the inventory still records is not present if discovery does not see it now.
 func TestVanishedInterfaceIsAbsentEvenIfTheInventoryLooksFresh(t *testing.T) {
 	a := presenceApplier(func(context.Context) ([]Interface, error) {
-		return []Interface{{Name: "ens160"}}, nil // vguest-h is gone
+		return []Interface{{Name: "ens160"}}, nil
 	})
 	present, _, err := a.presenceSets(context.Background())
 	if err != nil {
@@ -55,11 +45,8 @@ func TestVanishedInterfaceIsAbsentEvenIfTheInventoryLooksFresh(t *testing.T) {
 	}
 }
 
-// A WEDGED NETD MUST NOT MAKE EVERYTHING PRESENT FOREVER. This is the scenario the reviewer identified: the
-// last sweep is old, so a stale-relative check would still call its whole set present. Live discovery simply
-// does not consult it.
+// A wedged netd (old last sweep) must not make everything present forever; live discovery ignores the stored sweep.
 func TestAnOldLastSweepCannotKeepAnInterfacePresent(t *testing.T) {
-	// Discovery is what it is now; the age of any stored sweep is irrelevant to it by construction.
 	a := presenceApplier(func(context.Context) ([]Interface, error) {
 		return []Interface{{Name: "ens160"}}, nil
 	})
@@ -74,8 +61,7 @@ func TestAnOldLastSweepCannotKeepAnInterfacePresent(t *testing.T) {
 	}
 }
 
-// FAIL CLOSED. If presence cannot be established, the answer is an error — never a fallback to the last
-// thing the inventory happened to record.
+// Fail closed: if presence cannot be established the answer is an error, never a fallback to the inventory.
 func TestDiscoveryFailureRefusesRatherThanFallingBack(t *testing.T) {
 	boom := errors.New("ip: command not found")
 	a := presenceApplier(func(context.Context) ([]Interface, error) { return nil, boom })
@@ -95,8 +81,7 @@ func TestDiscoveryFailureRefusesRatherThanFallingBack(t *testing.T) {
 	}
 }
 
-// AN EMPTY APPLIANCE IS NOT A PERMISSIVE ONE. Discovery returning nothing is a valid observation — nothing
-// is present — and must not be confused with "unknown, so allow".
+// Discovery returning nothing is a valid observation (nothing present), not "unknown, so allow".
 func TestDiscoveringNothingMeansNothingIsPresent(t *testing.T) {
 	a := presenceApplier(func(context.Context) ([]Interface, error) { return nil, nil })
 	present, _, err := a.presenceSets(context.Background())
@@ -106,15 +91,13 @@ func TestDiscoveringNothingMeansNothingIsPresent(t *testing.T) {
 	if len(present) != 0 {
 		t.Fatalf("nothing discovered means nothing present, got %v", present)
 	}
-	// And the validator refuses against it rather than skipping the check: an empty non-nil map is not nil.
+	// The validator refuses against it: an empty non-nil map is not nil.
 	if present == nil {
 		t.Fatal("the present set must be non-nil so validation performs the check instead of skipping it")
 	}
 }
 
-// AN UNPLUGGED CABLE IS NOT AN ABSENT INTERFACE. Discovery reads link objects, so the NIC still appears with
-// its carrier down — and it stays usable as a parent, which is what an operator configuring ahead of the
-// cable expects.
+// An unplugged cable is not an absent interface: the NIC still appears with carrier down and stays usable as a parent.
 func TestUnpluggedInterfaceIsStillPresent(t *testing.T) {
 	a := presenceApplier(func(context.Context) ([]Interface, error) {
 		return []Interface{{Name: "ens160", LinkState: "up"}, {Name: "ens192", LinkState: "down"}}, nil

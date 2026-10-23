@@ -2,35 +2,15 @@
 
 package main
 
-// THE CLIENT NETWORK A DEVICE IS ACTUALLY ON MUST DECIDE THE SAME THINGS ON THE ROOM SIGN-IN PATH AS IT DOES
-// EVERYWHERE ELSE.
+// The device's client network must decide the same things on the room sign-in path as elsewhere:
 //
-// Three separate facts are held here, and all three were broken or absent in the same corner of the guest path.
+//  1. offersFor receives the server-derived network id (an empty id drops every SITE_NETWORK package).
+//  2. A replaced client network keeps its logical identity via the lineage view, scoped to replacements
+//     that took effect (a reverted apply must widen nothing).
+//  3. Two networks mapped to two PMS interfaces must not leak into each other: room numbers are a PMS's
+//     namespace.
 //
-//  1. THE OFFER SET DID NOT KNOW WHICH NETWORK THE GUEST WAS ON. offersFor was called with an empty client
-//     network id on the PMS room sign-in path, while the voucher, client-account, OTP, social and open paths all
-//     read the server-derived id back off the Auth Context. A SITE_NETWORK rule tests the subject's network id
-//     against the ids the operator configured; an empty id matches none of them. So EVERY package carrying a
-//     "this client network only" condition silently vanished from the offer set of EVERY room sign-in, and a
-//     verified guest standing in a correctly configured room was told "verified, but no eligible package".
-//
-//  2. A REPLACED CLIENT NETWORK LOST ITS LOGICAL IDENTITY. A staged replacement (0105) gives the network a NEW
-//     id for reasons — a port, a VLAN tag, a subnet — that have nothing to do with who may buy what, and a
-//     package revision is immutable. Republishing the current revision forward cannot help a revision that is
-//     PINNED and must stay pinned: an unused printed voucher redeems the revision it was issued against. So an
-//     ordinary cabling change made valid unused codes unredeemable. The lineage view (0106) restores the
-//     identity, and it must stay scoped to replacements that actually took effect — a reverted apply never
-//     happened on the wire and must widen nothing.
-//
-//  3. TWO CLIENT NETWORKS MAPPED TO TWO PMS INTERFACES MUST NOT LEAK INTO EACH OTHER. Room numbers are a PMS's
-//     namespace, not the property's: two interfaces can both have a room 707 belonging to different guests.
-//     Everything that decides a sign-in — which interfaces are probed, which stay matches, which packages are
-//     offered — has to stay inside the namespace the device's own network maps to.
-//
-// Every positive assertion below has a negative counterpart on purpose. "The package was offered" is satisfied
-// by a permissive evaluator that offers everything, which is exactly the failure a test of this must not pass
-// through; "and the package scoped to a DIFFERENT network was not offered" is what gives the first assertion
-// its meaning.
+// Every positive assertion has a negative counterpart, since a permissive evaluator would pass the positive alone.
 
 import (
 	"context"
@@ -38,14 +18,9 @@ import (
 	"testing"
 )
 
-// ---- fixtures: a second client network, a second PMS interface, extra stays ----
-//
-// These build the shapes the fixture deliberately does not have — it has exactly one client network mapped to
-// exactly one interface, which is the common property. Everything here is seeded the way real code must: stays
-// inside a transaction that has opened the 'stay' controlled operation, the interface revision PUBLISHED through
-// the pointer scd pins rather than by revision number, and a healthy runtime row, because a PMS that is telling
-// the appliance nothing cannot vouch for anybody and the whole resolve path would refuse before it looked at a
-// room.
+// Fixtures for a second client network and PMS interface: stays are seeded inside an opened 'stay' controlled
+// operation, revisions are published via the pointer scd pins, and a healthy runtime row is required or the
+// resolve path refuses early.
 
 // clientNetwork is one seeded client network plus a device sitting on it.
 type clientNetwork struct {
@@ -54,13 +29,9 @@ type clientNetwork struct {
 	ip, mac         string
 }
 
-// freeSiteNetworkOctet picks a third octet inside 10.78.0.0/16 that this database does not already use.
-//
-// It has to be a query, not a counter. The appliance resolves a device's client network by "which enabled
-// subnet contains this address" (resolveNetwork), so two networks sharing a subnet make that answer arbitrary —
-// and the symptom is not a clean failure but a resolution that lands in another run's tenant. 10.78 is used
-// rather than the shared fixture generator's 10.77 so that allocating a network here can never collide with a
-// subnet claimFreeFixtureOctet has handed to a fixture in this same run.
+// freeSiteNetworkOctet picks an unused third octet in 10.78.0.0/16. It must be a query, not a counter:
+// resolveNetwork picks the enabled subnet containing the address, so shared subnets resolve arbitrarily.
+// 10.78 avoids collisions with claimFreeFixtureOctet's 10.77.
 func (f *authFixture) freeSiteNetworkOctet(t *testing.T) int {
 	t.Helper()
 	rows, err := f.pool.Query(context.Background(),
@@ -86,9 +57,8 @@ func (f *authFixture) freeSiteNetworkOctet(t *testing.T) int {
 	return 0
 }
 
-// addClientNetwork seeds one client network on this site, with a subnet of its own and a device address inside
-// it. `enabled` is false for the retired side of a replacement: an applied replacement disables the original
-// row rather than deleting it, and a disabled network resolves no devices.
+// addClientNetwork seeds one client network with its own subnet. `enabled` is false for the retired side of
+// a replacement (applied replacements disable the original row); a disabled network resolves no devices.
 func (f *authFixture) addClientNetwork(t *testing.T, label string, enabled bool) clientNetwork {
 	t.Helper()
 	octet := f.freeSiteNetworkOctet(t)
@@ -98,8 +68,7 @@ func (f *authFixture) addClientNetwork(t *testing.T, label string, enabled bool)
 		ip:      fmt.Sprintf("10.78.%d.40", octet),
 		mac:     fmt.Sprintf("02:00:00:dd:00:%02x", octet),
 	}
-	// bridge_name is globally unique and parent_interface is unique among enabled untagged networks, so both
-	// are derived from a fresh uuid rather than from the label.
+	// bridge_name and parent_interface must be unique, so derive both from a fresh uuid.
 	if err := f.pool.QueryRow(context.Background(), `
 		INSERT INTO public.guest_networks
 		  (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
@@ -114,9 +83,8 @@ func (f *authFixture) addClientNetwork(t *testing.T, label string, enabled bool)
 	return cn
 }
 
-// addPMSInterface seeds a second ACTIVE PMS interface with a PUBLISHED revision and a healthy runtime row, and
-// returns both ids. The revision pointer is what scd pins; a revision that exists without being published is
-// correctly refused, which is the behaviour a Draft mid-configuration must get.
+// addPMSInterface seeds a second ACTIVE PMS interface with a published revision (the pointer scd pins) and a
+// healthy runtime row, and returns both ids.
 func (f *authFixture) addPMSInterface(t *testing.T, label string) (ifaceID, revisionID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -159,8 +127,7 @@ func (f *authFixture) addPMSInterface(t *testing.T, label string) (ifaceID, revi
 	return ifaceID, revisionID
 }
 
-// mapClientNetworkToPMSInterface routes a client network's sign-ins at one interface. This mapping is the only
-// thing that decides which interfaces a device's submission is probed against.
+// mapClientNetworkToPMSInterface routes a network's sign-ins at one interface; it alone decides which interfaces are probed.
 func (f *authFixture) mapClientNetworkToPMSInterface(t *testing.T, networkID, ifaceID string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -170,10 +137,8 @@ func (f *authFixture) mapClientNetworkToPMSInterface(t *testing.T, networkID, if
 	}
 }
 
-// addStay seeds one IN_HOUSE stay on an interface, with the FRESH occupancy evidence produced by that
-// interface's own published revision. The evidence is not decoration: a stay without it cannot issue an Auth
-// Context at all, and evidence pinned to another interface's revision is refused, so this is also what keeps
-// each interface's stays answerable only under their own configuration.
+// addStay seeds one IN_HOUSE stay with fresh occupancy evidence from that interface's own published revision;
+// without it, or with another interface's revision, no Auth Context can issue.
 func (f *authFixture) addStay(t *testing.T, ifaceID, revisionID, room, surnameNorm string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -201,7 +166,7 @@ func (f *authFixture) addStay(t *testing.T, ifaceID, revisionID, room, surnameNo
 		f.tenant, f.site, ifaceID, stayID, surnameNorm); err != nil {
 		t.Fatalf("add stay guest %s: %v", surnameNorm, err)
 	}
-	// The occupancy tuple is all-or-none, so every column goes in together, exactly as the shared fixture does.
+	// The occupancy tuple is all-or-none.
 	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.stays SET
 		  occupancy_evidence_at = now() - interval '10 seconds',
@@ -220,9 +185,7 @@ func (f *authFixture) addStay(t *testing.T, ifaceID, revisionID, room, surnameNo
 	return stayID
 }
 
-// resolveFrom is resolveBody for a device on a named client network rather than on the fixture's own one. The
-// network is never submitted: the appliance derives it from this source address, which is the whole reason the
-// id is trustworthy enough to decide eligibility with.
+// resolveFrom is resolveBody for a device on a named network; the network is derived from the source address, never submitted.
 func (f *authFixture) resolveFrom(cn clientNetwork, room, last, reqID string) map[string]any {
 	return map[string]any{
 		"room": room, "last_name": last, "reservation_number": "", "request_id": reqID,
@@ -230,7 +193,6 @@ func (f *authFixture) resolveFrom(cn clientNetwork, room, last, reqID string) ma
 	}
 }
 
-// offeredRevisions is the set of package revisions a resolve answered with.
 func offeredRevisions(res phase3Response) map[string]bool {
 	out := map[string]bool{}
 	for _, o := range res.Offers {
@@ -239,9 +201,7 @@ func offeredRevisions(res phase3Response) map[string]bool {
 	return out
 }
 
-// contextStayAndInterface reads what the Auth Context actually pinned. The response does not name the stay or
-// the interface — deliberately, it discloses nothing — so the namespace assertions are made against the record
-// the grant will later be checked against.
+// contextStayAndInterface reads what the Auth Context pinned; the response deliberately names neither.
 func (f *authFixture) contextStayAndInterface(t *testing.T, contextID string) (stay, iface string) {
 	t.Helper()
 	if err := f.pool.QueryRow(context.Background(),
@@ -253,8 +213,6 @@ func (f *authFixture) contextStayAndInterface(t *testing.T, contextID string) (s
 	return stay, iface
 }
 
-// siteNetworkRule is the SITE_NETWORK eligibility rule as an operator configures it: the client networks a
-// package is restricted to, named by id.
 func siteNetworkRule(networkIDs ...string) []map[string]any {
 	return []map[string]any{{
 		"type":  "SITE_NETWORK",
@@ -262,19 +220,8 @@ func siteNetworkRule(networkIDs ...string) []map[string]any {
 	}}
 }
 
-// ---- (a) the room sign-in path knows which client network the guest is on ----
-
-// A PACKAGE RESTRICTED TO THE GUEST'S OWN CLIENT NETWORK IS OFFERED ON THE ROOM SIGN-IN PATH.
-//
-// This is the regression for the defect in the file header: offersFor was called with an empty client network
-// id, so a SITE_NETWORK rule could never match on this path and every package carrying one disappeared from
-// every room sign-in's offer set. The guest was verified and then told there was nothing they qualified for.
-//
-// The second half of the test is what makes the first half mean anything. "The package naming this network was
-// offered" would also be true of an evaluator that ignored SITE_NETWORK altogether, or of one that treated a
-// rule it could not answer as no constraint at all. So a second package, identical except that its rule names a
-// DIFFERENT client network, must be absent from the same answer. One assertion proves the id arrives; the other
-// proves it is still being used to refuse.
+// A package restricted to the guest's own client network is offered on the room path. A second package naming a
+// different network must be absent: one assertion proves the id arrives, the other that it still refuses.
 func TestIntegration_Phase3SiteNetwork_RoomSignInOffersThePackageScopedToTheDevicesNetwork(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -297,40 +244,24 @@ func TestIntegration_Phase3SiteNetwork_RoomSignInOffersThePackageScopedToTheDevi
 			"evaluator but no longer deciding anything, which would make the assertion above vacuous: %+v",
 			res.Offers)
 	}
-	// The unrestricted included package is the control: it proves this answer is a real, fully-evaluated offer
-	// set rather than a coincidence of some rule type being skipped wholesale.
+	// The unrestricted package is the control for a fully-evaluated offer set.
 	if !offered[f.pkgRev] {
 		t.Fatalf("the unrestricted included package was not offered: %+v", res.Offers)
 	}
 }
 
-// ---- (b) a replaced client network keeps its logical identity ----
-
-// A RULE NAMING A RETIRED CLIENT NETWORK IS SATISFIED BY A DEVICE ON ITS SUCCESSOR — AND ONLY WHEN THE
-// REPLACEMENT ACTUALLY TOOK EFFECT.
-//
-// The hotel moved a port onto a tagged trunk. 0105 stages that as a replacement and the apply swaps the client
-// network ROW, so the successor carries a new id, while every existing package revision still names the old one
-// and cannot be rewritten: an unused printed voucher redeems the revision it was issued against, and a guest
-// holding an entitlement keeps the revision they were granted on. Before 0106 the cabling change therefore
-// narrowed the offer set of every pinned revision, and valid unused codes became unredeemable.
-//
-// The negative counterpart is the whole scope of the fix. Flipping the same replacement row to REVERTED means
-// the apply never stood: the successor row is gone on a real appliance and the original is enabled again, so
-// nothing was continued and the rule must stop matching. If lineage were read from any replacement row
-// regardless of state, a cancelled or rolled-back request would permanently widen eligibility to a network that
-// never replaced anything — which is the opposite error and worse, because it grants rather than withholds.
-//
-// The unrestricted included package is asserted in BOTH halves on purpose. Without it, the second half would
-// pass just as well if the sign-in itself had stopped working for an unrelated reason.
+// A rule naming a retired client network is satisfied by a device on its successor, only when the replacement
+// took effect. Pinned revisions cannot be rewritten, so without lineage a cabling change would make unused
+// printed vouchers unredeemable. Flipping the replacement to REVERTED must stop the match: reading lineage
+// regardless of state would widen eligibility to a network that replaced nothing. The unrestricted package
+// is asserted in both halves so the second half cannot pass because sign-in broke.
 func TestIntegration_Phase3SiteNetwork_AReplacedClientNetworkKeepsItsLogicalIdentity(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
-	// The retired original is disabled, as an applied replacement leaves it: it resolves no devices any more.
+	// The retired original is disabled, as an applied replacement leaves it.
 	retired := f.addClientNetwork(t, "retired-untagged-port", false)
-	// ...and the successor is live, carrying the guests, routed at the same PMS interface the replacement
-	// carried forward.
+	// The successor is live and routed at the same PMS interface.
 	successor := f.addClientNetwork(t, "guests-on-the-trunk", true)
 	f.mapClientNetworkToPMSInterface(t, successor.id, f.iface)
 
@@ -346,7 +277,7 @@ func TestIntegration_Phase3SiteNetwork_AReplacedClientNetworkKeepsItsLogicalIden
 		t.Fatalf("stage the confirmed replacement: %v", err)
 	}
 
-	// A pinned revision's rule, written against the network the operator chose — before the cable moved.
+	// A pinned revision's rule, written against the original network.
 	namingRetired := f.addPackage(t, "ON_THE_RETIRED_NETWORK", siteNetworkRule(retired.id))
 
 	_, res := post(t, f.p3.resolveHandler,
@@ -364,7 +295,7 @@ func TestIntegration_Phase3SiteNetwork_AReplacedClientNetworkKeepsItsLogicalIden
 			"pinned to such a revision would have become unredeemable: %+v", res.Offers)
 	}
 
-	// THE NEGATIVE: the apply did not stand. Nothing was continued, so nothing is inherited.
+	// Negative: the apply did not stand, so nothing is inherited.
 	if _, err := f.pool.Exec(ctx,
 		`UPDATE iam_v2.guest_network_replacements SET state='REVERTED', settled_at=now() WHERE id=$1::uuid`,
 		replacement); err != nil {
@@ -389,19 +320,8 @@ func TestIntegration_Phase3SiteNetwork_AReplacedClientNetworkKeepsItsLogicalIden
 	}
 }
 
-// ---- (c) two client networks, two PMS interfaces ----
-
-// A DEVICE'S CLIENT NETWORK DECIDES WHICH PMS NAMESPACE ANSWERS FOR IT, AND WHICH PACKAGES IT IS SHOWN.
-//
-// A property can run two PMS interfaces — two buildings, a hotel and a club — each with its own client network.
-// The mapping from client network to interface is the only thing that says which mirrored roster a submission is
-// compared against, and the resolve path probes exactly the interfaces that mapping names.
-//
-// Both directions are asserted, in both halves. A stay that exists only on interface 2 must not verify from
-// network 1, and vice versa: without that, "resolved against interface 1" would be satisfied by a path that
-// probed both and happened to find the right answer first. And each network is shown only the package scoped to
-// it, which is the same property as (a) measured where getting it wrong would show one property's guests the
-// other's offer.
+// A device's client network decides which PMS namespace answers and which packages it sees. A stay on
+// interface 2 must not verify from network 1 and vice versa, else a path probing both would pass.
 func TestIntegration_Phase3SiteNetwork_TwoClientNetworksResolveAgainstTheirOwnPMSInterface(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -413,7 +333,7 @@ func TestIntegration_Phase3SiteNetwork_TwoClientNetworksResolveAgainstTheirOwnPM
 	onlyNetworkOne := f.addPackage(t, "NETWORK_ONE_ONLY", siteNetworkRule(f.network))
 	onlyNetworkTwo := f.addPackage(t, "NETWORK_TWO_ONLY", siteNetworkRule(secondNet.id))
 
-	// Network one: interface one's stay, interface one's package.
+	// Network one: interface one's stay and package.
 	_, one := post(t, f.p3.resolveHandler,
 		f.resolveBody("412", "Okonkwo", "", mustUUID(t, f.pool)))
 	if one.Outcome != outcomeVerified {
@@ -432,7 +352,7 @@ func TestIntegration_Phase3SiteNetwork_TwoClientNetworksResolveAgainstTheirOwnPM
 		t.Fatalf("network one was offered the package restricted to network two: %+v", one.Offers)
 	}
 
-	// Network two: interface two's stay, interface two's package.
+	// Network two: interface two's stay and package.
 	_, two := post(t, f.p3.resolveHandler,
 		f.resolveFrom(secondNet, "501", "Whitfield", mustUUID(t, f.pool)))
 	if two.Outcome != outcomeVerified {
@@ -451,9 +371,7 @@ func TestIntegration_Phase3SiteNetwork_TwoClientNetworksResolveAgainstTheirOwnPM
 		t.Fatalf("network two was offered the package restricted to network one: %+v", two.Offers)
 	}
 
-	// THE NEGATIVES. Neither network can reach the other's roster at all: a submission that is perfectly valid
-	// on the other interface is an ordinary non-success here, because the interface it belongs to was never
-	// probed.
+	// Negatives: a submission valid on the other interface is an ordinary non-success here (never probed).
 	if _, crossed := post(t, f.p3.resolveHandler,
 		f.resolveBody("501", "Whitfield", "", mustUUID(t, f.pool))); crossed.Outcome == outcomeVerified {
 		t.Fatalf("interface two's guest verified from client network one, which maps only to interface one: %+v",
@@ -466,19 +384,8 @@ func TestIntegration_Phase3SiteNetwork_TwoClientNetworksResolveAgainstTheirOwnPM
 	}
 }
 
-// ---- (d) the same room number on both interfaces ----
-
-// A ROOM NUMBER BELONGS TO A PMS, NOT TO THE PROPERTY.
-//
-// Two interfaces can both hold a room 707, occupied by unrelated guests. Nothing in a room number, or in a
-// surname, is unique across interfaces, so every step of the sign-in has to stay inside the namespace the
-// device's own client network maps to. A lookup that searched the site rather than the interface would be
-// ambiguous at best — and at worst would hand one property's guest the other's access, or refuse a legitimate
-// guest as "ambiguous" because somebody in another building has their room number.
-//
-// The negatives are what make this a test of isolation rather than of two happy paths: the surname that opens
-// room 707 on interface one must NOT open room 707 on interface two, and the reverse. Both guests verifying is
-// consistent with a broken, site-wide search; only the refusals pin the namespace down.
+// A room number belongs to a PMS, not the property: the surname that opens room 707 on interface one must not
+// open room 707 on interface two. Both guests verifying fits a broken site-wide search; only refusals pin the namespace.
 func TestIntegration_Phase3SiteNetwork_TheSameRoomNumberOnTwoInterfacesDoesNotCollide(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -486,8 +393,7 @@ func TestIntegration_Phase3SiteNetwork_TheSameRoomNumberOnTwoInterfacesDoesNotCo
 	secondIface, secondRev := f.addPMSInterface(t, "building two")
 	f.mapClientNetworkToPMSInterface(t, secondNet.id, secondIface)
 
-	// The SAME room number on each interface, with DIFFERENT guests. This is the configuration the isolation
-	// has to survive; two different room numbers would prove nothing at all.
+	// The same room number on each interface with different guests.
 	const room = "707"
 	stayOne := f.addStay(t, f.iface, f.revision, room, "ADEYEMI")
 	stayTwo := f.addStay(t, secondIface, secondRev, room, "WHITFIELD")
@@ -512,8 +418,7 @@ func TestIntegration_Phase3SiteNetwork_TheSameRoomNumberOnTwoInterfacesDoesNotCo
 			room, stay, iface, stayTwo, secondIface)
 	}
 
-	// THE NEGATIVES. The room exists on both interfaces, so the refusal below is specifically that this
-	// surname is not on THIS interface's room 707 — not that the room is unknown.
+	// Negatives: the room exists on both interfaces, so the refusal is that this surname is not on this interface's room.
 	if _, crossed := post(t, f.p3.resolveHandler,
 		f.resolveFrom(secondNet, room, "Adeyemi", mustUUID(t, f.pool))); crossed.Outcome == outcomeVerified {
 		t.Fatalf("interface one's guest verified against interface two's room %s. Room numbers are not unique "+

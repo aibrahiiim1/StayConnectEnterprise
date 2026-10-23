@@ -17,35 +17,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// A CLIENT NETWORK'S TOPOLOGY CHANGE IS STAGED, THEN APPLIED, THEN SETTLED (migration 0105).
-//
-// Topology stays immutable in place: edged refuses a PUT that changes a network's type, port or VLAN, because
-// the applied configuration is keyed on the network's BRIDGE and a row whose VLAN moved underneath its bridge
-// would be rendered as one thing while the live port carried another. The supported change is a REPLACEMENT,
-// and these are its three moments:
-//
-//	STAGE      POST /guest-networks/{id}/replace records the request and NOTHING else. No row in
-//	           public.guest_networks moves, so guest authentication, PMS routing, which network a device is
-//	           attributed to and the wire are all exactly as they were. It can be cancelled.
-//
-//	APPLY      POST /network/apply materialises every staged request first, in one transaction -- the successor
-//	           row is created carrying the original's addressing, pools, reservations, settings and PMS route,
-//	           and the original is disabled -- and only then asks netd to render and apply. netd answers
-//	           synchronously: if validation, the apply itself or a health check failed, the materialisation is
-//	           reverted in the same request, so the database and the appliance agree again before the operator
-//	           sees the error.
-//
-//	SETTLE     Confirm keeps it: the request becomes CONFIRMED and every Internet Package whose CURRENT
-//	           revision was limited to the original network is republished forward onto the successor, through
-//	           the product's own versioned publish, so eligibility keeps meaning what the hotel intended.
-//	           Rollback -- by the operator, or by the watchdog when the confirmation window expires -- puts the
-//	           rows back and leaves the request PENDING for another attempt.
-//
-// WHY THE WATCHDOG NEEDS A RECONCILE. netd rolls an unconfirmed apply back on its own, without telling edged,
-// so a request can be APPLIED here while the wire is already back on the original. reconcileStaleReplacements
-// closes that: any APPLIED request whose revision is no longer in flight is reverted. It is idempotent and
-// runs on the paths the operator is already using (listing networks, applying, reading a revision), so the
-// window between the watchdog firing and the database agreeing is as long as one page poll.
+// A topology change is a replacement in three moments. STAGE (POST /guest-networks/{id}/replace) records the
+// request and changes nothing else. APPLY (POST /network/apply) materialises every staged request in one
+// transaction (successor created with the original's addressing, pools, reservations, settings and PMS route; the
+// original disabled), then asks netd to apply; on any failure the materialisation is reverted in the same request.
+// SETTLE (confirm) marks it CONFIRMED and republishes dependent packages onto the successor; rollback leaves it PENDING.
+// netd rolls back an unconfirmed apply by itself, so reconcileStaleReplacements reverts any APPLIED request whose
+// revision is no longer in flight (idempotent, run on the operator's own reads).
 
 const (
 	replStatePending   = "PENDING"
@@ -55,21 +33,20 @@ const (
 )
 
 type stagedReplacement struct {
-	ID         string  `json:"id"`
-	OriginalID string  `json:"original_network_id"`
-	Successor  *string `json:"successor_network_id,omitempty"`
-	State      string  `json:"state"`
-	Type       string  `json:"network_type"`
-	Parent     string  `json:"parent_interface"`
-	VLANID     *int    `json:"vlan_id,omitempty"`
-	Subnet     *string `json:"subnet_cidr,omitempty"`
-	Gateway    *string `json:"gateway_ip,omitempty"`
-	NewName    *string `json:"new_name,omitempty"`
-	Reason     string  `json:"reason"`
-	CreatedBy  string  `json:"created_by"`
-	CreatedAt  string  `json:"created_at"`
-	// What the operator must know before applying, recomputed on every read.
-	OriginalName string `json:"original_network_name,omitempty"`
+	ID           string  `json:"id"`
+	OriginalID   string  `json:"original_network_id"`
+	Successor    *string `json:"successor_network_id,omitempty"`
+	State        string  `json:"state"`
+	Type         string  `json:"network_type"`
+	Parent       string  `json:"parent_interface"`
+	VLANID       *int    `json:"vlan_id,omitempty"`
+	Subnet       *string `json:"subnet_cidr,omitempty"`
+	Gateway      *string `json:"gateway_ip,omitempty"`
+	NewName      *string `json:"new_name,omitempty"`
+	Reason       string  `json:"reason"`
+	CreatedBy    string  `json:"created_by"`
+	CreatedAt    string  `json:"created_at"`
+	OriginalName string  `json:"original_network_name,omitempty"`
 }
 
 type replaceNetworkInput struct {
@@ -83,8 +60,6 @@ type replaceNetworkInput struct {
 	Reason          string        `json:"reason"`
 }
 
-// stageGuestNetworkReplacement records a topology change. It writes nothing outside iam_v2: the client network
-// keeps serving its clients, keeps its identity and keeps its PMS route until the operator applies.
 func (s *server) stageGuestNetworkReplacement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in replaceNetworkInput
@@ -147,8 +122,7 @@ func (s *server) stageGuestNetworkReplacement(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// CONFLICTS ARE REFUSED HERE, not three screens later. The successor will take the slot the original frees,
-	// so the original is excluded from the comparison.
+	// Conflicts are refused here, not at apply; the original is excluded because the successor takes the slot it frees.
 	if msg := s.topologyConflict(ctx, in.NetworkType, in.ParentInterface, in.VLANID, in.SubnetCIDR, id); msg != "" {
 		jsonErr(w, http.StatusConflict, "topology_conflict", msg)
 		return
@@ -185,7 +159,6 @@ func (s *server) stageGuestNetworkReplacement(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// replacementCarries counts what the successor will inherit, so the operator sees it before applying.
 func (s *server) replacementCarries(ctx context.Context, id string, readdressing bool) map[string]any {
 	var pools, reservations, routes int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM dhcp_pools WHERE guest_network_id=$1`, id).Scan(&pools)
@@ -197,12 +170,8 @@ func (s *server) replacementCarries(ctx context.Context, id string, readdressing
 	return map[string]any{"pools": pools, "reservations": reservations, "pms_routes": routes}
 }
 
-// packagesLimitedTo names the Internet Packages whose CURRENT revision is limited to one client network.
-//
-// IT GOES THROUGH THE SCOPED READER, NOT THE RULES TABLE. svc_edged holds INSERT but no SELECT on
-// iam_v2.package_eligibility_rules, so the obvious join returns "permission denied" -- and an earlier version
-// of this swallowed that error and reported "no packages affected", which is the most misleading answer
-// available. iam_v2.p2_package_current_conditions is the reader the authoring form already uses.
+// Goes through the scoped reader, not the rules table: svc_edged has no SELECT on iam_v2.package_eligibility_rules,
+// and swallowing that "permission denied" would report "no packages affected".
 func (s *server) packagesLimitedTo(ctx context.Context, networkID string) []string {
 	if s.commerce == nil {
 		return nil
@@ -268,8 +237,7 @@ func toStringSlice(v any) []string {
 	return out
 }
 
-// topologyConflict states, in one sentence an operator can act on, why a requested topology cannot stand beside
-// what this appliance already serves. exceptID is the network about to be retired by this very change.
+// States why a requested topology cannot stand beside what the appliance serves; exceptID is the network this change retires.
 func (s *server) topologyConflict(ctx context.Context, netType, parent string, vlan *int, subnet, exceptID string) string {
 	if netType == "untagged" {
 		var name string
@@ -297,14 +265,8 @@ func (s *server) topologyConflict(ctx context.Context, netType, parent string, v
 			return fmt.Sprintf("subnet %s overlaps client network %q. Every client network needs its own, non-overlapping subnet.", subnet, name)
 		}
 	}
-	// ...AND AGAINST THE OTHER CHANGES ALREADY WAITING TO BE APPLIED.
-	//
-	// This only ever compared the request against networks that are ENABLED NOW, so two replacements of two
-	// different networks onto the same VLAN and port -- or onto overlapping subnets -- both accepted. The one
-	// live-request index is keyed on original_network_id, so it does not catch it either. The collision then
-	// surfaced at the apply, as a uniqueness error that aborted the WHOLE apply: every operator's network change
-	// failed, with a message naming a VLAN rather than the staged request responsible, until somebody found and
-	// cancelled it. Two operators working on two floors was enough.
+	// Also check against changes already waiting to be applied: two replacements onto the same VLAN/port or
+	// overlapping subnets would otherwise both be accepted and abort the WHOLE apply with a uniqueness error.
 	var other, otherReason string
 	if netType == "untagged" {
 		otherReason = fmt.Sprintf("%s untagged", parent)
@@ -343,7 +305,6 @@ func (s *server) topologyConflict(ctx context.Context, netType, parent string, v
 	return ""
 }
 
-// listGuestNetworkReplacements returns the live requests (PENDING or APPLIED) for this site.
 func (s *server) listGuestNetworkReplacements(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -375,7 +336,6 @@ func (s *server) listGuestNetworkReplacements(w http.ResponseWriter, r *http.Req
 	writeList(w, out)
 }
 
-// cancelGuestNetworkReplacement drops a request that was never applied.
 func (s *server) cancelGuestNetworkReplacement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -396,8 +356,6 @@ func (s *server) cancelGuestNetworkReplacement(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
-// ---------------------------------------------------------------------------------- apply / settle ---------
-
 type materialisedReplacement struct {
 	ReplacementID string
 	OriginalID    string
@@ -405,8 +363,7 @@ type materialisedReplacement struct {
 	Bridge        string
 }
 
-// materialisePendingReplacements turns every staged request into rows, inside the caller's transaction. It is
-// the ONLY moment a replacement touches public.guest_networks.
+// The only moment a replacement touches public.guest_networks.
 func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, actor string) ([]materialisedReplacement, error) {
 	rows, err := tx.Query(ctx, `SELECT id::text, original_network_id::text, network_type, parent_interface,
 		       vlan_id, subnet_cidr::text, host(gateway_ip), pools::text, COALESCE(new_name,'')
@@ -483,8 +440,7 @@ func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, 
 			succ.Pools = pools
 		}
 
-		// The original frees its VLAN/port slot and its subnet first; both uniqueness indexes are partial on
-		// `enabled`, so the successor can take them in the same transaction.
+		// The original frees its slot and subnet first; the uniqueness indexes are partial on `enabled`.
 		if _, err := tx.Exec(ctx, `UPDATE guest_networks SET enabled=false, updated_at=now() WHERE id=$1`, p.orig); err != nil {
 			return nil, err
 		}
@@ -492,13 +448,8 @@ func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, 
 		if err != nil {
 			return nil, err
 		}
-		// THE TWO COLUMNS THE COPY DOES NOT GO THROUGH. relay_targets and walled_garden_profile exist on
-		// guest_networks but not on the input struct the create route and insertGuestNetwork share -- there is no
-		// API that sets them -- so a replacement silently dropped both. For relay_targets that fails closed and
-		// loudly, but in the worst possible place: netcfg refuses a relay-mode network with no targets, so netd
-		// rejects THE WHOLE INTENT and every later apply, including unrelated ones, fails naming a network the
-		// operator never created. walled_garden_profile was dropped with no validation at all. Copied verbatim
-		// here, because a replacement changes a network's topology and nothing else about it.
+		// relay_targets and walled_garden_profile are not on the shared input struct, so they are copied verbatim:
+		// dropping relay_targets makes netcfg reject the WHOLE intent (relay mode needs targets) and every later apply fails.
 		if _, err := tx.Exec(ctx, `UPDATE guest_networks tgt
 			   SET relay_targets = src.relay_targets, walled_garden_profile = src.walled_garden_profile
 			  FROM guest_networks src
@@ -527,11 +478,8 @@ func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, 
 	return out, nil
 }
 
-// revertMaterialised undoes materialisation: the successor row goes (its pools, reservations and PMS route
-// cascade with it), the original is enabled again, and the request waits as PENDING for another attempt.
-// It reverts each request in a TRANSACTION OF ITS OWN. One shared transaction meant a single request that could
-// not be put back -- its slot retaken, its original deleted -- aborted the revert of every other one in the
-// batch, so one stuck row kept the whole appliance's database disagreeing with the wire.
+// Undoes materialisation: the successor goes (pools, reservations and PMS route cascade), the original is enabled
+// again and the request is PENDING. Each request reverts in its own transaction so one stuck row cannot block the rest.
 func (s *server) revertMaterialised(ctx context.Context, ids []string, reason string) error {
 	var failures []string
 	for _, replID := range ids {
@@ -564,22 +512,10 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 			return err
 		}
 		if succ != nil {
-			// A SUCCESSOR A GUEST ALREADY TOUCHED CANNOT BE DELETED, AND MUST NOT FAIL THE REVERT.
-			//
-			// The successor is live and serving for the whole 120-second confirmation window, so a guest can
-			// sign in on it before the operator decides. That writes an auth context, a device appearance and
-			// possibly a PMS resolution naming this network -- foreign keys with NO cascade, deliberately,
-			// because they are that guest's history. The DELETE then fails, and because it failed inside this
-			// transaction the WHOLE revert used to abort: the database went on claiming the successor was the
-			// live network while netd had already put the original back on the wire. One guest connecting
-			// during the window was enough to produce exactly the disagreement this lifecycle exists to
-			// prevent -- and the harder the appliance was being used, the likelier it was.
-			//
-			// The product already has the right answer for this, on the ordinary delete route: a network with
-			// client history is KEPT, disabled, as part of that history. Disabled is what the wire reflects
-			// (netd renders only enabled networks) and both uniqueness indexes are partial on `enabled`, so
-			// the original can take its VLAN, port and subnet straight back. The savepoint is what lets this
-			// transaction survive the failed DELETE and say so.
+			// A successor a guest already touched cannot be deleted and must not fail the revert: it serves during the
+			// confirmation window, and sign-ins reference it with foreign keys that do not cascade. As on the ordinary
+			// delete route it is kept, disabled; netd renders only enabled networks and the uniqueness indexes are
+			// partial on `enabled`. The savepoint lets the transaction survive the failed DELETE.
 			if _, err := tx.Exec(ctx, `SAVEPOINT drop_successor`); err != nil {
 				return err
 			}
@@ -599,12 +535,9 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 				return err
 			}
 		}
-		// AND THE ORIGINAL MUST ACTUALLY COME BACK. RowsAffected was not checked, so if the original had been
-		// deleted in the meantime -- it is disabled while the replacement is applied, and the delete route only
-		// refuses ENABLED networks -- this was a silent no-op: the request went back to PENDING naming a network
-		// that no longer existed, and every subsequent apply by every operator then died in the materialise with
-		// "the client network a staged change names could not be read". A request that cannot be put back is
-		// closed as REVERTED instead of pretending it is ready to try again.
+		// The original must actually come back: if it was deleted meanwhile (the delete route refuses only enabled
+		// networks) a silent no-op would leave a PENDING request naming a missing network and kill every later apply.
+		// Such a request is closed as REVERTED.
 		tag, err := tx.Exec(ctx, `UPDATE guest_networks SET enabled=true, updated_at=now() WHERE id=$1`, orig)
 		if err != nil {
 			return err
@@ -628,26 +561,11 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 	return tx.Commit(ctx)
 }
 
-// staleReplacementGrace is how long an APPLIED replacement may carry NO revision id before this reconcile
-// treats it as abandoned.
-//
-// IT EXISTS TO CLOSE A RACE THAT DESTROYED LIVE APPLIES. netApply materialises in one transaction, COMMITS, then
-// calls netd, and only then records which revision carries the change — it cannot record it sooner, because netd
-// mints the id. In that window the row reads (state=APPLIED, revision_id=NULL), and this reconcile used to read
-// a NULL revision as "the revision is gone" and revert the replacement. Any concurrent request that reconciles —
-// a second operator's Client networks page, or the apply's own retry — would therefore delete the successor
-// network and re-enable the original WHILE NETD WAS BUILDING THE SUCCESSOR'S BRIDGE, leaving the database and the
-// wire describing different networks, which is the one outcome this whole staged lifecycle exists to prevent.
-//
-// So a NULL revision is "not recorded YET" until this grace has passed. It is comfortably longer than netd's
-// 120-second confirmation window, so an apply that is merely slow is never mistaken for an abandoned one; after
-// it, the only way to still hold a NULL revision is for edged to have died between the commit and the update,
-// and reverting is then the correct, fail-safe answer. This is an internal reconciliation bound, not an
-// operational value a hotel administrator would tune.
+// How long an APPLIED replacement may carry no revision id before the reconcile treats it as abandoned. netApply
+// commits before netd mints the revision id, and a reconcile in that window used to revert the replacement while
+// netd was building the successor's bridge. The grace exceeds netd's 120-second confirmation window.
 const staleReplacementGrace = 10 * time.Minute
 
-// reconcileStaleReplacements reverts anything the watchdog rolled back behind edged's back, and retries a settle
-// that was withheld. Idempotent.
 func (s *server) reconcileStaleReplacements(ctx context.Context, r *http.Request) error {
 	rows, err := s.db.Query(ctx, `SELECT g.id::text, COALESCE(v.state,''),
 		       g.revision_id IS NULL AS unrecorded,
@@ -677,51 +595,32 @@ func (s *server) reconcileStaleReplacements(ctx context.Context, r *http.Request
 		}
 		switch state {
 		case "applying", "pending_confirmation":
-			// still in flight
 		case "active":
 			// the apply was KEPT but this request never settled: a package refused to be carried forward.
 			retry = true
 		case "superseded":
-			// SUPERSEDED MEANS A NEWER CONFIGURATION IS LIVE, NOT THAT THIS ONE FAILED.
-			//
-			// netd marks the previous active revision superseded whenever ANY later revision is confirmed
-			// (store.markActive). So a replacement whose settle was withheld -- which is exactly the state this
-			// reconcile exists to retry, and which by design sits in APPLIED with an 'active' revision -- became
-			// 'superseded' the moment the operator made any unrelated network change and confirmed it. This
-			// branch used to fall through to "the apply did not survive" and REVERT it: the successor row was
-			// deleted and the original re-enabled, while the successor was still on the wire, rendered by the
-			// newer revision that had just been confirmed. The next apply then tore the live bridge down.
-			//
-			// A superseded revision was confirmed before it was superseded, so its replacement is in exactly the
-			// position an 'active' one is: kept on the wire, waiting to settle.
+			// Superseded means a newer configuration is live, not that this one failed: netd supersedes the previous
+			// active revision when any later one is confirmed. Reverting here would delete a successor still on the wire.
 			retry = true
 		case "":
-			// The revision row this replacement names has VANISHED — it was never written, or something
-			// deleted it. The successor on the wire can no longer be accounted for by any revision, so the
-			// database must not go on claiming it.
+			// The named revision has vanished, so the successor can no longer be accounted for and must not be claimed.
 			stale = append(stale, id)
 		case "failed", "rolled_back":
 			// The apply did not survive, so neither may the rows it created.
 			stale = append(stale, id)
 		default:
-			// draft or validated: a revision in these states was never applied, so a replacement cannot
-			// legitimately be pointing at one. Unreachable through the product (the id is recorded only after
-			// an apply returns), and reverting is the safe reading of a state that should not exist.
+			// A draft or validated revision was never applied; revert is the safe reading of a state that should not exist.
 			stale = append(stale, id)
 		}
 	}
-	// A TRUNCATED RESULT SET IS NOT AN EMPTY ONE, and here that difference is a missed revert. Reported rather
-	// than acted on half-way: reverting the rows that happened to arrive, while silently not knowing about the
-	// rest, is worse than saying the reconcile did not run.
+	// A truncated result set is not an empty one; report it rather than revert half-way.
 	rerr := rows.Err()
 	rows.Close()
 	if rerr != nil {
 		return fmt.Errorf("the staged client-network changes could not be read: %w", rerr)
 	}
 	if len(stale) > 0 {
-		// A REVERT THAT FAILS IS REPORTED, NOT SWALLOWED. The caller decides what to do with it: the rollback
-		// route tells the operator outright, while a read path logs and leaves the next read to retry. Either
-		// way the appliance never claims it converged when it did not.
+		// A failing revert is reported, not swallowed: the rollback route tells the operator, a read path logs and retries.
 		if err := s.revertMaterialised(ctx, stale, "the apply was rolled back"); err != nil {
 			slog.Error("client network replacements could not be reverted", "replacements", stale, "err", err)
 			return fmt.Errorf("%d staged client-network change(s) could not be put back: %w", len(stale), err)
@@ -730,23 +629,16 @@ func (s *server) reconcileStaleReplacements(ctx context.Context, r *http.Request
 			s.audit(r, "network.guest.replacement_reverted", "guest_network", "", map[string]any{"replacements": stale})
 		}
 	}
-	// A settle WITHHELD because a package could not be carried forward is retried here, on the operator's own
-	// next read of the networks. Without this, correcting the package would leave the change APPLIED forever:
-	// the configuration is already confirmed, so no second confirm is coming.
+	// A settle withheld because a package could not be carried forward is retried here; no second confirm will come.
 	if retry {
 		_ = s.settleConfirmedReplacements(ctx, r, "")
 	}
 	return nil
 }
 
-// settleConfirmedReplacements marks applied requests CONFIRMED and republishes the Internet Packages that were
-// limited to each original network forward onto its successor. It returns what it did, for the response.
 func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Request, revisionID string) []map[string]any {
-	// ONLY requests whose apply was actually KEPT. revisionID is the revision being confirmed in this very
-	// request (its row is not 'active' yet); anything else must already be 'active' or 'superseded', which is how
-	// a settle withheld earlier for a package that could not be carried forward is retried later without a
-	// second confirm — nothing else would ever come back for it. SUPERSEDED counts because it means a newer
-	// configuration was confirmed on top, not that this one failed: the successor is still on the wire.
+	// Only requests whose apply was kept. revisionID is the one being confirmed now (not 'active' yet); anything else
+	// must be 'active' or 'superseded' (a newer revision was confirmed on top; the successor is still on the wire).
 	rows, err := s.db.Query(ctx, `SELECT g.id::text, g.original_network_id::text, g.successor_network_id::text
 		  FROM iam_v2.guest_network_replacements g
 		  LEFT JOIN network_config_revisions v ON v.id = g.revision_id
@@ -765,8 +657,6 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 			continue
 		}
 		if succ == nil {
-			// APPLIED with no successor cannot happen through the apply path; it would mean a row was edited
-			// outside it. Named rather than silently skipped.
 			slogReplacement("settle_skipped", d.repl, "it is APPLIED but names no successor network")
 			continue
 		}
@@ -780,19 +670,9 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 
 	var out []map[string]any
 	for _, d := range settled {
-		// THE ROW IS CLAIMED BEFORE ANYTHING IS PUBLISHED, AND RELEASED ONLY WHEN THE OUTCOME IS WRITTEN.
-		//
-		// This loop used to read its rows, publish package revisions, and then UPDATE with no state guard and no
-		// lock -- while revertMaterialised holds FOR UPDATE on the same rows for exactly the opposite purpose.
-		// A GET's reconcile reverting a replacement could therefore interleave with a POST's settle: the revert
-		// deleted the successor and set the request back to PENDING, and the settle went on to publish package
-		// revisions naming a guest_network_id that NO LONGER EXISTED and then stamp the request CONFIRMED with a
-		// NULL successor. Those packages were then eligible for nobody, with no lineage row to save them, over a
-		// change that never happened on the wire. Two browser tabs polling the networks list could also both
-		// pass this point and publish the same revision twice.
-		//
-		// Claiming the row first makes the revert and the settle take turns, and re-reading the state under that
-		// lock means the loser does nothing rather than acting on what it read a moment ago.
+		// The row is claimed before anything is published and released only when the outcome is written: a revert
+		// (FOR UPDATE) interleaving with a settle would publish package revisions naming a deleted network, and
+		// two tabs could publish twice. Re-reading under the lock makes the loser do nothing.
 		claim, cerr := s.claimReplacementForSettle(ctx, d.repl)
 		if cerr != nil {
 			slogReplacement("settle_skipped", d.repl, cerr.Error())
@@ -800,8 +680,7 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 		}
 		republished, failed, unknown := s.republishPackagesOnto(ctx, d.orig, d.succ)
 		if unknown != nil {
-			// NOT A REFUSAL -- AN OUTAGE. Settling now would lose the republish permanently (a CONFIRMED
-			// replacement is never revisited), so the request stays APPLIED and is retried on the next read.
+			// An outage, not a refusal: settling now would lose the republish permanently, so stay APPLIED and retry on the next read.
 			_ = claim.release(ctx)
 			slogReplacement("settle_deferred", d.repl, unknown.Error())
 			out = append(out, map[string]any{
@@ -812,16 +691,9 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 			})
 			continue
 		}
-		// FAIL-CLOSED. A replacement becomes CONFIRMED only when every dependent package was carried forward.
-		// If one refused, the request stays APPLIED: the operator sees the exact package and the exact reason,
-		// and the settle is retried on their next read of the networks (reconcileStaleReplacements) once they
-		// have corrected it. Leaving it APPLIED is what keeps "this change is finished" from meaning two
-		// different things on the wire and in the catalogue.
-		//
-		// What this does NOT do is leave guests stranded in the meantime: the retired network keeps its logical
-		// identity (0106), so a rule still naming it is satisfied by a device on the successor whether the
-		// republish has happened or not. The republish makes the CURRENT revision say what it means; lineage is
-		// what makes the pinned ones keep working.
+		// Fail closed: CONFIRMED only when every dependent package was carried forward; otherwise it stays APPLIED
+		// and is retried on the next read. Guests are not stranded meanwhile, since the retired network keeps its
+		// logical identity (lineage), so rules naming it still match a device on the successor.
 		if len(failed) > 0 {
 			slogReplacement("settle_withheld", d.repl, fmt.Sprintf("%d package(s) could not be carried forward", len(failed)))
 			if r != nil {
@@ -838,10 +710,7 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 			_ = claim.release(ctx)
 			continue
 		}
-		// THE REPORTED STATE IS THE STORED STATE. This used to log a failed UPDATE and then report CONFIRMED
-		// anyway, so an operator could be told a change was finished while the row still read APPLIED. The
-		// packages are already forward by now, so the next reconcile converges (the republish finds nothing
-		// left to move and marks it), but what is reported is what is true.
+		// Report the stored state: a failed UPDATE must not be reported as CONFIRMED.
 		settledNow := true
 		if err := claim.confirm(ctx, revisionID); err != nil {
 			slogReplacement("settle_failed", d.repl, err.Error())
@@ -866,14 +735,11 @@ func (s *server) settleConfirmedReplacements(ctx context.Context, r *http.Reques
 	return out
 }
 
-// settleClaim is a held transaction over one replacement row, with its state verified under the lock.
 type settleClaim struct {
 	tx   pgx.Tx
 	repl string
 }
 
-// claimReplacementForSettle locks the row and re-reads it. It refuses unless the request is still APPLIED and
-// still names the successor the caller is about to publish packages onto.
 func (s *server) claimReplacementForSettle(ctx context.Context, replID string) (*settleClaim, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -892,8 +758,7 @@ func (s *server) claimReplacementForSettle(ctx context.Context, replID string) (
 		_ = tx.Rollback(ctx)
 		return nil, fmt.Errorf("it is no longer waiting to settle (state %s)", state)
 	}
-	// AND THE SUCCESSOR MUST STILL EXIST. Publishing a package revision that names a deleted network makes that
-	// package eligible for nobody, on an immutable revision, which is not a failure anyone can undo.
+	// The successor must still exist: publishing a revision naming a deleted network makes the package eligible for nobody, irreversibly.
 	var alive bool
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM guest_networks WHERE id=$1 AND enabled)`, *succ).Scan(&alive); err != nil {
@@ -907,7 +772,6 @@ func (s *server) claimReplacementForSettle(ctx context.Context, replID string) (
 	return &settleClaim{tx: tx, repl: replID}, nil
 }
 
-// confirm records the settled state inside the claim and releases it.
 func (c *settleClaim) confirm(ctx context.Context, revisionID string) error {
 	if _, err := c.tx.Exec(ctx, `UPDATE iam_v2.guest_network_replacements
 		   SET state='CONFIRMED', settled_at=now(), revision_id=COALESCE(revision_id, NULLIF($2,'')::uuid)
@@ -918,17 +782,10 @@ func (c *settleClaim) confirm(ctx context.Context, revisionID string) error {
 	return c.tx.Commit(ctx)
 }
 
-// release drops the claim without recording anything, leaving the request APPLIED for the next attempt.
 func (c *settleClaim) release(ctx context.Context) error { return c.tx.Rollback(ctx) }
 
-// replacementsBlockingConfirm pre-flights the package forward for every APPLIED request, writing nothing. It is
-// called BEFORE netd is told to keep the configuration, so a package that cannot be carried forward refuses the
-// confirm outright rather than leaving the wire permanent and the catalogue behind it.
-// It is SCOPED TO THE REVISION BEING CONFIRMED. Without that scope one stuck replacement -- a settle withheld
-// earlier, whose revision is already active -- blocked the confirmation of EVERY future revision, for good: each
-// later apply was then rolled back by the watchdog at 120 seconds, the appliance lost the ability to change its
-// networking at all, and the refusal named a package that had nothing to do with the change the operator had
-// just made. A confirm answers for its own revision.
+// Pre-flights the package forward for every APPLIED request, writing nothing, before netd is told to keep the
+// configuration. Scoped to the revision being confirmed: one stuck replacement must not block every future confirm.
 func (s *server) replacementsBlockingConfirm(ctx context.Context, revisionID string) []map[string]any {
 	rows, err := s.db.Query(ctx, `SELECT id::text, original_network_id::text, successor_network_id::text
 		  FROM iam_v2.guest_network_replacements
@@ -936,8 +793,7 @@ func (s *server) replacementsBlockingConfirm(ctx context.Context, revisionID str
 		   AND revision_id = NULLIF($3,'')::uuid`,
 		s.tenantID, s.siteID, revisionID)
 	if err != nil {
-		// A PRE-FLIGHT THAT CANNOT RUN BLOCKS THE CONFIRM. It used to return nil, which reads as "nothing stands
-		// in the way" -- failing open on the one check whose whole purpose is to fail closed.
+		// A pre-flight that cannot run blocks the confirm; returning nil would fail open on a check meant to fail closed.
 		return []map[string]any{{"packages_not_preservable": []map[string]string{
 			{"package": "(unknown)", "why": "the staged changes could not be read: " + err.Error()}}}}
 	}
@@ -962,11 +818,8 @@ func (s *server) replacementsBlockingConfirm(ctx context.Context, revisionID str
 	var blocking []map[string]any
 	for _, p := range live {
 		_, failed, unknown := s.forwardPackagesOnto(ctx, p.orig, p.succ, true)
-		// AN OUTAGE IS NOT A REFUSAL, AND MUST NOT HOLD THE WIRE HOSTAGE. If the catalogue cannot be read at all,
-		// blocking the confirm would mean the watchdog tears down a correct network change because a package
-		// service is unavailable -- and eligibility is not at risk meanwhile, because the retired network keeps
-		// its logical identity (0106) whether the republish has happened or not. The settle withholds instead and
-		// retries, which is where that decision belongs.
+		// An outage is not a refusal: blocking would make the watchdog tear down a correct change, and eligibility is
+		// safe via the lineage identity. The settle withholds and retries instead.
 		if unknown != nil {
 			slogReplacement("preflight_unknown", p.repl, unknown.Error())
 			continue
@@ -981,25 +834,16 @@ func (s *server) replacementsBlockingConfirm(ctx context.Context, revisionID str
 	return blocking
 }
 
-// republishPackagesOnto publishes a NEW revision of every active package whose CURRENT revision is limited to
-// the retired network, with the successor's id in place of it. History is never rewritten: each package gains
-// a forward revision, exactly as an operator editing it would, so future guests are offered what the hotel
-// intended. Guests already holding an entitlement keep the revision they were granted on.
+// Publishes a new revision of every active package limited to the retired network, with the successor's id in
+// its place. History is not rewritten; guests holding an entitlement keep the revision they were granted on.
 func (s *server) republishPackagesOnto(ctx context.Context, oldID, newID string) ([]string, []map[string]string, error) {
 	return s.forwardPackagesOnto(ctx, oldID, newID, false)
 }
 
-// forwardPackagesOnto is republishPackagesOnto with a dryRun switch. With dryRun it writes nothing and reports
-// exactly which packages WOULD refuse, which is what makes the confirm step fail-closed: a replacement must not
-// become permanent while a package that depends on the retired network could not be carried forward.
+// With dryRun it writes nothing and reports which packages would refuse, which makes the confirm step fail closed.
 func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, dryRun bool) (republished []string, failed []map[string]string, unknown error) {
-	// FAILING OPEN HERE LOSES THE REPUBLISH FOR GOOD. Both of these used to `return nil, nil`, which the settle
-	// reads as "there was nothing to carry forward" and then marks the replacement CONFIRMED -- and a CONFIRMED
-	// replacement is excluded from the reconcile and from the settle, so nothing ever comes back for it. One
-	// transient error on one SELECT permanently left the hotel's packages naming a retired network id, with only
-	// the lineage view (0106) still making them work. They are reported as `unknown` instead: the caller can tell
-	// "this package refuses" (a decision) from "I could not find out" (an outage), and withholds rather than
-	// settling on a guess.
+	// Failing open loses the republish for good (a CONFIRMED replacement is never revisited), so errors are reported
+	// as `unknown`: the caller can tell a refusal from an outage and withholds rather than settling on a guess.
 	if s.commerce == nil {
 		return nil, nil, errors.New("the package catalogue is not available on this appliance")
 	}
@@ -1019,8 +863,7 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 	}
 	rerr := rows.Err()
 	rows.Close()
-	// A TRUNCATED RESULT SET IS NOT AN EMPTY ONE. Without this, a connection dropped mid-iteration looked exactly
-	// like a site with no packages.
+	// A truncated result set is not an empty one.
 	if rerr != nil {
 		return nil, nil, fmt.Errorf("the Internet packages could not be read: %w", rerr)
 	}
@@ -1028,18 +871,14 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 	for _, pid := range ids {
 		cur, disabled, err := s.commerce.GetPackageCurrent(ctx, s.tenantID, s.siteID, pid)
 		if err != nil {
-			// ErrPackageConditionsUnreadable lands here: publishing without the rules would silently widen the
-			// package to everyone, so it is refused and reported instead.
+			// Publishing without the rules would silently widen the package to everyone, so it is refused.
 			failed = append(failed, map[string]string{"package": pid, "why": err.Error()})
 			continue
 		}
 		if disabled || !ruleNamesNetwork(cur.EligibilityRules, oldID) {
 			continue
 		}
-		// EVERYTHING THE CURRENT REVISION SAYS, with the network id substituted and NOTHING else touched.
-		// This is the whole contract of an automatic republish: the operator did not ask for a package change,
-		// they asked for a cabling change, so any field this spec fails to carry is a silent edit to their
-		// pricing, their offer window or their quota on an immutable revision they cannot correct.
+		// The current revision's contents with only the network id substituted: any field not carried would silently edit pricing, offer window or quota.
 		spec := iamv2.PackagePublishSpec{
 			TenantID: s.tenantID, SiteID: s.siteID, PackageCode: cur.Code,
 			ServicePlanRevisionID: cur.ServicePlanRevisionID,
@@ -1059,10 +898,7 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 		if cur.CurrencyExponent != nil {
 			spec.CurrencyExponent = *cur.CurrencyExponent
 		}
-		// A SALE WINDOW IS NOT OPTIONAL TO CARRY. This used to swallow the parse error, and the reader used to
-		// hand back a format time.RFC3339 cannot parse -- so a seasonal package came out of a replacement
-		// permanently visible. The reader now renders RFC3339; a value that still will not parse is a refusal,
-		// not a dropped field, because publishing without the window would widen the package silently.
+		// A sale window must be carried: a parse failure is a refusal, since publishing without it would widen the package silently.
 		if vf, verr := parseVisibility(cur.VisibleFrom); verr != nil {
 			failed = append(failed, map[string]string{"package": cur.Code, "why": "unreadable visible_from: " + verr.Error()})
 			continue
@@ -1077,7 +913,6 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 		}
 		res, perr := s.commerce.PublishRevision(ctx, spec)
 		if dryRun {
-			// The dry run's own success word, so a caller cannot mistake "it would publish" for "it published".
 			if perr == nil && !res.Disabled && res.Reason == "validated" {
 				republished = append(republished, cur.Code)
 				continue
@@ -1108,14 +943,8 @@ func (s *server) forwardPackagesOnto(ctx context.Context, oldID, newID string, d
 	return republished, failed, nil
 }
 
-// unreverted StagedChanges answers the one failure that must never be quiet: the apply did not hold AND the
-// staged client-network changes could not be put back.
-//
-// This used to be logged and then hidden behind netd's own "the apply failed" response, which is the most
-// misleading pair of facts available: the operator reads a failure, assumes nothing changed, and the database is
-// meanwhile the only thing claiming the successor network exists. The reconcile on the next read will try again
-// -- it is idempotent, and the revision is not 'active', so the replacement is still classified as stale -- but
-// the operator is told NOW, with the exact reason, because the appliance cannot promise it converged.
+// The one failure that must never be quiet: the apply did not hold and the staged changes could not be put back,
+// so the database alone claims the successor exists. The operator is told now with the exact reason.
 func unrevertedStagedChanges(w http.ResponseWriter, staged []string, cause error, why string) {
 	slog.Error("client network replacement could not be reverted",
 		"why", why, "replacements", staged, "err", cause)
@@ -1125,7 +954,6 @@ func unrevertedStagedChanges(w http.ResponseWriter, staged []string, cause error
 			"apply again until the staged change reads as waiting to be applied.")
 }
 
-// describeBlockingPackages renders "Lobby free (invalid_duration_policy); Premium (no_grant_tiers)".
 func describeBlockingPackages(blocking []map[string]any) string {
 	var parts []string
 	for _, b := range blocking {
@@ -1140,8 +968,7 @@ func describeBlockingPackages(blocking []map[string]any) string {
 	return strings.Join(parts, "; ")
 }
 
-// parseVisibility turns the reader's RFC3339 sale-window bound into a time. Absent is absent (no bound); a
-// present value that will not parse is an error, never a silently dropped bound.
+// Absent is absent (no bound); a present value that will not parse is an error, never a silently dropped bound.
 func parseVisibility(raw *string) (*time.Time, error) {
 	if raw == nil || strings.TrimSpace(*raw) == "" {
 		return nil, nil

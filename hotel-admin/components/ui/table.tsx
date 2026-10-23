@@ -3,29 +3,15 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-// TABLES ARE THE PRODUCT. Almost every screen here is a list of operational rows, so the table treatment is
-// what the admin mostly looks like.
-//
-// Three things changed and all three were legibility, not decoration:
-//   * the header row now has its own surface, so a long list keeps a visible top edge when scrolled;
-//   * rows have a hover state, because an operator tracking one room across eight columns needs to be able to
-//     see which row their eye is on;
-//   * the horizontal scroll container is bounded with a rounded edge instead of bleeding off the card.
-//
-// Signatures are unchanged: Table/THead/TR/TH/TD are drop-in.
-
 export function Table({
   className,
   label,
   ...p
 }: React.HTMLAttributes<HTMLTableElement> & {
-  /** Names the scroll region when the table is wider than its card. Defaults to the table's aria-label. */
+  /** Names the scroll region when overflow makes it keyboard-focusable. */
   label?: string;
 }) {
-  // A SCROLLER A KEYBOARD CAN REACH (WCAG 2.1.1). When the table is wider than its card, the only way to see the
-  // clipped columns was a mouse or a trackpad. An overflowing scroller becomes a named, focusable region, so the
-  // arrow keys scroll it; a table that fits adds no tab stop. The check re-runs whenever the scroller or the
-  // table changes size (a resized window, rows arriving). Same pattern as Central's console.
+  // Only overflowing tables get a tab stop so keyboard users can scroll hidden columns.
   const scroller = React.useRef<HTMLDivElement | null>(null);
   const [overflowing, setOverflowing] = React.useState(false);
   React.useEffect(() => {
@@ -39,11 +25,7 @@ export function Table({
     return () => ro.disconnect();
   }, []);
 
-  // `relative` is load-bearing. Without it an absolutely positioned descendant (the `sr-only` label on an
-  // icon-only header, a tooltip anchor) takes its containing block from somewhere OUTSIDE this scroller, so it
-  // is laid out at the table's full width and stretches the whole DOCUMENT sideways on a phone — measured at
-  // 390px as a 759px page on Internet packages. Positioning the scroller makes it the containing block, so
-  // those elements scroll with the table instead of widening the page.
+  // Position the scroller so absolute descendants cannot widen the page on phones.
   return (
     <div
       ref={scroller}
@@ -79,8 +61,6 @@ export function TR({ className, ...p }: React.HTMLAttributes<HTMLTableRowElement
     <tr
       className={cn(
         "border-b border-border last:border-0 transition-colors",
-        // Only body rows highlight. `tbody &` keeps the header row out of it without every call site having to
-        // pass a different component.
         "[tbody_&]:hover:bg-accent/60",
         className,
       )}
@@ -97,8 +77,6 @@ export function TD({ className, ...p }: React.TdHTMLAttributes<HTMLTableCellElem
   return <td className={cn("px-4 py-3 align-middle", className)} {...p} />;
 }
 
-// TableWrap — a table that fills a card body edge to edge. Pages do this with `<CardBody className="p-0">`;
-// this just names the intent and adds the rounded bottom corners the raw version loses.
 export function TableWrap({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("overflow-hidden rounded-b-lg", className)} {...p} />;
 }

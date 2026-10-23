@@ -18,8 +18,7 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// EMAIL ACCOUNTS: the pure decisions (self_service.go). The database-backed journey is
-// self_service_integration_test.go.
+// Email accounts: the pure decisions (self_service.go); the database journey is self_service_integration_test.go.
 
 func ssKey(t *testing.T) []byte {
 	t.Helper()

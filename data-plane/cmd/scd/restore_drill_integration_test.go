@@ -2,12 +2,9 @@
 
 package main
 
-// THE RESTORE DRILL (GDPR final mission): the real restore code, against a real PostgreSQL in a container named
-// stayconnect-pg (the name restore.go uses), with real files for both ledger copies and a real encrypted secondary copy.
-// It is skipped unless LEDGER_DRILL_DSN points at that database (scripts/ledger-restore-drill.sh builds it and runs this).
-//
-// Every scenario is the same story: a backup is taken; afterwards a guest is erased and a request is answered; then the
-// backup is restored. The question each time is what the restored appliance serves.
+// Restore drill: the real restore code against PostgreSQL in a container named stayconnect-pg (the name
+// restore.go uses), with real ledger files and an encrypted secondary copy. Skipped unless LEDGER_DRILL_DSN is set
+// (scripts/ledger-restore-drill.sh). Each scenario: back up, then erase a guest and answer a request, then restore.
 
 import (
 	"context"
@@ -38,8 +35,8 @@ type drill struct {
 	tenant  string
 	site    string
 	stamp   int
-	accts   map[string]string // label -> account id
-	emails  map[string]string // label -> username
+	accts   map[string]string
+	emails  map[string]string
 	lastRes map[string]any
 }
 
@@ -304,8 +301,6 @@ func (d *drill) stagingUsername(db, label string) string {
 }
 
 func (d *drill) identity() string { return d.id.String() }
-
-// ---- the scenarios ---------------------------------------------------------------------------------------------------------
 
 // BOTH COPIES AVAILABLE. An older backup is restored; the erasure and the answered request made after it are applied to the
 // restored data before it is served, and the proof the guest was given is back.

@@ -9,8 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
-// authAccount validates a username/password against iam_v2.guest_access_accounts (argon2id) and,
-// on success, creates a one-time ACCOUNT auth_context. Scratch/enabled only.
 func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.Username) == "" || req.Secret == "" {
 		return deny(MethodAccount, "missing_credentials"), nil
@@ -23,7 +21,7 @@ func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, e
 			return err
 		}
 		if id == "" || !enabled {
-			// constant-work: still verify against a dummy hash to reduce user enumeration signal
+			// Constant work: verify against a dummy hash to limit user enumeration.
 			_, _ = verifyArgon2id(req.Secret, dummyArgon2)
 			res = deny(MethodAccount, "invalid_credentials")
 			return nil
@@ -54,20 +52,13 @@ func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, e
 	return res, nil
 }
 
-// accountEmailReader is the optional repository capability behind an Email account's group decision.
 type accountEmailReader interface {
 	AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accountID string) (string, error)
 }
 
-// accountGroupPin decides an Email account client's Client Group from its VERIFIED address.
-//
-// An Email account (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE) is a client account whose username is the
-// address its owner registered and then proved from the verification email. EMAIL_DOMAIN rules were evaluated
-// only for principal sign-ins (code, identity provider), so a group "everyone @partner.example" never matched a
-// partner's employee who signed in with their Email account -- the one sign-in method whose whole identity IS
-// an email address. The verified address is now the factor; an unverified one, and a staff-created account's
-// username, are not evidence and decide nothing (the client is then in no group, i.e. Public). A lookup
-// failure is a repository error, never "Public".
+// accountGroupPin decides an Email account client's Client Group from its VERIFIED address only; an
+// unverified address or a staff-created username decides nothing (Public). A lookup failure is a repository
+// error, never "Public".
 func accountGroupPin(ctx context.Context, tx Tx, req Request, accountID string) (groupPin, error) {
 	r, ok := tx.(accountEmailReader)
 	if !ok {
@@ -89,8 +80,6 @@ func accountGroupPin(ctx context.Context, tx Tx, req Request, accountID string) 
 	return groupPin{id: d.GroupID, name: d.GroupName, evidence: d.Evidence}, nil
 }
 
-// authVoucher validates a voucher code (blind-index HMAC) against iam_v2.vouchers and creates a
-// one-time VOUCHER auth_context. Scratch/enabled only.
 func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, error) {
 	if req.Secret == "" {
 		return deny(MethodVoucher, "missing_code"), nil
@@ -99,10 +88,8 @@ func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, e
 		return Result{}, &Error{Code: ErrConfig, Msg: "no voucher HMAC configured"}
 	}
 	now := a.now()
-	// ROTATION. A voucher's stored index was computed under the key of the generation it pins, so after a
-	// rotation the active key alone cannot match a voucher issued under the previous one. Every usable
-	// generation therefore contributes a candidate index, newest first, and the first that resolves wins.
-	// With a single generation this is exactly the old single-index behaviour.
+	// A voucher's index is computed under the key generation it pins, so every usable generation contributes
+	// a candidate index, newest first; the first that resolves wins.
 	var candidates [][]byte
 	if a.vhmacAll != nil {
 		var err error
@@ -151,9 +138,7 @@ func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, e
 	return res, nil
 }
 
-// authOTPIdentity resolves/creates a principal from an already-verified OTP factor (EMAIL/PHONE) and
-// creates a one-time OTP auth_context. The OTP challenge itself is verified upstream (public.auth_otps
-// stays transient per D2); this adapter only maps the verified factor to an iam_v2 principal identity.
+// authOTPIdentity maps an OTP factor already verified upstream to a principal identity.
 func (a *Authenticator) authOTPIdentity(ctx context.Context, req Request) (Result, error) {
 	ft := strings.ToUpper(strings.TrimSpace(req.FactorType))
 	if ft != "EMAIL" && ft != "PHONE" {
@@ -173,10 +158,8 @@ func (a *Authenticator) authOTPIdentity(ctx context.Context, req Request) (Resul
 	return a.resolvePrincipalAndFinalize(ctx, MethodOTP, primary, req.SecondaryFactors, req)
 }
 
-// authSocialIdentity resolves/creates a principal from a verified social identity: the (issuer, sub) subject
-// is the identity; a trusted issuer's verified email is a second factor on the same Client and is what links
-// a Google sign-in to the Client an email code created (identity.go). The Stub provider is refused in
-// production before this is reached.
+// authSocialIdentity: the (issuer, sub) subject is the identity; a trusted issuer's verified email is a second
+// factor that links the sign-in to an existing Client. The Stub provider is refused in production upstream.
 func (a *Authenticator) authSocialIdentity(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.FactorIssuer) == "" || strings.TrimSpace(req.FactorValue) == "" {
 		return deny(MethodSocial, "missing_identity"), nil
@@ -189,9 +172,8 @@ func (a *Authenticator) authSocialIdentity(ctx context.Context, req Request) (Re
 	return a.resolvePrincipalAndFinalize(ctx, MethodSocial, primary, req.SecondaryFactors, req)
 }
 
-// authResumedIdentity mints an auth context for a Client whose device-bound resume credential scd has already
-// verified (contract §2.3). No factor is re-proven here; the Client's STORED factors decide the group, so a
-// remembered device gets exactly the eligibility a fresh code would.
+// authResumedIdentity: the resume credential was verified by scd; no factor is re-proven, and the Client's
+// STORED factors decide the group.
 func (a *Authenticator) authResumedIdentity(ctx context.Context, req Request) (Result, error) {
 	now := a.now()
 	var res Result
@@ -226,9 +208,8 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 			res = deny(m, "subject_resolve")
 			return nil
 		}
-		// A STAFF-SHOWN CODE NEVER SIGNS IN TO AN EXISTING CLIENT (contract §6.7): the desk vouched for the
-		// address, the client did not prove it, so it must not reach someone else's access, group or devices.
-		// Rolled back, so nothing the resolution touched (an attrs merge) survives.
+		// A staff-shown code never signs in to an existing Client: the client did not prove the address.
+		// Rolled back so nothing the resolution touched (an attrs merge) survives.
 		if req.StaffAssisted && !rs.Created {
 			res = deny(m, "assisted_existing_client")
 			return errAssistedRollback
@@ -238,8 +219,7 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 			return err
 		}
 		if len(factors) == 0 {
-			// The repository contract says the primary factor is stored by now; a fake that stores nothing
-			// still gets a usable answer from the factor just proven.
+			// A repository that stored nothing still gets an answer from the factor just proven.
 			factors = []FactorClaim{primary}
 		}
 		res, err = a.finalizeWithGroup(ctx, tx, m, rs.PrincipalID, factors, req, now)
@@ -268,11 +248,10 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 	return res, nil
 }
 
-// errAssistedRollback rolls back a staff-assisted resolution that reached an existing Client.
 var errAssistedRollback = errors.New("iamv2: staff-assisted sign-in reached an existing client")
 
-// finalizeWithGroup decides the Client Group from the Client's verified factors, then creates the auth context
-// with that decision pinned on it. A group lookup failure is a repository error (fail closed), never "Public".
+// finalizeWithGroup pins the Client Group decision on the auth context. A group lookup failure is a
+// repository error (fail closed), never "Public".
 func (a *Authenticator) finalizeWithGroup(ctx context.Context, tx Tx, m Method, principalID string, factors []FactorClaim, req Request, now time.Time) (Result, error) {
 	groups, err := tx.LoadClientGroups(ctx, req.TenantID, req.SiteID)
 	if err != nil {
@@ -297,7 +276,6 @@ type groupPin struct {
 	evidence map[string]any
 }
 
-// primaryFactorFor picks the factor to label a resumed Client by: the kind the method proved.
 func primaryFactorFor(m Method, factors []FactorClaim) FactorClaim {
 	want := "SOCIAL_SUBJECT"
 	if m == MethodOTP {
@@ -316,17 +294,13 @@ func primaryFactorFor(m Method, factors []FactorClaim) FactorClaim {
 	return factors[0]
 }
 
-// finalize upserts the device and creates the one-time auth_context, returning an allow Result.
 func (a *Authenticator) finalize(ctx context.Context, tx Tx, m Method, subj Subject, req Request, now time.Time) (Result, error) {
 	return a.finalizeWithPin(ctx, tx, m, subj, req, now, groupPin{})
 }
 
-// finalizeWithPin is finalize with a Client Group decision pinned on the context (empty for subjects that have
-// no identity factors: voucher, account, open selection).
+// finalizeWithPin pins a Client Group decision (empty for voucher, account and open selection).
 func (a *Authenticator) finalizeWithPin(ctx context.Context, tx Tx, m Method, subj Subject, req Request, now time.Time, pin groupPin) (Result, error) {
-	// Validate the caller-supplied pins (tenant/site/device/guest-network/TTL/subject) up front so a
-	// bad request never reaches the DB as a NOT NULL / FK violation. A device MAC and guest network are
-	// mandatory because auth_contexts pins both NOT NULL.
+	// Validate up front so a bad request never reaches the DB as a NOT NULL / FK violation.
 	if req.Device.MAC == "" {
 		return Result{}, &Error{Code: ErrInvalidInput, Msg: "auth_context: missing device"}
 	}
@@ -366,13 +340,10 @@ func deny(m Method, reason string) Result {
 	return Result{Decision: DecisionDeny, Method: m, Reason: reason}
 }
 
-// ---- argon2id (PHC $argon2id$v=19$m=..,t=..,p=..$salt$hash) — internal/passwordhash is the one implementation ----
-
-// dummyArgon2 is a valid hash used for constant-work verification of unknown accounts.
+// dummyArgon2 gives unknown accounts the same verification work as known ones.
 var dummyArgon2 = passwordhash.Dummy()
 
-// verifyArgon2id is the bounded verifier, with an unusable stored hash reported as an invalid credential (never
-// as a match, never as a repository fault the guest would see as "try later").
+// verifyArgon2id reports an unusable stored hash as an invalid credential, never a match or a "try later" fault.
 func verifyArgon2id(pw, encoded string) (bool, error) {
 	ok, err := passwordhash.Verify(pw, encoded)
 	if err != nil {

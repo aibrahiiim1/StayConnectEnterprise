@@ -1,13 +1,7 @@
-// Package assignment implements the signed appliance-assignment document — the
-// authoritative, vendor-signed instruction that binds a specific appliance to a
-// Tenant + Site. It is the delivery channel that was previously missing: the
-// Platform "assign"/"reassign"/"unassign" actions sign one of these, and the
-// appliance fetches it over mTLS, verifies the signature + its own binding, and
-// persists it as its LOCAL source of truth for tenant/site. A clean appliance
-// has no assignment at all (tenant/site null → awaiting-assignment).
+// Package assignment implements the vendor-signed document that binds an appliance to a tenant and site; the
+// appliance persists it as its local source of truth. A clean appliance has none.
 //
-// Mirror this file on the data-plane side; the signed byte layout MUST match
-// exactly (same signView field order + JSON tags), or verification fails.
+// Mirrored in data-plane: the signed byte layout (signView field order and JSON tags) must match exactly.
 package assignment
 
 import (
@@ -19,9 +13,8 @@ import (
 	"time"
 )
 
-// States a signed assignment can carry. Ownership only ever CHANGES through one
-// of these, delivered in a newer, validly-signed document. An expired, missing or
-// unreachable Central response must never implicitly unassign an appliance.
+// Ownership changes only through a newer, validly signed document; an expired, missing or unreachable Central
+// response must never implicitly unassign an appliance.
 const (
 	StateAssigned       = "assigned"       // bound to tenant+site, operational
 	StateReassigned     = "reassigned"     // moved to a different tenant+site (still owning)
@@ -30,34 +23,26 @@ const (
 	StateDecommissioned = "decommissioned" // retired for good; tenant/site cleared
 )
 
-// Grants reports whether a document CONFERS ownership (a tenant/site the
-// appliance should operate as). Only these states carry tenant/site.
+// Grants reports whether a state confers ownership; only these states carry tenant/site.
 func Grants(state string) bool {
 	return state == StateAssigned || state == StateReassigned
 }
 
-// Clears reports whether a document explicitly REMOVES ownership. Only an
-// explicit, signed, newer document may do this.
+// Clears reports whether a state removes ownership; only an explicit, signed, newer document may.
 func Clears(state string) bool {
 	return state == StateUnassigned || state == StateRevoked || state == StateDecommissioned
 }
 
 func knownState(s string) bool { return Grants(s) || Clears(s) }
 
-// IsExpired reports whether the document is past its expires_at.
-//
-// Expiry is a STALENESS signal, never a de-authorisation. The signed assignment
-// is durable CONFIGURATION, not a short-lived auth token: a hotel must keep
-// serving guests through a Central outage. Passing expires_at therefore does not
-// clear tenant/site or return the appliance to awaiting-assignment — it only
-// marks the assignment stale so operators can see refresh has not succeeded.
+// IsExpired reports whether the document is past its expires_at. Expiry is a staleness signal, never a
+// de-authorisation: the assignment is durable configuration and a hotel must keep serving through a Central outage.
 func IsExpired(d *Document, now time.Time) bool {
 	return d != nil && d.ExpiresAt != 0 && now.Unix() > d.ExpiresAt
 }
 
-// Document is the vendor-signed assignment envelope. Version is monotonic per
-// appliance: the edge accepts only a version STRICTLY GREATER than the one it
-// has already applied, which defeats replay of a superseded assignment.
+// Document is the signed envelope. Version is monotonic per appliance: the edge accepts only a strictly greater
+// one, defeating replay of a superseded assignment.
 type Document struct {
 	AssignmentID   string `json:"assignment_id"`
 	ApplianceID    string `json:"appliance_id"`
@@ -73,15 +58,12 @@ type Document struct {
 	ExpiresAt      int64  `json:"expires_at"` // 0 = no expiry (revision-governed)
 	SignerKeyID    string `json:"signer_key_id"`
 	Signature      string `json:"signature"`
-	// SiteType is descriptive site metadata owned by Central (HOTEL, CAFE, …).
-	// It authorises nothing. It is the LAST signed field and omitempty, so a
-	// document without it signs byte-identically to the pre-site-type layout.
-	// Unknown values are carried as-is (forward compatibility).
+	// SiteType is descriptive only and authorises nothing. It is the last signed field and omitempty, so a document
+	// without it signs byte-identically. Unknown values are carried as-is.
 	SiteType string `json:"site_type,omitempty"`
 }
 
-// signView is the signature-free canonical projection. Field ORDER and JSON
-// tags here are the wire contract — do not reorder.
+// signView is the signed projection; field order and JSON tags are the wire contract — do not reorder.
 type signView struct {
 	AssignmentID   string `json:"assignment_id"`
 	ApplianceID    string `json:"appliance_id"`
@@ -108,20 +90,17 @@ func signingBytes(d *Document) []byte {
 	return b
 }
 
-// KeyID is the short fingerprint of the signing public key.
 func KeyID(pub ed25519.PublicKey) string {
 	s := sha256.Sum256(pub)
 	return fmt.Sprintf("%x", s[:8])
 }
 
-// Sign fills SignerKeyID + Signature with the vendor key.
 func Sign(priv ed25519.PrivateKey, d *Document) {
 	d.SignerKeyID = KeyID(priv.Public().(ed25519.PublicKey))
 	sig := ed25519.Sign(priv, signingBytes(d))
 	d.Signature = base64.StdEncoding.EncodeToString(sig)
 }
 
-// Verify checks the signature only.
 func Verify(pub ed25519.PublicKey, d *Document) bool {
 	sig, err := base64.StdEncoding.DecodeString(d.Signature)
 	if err != nil {
@@ -130,13 +109,9 @@ func Verify(pub ed25519.PublicKey, d *Document) bool {
 	return ed25519.Verify(pub, signingBytes(d), sig)
 }
 
-// AcceptFor validates an assignment against THIS appliance's identity and its
-// currently-applied version. Returns "" if acceptable, else a rejection reason.
-// haveVersion is the version already persisted (0 if none).
-//
-// NOTE: expiry is deliberately NOT a rejection. The assignment is durable
-// configuration; a stale document keeps the hotel running (see IsExpired). Only a
-// bad signature, wrong binding, unknown state or a non-newer version rejects.
+// AcceptFor returns "" if the assignment is acceptable for this appliance, else a rejection reason; haveVersion
+// is the version already persisted (0 if none). Expiry is deliberately not a rejection (see IsExpired); only a bad
+// signature, wrong binding, unknown state or a non-newer version rejects.
 func AcceptFor(pub ed25519.PublicKey, d *Document, applianceID, serial, identityFpr string, haveVersion int64, now time.Time) string {
 	if !Verify(pub, d) {
 		return "signature invalid (modified or unknown signer)"

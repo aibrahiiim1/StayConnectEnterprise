@@ -1,21 +1,13 @@
 package main
 
-// THE WORDS THE PORTAL AUDIT FOUND MISSING (audit P-5, P-7, P-8, P-14, P-20, P-23, P-26).
-//
-// Server sentences that reached a guest in English whatever their language ("Please sign in.", "We couldn't
-// detect your device…", "…wait a moment…", the free-used sentence, the post-stay PIN sentence), and the words of
-// the pages and buttons this remediation adds. They join the one dictionary at start-up like pageStrings, and
-// every sentence a handler composes is registered in serverMessageKeys so localise() shows it translated.
+// Server sentences that reached guests in English whatever their language, plus words of the pages added by the portal audit; every handler-composed sentence is registered in serverMessageKeys so localise() translates it.
 
-// The sentences the handlers compose. The English of each key is the sentence itself.
 const (
 	msgPleaseSignIn          = "Please sign in."
 	msgCannotDetectDevice    = "We couldn't detect your device. Please reconnect to the Wi-Fi and try again."
 	msgTooManyAttemptsMoment = "Too many attempts. Please wait a moment and try again."
 	msgFreeUsedNothingElse   = "You've used your free access here, and no other package is available for you right now. Please contact the site team."
-	// The device-limit sentences for the paths that cannot offer the replacement page (contract
-	// ONEGATE_DEVICE_MANAGEMENT §1: signing out does not free a place, so "disconnect another device" was advice
-	// that could not work; the way to free one is "Your devices" on a device that is online, or the site team).
+	// Device-limit sentences for paths that cannot offer the replacement page: signing out does not free a place, so the way is "Your devices" on an online device or the site team.
 	msgVoucherDevices = "Every device place on this voucher is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 	msgAccountDevices = "Every device place on this account is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 )

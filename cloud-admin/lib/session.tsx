@@ -1,9 +1,6 @@
 "use client";
 
-// THE SIGNED-IN OPERATOR, for every screen. Built from GET /v1/auth/whoami by the app shell, which re-reads it
-// every 30 seconds, so a role changed mid-session reaches the screens without a reload. There is no customer
-// selector: a platform operator sees the fleet and drills into a customer; a customer user is scoped by the
-// server to their own customer.
+// The server scopes customer users; periodic whoami refreshes apply role changes without reloading.
 
 import { createContext, useContext, useMemo } from "react";
 import type { Whoami } from "./api";

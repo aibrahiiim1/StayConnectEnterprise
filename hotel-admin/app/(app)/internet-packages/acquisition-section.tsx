@@ -1,16 +1,8 @@
 "use client";
 
-// PRICE AND HOW CLIENTS GET IT — one section of the package form.
-//
-// A package has a price (0 is Free) and the ways a client may acquire it: Free, Voucher, Card payment, Room
-// charge. Free and Voucher are the core product. A price above zero, Card payment and Room charge each belong
-// to a module. A module the site is NOT LICENSED for is not shown at all -- a café does not see Room charge,
-// and a site without Paid access sees no price -- unless the package already uses it, so it stays removable.
-// A licensed module that is switched off or not ready is shown disabled with the reason, because that one the
-// operator can act on.
-//
-// The section is controlled: the form owns the value and validates it with buildAcquisition on save. The
-// server stays authoritative and re-checks every rule, the module state included.
+// A price above zero, Card payment and Room charge each belong to a module. An unlicensed module is hidden
+// unless the package already uses it (so it stays removable); a licensed but switched-off or not-ready one is
+// shown disabled with the reason. The form owns the value; the server re-checks every rule.
 
 import { useId } from "react";
 import { Trash2, Plus } from "lucide-react";
@@ -46,12 +38,10 @@ export function AcquisitionSection({
   const paid = isPaidPrice(value.price, value.currency, value.currency_exponent);
   const exponent = currencyExponent(value.currency, value.currency_exponent);
   const paidAccess = moduleAvailability(PAID_ACCESS_MODULE, modules);
-  // The price appears only where charging exists: Paid access licensed, or a package that already has a price.
   const showPrice = moduleLicensedIn(PAID_ACCESS_MODULE, modules) || paid;
   const set = (patch: Partial<AcquisitionForm>) => onChange({ ...value, ...patch });
 
-  // A currency this build does not list stays selectable when the package already uses it; otherwise saving
-  // an unrelated change would silently move the package to another currency.
+  // A currency this build does not list stays selectable when the package uses it, or saving would silently change it.
   const currencies: string[] = (OFFERED_CURRENCIES as readonly string[]).includes(value.currency)
     ? [...OFFERED_CURRENCIES] : [value.currency, ...OFFERED_CURRENCIES];
 
@@ -62,7 +52,6 @@ export function AcquisitionSection({
 
   function toggle(m: AcquisitionMethod, on: boolean) {
     const methods = on ? [...value.methods.filter((x) => x !== m), m] : value.methods.filter((x) => x !== m);
-    // Ticking Room charge with nothing mapped opens one row to fill in, so the next thing needed is on screen.
     const room_charge = on && m === "PMS_POSTING" && value.room_charge.length === 0
       ? [emptyMapping(firstFreeInterface([]))] : value.room_charge;
     set({ methods, room_charge });
@@ -97,8 +86,7 @@ export function AcquisitionSection({
         </Field>
       </div>}
 
-      {/* A PRICE NEEDS PAID ACCESS. The price input is not locked -- a package that already has one must stay
-          editable -- but the operator is told before saving that the server will refuse it. */}
+      {/* Not locked, so a package that already has a price stays editable; warns the server will refuse it. */}
       {paid && !paidAccess.selectable && (
         <p className="mt-2 text-xs text-warning-subtle-foreground" role="note" data-testid="paid-access-note">
           Charging for a package needs the Paid access module ({paidAccess.reason?.toLowerCase()}). Saving a price
@@ -117,13 +105,11 @@ export function AcquisitionSection({
           {ACQUISITION_METHODS.filter((m) => methodShown(m, modules, value.methods.includes(m))).map((m) => {
             const checked = value.methods.includes(m);
             const avail = methodAvailability(m, modules);
-            // The price decides which methods can apply at all, independently of any module.
             const priceBlock = m === "NOT_REQUIRED" && paid ? "Not for a package with a price"
               : (m === "ONLINE_PAYMENT" || m === "PMS_POSTING") && !paid ? "Needs a price above 0"
               : undefined;
             const why = !avail.selectable ? avail.reason : priceBlock;
-            // Unticking is always allowed: an option that is on and no longer usable must be removable, or the
-            // package could never be saved again.
+            // Unticking is always allowed, or a no-longer-usable option would block saving.
             const disabled = !checked && !!why;
             return (
               <div key={m} data-testid={`method-${m}`}>
@@ -146,9 +132,8 @@ export function AcquisitionSection({
         </div>
       </fieldset>
 
-      {/* ROOM CHARGE: which posting code the charge lands on, per PMS interface. One row per interface; a
-          client is only offered room charge through an interface that has a row here, is approved for room
-          charge, and posts in the package's currency (there is no currency conversion). */}
+      {/* A client is offered room charge only through an interface with a row here that is approved and posts
+          in the package's currency (no conversion). */}
       {roomOn && (
         <div className="mt-3" role="group" aria-labelledby={mappingsHeadingID} data-testid="room-charge-mappings">
           <RoomChargeLiveNotice className="mb-2" />
@@ -185,7 +170,7 @@ export function AcquisitionSection({
                     className="h-9 w-auto shrink-0 ps-2.5" value={r.pms_interface_id}
                     onChange={(e) => setRow(i, { pms_interface_id: e.target.value })}>
                     <option value="">Choose a PMS interface…</option>
-                    {/* A saved mapping whose interface is not in the list is kept, not silently dropped. */}
+                    {/* A saved mapping whose interface is not listed is kept. */}
                     {r.pms_interface_id && !iface && <option value={r.pms_interface_id}>{r.pms_interface_id}</option>}
                     {options.map((x) => (
                       <option key={x.pms_interface_id} value={x.pms_interface_id}>

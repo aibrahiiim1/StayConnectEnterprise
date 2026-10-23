@@ -32,7 +32,7 @@ function Audit() {
       .catch(() => {});
   }, []);
 
-  // The date input gives a day; the API takes a moment. The day starts at local midnight.
+  // Convert calendar-day input to the local midnight instant expected by the API.
   const since = f.since ? new Date(`${f.since}T00:00:00`).toISOString() : undefined;
 
   return (

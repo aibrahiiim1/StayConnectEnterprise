@@ -17,11 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Adversarial cases for the assisted guest data request (migration 0146): another access on the same device,
-// another person on it, vouchers, range edges, records still in use, a review that changed, two requests at once,
-// roles, a second site, expiry, and the table guards. Each proves a record that is not established as the
-// requester's is neither disclosed nor changed.
-
 func insertSession(t *testing.T, f *apiFixture, ent, dev, ip, startedAgo string, endedAgo string) string {
 	t.Helper()
 	var id string
@@ -69,14 +64,10 @@ func asstRows(t *testing.T, f *apiFixture, q string, args ...any) string {
 	return gdStr(t, f, q, args...)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Another reservation on the same address: nothing about that address is established as the requester's.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_AnAddressAlsoUsedUnderAnotherReservationIsNeverSelectable(t *testing.T) {
 	f := newAPI(t)
 	a := seedAsstRoom(t, f, "AS5A", asstMACs("3c:22:fb:50:00", 1), "10.90.5")
 	b := seedAsstRoom(t, f, "AS5B", asstMACs("3c:22:fb:51:00", 1), "10.90.6")
-	// The same phone appears under the other room too.
 	otherSess := onDevice(t, f, b.room, a.devs[0], "10.90.6.99", "PMS", false)
 
 	id, ref := asstOpen(t, f, asstDefaults("ACCESS", a.macs, a.anchor()))
@@ -101,7 +92,6 @@ func TestIntegration_Assisted_AnAddressAlsoUsedUnderAnotherReservationIsNeverSel
 			t.Errorf("export of a conflicting record = %d %s", st, raw)
 		}
 	}
-	// An erasure request fares no better, and changes nothing.
 	eid, eref := asstOpen(t, f, asstDefaults("ERASURE", a.macs, a.anchor()))
 	erv := asstReviewOf(t, f, eid)
 	if st, raw := asstAct(f, t, "erase", eid, erv, eref, []map[string]any{sel("session", a.sess[0]), sel("session", otherSess)}); st != 409 {
@@ -135,7 +125,6 @@ func TestIntegration_Assisted_AReturningGuestStatesBothReservations(t *testing.T
 	if st, raw := asstAct(f, t, "export", id2, rv, ref2, rv.selectable()); st != 200 || !strings.Contains(raw, "10.90.7.50") {
 		t.Errorf("export = %d %s", st, raw)
 	}
-	// Two reservations from two PMS interfaces are two requests.
 	c := seedAsstRoom(t, f, "AS6C", asstMACs("3c:22:fb:61:00", 1), "10.90.8")
 	o := asstDefaults("ACCESS", a.macs, append(a.anchor(), c.anchor()...))
 	if st, body := f.do(t, "POST", "/guest-data-rights/assisted", o.body()); st != 400 || !strings.Contains(fmt.Sprint(body["message"]), "PMS interfaces") {
@@ -149,7 +138,6 @@ func TestIntegration_Assisted_ARoomMoveAcrossInterfacesKeepsTheSameContext(t *te
 	a := seedAsstRoom(t, f, "AS7A", asstMACs("3c:22:fb:70:00", 1), "10.90.9")
 	b := seedAsstRoom(t, f, "AS7B", nil, "10.90.10")
 	sessB := onDevice(t, f, b.room, a.devs[0], "10.90.10.7", "PMS", false)
-	// Unlinked, the second room is another reservation's.
 	id1, _ := asstOpen(t, f, asstDefaults("ACCESS", a.macs, a.anchor()))
 	if got := asstReviewOf(t, f, id1).selectable(); len(got) != 0 {
 		t.Fatalf("an unlinked second reservation on the address: %v", got)
@@ -164,9 +152,6 @@ func TestIntegration_Assisted_ARoomMoveAcrossInterfacesKeepsTheSameContext(t *te
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Another person on the device, vouchers, and the requester's own account.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_AnotherPersonOnTheDeviceIsAConflict(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -273,9 +258,6 @@ func TestIntegration_Assisted_TheRequestersOwnAccountNeedsNoStatements(t *testin
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// The event records tied to an address: sign-in attempts, verification access, restrictions, redirects.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_EventsTiedToTheAddressAreClassifiedOneByOne(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -393,13 +375,9 @@ func TestIntegration_Assisted_EventsTiedToTheAddressAreClassifiedOneByOne(t *tes
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Range edges, and records still in use.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_ARecordOutsideTheRangeIsNeverTouched(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS11", asstMACs("3c:22:fb:c0:00", 1), "10.90.16")
-	// A session that began before the range and ended inside it.
 	early := insertSession(t, f, r.room, r.devs[0], "10.90.16.50", "7 days", "5 days")
 	id, ref := asstOpen(t, f, asstDefaults("ERASURE", r.macs, r.anchor()))
 	rv := asstReviewOf(t, f, id)
@@ -485,9 +463,6 @@ func TestIntegration_Assisted_RecentAndLiveRecordsAreNotErasedButMayBeHandedOver
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// What staff reviewed is what happens.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_ARecordThatAppearedAfterTheReviewStopsTheErasure(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS13", asstMACs("3c:22:fb:e0:00", 1), "10.90.18")
@@ -511,7 +486,6 @@ func TestIntegration_Assisted_ARecordThatAppearedAfterTheReviewStopsTheErasure(t
 	if got := asstStatus(t, f, id)["status"]; got != "OPEN" {
 		t.Errorf("a refused erasure must leave the request open: %v", got)
 	}
-	// A fresh review now shows the conflict.
 	if c := asstReviewOf(t, f, id).find("session", r.sess[0]); c == nil || c.Class != "CONFLICTING" {
 		t.Errorf("the fresh review = %+v", c)
 	}
@@ -538,9 +512,6 @@ func TestIntegration_Assisted_ADeviceIsNotSelectableWithoutItsRecords(t *testing
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Two at once.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_TwoErasuresAtOnceRunOnce(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS15", asstMACs("3c:22:fb:15:00", 1), "10.90.21")
@@ -579,9 +550,6 @@ func TestIntegration_Assisted_TwoErasuresAtOnceRunOnce(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Roles, input, naming nobody.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_OnlyTheDataRightsRolesAndOnlyValidRequests(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS16", asstMACs("3c:22:fb:16:00", 1), "10.90.22")
@@ -622,12 +590,10 @@ func TestIntegration_Assisted_OnlyTheDataRightsRolesAndOnlyValidRequests(t *test
 			t.Errorf("%s: status %d %v, want 400", name, st, body)
 		}
 	}
-	// An anchor that is not on this site is not found.
 	o := asstDefaults("ACCESS", r.macs, []map[string]any{{"kind": "stay", "id": "00000000-0000-4000-8000-000000000000"}})
 	if st, _ := f.do(t, "POST", "/guest-data-rights/assisted", o.body()); st != 404 {
 		t.Errorf("an anchor that does not exist = %d, want 404", st)
 	}
-	// A request that does not exist.
 	if st, _ := f.do(t, "GET", "/guest-data-rights/assisted/00000000-0000-4000-8000-000000000000", nil); st != 404 {
 		t.Errorf("a request that does not exist = %d", st)
 	}
@@ -662,7 +628,6 @@ func TestIntegration_Assisted_AnotherSiteSeesNothingOfThisOne(t *testing.T) {
 	if rv := asstReviewOf(t, g, gid); len(rv.Records) != 0 {
 		t.Errorf("another site's review of this site's address holds %d records", len(rv.Records))
 	}
-	// And each site lists only its own.
 	st, body := g.do(t, "GET", "/guest-data-rights/assisted", nil)
 	if list, _ := body["requests"].([]any); st != 200 || len(list) != 1 {
 		t.Errorf("another site's list = %d %v", st, body)
@@ -670,9 +635,6 @@ func TestIntegration_Assisted_AnotherSiteSeesNothingOfThisOne(t *testing.T) {
 	_ = ref
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Expiry, the table guards, and the runtime role.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_AStaleRequestExpiresAndIsScrubbed(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS18", asstMACs("3c:22:fb:18:00", 1), "10.90.25")
@@ -759,7 +721,6 @@ func TestIntegration_Assisted_TheRuntimeRoleReachesOnlyTheFunctions(t *testing.T
 			t.Errorf("svc_edged cannot run %q: %v", q, err)
 		}
 	}
-	// Through the wrappers the whole workflow works under the runtime role.
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS20", asstMACs("3c:22:fb:20:20", 1), "10.90.27")
 	// ACCESS, then ERASURE, end to end as the runtime role: open, review, hand over, close; open, review, anonymise.
@@ -803,9 +764,6 @@ func TestIntegration_Assisted_TheRuntimeRoleReachesOnlyTheFunctions(t *testing.T
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// The activity log names the request, never the person.
-// ---------------------------------------------------------------------------------------------------------
 func TestIntegration_Assisted_TheActivityLogNamesNoAddressAndNoPerson(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "AS21", asstMACs("3c:22:fb:21:00", 1), "10.90.28")
@@ -865,7 +823,6 @@ func TestIntegration_Assisted_AStaffIssuedCredentialIsClaimedPhoneByPhone(t *tes
 	if st != 200 || strings.Contains(raw, macs[1]) || strings.Contains(raw, "10.90.30.2") || !strings.Contains(raw, "10.90.30.1") {
 		t.Errorf("hand-over = %d %s", st, raw)
 	}
-	// Without the statements the credential stays shared.
 	o := asstDefaults("ACCESS", macs[:1], []map[string]any{{"kind": "account", "id": acct}})
 	o.soleUse = false
 	id2, _ := asstOpen(t, f, o)

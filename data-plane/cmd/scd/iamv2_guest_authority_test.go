@@ -13,17 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// THE REGRESSION FOR THE AUTHORITY DEFECT.
-//
-// The defect was not that IAM-v2 was broken -- it was that IAM-v2 being ENABLED changed nothing. The flags
-// were read, the Authenticator was constructed, and /v1/sessions/authorize went on calling the legacy
-// voucher pipeline and writing public.sessions while iam_v2 stayed at zero rows.
-//
-// So the property under test is deliberately NOT "IAM-v2 works". It is: when the flag is on, the legacy
-// pipeline is NOT REACHED. That is what a future regression would break, and it is checkable without a
-// database, because reaching legacy means touching s.vou / s.sess -- both nil in this fixture, which would
-// panic. A test that needed a live DB would be skipped in CI and would have caught nothing, which is
-// exactly how the original defect survived.
+// When the flag is on the legacy pipeline must NOT be reached. Checkable without a database: reaching legacy touches s.vou/s.sess, both nil here.
 
 func enabledCfg(m iamv2.Method) iamv2.Config {
 	return iamv2.Config{MasterEnabled: true, Methods: map[iamv2.Method]bool{m: true}}
@@ -32,15 +22,12 @@ func enabledCfg(m iamv2.Method) iamv2.Config {
 // A server with NO legacy dependencies. Any fall-through to legacy dereferences a nil and fails loudly.
 func authoritySrv(t *testing.T, cfg iamv2.Config) *server {
 	t.Helper()
-	// A non-required license manager: unlicensed DEV mode still allows new sessions, which is what lets
-	// this test reach the authority switch. The license gate runs BEFORE the switch by design (an
-	// unlicensed appliance must not authorize anyone regardless of which IAM owns the decision).
+	// A non-required licence manager lets unlicensed DEV mode reach the authority switch; the licence gate runs BEFORE the switch by design.
 	return &server{
 		lic:      licstate.New(nil, "11111111-1111-4111-8111-111111111111", "", "", false),
 		iamv2Cfg: cfg,
 		tenID:    "11111111-1111-4111-8111-111111111111",
 		siteID:   "22222222-2222-4222-8222-222222222222",
-		// Hotel Admin has both methods switched on; this test is about which authority serves them.
 		methodSwitches: func(context.Context) (*tenantcfg.AuthMethods, error) {
 			on := &tenantcfg.AuthMethod{Enabled: true}
 			return &tenantcfg.AuthMethods{Voucher: on, GuestAccount: on}, nil
@@ -57,7 +44,6 @@ func postJSON(t *testing.T, h http.HandlerFunc, body any) *httptest.ResponseReco
 	return rec
 }
 
-// With VOUCHER enabled, the voucher entry point must not reach the legacy voucher/session pipeline.
 func TestVoucherEntryPointDoesNotFallBackToLegacyWhenIAMv2Enabled(t *testing.T) {
 	s := authoritySrv(t, enabledCfg(iamv2.MethodVoucher))
 	defer func() {
@@ -69,15 +55,13 @@ func TestVoucherEntryPointDoesNotFallBackToLegacyWhenIAMv2Enabled(t *testing.T) 
 	rec := postJSON(t, s.authorize, map[string]string{
 		"ip": "10.77.0.51", "mac": "02:de:00:00:00:01", "voucher": "ANYCODE",
 	})
-	// It must refuse rather than serve: with no guest network resolvable (nil db) IAM-v2 cannot place the
-	// device, and refusing is the required behaviour. What it must never do is fall through and succeed.
+	// Must refuse, never fall through and succeed: with no resolvable guest network IAM-v2 cannot place the device.
 	if rec.Code == http.StatusOK {
 		t.Fatalf("enabled VOUCHER returned 200 without IAM-v2 state; body=%s", rec.Body.String())
 	}
 	assertIAMv2Authority(t, rec)
 }
 
-// Same contract for ACCOUNT.
 func TestAccountEntryPointDoesNotFallBackToLegacyWhenIAMv2Enabled(t *testing.T) {
 	s := authoritySrv(t, enabledCfg(iamv2.MethodAccount))
 	defer func() {
@@ -95,8 +79,7 @@ func TestAccountEntryPointDoesNotFallBackToLegacyWhenIAMv2Enabled(t *testing.T) 
 	assertIAMv2Authority(t, rec)
 }
 
-// Every refusal on an enabled method must name iam_v2 as the authority. Without this an operator reading a
-// 403 cannot tell whether IAM-v2 refused or legacy did -- which is the ambiguity that hid the defect.
+// Every refusal on an enabled method names iam_v2 as the authority, so an operator can tell who refused.
 func assertIAMv2Authority(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	var body map[string]any
@@ -108,15 +91,7 @@ func assertIAMv2Authority(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 }
 
-// THE OTHER HALF OF THE CONTRACT, INVERTED BY THE ZERO-LEGACY BASELINE.
-//
-// This used to assert that a DISABLED method still reached the legacy pipeline -- that the switch was inert
-// when IAM-v2 was not the configured authority. That contract is deliberately gone: there is no legacy
-// pipeline to reach. The entry point now serves IAM-v2 unconditionally, so the assertion is inverted rather
-// than deleted, because "there is no longer anywhere else to go" is the property worth pinning.
-//
-// The nil legacy dependency that the old test relied on to panic is the proof: if any legacy path survived
-// under a disabled method, this would panic instead of answering.
+// A disabled method has no legacy pipeline to reach; the nil legacy dependencies would panic if one survived.
 func TestDisabledMethodNoLongerReachesAnyLegacyPath(t *testing.T) {
 	s := authoritySrv(t, iamv2.Config{MasterEnabled: false, Methods: map[iamv2.Method]bool{}})
 	panicked := func() (p bool) {
@@ -139,7 +114,6 @@ func TestDisabledMethodNoLongerReachesAnyLegacyPath(t *testing.T) {
 	}
 }
 
-// The switch must read the same config the Authenticator was gated on.
 func TestAuthoritySwitchTracksMethodConfig(t *testing.T) {
 	on := authoritySrv(t, enabledCfg(iamv2.MethodVoucher))
 	if !on.iamv2MethodEnabled(iamv2.MethodVoucher) {

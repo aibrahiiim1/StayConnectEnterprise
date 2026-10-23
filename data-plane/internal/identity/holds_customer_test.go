@@ -22,9 +22,7 @@ func captureRegistration(body *[]byte, token *string) *fakeCentral {
 	}}
 }
 
-// The registration token signs the method, the path and the SHA-256 of the body, so holds_customer_id in the
-// body is covered by the identity key's signature: it cannot be stripped or edited without Central refusing
-// the signature.
+// The token signs the body's SHA-256, so holds_customer_id cannot be stripped or edited without breaking the signature.
 func assertBodySigned(t *testing.T, s *Store, body []byte, token string) {
 	t.Helper()
 	parts := strings.Split(token, ".")
@@ -84,8 +82,7 @@ func TestFactoryCleanRegistrationOmitsTheHeldCustomer(t *testing.T) {
 	}
 }
 
-// An appliance that cannot tell what it holds -- or holds more than one customer -- does not register at all:
-// presenting itself as clean is exactly what this field exists to prevent.
+// An appliance that cannot tell what it holds, or holds more than one customer, must not register as clean.
 func TestRegisterRefusedWhenHeldCustomerCannotBeRead(t *testing.T) {
 	s := &Store{Dir: t.TempDir(), HeldCustomer: func(context.Context) (string, error) {
 		return "", errors.New("database unavailable")

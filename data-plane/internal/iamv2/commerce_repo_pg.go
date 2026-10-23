@@ -17,8 +17,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// unmarshalNumberAware decodes JSON preserving numeric literals as json.Number so grant validation can
-// reject non-integer (float) values (e.g. 5.5) rather than silently coercing them.
+// unmarshalNumberAware keeps numbers as json.Number so grant validation can reject floats (e.g. 5.5) instead
+// of coercing them.
 func unmarshalNumberAware(b []byte) map[string]any {
 	m := map[string]any{}
 	if len(b) == 0 {
@@ -30,26 +30,20 @@ func unmarshalNumberAware(b []byte) map[string]any {
 	return m
 }
 
-// PgCommerceRepository is the production/scratch Phase-2 commerce repository over iam_v2. It is
-// constructed only when the Phase-2 master flag is ON; while dark the engine holds a nil repository.
 type PgCommerceRepository struct{ db *pgxpool.Pool }
 
-// NewPgCommerceRepository builds the repository over a pool.
 func NewPgCommerceRepository(db *pgxpool.Pool) *PgCommerceRepository {
 	return &PgCommerceRepository{db: db}
 }
 
-// WithTx runs fn in a single serializable-enough READ COMMITTED transaction with row locks; commit on
-// success, rollback on any error (zero partial rows).
 func (r *PgCommerceRepository) WithTx(ctx context.Context, fn func(CommerceTx) error) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	// Phase-2 Commerce writes across three capability-scoped Phase-3 families: it consumes an Auth Context,
-	// writes the Quote/Purchase pair, and terminates the superseded Entitlement through the controlled
-	// operation. The scopes are declared on the transaction because that is where they are read.
+	// Writes span three capability-scoped families (auth context, quote/purchase, entitlement termination);
+	// scopes are declared on the transaction because that is where they are read.
 	for _, cap := range []string{
 		writerguard.CapAuthContext, writerguard.CapCommerceIntent, writerguard.CapDeviceAuth,
 	} {
@@ -65,8 +59,6 @@ func (r *PgCommerceRepository) WithTx(ctx context.Context, fn func(CommerceTx) e
 
 type pgCommerceTx struct{ tx pgx.Tx }
 
-// subjectCols maps a subject to the iam_v2 (voucher_id, guest_account_id, guest_principal_id) triple
-// used by auth_contexts / entitlements (exactly one non-null).
 func subjectCols(s CommerceSubject) (voucher, account, principal *string) {
 	switch s.Kind {
 	case SubjectVoucher:
@@ -137,7 +129,7 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 	var display, duration []byte
 	var settlement []string
 	var cexp *int
-	var cur *string // NULL for a system grace package; see ListActivePackageRevisions
+	var cur *string
 	err := t.tx.QueryRow(ctx,
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
@@ -171,9 +163,8 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 	return row, nil
 }
 
-// ListActivePackageRevisions returns the current revision of every ACTIVE package for the tenant/site.
-// The guest listing path filters these down to the subject-eligible, free, in-window ones in the domain
-// layer; this query performs no eligibility disclosure of its own.
+// No eligibility disclosure here; the domain layer filters these down to the subject-eligible, free, in-window
+// ones.
 func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID, siteID string) ([]PackageRevisionRow, error) {
 	rows, err := t.tx.Query(ctx,
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
@@ -194,10 +185,8 @@ func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID,
 		var display, duration []byte
 		var settlement []string
 		var cexp *int
-		// CURRENCY IS NULLABLE, and one row always has it NULL: the system emergency-grace package edged
-		// provisions on every site carries no currency. Scanning it into a string failed the whole query, so
-		// every guest -- voucher, account, any method -- was told no packages existed. A NULL currency reads as
-		// "" and the free-package/currency gates exclude that row, as they would any unofferable package.
+		// Currency is nullable: the system emergency-grace package carries none, and scanning it into a string
+		// would fail the whole listing. NULL reads as "" and the currency gates exclude it.
 		var cur *string
 		if err := rows.Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
 			&row.PriceMinor, &cur, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
@@ -251,12 +240,8 @@ func (t *pgCommerceTx) LoadPlanRevision(ctx context.Context, tenantID, siteID, i
 	return row, nil
 }
 
-// VoucherPinnedPackageRevision reads the revision the card was printed against.
-//
-// It returns ("", nil) when the voucher does not belong to this owner, so the caller treats an unknown
-// voucher as "grants nothing" rather than as a repository failure -- the same shape every other
-// eligibility gate in this package uses, and the safe direction: an unresolvable card offers no package
-// instead of offering all of them.
+// Returns ("", nil) for a voucher that does not belong to this owner, so an unresolvable card offers no
+// package rather than all of them.
 func (t *pgCommerceTx) VoucherPinnedPackageRevision(ctx context.Context, tenantID, siteID, voucherID string) (string, error) {
 	var rev string
 	err := t.tx.QueryRow(ctx, `
@@ -272,9 +257,8 @@ func (t *pgCommerceTx) VoucherPinnedPackageRevision(ctx context.Context, tenantI
 	return rev, nil
 }
 
-// GuestNetworkAncestors reads the lineage view. SELECT on iam_v2.guest_network_lineage only -- not on the
-// replacement table behind it, which carries the operator, the reason and the staged addressing that no guest
-// path has any business reading.
+// SELECT on iam_v2.guest_network_lineage only; the replacement table behind it holds operator, reason and
+// addressing no guest path may read.
 func (t *pgCommerceTx) GuestNetworkAncestors(ctx context.Context, tenantID, siteID, guestNetworkID string) ([]string, error) {
 	if strings.TrimSpace(guestNetworkID) == "" {
 		return nil, nil
@@ -339,15 +323,10 @@ func (t *pgCommerceTx) LoadGrantTiers(ctx context.Context, packageRevisionID str
 }
 
 func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID string, q PriorPurchaseQuery) (bool, error) {
-	// KEYED ON THE PACKAGE, NOT THE REVISION. A republish (a wording change, a plan repin) used to hand every
-	// Client a fresh free allowance because the history was looked up by revision id. The package is what the
-	// operator means by "this package"; its revisions are its history.
-	//
-	// AN ANONYMOUS SUBJECT IS NEW EVERY TIME A DEVICE HAS NO LIVE ACCESS, so its history is the DEVICE's own,
-	// through purchase -> auth context -> device (open selection, contract 6.5). For an identified Client the
-	// subject's own history counts, and -- when the policy says so -- the device's too, so a second email on
-	// the same phone is not a second free allowance. The device is never the subject.
-	// The window is measured from the grant (activated_at); a grant still pending counts as now.
+	// Keyed on the package, not the revision: a republish must not hand every Client a fresh free allowance.
+	// An anonymous subject is new every time a device has no live access, so its history is the device's own
+	// (purchase -> auth context -> device). An identified Client's own history counts, plus the device's when
+	// the policy says so. The window runs from activated_at; a pending grant counts as now.
 	var since *time.Time
 	if q.Policy.WithinHours > 0 {
 		s := time.Now().Add(-time.Duration(q.Policy.WithinHours) * time.Hour)
@@ -373,17 +352,14 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID st
 	if useDevice {
 		dev = nullable(q.Subject.DeviceID)
 	}
-	// ONE STATEMENT, every parameter referenced. The device branch used to be left out of the text when the
-	// policy did not count the device, which left $7 unreferenced -- and PostgreSQL refuses a statement with a
-	// parameter whose type it cannot determine (42P18), so every package whose free-access rule had the device
-	// switch OFF failed the listing outright. A NULL device simply never matches.
+	// One statement with every parameter referenced: PostgreSQL refuses a statement with an unreferenced
+	// parameter of undeterminable type (42P18). A NULL device never matches.
 	sql := `SELECT EXISTS(` + bySubject + `) OR EXISTS(` + byDevice + `)`
 	var exists bool
 	err := t.tx.QueryRow(ctx, sql, tenantID, siteID, q.PackageID, v, a, p, dev, since).Scan(&exists)
 	return exists, err
 }
 
-// nullable maps "" to SQL NULL.
 func nullable(s string) *string {
 	if s == "" {
 		return nil
@@ -391,8 +367,8 @@ func nullable(s string) *string {
 	return &s
 }
 
-// LoadPackageRevisionByID resolves one revision by id -- current or not, package active or not. It is the
-// voucher path: a card is honoured against the immutable revision it was printed for.
+// Resolves a revision by id, current or not: a voucher is honoured against the immutable revision it was
+// printed for.
 func (t *pgCommerceTx) LoadPackageRevisionByID(ctx context.Context, tenantID, siteID, revID string) (PackageRevisionRow, error) {
 	var row PackageRevisionRow
 	var display, duration []byte
@@ -432,7 +408,6 @@ func (t *pgCommerceTx) LoadPackageRevisionByID(ctx context.Context, tenantID, si
 	return row, nil
 }
 
-// InsertPurchaseAs writes a purchase with an explicit trigger and first state.
 func (t *pgCommerceTx) InsertPurchaseAs(ctx context.Context, p PurchaseSpec, trigger, state string) (string, error) {
 	var id string
 	err := t.tx.QueryRow(ctx,
@@ -444,8 +419,8 @@ func (t *pgCommerceTx) InsertPurchaseAs(ctx context.Context, p PurchaseSpec, tri
 	return id, err
 }
 
-// InsertSettlementAs writes a settlement with an explicit method and first status. The database birth rule
-// (migration 0095) refuses any incoherent pair, including a PREPAID settlement that is not a voucher's.
+// The database birth rule (migration 0095) refuses incoherent pairs, including a PREPAID settlement that is
+// not a voucher's.
 func (t *pgCommerceTx) InsertSettlementAs(ctx context.Context, tenantID, siteID, purchaseID, method, status string) (string, error) {
 	var id string
 	err := t.tx.QueryRow(ctx,
@@ -454,8 +429,6 @@ func (t *pgCommerceTx) InsertSettlementAs(ctx context.Context, tenantID, siteID,
 	return id, err
 }
 
-// GrantVoucherEntitlement calls the voucher grant entry point, which re-resolves its own evidence and burns
-// the voucher inside the kernel.
 func (t *pgCommerceTx) GrantVoucherEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
 	var eid string
 	var superseded *string
@@ -474,8 +447,6 @@ func (t *pgCommerceTx) GrantVoucherEntitlement(ctx context.Context, tenantID, si
 
 func (t *pgCommerceTx) InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error) {
 	var id string
-	// pms_interface_id / settlement_mapping_id / tax_* are left NULL (free quote); grant_snapshot is the
-	// canonical typed snapshot.
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.offer_quotes
 		   (tenant_id, site_id, auth_context_id, package_revision_id, price_minor, currency, currency_exponent, grant_snapshot, expires_at)
@@ -515,8 +486,8 @@ func (t *pgCommerceTx) LockOfferQuoteForUpdate(ctx context.Context, tenantID, si
 	return row, nil
 }
 
-// AcquireSubjectLock takes a transaction-scoped advisory lock keyed by a deterministic hash of
-// (tenant, site, subject-kind, subject-id) so all confirms for the same subject serialize in one order.
+// Transaction-scoped advisory lock keyed by a deterministic hash of (tenant, site, subject-kind, subject-id),
+// so confirms for one subject serialize in one order.
 func (t *pgCommerceTx) AcquireSubjectLock(ctx context.Context, tenantID, siteID string, subj CommerceSubject) error {
 	id, _ := subj.subjectID()
 	h := fnv.New64a()
@@ -565,29 +536,13 @@ func (t *pgCommerceTx) InsertSettlement(ctx context.Context, tenantID, siteID, p
 	return err
 }
 
-// TerminateLiveEntitlementForSubject ends whatever access a subject currently holds, so a new grant can
-// supersede it.
-//
-// The termination is performed by the controlled writer, NOT by an UPDATE here. Two reasons, and the second
-// is the one that actually bites:
-//
-//	The Entitlement status column is controlled-writer-only. This path used to set it directly, which works
-//	only for as long as the service's database role happens to also own the controlled operations. Under the
-//	dedicated minimum-privilege owners Gate-P introduces, the guard would refuse it — and it would refuse it
-//	at the moment a guest was buying access, not at deploy time.
-//
-//	A raw UPDATE moves the status and writes NO history. An Entitlement that is TERMINATED with nothing in
-//	its transition chain saying when or why is unanswerable afterwards: "was this guest's access ended by an
-//	operator, by checkout, or by another purchase?" has no recorded answer. Routing through the controlled
-//	operation appends the transition as a matter of course.
-//
-// The row is selected FOR UPDATE first so the entitlement cannot be terminated by a concurrent path between
-// the read and the transition — the same lock the controlled operation takes, taken in the same order.
+// Termination goes through the controlled writer, not a raw UPDATE: the status column is controlled-writer-
+// only, and a raw UPDATE records no transition history. The row is locked FOR UPDATE first, in the same order
+// the controlled operation uses.
 func (t *pgCommerceTx) TerminateLiveEntitlementForSubject(ctx context.Context, tenantID, siteID string, subj CommerceSubject) (string, error) {
 	v, a, p := subjectCols(subj)
-	// Locking the live entitlement requires UPDATE privilege, which is exactly what the restricted runtime
-	// role must not hold -- so the SELECT ... FOR UPDATE and the termination both live inside the controlled
-	// function. A NULL result means the subject held nothing, which is ordinary, not an error.
+	// The runtime role holds no UPDATE, so the SELECT ... FOR UPDATE and the termination both live inside the
+	// controlled function. A NULL result means the subject held nothing.
 	var id *string
 	err := t.tx.QueryRow(ctx,
 		`SELECT iam_v2.p4_terminate_live_entitlement_for_subject($1,$2,$3::uuid,$4::uuid,$5::uuid)::text`,
@@ -608,12 +563,8 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 	if e.SupersedesID != "" {
 		supersedes = &e.SupersedesID
 	}
-	// The row and its opening ACTIVE transition are created together by p4_insert_entitlement.
-	//
-	// This is still ONE writer -- this method -- but its statement is now a controlled function rather than
-	// direct DML. That is what lets a restricted runtime role complete a paid grant while holding no INSERT
-	// or UPDATE privilege on entitlements at all: it can call the sanctioned operation and nothing else.
-	// It also keeps the row and its transition inseparable, which is the T0037 defect made structural.
+	// p4_insert_entitlement creates the row and its opening ACTIVE transition together, so the runtime role
+	// needs no INSERT or UPDATE on entitlements.
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`SELECT iam_v2.p4_insert_entitlement($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13::uuid)::text`,
@@ -622,10 +573,8 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 	return id, err
 }
 
-// GrantQuotedEntitlement performs the FREE grant through the shared kernel. There is deliberately no
-// parameter for a subject, a package revision or a policy snapshot: the operation re-resolves all of it
-// from the purchase's own pinned quote and auth context, so a caller cannot substitute anyone else's
-// evidence -- exactly as the paid entry point cannot.
+// No parameter for subject, package revision or policy snapshot: the operation re-resolves them from the
+// purchase's pinned quote and auth context, so a caller cannot substitute evidence.
 func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
 	var eid string
 	var already bool
@@ -637,30 +586,10 @@ func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, sit
 	if err != nil {
 		return "", "", err
 	}
-	// SINGLE-USE IS ENFORCED INSIDE p4_entitlement_grant_kernel, NOT HERE.
-	//
-	// It used to be this statement:
-	//
-	//     UPDATE iam_v2.vouchers v SET state = 'REDEEMED' FROM iam_v2.entitlements e
-	//      WHERE e.id = $1 AND v.id = e.voucher_id AND ... AND v.state = 'UNUSED'
-	//
-	// and it could never have run. This transaction is svc_scd, and svc_scd holds SELECT and INSERT on
-	// iam_v2.vouchers and NOT UPDATE -- read off PRE-LIVE, and declined on purpose by
-	// deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql:225-228, which says redemption is a write "the
-	// accepted domain performs through its own guarded paths". So the statement raised permission denied,
-	// and because it shared this transaction with the grant it took the grant down with it: not a voucher
-	// redeemed twice, but a voucher that could not be redeemed once. Nothing met it because the portal
-	// commerce surface is dark, so nothing reaches this function.
-	//
-	// Migration 0084 moves the burn into the SECURITY DEFINER kernel the call above enters. That kernel is
-	// owned by iam_v2_owner, which does hold UPDATE; it is the one kernel BOTH the free and the paid grant
-	// paths funnel through, so the paid path is now covered too, which this statement never was; and it
-	// already holds the per-subject advisory lock, so the burn serializes against concurrent grants without
-	// a second locking scheme. svc_scd gained no privilege -- the fix removed the need for one.
-	//
-	// A fresh grant against a voucher that is not UNUSED now raises VOUCHER_NOT_REDEEMABLE from the kernel
-	// and arrives here as an error from the call above. An idempotent retry returns already_granted before
-	// the burn is reached, so it is unaffected.
+	// Single use is enforced inside p4_entitlement_grant_kernel, not here: svc_scd has no UPDATE on
+	// iam_v2.vouchers, and the kernel (owned by iam_v2_owner) already holds the per-subject advisory lock. A
+	// grant against a non-UNUSED voucher raises VOUCHER_NOT_REDEEMABLE; an idempotent retry returns
+	// already_granted before the burn.
 	_ = already
 
 	if superseded == nil {
@@ -670,20 +599,14 @@ func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, sit
 }
 
 func (t *pgCommerceTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
-	// GRANTED is reached through the controlled function, which locks the row and refuses any origin state
-	// the approved machine does not permit. A raw UPDATE could drive a CANCELLED or FAILED purchase to
-	// GRANTED, and nothing in the schema would have objected.
+	// GRANTED is reached through the controlled function, which refuses any origin state the machine does not
+	// permit (a raw UPDATE could move CANCELLED or FAILED to GRANTED).
 	_, err := t.tx.Exec(ctx, `SELECT iam_v2.p4_mark_purchase_granted($1)`, purchaseID)
 	return err
 }
 
-// LoadSettledPurchaseGrant resolves a settled purchase's pinned grant evidence.
-//
-// Every value comes from a row the purchase already references: the package revision from the purchase, the
-// grant snapshot and subject from the quote and auth context it was created against, and the settlement
-// status from the settlement that owns it. There is no parameter through which a caller could substitute a
-// different package, price or subject -- which is what makes the paid grant path as tamper-proof as the
-// free one.
+// Every value comes from rows the purchase already references; no parameter lets a caller substitute package,
+// price or subject.
 func (t *pgCommerceTx) LoadSettledPurchaseGrant(ctx context.Context, tenantID, siteID, purchaseID string) (SettledPurchaseGrant, error) {
 	var g SettledPurchaseGrant
 	var snap []byte

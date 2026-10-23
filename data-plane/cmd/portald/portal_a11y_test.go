@@ -1,10 +1,7 @@
 package main
 
-// THE GUEST PORTAL, HELD TO WCAG 2.2 AA.
-//
-// Each test pins one finding of the accessibility audit on the markup, script or stylesheet a guest receives.
-// They are structural: a screen reader and a keyboard are what prove the effect, and these keep the parts
-// that make it possible from quietly going away.
+// Structural WCAG 2.2 AA checks on the markup, script and stylesheet a guest receives; a screen reader and
+// keyboard prove the effect, these keep the enabling parts from going away.
 
 import (
 	"net/http"
@@ -13,8 +10,7 @@ import (
 	"testing"
 )
 
-// A ticking wait inside role=alert is re-announced every second. The sentence is said once (visually hidden),
-// the ticking copy is aria-hidden, and the end of the wait is one change of the alert.
+// A ticking wait inside role=alert is re-announced every second: say it once (visually hidden), hide the ticking copy.
 func TestTheRoomWaitIsAnnouncedOnceNotEverySecond(t *testing.T) {
 	if !strings.Contains(landingHTML, `<div class="err" id="pms-err" role="alert"`) {
 		t.Fatal("the room refusal is no longer an alert; this test is not reading what it thinks it is")
@@ -34,8 +30,7 @@ func TestTheRoomWaitIsAnnouncedOnceNotEverySecond(t *testing.T) {
 	}
 }
 
-// The guard sheet keeps a focus outline and readable fields and messages on every guest page, whatever the
-// hotel's layer says, without !important.
+// The guard sheet keeps focus outlines and readable colours whatever the hotel's layer says, without !important.
 func TestTheGuardKeepsTheFocusRingAndTheReadableColours(t *testing.T) {
 	for name, sheet := range map[string]string{"sign-in": portalGuardCSS, "pages": portalPageGuardCSS} {
 		for _, want := range []string{
@@ -53,7 +48,6 @@ func TestTheGuardKeepsTheFocusRingAndTheReadableColours(t *testing.T) {
 			t.Errorf("%s guard uses !important", name)
 		}
 	}
-	// And both pages carry the guard after the hotel's layer.
 	pages := guestPages(t, map[string]any{"custom_css": "a:focus { outline: none }"}, http.Header{})
 	for name, html := range pages {
 		if !strings.Contains(html, `outline: 2px solid #14161a`) && !strings.Contains(html, `outline:2px solid #14161a`) {
@@ -62,7 +56,6 @@ func TestTheGuardKeepsTheFocusRingAndTheReadableColours(t *testing.T) {
 	}
 }
 
-// Room sign-in asks for one name in two of its modes; the field says which.
 func TestTheRoomSecondFieldNamesWhatItAsksFor(t *testing.T) {
 	for _, want := range []string{
 		`const PMSAutocomplete = { room_lastname: 'family-name', room_firstname: 'given-name' };`,
@@ -74,8 +67,7 @@ func TestTheRoomSecondFieldNamesWhatItAsksFor(t *testing.T) {
 	}
 }
 
-// The pages after sign-in reload to change language; arrow keys through a closed select must not reload on
-// each step.
+// Arrow keys through the closed select must not reload on each step.
 func TestTheLanguagePillDoesNotReloadOnEveryArrowKey(t *testing.T) {
 	js := guestScripts[strings.Index(guestScripts, "var sel = document.getElementById('lang');"):]
 	js = js[:strings.Index(js, "A refusal the server rendered")]
@@ -92,7 +84,6 @@ func TestTheLanguagePillDoesNotReloadOnEveryArrowKey(t *testing.T) {
 	}
 }
 
-// Each language's own name is marked as that language, on every page and in the script that redraws the list.
 func TestEveryLanguageOptionCarriesItsLanguage(t *testing.T) {
 	pages := guestPages(t, map[string]any{}, http.Header{})
 	for name, html := range pages {
@@ -110,7 +101,6 @@ func TestEveryLanguageOptionCarriesItsLanguage(t *testing.T) {
 	}
 }
 
-// The two links that open a new tab say so, in words a screen reader reads and the language pass translates.
 func TestNewTabLinksSaySo(t *testing.T) {
 	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
 	for _, id := range []string{"privacy-url", "brand-terms"} {
@@ -133,8 +123,7 @@ func TestNewTabLinksSaySo(t *testing.T) {
 	}
 }
 
-// The code step says how long the code lasts -- from the server's ttl_seconds, never a number in the page --
-// and offers a new code through the existing resend route, reporting in a polite status.
+// The validity comes from the server's ttl_seconds, never a number in the page.
 func TestTheCodeStepSaysHowLongTheCodeLastsAndOffersANewOne(t *testing.T) {
 	html := renderLanding(t, "10.77.0.42", "aa:bb:cc:dd:ee:ff")
 	for _, want := range []string{
@@ -166,7 +155,6 @@ func TestTheCodeStepSaysHowLongTheCodeLastsAndOffersANewOne(t *testing.T) {
 	}
 }
 
-// "Copied" is said to a screen reader through a polite status, not only written on the button.
 func TestCopyingTheAddressIsAnnounced(t *testing.T) {
 	for _, want := range []string{
 		`<p class="sc-vh" id="copy-status" role="status" aria-live="polite"></p>`,
@@ -178,7 +166,6 @@ func TestCopyingTheAddressIsAnnounced(t *testing.T) {
 	}
 }
 
-// Welcome back holds a heading and two forms: it is not a status region.
 func TestWelcomeBackIsNotALiveRegion(t *testing.T) {
 	i := strings.Index(landingHTML, `id="welcome"`)
 	tag := landingHTML[i : i+strings.Index(landingHTML[i:], ">")]
@@ -187,7 +174,6 @@ func TestWelcomeBackIsNotALiveRegion(t *testing.T) {
 	}
 }
 
-// The edge of a control a guest presses reaches 3:1 on the card; dividers keep the light line.
 func TestPressableControlsHaveAVisibleEdge(t *testing.T) {
 	for _, sel := range []string{"  .pill {", "  .alt button.link {", "  button.choice {"} {
 		i := strings.Index(portalBaseCSS, sel)

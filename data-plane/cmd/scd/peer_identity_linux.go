@@ -2,61 +2,16 @@
 
 package main
 
-// WHO IS ON THE OTHER END OF THE SOCKET, AND WHY IT HAD TO BE ASKED.
+// scd's admin surface is a unix socket (/run/stayconnect/scd.sock, mode 0660, root:stayconnect) whose trust model is that
+// edged has already authenticated the operator, checked permission and re-verified the password. That holds only if the
+// caller IS edged, so the peer is identified with SO_PEERCRED (uid, gid, pid) and /proc/<pid>/exe, which the kernel
+// resolves to the real path of the running image.
 //
-// scd's admin surface is a unix socket at /run/stayconnect/scd.sock, mode 0660, owned root:stayconnect.
-// Its trust model was "edged has already authenticated the operator, checked the resource permission and
-// re-verified the password; this socket is not reachable from the network". That model was written for
-// license installs and backup runs, and it had a hole that only became serious when this delivery put
-// PLAINTEXT GUEST CREDENTIALS behind the same socket. As it stood then:
-//
-//	edged   ran as stayconnect
-//	portald ran as stayconnect      <- the NETWORK-FACING captive portal
-//
-// Read off the appliance, not assumed: `srw-rw---- root stayconnect /run/stayconnect/scd.sock`, with
-// systemd reporting User=stayconnect for both services. So portald could POST to /v1/vouchers/{id}/reveal
-// with any real operator UUID and a reason of its choosing and receive the code -- no step-up, no
-// permission check, because those happen in edged and nothing proved they had happened.
-//
-// WHAT THIS CHECK IS, AND WHAT IT HONESTLY IS NOT.
-//
-// SO_PEERCRED gives the peer's uid, gid and pid. The uid cannot separate edged from portald, because they
-// share it. What can be read is the peer's own executable: /proc/<pid>/exe resolves, in the kernel, to the
-// real path of the running image. Requiring it to be the installed edged binary -- root-owned and not
-// writable by stayconnect -- means portald cannot reach these routes AS ITSELF, and cannot reach them by
-// exec'ing a copy it placed somewhere it can write.
-//
-// IT WAS NOT A BOUNDARY AGAINST A COMPROMISED PEER, and pretending otherwise would have been worse than not
-// having it. A process running as stayconnect can ptrace edged unless the kernel forbids it, so under a
-// shared uid a full compromise of portald reached edged's memory whatever this function did. This file said
-// so, and said the real fix was to stop sharing the uid.
-//
-// THAT FIX IS NOW DONE, which changes what everything below is worth:
-//
-//	portald      runs as stayconnect-portald       deploy/systemd/stayconnect-portald.service
-//	hotel-admin  runs as stayconnect-hotel-admin   deploy/systemd/stayconnect-hotel-admin.service
-//	edged        runs as stayconnect               unchanged, and now the only thing holding that account
-//	scd.sock stays root:stayconnect 0660 -- portald keeps SupplementaryGroups=stayconnect because it needs
-//	the GUEST routes (commerce, sessions, phase3/5/6); hotel-admin gets no group at all, because it speaks
-//	to edged over HTTP and has no business on this socket.
-//
-// The socket group could not be narrowed to edged alone, which is what the earlier note here proposed: the
-// captive portal authenticates guests THROUGH this socket, so removing its access removes guest internet.
-// What was narrowed instead is the surface: admin_surface.go classifies every route, and an administrative
-// one requires the peer to be edged (requireAdminPeer, below).
-//
-// hotel-admin IS IN THAT LIST BECAUSE A REVIEW CAUGHT IT, and the first version of this note did not have
-// it. After portald was given its own account this file claimed the uid was "now the load-bearing one" --
-// while stayconnect-hotel-admin.service was still running `/usr/bin/node server.js` as User=stayconnect,
-// holding exactly edged's uid (998, read off the appliance) with a group that opens this socket. A uid-only
-// gate therefore admitted the Node process that renders the admin web UI to /v1/backup/restore,
-// /v1/license/install and /v1/central/offline-package. Six Go services were enumerated and the one written in another
-// language was not.
-//
-// SO BOTH CHECKS ARE REQUIRED FOR THE ADMINISTRATIVE SURFACE, and neither subsumes the other: the uid stops
-// a different account, and the exe stops this account running something that is not edged. Nor is the exe
-// check a substitute for the accounts -- a process holding edged's uid can ptrace edged and act as it
-// whatever this file checks, which is why portald and hotel-admin have their own.
+// portald (stayconnect-portald), hotel-admin (stayconnect-hotel-admin) and edged (stayconnect) run as separate accounts.
+// The uid check stops a different account; the exe check stops edged's own account running something that is not edged
+// (hotel-admin's node process once shared edged's uid and a group that opens this socket). Neither subsumes the other, and
+// neither is a boundary against a compromised peer sharing edged's uid, which can ptrace edged: hence the separate accounts.
+// The socket group still admits portald because it needs the guest routes.
 
 import (
 	"context"
@@ -74,7 +29,6 @@ import (
 
 type peerKey struct{}
 
-// peerCred is what the kernel said about the other end.
 type peerCred struct {
 	PID  int32
 	UID  uint32
@@ -82,11 +36,8 @@ type peerCred struct {
 	Read bool   // whether the credentials were obtained at all
 }
 
-// withPeerCred is the http.Server ConnContext hook: it reads the peer credentials once, at accept time,
-// and puts them in the connection's context so every handler on that connection can ask.
-//
-// AT ACCEPT TIME, not per request, and that ordering matters: by the time a handler runs, the peer may
-// have exited and /proc/<pid>/exe would be gone -- which would turn a legitimate caller into a refusal.
+// withPeerCred is the http.Server ConnContext hook: it reads peer credentials at accept time, because by the time a
+// handler runs the peer may have exited and /proc/<pid>/exe be gone.
 func withPeerCred(ctx context.Context, c net.Conn) context.Context {
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
@@ -111,38 +62,27 @@ func withPeerCred(ctx context.Context, c net.Conn) context.Context {
 	return context.WithValue(ctx, peerKey{}, p)
 }
 
-// peerFrom returns what was learned at accept time.
 func peerFrom(ctx context.Context) (peerCred, bool) {
 	p, ok := ctx.Value(peerKey{}).(peerCred)
 	return p, ok
 }
 
-// edgedBinaryPaths are the images allowed to call the code-recovery routes.
-//
-// The deployed layout is a release directory with a symlink, so the resolved path is the versioned one;
-// both spellings are accepted, and SCD_EDGED_BINARY overrides for a test or an unusual install. A prefix
-// match under the release root is deliberately NOT used: "anything under /opt/stayconnect/releases" would
-// admit any binary a future packaging step drops there.
+// edgedBinaryPaths are the images allowed to call the code-recovery routes. The deployed layout is a release directory with a
+// symlink, so both spellings are accepted (SCD_EDGED_BINARY overrides). No prefix match under the release root: it would
+// admit any binary a packaging step drops there.
 func edgedBinaryPaths() []string {
 	if v := os.Getenv("SCD_EDGED_BINARY"); v != "" {
 		return []string{v}
 	}
-	// VERIFIED ON THE APPLIANCE, not guessed: systemd's ExecStart is /opt/stayconnect/bin/edged and the
-	// running process's /proc/<pid>/exe resolves to the same path. Getting this list wrong fails CLOSED,
-	// which would make the reveal stop working rather than become unsafe -- but a security check that
-	// breaks the feature is still a defect, so the path was read from the machine.
+	// Read off the appliance: systemd's ExecStart and the running process's /proc/<pid>/exe resolve to the same path. A wrong list fails closed.
 	return []string{
 		"/opt/stayconnect/bin/edged",
 		"/usr/local/bin/edged",
 	}
 }
 
-// requireEdgedPeer refuses a request that did not come from edged.
-//
-// FAIL CLOSED WHEN THE PEER CANNOT BE IDENTIFIED. If SO_PEERCRED could not be read or /proc/<pid>/exe could
-// not be resolved, this refuses: "I could not tell who you are" is not a reason to hand over a guest's
-// credential. The one deliberate exception is a build where this check does not exist at all (see
-// peer_identity_other.go), which is not Linux and therefore not the appliance.
+// requireEdgedPeer refuses a request that did not come from edged, failing closed when SO_PEERCRED or /proc/<pid>/exe cannot
+// be read. The one exception is a non-Linux build (peer_identity_other.go), which is not the appliance.
 func requireEdgedPeer(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := peerFrom(r.Context())
 	if !ok || !p.Read {
@@ -155,14 +95,11 @@ func requireEdgedPeer(w http.ResponseWriter, r *http.Request) bool {
 			"this route requires a caller the server can identify, and the peer's executable could not be resolved")
 		return false
 	}
-	// The same comparison the administrative gate uses (requireEdgedExecutable), so the two cannot drift
-	// into different notions of "is edged". A release-directory install resolves the symlink, which that
-	// helper accounts for.
+	// The same comparison as the administrative gate (requireEdgedExecutable), so the two cannot drift; a release-directory install resolves the symlink.
 	if requireEdgedExecutable(p) {
 		return true
 	}
-	// Named in the log, because "a process on this appliance asked for a guest's voucher code" is worth
-	// seeing even when it was refused. The code is not disclosed and no reveal row is written.
+	// Logged even when refused: the code is not disclosed and no reveal row is written.
 	slogWarnPeerRefused(p, r.URL.Path)
 	httpErr(w, http.StatusForbidden,
 		"this route may only be called by edged: it returns a guest credential in the clear, and the "+
@@ -175,31 +112,13 @@ func slogWarnPeerRefused(p peerCred, path string) {
 		"path", path, "peer_pid", p.PID, "peer_uid", p.UID, "peer_exe", p.Exe)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// THE ADMINISTRATIVE SURFACE, GATED BY UID
-// ---------------------------------------------------------------------------------------------------------
-//
-// requireEdgedPeer above compares the peer's EXECUTABLE, because when it was written edged and portald
-// shared a uid and the uid could not tell them apart. That is no longer the arrangement: portald runs as its
-// own user (deploy/systemd/stayconnect-portald.service), so the uid is now the meaningful fact and the exe
-// is the weaker one -- a process that can exec a copy of edged's path passes an exe check, while nothing it
-// can do changes the uid the kernel reports for its own socket.
-//
-// So the two checks are kept, deliberately, at different strengths for different routes:
-//
-//	requireAdminPeer  uid only          the whole administrative surface (backups, licence, enrolment)
-//	requireEdgedPeer  uid via the gate, plus exe   the code-recovery routes, which return a guest credential
-//
-// WHY ROOT IS ALLOWED. uid 0 owns the machine: it can read the DEK from /etc/stayconnect, attach to any
-// process, and replace these binaries. Refusing root here would buy no security and would break netd,
-// acctd, keepalived and the deployment scripts that legitimately dial this socket. It is listed as allowed
-// rather than accidentally permitted, because a check that pretends to constrain root is a false claim.
+// requireEdgedPeer compares the executable; requireAdminPeer compares the uid (the meaningful fact now that portald has its
+// own user) plus the exe, and covers the whole administrative surface, while requireEdgedPeer covers the code-recovery routes,
+// which return a guest credential.
+// Root is allowed on purpose: uid 0 can read the DEK from /etc/stayconnect, attach to any process and replace these binaries,
+// and netd, acctd, keepalived and the deployment scripts dial this socket as root.
 
-// edgedUID resolves, once, the uid this appliance's edged runs as.
-//
-// FROM THE SYSTEM, not a constant: the service account's name is a packaging decision (SCD_EDGED_USER
-// overrides it for a test or an unusual install) and its uid is assigned at install time -- 998 on this
-// appliance, and nothing guarantees that number anywhere else.
+// edgedUID resolves once, from the system, the uid this appliance's edged runs as (SCD_EDGED_USER overrides the account name); the uid is assigned at install time.
 var (
 	edgedUIDMu     sync.Mutex
 	edgedUIDCached bool
@@ -213,9 +132,7 @@ func edgedUID() (uint32, error) {
 	if edgedUIDCached {
 		return edgedUIDVal, edgedUIDErr
 	}
-	// Cached either way, success OR failure. A name-service lookup on every administrative request would
-	// put NSS in the path of a backup restore; and a failure that is retried per request turns one
-	// misconfiguration into a log flood.
+	// Cached on success or failure: a per-request NSS lookup would sit in the path of a backup restore, and a per-request retry turns one misconfiguration into a log flood.
 	edgedUIDCached = true
 
 	name := os.Getenv("SCD_EDGED_USER")
@@ -236,22 +153,15 @@ func edgedUID() (uint32, error) {
 	return edgedUIDVal, nil
 }
 
-// resetEdgedUIDCache exists for the tests, and it is a mutex rather than a sync.Once for exactly that
-// reason: admin_surface_linux_test.go points SCD_EDGED_USER at several different users within one test
-// binary, and a cache that could not be cleared would make every case after the first assert against a
-// stale uid -- passing or failing for a reason unrelated to what it was checking.
+// resetEdgedUIDCache exists for tests (a mutex, not sync.Once): admin_surface_linux_test.go points SCD_EDGED_USER at several users in one binary.
 func resetEdgedUIDCache() {
 	edgedUIDMu.Lock()
 	defer edgedUIDMu.Unlock()
 	edgedUIDCached, edgedUIDVal, edgedUIDErr = false, 0, nil
 }
 
-// requireAdminPeer refuses an administrative request from a process that is not edged and is not root.
-//
-// FAIL CLOSED, in both of the ways it can fail. If the peer credentials could not be read, it refuses. If
-// the configured user cannot be resolved AT ALL, it refuses too and says so in the log -- that condition
-// means scd cannot tell who edged is, and serving a licence install or a backup restore to an unidentified
-// caller is worse than an outage that is loud and obvious.
+// requireAdminPeer refuses an administrative request from a process that is neither edged nor root. It fails closed on
+// unreadable peer credentials and on a configured user that cannot be resolved at all (a loud outage beats serving a restore to an unidentified caller).
 func requireAdminPeer(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := peerFrom(r.Context())
 	if !ok || !p.Read {
@@ -272,27 +182,8 @@ func requireAdminPeer(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if p.UID == want {
-		// THE UID IS NOT ENOUGH, AND A REVIEW OF THIS FILE CAUGHT THAT.
-		//
-		// The first version stopped here, on the belief that after portald got its own account edged was the
-		// only thing left holding this uid. It was not. deploy/systemd/stayconnect-hotel-admin.service runs
-		// `/usr/bin/node server.js` as User=stayconnect -- read off the appliance: the next-server process
-		// reports Uid 998 Gid 998, exactly edged's -- and its primary group opens scd.sock. So a uid-only
-		// gate admitted the Node process that renders the admin web UI to /v1/backup/restore,
-		// /v1/license/install and /v1/central/offline-package, with none of edged's operator authentication, permission
-		// check or step-up.
-		//
-		// I had enumerated the six Go services and never looked at the one written in another language.
-		//
-		// So the EXECUTABLE is required too, from the same allowlist the code-recovery routes use. Neither
-		// check subsumes the other: the uid stops a different account, and the exe stops this account
-		// running something that is not edged. hotel-admin fails on the exe while matching the uid, which is
-		// precisely the case that was missed.
-		//
-		// This does NOT make hotel-admin's shared uid acceptable -- a process holding edged's uid can ptrace
-		// edged and act as it, whatever this function checks, which is the same argument that made portald's
-		// own account necessary. hotel-admin is given its own account in the same delivery; this is the half
-		// that takes effect the moment scd restarts, without waiting for a unit change.
+		// The uid alone is not enough: hotel-admin's node process ran as edged's uid with a group that opens scd.sock. The
+		// executable is required too, from the same allowlist as the code-recovery routes; hotel-admin fails on the exe while matching the uid.
 		if requireEdgedExecutable(p) {
 			return true
 		}
@@ -303,8 +194,7 @@ func requireAdminPeer(w http.ResponseWriter, r *http.Request) bool {
 				"edged's account but is not edged")
 		return false
 	}
-	// Worth seeing even though it was refused: the other processes that can open this socket are the
-	// network-facing captive portal and the admin UI, so this line is what one of those looks like.
+	// Logged even though refused: the other processes that can open this socket are the captive portal and the admin UI.
 	slog.Warn("REFUSED an administrative call from a process that is neither edged nor root",
 		"path", r.URL.Path, "peer_pid", p.PID, "peer_uid", p.UID, "peer_exe", p.Exe, "expected_uid", want)
 	httpErr(w, http.StatusForbidden,
@@ -313,10 +203,7 @@ func requireAdminPeer(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// requireEdgedExecutable reports whether the peer's resolved image is the installed edged binary.
-//
-// Factored out of requireEdgedPeer so the administrative gate and the code-recovery gate compare the image
-// the same way and cannot drift into two different notions of "is edged".
+// requireEdgedExecutable reports whether the peer's resolved image is the installed edged binary; shared by both gates so they cannot drift.
 func requireEdgedExecutable(p peerCred) bool {
 	if p.Exe == "" {
 		return false // could not be resolved: not a reason to trust it

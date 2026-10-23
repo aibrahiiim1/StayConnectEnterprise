@@ -1,14 +1,7 @@
 package pmsd
 
-// THE COMMAND REACHES THE SOCKET AS EXACTLY ONE DR, THROUGH THE WRITER THAT ALREADY OWNS IT.
-//
-// The claim tests prove the row can only be consumed once. These prove what the adapter does with it: one
-// claimed command produces one DR and no more, a command claimed mid-roster cannot open a second staging
-// window, and nothing this path can reach is capable of emitting a financial frame.
-//
-// The last one is not decoration. The whole reason edged writes a row instead of talking to the socket is
-// that only pmsd may emit frames; a control that could be coaxed into emitting a PS would make that argument
-// worthless, so it is asserted rather than assumed.
+// A claimed command produces exactly one DR through the owning writer, never a second staging window, and
+// nothing on this path can emit a financial frame (only pmsd may emit frames, so this is asserted).
 
 import (
 	"bufio"
@@ -21,13 +14,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// A CLAIMED COMMAND PRODUCES ONE MORE DR — and exactly one more.
-//
-// Every connection already sends a DR at startup: that is the automatic initial full sync, and this feature
-// must not disturb it. So a successful command means TWO DR frames on the wire, the initial one and the
-// operator's, and the assertion is about the difference rather than the total. The sink hands the command out
-// once, as the real claim does by clearing the row in the same statement, so an adapter that re-asked on
-// every frame would show up here as three or more.
+// A claimed command adds exactly one DR on top of the automatic initial one (two on the wire). The sink hands
+// the command out once, so an adapter that re-asked every frame would show three or more.
 func TestResyncCommand_ProducesExactlyOneDR(t *testing.T) {
 	sink := &recordingSink{pendingCmd: &ResyncCommand{ID: "cmd-1", Reason: "OPERATOR_VERIFICATION"}}
 
@@ -43,17 +31,15 @@ func TestResyncCommand_ProducesExactlyOneDR(t *testing.T) {
 		t.Fatalf("the adapter emitted %d DR frames, want exactly 2 — the automatic initial sync plus the "+
 			"operator's one. Frames: %v", got, frames)
 	}
-	// The adapter asks only when it is NOT mid-roster, so with an initial sync running from connect until
-	// DE, the first opportunity to ask is the frame after DE. One claim is the correct number here, and the
-	// assertion exists to catch the opposite failure: an adapter that never asks at all.
+	// The adapter asks only outside a roster, so the first chance is the frame after DE; one claim is
+	// correct, and zero would mean it never asks.
 	if sink.claims < 1 {
 		t.Fatal("the adapter never asked for a pending command, so an operator's request would sit " +
 			"unclaimed until the connection happened to restart")
 	}
 }
 
-// NO COMMAND, NO DR beyond the automatic one the initial connection always performs. This is the guard that
-// the claim is genuinely consulted rather than the adapter resyncing on a timer.
+// No command means no DR beyond the automatic one (the adapter must not resync on a timer).
 func TestResyncCommand_NoCommandMeansNoExtraDR(t *testing.T) {
 	sink := &recordingSink{} // nothing pending
 
@@ -64,17 +50,14 @@ func TestResyncCommand_NoCommandMeansNoExtraDR(t *testing.T) {
 		pms.BuildLS("260825", "120100"),
 	)
 
-	// Exactly one DR: the automatic initial full sync at connect, which this feature must leave untouched.
+	// Exactly one DR: the automatic initial sync.
 	if got := countFrames(frames, "DR"); got != 1 {
 		t.Fatalf("expected only the automatic initial DR, got %d. Frames: %v", got, frames)
 	}
 }
 
-// A COMMAND CLAIMED WHILE A ROSTER IS ARRIVING MUST NOT OPEN A SECOND WINDOW.
-//
-// The claim already refuses while sync_status is RESYNC_IN_PROGRESS; this is the adapter's own guard, and
-// having both is deliberate — the two cover different moments, since the adapter knows it is inside DS…DE
-// before the database row does.
+// A command claimed mid-roster must not open a second window. This is the adapter's own guard in addition to
+// the claim's: the adapter knows it is inside DS…DE before the database row does.
 func TestResyncCommand_NotClaimedInsideAnOpenRoster(t *testing.T) {
 	sink := &recordingSink{pendingCmd: &ResyncCommand{ID: "cmd-2", Reason: "SUPPORT_REQUEST"}}
 
@@ -91,11 +74,7 @@ func TestResyncCommand_NotClaimedInsideAnOpenRoster(t *testing.T) {
 	}
 }
 
-// NOTHING ON THIS PATH CAN EMIT A FINANCIAL FRAME.
-//
-// Asserted against every frame the adapter produced across the command scenarios: PS (posting) and PA
-// (posting answer) must never appear. The writer refuses them at writeFrame, and this proves the refusal
-// covers the frames the operator control actually causes.
+// PS and PA must never appear in any frame produced by the command scenarios (writeFrame refuses them).
 func TestResyncCommand_EmitsNoFinancialFrame(t *testing.T) {
 	sink := &recordingSink{pendingCmd: &ResyncCommand{ID: "cmd-3", Reason: "AFTER_PMS_MAINTENANCE"}}
 
@@ -113,7 +92,6 @@ func TestResyncCommand_EmitsNoFinancialFrame(t *testing.T) {
 	}
 }
 
-// countFrames counts outbound frames whose record id matches.
 func countFrames(frames []string, id string) int {
 	n := 0
 	for _, f := range frames {
@@ -124,7 +102,6 @@ func countFrames(frames []string, id string) int {
 	return n
 }
 
-// frameID reads the record identifier from an outbound FIAS frame body.
 func frameID(f string) string {
 	f = strings.TrimLeft(f, "\x01\x02")
 	if len(f) < 2 {
@@ -133,9 +110,7 @@ func frameID(f string) string {
 	return f[:2]
 }
 
-// runAdapterWithFrames drives the adapter against a fake PMS peer that sends the given frames, and returns
-// every frame the adapter WROTE. Modelled on TestAdapter_StartupDomainAndResync's peer; the difference is
-// that this one keeps reading after the handshake so the DR raised by a command is captured too.
+// runAdapterWithFrames returns every frame the adapter wrote; the peer keeps reading after the handshake so a command's DR is captured.
 func runAdapterWithFrames(t *testing.T, sink *recordingSink, frames ...string) []string {
 	t.Helper()
 	if sink.q == nil {
@@ -149,8 +124,7 @@ func runAdapterWithFrames(t *testing.T, sink *recordingSink, frames ...string) [
 	go func() {
 		defer close(done)
 		br := bufio.NewReader(server)
-		// Every outbound frame is recorded, in a goroutine of its own, because the adapter writes while it
-		// reads and a serialized read-then-write peer would deadlock the pipe.
+		// Recorded in its own goroutine: a serialized read-then-write peer would deadlock the pipe.
 		go func() {
 			for {
 				body, err := pms.ReadFramedRecord(br)
@@ -182,11 +156,7 @@ func runAdapterWithFrames(t *testing.T, sink *recordingSink, frames ...string) [
 	return append([]string(nil), wrote...)
 }
 
-// THE AUTOMATIC FIRST SYNC IS WATCHABLE, not just the one a human clicked.
-//
-// The operator restores the socket by hand with the page open, so the sync they are most likely to be
-// watching is the automatic one. It previously entered no stage at all until DS arrived: the connection came
-// up and the screen showed nothing.
+// The automatic first sync must enter a stage before DS arrives, since operators watch it after restoring the socket.
 func TestAutomaticFirstSync_AnnouncesWaitingForPMS(t *testing.T) {
 	sink := &recordingSink{}
 
@@ -208,16 +178,11 @@ func TestAutomaticFirstSync_AnnouncesWaitingForPMS(t *testing.T) {
 	}
 }
 
-// SKIPPED RECORDS BELONG TO ONE ROSTER.
-//
-// The counter was per-ownership-cycle, so a second full sync inherited the first one's rejects. An operator
-// reading "40 skipped" on a clean roster had no way to know all 40 belonged to an earlier sync — and the
-// number that matters is exactly "how much of THIS roster was unusable".
+// The skipped count is per roster: a second full sync must not inherit the first one's rejects.
 func TestConsecutiveResyncs_HaveIndependentSkippedCounters(t *testing.T) {
 	sink := &recordingSink{}
 
-	// Two complete rosters on one connection. The FIRST carries records with no keyable Stay identity; the
-	// second is clean. GI records without RN/G# cannot be keyed, which is what ErrIdentityAbsent describes.
+	// Two rosters: the first has GI records without RN/G# (ErrIdentityAbsent); the second is clean.
 	frames := []string{"DS|"}
 	for i := 0; i < 30; i++ {
 		frames = append(frames, "GI|GNSmith|GFJohn|") // no room, no reservation: unkeyable
@@ -235,8 +200,7 @@ func TestConsecutiveResyncs_HaveIndependentSkippedCounters(t *testing.T) {
 	if len(sink.skippedReports) == 0 {
 		t.Skip("no skipped-record report was produced; the batching threshold was not reached")
 	}
-	// The reports must not be monotonically increasing across the DE boundary: a reset means a later report
-	// is SMALLER than an earlier one, or the counter simply stops climbing once the clean roster begins.
+	// A reset shows as a later report smaller than an earlier one, or the counter no longer climbing.
 	max := int64(0)
 	for _, n := range sink.skippedReports {
 		if n > max {

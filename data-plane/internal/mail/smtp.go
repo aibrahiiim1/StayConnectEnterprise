@@ -1,16 +1,8 @@
 package mail
 
-// A SITE'S OWN SMTP SERVER.
-//
-// Email one-time codes do not have to go through a provider API: an office, a clinic or a hotel group usually
-// already has a mail server or a relay (Microsoft 365, Google Workspace, an on-premise Exchange, a transactional
-// relay) and the credentials to use it. This sender speaks plain SMTP with the three transport modes that cover
-// those: implicit TLS (465), STARTTLS (587) and none (an internal relay that refuses TLS). Authentication is
-// PLAIN or LOGIN over TLS only; CRAM-MD5 is accepted for a plaintext hop because it never sends the password.
-//
-// It sends ONE message per call, opens a fresh connection each time (codes are rare; a pooled connection to a
-// mail server that drops idle sessions is a worse failure than a short handshake), and reports the server's
-// own words on failure so an operator can act on them. The password is held in memory only.
+// A site's own SMTP server: implicit TLS (465), STARTTLS (587) or none (an internal relay). PLAIN/LOGIN only over
+// TLS; CRAM-MD5 is accepted on a plaintext hop since it never sends the password. One message per call on a fresh
+// connection (a pooled connection to a server that drops idle sessions is worse); failures carry the server's words.
 
 import (
 	"context"
@@ -25,7 +17,6 @@ import (
 	"time"
 )
 
-// SMTPSecurity is the transport mode.
 type SMTPSecurity string
 
 const (
@@ -34,18 +25,16 @@ const (
 	SMTPNone     SMTPSecurity = "none"     // no TLS at all: an internal relay only
 )
 
-// PLAIN SMTP STAYS ON THE HOTEL'S OWN NETWORK (GDPR audit B9). Guest email addresses, codes and staff reset
-// links must not cross the internet unencrypted, so "none" is accepted only for a relay at a loopback, private
-// or link-local address. A literal address is checked when the settings are saved; a host name is checked where
-// it matters, against the address actually connected to, so a name that resolves to a public server is refused.
+// Plain SMTP stays on the hotel's own network: "none" is accepted only for a loopback, private or link-local relay.
+// A literal address is checked when saved; a host name is checked against the address actually connected to, so a
+// name resolving to a public server is refused.
 const plainSMTPRefused = "SMTP without TLS is allowed only for a mail server on this network (a private address); use starttls or tls for an outside server"
 
 func internalAddress(ip net.IP) bool {
 	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
 }
 
-// SMTPConfig is what the operator enters. The password arrives separately (sealed storage) and is never
-// returned by any API.
+// SMTPConfig is what the operator enters; the password arrives separately and is never returned by any API.
 type SMTPConfig struct {
 	Host        string
 	Port        int
@@ -55,11 +44,9 @@ type SMTPConfig struct {
 	FromAddress string
 	FromName    string
 	Timeout     time.Duration // whole send; default 20s
-	// InsecureSkipVerify is deliberately NOT offered: a site that cannot present a valid certificate for its
-	// relay uses SMTPNone on a trusted internal segment or fixes the certificate. Codes go to clients.
+	// InsecureSkipVerify is deliberately not offered: use SMTPNone on a trusted internal segment or fix the certificate.
 }
 
-// ValidateSMTPConfig returns an operator-readable reason the configuration cannot work, or "".
 func ValidateSMTPConfig(c SMTPConfig) string {
 	host := strings.TrimSpace(c.Host)
 	if host == "" || strings.ContainsAny(host, " /\\@:") {
@@ -102,14 +89,11 @@ func DefaultSMTPPort(sec SMTPSecurity) int {
 	return 587
 }
 
-// SMTP is the Mailer.
 type SMTP struct {
-	cfg SMTPConfig
-	// Dialer is replaceable for tests.
+	cfg    SMTPConfig
 	Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-// NewSMTP validates and builds the sender.
 func NewSMTP(c SMTPConfig) (*SMTP, error) {
 	if msg := ValidateSMTPConfig(c); msg != "" {
 		return nil, errors.New("smtp: " + msg)
@@ -121,7 +105,6 @@ func NewSMTP(c SMTPConfig) (*SMTP, error) {
 	return &SMTP{cfg: c, Dialer: (&net.Dialer{}).DialContext}, nil
 }
 
-// Send delivers one message and returns the server's words on failure.
 func (s *SMTP) Send(ctx context.Context, m Message) error {
 	if _, err := mail.ParseAddress(m.To); err != nil {
 		return errors.New("smtp: invalid recipient")

@@ -1,15 +1,7 @@
-// Site-role → resource permission matrix. The UI uses this only to hide nav items / write controls the
-// operator's role cannot use — edged enforces the real gate on every request.
-//
-// THE TABLE IS NOT WRITTEN HERE. It is GENERATED from edged's rolePerms (data-plane/cmd/edged/auth.go) into
-// role-permissions.generated.json by data-plane/cmd/edged/role_permissions_console_test.go, and that test fails
-// when the two differ. The hand-copied table this file used to carry drifted three ways at once (audit L-2,
-// 2026-10-16): it offered Usage explorer to three roles edged refused, hid Internet packages and Service plans
-// from the Site IT manager edged lets edit them, and sent the payments role to a page whose data it could not
-// read. A permission this table is missing is a screen nobody can find; one it invents is a button that 403s.
-//
-// To change who may do what, change auth.go and regenerate:
-//   UPDATE_ROLE_PERMISSIONS=1 go test ./cmd/edged -run TestConsoleRolePermissionsAreGeneratedFromTheServerTable
+// Site-role to permission matrix, used only to hide nav items / write controls; edged enforces the real gate.
+// GENERATED from edged's rolePerms (auth.go) into role-permissions.generated.json; a test fails on drift.
+// To change it, change auth.go and run: UPDATE_ROLE_PERMISSIONS=1 go test ./cmd/edged -run
+// TestConsoleRolePermissionsAreGeneratedFromTheServerTable
 
 import generated from "./role-permissions.generated.json";
 
@@ -37,7 +29,6 @@ export const ROLE_LABELS: Record<SiteRole, string> = {
   site_viewer: "Site viewer",
 };
 
-// Resource keys match edged's mountResource names.
 type Matrix = Record<string, Record<string, Perm>>;
 
 const MATRIX: Matrix = generated.roles as Matrix;

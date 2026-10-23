@@ -46,8 +46,7 @@ func (c *fakeClock) waitAsked(t *testing.T) {
 	}
 }
 
-// F2: an appliance that boots while Central is down keeps retrying (30 s doubling to 5 min), records every
-// outcome, and on the first success reports the identity exactly once.
+// An appliance that boots while Central is down keeps retrying, records every outcome and reports the identity once.
 func TestRegistrationLoopBacksOffAndStopsOnSuccess(t *testing.T) {
 	clock := newFakeClock()
 	var mu sync.Mutex
@@ -102,8 +101,7 @@ func TestRegistrationLoopBacksOffAndStopsOnSuccess(t *testing.T) {
 	}
 }
 
-// Check now: a kick resets the backoff and retries immediately; an attempt made directly (the refresh handler)
-// is serialised with the loop and a success is reported once.
+// A kick resets the backoff and retries at once; a direct attempt is serialised with the loop.
 func TestRegistrationKickAndDirectAttempt(t *testing.T) {
 	clock := newFakeClock()
 	var mu sync.Mutex

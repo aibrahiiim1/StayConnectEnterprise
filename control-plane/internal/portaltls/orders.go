@@ -9,28 +9,22 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Per-appliance order limits (contract §3 "Limits").
 const (
 	maxOrdersPerDay = 10
 )
 
-// OrderRequest is POST /v1/appliance/portal-tls/orders.
 type OrderRequest struct {
 	Hostname string `json:"hostname"`
 	CSRPEM   string `json:"csr_pem"`
 }
 
-// OrderAccepted is the 202 answer.
 type OrderAccepted struct {
 	OrderID string `json:"order_id"`
 	Status  string `json:"status"`
 }
 
-// CreateOrder validates an appliance's certificate request and queues it for the worker. It never talks to
-// the CA itself: an appliance request must not be able to hold a Central request goroutine for minutes.
-//
-// Refusals: 403 not active · 503 Central not configured · 422 a CSR or hostname Central will not order ·
-// 409 an order is already open for the hostname (with its id) · 429 over the daily limit.
+// CreateOrder validates the request and queues it for the worker. It never talks to the CA itself: an
+// appliance request must not hold a Central goroutine for minutes.
 func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderRequest) (*OrderAccepted, error) {
 	if _, err := s.requireActive(ctx, applianceID); err != nil {
 		return nil, err
@@ -72,8 +66,7 @@ func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderR
 		if d.Status != "VERIFIED" {
 			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the hotel domain %s is not verified", hostname)
 		}
-		// Re-verify before every order (contract §3.1): a delegation that broke since the last check must not
-		// produce a certificate.
+		// Re-verify before every order: a delegation that broke since the last check must not yield a certificate.
 		if !s.checkAndRecordDomain(ctx, d, h.FQDN, st) {
 			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the hotel domain no longer verifies: %s", d.LastError)
 		}
@@ -118,7 +111,6 @@ func (s *Service) openOrder(ctx context.Context, applianceID, hostname string) (
 	return id, err == nil
 }
 
-// OrderView is GET /v1/appliance/portal-tls/orders/{id}.
 type OrderView struct {
 	OrderID    string     `json:"order_id"`
 	Hostname   string     `json:"hostname"`
@@ -130,9 +122,7 @@ type OrderView struct {
 	Error      *string    `json:"error"`
 }
 
-// GetOrder returns one of the appliance's own orders; another appliance's order does not exist for it. The
-// chain is returned only while the certificate is current (ISSUED): a revoked or superseded chain is of no
-// use to the appliance and is not handed out again.
+// GetOrder returns only the appliance's own orders. The chain is returned only while ISSUED.
 func (s *Service) GetOrder(ctx context.Context, applianceID, orderID string) (*OrderView, error) {
 	var v OrderView
 	var chain, serial, errText *string

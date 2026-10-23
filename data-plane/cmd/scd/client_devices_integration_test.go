@@ -2,9 +2,7 @@
 
 package main
 
-// A CLIENT'S DEVICES (client_devices.go, migration 0118) against the full appliance schema, the server running
-// as svc_scd: replace on a 1-device package, the package untouched, the daily limit, release from an online
-// device, and the proofs a replacement needs (a fresh sign-in on THIS device for the package's subject).
+// Client devices against the full appliance schema as svc_scd: replace, daily limit, release, and the proofs a replacement needs.
 
 import (
 	"context"
@@ -14,12 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// seedLimitedEntitlement is seedEntitlementSession with a device limit of its own: an ACTIVE entitlement of the
-// account whose first device (mac) is online.
 func (f *ssFixture) seedLimitedEntitlement(t *testing.T, accountID, ip, mac string, limit int) (ent, device, session string) {
 	t.Helper()
 	ent, device, session = f.seedEntitlementSession(t, accountID, ip, mac)
-	// The seeded plan allows 4; a fresh revision with the limit under test replaces it on this entitlement.
 	ctx := context.Background()
 	var rev string
 	if err := f.owner.QueryRow(ctx, `INSERT INTO iam_v2.service_plan_revisions (tenant_id, site_id, service_plan_id, revision_no,
@@ -54,7 +49,6 @@ func (f *ssFixture) seedDevice(t *testing.T, mac string) string {
 	return id
 }
 
-// seedSignIn is the auth context a sign-in on device leaves: the account, this device, an expiry.
 func (f *ssFixture) seedSignIn(t *testing.T, accountID, device string, expiresIn time.Duration) string {
 	t.Helper()
 	ctx := context.Background()
@@ -120,7 +114,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 	d2 := f.seedDevice(t, mac2)
 	before := f.entState(t, ent)
 
-	// The new device has signed in; its sign-in names the package's subject.
 	ac := f.seedSignIn(t, acc, d2, 10*time.Minute)
 	code, out := f.post(t, s.clientDevicesList, map[string]string{"ip": f.ip(41), "mac": mac2, "auth_context_id": ac})
 	devs, _ := out["devices"].([]any)
@@ -131,7 +124,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 		t.Fatalf("the package's device = %v", dv)
 	}
 
-	// Another device's sign-in, or an expired one, proves nothing.
 	other := f.seedSignIn(t, acc, f.seedDevice(t, "02:18:00:01:"+randHex(1)+":03"), 10*time.Minute)
 	if _, o := f.post(t, s.clientDevicesReplace, map[string]string{"ip": f.ip(41), "mac": mac2, "auth_context_id": other, "device_id": d1}); o["outcome"] != "UNAVAILABLE" {
 		t.Fatalf("a sign-in of another device replaced a device: %v", o)
@@ -144,7 +136,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 		t.Fatal("a refused replacement must not disconnect anything")
 	}
 
-	// REPLACE: device 1 goes offline and loses its place; device 2 holds it; the package is unchanged.
 	code, out = f.post(t, s.clientDevicesReplace, map[string]string{"ip": f.ip(41), "mac": mac2, "auth_context_id": ac, "device_id": d1})
 	if code != 200 || out["outcome"] != "REPLACED" || out["entitlement_id"] != ent || out["device_id"] != d2 {
 		t.Fatalf("replace = %d %v", code, out)
@@ -174,7 +165,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 		t.Fatal("refused attempts are recorded too")
 	}
 
-	// THE DAILY LIMIT: with one change a day, device 1 cannot take the place straight back.
 	if _, err := f.owner.Exec(ctx, `SELECT iam_v2.device_settings_set($1,$2,1,'test','one change a day')`, f.tenant, f.site); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +172,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 	if _, o := f.post(t, s.clientDevicesList, map[string]string{"ip": f.ip(40), "mac": mac1, "auth_context_id": back}); o["changes_left"] != float64(0) {
 		t.Fatalf("changes left after today's one change = %v", o["changes_left"])
 	}
-	// Device 2 is online on the package; a refused change must not disconnect it.
 	var s2 string
 	if err := f.owner.QueryRow(ctx, `INSERT INTO iam_v2.sessions (tenant_id, site_id, entitlement_id, device_id, ip, mac, state,
 	     credential_method, started, expires_at) VALUES ($1,$2,$3::uuid,$4::uuid,$5::inet,$6::macaddr,'active','ACCOUNT',now(), now()+interval '1 day')
@@ -198,7 +187,6 @@ func TestIntegration_ClientReplacesADeviceOnAOneDevicePackage(t *testing.T) {
 	if st, open := f.binding(t, ent, d2); st != "AUTHORIZED" || open != 1 {
 		t.Fatal("a refused change must not move the place")
 	}
-	// The setting's own bounds hold in the database.
 	if _, err := f.owner.Exec(ctx, `SELECT iam_v2.device_settings_set($1,$2,11,'test','above the hard maximum')`, f.tenant, f.site); err == nil {
 		t.Fatal("the daily limit accepted 11, above the hard maximum of 10")
 	}
@@ -211,7 +199,6 @@ func TestIntegration_ClientReleasesAnotherDeviceFromTheOnlinePage(t *testing.T) 
 	mac1, mac2 := "02:18:00:02:"+randHex(1)+":01", "02:18:00:02:"+randHex(1)+":02"
 	ent, _, _ := f.seedLimitedEntitlement(t, acc, f.ip(50), mac1, 2)
 	d2 := f.seedDevice(t, mac2)
-	// Device 2 used the package earlier and signed out: it holds a place, offline.
 	ac := f.seedSignIn(t, acc, d2, 10*time.Minute)
 	if err := pgx.BeginFunc(context.Background(), f.owner, func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `SELECT iam_v2.authorize_entitlement_device($1::uuid,$2::uuid,now())`, ent, d2)
@@ -227,7 +214,6 @@ func TestIntegration_ClientReleasesAnotherDeviceFromTheOnlinePage(t *testing.T) 
 	if out["outcome"] != "LISTED" || len(devs) != 2 || out["in_use"] != float64(2) {
 		t.Fatalf("list from the online device = %v", out)
 	}
-	// A device that is not online on a package has nothing to list without a sign-in.
 	if _, o := f.post(t, s.clientDevicesList, map[string]string{"ip": f.ip(51), "mac": mac2}); o["outcome"] != "UNAVAILABLE" {
 		t.Fatalf("an offline device listed a package without proof: %v", o)
 	}

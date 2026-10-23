@@ -1,10 +1,5 @@
-// keybootstrap — deployment-time bootstrap of appliance-local HMAC secret material and its database
-// lifecycle metadata for the durable throttle (D4) and keyed-HMAC OTP (D7).
-//
-// Run ONCE per appliance during deployment, BEFORE scd starts, using a privileged (migration/
-// operational) database role — never svc_scd. It is idempotent and fail-closed: it creates the
-// throttle key and OTP generation-1 key if absent, records generation 1 active, and refuses to start
-// scd unless key material and DB metadata agree. It prints only non-secret status.
+// keybootstrap creates appliance-local key material (throttle, OTP, DEKs) and its DB lifecycle metadata at deployment.
+// Run once per appliance BEFORE scd starts, with a privileged database role (never svc_scd). Idempotent and fail-closed; prints only non-secret status.
 //
 // Env:
 //
@@ -51,35 +46,24 @@ func main() {
 	}
 	log.Printf("keybootstrap: throttle key ready at %s", throttlePath)
 
-	// 2) Voucher code-encryption key (DEK). On a production build IAM-v2 VOUCHER is locked ON, so scd
-	// refuses to start without this key and its own error names this tool: "run keybootstrap at deploy".
-	// It was not created here, so a factory-clean production appliance crash-looped on first boot with a
-	// message pointing at a step that did not do it. Runtime is load-only by design; creation belongs at
-	// deployment, which is here.
+	// 2) Voucher code-encryption key (DEK). Production locks IAM-v2 VOUCHER on, so scd refuses to start without it and names this tool.
+	// Runtime is load-only; creation belongs to deployment.
 	dekPath := filepath.Join(secretsDir, "voucher_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(dekPath); err != nil {
 		log.Fatalf("keybootstrap: voucher DEK: %v", err)
 	}
 	log.Printf("keybootstrap: voucher code-encryption key ready at %s", dekPath)
 
-	// 2b) Guest sign-in attempt DEK. It seals the credential half of iam_v2.sign_in_attempts: what a guest
-	// typed, and the values the mirror would have accepted.
-	//
-	// ITS ABSENCE MUST NOT COST A GUEST THEIR INTERNET, which is why scd treats this key differently from the
-	// voucher DEK. A missing voucher key means scd cannot issue a credential at all and refusing to start is
-	// correct. A missing key here means only that the DIAGNOSTIC half of an attempt record cannot be sealed,
-	// so scd records the attempt with those columns NULL, logs it loudly, and keeps authenticating. Creating
-	// it is still deployment's job — runtime is load-only, and a service that could mint its own key would
-	// silently orphan every row sealed under the previous one.
+	// 2b) Guest sign-in attempt DEK: seals the credential half of iam_v2.sign_in_attempts. Its absence must not cost a guest their internet:
+	// scd records attempts with those columns NULL, logs loudly and keeps authenticating. Creation stays here because a runtime-minted key would orphan sealed rows.
 	attemptsDEKPath := filepath.Join(secretsDir, "signin_attempts_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(attemptsDEKPath); err != nil {
 		log.Fatalf("keybootstrap: sign-in attempt DEK: %v", err)
 	}
 	log.Printf("keybootstrap: sign-in attempt sealing key ready at %s", attemptsDEKPath)
 
-	// 2c) Card payment key. It seals provider credentials (API keys) in iam_v2.payment_provider_secret_generations.
-	// Its absence only makes card payment "not ready" -- scd keeps serving every other client -- and runtime is
-	// load-only for the same reason as the keys above: a key minted at runtime would orphan every sealed row.
+	// 2c) Card payment key: seals provider credentials in iam_v2.payment_provider_secret_generations. Absence only makes card payment "not ready";
+	// load-only at runtime (a runtime-minted key would orphan sealed rows).
 	paymentKeyPath := filepath.Join(secretsDir, "payment_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(paymentKeyPath); err != nil {
 		log.Fatalf("keybootstrap: payment key: %v", err)
@@ -94,29 +78,24 @@ func main() {
 	}
 	log.Printf("keybootstrap: anonymous-access key ready at %s", anonPath)
 
-	// 2e) Notification-secret key: seals SMTP passwords, API keys and access tokens of the site's email, SMS
-	// and WhatsApp senders (iam_v2.notification_provider_secret_generations). Without it a sender whose secret
-	// was sealed cannot send and the method is not offered; nothing else is affected. Load-only at runtime.
+	// 2e) Notification-secret key: seals SMTP passwords, API keys and access tokens of email, SMS and WhatsApp senders.
+	// Without it a sealed sender cannot send; load-only at runtime.
 	notifyPath := filepath.Join(secretsDir, "notify_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(notifyPath); err != nil {
 		log.Fatalf("keybootstrap: notification-secret key: %v", err)
 	}
 	log.Printf("keybootstrap: notification-secret sealing key ready at %s", notifyPath)
 
-	// 2f) Social sign-in key: seals the client secrets (and Apple .p8 keys) of the hotel's own Google, Microsoft,
-	// Apple and Facebook applications (iam_v2.social_provider_secret_generations). Without it scd builds no social
-	// provider and seals nothing -- it never falls back to a plaintext column -- and nothing else is affected.
-	// Load-only at runtime, for the same reason as every key above.
+	// 2f) Social sign-in key: seals client secrets (and Apple .p8 keys) of the hotel's social apps. Without it scd builds no social provider
+	// and never falls back to a plaintext column; load-only at runtime.
 	socialPath := filepath.Join(secretsDir, "social_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(socialPath); err != nil {
 		log.Fatalf("keybootstrap: social sign-in key: %v", err)
 	}
 	log.Printf("keybootstrap: social sign-in sealing key ready at %s", socialPath)
 
-	// 2g) Admin Console authenticator key (0132, GDPR plan C10): seals each operator's TOTP secret and MACs their
-	// recovery codes (public.operator_mfa*). Without it scd checks no code and edged refuses Admin Console
-	// sign-in. Load-only at runtime, for the same reason as every key above; replacing it means every operator
-	// sets up their authenticator again.
+	// 2g) Admin Console authenticator key: seals each operator's TOTP secret and MACs recovery codes (public.operator_mfa*).
+	// Without it scd checks no code and edged refuses Admin Console sign-in; replacing it forces every operator to re-enrol.
 	mfaPath := filepath.Join(secretsDir, "operator_totp_dek.key")
 	if _, err := localkeys.CreateKeyIfAbsent(mfaPath); err != nil {
 		log.Fatalf("keybootstrap: admin console authenticator key: %v", err)

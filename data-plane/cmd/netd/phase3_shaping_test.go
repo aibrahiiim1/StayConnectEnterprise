@@ -1,9 +1,6 @@
 package main
 
-// Tests for the SINGLE Phase-3 shaping writer and its control plane (ADR-0002). These prove the properties
-// that make one writer safe: only an authenticated producer can submit, a dark appliance refuses outright, a
-// plan is checked against netd's OWN scope, a stale or replayed plan cannot reinstate access, ordering and
-// idempotency hold, strays are removed, and health tells the truth.
+// Tests for the single Phase-3 shaping writer and its control plane.
 
 import (
 	"bytes"
@@ -26,7 +23,7 @@ import (
 )
 
 type tcCall struct {
-	op     string // ensure | add | delete | delete-minor
+	op     string
 	bridge string
 	ip     string
 	minor  int
@@ -39,25 +36,19 @@ type fakeTC struct {
 	calls   []tcCall
 	failAdd map[string]error
 	failDel map[string]error
-	// installed models the kernel CLASSES: device -> minor -> the class that is actually there (a prepared
-	// class exists here even though it has no forwarding filter). Reconciliation is only meaningful against
-	// something that remembers what a previous plan (or a crash) left behind.
+	// installed models kernel classes (device -> minor -> class); reconciliation needs a fake that remembers what a prior plan or crash left.
 	installed map[string]map[int]tcCall
-	// forwarding models the kernel FILTERS separately: device -> minor -> whether a guest forwarding filter is
-	// installed. A prepared-but-not-activated class is installed==true, forwarding==false — it carries no
-	// guest packets. This split is what lets the staged-provisioning tests prove "prepared does not forward".
+	// forwarding models kernel filters separately: a prepared class is installed but not forwarding.
 	forwarding map[string]map[int]bool
 	readErr    map[string]error
 
-	// per-stage failure injection, keyed by guest IP.
-	failPrepare        map[string]error // download (bridge) class preparation
-	failPrepareUpload  map[string]error // upload (ifb) class preparation
-	failActivate       map[string]error // download filter activation
-	failActivateUpload map[string]error // upload filter activation
+	failPrepare        map[string]error
+	failPrepareUpload  map[string]error
+	failActivate       map[string]error
+	failActivateUpload map[string]error
 	failReRate         map[string]error
-	failAbort          map[string]bool // AbortSession cannot remove the class (returns error, leaves it)
+	failAbort          map[string]bool
 
-	// SHARED-allocation bookkeeping: the aggregate classes created, and the parent each session hangs under.
 	groups  map[string]int
 	parents map[string]string
 }
@@ -77,7 +68,6 @@ func (f *fakeTC) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	return nil
 }
 
-// setFwd records/clears a forwarding filter for a minor on a device (caller holds the lock).
 func (f *fakeTC) setFwd(device string, minor int, on bool) {
 	if f.forwarding[device] == nil {
 		f.forwarding[device] = map[int]bool{}
@@ -89,11 +79,7 @@ func (f *fakeTC) setFwd(device string, minor int, on bool) {
 	}
 }
 
-// PrepareSession installs the download+upload classes WITHOUT forwarding filters, on both the bridge and its
-// ifb. It clears any stale class+filter for the slot first, as the real client does.
-// groups models the SHARED aggregate classes, per device (bridge or ifb) and classid, with the rate they were
-// last created or re-rated at. parents records which class each session was hung under, so a test can assert
-// that a SHARED session really borrows from its entitlement's ceiling instead of holding its own.
+// PrepareSession installs download+upload classes without forwarding filters, clearing any stale slot first.
 func (f *fakeTC) EnsureGroupClass(ctx context.Context, ifc, groupCid string, kbps int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -138,7 +124,6 @@ func (f *fakeTC) PrepareSession(ctx context.Context, bridge string, ip net.IP, d
 	minor, _ := shape.MinorForIP(ip)
 	ifb := shape.IFBName(bridge)
 	f.calls = append(f.calls, tcCall{op: "prepare", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
-	// clear stale first (like DeleteSession)
 	f.delClass(bridge, minor)
 	f.delClass(ifb, minor)
 	if err, ok := f.failPrepare[ip.String()]; ok {
@@ -146,7 +131,7 @@ func (f *fakeTC) PrepareSession(ctx context.Context, bridge string, ip net.IP, d
 	}
 	f.put(bridge, minor, tcCall{op: "prepare", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
 	if err, ok := f.failPrepareUpload[ip.String()]; ok {
-		f.delClass(bridge, minor) // roll the download class back, as the real client does
+		f.delClass(bridge, minor)
 		return err
 	}
 	f.put(ifb, minor, tcCall{op: "prepare", bridge: ifb, ip: ip.String(), minor: minor, down: down, up: up})
@@ -164,7 +149,7 @@ func (f *fakeTC) ActivateSession(ctx context.Context, bridge string, ip net.IP) 
 	}
 	f.setFwd(bridge, minor, true)
 	if err, ok := f.failActivateUpload[ip.String()]; ok {
-		f.setFwd(bridge, minor, false) // roll the download filter back
+		f.setFwd(bridge, minor, false)
 		return err
 	}
 	f.setFwd(ifb, minor, true)
@@ -177,11 +162,9 @@ func (f *fakeTC) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	minor, _ := shape.MinorForIP(ip)
 	ifb := shape.IFBName(bridge)
 	f.calls = append(f.calls, tcCall{op: "abort", bridge: bridge, ip: ip.String(), minor: minor})
-	// forwarding always stops first
 	f.setFwd(bridge, minor, false)
 	f.setFwd(ifb, minor, false)
 	if f.failAbort[ip.String()] {
-		// class cannot be removed; it remains installed but non-forwarding
 		return fmt.Errorf("abort: class %d could not be removed", minor)
 	}
 	f.delClass(bridge, minor)
@@ -208,7 +191,7 @@ func (f *fakeTC) ReRateSession(ctx context.Context, bridge string, ip net.IP, do
 	if err, ok := f.failReRate[ip.String()]; ok {
 		return err
 	}
-	// class change requires the class present on both devices; it never deletes+recreates (counters preserved)
+	// A class change never deletes and recreates, so counters are preserved.
 	if _, d := f.installed[bridge][minor]; !d {
 		return fmt.Errorf("re-rate: no download class for minor %d", minor)
 	}
@@ -225,7 +208,6 @@ func (f *fakeTC) SessionForwarding(ctx context.Context, bridge string, ip net.IP
 	return f.forwarding[bridge][minor] && f.forwarding[shape.IFBName(bridge)][minor], nil
 }
 
-// delClass removes a class and its forwarding filter on one device (caller holds the lock).
 func (f *fakeTC) delClass(device string, minor int) {
 	if m := f.installed[device]; m != nil {
 		delete(m, minor)
@@ -263,13 +245,12 @@ func (f *fakeTC) DeleteSessionClass(ctx context.Context, bridge string, minor in
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, tcCall{op: "delete-minor", bridge: bridge, minor: minor})
-	// A managed class is a pair — download on the bridge, upload on its ifb — so a stray removal drops both.
+	// A managed class is a pair (bridge download, ifb upload); stray removal drops both.
 	f.delClass(bridge, minor)
 	f.delClass(shape.IFBName(bridge), minor)
 	return nil
 }
 
-// put records an installed class (caller holds the lock).
 func (f *fakeTC) put(bridge string, minor int, c tcCall) {
 	if f.installed[bridge] == nil {
 		f.installed[bridge] = map[int]tcCall{}
@@ -277,7 +258,6 @@ func (f *fakeTC) put(bridge string, minor int, c tcCall) {
 	f.installed[bridge][minor] = c
 }
 
-// wipe empties the kernel, as a reboot does.
 func (f *fakeTC) wipe() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -285,7 +265,6 @@ func (f *fakeTC) wipe() {
 	f.forwarding = map[string]map[int]bool{}
 }
 
-// wipeBridge empties one bridge (and its paired ifb), as a flushed qdisc does within a single boot.
 func (f *fakeTC) wipeBridge(bridge string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -295,7 +274,7 @@ func (f *fakeTC) wipeBridge(bridge string) {
 	delete(f.forwarding, shape.IFBName(bridge))
 }
 
-// preinstall seeds the kernel with a class no plan will claim — a leftover from a crash or an earlier run.
+// preinstall seeds a class no plan claims, like a crash leftover.
 func (f *fakeTC) preinstall(bridge, ip string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,8 +295,7 @@ func (f *fakeTC) snapshot() ([]tcCall, map[string]map[int]tcCall) {
 	return append([]tcCall(nil), f.calls...), out
 }
 
-// countInstalled counts DOWNLOAD classes only (on bridges, not the paired ifb devices), so it still equals
-// the number of shaped sessions now that the fake models both directions of each managed class.
+// countInstalled counts download classes only, not the paired ifbs.
 func (f *fakeTC) countInstalled() int {
 	_, inst := f.snapshot()
 	n := 0
@@ -330,8 +308,7 @@ func (f *fakeTC) countInstalled() int {
 	return n
 }
 
-// countForwarding counts sessions with an ACTIVE download forwarding filter — i.e. classes actually carrying
-// guest packets, as distinct from merely prepared. The staged-provisioning tests assert on this.
+// countForwarding counts sessions with an active download filter, as distinct from merely prepared.
 func (f *fakeTC) countForwarding() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -344,8 +321,6 @@ func (f *fakeTC) countForwarding() int {
 	}
 	return n
 }
-
-// ---- fixtures -------------------------------------------------------------
 
 const (
 	testTenant    = "11111111-1111-1111-1111-111111111111"
@@ -360,18 +335,13 @@ func liveMode() phase3Mode {
 }
 
 func liveWriter(tc shaper) *phase3Shaping {
-	// A live writer always has generation authority — without it no class can be made accountable, which is
-	// its own test (TestNoGenerationAuthorityMeansNoAccountableClass) rather than the default condition.
 	return &phase3Shaping{shp: tc, mode: liveMode(), authz: shapingAuthz{allowedUID: testUID, configured: true},
 		generations: &fakeGenerations{},
-		// Every writer needs a MONOTONIC security clock: the activation bound is measured against it, and a
-		// writer without one cannot measure the bound and therefore (correctly) refuses to authorize anyone.
-		// The durability suite replaces this with a clock it drives.
+		// Every writer needs a monotonic security clock; without one it refuses to authorize anyone.
 		secClock: &fixedSecurityClock{ms: 60_000, bootID: "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"}}
 }
 
-// envelope builds a well-formed plan for the live scope, declaring the bridges its sessions use plus the
-// site's other guest bridge — so stray removal is exercised on a bridge with no sessions too.
+// envelope builds a plan declaring its sessions' bridges plus an empty one, so stray removal is exercised there too.
 func envelope(gen int64, sessions ...shapeplan.Session) shapeplan.Envelope {
 	return envelopeOn([]string{"br-guest", "br-lan", "br-empty"}, gen, sessions...)
 }
@@ -398,14 +368,10 @@ func standardPlan(gen int64) shapeplan.Envelope {
 	)
 }
 
-// ---- DARK -----------------------------------------------------------------
-
-// A dark appliance refuses to mutate tc, on its OWN authority. If netd trusted "acctd would never submit while
-// dark", the kill switch would depend on a different process staying correct — and a compromised or
-// misconfigured producer would be enough to start enforcing on a site that never enabled Phase 3.
+// A dark appliance refuses to mutate tc on its own authority, not on trust that acctd will not submit.
 func TestDarkNetdRefusesEveryPlan(t *testing.T) {
 	tc := newFakeTC()
-	p := &phase3Shaping{shp: tc, authz: shapingAuthz{allowedUID: testUID, configured: true}} // mode.Active == false
+	p := &phase3Shaping{shp: tc, authz: shapingAuthz{allowedUID: testUID, configured: true}}
 	res, err := p.submit(context.Background(), standardPlan(1), time.Now())
 	if err == nil || res.Accepted {
 		t.Fatalf("a dark netd accepted a shaping plan: %+v", res)
@@ -416,7 +382,6 @@ func TestDarkNetdRefusesEveryPlan(t *testing.T) {
 	if calls, _ := tc.snapshot(); len(calls) != 0 {
 		t.Fatalf("a dark netd touched tc: %+v", calls)
 	}
-	// and it does not even disclose the managed-class generations
 	srv := &server{phase3: p}
 	epochReq := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
 	epochReq = epochReq.WithContext(context.WithValue(epochReq.Context(), peerConnKey{}, producerIdentity{UID: testUID}))
@@ -427,24 +392,19 @@ func TestDarkNetdRefusesEveryPlan(t *testing.T) {
 	}
 }
 
-// ---- producer authentication ---------------------------------------------
-
-// The producer is authenticated by the KERNEL's statement of who is on the other end of the socket. A header
-// is a claim any local process can write; SO_PEERCRED cannot be forged by the caller.
+// Identity comes from SO_PEERCRED; a header is forgeable.
 func TestOnlyTheAuthenticatedProducerMaySubmit(t *testing.T) {
 	tc := newFakeTC()
 	srv := &server{phase3: liveWriter(tc)}
 	h := http.HandlerFunc(srv.phase3ShapingHandler)
 	raw, _ := json.Marshal(standardPlan(1))
 
-	// no peer credentials at all (a connection that did not come through the peer listener)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/phase3/shaping", bytes.NewReader(raw)))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("an unauthenticated caller was allowed to submit: %d", rec.Code)
 	}
 
-	// the wrong local uid — e.g. edged or portald, which do not own enforcement
 	req := httptest.NewRequest(http.MethodPost, "/v1/phase3/shaping", bytes.NewReader(raw))
 	req = req.WithContext(context.WithValue(req.Context(), peerConnKey{}, producerIdentity{UID: testUID + 1, PID: 99}))
 	rec2 := httptest.NewRecorder()
@@ -456,7 +416,6 @@ func TestOnlyTheAuthenticatedProducerMaySubmit(t *testing.T) {
 		t.Fatal("an unauthorized submission reached tc")
 	}
 
-	// the authorized producer
 	req3 := httptest.NewRequest(http.MethodPost, "/v1/phase3/shaping", bytes.NewReader(raw))
 	req3 = req3.WithContext(context.WithValue(req3.Context(), peerConnKey{}, producerIdentity{UID: testUID, PID: 42}))
 	rec3 := httptest.NewRecorder()
@@ -466,8 +425,7 @@ func TestOnlyTheAuthenticatedProducerMaySubmit(t *testing.T) {
 	}
 }
 
-// With no producer uid configured there is no way to tell acctd from any other local process. That is not a
-// degraded mode, it is an unenforceable one, so authorization fails closed.
+// With no producer uid configured, authorization fails closed.
 func TestUnconfiguredProducerFailsClosed(t *testing.T) {
 	a := newShapingAuthz(func(string) string { return "" })
 	if a.configured {
@@ -476,7 +434,6 @@ func TestUnconfiguredProducerFailsClosed(t *testing.T) {
 	if err := a.authorize(producerIdentity{UID: 0}, nil); err == nil {
 		t.Fatal("an unconfigured authorizer allowed root to submit")
 	}
-	// a malformed value is not a reason to open up either
 	if newShapingAuthz(func(string) string { return "not-a-uid" }).configured {
 		t.Fatal("a malformed producer uid was treated as configured")
 	}
@@ -494,10 +451,7 @@ func TestUnconfiguredProducerFailsClosed(t *testing.T) {
 	}
 }
 
-// ---- envelope validation --------------------------------------------------
-
-// A plan is checked against netd's OWN scope, never against itself. Applying another site's or another
-// appliance's desired state would silently enforce someone else's policy here.
+// A plan is checked against netd's own scope; applying another site's state would enforce someone else's policy.
 func TestPlanMustMatchThisAppliancesScope(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -537,8 +491,7 @@ func TestPlanMustMatchThisAppliancesScope(t *testing.T) {
 	}
 }
 
-// A delayed or replayed older plan must never be applied. It is the classic way a reconciliation loop
-// reinstates access somebody has just revoked: the stale plan still lists them as entitled.
+// A delayed or replayed older plan must never reinstate revoked access.
 func TestStaleAndReplayedPlansAreRefused(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -546,31 +499,26 @@ func TestStaleAndReplayedPlansAreRefused(t *testing.T) {
 	if _, err := p.submit(context.Background(), standardPlan(5), time.Now()); err != nil {
 		t.Fatalf("generation 5 was refused: %v", err)
 	}
-	// an older plan arriving late
 	res, err := p.submit(context.Background(), standardPlan(4), time.Now())
 	if err == nil || res.Reason != shapeplan.ReasonStaleGeneration {
 		t.Fatalf("a stale plan was accepted: %+v", res)
 	}
-	// the SAME generation with DIFFERENT contents means the producer's numbering is broken; applying either
-	// would be a guess
+	// The same generation with different contents means the producer's numbering is broken.
 	conflicting := envelope(5, shapeplan.Session{SessionID: "live-1", IP: "10.0.0.77", Bridge: "br-guest",
 		DownKbps: 1000, UpKbps: 1000, Entitled: true})
 	res2, err2 := p.submit(context.Background(), conflicting, time.Now())
 	if err2 == nil || res2.Reason != shapeplan.ReasonGenerationConflict {
 		t.Fatalf("a conflicting duplicate generation was accepted: %+v", res2)
 	}
-	// an exact replay of the accepted generation is harmless and idempotent
 	if _, err := p.submit(context.Background(), standardPlan(5), time.Now()); err != nil {
 		t.Fatalf("an exact replay was refused: %v", err)
 	}
-	// and a newer one is accepted
 	if _, err := p.submit(context.Background(), standardPlan(6), time.Now()); err != nil {
 		t.Fatalf("a newer plan was refused: %v", err)
 	}
 }
 
-// The generation history survives a netd restart. Without that, a restarted netd would accept an old plan it
-// had already superseded — and re-shape sessions whose access had ended.
+// Generation history survives a netd restart, else an old plan could be re-accepted.
 func TestAcceptedGenerationSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "plan.json")
@@ -585,7 +533,6 @@ func TestAcceptedGenerationSurvivesRestart(t *testing.T) {
 		t.Fatalf("the accepted plan was not persisted: %v", err)
 	}
 
-	// a brand-new netd process, no memory at all
 	restarted := liveWriter(tc)
 	restarted.store = &planStore{path: statePath}
 	res, err := restarted.submit(context.Background(), standardPlan(8), time.Now())
@@ -597,10 +544,7 @@ func TestAcceptedGenerationSurvivesRestart(t *testing.T) {
 	}
 }
 
-// ---- reconciliation -------------------------------------------------------
-
-// Teardown happens before shaping. The other order leaves a window in which access that has ended is still
-// forwarded while capacity is handed to whoever is still entitled.
+// Teardown happens before shaping; the other order leaves ended access forwarded while capacity is handed out.
 func TestShapingTearsDownBeforeShaping(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -626,12 +570,9 @@ func TestShapingTearsDownBeforeShaping(t *testing.T) {
 	}
 }
 
-// THE case a delta protocol can never handle: a class belonging to a session that no longer exists anywhere.
-// After a crash — or any restart that lost the in-memory map — nothing will ever mention it again, so it would
-// keep forwarding traffic forever. Enumerating the kernel is the only way to find it.
+// A class for a session that no longer exists anywhere is only found by enumerating the kernel.
 func TestStrayClassesAreRemoved(t *testing.T) {
 	tc := newFakeTC()
-	// a leftover from before: a class for a guest whose session ended while netd was down
 	tc.preinstall("br-guest", "10.0.0.55")
 	p := liveWriter(tc)
 
@@ -652,12 +593,10 @@ func TestStrayClassesAreRemoved(t *testing.T) {
 	}
 }
 
-// THE CASE THAT NEEDS THE DECLARED BRIDGE LIST: a leftover class on a bridge with NO sessions at all. Nothing
-// in the session set mentions that bridge, so an applier that reconciled only "wherever the sessions are"
-// would never look there — and the class would keep forwarding traffic for access that ended, forever.
+// A leftover class on a bridge with no sessions is found only via the plan's declared bridge list.
 func TestStrayOnAnEmptyBridgeIsStillRemoved(t *testing.T) {
 	tc := newFakeTC()
-	tc.preinstall("br-empty", "10.0.0.77") // a guest bridge whose last session ended while netd was down
+	tc.preinstall("br-empty", "10.0.0.77")
 	p := liveWriter(tc)
 
 	res, err := p.submit(context.Background(), standardPlan(1), time.Now())
@@ -673,8 +612,7 @@ func TestStrayOnAnEmptyBridgeIsStillRemoved(t *testing.T) {
 	}
 }
 
-// A session on a bridge the plan does not declare is refused rather than installed: the applier would create
-// a class it has not been told to reconcile, and would therefore never remove it again.
+// A session on an undeclared bridge is refused; its class would never be removed.
 func TestSessionOnAnUndeclaredBridgeIsRefused(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -694,8 +632,7 @@ func TestSessionOnAnUndeclaredBridgeIsRefused(t *testing.T) {
 	}
 }
 
-// An unreadable kernel means UNKNOWN strays. Reporting success would tell an operator enforcement is exact
-// when netd has no idea what is installed.
+// An unreadable kernel means unknown strays; reporting success would claim exact enforcement.
 func TestUnreadableKernelIsDegradedNotAssumedClean(t *testing.T) {
 	tc := newFakeTC()
 	tc.readErr["br-guest"] = errors.New("tc: cannot open netlink")
@@ -712,8 +649,7 @@ func TestUnreadableKernelIsDegradedNotAssumedClean(t *testing.T) {
 	}
 }
 
-// Applying the same plan repeatedly converges: the desired state is identical every time, which is what makes
-// restart and reboot recovery ordinary rather than special.
+// Reapplying the same plan converges, which makes restart recovery ordinary.
 func TestShapingIsIdempotentAndConverges(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -722,7 +658,6 @@ func TestShapingIsIdempotentAndConverges(t *testing.T) {
 	}
 	_, first := tc.snapshot()
 
-	// a "restart": a brand-new writer with no memory at all applies the same desired state
 	p2 := liveWriter(tc)
 	if _, err := p2.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
 		t.Fatal(err)
@@ -744,8 +679,7 @@ func TestShapingIsIdempotentAndConverges(t *testing.T) {
 	}
 }
 
-// A plan that could not be fully applied is reported as degraded rather than treated as success — especially a
-// TEARDOWN failure, which means traffic may still be forwarded for access that has ended.
+// A partially applied plan is reported degraded, especially a teardown failure (traffic may still be forwarded).
 func TestPartialApplicationIsTruthfullyDegraded(t *testing.T) {
 	tc := newFakeTC()
 	tc.failDel["10.0.0.8"] = errors.New("class busy")
@@ -765,8 +699,7 @@ func TestPartialApplicationIsTruthfullyDegraded(t *testing.T) {
 	}
 }
 
-// A session with no addressing or no rates is left UNSHAPED. Installing a zero rate would be a silent
-// full-speed pass — worse than not shaping it, because it looks deliberate.
+// A session with no addressing or rates stays unshaped; a zero rate would be a silent full-speed pass.
 func TestUnusablePlanEntriesAreNotShaped(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -786,8 +719,7 @@ func TestUnusablePlanEntriesAreNotShaped(t *testing.T) {
 	}
 }
 
-// Two live sessions mapping to one class is a producer defect. Installing either would attribute the other's
-// traffic to it, so neither is installed and the conflict is reported.
+// Two sessions mapping to one class is a producer defect; neither is installed and the conflict is reported.
 func TestConflictingSessionsAreBothRefused(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -807,8 +739,7 @@ func TestConflictingSessionsAreBothRefused(t *testing.T) {
 	}
 }
 
-// Concurrent submissions must not interleave: two half-applied plans would leave the kernel in a state neither
-// plan describes.
+// Concurrent submissions must not interleave into a state neither plan describes.
 func TestConcurrentSubmissionsDoNotInterleave(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -826,10 +757,7 @@ func TestConcurrentSubmissionsDoNotInterleave(t *testing.T) {
 	}
 }
 
-// ---- HTTP contract --------------------------------------------------------
-
-// The endpoint accepts only a COMPLETE envelope and rejects anything it does not understand, so the two sides
-// cannot drift into exchanging deltas.
+// The endpoint accepts only a complete envelope so the sides cannot drift into exchanging deltas.
 func TestShapingEndpointContract(t *testing.T) {
 	tc := newFakeTC()
 	srv := &server{phase3: liveWriter(tc)}
@@ -856,19 +784,15 @@ func TestShapingEndpointContract(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", res)
 	}
 
-	// an unknown field is a contract drift signal, not something to silently ignore
 	if rec2 := post([]byte(`{"contract_version":"phase3-shaping/1","remove_one":"s1"}`)); rec2.Code != http.StatusBadRequest {
 		t.Fatalf("an unknown field was accepted: %d", rec2.Code)
 	}
 
-	// a legacy DELTA body (the pre-contract shape) must not be silently interpreted
 	if rec3 := post([]byte(`{"tear":[],"shape":[]}`)); rec3.Code != http.StatusBadRequest {
 		t.Fatalf("a legacy delta body was accepted: %d %s", rec3.Code, rec3.Body.String())
 	}
 
-	// an unsupported contract version is a 400 (the caller must change), a scope/staleness refusal is a 409.
-	// The OLD contract is the one that matters here: a /1 producer states no access boundary, so an applier
-	// that accepted it would have to invent a lease length for a guest whose access may end in a minute.
+	// An unsupported version is 400, a scope or staleness refusal is 409; a /1 producer states no access boundary, so accepting it would mean inventing a lease length.
 	badVersion := standardPlan(2)
 	badVersion.ContractVersion = "phase3-shaping/1"
 	bvRaw, _ := json.Marshal(badVersion)
@@ -883,18 +807,12 @@ func TestShapingEndpointContract(t *testing.T) {
 	}
 }
 
-// ---- health ---------------------------------------------------------------
-
-// Health must tell the truth about enforcement, in a state an operator can act on. The five states exist
-// because the interesting failures are not "an error occurred" — they are "nothing is known to be in force"
-// and "what is in force is no longer confirmed", both of which an earlier version reported as healthy.
+// Health must report states an operator can act on: "nothing known in force" and "no longer confirmed" must not read as healthy.
 func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
 
-	// LIVE, NOTHING IN FORCE. This is degraded: the appliance is supposed to be enforcing and demonstrably
-	// is not. Reporting degraded=false here — with the fact buried in a plan_stale field — reads as healthy
-	// at a glance while saying the opposite in small print.
+	// Live with nothing in force is degraded, not healthy with a buried plan_stale.
 	st := p.status()
 	if st["state"] != shapingNoPlan || st["degraded"] != true {
 		t.Fatalf("a live writer with nothing in force: %v", st)
@@ -906,10 +824,7 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 		t.Fatalf("health did not report the enforcement mode: %v", st)
 	}
 
-	// CONVERGED: the kernel was driven to a current plan with nothing failing.
-	//
-	// gone-1 is NOT in this first plan: a session whose teardown already succeeded is not torn down again
-	// (B-9), so the failure staged below must hit a teardown that is genuinely being attempted.
+	// CONVERGED. gone-1 is absent from this plan: an already-torn-down session is not torn down again, so the failure staged below hits a real attempt.
 	plan1 := envelope(1,
 		shapeplan.Session{SessionID: "gone-2", DeviceID: "dev-gone-2", IP: "10.0.0.9", Bridge: "br-guest"},
 		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-live-1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 8000, UpKbps: 3000, Entitled: true},
@@ -926,7 +841,6 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 		t.Fatalf("health did not report the converged plan: %v", st)
 	}
 
-	// DEGRADED: a teardown failed, so traffic may still be forwarded for access that ended.
 	tc.failDel["10.0.0.8"] = errors.New("class busy")
 	if _, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
 		t.Fatal(err)
@@ -935,8 +849,7 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	if st["state"] != shapingDegradedState || st["degraded"] != true || st["problem"] == nil {
 		t.Fatalf("a failed apply: %v", st)
 	}
-	// the ADMISSION advanced (so a replay of generation 1 still cannot reinstate anything) but CONVERGENCE
-	// did not: claiming generation 2 was put in force would be a false record of the kernel's state
+	// Admission advanced but convergence did not; claiming generation 2 in force would be a false record.
 	if st["admitted_generation"] != int64(2) {
 		t.Fatalf("a partially applied plan was not admitted: %v", st)
 	}
@@ -944,7 +857,7 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 		t.Fatalf("a partially applied plan was recorded as converged: %v", st)
 	}
 
-	// RECOVERY: re-submitting the SAME generation and hash is allowed, and finishing convergence clears it.
+	// Resubmitting the same generation and hash is allowed and finishes convergence.
 	delete(tc.failDel, "10.0.0.8")
 	if _, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
 		t.Fatalf("retrying the admitted generation was refused: %v", err)
@@ -957,8 +870,6 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 		t.Fatalf("convergence did not catch up: %v", st)
 	}
 
-	// a refusal is counted and named, so an operator can see netd REFUSING plans rather than quietly
-	// enforcing nothing
 	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err == nil {
 		t.Fatal("expected the stale plan to be refused")
 	}
@@ -968,8 +879,7 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	}
 }
 
-// A plan that expired without a replacement means the producer went quiet. What is installed may still be
-// correct, but nothing is confirming it — and "probably still correct" is not a state to stay silent about.
+// An expired plan means the producer went quiet; nothing confirms what is installed.
 func TestExpiredPlanIsStaleAndDegraded(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
@@ -983,7 +893,6 @@ func TestExpiredPlanIsStaleAndDegraded(t *testing.T) {
 		t.Fatalf("a fresh plan: %v", st)
 	}
 
-	// wind the converged plan's validity into the past, as a producer that died would leave it
 	p.mu.Lock()
 	p.lastConverged.ExpiresAt = time.Now().Add(-time.Second)
 	p.mu.Unlock()
@@ -1000,7 +909,6 @@ func TestExpiredPlanIsStaleAndDegraded(t *testing.T) {
 	}
 }
 
-// A dark appliance is not "degraded" — it is doing exactly what it should.
 func TestDarkIsNotDegraded(t *testing.T) {
 	p := &phase3Shaping{shp: newFakeTC(), authz: shapingAuthz{allowedUID: testUID, configured: true}}
 	st := p.status()
@@ -1009,14 +917,11 @@ func TestDarkIsNotDegraded(t *testing.T) {
 	}
 }
 
-// ---- generation authority and kernel-proven continuity ----------------------
-
-// fakeGenerations stands in for the durable allocator: strictly increasing, never reissued, able to fail.
 type fakeGenerations struct {
 	mu     sync.Mutex
 	last   int64
 	err    error
-	issued []int64 // every value handed out, so a test can prove none was repeated
+	issued []int64
 }
 
 func (g *fakeGenerations) AllocateClassGeneration(ctx context.Context, tenant, site, appliance string) (int64, error) {
@@ -1030,7 +935,6 @@ func (g *fakeGenerations) AllocateClassGeneration(ctx context.Context, tenant, s
 	return g.last, nil
 }
 
-// writerWithState builds a writer backed by a real state file and a durable allocator, as netd's main does.
 func writerWithState(tc *fakeTC, gens generationAllocator, path, bootID string) *phase3Shaping {
 	p := liveWriter(tc)
 	p.classStore = &classStore{path: path}
@@ -1041,8 +945,7 @@ func writerWithState(tc *fakeTC, gens generationAllocator, path, bootID string) 
 	return p
 }
 
-// A RESTART with the kernel intact keeps every generation. If it did not, acctd — holding a checkpoint at the
-// older generation — would refuse every later observation as stale and accounting would simply stop.
+// A restart with the kernel intact keeps every generation; otherwise acctd's checkpoint would reject later observations as stale.
 func TestRestartWithKernelIntactKeepsGenerations(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1074,8 +977,7 @@ func TestRestartWithKernelIntactKeepsGenerations(t *testing.T) {
 	}
 }
 
-// A REBOOT loses every class. Their successors must be strictly newer generations, or a checkpoint that still
-// pins the old one would measure a counter restarting at zero against it.
+// A reboot loses every class; successors must be strictly newer or a checkpoint measures a counter restarting at zero.
 func TestRebootAllocatesStrictlyNewerGenerations(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1087,7 +989,7 @@ func TestRebootAllocatesStrictlyNewerGenerations(t *testing.T) {
 	}
 	before := p.Epochs()
 
-	tc.wipe() // reboot: new boot id AND an empty kernel
+	tc.wipe()
 	rebooted := writerWithState(tc, gens, state, "boot-bbbb")
 	if len(rebooted.Epochs()) != 0 {
 		t.Fatalf("a rebooted appliance claimed %d surviving classes", len(rebooted.Epochs()))
@@ -1102,8 +1004,7 @@ func TestRebootAllocatesStrictlyNewerGenerations(t *testing.T) {
 	}
 }
 
-// SAME BOOT but the class is gone — a flushed qdisc, a manual removal. The boot id still matches, so only the
-// kernel reading can catch it. The successor must be a new series; untouched classes keep theirs.
+// Same boot but the class is gone: only the kernel reading catches it, and the successor must be a new series.
 func TestSameBootWithClassRemovedRegenerates(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1132,8 +1033,7 @@ func TestSameBootWithClassRemovedRegenerates(t *testing.T) {
 	}
 }
 
-// SAME BOOT, same minor, DIFFERENT session. The slot is occupied, so a presence check alone would carry the
-// old generation forward and hand the new guest the previous guest's checkpoint.
+// Same boot, same minor, different session: a presence check alone would hand the new guest the previous guest's checkpoint.
 func TestSameMinorReusedByAnotherSessionDoesNotInherit(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1161,12 +1061,11 @@ func TestSameMinorReusedByAnotherSessionDoesNotInherit(t *testing.T) {
 	}
 }
 
-// Corrupted durable state with OLDER generations already in use must not reuse one. The allocator is the
-// authority; a lost inventory cannot hand back a value some checkpoint still pins.
+// Corrupted durable state must not reuse an older generation; the allocator is the authority.
 func TestCorruptedStateWithOlderGenerationsNeverReuses(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
-	gens := &fakeGenerations{last: 5} // 1..5 already issued and pinned by existing checkpoints
+	gens := &fakeGenerations{last: 5}
 
 	p := writerWithState(tc, gens, state, "boot-aaaa")
 	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
@@ -1198,8 +1097,7 @@ func TestCorruptedStateWithOlderGenerationsNeverReuses(t *testing.T) {
 	}
 }
 
-// The generation is NOT derived from the wall clock. A clock that jumps backwards — RTC reset, NTP
-// correction, image restore — must not affect it at all.
+// The generation is not derived from the wall clock, which may jump backwards.
 func TestGenerationsAreIndependentOfTheWallClock(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1215,7 +1113,6 @@ func TestGenerationsAreIndependentOfTheWallClock(t *testing.T) {
 
 	tc.wipe()
 	restarted := writerWithState(tc, gens, state, "boot-aaaa")
-	// a plan evaluated against a clock that has moved BACKWARDS two days
 	if _, err := restarted.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -1226,8 +1123,7 @@ func TestGenerationsAreIndependentOfTheWallClock(t *testing.T) {
 	}
 }
 
-// Without generation authority a class is NOT made accountable. Installing it anyway would put traffic on the
-// wire that no checkpoint can ever attribute, and no local value may be manufactured to fill the gap.
+// Without generation authority a class is not made accountable; no local value may be manufactured.
 func TestNoGenerationAuthorityMeansNoAccountableClass(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{err: errors.New("database unavailable")}
@@ -1245,8 +1141,7 @@ func TestNoGenerationAuthorityMeansNoAccountableClass(t *testing.T) {
 	}
 }
 
-// Epochs() reports only classes the kernel is currently verified to hold. Reporting a torn-down or
-// unverifiable class would tell acctd it may account against something that no longer exists.
+// Epochs() reports only classes the kernel is verified to hold.
 func TestEpochsExposesOnlyVerifiedKernelClasses(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "classes.json")
 	tc := newFakeTC()
@@ -1271,9 +1166,7 @@ func TestEpochsExposesOnlyVerifiedKernelClasses(t *testing.T) {
 	}
 }
 
-// The class-generation endpoint is control-plane state: it enumerates which sessions are shaped, where, and
-// how often each class has been replaced. Every other service on the appliance can reach the socket, so it
-// requires the same authenticated producer identity as a submission.
+// The class-generation endpoint is control-plane state and requires the same producer identity as a submission.
 func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
 	tc := newFakeTC()
 	srv := &server{phase3: liveWriter(tc)}
@@ -1282,7 +1175,6 @@ func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
 	}
 	h := http.HandlerFunc(srv.phase3EpochsHandler)
 
-	// no peer credentials at all
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil))
 	if rec.Code != http.StatusForbidden {
@@ -1292,7 +1184,6 @@ func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
 		t.Fatal("a refused read disclosed managed sessions")
 	}
 
-	// another local service — edged, portald, scd all share the socket group
 	other := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
 	other = other.WithContext(context.WithValue(other.Context(), peerConnKey{}, producerIdentity{UID: testUID + 1}))
 	rec2 := httptest.NewRecorder()
@@ -1301,7 +1192,6 @@ func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
 		t.Fatalf("uid %d read class generations: %d", testUID+1, rec2.Code)
 	}
 
-	// the authorised producer
 	ok := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
 	ok = ok.WithContext(context.WithValue(ok.Context(), peerConnKey{}, producerIdentity{UID: testUID}))
 	rec3 := httptest.NewRecorder()
@@ -1314,13 +1204,7 @@ func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
 	}
 }
 
-// THE WHOLE REBOOT SEQUENCE, end to end.
-//
-// Each piece is tested on its own above; this drives them in the order a real reboot produces them, because
-// the failure being guarded against is an interaction, not a unit: durable admission state and durable class
-// state must recover together, the kernel must be re-driven from a single desired-state submission, strays
-// left by the previous boot must go, recreated classes must be new series, and the accounting checkpoints
-// acctd still holds must be able to continue without a regression or a phantom delta.
+// The whole reboot sequence end to end: the guarded failure is an interaction, so durable admission and class state must recover together and checkpoints continue without a regression or phantom delta.
 func TestRebootConvergesFromOneSubmission(t *testing.T) {
 	dir := t.TempDir()
 	classState := filepath.Join(dir, "classes.json")
@@ -1328,7 +1212,6 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 	gens := &fakeGenerations{}
 	tc := newFakeTC()
 
-	// ---- before the reboot: a converged appliance --------------------------
 	before := liveWriter(tc)
 	before.classStore = &classStore{path: classState}
 	before.store = &planStore{path: planState}
@@ -1345,9 +1228,7 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 		t.Fatalf("managed classes before the reboot = %d", len(oldEpochs))
 	}
 
-	// ---- the reboot --------------------------------------------------------
-	// Every tc class is gone. One class from the previous boot is left behind in the kernel by a partial
-	// teardown, to prove stray removal still happens after a restart.
+	// Reboot: every tc class is gone except one stray left by a partial teardown.
 	tc.wipe()
 	tc.preinstall("br-guest", "10.0.0.55")
 
@@ -1359,19 +1240,16 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 	inv, verified := kernelInventory(context.Background(), tc, bridgesIn(prev))
 	after.restore(prev, "boot-bbbb", inv, verified)
 
-	// durable ADMISSION state survived: a replay of a superseded generation is still refused
 	if res, err := after.submit(context.Background(), standardPlan(6), time.Now()); err == nil {
 		t.Fatalf("a superseded plan was accepted after a reboot: %+v", res)
 	} else if res.Reason != shapeplan.ReasonStaleGeneration {
 		t.Fatalf("refusal reason after reboot = %q", res.Reason)
 	}
 
-	// nothing is claimed to be in force yet
 	if st := after.status(); st["state"] != shapingNoPlan || st["degraded"] != true {
 		t.Fatalf("a rebooted appliance did not report that nothing is in force: %v", st)
 	}
 
-	// ---- one complete desired-state submission -----------------------------
 	res, err := after.submit(context.Background(), standardPlan(8), time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -1389,9 +1267,7 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 		t.Fatalf("after convergence: %v", st)
 	}
 
-	// ---- the accounting side can continue safely ---------------------------
-	// Every recreated class is a STRICTLY NEWER generation, so a checkpoint still holding the previous one
-	// sees a new series (a trustworthy reset) rather than a counter that appears to have gone backwards.
+	// Recreated classes are strictly newer generations, so a held checkpoint sees a reset, not a backwards counter.
 	newEpochs := after.Epochs()
 	if len(newEpochs) != len(oldEpochs) {
 		t.Fatalf("managed classes after convergence = %d, want %d", len(newEpochs), len(oldEpochs))
@@ -1410,25 +1286,18 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 	}
 }
 
-// classState4 is an empty starting inventory, spelled out so the reboot test reads in order.
 func classState4() classState {
 	return classState{Classes: map[string]managedClass{}}
 }
 
-// hasForwarding reports whether a minor is CLASSIFYING on a bridge (its download filter is installed). The
-// system tests use it to assert the invariant that no authorized guest lacks an accountable class.
+// hasForwarding reports whether a minor is classifying on a bridge (download filter installed).
 func (f *fakeTC) hasForwarding(bridge string, minor int) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.forwarding[bridge][minor]
 }
 
-// A HANDOVER MUST NOT TAKE THE NEW OWNER OFFLINE.
-//
-// One address, two sessions in one plan: the older is torn down, the newer is entitled. Teardown works by
-// address, so the naive order revokes the element and deletes the class that the surviving session is about to
-// be given — and the next pass re-creates both with a fresh generation. On the appliance that produced a guest
-// flickering offline once a second and an accounting series that restarted every tick.
+// A handover must not take the new owner offline: teardown works by address, so the naive order revokes the element and class the surviving session is about to receive.
 func TestHandoverLeavesTheNewOwnersKernelStateAlone(t *testing.T) {
 	const handoverIP = "10.0.0.44"
 	tc := newFakeTC()
@@ -1436,7 +1305,6 @@ func TestHandoverLeavesTheNewOwnersKernelStateAlone(t *testing.T) {
 	gate := newFakeGate()
 	p.gate = gate
 
-	// The newer session is already provisioned and online at this address.
 	older := shapeplan.Session{SessionID: "s-older", DeviceID: "dev", IP: handoverIP, Bridge: "br-guest",
 		Entitled: false, EndReason: "SUPERSEDED_ON_ADDRESS"}
 	newer := shapeplan.Session{SessionID: "s-newer", DeviceID: "dev", IP: handoverIP, Bridge: "br-guest",
@@ -1453,7 +1321,6 @@ func TestHandoverLeavesTheNewOwnersKernelStateAlone(t *testing.T) {
 		t.Fatal("the new owner has no accounting generation")
 	}
 
-	// Now the plan carries BOTH: the superseded session and its successor.
 	res, err := p.submit(context.Background(), envelope(2, older, newer), time.Now())
 	if err != nil {
 		t.Fatalf("handover pass: %v", err)

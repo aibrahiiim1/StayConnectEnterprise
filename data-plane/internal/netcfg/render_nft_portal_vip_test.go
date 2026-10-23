@@ -1,15 +1,9 @@
 package netcfg
 
-// THE PORTAL ADDRESS IN THE RULESET (contract ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN §2.1, §9).
-//
-// The portal is served over TLS on one private /32 that exists only on the appliance. What the firewall must make
-// true, and what these tests read back from the RENDERED ruleset rather than from intent:
-//
-//	a guest -- signed in or not -- reaches the portal on that address, 443 -> 8343 and 80 -> 8380;
-//	nothing else on the address is open, and nothing but a guest network may address it at all;
-//	the address is never routed and never NATed, whatever state its interface is in;
-//	and the one 443 redirect in the ruleset is bound to that ONE destination: arbitrary 443 is still never
-//	intercepted (render_nft_no_tls_portal_test.go holds that half).
+// The portal address in the rendered ruleset: a guest, signed in or not, reaches the portal on that address (443 ->
+// 8343, 80 -> 8380); nothing else on the address is open and only a guest network may address it; the address is
+// never routed or NATed; and the one 443 redirect is bound to that destination (arbitrary 443 is never intercepted,
+// see render_nft_no_tls_portal_test.go).
 
 import (
 	"strings"
@@ -36,7 +30,6 @@ func renderVIP(t *testing.T, vip string) string {
 	return string(RenderNftables(vipNets(), topo))
 }
 
-// chainOf returns one chain's body, so an assertion about one hook cannot be satisfied by another.
 func chainOf(t *testing.T, out, name string) string {
 	t.Helper()
 	i := strings.Index(out, "chain "+name+" {")
@@ -69,8 +62,7 @@ const (
 )
 
 func TestPortalVIP_NoAddressRendersNothingNew(t *testing.T) {
-	// "" is "this appliance has no portal address": the ruleset is byte-for-byte what it was before the feature,
-	// so the render fingerprint does not move and a restart of an unconfigured appliance changes nothing.
+	// "" means no portal address: the ruleset is byte-for-byte what it was before the feature, so the fingerprint does not move.
 	topo := DefaultTopology()
 	before := string(RenderNftables(vipNets(), topo))
 	if strings.Contains(before, "portal address") || strings.Contains(before, "8343") {
@@ -88,8 +80,8 @@ func TestPortalVIP_PreroutingRedirectsOnlyThePortalAddressAndComesFirst(t *testi
 
 	at443 := idx(t, pre, vipDNAT443)
 	at80 := idx(t, pre, vipDNAT80)
-	// BEFORE the walled-garden accept (which ends NAT for a matching packet) and BEFORE every per-network captive
-	// DNAT (which would send the guest's port 80 to its gateway instead of the portal address).
+	// Before the walled-garden accept (which ends NAT) and every per-network captive DNAT (which would send port 80 to
+	// the gateway).
 	garden := idx(t, pre, "ip daddr . tcp dport @walled_garden_tcp accept")
 	captive := idx(t, pre, "tcp dport 80  dnat ip to 10.221.0.1:8380")
 	for _, at := range []int{at443, at80} {
@@ -97,15 +89,13 @@ func TestPortalVIP_PreroutingRedirectsOnlyThePortalAddressAndComesFirst(t *testi
 			t.Fatalf("the portal-address redirect is ordered after a rule that would claim its packet:\n%s", pre)
 		}
 	}
-	// THE REDIRECT IS FOR ANY AUTH STATE: it must not carry an auth-set exclusion, or a signed-in guest could not
-	// open the portal (to see their session, sign out, buy more time).
+	// The redirect applies in any auth state: an auth-set exclusion would stop a signed-in guest opening the portal.
 	for _, line := range strings.Split(pre, "\n") {
 		if strings.Contains(line, "ip daddr 10.255.255.1") && strings.Contains(line, "@auth_ipv4") {
 			t.Fatalf("the portal-address redirect depends on authentication state: %s", line)
 		}
 	}
-	// EVERY 443 DNAT IN THE WHOLE RULESET IS BOUND TO THE PORTAL ADDRESS. This is the guarantee the
-	// no-TLS-portal tests were written for: arbitrary HTTPS is never intercepted.
+	// Every 443 DNAT in the ruleset is bound to the portal address: arbitrary HTTPS is never intercepted.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "dport 443") && strings.Contains(line, "dnat") && !strings.Contains(line, "ip daddr 10.255.255.1 ") {
 			t.Fatalf("a 443 redirect that is not bound to the portal address: %s", line)
@@ -141,9 +131,8 @@ func TestPortalVIP_InputAdmitsGuestsOnTheTwoListenersOnly(t *testing.T) {
 }
 
 func TestPortalVIP_WANAndManagementCannotReachIt(t *testing.T) {
-	// The policy drop does NOT cover this on its own: the management accepts for SSH (22) and the admin UI (443
-	// when no MgmtAddr pins it) are keyed on the interface, not the destination. The explicit drop must therefore
-	// come before them -- and after the established accept and loopback, which it must not disturb.
+	// The policy drop does not cover this: the SSH and admin UI accepts key on interface, not destination, so the
+	// explicit drop must come before them and after the established accept and loopback.
 	out := renderVIP(t, testVIP)
 	in := chainOf(t, out, "input")
 
@@ -169,7 +158,6 @@ func TestPortalVIP_WANAndManagementCannotReachIt(t *testing.T) {
 			t.Fatalf("a WAN/management rule names the portal address: %s", line)
 		}
 	}
-	// And with MgmtAddr pinned the same holds.
 	topo := DefaultTopology()
 	topo.PortalVIP, topo.MgmtAddr = testVIP, "172.21.60.25"
 	pinned := chainOf(t, string(RenderNftables(vipNets(), topo)), "input")
@@ -189,7 +177,6 @@ func TestPortalVIP_IsNeverRoutedNorNATed(t *testing.T) {
 	if dst > est || src > est {
 		t.Fatal("the never-routed drops come after the established accept, so an existing flow would be exempt")
 	}
-	// Before every accept in the forward chain.
 	for _, line := range strings.Split(fwd, "\n") {
 		if strings.Contains(line, " accept") {
 			if strings.Index(fwd, line) < dst {
@@ -210,11 +197,9 @@ func TestPortalVIP_IsNeverRoutedNorNATed(t *testing.T) {
 	}
 }
 
-// THE UNAUTHENTICATED-443 DROP CANNOT CATCH PORTAL TRAFFIC. That drop lives in the FORWARD chain; a guest's
-// 443 to the portal address is DNAT'd in prerouting to the portal address itself -- a local address -- so the
-// routing decision sends it to INPUT, and the forward chain never sees it. The render proves the three facts that
-// argument rests on: the DNAT target is the portal address (local, not forwarded), input admits the translated
-// port, and the drop is a forward-chain rule ordered after the forward never-routed drop.
+// The unauthenticated-443 drop cannot catch portal traffic: it is in the forward chain, but a guest's 443 to the
+// portal address is DNAT'd to a local address and goes to INPUT. The render shows the DNAT target is the portal
+// address, input admits the translated port, and the drop is ordered after the forward never-routed drop.
 func TestPortalVIP_TheForward443DropIsNotOnThePortalPath(t *testing.T) {
 	out := renderVIP(t, testVIP)
 	if !strings.Contains(out, "dnat ip to 10.255.255.1:8343") {

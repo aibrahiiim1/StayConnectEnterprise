@@ -5,18 +5,9 @@ import (
 	"os/user"
 )
 
-// THE SOCKET HAS ITS OWN GROUP (audit N-26).
-//
-// scd's socket used to be root:stayconnect 0660, and portald -- the process every guest network talks to -- was
-// given the whole stayconnect group to reach it. That group is edged's PRIMARY group, so it also opened every
-// other file grouped stayconnect: edged's, netd's and acctd's env files (database credentials), the 0640 database
-// dumps in /opt/stayconnect/backups/db and netd's socket. A compromised portal would have read the credentials of
-// more privileged services. The socket now carries a group that does nothing else, held by exactly the two
-// services that call scd (edged and portald, through SupplementaryGroups= in their units), so reaching scd
-// buys nothing more. scd's own per-route peer checks (admin_surface.go) still decide what each caller may do.
-//
-// defaultSocketGroup is provisioned by provision-fresh-appliance.sh. An appliance upgraded before the group
-// exists keeps working on the legacy group, loudly, until the group is created.
+// The socket has its own group: portald gets only this group (held by edged and portald via SupplementaryGroups=) rather than edged's primary
+// group stayconnect, which would expose env files with database credentials, the DB dumps and netd's socket. Per-route peer checks
+// (admin_surface.go) still decide what each caller may do. Provisioned by provision-fresh-appliance.sh; until the group exists the legacy group is used, loudly.
 const (
 	defaultSocketGroup = "stayconnect-scd"
 	legacySocketGroup  = "stayconnect"

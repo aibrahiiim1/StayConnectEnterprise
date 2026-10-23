@@ -7,10 +7,8 @@ import (
 	"time"
 )
 
-// Publication-time validation of typed eligibility rules and grant tiers. Hotel Admin MUST call these
-// before publishing an immutable package revision; runtime evaluation additionally fails closed. Every
-// malformed/unknown-field/ambiguous rule is rejected here so bad config can never be published.
-
+// Publication-time validation: Hotel Admin must call these before publishing an immutable revision (runtime
+// evaluation also fails closed).
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 var (
@@ -23,22 +21,18 @@ var (
 		RulePriorPurchase: {"requires_prior": true, "forbids_prior": true, "within_hours": true, "also_by_device": true},
 		RuleSiteNetwork:   {"guest_network_ids": true},
 		RuleClientGroup:   {"group_ids": true, "public": true},
-		// The PMS rule types. Phase 2 refused to publish these because nothing could evaluate them; Phase 3
-		// supplies authoritative Stay evidence, so they are publishable — and are validated as strictly as
-		// the others, because a property that writes a rule expects it to mean what it says.
-		RuleStayStatus:   {"statuses": true},
-		RuleStayLength:   {"min_nights": true, "max_nights": true},
-		RuleRoomType:     {"room_types": true},
-		RuleVIP:          {"is_vip": true},
-		RuleTravelAgent:  {"travel_agents": true},
-		RulePMSInterface: {"pms_interface_ids": true},
-		RuleRatePlan:     {"rate_plans": true},
+		RuleStayStatus:    {"statuses": true},
+		RuleStayLength:    {"min_nights": true, "max_nights": true},
+		RuleRoomType:      {"room_types": true},
+		RuleVIP:           {"is_vip": true},
+		RuleTravelAgent:   {"travel_agents": true},
+		RulePMSInterface:  {"pms_interface_ids": true},
+		RuleRatePlan:      {"rate_plans": true},
 	}
 )
 
-// validatePMSRule checks the shape of a PMS rule at PUBLICATION time. Catching a malformed rule here is the
-// difference between an operator seeing an error while they are looking at the form and a guest silently
-// failing to qualify months later for a reason nobody can reconstruct.
+// validatePMSRule checks a PMS rule's shape at publication, so a malformed rule fails at the form rather than
+// leaving guests silently unqualified.
 func validatePMSRule(t string, v map[string]any) error {
 	bad := func(m string) error { return &Error{Code: ErrInvalidInput, Msg: m} }
 	switch t {
@@ -51,7 +45,7 @@ func validatePMSRule(t string, v map[string]any) error {
 	case RuleRatePlan:
 		return requireNonEmptyStrings(v, "rate_plans", bad)
 	case RulePMSInterface:
-		// Interface ids, not free text: a typo used to publish a rule that matched no stay, ever.
+		// Ids, not free text: a typo would publish a rule that never matches.
 		if _, err := normalizedUUIDList(v["pms_interface_ids"]); err != nil {
 			return bad("PMS_INTERFACE pms_interface_ids must be a non-empty list of PMS connection ids")
 		}
@@ -94,8 +88,6 @@ func noUnknownFields(v map[string]any, allowed map[string]bool) error {
 	return nil
 }
 
-// normalizedEnumList validates a JSON string array against an allowed enum set, upper-cased and
-// deduplicated. Empty list or any unknown/blank value is rejected.
 func normalizedEnumList(a any, allowed map[string]bool) ([]string, error) {
 	arr, ok := a.([]any)
 	if !ok || len(arr) == 0 {
@@ -120,7 +112,6 @@ func normalizedEnumList(a any, allowed map[string]bool) ([]string, error) {
 	return out, nil
 }
 
-// normalizedUUIDList validates a JSON array of normalized UUIDs (lower-cased, deduplicated).
 func normalizedUUIDList(a any) ([]string, error) {
 	arr, ok := a.([]any)
 	if !ok || len(arr) == 0 {
@@ -145,8 +136,7 @@ func normalizedUUIDList(a any) ([]string, error) {
 	return out, nil
 }
 
-// ValidateEligibilityRule strictly validates one typed rule for publication. Unknown rule type,
-// capability-disabled PMS type, unknown fields, malformed values or ambiguous structure are rejected.
+// ValidateEligibilityRule rejects unknown types, unknown fields, malformed values and ambiguous structure.
 func ValidateEligibilityRule(r EligibilityRule) error {
 	t := strings.ToUpper(strings.TrimSpace(r.Type))
 	allowed, known := ruleAllowedFields[t]
@@ -232,9 +222,8 @@ func ValidateEligibilityRule(r EligibilityRule) error {
 	return nil
 }
 
-// ValidateGrantTier validates a tier for publication: an optional typed "match" (object with one
-// recognized non-PMS condition) plus grant fields validated by BuildGrantSnapshot's bounds (with a
-// dummy plan so the tier's own values are range-checked).
+// ValidateGrantTier validates an optional "match" condition and range-checks the grant values through
+// BuildGrantSnapshot against a dummy plan.
 func ValidateGrantTier(t GrantTier) error {
 	if t.Order < 0 {
 		return &Error{Code: ErrInvalidInput, Msg: "tier_order must be >= 0"}
@@ -254,7 +243,6 @@ func ValidateGrantTier(t GrantTier) error {
 		if ct == "" {
 			return &Error{Code: ErrInvalidInput, Msg: "tier match requires a condition type"}
 		}
-		// re-use rule validation for the embedded condition (strip the "type" key into a rule)
 		cv := map[string]any{}
 		for k, val := range cond {
 			if k == "type" {
@@ -266,7 +254,6 @@ func ValidateGrantTier(t GrantTier) error {
 			return err
 		}
 	}
-	// range-check the tier's grant values via the shared builder against a permissive dummy plan.
 	dummy := PlanRevisionRow{ID: "00000000-0000-0000-0000-000000000000", MaxConcurrentDevices: 1, TimeAccountingMode: "VALIDITY_WINDOW"}
 	if _, err := BuildGrantSnapshot(t, dummy, PackageRevisionRow{ID: "00000000-0000-0000-0000-000000000000"}); err != nil {
 		return err
@@ -276,11 +263,8 @@ func ValidateGrantTier(t GrantTier) error {
 
 var _ = time.Now
 
-// VoucherBlocker names why a package revision can never be redeemed by a voucher, or "" when it can.
-//
-// A voucher subject carries no stay, no client group and its own auth method and kind, so some packages it is
-// pinned to can never pass their own rules: the card is printed, handed to a guest and refused at the portal.
-// Issue asks this first (O-26, O-4), so the operator hears it before printing, not the guest after.
+// VoucherBlocker names why a revision can never be redeemed by a voucher, or "" when it can. A voucher subject
+// has no stay or client group, so Issue asks this first and the operator hears it before printing.
 func VoucherBlocker(dataAllocationMode string, rules []EligibilityRule) string {
 	if strings.EqualFold(strings.TrimSpace(dataAllocationMode), AllocPerStayNight) {
 		return "This package's data allowance is set per night of the stay, which only a guest who signed in " +
@@ -312,20 +296,11 @@ func VoucherBlocker(dataAllocationMode string, rules []EligibilityRule) string {
 	return ""
 }
 
-// GrantTiersEnforceableRefusal is the editor's refusal for grant tiers the enforcement plane does not honour
-// (audit O-5, Product-Owner decision D-C), or "" when the tiers are acceptable.
-//
-// WHY REFUSE RATHER THAN ENFORCE. The stored tier model is (tier_order, grant_value): an ordered list of
-// optional speed/quota/device overrides, chosen per client by a FIRST-MATCH condition -- not by usage. It has no
-// threshold, so "speed steps applied in order" has no defined moment to step at, and a first-match list with an
-// unconditional first tier never reaches the second at all. The overrides on the chosen tier are frozen into the
-// quote and shown to the client, but shaping, device limits and quotas are enforced from the package's SERVICE
-// PLAN revision. So the screen promised speeds the network never applied.
-//
-// Inventing a threshold model would be a product decision; refusing is not. A package carries exactly one grant
-// tier, and that tier may hold only its optional match condition. Different speeds are different service plans.
-// Packages already published keep their stored tiers (history is immutable, and an automatic republish such as
-// a network replacement carries them unchanged); this applies to an operator saving a package.
+// GrantTiersEnforceableRefusal refuses grant tiers the enforcement plane does not honour, or returns "".
+// Tiers are chosen by first-match, not by usage, and shaping, device limits and quotas are enforced from the
+// SERVICE PLAN revision, so extra tiers would promise speeds the network never applies: a package carries one
+// tier, holding only its optional match. Already-published packages keep their stored tiers (history is
+// immutable and automatic republishes carry them); this applies when an operator saves a package.
 func GrantTiersEnforceableRefusal(tiers []GrantTier) string {
 	if len(tiers) > 1 {
 		return "speed_steps_not_supported: a package has a single grant step. Speed steps were shown to clients " +

@@ -28,7 +28,7 @@ function recordFetch(answer: (s: Sent) => { status?: number; body: unknown } = (
   return sent;
 }
 
-// D-R3: a new set of recovery codes needs a current code from the authenticator app (and the password step-up).
+// Recovery-code rotation requires both password step-up and a current authenticator code.
 describe("new recovery codes", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -42,7 +42,6 @@ describe("new recovery codes", () => {
     const field = await screen.findByLabelText("Code from your authenticator app");
     expect(field).toHaveAttribute("autocomplete", "one-time-code");
 
-    // Nothing typed: told so under the field, nothing sent.
     fireEvent.click(screen.getByRole("button", { name: "Make new recovery codes" }));
     expect(await screen.findByText(/Enter the 6-digit code your authenticator app shows now/)).toBeInTheDocument();
     expect(field).toHaveAttribute("aria-invalid", "true");

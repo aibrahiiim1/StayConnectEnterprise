@@ -2,18 +2,10 @@
 
 package main
 
-// ROOM-AUTH FEED READINESS IS DECIDED HERE, FROM EACH INTERFACE'S OWN REVISION.
-//
-// The health read reports whether an interface can currently serve Room authentication. It mirrors the feed
-// half of iam_v2.p3_feed_authorizes — ACTIVE, CONNECTED, IN_SYNC, CONTINUOUS, pinned to the published
-// Revision, and heard from within that Revision's own heartbeat_timeout_ms — and deliberately excludes the
-// Stay-specific half, because occupancy evidence belongs to one guest's Stay rather than to the feed.
-//
-// The heartbeat bound is why this must be answered server-side at all. Hotel Admin was re-implementing the
-// rule with the 300-second DEFAULT hardcoded, so an interface configured with any other timeout was described
-// to an operator using a number that interface does not use. The tests that matter most below are the two
-// non-default ones: a long timeout must keep a quiet feed READY, and a short one must call a recently-seen
-// feed SILENT. A client cannot get either right, which is the whole argument for moving the decision.
+// Readiness mirrors the feed half of iam_v2.p3_feed_authorizes (ACTIVE, CONNECTED, IN_SYNC, CONTINUOUS, pinned
+// to the published Revision, heard within that Revision's own heartbeat_timeout_ms) and excludes the
+// Stay-specific half. It is decided server-side because a client hardcoding the 300-second default gets any
+// other timeout wrong; the two non-default tests below matter most.
 
 import (
 	"context"
@@ -23,8 +15,6 @@ import (
 	"time"
 )
 
-// runtimeState puts the interface's runtime row into an exact state. Every axis is named at each call site so
-// a test reads as the situation it is describing.
 func (f *apiFixture) runtimeState(
 	t *testing.T, iface, pinnedRev, transport, sync, continuity string, lastSeen *time.Time,
 ) {
@@ -46,9 +36,7 @@ func (f *apiFixture) runtimeState(
 	}
 }
 
-// setHeartbeatTimeout publishes a fresh Revision carrying an explicit heartbeat_timeout_ms and points the
-// interface at it. Revisions are immutable, so a different bound means a different Revision — which is also
-// how a real property changes one.
+// setHeartbeatTimeout publishes a fresh Revision (Revisions are immutable) and points the interface at it.
 func (f *apiFixture) setHeartbeatTimeout(t *testing.T, iface string, ms int) string {
 	t.Helper()
 	ctx := context.Background()
@@ -92,7 +80,6 @@ func (f *apiFixture) readiness(t *testing.T, iface string) (bool, string) {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
-// A fully healthy feed serves Room authentication.
 func TestIntegration_API_RoomAuthReadyWhenTheFeedIsHealthy(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
@@ -104,8 +91,7 @@ func TestIntegration_API_RoomAuthReadyWhenTheFeedIsHealthy(t *testing.T) {
 	}
 }
 
-// THE CASE A CLIENT CANNOT GET RIGHT (1): a Revision whose heartbeat_timeout_ms is far ABOVE the default. The
-// feed has been quiet for longer than 300 seconds and is still healthy by its own configuration.
+// A heartbeat_timeout_ms far above the default: quiet for over 300 seconds and still healthy by its own configuration.
 func TestIntegration_API_RoomAuthHonoursALongerThanDefaultHeartbeatTimeout(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -120,8 +106,7 @@ func TestIntegration_API_RoomAuthHonoursALongerThanDefaultHeartbeatTimeout(t *te
 	}
 }
 
-// THE CASE A CLIENT CANNOT GET RIGHT (2): a Revision whose heartbeat_timeout_ms is BELOW the default. A gap a
-// 300-second rule would wave through is a silent feed by this interface's own configuration.
+// A heartbeat_timeout_ms below the default: a gap a 300-second rule would wave through is a silent feed here.
 func TestIntegration_API_RoomAuthHonoursAShorterThanDefaultHeartbeatTimeout(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -139,8 +124,7 @@ func TestIntegration_API_RoomAuthHonoursAShorterThanDefaultHeartbeatTimeout(t *t
 	}
 }
 
-// An absent heartbeat_timeout_ms falls back to the documented 300-second default — the same fallback
-// iam_v2.p3_cfg_secs applies for the authentication path.
+// An absent heartbeat_timeout_ms falls back to the 300-second default, as iam_v2.p3_cfg_secs does.
 func TestIntegration_API_RoomAuthFallsBackToTheDefaultTimeout(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t) // rev1 carries no heartbeat_timeout_ms
@@ -154,8 +138,7 @@ func TestIntegration_API_RoomAuthFallsBackToTheDefaultTimeout(t *testing.T) {
 	}
 }
 
-// Each remaining clause of the feed rule, reported with its own bounded code so an operator surface can say
-// something specific rather than "unavailable".
+// Each remaining clause of the feed rule has its own bounded code, so the surface can say more than "unavailable".
 func TestIntegration_API_RoomAuthReportsEachUnhealthyClause(t *testing.T) {
 	now := time.Now()
 	for _, tc := range []struct {
@@ -163,9 +146,8 @@ func TestIntegration_API_RoomAuthReportsEachUnhealthyClause(t *testing.T) {
 		transport, sync, continuity string
 		want                        string
 	}{
-		// A transport failure is judged by the MIRROR now, and this fixture has never completed a sync, so
-		// the honest answer is that there is no local guest list — not that the socket is down. The
-		// transport's own state is still reported alongside, in transport_status and disconnected_since.
+		// Transport failure is judged by the mirror, and this fixture never completed a sync, so the answer is
+		// "no local guest list"; transport_status and disconnected_since still report the transport.
 		{"disconnected, mirror never synchronised", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", roomAuthNeverSynced},
 		{"not in sync", "CONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", roomAuthNotInSync},
 		{"gap detected", "CONNECTED", "IN_SYNC", "GAP_DETECTED", roomAuthContinuityGap},
@@ -186,9 +168,7 @@ func TestIntegration_API_RoomAuthReportsEachUnhealthyClause(t *testing.T) {
 	}
 }
 
-// A runtime pinned to a Revision that is no longer the published one cannot authenticate: Phase 3 compares
-// the pin against the published Revision, and a mismatch means the connector is running configuration the
-// product has moved on from.
+// A runtime pinned to a Revision that is no longer published cannot authenticate: the connector runs stale configuration.
 func TestIntegration_API_RoomAuthRefusesAnUnpinnedRevision(t *testing.T) {
 	f := newAPI(t)
 	iface, _, rev2 := f.seedInterface(t) // rev1 is published; rev2 is not
@@ -201,8 +181,7 @@ func TestIntegration_API_RoomAuthRefusesAnUnpinnedRevision(t *testing.T) {
 	}
 }
 
-// An interface that is switched off serves nobody, whatever its axes say. Reported as a lifecycle state so an
-// operator is not sent to investigate a connection that is deliberately absent.
+// An interface switched off serves nobody and is reported as a lifecycle state, not a connection fault.
 func TestIntegration_API_RoomAuthRefusesANonActiveInterface(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
@@ -218,12 +197,8 @@ func TestIntegration_API_RoomAuthRefusesANonActiveInterface(t *testing.T) {
 	}
 }
 
-// An interface with no runtime row at all has never connected. It must read as not-ready rather than as an
-// error, and the reason must be one the operator can act on.
-//
-// The reason is CONTINUITY_NOT_ESTABLISHED rather than anything about the transport, and that is the more
-// honest answer: nothing has ever arrived from this PMS. Naming the socket would suggest a connection problem
-// to investigate, when what is actually true is that the interface has never been commissioned.
+// An interface with no runtime row has never connected: not-ready rather than an error, with
+// CONTINUITY_NOT_ESTABLISHED (not a transport reason) since it was never commissioned.
 func TestIntegration_API_RoomAuthHandlesAnInterfaceThatNeverConnected(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t) // no runtime row seeded
@@ -235,12 +210,7 @@ func TestIntegration_API_RoomAuthHandlesAnInterfaceThatNeverConnected(t *testing
 	}
 }
 
-// THE OPERATOR MUST NOT BE TOLD GUESTS CANNOT SIGN IN WHEN THEY CAN.
-//
-// This is the readiness half of the Product Owner's local-first rule, and it is the half a hotel actually
-// experiences: the socket drops, and the front desk needs to know whether that is their problem. If the mirror
-// is intact it is not — guests carry on signing in — and saying otherwise invites staff to start handing out
-// workarounds for a problem nobody has.
+// Local-first: when the socket drops but the mirror is intact, guests keep signing in and the operator must not be told otherwise.
 func TestIntegration_API_TransportDownWithTrustedMirrorStaysReady(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
@@ -255,9 +225,8 @@ func TestIntegration_API_TransportDownWithTrustedMirrorStaysReady(t *testing.T) 
 	}
 }
 
-// AUDIT H-12. While the transport is down a resync in flight does NOT close room sign-in: the published roster
-// is untouched until a replacement completes, and p3_feed_authorizes (0060) authorises from it. Readiness used
-// to report RESYNC_IN_FLIGHT ("down") here while guests were signing in from the mirror.
+// While the transport is down a resync in flight does not close room sign-in: the published roster is untouched
+// until a replacement completes and p3_feed_authorizes authorises from it, so readiness must not report "down".
 func TestIntegration_API_TransportDownDuringResyncStaysReady(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
@@ -273,7 +242,7 @@ func TestIntegration_API_TransportDownDuringResyncStaysReady(t *testing.T) {
 	}
 }
 
-// completeSync records that a full sync finished — the durable evidence that a local mirror exists at all.
+// completeSync is the durable evidence that a local mirror exists at all.
 func (f *apiFixture) completeSync(t *testing.T, iface string, at time.Time) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
@@ -283,8 +252,7 @@ func (f *apiFixture) completeSync(t *testing.T, iface string, at time.Time) {
 	}
 }
 
-// beginResync marks a complete sync as in flight, which is the one state where the mirror is inconsistent
-// rather than merely stale.
+// beginResync marks a sync in flight, the one state where the mirror is inconsistent rather than merely stale.
 func (f *apiFixture) beginResync(t *testing.T, iface string, at time.Time) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime

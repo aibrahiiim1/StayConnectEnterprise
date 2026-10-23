@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------- flags
-
 func TestConfig_DefaultIsDarkAndClosed(t *testing.T) {
 	c := DefaultConfig()
 	if c.PostingOn() || c.OutboxOn() || c.ReviewOn() || c.TransmitOn() {
@@ -57,8 +55,6 @@ func TestConfig_TransmitNeedsAllThreeFlags(t *testing.T) {
 		t.Fatal("all three ON must not be DARK")
 	}
 }
-
-// ---------------------------------------------------------------- PS golden wire
 
 // The exact bytes. If this test changes, the wire changed, and the wire is the contract.
 func TestBuildPS_GoldenWire(t *testing.T) {
@@ -147,8 +143,6 @@ func TestBuildPS_RefusesUntransmissibleFields(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- PA correlation
-
 func TestParsePA_CorrelatesByPNumber(t *testing.T) {
 	pa, err := ParsePA("PA|P#7|ASOK|")
 	if err != nil {
@@ -229,9 +223,7 @@ func TestParsePA_NeverUsesRoomNumberAsIdentity(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- DARK transport
-
-// recordingTransport is the "even if the worker is running" stand-in: it would happily accept a send.
+// recordingTransport would happily accept a send, so the DARK guard is what must refuse it.
 type recordingTransport struct{ sends []string }
 
 func (r *recordingTransport) SendPS(_ context.Context, _ string, pn int64, body string) (*PA, error) {
@@ -297,8 +289,6 @@ func TestDarkError_CarriesBothClassifications(t *testing.T) {
 		t.Fatal("a dark refusal must also be ErrNotTransmitted")
 	}
 }
-
-// ---------------------------------------------------------------- the gate, on synthetic snapshots
 
 func exp(v int16) *int16 { return &v }
 
@@ -385,8 +375,7 @@ func TestGate_FailClosedMatrix(t *testing.T) {
 	}
 }
 
-// G# IS STABLE, RN IS MUTABLE (Phase-0 Amendment A1). At creation the room need only resolve; the reservation
-// is the identity. At execution the attempt's room must be exactly the reservation's current room.
+// At creation the room need only resolve; at execution the attempt's room must equal the reservation's current room.
 func TestGate_RoomIsRefreshedNotPinned(t *testing.T) {
 	p, s := goodPair()
 	p.RN = "" // a creation request does not pin the room
@@ -430,10 +419,7 @@ func TestGate_NeverConvertsBetweenCurrencies(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- hardening corrections
-
-// Contract section 10: AUTH_DISABLED closes guest AUTHENTICATION, not the folio, and DRAINING must still
-// drain. The first version of this gate refused both, which would have stranded authorized money.
+// AUTH_DISABLED closes guest authentication, not posting, and DRAINING must still drain authorized work.
 func TestGate_LifecycleMatrixMatchesTheContract(t *testing.T) {
 	cases := []struct {
 		state             string
@@ -458,7 +444,7 @@ func TestGate_LifecycleMatrixMatchesTheContract(t *testing.T) {
 	}
 }
 
-// Contract section 9a fixes this posting path at exponent 2, and the Gate-3A evidence is a USD 1.00 debit.
+// The FIAS posting path is fixed at exponent 2.
 func TestGate_FIASPathIsExponentTwoOnly(t *testing.T) {
 	for _, exp := range []int16{0, 1, 3, 4} {
 		p, s := goodPair()
@@ -491,8 +477,7 @@ func TestBuildPS_CTIsBoundedAtTwenty(t *testing.T) {
 	}
 }
 
-// wrongPNumberTransport answers with a P# that belongs to a different attempt. It is the shape of the
-// defect that matters: everything about the answer looks valid except who it is for.
+// wrongPNumberTransport answers with a valid-looking PA whose P# belongs to a different attempt.
 type wrongPNumberTransport struct{ answered int }
 
 func (w *wrongPNumberTransport) SendPS(_ context.Context, _ string, pn int64, _ string) (*PA, error) {

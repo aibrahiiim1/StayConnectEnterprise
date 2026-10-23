@@ -1,11 +1,6 @@
 "use client";
 
-// A SCREEN THE OPERATOR'S ROLE MAY NOT READ.
-//
-// The menu hides what a role cannot read, but every route still opens by URL or bookmark -- and used to render as
-// an empty shell of 403 banners, which reads as a broken product rather than a permission (audit L-2). The layout
-// now shows this instead, before the page mounts, so the page sends no request that would only be refused.
-// edged still enforces every request; this only stops the console from pretending.
+// Check route permission before mounting the page to avoid sending requests the operator cannot make.
 
 import Link from "next/link";
 import { Lock } from "lucide-react";

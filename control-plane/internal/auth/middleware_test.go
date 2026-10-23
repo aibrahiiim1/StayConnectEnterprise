@@ -17,9 +17,7 @@ func (b *touchCounter) Get(context.Context, string) (*Session, error) { s := *b.
 func (b *touchCounter) Destroy(context.Context, string) error         { return nil }
 func (b *touchCounter) Touch(context.Context, *Session) error         { b.touched++; return nil }
 
-// The idle limit is judged on what the person does. The console's own timer-driven requests (lists refreshing
-// themselves, the sign-in-ending check) carry X-OneGate-Background: 1 and do not count as activity; whoami never
-// counts; anything else does.
+// Requests carrying X-OneGate-Background: 1 and whoami do not count as activity; anything else does.
 func TestBackgroundRequestsAreNotActivity(t *testing.T) {
 	now := time.Now()
 	b := &touchCounter{sess: &Session{OperatorID: "op", CreatedAt: now, LastSeenAt: now.Add(-5 * time.Minute)}}

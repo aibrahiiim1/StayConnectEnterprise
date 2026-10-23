@@ -11,19 +11,8 @@ import (
 	"time"
 )
 
-// ---- /api/auth-methods (proxy to scd) ---------------------------------------
-
-// branding serves the hotel's published portal design to the landing page.
-//
-// GUEST-FACING AND THEREFORE NARROW. It reads the tenant's design from scd and hands the guest only what
-// portaldesign.ForGuests lets through: known fields, each re-checked, the custom stylesheet and fragment
-// rebuilt from the same allowlist edged applied on save. It used to copy scd's answer through verbatim, so a
-// design that reached the database any other way -- written before the allowlist existed, restored from a
-// backup -- reached every guest device exactly as stored.
-//
-// If the hotel has published nothing, or scd cannot answer, the portal falls back to its own defaults --
-// which is why a failure here is an empty object rather than an error page. A guest must never be unable to
-// sign in because a logo could not be fetched.
+// branding hands the guest only what portaldesign.ForGuests allows (known fields re-checked, custom CSS rebuilt from the save-time allowlist), because a design stored any other way must not reach guests as stored.
+// A failure is an empty object, not an error page: a guest must never be unable to sign in because a logo could not be fetched.
 func (h *handler) branding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -47,7 +36,6 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	// THE DEVICE'S PENDING CODE RIDES WITH THE METHODS: the page opens on the code box when one is in flight.
 	if h.pendingOTP != nil && resp.StatusCode == http.StatusOK {
 		if p, ok := h.pendingOTP.get(h.pendingKey(r)); ok {
 			var m map[string]any
@@ -63,22 +51,14 @@ func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(payload)
 }
 
-// ---- /auth/otp/request (sms | whatsapp) --------------------------------------
-
-// THE ONE-TIME CODE IS FOR PHONES ONLY. An email address signs in as an email account with a password
-// (account_handlers.go); the email code, and the temporary Internet it opened to read it, are gone (self-service
-// contract section 1).
+// The one-time code is for phones only; an email address signs in as an email account (account_handlers.go).
 type otpReqIn struct {
-	Channel     string `json:"channel"`     // "sms" | "whatsapp"
-	Destination string `json:"destination"` // E.164-ish phone
+	Channel     string `json:"channel"`
+	Destination string `json:"destination"`
 }
 
 func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
-	// ONLY THE PORTAL'S OWN PAGE MAY ASK FOR A MESSAGE (audit P-18). This route sends an SMS or WhatsApp message
-	// to a number in the body, and it accepted any body type: a page on any origin could submit it as a no-cors
-	// text/plain "simple request" -- no preflight -- and make the portal message a number of its choosing from a
-	// guest's device. A JSON content type forces a CORS preflight, which portald never grants, and a request
-	// that carries another origin is refused outright.
+	// Only the portal's own page may ask for a message: this route texts a number from the body, so a no-cors text/plain request from any origin could make the portal message a number of its choosing. A JSON content type forces a preflight portald never grants, and another origin is refused outright.
 	if !jsonContentType(r) || h.crossSite(r) {
 		jsonErr(w, http.StatusForbidden, "request refused")
 		return
@@ -99,9 +79,7 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad ip")
 		return
 	}
-	// THE CODE IS BOUND TO THIS DEVICE. The hardware address comes from the kernel's neighbour table, never from
-	// the client, resolved rather than only consulted (arp_resolve.go) -- the same guarantee every sign-in path
-	// gives. scd records it with the challenge, and the code (or the message's link) verifies from it alone.
+	// The code is bound to this device: the MAC comes from the kernel neighbour table, resolved rather than only consulted (arp_resolve.go), never from the client.
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		jsonErr(w, 400, "device not on this Wi-Fi network")
@@ -112,7 +90,6 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 		"destination": in.Destination,
 		"ip":          ipString(ip),
 		"mac":         mac.String(),
-		// The origin this device reached the portal by: the message's tap-to-connect link uses it.
 		"portal_base": portalLinkBase(r),
 	})
 	req, _ := http.NewRequestWithContext(r.Context(), "POST",
@@ -126,8 +103,7 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	// THE CODE IS NOW IN FLIGHT FOR THIS DEVICE. Held server-side for the code's lifetime, so a landing page
-	// opened after the captive browser was dismissed reopens on the code box instead of starting over.
+	// The code is in flight for this device, held server-side so a landing page opened after the captive browser was dismissed reopens on the code box.
 	if resp.StatusCode == http.StatusOK && h.pendingOTP != nil {
 		var out struct {
 			ChallengeID string `json:"challenge_id"`
@@ -148,8 +124,6 @@ func (h *handler) authOTPRequest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(payload)
 }
 
-// ---- /auth/otp/verify -------------------------------------------------------
-
 type otpVerifyIn struct {
 	ChallengeID string `json:"challenge_id"`
 	Code        string `json:"code"`
@@ -166,9 +140,7 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad ip")
 		return
 	}
-	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
-	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
-	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	// The MAC comes from the kernel neighbour table and the kernel is asked to resolve it (arp_resolve.go).
 	mac, ok := h.deviceMAC(r.Context(), ip)
 	if !ok {
 		jsonErr(w, 400, "device not on this Wi-Fi network")
@@ -191,10 +163,7 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	// A VERIFIED CODE IS AUTHENTICATION, NOT ACCESS. The IAM-v2 reply carries an auth context, and the Client
-	// still has to join their live access or choose a package. This used to copy the reply through, and the
-	// page -- reading the legacy session_id shape -- sent the Client to /success?s=&t=0. Now the same commerce
-	// session the voucher and account forms get is issued here, and the page is told where to go next.
+	// A verified code is authentication, not access: the same commerce session the voucher and account forms get is issued, and the page is told where to go next.
 	if resp.StatusCode == http.StatusOK {
 		if h.pendingOTP != nil {
 			h.pendingOTP.clear(pendingKeyFor(ip, mac))
@@ -207,8 +176,6 @@ func (h *handler) authOTPVerify(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(payload)
 }
-
-// ---- helpers ----------------------------------------------------------------
 
 func ipString(ip net.IP) string {
 	if ip == nil {

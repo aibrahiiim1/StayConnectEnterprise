@@ -1,13 +1,7 @@
 package whatsapp
 
-// WhatsApp Business Cloud API (Meta).
-//
-// Endpoint: POST https://graph.facebook.com/v19.0/{phone_number_id}/messages
-// Auth:     Authorization: Bearer {access token}
-// Body:     JSON, type=template, naming an approved AUTHENTICATION template. The code fills the body parameter
-//           and the template's copy-code button parameter (button sub_type "url", index "0").
-//
-// 200 OK carries {"messages":[{"id":...}]}. An error carries {"error":{"message","type","code",...}}.
+// WhatsApp Business Cloud API: POST {base}/{phone_number_id}/messages with a Bearer token. The code fills
+// both the body parameter and the template's copy-code button parameter (sub_type "url", index "0").
 
 import (
 	"bytes"
@@ -23,10 +17,8 @@ import (
 	"time"
 )
 
-// MetaDefaultBaseURL is the Graph API root including its version.
 const MetaDefaultBaseURL = "https://graph.facebook.com/v19.0"
 
-// Meta sends through the WhatsApp Business Cloud API.
 type Meta struct {
 	AccessToken   string // secret; never logged or returned
 	PhoneNumberID string
@@ -36,7 +28,6 @@ type Meta struct {
 	HTTPClient    *http.Client
 }
 
-// NewMeta builds a Meta adapter. access token, phone number id and template name are required.
 func NewMeta(accessToken, phoneNumberID, templateName, language string) (*Meta, error) {
 	var missing []string
 	if strings.TrimSpace(accessToken) == "" {
@@ -104,7 +95,6 @@ func (m *Meta) language(msg Message) string {
 	return "en"
 }
 
-// Send delivers the code as the approved authentication template.
 func (m *Meta) Send(ctx context.Context, msg Message) error {
 	if err := checkMessage(msg); err != nil {
 		return err

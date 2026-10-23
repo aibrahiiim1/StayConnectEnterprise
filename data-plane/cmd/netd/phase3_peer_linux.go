@@ -2,8 +2,7 @@
 
 package main
 
-// SO_PEERCRED is a Linux socket option: the kernel, not the caller, states which uid is on the other end. That
-// is the whole point — a local process can forge any header it likes, but it cannot forge this.
+// SO_PEERCRED: the kernel, not the caller, states the peer uid; a local process cannot forge it.
 
 import (
 	"errors"

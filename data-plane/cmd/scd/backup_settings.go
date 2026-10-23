@@ -1,17 +1,7 @@
 package main
 
-// RETENTION AND SCHEDULE ARE SETTINGS, NOT CONSTANTS (§0C).
-//
-// How many builds to keep, how many database backups to keep, when the nightly sweep runs and at what disk
-// pressure it warns are all operational values a hotel administrator may reasonably need to change. They
-// lived in two places an operator cannot reach: defaults inside stayconnect-backup-cleanup, and an optional
-// /etc/stayconnect/backup-retention.conf which did not exist on this appliance at all — so the Backups screen
-// could show the policy in force but nobody could alter it without a shell.
-//
-// The file is the sweep's own contract — a shell-sourced KEY=value file it reads on every run — so writing it
-// is the honest way to change behaviour. Nothing here re-implements retention; it configures the thing that
-// already performs it. The schedule is a systemd drop-in for the same reason: systemd owns when the sweep
-// runs, so that is what gets edited.
+// Retention and schedule are settings: the sweep sources /etc/stayconnect/backup-retention.conf (KEY=value) on every run and the
+// schedule is a systemd drop-in, so Hotel Admin edits those rather than reimplementing retention.
 
 import (
 	"context"
@@ -35,8 +25,6 @@ const (
 // retentionConf is the file Hotel Admin writes the backup and retention settings to; a var so tests can use a temporary one.
 var retentionConf = "/etc/stayconnect/backup-retention.conf"
 
-// retentionSetting is one knob with everything an operator needs to set it responsibly: what it means, its
-// unit, its default, and the bounds it is held to.
 type retentionSetting struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
@@ -48,15 +36,13 @@ type retentionSetting struct {
 	Explains string `json:"explains"`
 }
 
-// retentionSchema is the single source of truth for what may be set and to what. The lower bounds are not
-// decoration: each is the point below which the appliance loses its own ability to recover.
+// retentionSchema is the single source of truth; each lower bound is the point below which the appliance cannot recover.
 var retentionSchema = []retentionSetting{
 	{Key: "KEEP_BINARIES", Label: "Service binaries", Unit: "versions", Default: 5, Min: 2, Max: 30,
 		Explains: "Previous builds of each service, kept so a bad deployment can be rolled back. Below two there is nothing to roll back to."},
 	{Key: "KEEP_RELEASES", Label: "Hotel Admin releases", Unit: "releases", Default: 5, Min: 2, Max: 30,
 		Explains: "Previous Hotel Admin bundles, on top of the current and previous ones, which are never removed."},
-	// BACKUPS (one system, one policy). The schedule is OFF until an administrator switches it on; what a restore, a migration or a
-	// deployment takes first is taken whatever it says. Counts only: there is no age rule beside them to contradict.
+	// The schedule is OFF until an administrator switches it on; pre-restore, pre-migration and pre-deployment backups are taken regardless. Counts only, no age rule.
 	{Key: "BACKUP_ENABLED", Label: "Scheduled backups", Unit: "0 = off, 1 = on", Default: 0, Min: 0, Max: 1,
 		Explains: "Off until you switch it on. When on, the appliance takes an encrypted backup on the schedule below. Manual backups, and the backups a restore, a migration or a deployment take first, do not depend on it."},
 	{Key: "BACKUP_HOUR", Label: "Scheduled backups: hour of the day", Unit: "o'clock", Default: 2, Min: 0, Max: 23,
@@ -67,16 +53,12 @@ var retentionSchema = []retentionSetting{
 		Explains: "How many scheduled and manual backups to keep. The newest is always kept; older ones go only after a newer one has been verified. With a schedule of N days, the oldest backup is about (this number x N) days old, and an erased guest can be in it for that long."},
 	{Key: "SAFETY_BACKUP_KEEP", Label: "Safety backups kept", Unit: "backups", Default: 3, Min: 2, Max: 20,
 		Explains: "The backups taken automatically before a restore, a migration or a deployment: how many of the newest to keep."},
-	// THE DATABASE SET ASIDE BY A RESTORE (GDPR final mission). A restore keeps the database it replaced so the restore can
-	// be undone -- and that copy holds everything the restored one was cleaned of, including guests erased since. It is
-	// removed after this many days; undoing a restore is possible until then.
+	// A restore keeps the database it replaced so it can be undone; that copy still holds guests erased since, so it is removed after this many days.
 	{Key: "SET_ASIDE_DAYS", Label: "Database kept aside by a restore: keep for", Unit: "days", Default: 14, Min: 1, Max: 90,
 		Explains: "A restore keeps the database it replaced so it can be undone. That copy still holds data erased or anonymised since, so it is removed after this many days."},
 	{Key: "KEEP_CONFIG", Label: "Configuration backups", Unit: "copies", Default: 3, Min: 1, Max: 30,
 		Explains: "Saved copies of configuration files taken before a change."},
-	// THE RESTORE-TEST REMINDER (decision D-C5). Backups are encrypted to the hotel's own keys, and the
-	// appliance cannot tell whether those keys still exist. So Hotel Admin asks, this often, for a key holder to
-	// prove it by opening the newest backup; an overdue or failed test is a warning on the Backups screen.
+	// Backups are encrypted to the hotel's keys and the appliance cannot tell whether they still exist, so a key holder must periodically prove it by opening the newest backup.
 	{Key: "RESTORE_TEST_MONTHS", Label: "Backup key restore test every", Unit: "months", Default: 6, Min: 1, Max: 24,
 		Explains: "How often a backup key holder must prove their key still opens the backups. Overdue tests show a warning."},
 	{Key: "DISK_WARN", Label: "Disk warning threshold", Unit: "% used", Default: 80, Min: 50, Max: 95,
@@ -91,9 +73,7 @@ var (
 	reTimeOfDay = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
 )
 
-// readRetention returns the schema with each value resolved from the file, or its default when absent —
-// which is exactly what the sweep does, so the screen shows what is genuinely in force rather than what
-// happens to have been written down.
+// readRetention resolves each value from the file or its default, exactly as the sweep does, so the screen shows what is in force.
 func readRetention() []retentionSetting {
 	out := make([]retentionSetting, len(retentionSchema))
 	copy(out, retentionSchema)
@@ -122,8 +102,7 @@ func readRetention() []retentionSetting {
 	return out
 }
 
-// readSchedule asks systemd when the sweep will next run, rather than reporting what we last wrote. A file we
-// wrote and a timer that reloaded are two different facts, and only the second one happens.
+// readSchedule asks systemd when the sweep next runs: a written file and a reloaded timer are different facts.
 func readSchedule(ctx context.Context) (string, bool) {
 	out, err := exec.CommandContext(ctx, "systemctl", "show", sweepTimerUnit, "--property=TimersCalendar").Output()
 	if err != nil {
@@ -153,10 +132,7 @@ type backupSettingsReq struct {
 	Schedule  string         `json:"schedule"` // HH:MM, appliance local time
 }
 
-// backupSettingsSet validates everything before writing anything.
-//
-// IT REFUSES THE WHOLE REQUEST rather than the offending field. A partially-applied retention policy is worse
-// than a rejected one: the operator believes they set six values and the sweep acts on four.
+// backupSettingsSet validates everything before writing and refuses the whole request: a partly applied policy is worse than a rejected one.
 func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 	var in backupSettingsReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -181,8 +157,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 		}
 		set.Value = v
 	}
-	// A critical threshold at or below the warning threshold is not a stricter policy, it is a broken one:
-	// the appliance could never warn before it alarmed.
+	// A critical threshold at or below the warning threshold is a broken policy.
 	if byKey["DISK_CRIT"].Value <= byKey["DISK_WARN"].Value {
 		httpErr(w, http.StatusBadRequest, "the critical disk threshold must be above the warning threshold")
 		return
@@ -198,15 +173,8 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 	for _, set := range current {
 		fmt.Fprintf(&b, "%s=%d\n", set.Key, set.Value)
 	}
-	// WRITTEN IN PLACE, and that is a deliberate trade against a narrower sandbox.
-	//
-	// Write-to-temp-and-rename is the usual way to avoid a torn read, but it needs the DIRECTORY writable.
-	// This service runs under ProtectSystem=full with an explicit ReadWritePaths allowlist, and widening that
-	// to all of /etc/stayconnect to gain atomicity on a 300-byte file would hand it write access to the
-	// identity, licence and certificate material sitting beside it. The allowlist names this one file.
-	//
-	// What is given up is small and bounded: the payload is a few hundred bytes written by a single
-	// os.WriteFile, and the only reader is a nightly sweep that sources it once at start.
+	// Written in place, not temp-and-rename: ProtectSystem=full with a one-file ReadWritePaths allowlist leaves the directory
+	// unwritable, and widening it would expose identity, licence and certificate material. The payload is a few hundred bytes read once by the sweep.
 	if err := os.WriteFile(retentionConf, []byte(b.String()), 0o644); err != nil {
 		slog.Error("retention policy not written", "path", retentionConf, "err", err)
 		httpErr(w, http.StatusInternalServerError,
@@ -221,8 +189,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, http.StatusInternalServerError, "the schedule directory could not be created")
 			return
 		}
-		// A drop-in override rather than an edit of the shipped unit: a package update replaces the unit file
-		// and would silently discard an in-place change, leaving the operator's schedule quietly reverted.
+		// A drop-in, not an edit of the shipped unit: a package update would replace the unit and silently revert the schedule.
 		ov := "[Timer]\n# Set from Hotel Admin.\nOnCalendar=\nOnCalendar=*-*-* " + in.Schedule + ":00\n"
 		if err := os.WriteFile(timerOverride, []byte(ov), 0o644); err != nil {
 			httpErr(w, http.StatusInternalServerError, "the schedule could not be written")
@@ -237,8 +204,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Read back from systemd rather than echoing the request: what was asked for and what is scheduled are
-	// different facts.
+	// Read back from systemd rather than echoing the request.
 	sched, schedOK := readSchedule(ctx)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"retention": current, "schedule": sched, "schedule_known": schedOK, "config_present": true,

@@ -1,10 +1,6 @@
-// Package sealbox seals a short secret with AES-256-GCM under an appliance-local key, binding the ciphertext
-// to its exact owner through the additional authenticated data. It is the pattern of internal/payment/sealing.go
-// and internal/pmsd/secret.go, generalised so a third kind of secret (notification sender credentials) does not
-// grow a third copy. Each caller names its own domain string, so a row sealed for one purpose never opens
-// under another.
-//
-// Plaintext exists only in memory for the duration of one use and is never logged or returned by an API.
+// Package sealbox seals a short secret with AES-256-GCM under an appliance-local key, binding the
+// ciphertext to its owner through the AAD. Each caller's domain string keeps a row sealed for one purpose
+// from opening under another. Plaintext is never logged or returned by an API.
 package sealbox
 
 import (
@@ -16,21 +12,18 @@ import (
 	"errors"
 )
 
-// CipherVersion is the only sealing format.
 const CipherVersion = 1
 
-// ErrSeal is the single, deliberately undetailed failure.
+// ErrSeal is deliberately undetailed.
 var ErrSeal = errors.New("sealbox: seal/open failed")
 
-// Key is a 32-byte key with a stable id derived from the key itself, so a replaced key file is detected
-// rather than silently used on rows sealed under the old one.
+// Key's id is derived from the key, so a replaced key file is detected rather than used on old rows.
 type Key struct {
 	ID     string
 	domain string
 	key    []byte
 }
 
-// NewKey wraps a 32-byte key for one domain (for example "notify-secret-aead:v1").
 func NewKey(domain string, k []byte) (Key, error) {
 	if len(k) != 32 || domain == "" {
 		return Key{}, ErrSeal
@@ -39,10 +32,8 @@ func NewKey(domain string, k []byte) (Key, error) {
 	return Key{ID: hex.EncodeToString(sum[:8]), domain: domain, key: append([]byte(nil), k...)}, nil
 }
 
-// Present reports whether a usable key is loaded.
 func (k Key) Present() bool { return len(k.key) == 32 }
 
-// Sealed is one ciphertext ready to be stored.
 type Sealed struct {
 	Ciphertext    []byte
 	Nonce         []byte

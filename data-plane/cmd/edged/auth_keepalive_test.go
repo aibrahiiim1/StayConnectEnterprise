@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// The idle warning's "Stay signed in" must count as activity, and the background whoami check must not (0132):
-// otherwise the button would not keep the session, or an open tab would never be signed out.
 func TestKeepaliveCountsAsActivityAndWhoamiDoesNot(t *testing.T) {
 	s := &server{sessions: newSessionStore(sessionStoreCap)}
 	tok := s.sessions.create(&session{OperatorID: "op-1", Email: "op@example.test"})
@@ -52,13 +50,11 @@ func TestKeepaliveCountsAsActivityAndWhoamiDoesNot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expires_at: %v", err)
 	}
-	// Default idle limit is 30 minutes from the keepalive itself.
 	if d := time.Until(ends); d < 29*time.Minute || d > 31*time.Minute {
 		t.Fatalf("expires_at is %v away, want about 30 minutes", d)
 	}
 }
 
-// Keepalive cannot outlive the absolute limit: the end it reports stops at the sign-in time plus the maximum.
 func TestKeepaliveDoesNotMoveTheAbsoluteLimit(t *testing.T) {
 	sess := &session{CreatedAt: time.Now().Add(-defaultSessionPolicy.max() + 5*time.Minute), LastSeen: time.Now()}
 	ends := sessionEnds(sess, defaultSessionPolicy)
@@ -67,8 +63,6 @@ func TestKeepaliveDoesNotMoveTheAbsoluteLimit(t *testing.T) {
 	}
 }
 
-// A console poll carries X-OneGate-Background and must not extend the idle limit; the same request without it
-// is an operator's action and must.
 func TestBackgroundRequestsAreNotActivity(t *testing.T) {
 	s := &server{sessions: newSessionStore(sessionStoreCap)}
 	tok := s.sessions.create(&session{OperatorID: "op-1", Email: "op@example.test"})

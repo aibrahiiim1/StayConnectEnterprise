@@ -21,18 +21,17 @@ type authDeps struct {
 	Repo   *auth.Repo
 	Store  *auth.SessionStore
 	DB     *pgxpool.Pool
-	Secure bool // set true in prod to add Secure on cookies
-	// Failures bounds how many failed sign-ins / step-ups are written to the audit log (ratebudget).
+	Secure bool
+	// Failures bounds how many failed sign-ins / step-ups are written to the audit log.
 	Failures *ratebudget.Budget
-	// MFA is the authenticator service (auth/mfa.go, 0052). nil refuses every sign-in: fail closed.
+	// MFA nil refuses every sign-in: fail closed.
 	MFA *auth.MFA
-	// NewSession creates the console session; nil means Store.Create (Redis). Tests supply their own.
+	// NewSession nil means Store.Create.
 	NewSession func(context.Context, auth.Session) (*auth.Session, error)
 }
 
-// auditFailure records a failed sign-in or step-up, within the failure budget: at most 5 per client address
-// and 300 overall per minute. What the budget suppresses is recorded as one auth.failures_suppressed row
-// at the start of the next window, so a flood is visible without filling the log.
+// auditFailure records a failure within the budget; suppressed failures are summarised as one
+// auth.failures_suppressed row in the next window, so a flood cannot fill the log.
 func (d authDeps) auditFailure(r *http.Request, action, operatorID string, payload map[string]any) {
 	if d.DB == nil {
 		return
@@ -61,7 +60,6 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
-// whoamiResp is the §6 whoami shape; login answers with the same.
 type whoamiResp struct {
 	OperatorID   string   `json:"operator_id"`
 	Email        string   `json:"email"`
@@ -72,15 +70,12 @@ type whoamiResp struct {
 	CustomerName *string  `json:"customer_name"`
 	Permissions  []string `json:"permissions"`
 
-	// Session timing, so the console can warn before a sign-in ends (WCAG 2.2.1). Additive, and omitted when
-	// unknown. idle_expires_at moves with each request that counts as activity (whoami does not);
-	// absolute_expires_at never moves. server_time lets the console correct for its own clock.
+	// idle_expires_at moves with activity (whoami does not count); absolute_expires_at never moves.
 	IdleExpiresAt     *time.Time `json:"idle_expires_at,omitempty"`
 	AbsoluteExpiresAt *time.Time `json:"absolute_expires_at,omitempty"`
 	ServerTime        *time.Time `json:"server_time,omitempty"`
 }
 
-// withSessionTiming adds the session's idle and absolute expiry times, as the session policy computed them.
 func withSessionTiming(resp whoamiResp, s *auth.Session, now time.Time) whoamiResp {
 	if !s.IdleExpiresAt.IsZero() {
 		idle := s.IdleExpiresAt.UTC()
@@ -102,7 +97,6 @@ func (d authDeps) describe(ctx context.Context, s *auth.Session) whoamiResp {
 	}
 	resp := whoamiResp{OperatorID: s.OperatorID, Email: s.Email, DisplayName: s.DisplayName, Roles: roles,
 		IsSuperAdmin: s.IsSuperAdmin, Permissions: s.Permissions()}
-	// A customer-scoped user belongs to one customer; a platform operator to none.
 	if s.DefaultTenantID != "" && !s.HasPermission(auth.PermFleetView) {
 		id := s.DefaultTenantID
 		resp.CustomerID = &id
@@ -132,8 +126,7 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 
 	op, err := d.Repo.FindByEmail(r.Context(), req.Email)
 	if err != nil || op.Status != "active" || op.PasswordHash == "" {
-		// Constant response for bad email vs bad password vs disabled; the audit row says which. The time is the same
-		// too: a password is checked against a decoy, so the response time does not tell which names have an account.
+		// Same response and timing for every failure (a decoy password check), so names with accounts are not revealed.
 		if errors.Is(auth.SpendPasswordCheck(req.Password), auth.ErrBusy) {
 			api.Fail(w, r, http.StatusServiceUnavailable, "busy", "Central is busy checking other sign-ins. Try again in a moment.")
 			return
@@ -167,14 +160,11 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 	}
 	d.signinSucceeded(r, req.Email)
 
-	// THE PASSWORD IS ONE OF TWO STEPS (0052): no session yet. The authenticator code opens it
-	// (auth_mfa_handlers.go).
+	// The password is only the first step: no session until the authenticator code.
 	d.beginSecondStep(w, r, op)
 }
 
-// reauth re-verifies the CURRENT session operator's password. Licence and activation writes (and every
-// other SU route) require this fresh confirmation on top of the permission check. Returns 200 {"ok":true}
-// or 401.
+// reauth re-verifies the current operator's password; licence, activation and other SU writes require it on top of the permission.
 func (d authDeps) reauth(w http.ResponseWriter, r *http.Request) {
 	s := auth.FromContext(r.Context())
 	if s == nil {

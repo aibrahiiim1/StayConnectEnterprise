@@ -1,14 +1,8 @@
 package main
 
-// THE PORTAL'S REQUEST DEADLINE, AND WHAT A CLIENT SEES WHEN IT IS REACHED (audit P-20).
-//
-// The router used chi's Timeout(15 s). A package acquisition runs quote (scd client, 5 s) + confirm (5 s) +
-// activation (12 s: scd waits up to 8 s for netd to enforce the session), so on a slow appliance the deadline
-// fired AFTER the grant had committed -- the client's access existed, and their browser received a blank 504.
-//
-// The deadline now covers the longest legitimate request with margin, and a request that still runs out without
-// having answered gets a page in the client's language that says what to do: check whether the device is online
-// before trying again (the Status page answers that), rather than paying or redeeming twice.
+// The deadline covers the longest legitimate request (an acquisition: quote 5 s + confirm 5 s + activation 12 s), because
+// firing after a grant committed gave the client a blank 504. A request still unanswered gets a page telling the client to
+// check the Status page before paying or redeeming twice.
 
 import (
 	"context"
@@ -19,7 +13,6 @@ import (
 // portalRequestTimeout bounds one portal request: the acquisition's 22 s worst case, plus margin.
 const portalRequestTimeout = 30 * time.Second
 
-// answeredWriter records whether the handler has started its answer.
 type answeredWriter struct {
 	http.ResponseWriter
 	answered bool
@@ -35,7 +28,6 @@ func (a *answeredWriter) Write(b []byte) (int, error) {
 	return a.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.ResponseController reach the underlying writer.
 func (a *answeredWriter) Unwrap() http.ResponseWriter { return a.ResponseWriter }
 
 func (h *handler) portalTimeout(d time.Duration) func(http.Handler) http.Handler {

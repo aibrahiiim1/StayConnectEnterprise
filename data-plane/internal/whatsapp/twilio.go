@@ -1,14 +1,7 @@
 package whatsapp
 
-// Twilio Programmable Messaging with a WhatsApp sender.
-//
-// Endpoint: POST https://api.twilio.com/2010-04-01/Accounts/{AccountSID}/Messages.json
-// Auth:     HTTP Basic, username = Account SID, password = Auth Token
-// Body:     form: From=whatsapp:+E164, To=whatsapp:+E164, ContentSid = the approved authentication template
-//           (Content API), ContentVariables = {"1": code}. There is no Body field: the code is a template
-//           variable, never free text.
-//
-// 201 Created on acceptance. An error carries {"code","message","more_info","status"}.
+// Twilio Programmable Messaging with a WhatsApp sender: the code travels as ContentVariables {"1": code} of
+// an approved Content API template; there is no Body field.
 
 import (
 	"context"
@@ -23,10 +16,8 @@ import (
 	"time"
 )
 
-// TwilioDefaultBaseURL is Twilio's REST root.
 const TwilioDefaultBaseURL = "https://api.twilio.com"
 
-// Twilio sends through Twilio's WhatsApp sender.
 type Twilio struct {
 	AccountSID string
 	AuthToken  string // secret; never logged or returned
@@ -36,7 +27,6 @@ type Twilio struct {
 	HTTPClient *http.Client
 }
 
-// NewTwilio builds a Twilio WhatsApp adapter. Every field is required; the sender must be E.164.
 func NewTwilio(accountSID, authToken, fromNumber, contentSID string) (*Twilio, error) {
 	var missing []string
 	if strings.TrimSpace(accountSID) == "" {
@@ -72,7 +62,6 @@ type twilioErrorBody struct {
 	Message string `json:"message"`
 }
 
-// Send delivers the code as the approved content template.
 func (t *Twilio) Send(ctx context.Context, msg Message) error {
 	if err := checkMessage(msg); err != nil {
 		return err

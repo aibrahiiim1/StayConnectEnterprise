@@ -1,11 +1,5 @@
 import { cn } from "@/lib/utils";
 
-// Tones keep their existing names (`default | ok | warn | err | info`) because the whole admin passes them as
-// strings, often through `as any` from a status-mapping helper. What changed is that each one is now a pair of
-// status tokens rather than a hand-picked hex for one dark background — so the same badge is legible on a white
-// table row and on a near-black one.
-//
-// `neutral` and `accent` are additions for counts and non-status labels.
 type Tone = "default" | "ok" | "warn" | "err" | "info" | "neutral" | "accent";
 
 const TONES: Record<Tone, string> = {
@@ -25,8 +19,6 @@ export function Badge({
   children,
 }: {
   tone?: Tone;
-  // A leading dot, for the cases where the word alone is the status ("active", "connected") and the colour is
-  // doing the work. Off by default so nothing existing changes shape.
   dot?: boolean;
   className?: string;
   children: React.ReactNode;
@@ -45,7 +37,6 @@ export function Badge({
   );
 }
 
-// StatusDot — the smallest possible health indicator, for dense lists where a full badge is too loud.
 export function StatusDot({
   tone = "default",
   className,

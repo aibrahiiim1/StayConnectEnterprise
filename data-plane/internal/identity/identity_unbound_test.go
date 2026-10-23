@@ -31,8 +31,7 @@ func answer(code int, body string) func(*http.Request) (*http.Response, error) {
 
 func init() { detectHW = func() hwid.Info { return hwid.Info{Serial: "SC-TEST"} } }
 
-// An appliance that downloads ONE offline activation request must not lose the online path: an unbound keypair
-// is not a registered identity.
+// An unbound keypair is not a registered identity.
 func TestUnboundKeypairDoesNotCountAsEnrolled(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: dir}
@@ -56,8 +55,7 @@ func TestUnboundKeypairDoesNotCountAsEnrolled(t *testing.T) {
 	}
 }
 
-// Once Central has bound an appliance id, that identity IS registered and is returned as-is -- Register does
-// not call Central again and never replaces the key.
+// A bound identity is returned as-is: Register does not call Central again or replace the key.
 func TestBoundIdentityIsReturnedUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: dir}
@@ -81,8 +79,7 @@ func TestBoundIdentityIsReturnedUnchanged(t *testing.T) {
 	}
 }
 
-// Registration reuses ONE key across every attempt: an unanswered attempt must not mint a second identity,
-// and the key an offline request already names must be the one that gets registered.
+// Registration reuses one key across attempts, including the key an offline request already names.
 func TestRegisterReusesTheSameKeyAcrossRetries(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: dir}

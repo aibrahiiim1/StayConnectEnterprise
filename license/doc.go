@@ -1,12 +1,4 @@
-// Package license implements StayConnect's vendor-signed entitlement
-// documents.
-//
-// The cloud control plane signs an entitlement payload with the vendor's
-// Ed25519 private key. Appliances hold only the public verification key and
-// validate entitlements entirely offline — no cloud round-trip is needed for
-// any guest or admin operation. The document is delivered on enrollment and
-// on every renewal/change via sync; the appliance persists the latest copy
-// and evaluates its operational state locally.
+// Package license verifies vendor-signed entitlements locally so guest access does not depend on cloud reachability.
 package license
 
 import (
@@ -15,8 +7,7 @@ import (
 	"time"
 )
 
-// Features are the boolean commercial entitlements a CommercialPlan grants.
-// Zero value = not entitled.
+// A zero-value feature is not entitled.
 type Features struct {
 	PMS         bool `json:"pms"`
 	PaidWiFi    bool `json:"paid_wifi"`
@@ -27,9 +18,7 @@ type Features struct {
 	WhiteLabel  bool `json:"white_label"`
 }
 
-// Limits are the numeric commercial entitlements. 0 means "not set" and is
-// treated as unlimited by convention with the existing plan-limit semantics
-// (-1 also means unlimited).
+// Zero and -1 both mean unlimited for legacy plan limits.
 type Limits struct {
 	MaxAppliancesForSite       int `json:"max_appliances_for_site"`
 	MaxConcurrentGuestSessions int `json:"max_concurrent_guest_sessions"`
@@ -39,17 +28,14 @@ type Limits struct {
 	AuditRetentionDays         int `json:"audit_retention_days"`
 }
 
-// DocStatus is the issuer-declared status baked into the signed payload.
 type DocStatus string
 
 const (
 	DocActive    DocStatus = "active"
-	DocSuspended DocStatus = "suspended" // billing hold — cloud-directed
+	DocSuspended DocStatus = "suspended"
 )
 
-// Document is the entitlement payload that gets signed. Field order and
-// content are stable; the signature covers the exact serialized bytes
-// embedded in the Envelope, so no JSON canonicalization is required.
+// The signature covers the envelope's exact payload bytes, without JSON canonicalization.
 type Document struct {
 	LicenseID          string    `json:"license_id"`
 	TenantID           string    `json:"tenant_id"`
@@ -63,11 +49,7 @@ type Document struct {
 	Features           Features  `json:"features"`
 	Limits             Limits    `json:"limits"`
 
-	// Schema v2 — per-appliance hardware/identity binding. The cryptographic
-	// identity key is the primary trust anchor; serial / hardware fingerprint /
-	// WAN MAC are hardware-mismatch + clone-detection signals. All optional in
-	// the type for v1 backward-compatibility, but populated on every new issue
-	// and enforced locally by the appliance (see licstate binding check).
+	// Optional binding fields preserve compatibility with unbound legacy licenses.
 	ApplianceID            string    `json:"appliance_id,omitempty"`
 	ApplianceSerial        string    `json:"appliance_serial,omitempty"`
 	HardwareFingerprint    string    `json:"hardware_fingerprint,omitempty"`
@@ -76,44 +58,23 @@ type Document struct {
 	ValidFrom              time.Time `json:"valid_from,omitempty"`
 	SignerKeyID            string    `json:"signer_key_id,omitempty"`
 
-	// Schema v3 — the SIMPLE license model. The license itself is the direct
-	// source of the commercial entitlement: one appliance, one concurrent
-	// online-guest cap, one validity window with an explicit grace period.
-	// LicenseVersion is a per-appliance monotonic sequence: the appliance
-	// persists the highest version it has accepted and refuses anything lower
-	// (anti-rollback / old-license replay protection).
-	MaxConcurrentOnlineGuests int    `json:"max_concurrent_online_guests,omitempty"` // 0 = unlimited
+	// A monotonic version rejects replay of older licenses.
+	MaxConcurrentOnlineGuests int    `json:"max_concurrent_online_guests,omitempty"` // 0 means unlimited.
 	GracePeriodDays           int    `json:"grace_period_days,omitempty"`
 	LicenseVersion            int64  `json:"license_version,omitempty"`
 	SupersedesLicenseID       string `json:"supersedes_license_id,omitempty"`
 
-	// Schema v4 — module authorisation. Modules is the SOLE commercial
-	// authority of a v4 licence; Features is emitted only as a compatibility
-	// projection computed by ProjectFeatures and is never read as authority.
+	// Modules alone authorize commercial capabilities; Features is a compatibility projection.
 	Modules Modules `json:"modules"`
 
-	// SchemaVersion allows future payload evolution; verifiers reject
-	// versions they do not understand rather than misreading fields.
+	// Unknown versions fail closed to avoid misreading fields.
 	SchemaVersion int `json:"schema_version"`
 }
 
-// CurrentSchemaVersion is the version new licenses are issued with. Verifiers
-// accept MinSchemaVersion..CurrentSchemaVersion so an appliance holding a v1
-// license keeps working across the upgrade.
 const CurrentSchemaVersion = 4
 const MinSchemaVersion = 1
 
-// EffectiveGraceDays is the grace window applied after ValidUntil.
-//
-// From schema v3 (the simple model) the document carries the grace period EXPLICITLY and it is the whole
-// answer: grace_period_days = 0 means NO grace -- the licence stops admitting new guests the second after
-// valid_until. It used to fall back to offline_grace_days (30) whenever the value was 0, so an operator who
-// chose "no grace" silently gave the hotel a month. The field is `omitempty`, so a v3+ document issued with
-// 0 simply has no grace_period_days key; that absence now reads as 0, which is what Central signed.
-//
-// Older documents (v1/v2) never carried a grace period: for them the offline grace historically doubled as
-// the renewal grace, and that is kept so every licence already in the field evaluates exactly as before.
-// The signed bytes are untouched either way; only the reading of a v3+ zero changes.
+// For v3+, zero explicitly means no renewal grace; older documents use offline grace when no renewal grace is set.
 func (d *Document) EffectiveGraceDays() int {
 	if d.SchemaVersion >= 3 {
 		if d.GracePeriodDays < 0 {
@@ -127,10 +88,7 @@ func (d *Document) EffectiveGraceDays() int {
 	return d.OfflineGraceDays
 }
 
-// EffectiveMaxConcurrentOnlineGuests is the appliance-wide cap on concurrently
-// authorized guest sessions across all guest VLANs/networks. 0 = unlimited.
-// v3 documents carry it explicitly; older documents fall back to the
-// plan-derived limit.
+// The cap spans all guest networks; older documents use the plan-derived limit.
 func (d *Document) EffectiveMaxConcurrentOnlineGuests() int {
 	if d.MaxConcurrentOnlineGuests > 0 {
 		return d.MaxConcurrentOnlineGuests
@@ -138,70 +96,31 @@ func (d *Document) EffectiveMaxConcurrentOnlineGuests() int {
 	return d.Limits.MaxConcurrentGuestSessions
 }
 
-// Envelope is the on-disk / on-wire form: the exact signed payload bytes
-// (base64 in JSON) plus the Ed25519 signature and the signing key id.
-// The payload is NOT re-serialized on verify — the embedded bytes are what
-// the signature covers and what gets decoded into a Document.
+// Verification uses the embedded payload bytes without re-serializing them.
 type Envelope struct {
 	PayloadB64 string `json:"payload"`
 	SigB64     string `json:"signature"`
 	KeyID      string `json:"key_id"`
 }
 
-// State is the locally evaluated operational state of an appliance license.
 type State string
 
 const (
-	// StateActive — document within validity. All entitled features work.
 	StateActive State = "Active"
-	// StateGracePeriod — valid_until has passed but the appliance is within
-	// grace_period_days of it. All guest functionality continues unchanged;
-	// Hotel Admin surfaces a prominent renewal warning. Exists so a renewal
-	// issued while the appliance was offline never interrupts a hotel.
-	//
-	// NOT keyed to offline_grace_days, which this comment used to name. That
-	// field bounds how long the appliance may go without reaching the cloud
-	// before CloudStale is raised, and CloudStale is a warning flag that never
-	// changes the state: a hotel whose internet is down does not lose its
-	// licence. Only v1/v2 documents with no grace_period_days fall back to it.
+	// Renewal grace preserves guest access; cloud staleness only raises a warning.
 	StateGracePeriod State = "GracePeriod"
-	// StateRestricted — grace exhausted (valid_until + grace .. + 2×grace).
-	// Existing guest sessions continue and voucher/PMS guest logins still
-	// work, but entitlement-gated features (paid WiFi, SMS OTP, social) are
-	// disabled and creating new guest access plans / voucher batches is
-	// blocked. Admin is directed to the license page.
+	// Legacy restricted state permits basic access but blocks gated features and provisioning.
 	StateRestricted State = "Restricted"
-	// StateExpired — beyond valid_until + grace_period_days (v3). Legacy
-	// documents reach it beyond valid_until + 2×grace, via Restricted. New
-	// guest sessions are refused (portal shows a service notice); existing
-	// sessions are allowed to run to their natural end; local admin remains
-	// accessible read-only plus license upload.
-	StateExpired State = "Expired"
-	// StateSuspended — an operator suspended the licence in Central. New
-	// sessions are refused, effective immediately on receipt.
+	// Expiry blocks new sessions while existing sessions end naturally and admin can upload a license.
+	StateExpired   State = "Expired"
 	StateSuspended State = "Suspended"
-	// StateRevoked — an authenticated revocation notice names this
-	// license_id. New sessions refused immediately; admin locked to the
-	// license page. Strongest state; never entered by time alone.
+	// Revocation requires an authenticated notice and restricts admin to the license page.
 	StateRevoked State = "Revoked"
-	// StateUnlicensed — NO valid signed license is installed at all (factory-
-	// clean / missing / invalid / config error). On a production appliance this
-	// is the safe default: it never authorizes new guest sessions. It is
-	// distinct from Expired (a real license that lapsed) so the UI can show
-	// "pending activation" rather than implying a license existed. Only a
-	// development build may instead run permissively (StateActive) with no
-	// license — production builds can never reach that path.
+	// Production fails closed without a signed license; the UI can distinguish pending activation from expiry.
 	StateUnlicensed State = "unlicensed"
 )
 
-// AllowsNewSessions reports whether new guest sessions may be created.
-//
-// Final simple-model semantics: Active and Grace authorize new sessions;
-// Expired, Suspended and Revoked do not. Existing sessions are never dropped
-// by a state change (the reaper/quotas end them naturally), and DHCP/DNS/
-// portal/Hotel Admin all keep running — only NEW Internet authorization is
-// refused. Restricted is a legacy (pre-v3) intermediate window and keeps its
-// historical allow-basic-access behavior for old documents.
+// License state only gates new authorization; existing sessions end through their normal limits.
 func (s State) AllowsNewSessions() bool {
 	switch s {
 	case StateActive, StateGracePeriod, StateRestricted:
@@ -211,15 +130,10 @@ func (s State) AllowsNewSessions() bool {
 	}
 }
 
-// AllowsProvisioning reports whether new guest access plans, voucher batches
-// and similar management writes are allowed.
 func (s State) AllowsProvisioning() bool {
 	return s == StateActive || s == StateGracePeriod
 }
 
-// FeatureEnabled evaluates a feature entitlement under the current state:
-// entitled features degrade in Restricted/Suspended, everything is off in
-// Expired/Revoked.
 func FeatureEnabled(st State, entitled bool) bool {
 	if !entitled {
 		return false
@@ -252,8 +166,7 @@ func (d *Document) Validate() error {
 		if d.Modules == nil {
 			return fmt.Errorf("schema v4 requires modules")
 		}
-		// Features must be exactly the projection of modules: a v4 document
-		// can never carry an independent feature authority.
+		// Reject independent feature claims that could bypass module grants.
 		if d.Features != ProjectFeatures(d.Modules) {
 			return fmt.Errorf("features disagree with the modules projection")
 		}
@@ -261,5 +174,4 @@ func (d *Document) Validate() error {
 	return nil
 }
 
-// Marshal serializes a Document for signing.
 func (d *Document) Marshal() ([]byte, error) { return json.Marshal(d) }

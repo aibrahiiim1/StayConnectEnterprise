@@ -1,10 +1,6 @@
-// Package posting is the Phase-4 financial execution core: the Posting domain, the durable per-interface
-// P# allocator, the financial outbox and its per-interface worker lanes, FIAS PS construction, PA
-// correlation, and the UNKNOWN safety state.
-//
-// It is DARK. Every flag below defaults OFF, and with them OFF this package cannot emit a byte to a PMS or
-// a payment provider — see transport.go, which makes that a property of the code rather than a property of
-// the deployment. Nothing here performs a real financial transmission in this milestone.
+// Package posting is the financial execution core: postings, the P# allocator, the outbox lanes, PS
+// construction, PA correlation and the UNKNOWN state. Every flag defaults OFF (DARK), and DARK cannot emit a
+// byte to a PMS or payment provider (see transport.go).
 package posting
 
 import (
@@ -12,10 +8,8 @@ import (
 	"strings"
 )
 
-// Phase-4 financial feature flags. Deployment-controlled env only: no DB flag table, no admin UI, no
-// runtime toggle. The shape deliberately mirrors the Phase-3 flags in internal/iamv2/pms_config.go — a
-// master flag plus per-surface children, where a child ON while the master is OFF is a fail-closed startup
-// error rather than a quietly-half-enabled system.
+// Financial flags are deployment env only (no DB table, UI or runtime toggle). A child ON while the master is
+// OFF is a fail-closed startup error, as in internal/iamv2/pms_config.go.
 const (
 	EnvPhase4Master   = "STAYCONNECT_PHASE4_MASTER"
 	EnvPhase4Posting  = "STAYCONNECT_PHASE4_POSTING"          // Posting domain: creation + gate
@@ -24,7 +18,7 @@ const (
 	EnvPhase4Review   = "STAYCONNECT_PHASE4_FINANCIAL_REVIEW" // manual-review write surface
 )
 
-// Config holds the Phase-4 flag state. The zero value is the delivered, deployed state: everything OFF.
+// Config's zero value is everything OFF.
 type Config struct {
 	MasterEnabled   bool
 	PostingEnabled  bool
@@ -33,7 +27,6 @@ type Config struct {
 	ReviewEnabled   bool
 }
 
-// DefaultConfig is all-OFF.
 func DefaultConfig() Config { return Config{} }
 
 // A surface is live only when BOTH the master flag and its own flag are ON.
@@ -41,21 +34,17 @@ func (c Config) PostingOn() bool { return c.MasterEnabled && c.PostingEnabled }
 func (c Config) OutboxOn() bool  { return c.MasterEnabled && c.OutboxEnabled }
 func (c Config) ReviewOn() bool  { return c.MasterEnabled && c.ReviewEnabled }
 
-// TransmitOn is the single predicate that separates DARK from not-DARK. It is deliberately stricter than
-// the others: transmission requires the master flag, the outbox lane flag AND its own flag, so no single
-// mis-set variable can put financial bytes on a wire.
+// TransmitOn separates DARK from not-DARK and needs master, outbox and its own flag, so no single mis-set variable can put financial bytes on a wire.
 func (c Config) TransmitOn() bool {
 	return c.MasterEnabled && c.OutboxEnabled && c.TransmitEnabled
 }
 
-// Dark reports whether the process is in DARK mode: no financial egress is permitted, at all, by anyone.
 func (c Config) Dark() bool { return !c.TransmitOn() }
 
 func (c Config) anyChildSet() bool {
 	return c.PostingEnabled || c.OutboxEnabled || c.TransmitEnabled || c.ReviewEnabled
 }
 
-// Validate fails closed on an incoherent flag set.
 func (c Config) Validate() error {
 	if !c.MasterEnabled && c.anyChildSet() {
 		return &Error{Code: ErrConfig, Msg: "phase4 surface flag enabled while " + EnvPhase4Master + " is OFF"}
@@ -66,7 +55,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Getenv matches the Phase-3 loader signature.
 type Getenv func(string) string
 
 // LoadConfigFromEnv builds a Config from env. A malformed boolean is a startup failure, never a default.
@@ -94,8 +82,7 @@ func LoadConfigFromEnv(get Getenv) (Config, error) {
 	return c, nil
 }
 
-// parseBoolStrict treats an empty value as OFF and anything unparseable as a startup error. "probably
-// false" is not a state a financial flag is allowed to be in.
+// parseBoolStrict treats empty as OFF and anything unparseable as a startup error.
 func parseBoolStrict(name, raw string) (bool, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -108,7 +95,6 @@ func parseBoolStrict(name, raw string) (bool, error) {
 	return v, nil
 }
 
-// SafeFlagSummary is a log-safe description. It contains no secrets and no identifiers.
 func (c Config) SafeFlagSummary() string {
 	var b strings.Builder
 	b.WriteString("phase4 master=")

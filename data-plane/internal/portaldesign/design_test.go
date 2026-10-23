@@ -12,7 +12,6 @@ import (
 func errorsFor(d map[string]any) []Issue { return Errors(Validate(d)) }
 
 func TestTermsURLIsALinkAGuestCanSafelyFollow(t *testing.T) {
-	// It used to be copied into a live <a href> without any check at all.
 	for _, bad := range []string{"javascript:alert(1)", "http://hotel.example/terms", "//evil.example/", "data:text/html,x",
 		"https://" + strings.Repeat("a", MaxURLLength) + ".example/"} {
 		if len(errorsFor(map[string]any{"terms_url": bad})) == 0 {
@@ -111,15 +110,14 @@ func TestLanguagesAndTranslationsAreBounded(t *testing.T) {
 	}
 }
 
-// THE STEP-UP LIST IS THE MARKUP LIST. Product-Owner decision: changing custom CSS or HTML asks for the
-// operator's password, and nothing else does. Any field that can carry markup or a stylesheet belongs here; a
-// field that cannot must not, or every ordinary save turns into a password prompt.
+// The step-up list is exactly the markup list: a field that can't carry markup must not be on it, or every
+// ordinary save becomes a password prompt.
 func TestAdvancedFieldsAreExactlyTheMarkupFields(t *testing.T) {
 	if strings.Join(AdvancedFields, ",") != "custom_css,custom_html" {
 		t.Fatalf("AdvancedFields = %v; if a new field carries markup or CSS, add it here AND to ADVANCED_KEYS in "+
 			"hotel-admin/app/(app)/portal-branding/strings.ts, then update this test", AdvancedFields)
 	}
-	// Template choice and options are NOT markup: they are closed vocabularies, proven above.
+	// Template choice and options are closed vocabularies, not markup.
 	for _, k := range []string{"template_id", "template_options", "hero_image_url"} {
 		for _, a := range AdvancedFields {
 			if a == k {
@@ -168,11 +166,8 @@ func TestForGuestsServesOnlyWhatIsSafe(t *testing.T) {
 	}
 }
 
-// THE DESIGNER AND THE PORTAL AGREE ON THE LAYOUTS AND ON WHAT IS "ADVANCED".
-//
-// Hotel Admin offers the template gallery from its own list and asks for the password from its own list of
-// advanced keys. If either drifted from this package, the designer would offer a layout the server refuses, or
-// -- worse -- save a new markup field without the step-up the server would have required for it.
+// Hotel Admin keeps its own template and advanced-key lists; drift would offer a layout the server refuses or
+// save a markup field without the required step-up.
 func TestTheDesignerMirrorsThisPackage(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "hotel-admin")
 	api, err := os.ReadFile(filepath.Join(root, "lib", "api", "portal-design.ts"))

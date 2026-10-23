@@ -1,22 +1,7 @@
 package main
 
-// ASSISTED GUEST DATA REQUESTS (migration 0146): staff-supervised export and anonymisation of internet-usage
-// records that no automatic rule can attribute to one person.
-//
-//	GET  /edge/v1/guest-data-rights/assisted                  the requests (open ones and the closed record)
-//	POST /edge/v1/guest-data-rights/assisted                  open one: addresses, range, the reservation/guest/account it is about,
-//	                                                          how the requester was verified, three statements   reason
-//	GET  /edge/v1/guest-data-rights/assisted/{id}             one request
-//	GET  /edge/v1/guest-data-rights/assisted/{id}/review      every record of the addresses in the range, with its class and
-//	                                                          (for the ones that can be selected) exactly what it would disclose
-//	POST /edge/v1/guest-data-rights/assisted/{id}/export      hand over the selected records            password + reason + reference
-//	POST /edge/v1/guest-data-rights/assisted/{id}/erase       anonymise the selected records            password + reason + reference
-//	POST /edge/v1/guest-data-rights/assisted/{id}/close       complete (after a hand-over) or cancel
-//
-// Same resource key as the automatic requests (guest-data-rights: site_admin and the IT manager). All the deciding
-// is in the database: which records belong to the stated context, which are shared or in conflict, what a record
-// would disclose, and whether anything changed since staff reviewed. This file validates the shape of a request,
-// asks for the password, records who did what, and passes the selection through.
+// Staff-supervised export and anonymisation of usage records no automatic rule can attribute. The database decides
+// attribution, disclosure and staleness; this file validates shape, re-authenticates and audits.
 
 import (
 	"context"
@@ -69,7 +54,6 @@ func (s *server) assistedRoutes(parent chi.Router) {
 	})
 }
 
-// rawJSON answers with a JSON document the database built.
 func rawJSON(w http.ResponseWriter, code int, doc []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

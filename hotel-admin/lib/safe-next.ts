@@ -1,11 +1,7 @@
-// WHERE THE LOGIN PAGE MAY SEND AN OPERATOR AFTER SIGNING IN (audit N-18).
-//
-// /login?next=... is how the middleware returns an operator to the page they asked for. It used to be passed to
-// router.replace unchecked, so /login?next=https://evil.example signed the operator in and then handed them to
-// another site that could imitate the console and ask for the password again. Only a path on THIS console is
-// accepted: it must start with a single "/", must not start with "//" or "/\" (both are another host to a
-// browser), and must not carry a scheme, a control character or a backslash anywhere. Anything else goes to
-// the dashboard.
+// Where the login page may send an operator after sign-in: only a path on THIS console (single leading "/", not "//" or
+// "/\",
+// no scheme, control character or backslash); anything else goes to the dashboard. Blocks open redirects via
+// /login?next=.
 
 export const DEFAULT_AFTER_LOGIN = "/dashboard";
 
@@ -28,9 +24,8 @@ export function safeNextPath(raw: string | null | undefined): string {
 }
 
 /**
- * Where the console sends an operator whose session has ended: the sign-in page, told why (`reason=expired`, which
- * it says politely) and where to return to. `path` is the page they were on; safeNextPath decides again, on the
- * way back, whether it may be followed.
+ * Where the console sends an operator whose session ended: the sign-in page with `reason=expired` and a return path
+ * (re-checked by safeNextPath).
  */
 export function loginAfterExpiry(path: string): string {
   return `/login?next=${encodeURIComponent(safeNextPath(path))}&reason=expired`;

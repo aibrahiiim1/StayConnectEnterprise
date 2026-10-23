@@ -1,21 +1,9 @@
 package main
 
-// TRUSTED BOOT IDENTITY, AND A SECURITY JOURNAL THAT MEANS WHAT IT SAYS.
-//
-// The cross-reboot guarantee rests on two readings, not one: a monotonic uptime AND the identity of the boot
-// that uptime belongs to. A monotonic number without a trustworthy boot is not a bound — it is a number that
-// happens to be small again.
-//
-// Two failure shapes are covered here, and both used to pass silently:
-//
-//	AN UNREADABLE OR EMPTY BOOT ID. Represented as "", it made crossBoot() compare "" against "" and answer
-//	"same boot", so a previous boot's deadline could be measured against the new boot's uptime.
-//
-//	A JOURNAL THAT PARSES BUT DOES NOT COHERE. The file is security authority; valid JSON carrying a deadline
-//	far in the future, a negative reading, a missing boot identity or two records for one key must be treated
-//	exactly like an unreadable file, and never normalised into a fresh grace.
-//
-// FAKE-KERNEL tests. nft and tc are modelled; the disposable-namespace suite covers the kernel contract.
+// The cross-reboot bound needs a monotonic uptime and a trustworthy boot id: an unreadable or empty id would
+// compare "" with "" as the same boot, and a journal that parses but does not cohere (far-future deadline,
+// negative reading, missing boot id, duplicate keys) must be treated like an unreadable file, never as a fresh
+// grace. Fake-kernel tests; the disposable-namespace suite covers the kernel contract.
 
 import (
 	"encoding/json"
@@ -26,10 +14,7 @@ import (
 	"time"
 )
 
-// ---- 1. boot identity is part of the security clock --------------------------
-
-// AN UNREADABLE BOOT ID DENIES ADMISSION. The monotonic reading is fine; the identity it would be anchored to
-// is not, so the bound cannot be trusted after a reboot and no provisional access is granted.
+// An unreadable boot id denies admission: the bound cannot be trusted after a reboot.
 func TestBootID_UnreadableBootIdentityDeniesAdmission(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -47,8 +32,7 @@ func TestBootID_UnreadableBootIdentityDeniesAdmission(t *testing.T) {
 	}
 }
 
-// AN EMPTY OR WHITESPACE BOOT ID is the same failure wearing a different mask: it parses, it is a string, and
-// it cannot distinguish two boots.
+// An empty or whitespace boot id cannot distinguish two boots.
 func TestBootID_EmptyOrWhitespaceBootIdentityDeniesAdmission(t *testing.T) {
 	for _, id := range []string{"", "   ", "\n", "\t \n"} {
 		h := newDurHarness(t)
@@ -61,13 +45,11 @@ func TestBootID_EmptyOrWhitespaceBootIdentityDeniesAdmission(t *testing.T) {
 	}
 }
 
-// THE ACTUAL LINUX CONTRACT. /proc/sys/kernel/random/boot_id is a canonical RFC-4122 UUID in lowercase hex,
-// 8-4-4-4-12 — the kernel formats it with %pUb and produces nothing else. Accepting "any opaque token of at
-// least eight characters" was far too generous: a truncated read would pass, and two different truncations of
-// one id could compare equal to each other and hide a real reboot.
+// /proc/sys/kernel/random/boot_id is a canonical lowercase RFC-4122 UUID (8-4-4-4-12); a looser check would let
+// truncated reads compare equal and hide a real reboot.
 func TestBootID_OnlyACanonicalLinuxBootIDIsAccepted(t *testing.T) {
 	valid := []string{
-		"f81d4fae-7dec-11d0-a765-00a0c91e6bf6", // the RFC-4122 example, as the kernel would render it
+		"f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
 		"00000000-0000-0000-0000-000000000000",
 		"ffffffff-ffff-ffff-ffff-ffffffffffff",
 	}
@@ -99,8 +81,7 @@ func TestBootID_OnlyACanonicalLinuxBootIDIsAccepted(t *testing.T) {
 	}
 }
 
-// THE CENTRAL CASE: a reboot followed by an unreadable boot id must not be mistaken for the same boot. This is
-// the exact shape that let a prior boot's large deadline be compared against a new boot's small uptime.
+// A reboot followed by an unreadable boot id must not be mistaken for the same boot (a prior boot's large deadline would be compared with the new uptime).
 func TestBootID_ARebootHiddenByAnUnreadableBootIDCannotRestoreAccess(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -109,11 +90,10 @@ func TestBootID_ARebootHiddenByAnUnreadableBootIDCannotRestoreAccess(t *testing.
 		t.Fatal("setup: the guest was never admitted")
 	}
 
-	// Reboot: the kernel is empty and uptime restarts small — but the boot id cannot be read, so nothing can
-	// prove which boot the journalled deadline belongs to.
+	// Reboot with an unreadable boot id: nothing proves which boot the journalled deadline belongs to.
 	h.reboot(t, bootIDFor("B"))
 	h.clk.bootErr = errors.New("boot_id unreadable")
-	h.clk.ms = 1_000 // a fresh, small uptime: the prior deadline would look far in the future
+	h.clk.ms = 1_000 // fresh, small uptime
 
 	for i := 0; i < 5; i++ {
 		h.advance(20 * time.Second)
@@ -124,26 +104,25 @@ func TestBootID_ARebootHiddenByAnUnreadableBootIDCannotRestoreAccess(t *testing.
 	}
 }
 
-// AN OLD JOURNAL WITH A LARGE PRIOR-BOOT DEADLINE plus a new small uptime must not be honoured, even when the
-// boot id IS readable — it simply differs, which is the ordinary reboot path.
+// A large prior-boot deadline plus a small new uptime must not be honoured even when the boot id is readable (it differs).
 func TestBootID_APriorBootDeadlineIsNeverComparedWithANewUptime(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
-	h.clk.ms = 5_000_000 // a long-running previous boot
+	h.clk.ms = 5_000_000
 	h.pass(t, nil)
 	at := h.attempts(t)
 	if len(at) != 1 || at[0].DeadlineBootMs < 5_000_000 {
 		t.Fatalf("setup: expected a large prior-boot deadline, got %+v", at)
 	}
 
-	h.reboot(t, bootIDFor("C")) // uptime restarts small; the old deadline is now "in the future"
+	h.reboot(t, bootIDFor("C"))
 	h.pass(t, nil)
 	if h.authorized() {
 		t.Fatal("a prior boot's deadline was compared against the new boot's uptime and read as unexpired")
 	}
 }
 
-// RECOVERY. Once the boot identity is readable again, an ordinary session is admitted again.
+// Once the boot identity is readable again, an ordinary session is admitted again.
 func TestBootID_AccessResumesOnceBootIdentityIsReadableAgain(t *testing.T) {
 	h := newDurHarness(t)
 	h.clk.bootErr = errors.New("boot_id unreadable")
@@ -160,11 +139,10 @@ func TestBootID_AccessResumesOnceBootIdentityIsReadableAgain(t *testing.T) {
 	}
 }
 
-// AND A PROVEN-ACTIVE SESSION IS NOT DISCONNECTED unnecessarily: durable state proving ACTIVE resolves the
-// session regardless of the journal, so an identity problem must not turn into an outage for it.
+// A proven-active session is not disconnected: durable state proving ACTIVE resolves it regardless of the journal.
 func TestBootID_AProvenActiveSessionSurvivesAnUnreadableBootIdentity(t *testing.T) {
 	h := newDurHarness(t)
-	h.pass(t, nil) // healthy: promoted to active, no attempt outstanding
+	h.pass(t, nil)
 	if !h.authorized() || h.enf.sessionState("live-1") != "active" {
 		t.Fatal("setup: the session did not converge to active")
 	}
@@ -180,16 +158,13 @@ func TestBootID_AProvenActiveSessionSurvivesAnUnreadableBootIdentity(t *testing.
 	}
 }
 
-// ---- 2. the journal must cohere, not merely parse ----------------------------
-
-// writeJournal puts an arbitrary — valid JSON — document in the journal's place, under THIS appliance's scope.
+// writeJournal puts an arbitrary valid-JSON document in the journal's place, under this appliance's scope.
 func writeJournal(t *testing.T, h *durHarness, attempts []activationAttempt) {
 	t.Helper()
 	writeJournalScoped(t, h, h.p.mode.TenantID, h.p.mode.SiteID, h.p.mode.ApplianceID, attempts)
 }
 
-// writeJournalScoped writes the envelope with an arbitrary scope, so a test can present the appliance with
-// another property's security history.
+// writeJournalScoped writes the envelope under an arbitrary scope (another property's history).
 func writeJournalScoped(t *testing.T, h *durHarness, tenant, site, appliance string, attempts []activationAttempt) {
 	t.Helper()
 	raw, err := json.Marshal(journalState{
@@ -202,12 +177,8 @@ func writeJournalScoped(t *testing.T, h *durHarness, tenant, site, appliance str
 	}
 }
 
-// ---- the envelope must belong to THIS appliance ------------------------------
-
-// A JOURNAL FROM ANOTHER TENANT, SITE OR APPLIANCE is not this appliance's security history — and it is not an
-// empty one either. It arrives by ordinary means: a restored image, a cloned VM, a copied /var/lib, a re-homed
-// unit after a tenancy change. Reading it as "no attempts outstanding" would award every guest here a fresh
-// grace on the strength of a file describing somewhere else.
+// A journal from another tenant, site or appliance (restored image, cloned VM, copied /var/lib) is unknown, not
+// empty: reading it as "no attempts outstanding" would award every guest a fresh grace.
 func TestJournal_AForeignScopeIsUnknownNotAFreshStart(t *testing.T) {
 	const otherID = "99999999-9999-4999-8999-999999999999"
 	coherent := func(h *durHarness) []activationAttempt {
@@ -266,7 +237,7 @@ func TestJournal_AForeignScopeIsUnknownNotAFreshStart(t *testing.T) {
 			if h.authorized() {
 				t.Fatal("a foreign-scope journal was read as a clean first run and awarded a fresh grace")
 			}
-			// and it is never silently re-scoped into ours
+			// It is never silently re-scoped into ours.
 			after := h.p.journal.load(h.p.mode.TenantID, h.p.mode.SiteID, h.p.mode.ApplianceID)
 			if !after.Unreadable {
 				t.Fatal("the foreign journal was adopted into this appliance's scope")
@@ -275,8 +246,7 @@ func TestJournal_AForeignScopeIsUnknownNotAFreshStart(t *testing.T) {
 	}
 }
 
-// THE CORRECT SCOPE IS STILL ACCEPTED — otherwise the check above would be indistinguishable from refusing
-// every journal, and the whole mechanism would be dead weight.
+// The correct scope is still accepted.
 func TestJournal_TheCorrectScopeIsAccepted(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -293,7 +263,7 @@ func TestJournal_TheCorrectScopeIsAccepted(t *testing.T) {
 	}
 }
 
-// AND A TRULY ABSENT FILE remains the one legitimate clean first run.
+// A truly absent file is the one legitimate clean first run.
 func TestJournal_OnlyAnAbsentFileIsACleanFirstRun(t *testing.T) {
 	h := newDurHarness(t)
 	if err := os.Remove(h.journalPath()); err != nil && !os.IsNotExist(err) {
@@ -309,26 +279,23 @@ func TestJournal_OnlyAnAbsentFileIsACleanFirstRun(t *testing.T) {
 	}
 }
 
-// ---- the two identities in a record must be the same session -----------------
-
-// parseClassKey is the canonical reader, and it is the only one. "Contains a pipe" would let br-guest|a|b be
-// read two ways, and a record whose identity can be read two ways can be made to describe a different session
-// than the one it was written for.
+// parseClassKey is the only canonical reader: "contains a pipe" would let br-guest|a|b be read two ways and
+// describe a different session than the one it was written for.
 func TestJournal_CanonicalKeyParsing(t *testing.T) {
 	bridge, session, ok := parseClassKey("br-guest|live-1")
 	if !ok || bridge != "br-guest" || session != "live-1" {
 		t.Fatalf("the canonical form did not parse: %q %q %v", bridge, session, ok)
 	}
 	for _, bad := range []string{
-		"",                 // empty
-		"live-1",           // no separator
-		"|live-1",          // empty bridge
-		"br-guest|",        // empty session
-		"br-guest|a|b",     // AMBIGUOUS: two separators, two readings
-		"br-guest|live-1|", // trailing separator
-		"|",                // both empty
-		"   |live-1",       // whitespace bridge
-		"br-guest|   ",     // whitespace session
+		"",
+		"live-1",
+		"|live-1",
+		"br-guest|",
+		"br-guest|a|b", // ambiguous: two separators, two readings
+		"br-guest|live-1|",
+		"|",
+		"   |live-1",
+		"br-guest|   ",
 	} {
 		if _, _, ok := parseClassKey(bad); ok {
 			t.Fatalf("%q was accepted as a canonical class key", bad)
@@ -336,8 +303,7 @@ func TestJournal_CanonicalKeyParsing(t *testing.T) {
 	}
 }
 
-// THE POISON MATRIX. Every one of these is valid JSON, and every one would widen or erase the bound if it were
-// believed. Each must land in exactly the same place as an unreadable file: UNKNOWN, fail-closed.
+// Each case is valid JSON that would widen or erase the bound if believed; each must land as unknown, fail-closed.
 func TestJournal_SemanticallyIncoherentRecordsAreTreatedAsUnknown(t *testing.T) {
 	good := activationAttempt{
 		Key: "br-guest|live-1", SessionID: "live-1", BootID: bootIDFor("A"),
@@ -416,8 +382,7 @@ func TestJournal_SemanticallyIncoherentRecordsAreTreatedAsUnknown(t *testing.T) 
 	}
 }
 
-// A COHERENT record is still honoured — otherwise the check above would be indistinguishable from refusing
-// everything, and the whole journal would be dead weight.
+// A coherent record is still honoured.
 func TestJournal_ACoherentRecordIsStillHonoured(t *testing.T) {
 	h := newDurHarness(t)
 	brokenDB(h)
@@ -433,8 +398,7 @@ func TestJournal_ACoherentRecordIsStillHonoured(t *testing.T) {
 	if !h.authorized() {
 		t.Fatal("a session inside its recorded grace was denied")
 	}
-	// and the countdown continues from the RECORDED start rather than restarting. One millisecond past the
-	// recorded deadline, not exactly on it: the grace is inclusive of its final instant by design.
+	// The countdown continues from the recorded start; one millisecond past the deadline, since the grace is inclusive of its final instant.
 	h.advance(phase3ActivationGrace + time.Millisecond)
 	h.pass(t, nil)
 	if h.authorized() {

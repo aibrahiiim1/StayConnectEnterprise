@@ -18,12 +18,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
-// GDPR plan C5 (migration 0129, decision D-C5): the hotel's backup key holders. The private key is handed over
-// once and never kept, a holder counts only once its check code is typed back, the last holder cannot be
-// removed, and the restore test records which holder proved their key -- and goes overdue.
-
-// fakeBackupSCD serves the two scd endpoints this surface uses. The key test opens an encrypted file with the
-// same library scd uses, so "the key opens the backup" is a real decryption, not a stub's say-so.
+// fakeBackupSCD serves the two scd endpoints used; the key test does a real decryption with the library scd uses.
 func fakeBackupSCD(t *testing.T, months int, backup []byte) *scdClient {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "scd")
@@ -95,7 +90,7 @@ func TestIntegration_BackupKeys(t *testing.T) {
 	}
 	id1, secret1, public1, check1 := add("IT manager")
 
-	// THE APPLIANCE KEEPS NO COPY: the secret is nowhere in the database, the audit log included.
+	// The secret is nowhere in the database, the audit log included.
 	var leaks int
 	if err := f.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM public.backup_key_holders h WHERE h::text LIKE '%'||$1||'%')
 		+ (SELECT count(*) FROM public.audit_log l WHERE l.payload::text LIKE '%'||$1||'%')
@@ -103,7 +98,6 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatalf("the private key or the check code is stored (%d, %v)", leaks, err)
 	}
 
-	// Pending is not encryption.
 	if _, body := f.do(t, "GET", "/backup-keys/", nil); body["encrypted"] != false {
 		t.Fatal("a holder that never confirmed switched encryption on")
 	}
@@ -133,7 +127,6 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatalf("recipients = %v", got)
 	}
 
-	// The last holder stays.
 	if st, b := f.do(t, "POST", "/backup-keys/holders/"+id1+"/remove", map[string]any{"reason": "left the hotel", "password": f.password}); st != 409 {
 		t.Fatalf("removed the last holder: %d %v", st, b)
 	}
@@ -151,7 +144,7 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatalf("recipients after removal = %v", got)
 	}
 
-	// THE RESTORE TEST, against a backup encrypted to the current holder only.
+	// Restore test against a backup encrypted to the current holder only.
 	rs, _ := backupcrypt.ParseRecipients([]string{public2})
 	var enc bytes.Buffer
 	w, _ := backupcrypt.Encrypt(&enc, rs)
@@ -176,7 +169,6 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatalf("a test two months old is not overdue on a one-month interval: %v", body["restore_test"])
 	}
 
-	// Roles: readers of backups see it, only site administrators change it.
 	it := newAPIIn(t, f.tenant, "hotel_it_manager")
 	it.app.scd = f.app.scd
 	if st, _ := it.do(t, "GET", "/backup-keys/", nil); st != 200 {
@@ -186,8 +178,7 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatalf("the IT manager added a holder: %d", st)
 	}
 
-	// The nightly backup names no site. With holders active on two sites -- an appliance moved to another
-	// hotel -- it must refuse, never encrypt to the other hotel's keys.
+	// The nightly backup names no site: with holders active on two sites it must refuse, never encrypt to the other hotel's keys.
 	other := newAPIIn(t, f.tenant)
 	other.app.scd = f.app.scd
 	st, b := other.do(t, "POST", "/backup-keys/holders", map[string]any{"label": "Other hotel", "acknowledge_loss": true, "password": other.password})
@@ -204,7 +195,6 @@ func TestIntegration_BackupKeys(t *testing.T) {
 		t.Fatal("the site-less recipient list answered with holders of two sites active")
 	}
 
-	// Nothing is ever deleted.
 	if _, err := f.pool.Exec(ctx, `DELETE FROM public.backup_key_holders WHERE id=$1`, id1); err == nil {
 		t.Fatal("a holder was deleted")
 	}

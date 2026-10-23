@@ -1,18 +1,8 @@
-// Pure, deterministic form logic for the Internet-package publish form. Kept separate from the React
-// components so it is unit-testable in isolation and shared by the editors. Everything here enforces the
-// currently-supported contract on the client (the edged API re-validates authoritatively): the supported
-// eligibility rules, only the duration modes this build actually implements, and — at the end of the file —
-// the price, currency, acquisition methods and room-charge mappings a package is offered with.
+// Pure form logic for the Internet-package publish form. Enforces the supported contract client-side; edged
+// re-validates authoritatively.
 
-// The eligibility rule types an operator may select.
-//
-// THE PMS ONES WERE ABSENT ON PURPOSE, AND THAT PURPOSE HAS EXPIRED. They were withheld while the engine
-// recognised them but could not evaluate them — a control that silently does nothing is worse than an absent
-// one. The engine now evaluates every one of them against server-pinned Stay evidence, and refuses when that
-// evidence is missing rather than guessing, so withholding them only hides working behaviour.
-//
-// What is still absent is anything the engine cannot answer: LOYALTY_TIER has no evidence behind it, and
-// STAY_NIGHTS was never a rule type — stay length is STAY_LENGTH, with min/max night bounds.
+// Eligibility rule types an operator may select. LOYALTY_TIER has no evidence behind it and STAY_NIGHTS is not a rule
+// type (use STAY_LENGTH).
 export const SUPPORTED_RULE_TYPES = [
   "AUTH_METHOD",
   "SUBJECT_KIND",
@@ -29,27 +19,22 @@ export const SUPPORTED_RULE_TYPES = [
 ] as const;
 export type RuleType = (typeof SUPPORTED_RULE_TYPES)[number];
 
-// RULES WITH A CONTROL OF THEIR OWN. The audience (CLIENT_GROUP) and the free allowance (PRIOR_PURCHASE with
-// forbids_prior) are the two conditions nearly every site sets, so the package editor presents each as a named
-// control rather than as a row in the generic condition list (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4,
-// §5). The wire shape is unchanged: both are still ordinary eligibility rules, and the generic rows keep every
-// other type.
+// CLIENT_GROUP and PRIOR_PURCHASE with forbids_prior get dedicated controls; on the wire they are still ordinary
+// eligibility rules.
 export const DEDICATED_RULE_TYPES = ["CLIENT_GROUP"] as const;
 export function isDedicatedRule(r: { type: string; mode?: string }): boolean {
   if ((DEDICATED_RULE_TYPES as readonly string[]).includes(r.type)) return true;
   return r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior";
 }
 
-// Rule types that must never be selectable: recognised nowhere in the engine, so a package carrying one would
-// be permanently ineligible for everybody. Exported for tests.
+// Rule types recognised nowhere in the engine (a package carrying one is ineligible for everybody). Exported for tests.
 export const FORBIDDEN_RULE_TYPES = [
   "STAY_NIGHTS",
   "LOYALTY_TIER",
 ] as const;
 
-// The rule types that need authoritative Stay evidence. A guest who did not sign in through the PMS has none,
-// so a package carrying any of these is not offered to them at all — which is a product decision worth
-// stating on screen rather than leaving the operator to discover.
+// Rule types needing authoritative Stay evidence; a guest who did not sign in through the PMS has none, so the package
+// is not offered to them.
 export const PMS_RULE_TYPES = [
   "STAY_LENGTH", "ROOM_TYPE", "RATE_PLAN", "VIP", "TRAVEL_AGENT", "PMS_INTERFACE",
 ] as const;
@@ -61,8 +46,7 @@ export function isSupportedRuleType(t: string): t is RuleType {
   return (SUPPORTED_RULE_TYPES as readonly string[]).includes(t);
 }
 
-// The ONLY duration end-modes selectable here. AT_CHECKOUT / GRACE_AFTER_CHECKOUT / REST_OF_STAY /
-// EARLIEST_OF_FIXED_AND_CHECKOUT (PMS/checkout-driven) are capability-disabled and absent.
+// The only selectable duration end-modes; PMS/checkout-driven modes are capability-disabled.
 export const SUPPORTED_END_MODES = ["MANUAL_END", "VALIDITY_WINDOW", "FIXED_AT"] as const;
 export type EndMode = (typeof SUPPORTED_END_MODES)[number];
 
@@ -70,29 +54,23 @@ export type EligibilityRuleForm =
   | { type: "AUTH_METHOD"; methods: string }
   | { type: "SUBJECT_KIND"; kinds: string }
   | { type: "DATE_WINDOW"; from: string; until: string }
-  // THE FREE ALLOWANCE (forbids_prior). `within_hours` ("once every N hours", 1..8760, empty = once ever) and
-  // `also_by_device` (the device's own history counts too) are sent only when set, so a rule that never named
-  // them keeps the server's defaults -- and the switch an operator turned OFF is sent as an explicit false.
+  // forbids_prior: `within_hours` (1..8760, empty = once ever) and `also_by_device` are sent only when set; a
+  // switched-off one is an explicit false.
   | { type: "PRIOR_PURCHASE"; mode: "requires_prior" | "forbids_prior"; within_hours?: string; also_by_device?: boolean }
   | { type: "SITE_NETWORK"; guest_network_ids: string }
-  // THE AUDIENCE. Group ids are a list (never comma text: they are uuids chosen from a picker), and `public`
-  // widens the rule to Clients who are in no group at all.
+  // Group ids are a list of uuids from a picker; `public` widens the rule to Clients in no group.
   | { type: "CLIENT_GROUP"; group_ids: string[]; public: boolean }
-  // Either bound may be left empty: "8 nights or more" and "up to 7 nights" are both real rules, and the
-  // backend contract permits an open end. What it does not permit is BOTH empty, which constrains nothing.
+  // Either bound may be empty (open end); both empty constrains nothing and is refused.
   | { type: "STAY_LENGTH"; min_nights: string; max_nights: string }
   | { type: "ROOM_TYPE"; room_types: string }
   | { type: "RATE_PLAN"; rate_plans: string }
   | { type: "VIP"; is_vip: "true" | "false" }
-  // A LIST, not comma-separated text: travel-agent names come from the PMS and may themselves contain a comma
-  // ("Sun Tours, Ltd"). The stored rule has always been a JSON array; only this form model used to be text,
-  // which split such a name into two agents that match nobody.
+  // A list, not comma text: PMS travel-agent names may contain a comma ("Sun Tours, Ltd").
   | { type: "TRAVEL_AGENT"; travel_agents: string[] }
   | { type: "PMS_INTERFACE"; pms_interface_ids: string };
 
-// `extra` is everything else the stored tier's grant object carries -- above all its `match` condition --
-// which the form does not edit. It is handed back unchanged on save; dropping it would turn a conditional
-// speed step into an unconditional one (audit O-15).
+// `extra` is the rest of the stored tier's grant (above all its `match`), handed back unchanged on save; dropping it
+// would make a conditional step unconditional.
 export type GrantTierForm = {
   order: number | string; down_kbps?: number | string; up_kbps?: number | string;
   extra?: Record<string, unknown>;
@@ -118,8 +96,7 @@ export type PublishFormState = {
   display?: Record<string, unknown> | null;
 };
 
-// nameList keeps each name whole (never split): trimmed, empties dropped, and a name repeated in another case
-// kept once -- the engine matches case-insensitively, so a second spelling would add nothing.
+// nameList keeps names whole, trimmed, de-duplicated case-insensitively (the engine matches that way).
 export const nameList = (names: readonly string[]): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -133,8 +110,8 @@ export const nameList = (names: readonly string[]): string[] => {
 const asList = (s: string): string[] =>
   s.split(",").map((x) => x.trim()).filter(Boolean);
 
-// serializeRule maps a typed form row to the { type, value } wire shape. A forbidden/unknown type throws
-// (the UI never offers one, so this is a defensive guard).
+// serializeRule maps a form row to the { type, value } wire shape; a forbidden/unknown type throws as a defensive
+// guard.
 export function serializeRule(r: EligibilityRuleForm): { type: string; value: Record<string, unknown> } {
   switch (r.type) {
     case "AUTH_METHOD":
@@ -149,7 +126,6 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
     }
     case "PRIOR_PURCHASE": {
       const value: Record<string, unknown> = { [r.mode]: true };
-      // The allowance fields belong to forbids_prior only; "requires prior" has no window or device dimension.
       if (r.mode === "forbids_prior") {
         if (r.within_hours !== undefined && r.within_hours !== "") value.within_hours = Number(r.within_hours);
         if (typeof r.also_by_device === "boolean") value.also_by_device = r.also_by_device;
@@ -166,8 +142,7 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
       return { type: "CLIENT_GROUP", value };
     }
     case "STAY_LENGTH": {
-      // An empty bound is OMITTED, never sent as 0. {min_nights: 0} reads as "at least zero nights", which
-      // is a rule that constrains nothing while looking like one that does.
+      // An empty bound is omitted, never 0: {min_nights: 0} looks like a rule but constrains nothing.
       const value: Record<string, unknown> = {};
       if (r.min_nights !== "" && r.min_nights !== undefined) value.min_nights = Number(r.min_nights);
       if (r.max_nights !== "" && r.max_nights !== undefined) value.max_nights = Number(r.max_nights);
@@ -188,13 +163,11 @@ export function serializeRule(r: EligibilityRuleForm): { type: string; value: Re
   }
 }
 
-// THE BOUNDS OF THE FREE ALLOWANCE WINDOW, mirroring edged (1 hour to one year). Exported so the editor can
-// state them beside the field rather than discover them on save.
+// Bounds of the free-allowance window, mirroring edged (1 hour to one year).
 export const WITHIN_HOURS_MIN = 1;
 export const WITHIN_HOURS_MAX = 8760;
 
-// validateRule says, in the operator's words, why a dedicated-control rule cannot be published as it stands.
-// The server re-validates; this stops the two conditions that are easy to leave half-set from reaching it.
+// validateRule explains why a dedicated-control rule cannot be published as it stands; the server re-validates.
 export function validateRule(r: EligibilityRuleForm): string | null {
   if (r.type === "CLIENT_GROUP") {
     if (nameList(r.group_ids).length === 0 && !r.public) {
@@ -210,8 +183,7 @@ export function validateRule(r: EligibilityRuleForm): string | null {
   return null;
 }
 
-// validateDuration returns a client-side error string (or null). PMS/checkout modes are not representable
-// in DurationForm, so they cannot reach here; this validates the three supported modes.
+// validateDuration returns an error string or null; PMS/checkout modes are not representable in DurationForm.
 export function validateDuration(d: DurationForm): string | null {
   if (!SUPPORTED_END_MODES.includes(d.end_mode)) return "unsupported end mode";
   if (d.end_mode === "VALIDITY_WINDOW") {
@@ -233,7 +205,6 @@ export function serializeDuration(d: DurationForm): Record<string, unknown> {
   return out;
 }
 
-// validateSaleWindow enforces from < until when both are set.
 export function validateSaleWindow(from?: string, until?: string): string | null {
   if (from && until && new Date(from).getTime() >= new Date(until).getTime()) {
     return "sale window start must be before end";
@@ -241,10 +212,8 @@ export function validateSaleWindow(from?: string, until?: string): string | null
   return null;
 }
 
-// SPEED STEPS WERE NEVER APPLIED (audit O-5). A package's grant tiers are a first-match list with optional speed
-// overrides and no threshold; the override was shown to clients while the network always applied the service
-// plan's speed. The appliance now refuses to save more than one step, or a step with speeds, and so does the form,
-// in the same words. (The server message starts "speed_steps_not_supported"; this is the operator sentence.)
+// Speed steps were never applied: grant tiers are a first-match list and the network always uses the service plan's
+// speed, so the appliance and this form refuse more than one step or a step with speeds.
 export const SPEED_STEPS_REFUSAL =
   "This package has speed steps, which were never applied: clients always get the speed of the package's service " +
   "plan. Remove the speed steps, and choose a service plan with the speed you want.";
@@ -261,7 +230,6 @@ export function plainTiers(tiers: GrantTierForm[]): GrantTierForm[] {
   return [{ order: orders.length ? Math.min(...orders) : 10 }];
 }
 
-// tiersInOrder returns the tiers sorted by ascending order (deterministic), each with numeric fields.
 export function tiersInOrder(tiers: GrantTierForm[]): { order: number; grant: Record<string, unknown> }[] {
   return tiers
     .map((t) => {
@@ -282,15 +250,12 @@ export type PublishPayload = {
   grant_tiers: { order: number; grant: Record<string, unknown> }[];
   visible_from?: string;
   visible_until?: string;
-  /** Absent means FIXED: the pinned service plan's allowance, used unchanged. */
   data_allocation_policy?: Record<string, unknown>;
-  /** Absent together means a Free package (the server's default). See buildAcquisition. */
   price_minor?: number;
   currency?: string;
   currency_exponent?: number;
   acquisition_methods?: AcquisitionMethod[];
   room_charge_mappings?: RoomChargeMappingWire[];
-  // CARRIED ON A REVISION, sent back exactly as loaded (absent = the server carries the current value).
   package_type?: string;
   plan_overrides?: Record<string, unknown> | null;
   renewable?: boolean;
@@ -299,9 +264,8 @@ export type PublishPayload = {
   password?: string;
 };
 
-// THE FREE-ACCESS LIMIT AND "ONLY CLIENTS WHO ALREADY HAD A PACKAGE" CONTRADICT EACH OTHER. The first offers
-// the package only to a client with no earlier purchase; the second only to a client with one. Together they
-// offer it to nobody, and the server refuses the pair (audit O-9).
+// Free-access limit and "only clients who already had a package" contradict each other (offered to nobody); the server
+// refuses the pair.
 export const CONTRADICTORY_PRIOR_PURCHASE =
   "Free access is limited to clients who have not had this package before, and a condition also requires an earlier purchase, so no client can meet both. Remove the \"Only clients who already had a package here\" condition, or set Free access to No limit.";
 
@@ -326,9 +290,8 @@ export function validateTiers(tiers: GrantTierForm[]): string | null {
   return null;
 }
 
-// buildPublishPayload validates the whole form and returns { payload } or { error }. It emits no price or
-// acquisition field of its own: on its own it publishes a Free package, which is what the server makes of a
-// body that names none. The package form adds the price section from buildAcquisition, validated separately.
+// buildPublishPayload emits no price/acquisition field; alone it publishes a Free package. The package form adds the
+// price section from buildAcquisition.
 export function buildPublishPayload(s: PublishFormState): { payload?: PublishPayload; error?: string } {
   if (!s.code.trim()) return { error: "code is required" };
   if (!s.service_plan_revision_id) return { error: "a service plan is required" };
@@ -350,7 +313,6 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
   const payload: PublishPayload = {
     code: s.code.trim(),
     service_plan_revision_id: s.service_plan_revision_id,
-    // MERGED, not replaced: a display object carrying more than the name keeps the rest (audit O-15).
     display: { ...(s.display ?? {}), name: s.name.trim() || s.code.trim() },
     duration_policy: serializeDuration(s.duration),
     eligibility_rules: [
@@ -365,13 +327,8 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
 }
 
 
-// OPERATOR WORDING for the enum values above.
-//
-// The form used to render the raw constants — an operator picking a duration policy chose between
-// "MANUAL_END", "VALIDITY_WINDOW" and "FIXED_AT", and picking an eligibility rule chose between
-// "AUTH_METHOD" and "SUBJECT_KIND". Those are the wire values and they stay the wire values; these are what
-// the person reading the screen sees. Kept beside the enums so a new value cannot be added without the
-// label question being asked.
+// Operator wording for the enum values above; the wire values are unchanged. Kept beside the enums so a new value
+// forces a label.
 export const END_MODE_LABELS: Record<EndMode, string> = {
   MANUAL_END: "Until the client disconnects or an operator ends it",
   VALIDITY_WINDOW: "For a fixed length of time after the client connects",
@@ -394,17 +351,10 @@ export const RULE_TYPE_LABELS: Record<RuleType, string> = {
 };
 
 
-// ------------------------------------------------------------------ PRICE AND HOW CLIENTS GET IT ---------
-//
-// A package says what it costs and the ways a client may acquire it. The server is the authority on every rule
-// below (it refuses with `invalid_acquisition_methods`, `invalid_currency`, `invalid_room_charge_mapping`, or
-// 409 `module_not_enabled`); these mirror it so the operator is told before a round trip, in words, and the
-// form never offers a combination the server is certain to refuse.
-//
-// buildPublishPayload above is deliberately left alone: a caller that names no acquisition fields still
-// publishes a Free package, exactly as before, and that backward-compatible path stays testable on its own.
+// Price and acquisition. The server is authoritative (invalid_acquisition_methods, invalid_currency,
+// invalid_room_charge_mapping, 409 module_not_enabled);
+// these mirror it so the form never offers a combination the server will refuse.
 
-/** The acquisition methods, in the order they are presented. The wire values are the stored ones. */
 export const ACQUISITION_METHODS = ["NOT_REQUIRED", "PREPAID", "ONLINE_PAYMENT", "PMS_POSTING"] as const;
 export type AcquisitionMethod = (typeof ACQUISITION_METHODS)[number];
 
@@ -419,9 +369,7 @@ export function isAcquisitionMethod(m: string): m is AcquisitionMethod {
   return (ACQUISITION_METHODS as readonly string[]).includes(m);
 }
 
-// THE EXPONENT IS A PROPERTY OF THE CURRENCY, NOT A CHOICE. The server refuses any exponent that is not the
-// ISO-4217 one, so the operator never types it: it is read from here. JPY is not in the offered list but is
-// known, so a package already published in yen is still read and handed back correctly.
+// The exponent is the currency's ISO-4217 one (the server refuses others); JPY is known so a yen package still loads.
 export const CURRENCY_EXPONENTS: Record<string, number> = {
   EGP: 2, USD: 2, EUR: 2, SAR: 2, AED: 2, QAR: 2, GBP: 2,
   OMR: 3, KWD: 3, BHD: 3, JOD: 3,
@@ -431,23 +379,19 @@ export const CURRENCY_EXPONENTS: Record<string, number> = {
 /** The currencies offered in the picker. A package already in another currency keeps it. */
 export const OFFERED_CURRENCIES = ["EGP", "USD", "EUR", "SAR", "AED", "OMR", "KWD", "QAR", "BHD", "JOD", "GBP"] as const;
 
-// A free package with no currency is stored by the server as USD/2, so a new form starts there too: saving an
-// untouched new package publishes exactly what omitting the fields would have.
+// A free package with no currency is stored as USD/2, so a new form starts there too.
 export const DEFAULT_CURRENCY = "USD";
 
 export type RoomChargeMappingForm = {
   pms_interface_id: string;
   posting_code: string;
   tax_code: string;
-  /** Percent as typed ("14" = 14%). Empty means no rate is recorded. */
   tax_rate_pct: string;
 };
 
 export type AcquisitionForm = {
-  /** Major units as typed ("12.50"). Empty reads as 0. */
   price: string;
   currency: string;
-  /** Only consulted for a loaded currency this build does not know; otherwise the map decides. */
   currency_exponent?: number;
   methods: AcquisitionMethod[];
   room_charge: RoomChargeMappingForm[];
@@ -462,7 +406,6 @@ export type AcquisitionPayload = {
   currency: string;
   currency_exponent: number;
   acquisition_methods: AcquisitionMethod[];
-  /** Present only when Room charge is one of the methods; the server forbids it otherwise. */
   room_charge_mappings?: RoomChargeMappingWire[];
 };
 
@@ -476,9 +419,8 @@ export function currencyExponent(currency: string, fallback?: number | null): nu
   return typeof fallback === "number" && Number.isInteger(fallback) && fallback >= 0 ? fallback : null;
 }
 
-// parsePrice turns what the operator typed into minor units WITHOUT floating point: "12.5" in a 2-decimal
-// currency is 1250, and "0.005" in one is refused rather than rounded, because a rounded price is a price
-// nobody set.
+// parsePrice converts typed text to minor units without floating point; excess precision ("0.005" in 2 decimals) is
+// refused, not rounded.
 export function parsePrice(price: string, exponent: number): { minor?: number; error?: string } {
   const s = price.trim();
   if (s === "") return { minor: 0 };
@@ -497,14 +439,12 @@ export function parsePrice(price: string, exponent: number): { minor?: number; e
   return { minor };
 }
 
-/** formatMajor is the inverse of parsePrice, for loading a stored price back into the input. */
 export function formatMajor(minor: number, exponent: number): string {
   if (exponent <= 0) return String(minor);
   const s = String(Math.abs(minor)).padStart(exponent + 1, "0");
   return `${minor < 0 ? "-" : ""}${s.slice(0, -exponent)}.${s.slice(-exponent)}`;
 }
 
-/** True when the typed price parses to more than zero. An unparseable price is not "paid". */
 export function isPaidPrice(price: string, currency: string, fallbackExponent?: number | null): boolean {
   const e = currencyExponent(currency, fallbackExponent);
   if (e === null) return false;
@@ -512,9 +452,8 @@ export function isPaidPrice(price: string, currency: string, fallbackExponent?: 
   return (p.minor ?? 0) > 0;
 }
 
-// The price moving across zero changes which methods can apply at all, so the form follows it rather than
-// leaving the operator with a combination that is certain to be refused: a priced package cannot be Free, and
-// a free one cannot be charged to a card or a room. Voucher is valid on both sides and is left as it is.
+// Price crossing zero changes which methods apply: a priced package cannot be Free, a free one cannot be charged to a
+// card or room.
 export function methodsForPriceChange(
   methods: AcquisitionMethod[], wasPaid: boolean, isPaid: boolean,
 ): AcquisitionMethod[] {
@@ -523,7 +462,6 @@ export function methodsForPriceChange(
   return methods;
 }
 
-// Tax rate in percent to basis points, without floating-point drift: "14" is 1400, "12.5" is 1250.
 export function pctToBp(pct: string): { bp?: number; error?: string } {
   const m = /^(\d+)(?:\.(\d{0,2}))?$/.exec(pct.trim());
   if (!m) return { error: "enter the tax rate as a percentage with at most two decimals, for example 14 or 12.5." };
@@ -538,11 +476,8 @@ export function bpToPct(bp: number): string {
   return s.endsWith("0") ? s.slice(0, -1) : s;
 }
 
-// Printable ASCII, the same test the server applies (it also refuses "|", which separates FIAS fields).
 const PRINTABLE_1_20 = /^[\x20-\x7E]{1,20}$/;
 
-// buildAcquisition validates the price section and returns the fields to add to the publish body, or an
-// operator-readable error. The messages say what to change, not which rule was broken.
 export function buildAcquisition(f: AcquisitionForm): { fields?: AcquisitionPayload; error?: string } {
   const currency = f.currency.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) return { error: "Choose a currency." };
@@ -604,15 +539,12 @@ export function buildAcquisition(f: AcquisitionForm): { fields?: AcquisitionPayl
   return { fields };
 }
 
-// THE SERVER'S REFUSALS, READABLE. A publish the server refuses answers with its reason verbatim, prefixed by
-// a machine code ("invalid_currency: …"). The code is for logs; the operator is told which part of the form it
-// concerns, followed by the server's own explanation, unchanged. Any other message is left alone (null).
+// A refused publish answers "code: reason"; the operator sees which part of the form it concerns plus the server's
+// explanation. Other messages are left alone (null).
 const REFUSAL_PREFIXES: Record<string, string> = {
   invalid_acquisition_methods: "How clients get this package",
   invalid_currency: "Currency",
   invalid_room_charge_mapping: "Room charge",
-  // THE DURATION REFUSAL KEEPS ITS REASON (audit O-18): "invalid_duration_policy: the end time is in the past"
-  // is shown as the part of the form it concerns followed by the server's reason, never as a bare code.
   invalid_duration_policy: "How long access lasts",
   invalid_eligibility_rules: "Conditions",
   invalid_grant_tiers: "Speed steps",
@@ -627,21 +559,17 @@ export function describePublishRefusal(message: string): string | null {
   return `${REFUSAL_PREFIXES[m[1]]}: ${sentence}${/[.!?]$/.test(sentence) ? "" : "."}`;
 }
 
-// ------------------------------------------------------------- WHICH METHODS THIS SITE CAN OFFER ---------
-//
-// Free and Voucher are the core product and always selectable. The other two, and any price above zero,
-// belong to modules the site must have LICENSED AND SWITCHED ON (System › Modules) — the same test the server
-// applies when it publishes. "Ready" is a further, separate gate: a card method with no active card account
-// may be configured, but clients are not offered it until it is ready, and the form says so.
+// Free and Voucher are always selectable; other methods and any price above zero need a licensed AND switched-on
+// module.
+// "Ready" is a separate gate: a card method with no active card account may be configured but is not offered until
+// ready.
 
-/** One module as GET /modules reports it (only the fields this form reads). */
 export type ModuleState = {
   id: string; label: string; licensed: boolean; enabled: boolean; ready: boolean;
   reasons?: string[]; readiness?: string[];
 };
 export type ModulesReport = { modules?: Record<string, ModuleState> | null };
 
-/** A PMS interface as GET /pms-financial-onboarding reports it (only the fields this form reads). */
 export type RoomChargeInterface = {
   pms_interface_id: string; display_label: string; connector_kind?: string;
   financial_base_currency: string | null; ready: boolean; reason: string | null;
@@ -655,17 +583,11 @@ export const PAID_ACCESS_MODULE = "paid_access";
 
 export type Availability = {
   selectable: boolean;
-  /** Why it cannot be chosen, in a few words. */
   reason?: string;
-  /** Selectable, but clients are not offered it yet: what is missing. */
   notReady?: string[];
 };
 
-/**
- * moduleAvailability answers whether a module-gated option can be chosen here. `report` is null while the
- * module state is loading and "error" when it could not be read; both FAIL CLOSED — an option the site may not
- * be licensed for is never offered on a guess.
- */
+/** Whether a module-gated option can be chosen. `report` null (loading) or "error" fails closed. */
 export function moduleAvailability(moduleID: string, report: ModulesReport | "error" | null): Availability {
   if (report === "error") return { selectable: false, reason: "Module state could not be read" };
   if (report === null) return { selectable: false, reason: "Checking modules…" };
@@ -679,16 +601,16 @@ export function moduleAvailability(moduleID: string, report: ModulesReport | "er
   return { selectable: true };
 }
 
-/** Whether a module is LICENSED here (whatever its switch or readiness). Unknown or unreadable = no. */
 export function moduleLicensedIn(moduleID: string, report: ModulesReport | "error" | null): boolean {
   if (!report || report === "error") return false;
   const m = report.modules?.[moduleID];
   return !!m && !!m.licensed;
 }
 
-/** Whether an acquisition method belongs on this site's package form at all: Free and Voucher always; a
- *  module-owned method only when its module is licensed. A method that is not licensed is not shown -- a café
- *  does not see "Room charge" -- unless the package already uses it, so it can still be removed. */
+/**
+ * Free and Voucher always; a module-owned method only when its module is licensed, unless the package already uses it
+ * (so it can be removed).
+ */
 export function methodShown(method: AcquisitionMethod, report: ModulesReport | "error" | null, checked: boolean): boolean {
   const mod = METHOD_MODULE[method];
   return !mod || checked || moduleLicensedIn(mod, report);
@@ -699,7 +621,6 @@ export function methodAvailability(method: AcquisitionMethod, report: ModulesRep
   return mod ? moduleAvailability(mod, report) : { selectable: true };
 }
 
-/** Why a PMS interface cannot take room charges yet, in the operator's words. */
 export const ROOM_CHARGE_NOT_READY: Record<string, string> = {
   NOT_ONBOARDED: "Not approved for room charge yet",
   ONBOARDING_NOT_APPROVED: "Room-charge approval is not complete",
@@ -709,13 +630,9 @@ export function roomChargeNotReadyText(reason: string | null | undefined): strin
   return (reason && ROOM_CHARGE_NOT_READY[reason]) || "Not ready for room charge";
 }
 
-// ------------------------------------------------------------- WHEN A REVISION NEEDS THE PASSWORD ---------
-//
-// Revising an existing package so that what clients PAY or RECEIVE changes is a step-up action: the server
-// answers 401 reauth_required unless the operator's password comes with it (audit O-21). A rename, a new
-// condition or a sale window does not need it, so the editor asks only when one of these changed.
+// Revising what clients pay or receive is a step-up action (401 reauth_required without the operator's password);
+// renames, conditions and sale windows are not.
 
-/** The money-and-plan terms of a revision, as compared for the step-up. */
 export type RevisionTerms = {
   price_minor: number;
   currency: string;
@@ -724,7 +641,6 @@ export type RevisionTerms = {
   service_plan_revision_id: string;
 };
 
-/** revisionNeedsPassword reports whether going from `before` to `after` changes price, currency, methods or plan. */
 export function revisionNeedsPassword(before: RevisionTerms | null | undefined, after: RevisionTerms): boolean {
   if (!before) return false;
   const set = (xs: readonly string[]) => Array.from(new Set(xs)).sort().join(",");

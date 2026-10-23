@@ -1,7 +1,6 @@
 package main
 
-// THE PORTAL CERTIFICATE AGENT'S DECISIONS, with a fake Central, a fake clock, an in-memory database and a test
-// certificate authority. Nothing here touches a network, a real database or a real appliance.
+// Portal certificate agent decisions with a fake Central, fake clock, in-memory database and test CA.
 
 import (
 	"context"
@@ -23,8 +22,6 @@ const (
 	ogHost     = "ab12cd34.gw.onegate.work"
 	customHost = "wifi.nilehotel.com"
 )
-
-// ---- fakes ---------------------------------------------------------------------------------------------------
 
 type memRepo struct {
 	set   ptSettings
@@ -214,8 +211,6 @@ func (f *agentFixture) toActive(t *testing.T) PortalTLSState {
 	}
 	return st
 }
-
-// ---- the lifecycle -------------------------------------------------------------------------------------------
 
 func TestNoCertificateOrdersThenTheIssuedCertificateIsInstalledAndHTTPSActivates(t *testing.T) {
 	f := newAgentFixture(t)
@@ -438,9 +433,7 @@ func TestAMissingFileOrAMismatchedKeyIsReordered(t *testing.T) {
 	}
 }
 
-// ---- the decision ---------------------------------------------------------------------------------------------
-
-// HTTPS SURVIVES AN INTERNET OUTAGE: a valid certificate keeps the portal on HTTPS whatever Central says.
+// A valid certificate keeps the portal on HTTPS whatever Central says.
 func TestAnOutageKeepsHTTPSWhileTheCertificateIsValid(t *testing.T) {
 	f := newAgentFixture(t)
 	f.toActive(t)
@@ -539,8 +532,6 @@ func TestThePortalAddressMustBeUpOnOgportal0(t *testing.T) {
 	}
 }
 
-// ---- the hotel domain -----------------------------------------------------------------------------------------
-
 func TestAVerifiedHotelDomainBecomesCanonicalAndItsRemovalCleansUp(t *testing.T) {
 	f := newAgentFixture(t)
 	f.toActive(t)
@@ -602,8 +593,6 @@ func TestAnEmptyHostnameAnswerNeverErasesTheKnownOne(t *testing.T) {
 		t.Fatal("the certificate must stay")
 	}
 }
-
-// ---- the local API ---------------------------------------------------------------------------------------------
 
 func TestTheTLSStateEndpoint(t *testing.T) {
 	f := newAgentFixture(t)

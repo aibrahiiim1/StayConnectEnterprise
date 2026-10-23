@@ -1,17 +1,5 @@
 "use client";
 
-// OPERATORS — the staff accounts that can sign in to this admin.
-//
-// THE PASSWORD WAS BEING TYPED INTO A window.prompt(), which is the one change here that is not cosmetic.
-// `prompt()` renders a plain text field: every character of a new operator password was displayed on a
-// front-desk screen, it could not be confirmed against a second entry, and the minimum length was checked only
-// after the dialog closed — so a too-short password was reported as an error banner on the page behind it with
-// the value already discarded. Disabling an operator and removing a role went through `window.confirm`, which
-// cannot say what either does.
-//
-// All three are now real dialogs: masked input, a confirmation field, validation before anything is sent, and a
-// sentence saying what the action will do to the person it is about.
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ListResp, Whoami, EdgeOperator } from "@/lib/api";
@@ -50,8 +38,8 @@ export default function OperatorsPage() {
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<string>("site_viewer");
-  // A password an administrator chose is one the administrator knows: by default the operator replaces it at
-  // their first sign-in (edged must_change_password, 0119).
+  // The administrator knows a password they chose, so by default the operator replaces it at first sign-in
+  // (edged must_change_password).
   const [requireChangeNew, setRequireChangeNew] = useState(true);
 
   const [pwFor, setPwFor] = useState<EdgeOperator | null>(null);
@@ -60,13 +48,11 @@ export default function OperatorsPage() {
   const [requireChangeReset, setRequireChangeReset] = useState(true);
 
   const [disabling, setDisabling] = useState<EdgeOperator | null>(null);
-  // Resetting a colleague's two-step sign-in (0132): they set up a new app at their next sign-in.
   const [mfaFor, setMfaFor] = useState<EdgeOperator | null>(null);
   const [mfaReason, setMfaReason] = useState("");
   const [mfaPassword, setMfaPassword] = useState("");
   const [removingRole, setRemovingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
-  // Every change to a colleague's account asks for YOUR password first (GDPR audit B7). It is cleared whenever a
-  // dialog opens or the change succeeds, so it never outlives the one change it confirmed.
+  // The acting administrator's password; cleared when a dialog opens or the change succeeds.
   const [yourPw, setYourPw] = useState("");
 
   const writable = canWrite("operators", me?.roles ?? []);
@@ -115,8 +101,6 @@ export default function OperatorsPage() {
       setFormErr(`The password must be at least ${MIN_PASSWORD} characters.`); setBusy(false); return;
     }
     if (newPw !== confirmPw) {
-      // Checked BEFORE sending. With window.prompt there was no second entry to check against at all, so a
-      // mistyped password became a locked-out colleague discovered at the next shift change.
       setFormErr("The two passwords do not match."); setBusy(false); return;
     }
     try {
@@ -153,9 +137,7 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
-  // ADDING A ROLE WIDENS WHAT SOMEONE CAN DO, so it is confirmed like removing one. Choosing from the menu used to
-  // grant the role on the spot: one slip of a select widened a colleague's access with nothing to catch it. The
-  // request is the same one, sent only after the operator confirms.
+  // Adding a role widens access, so it is confirmed first like removing one.
   const [addingRole, setAddingRole] = useState<{ op: EdgeOperator; role: string } | null>(null);
   async function onAddRole({ password }: { password: string }) {
     if (!addingRole) return;
@@ -231,7 +213,6 @@ export default function OperatorsPage() {
             </HelpSection>
           </>
         }
-
         actions={writable && <Button onClick={openNew}><Plus /> Add operator</Button>}
       />
 
@@ -266,7 +247,6 @@ export default function OperatorsPage() {
                           {isMe && <Badge tone="accent">You</Badge>}
                         </div>
                         <div className="text-xs text-muted-foreground">{op.email}</div>
-                        {/* On a phone the status column is hidden; a disabled account still says so here. */}
                         {op.status !== "active" && (
                           <Badge tone="neutral" className="mt-1 sm:hidden">Disabled</Badge>
                         )}
@@ -368,16 +348,12 @@ export default function OperatorsPage() {
         </CardBody>
       </Card>
 
-      {/* ------------------------------------------------------------------ sign-in protection (0119) */}
       <OperatorSigninProtection writable={writable} />
 
-      {/* ------------------------------------------------------------------ session limits (0132) */}
       <OperatorSessionLimits writable={writable} />
 
-      {/* ------------------------------------------------------------------ disabled accounts (0138) */}
       <OperatorAccountRetention writable={writable} />
 
-      {/* ------------------------------------------------------------------ reset two-step sign-in (0132) */}
       <DialogForm
         open={mfaFor !== null}
         onOpenChange={(v) => !v && setMfaFor(null)}
@@ -398,7 +374,6 @@ export default function OperatorsPage() {
         </Field>
       </DialogForm>
 
-      {/* ------------------------------------------------------------------ new operator */}
       <DialogForm
         open={showNew}
         onOpenChange={(v) => !v && setShowNew(false)}
@@ -442,7 +417,6 @@ export default function OperatorsPage() {
         <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
-      {/* ------------------------------------------------------------------ change password */}
       <DialogForm
         open={pwFor !== null}
         onOpenChange={(v) => !v && setPwFor(null)}
@@ -482,7 +456,6 @@ export default function OperatorsPage() {
         <YourPasswordField value={yourPw} onChange={setYourPw} />
       </DialogForm>
 
-      {/* ------------------------------------------------------------------ disable */}
       <ConfirmDialog
         open={disabling !== null}
         onOpenChange={(v) => !v && setDisabling(null)}
@@ -501,7 +474,6 @@ export default function OperatorsPage() {
         onConfirm={onDisable}
       />
 
-      {/* ------------------------------------------------------------------ add role */}
       <ConfirmDialog
         open={addingRole !== null}
         onOpenChange={(v) => !v && setAddingRole(null)}
@@ -519,7 +491,6 @@ export default function OperatorsPage() {
         onConfirm={onAddRole}
       />
 
-      {/* ------------------------------------------------------------------ remove role */}
       <ConfirmDialog
         open={removingRole !== null}
         onOpenChange={(v) => !v && setRemovingRole(null)}
@@ -541,7 +512,6 @@ export default function OperatorsPage() {
   );
 }
 
-/** The administrator's own password, confirming a change to a colleague's account (B7). */
 function YourPasswordField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Field label="Your password" required hint="Confirms that it is you making this change.">
@@ -550,7 +520,6 @@ function YourPasswordField({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
-/** "Must set a new password at the next sign-in" -- on by default whenever an administrator chooses one. */
 function RequireChangeBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-start gap-2 rounded-md border border-border bg-surface/50 px-3.5 py-2.5 text-sm">

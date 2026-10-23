@@ -1,19 +1,13 @@
-// WHAT THE GUEST PORTAL SAYS, AND IN WHICH LANGUAGES.
-//
-// This file is one half of a contract. The other half is BUILTIN in data-plane/cmd/portald/templates.go, and
-// a test in cmd/portald reads both and fails if they disagree in either direction — a key offered here that
-// the portal no longer renders is a field an operator fills in for nothing, and a key the portal renders that
-// is missing here is a string nobody can change.
+// Half of a contract with BUILTIN in data-plane/cmd/portald/templates.go; a test in cmd/portald fails if the two
+// disagree in either direction.
 
-/** The settings a hotel can change. One flat document; the operator never sees its shape. */
+/** The settings a hotel can change, one flat document. */
 export type Design = {
   hotel_name?: string;
   welcome_text?: string;
   help_text?: string;
   terms_url?: string;
-  /** The hotel's privacy notice (GDPR Art. 13), plain text shown in place on the sign-in page. */
   privacy_text?: string;
-  /** A link to the hotel's full privacy notice. */
   privacy_url?: string;
   logo_url?: string;
   background_url?: string;
@@ -22,15 +16,15 @@ export type Design = {
   text_color?: string;
   font_family?: string;
   corner_radius?: string;
-  /** code -> { key: text }. The hotel's own wording, merged over the shipped translations. */
+  /** code -> { key: text }, merged over the shipped translations. */
   translations?: Record<string, Record<string, string>>;
-  /** Which languages a guest is offered. Absent means "all the shipped ones". */
+  /** Absent means all the shipped languages. */
   languages?: { code: string; label: string }[];
-  /** The page layout. Absent means classic, the original page. */
+  /** Absent means classic. */
   template_id?: string;
-  /** Closed vocabularies each template translates into its own CSS. None of them carries markup. */
+  /** Closed vocabularies; none carries markup. */
   template_options?: TemplateOptions;
-  /** The photograph for the hero panel of the split/immersive/resort layouts. Falls back to background_url. */
+  /** Hero panel photograph; falls back to background_url. */
   hero_image_url?: string;
   custom_css?: string;
   custom_html?: string;
@@ -46,8 +40,7 @@ export type TemplateOptions = {
   heading_font?: string;
 };
 
-/** The six languages the portal ships complete wording for. Codes, order and native names match LANGS in
- *  data-plane/cmd/portald/templates.go. A hotel may add a seventh of its own; that one it translates. */
+/** Codes, order and native names match LANGS in data-plane/cmd/portald/templates.go. */
 export const SHIPPED_LANGUAGES: { code: string; label: string; rtl?: boolean }[] = [
   { code: "en", label: "English" },
   { code: "ar", label: "العربية", rtl: true },
@@ -59,38 +52,27 @@ export const SHIPPED_LANGUAGES: { code: string; label: string; rtl?: boolean }[]
 
 export const isShippedLanguage = (code: string) => SHIPPED_LANGUAGES.some((l) => l.code === code);
 
-/** THE OPTIONAL MODULES A STRING CAN BELONG TO. A string tagged with one is wording for a part of the portal
- *  that exists only when that module is licensed here: room sign-in and post-stay (hospitality), email accounts
- *  (the email module), a one-time code by text or WhatsApp, social sign-in, card payment, and charging to a room. The Languages editor
- *  lists it only then, so a site without hospitality is never asked to translate "Room Number".
- *
- *  Hiding is presentation only. A saved translation for a hidden string stays in the document and is saved
- *  back unchanged: the licence can return, and the hotel's wording must still be there when it does. */
+/** A tagged string belongs to a part of the portal that exists only while its module is licensed; the Languages
+ *  editor lists it only then. Hiding is presentation only: a saved translation stays and is saved back unchanged. */
 export type PortalModule =
   | "hospitality" | "email_otp" | "sms_otp" | "whatsapp_otp" | "social_login" | "card_payment" | "room_charge";
 
-/** Wording shared by every one-time-code channel: listed while any of them is licensed. */
 const OTP: PortalModule[] = ["email_otp", "sms_otp", "whatsapp_otp"];
 
-/** One guest-facing string. `module`, when present, comes AFTER `english`: the portal's contract test reads
- *  `key: "…", english: "…"` as one pattern. An array means "any of these". */
+/** `module` must come after `english`: the portal's contract test reads `key: "…", english: "…"` as one pattern. An array means any of these. */
 export type PortalString = { group: string; key: string; english: string; module?: PortalModule | PortalModule[] };
 
-/** Whether a string belongs on this site's editor, given which modules are licensed. Untagged strings are
- *  core and always apply. */
+/** Untagged strings are core and always apply. */
 export function stringApplies(s: PortalString, licensed: (m: PortalModule) => boolean): boolean {
   if (!s.module) return true;
   return (Array.isArray(s.module) ? s.module : [s.module]).some(licensed);
 }
 
-/** WHAT THIS SIGN-IN PAGE COLLECTS, in the words the warnings on this screen use. Room numbers only where
- *  hospitality is licensed: an office or a campus is told about its own voucher codes and passwords, not a
- *  hotel's. */
+/** Room numbers are named only where hospitality is licensed. */
 export function collectedDetails(hospitality: boolean): string {
   return hospitality ? "room numbers and voucher codes" : "voucher codes and passwords";
 }
 
-/** The guest-facing strings, grouped the way they appear on the page rather than as one long list. */
 export const PORTAL_STRINGS: PortalString[] = [
   { group: "Navigation", key: "tab.guest", english: "Client Login" },
   { group: "Navigation", key: "tab.account", english: "Account Login" },
@@ -348,24 +330,19 @@ export const PORTAL_STRINGS: PortalString[] = [
 
 export const STRING_GROUPS = Array.from(new Set(PORTAL_STRINGS.map((s) => s.group)));
 
-/** The settings that are "advanced": the only ones that can put markup or a stylesheet on the page, and
- *  therefore the only ones whose change -- including clearing them -- is confirmed with a password (Product
- *  Owner decision). This mirrors portaldesign.AdvancedFields on the server, which advancedChanged in
- *  resources_branding.go reads. A NEW field that can carry markup or CSS must be added to BOTH lists or the
- *  step-up is silently bypassed for it. The template choice and its options are closed vocabularies, not
- *  markup, and deliberately save without a password. */
+/** The only settings that can put markup or CSS on the page, so changing or clearing them needs a password. Mirrors
+ *  portaldesign.AdvancedFields (read by advancedChanged in resources_branding.go): a new markup-carrying field must
+ *  be added to BOTH lists or the step-up is silently bypassed. */
 export const ADVANCED_KEYS: (keyof Design)[] = ["custom_css", "custom_html"];
 
 export function advancedChanged(next: Design, current: Design) {
   return ADVANCED_KEYS.some((k) => (next[k] ?? "") !== (current[k] ?? ""));
 }
 
-/** Which languages a guest is offered. An unset list means all six, which is what the portal does. */
 export function offeredLanguages(d: Design): { code: string; label: string }[] {
   return d.languages?.length ? d.languages : SHIPPED_LANGUAGES.map((l) => ({ code: l.code, label: l.label }));
 }
 
-/** Every language this appliance knows about: the six that ship, plus anything the hotel added. */
 export function knownLanguages(d: Design): { code: string; label: string }[] {
   const seen = new Map<string, { code: string; label: string }>();
   SHIPPED_LANGUAGES.forEach((l) => seen.set(l.code, { code: l.code, label: l.label }));
@@ -376,8 +353,7 @@ export function knownLanguages(d: Design): { code: string; label: string }[] {
   return Array.from(seen.values());
 }
 
-/** How complete one language is. A shipped language is never incomplete — the portal has a word for every
- *  key — so only a hotel-added language can fall back to English. */
+/** A shipped language is never incomplete, so only a hotel-added one can fall back to English. */
 export function languageStatus(d: Design, code: string) {
   const tr = d.translations?.[code] ?? {};
   const custom = PORTAL_STRINGS.filter((s) => (tr[s.key] ?? "").trim() !== "").length;
@@ -385,8 +361,7 @@ export function languageStatus(d: Design, code: string) {
   return { shipped, custom, total: PORTAL_STRINGS.length, missing: shipped ? 0 : PORTAL_STRINGS.length - custom };
 }
 
-/** WCAG contrast between two CSS colours in #rgb, #rrggbb(aa) or rgb() form; null when either cannot be read
- *  (the designer then says nothing rather than guessing). */
+/** WCAG contrast of two CSS colours; null when either cannot be read. */
 export function contrastRatio(a?: string, b?: string): number | null {
   const la = luminanceOf(a);
   const lb = luminanceOf(b);
@@ -417,9 +392,7 @@ function parseColour(c?: string): [number, number, number] | null {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-/** An appliance path is a GUEST-network path: /assets/<name> is served by portald on the guest side and
- *  resolves to nothing from the admin origin, which is why the old screen's own logo thumbnail was a broken
- *  image. The same file is read back here through the authenticated operator API. */
+/** /assets/<name> is a guest-network path that resolves to nothing from the admin origin, so read it through the operator API. */
 export function assetSrc(url?: string) {
   if (!url) return undefined;
   if (!url.startsWith("/assets/")) return url;

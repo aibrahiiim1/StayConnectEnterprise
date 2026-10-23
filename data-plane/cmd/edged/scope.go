@@ -7,16 +7,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// resolveSiteScope decides which tenant and site Hotel Admin operates on.
-//
-// It is the VERIFIED assignment -- signature, trust registry and binding to this appliance -- from the same
-// resolver scd uses. edged used to read assignment.json raw through Store.Resolved(), so a document scd refused
-// as unverifiable was still the tenant/site the admin surface operated under. Anything that does not verify
-// yields no tenant and no site ("awaiting assignment"), which is fail-closed.
-//
-// The legacy EDGED_TENANT_ID/EDGED_SITE_ID pair is honoured only when NO assignment exists and only in an
-// explicit development build (assignment.EnvFallbackAllowed); a production appliance never takes its scope
-// from the environment.
+// resolveSiteScope returns the tenant and site from the VERIFIED assignment (signature, trust registry, binding), the same resolver scd uses.
+// Anything that does not verify yields no scope ("awaiting assignment"): fail closed.
+// EDGED_TENANT_ID/EDGED_SITE_ID is honoured only with no assignment and in an explicit development build (assignment.EnvFallbackAllowed).
 func resolveSiteScope(getenv func(string) string) (tenantID, siteID string, r assignment.Resolution) {
 	identityDir := getenv("EDGED_IDENTITY_DIR")
 	if identityDir == "" {

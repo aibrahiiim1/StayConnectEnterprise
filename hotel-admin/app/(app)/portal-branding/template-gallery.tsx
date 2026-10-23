@@ -1,14 +1,5 @@
 "use client";
 
-// THE TEMPLATE GALLERY.
-//
-// Each card shows the REAL portal page in that layout, rendered with this hotel's own name, colours and images
-// at a small scale -- not a stock illustration of what a layout might look like. An operator choosing between
-// "Split" and "Resort" is looking at their own sign-in page both ways.
-//
-// Choosing a template changes layout only. Every sign-in method, every form and every translation works the same
-// under all of them, and the choice saves without a password: it is a closed list, not markup.
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OptionCard } from "@/components/ui/data";
 import { Badge } from "@/components/ui/badge";
@@ -26,12 +17,10 @@ export function TemplateGallery({ design, value, onChange, disabled }: {
   disabled?: boolean;
 }) {
   const { html } = usePortalHTML();
-  // The same sign-in methods as the main preview: the site's own, less any whose module is not licensed here.
-  // A thumbnail of a hotel room tab on a site that has none would sell a layout on something it cannot show.
+  // Same methods as the main preview, so a thumbnail never shows a method the site cannot offer.
   const { methods } = usePreviewMethods();
   const inlined = useInlinedDesign(useSettled(design, 700));
-  // One design per layout, rebuilt only when the hotel's design has settled. The Advanced fields are left out
-  // of the thumbnails: they are the hotel's own additions, and the thumbnails are about the layouts.
+  // Advanced custom CSS/HTML is left out: thumbnails compare layouts only.
   const perTemplate = useMemo(() => {
     const base: Design = { ...inlined, custom_css: undefined, custom_html: undefined };
     return Object.fromEntries(PORTAL_TEMPLATES.map((t) => [t.id, { ...base, template_id: t.id }])) as Record<TemplateId, Design>;
@@ -62,8 +51,7 @@ function Thumbnail({ html, methods, design, name }: {
   html: string | null; methods: AuthMethodsDoc | null; design: Design; name: string;
 }) {
   const srcDoc = useMemo(() => (html && methods ? buildSrcDoc(html, design, methods) : null), [html, design, methods]);
-  // The whole desktop page, scaled to the card's width: the card is narrower in a three-column designer than
-  // on a phone, and a thumbnail that clips its own layout is not a preview of it.
+  // The whole desktop page is scaled to the card width so the layout is never clipped.
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   useEffect(() => {

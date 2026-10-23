@@ -1,19 +1,8 @@
 package main
 
-// BACKUPS ARE ENCRYPTED TO THE HOTEL'S OWN KEYS (migration 0129; GDPR remediation plan C5; Product-Owner decision
-// D-C5).
-//
-// Once the hotel has registered a backup key holder, every dump this appliance writes -- an operator's backup,
-// the safety copy a restore takes, and (through `scd backup-crypt`) the nightly backup -- is encrypted with age
-// to every ACTIVE holder's public key, as it is written: no plaintext copy ever touches the disk. Before the
-// first holder is confirmed, backups are written as they always were and the Backups screen says so.
-//
-// The appliance holds public keys only, so it can write backups and never read them back. Verify, restore and
-// the restore test each take a holder's private key in the request, use it in memory for that one operation,
-// and drop it. It is never written, logged or echoed.
-//
-// FAILS CLOSED. If holders are registered but cannot be read, the backup fails rather than falling back to
-// plaintext: a hotel that switched encryption on must never find an unencrypted copy of its guests.
+// Backups are encrypted with age to every active backup key holder's public key as they are written, so no plaintext copy touches disk.
+// The appliance holds public keys only; verify and restore take a private key per request, use it in memory, and never store or log it.
+// Fails closed: if holders are registered but unreadable, the backup fails rather than falling back to plaintext.
 
 import (
 	"bufio"
@@ -36,11 +25,10 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
-// nightlyBackupDir is where the retired nightly site-backup job wrote (earlier backups). The restore test looks there too.
+// nightlyBackupDir is where the retired nightly job wrote; the restore test looks there too.
 var nightlyBackupDir = "/var/backups/stayconnect"
 
-// backupRecipients returns the keys to encrypt to, or nil when the hotel has not set encryption up (or the
-// database predates 0129). Any other failure is an error: the caller must not write plaintext instead.
+// backupRecipients returns nil when encryption is not set up; any other failure is an error so the caller never writes plaintext.
 func (s *server) backupRecipients(ctx context.Context) ([]age.Recipient, error) {
 	keys, err := s.backupRecipientKeys(ctx)
 	if err != nil || len(keys) == 0 {
@@ -49,13 +37,11 @@ func (s *server) backupRecipients(ctx context.Context) ([]age.Recipient, error) 
 	return backupcrypt.ParseRecipients(keys)
 }
 
-// backupRecipientKeys is the public keys of the confirmed backup key holders, or nil when none is set up.
 func (s *server) backupRecipientKeys(ctx context.Context) ([]string, error) {
 	if s.db == nil {
 		return nil, errors.New("the database is not reachable, so the backup keys could not be read")
 	}
-	// Without its own site scd asks as the nightly backup does, for the holders of the site the appliance serves
-	// (0144): a dump is never written in the clear while that site's holders exist.
+	// With no site of its own, ask as the nightly backup does for the serving site's holders: never dump in the clear while they exist.
 	q, args := `SELECT k FROM public.backup_key_recipients($1::uuid,$2::uuid) k`, []any{s.tenID, s.siteID}
 	if s.tenID == "" || s.siteID == "" {
 		q, args = `SELECT k FROM public.backup_key_recipients() k`, nil
@@ -83,9 +69,7 @@ func (s *server) backupRecipientKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
-// writeDumpTee streams pg_dump through gzip -- and age, when recipients are given -- into dest, and also hands the plain SQL to
-// tee as it is produced (the backup engine loads it into a scratch database to prove the backup can be restored, without ever
-// writing the plain text to disk).
+// writeDumpTee streams pg_dump through gzip (and age) into dest and hands the plain SQL to tee, so it can be loaded to prove restorability without touching disk.
 func writeDumpTee(ctx context.Context, dest string, recipients []age.Recipient, tee io.Writer) error {
 	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -124,19 +108,13 @@ type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
 
-// openBackup returns the plain SQL of a backup: decrypted with the supplied key when the file is encrypted,
-// then decompressed. errNeedKey tells the operator an encrypted backup needs a key; a key that does not open
-// it is backupcrypt.ErrWrongKey.
+// errNeedKey: an encrypted backup needs a key; a key that does not open it is backupcrypt.ErrWrongKey.
 var errNeedKey = errors.New("this backup is encrypted: provide a backup key holder's key to open it")
 
-// errNotSQLBackup is a backup that opened but is a pg_dump custom-format archive -- the nightly backup's shape
-// -- rather than the gzip SQL text verify and restore load with psql. Feeding one to psql would fail late and
-// obscurely, so it is refused up front and by name.
+// errNotSQLBackup: a pg_dump custom-format archive (the nightly shape) is refused up front since psql would fail late and obscurely.
 var errNotSQLBackup = errors.New("this is a nightly (pg_dump custom-format) backup, not a database backup taken on the Backups screen: it cannot be loaded here")
 
-// backupFormat is what a backup holds once any encryption is removed. The two writers on this appliance do not
-// agree: an on-demand backup is gzip SQL text (writeDump), the nightly one is `pg_dump -Fc` encrypted as it
-// stands (the retired nightly site-backup job). The bytes, not the name, say which.
+// backupFormat is what a backup holds once decrypted; the bytes, not the name, say which writer produced it.
 type backupFormat int
 
 const (
@@ -144,8 +122,7 @@ const (
 	formatPGCustom                         // "PGDMP"
 )
 
-// openBackupStream decrypts a backup when it is encrypted and reports which format it holds. A gzip backup is
-// returned decompressed; a custom-format archive is returned as it is. Anything else is an error.
+// openBackupStream decrypts if needed and reports the format; gzip is returned decompressed, custom-format as is.
 func openBackupStream(path, identity string) (io.Reader, backupFormat, io.Closer, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -187,8 +164,7 @@ func openBackupStream(path, identity string) (io.Reader, backupFormat, io.Closer
 	return nil, 0, nil, errors.New("the backup is not a readable archive: it is neither gzip SQL nor a pg_dump archive")
 }
 
-// openBackup is openBackupStream for the callers that load SQL text with psql (verify, restore): a nightly
-// custom-format archive is refused with errNotSQLBackup rather than misread.
+// openBackup refuses a nightly custom-format archive with errNotSQLBackup rather than misreading it.
 func openBackup(path, identity string) (io.Reader, io.Closer, error) {
 	src, format, closer, err := openBackupStream(path, identity)
 	if err != nil {
@@ -201,7 +177,6 @@ func openBackup(path, identity string) (io.Reader, io.Closer, error) {
 	return src, closer, nil
 }
 
-// keyProblem reports whether err is about the key rather than the backup, and says so in the operator's terms.
 func keyProblem(err error) (string, bool) {
 	switch {
 	case errors.Is(err, errNeedKey):
@@ -216,7 +191,6 @@ func keyProblem(err error) (string, bool) {
 	return "", false
 }
 
-// loadBackupInto loads a backup into the named database with psql, decrypting and decompressing in-process.
 func loadBackupInto(ctx context.Context, path, identity, db string) ([]byte, error) {
 	src, closer, err := openBackup(path, identity)
 	if err != nil {
@@ -229,12 +203,7 @@ func loadBackupInto(ctx context.Context, path, identity, db string) ([]byte, err
 	return cmd.CombinedOutput()
 }
 
-// ---------------------------------------------------------------------------- the restore test ----------
-
-// backupKeyTest proves the hotel still holds a working key: the newest encrypted backup on the appliance is
-// opened with the key supplied and its first bytes are read -- decompressed for an on-demand gzip backup, as
-// they stand for a nightly pg_dump archive, whose "PGDMP" header is itself the proof it decrypted correctly. Nothing is loaded or kept. It answers
-// which holder the key belongs to (its public key) so edged can record the test against that holder.
+// backupKeyTest proves the hotel still holds a working key by opening the newest encrypted backup and reading its first bytes; nothing is loaded or kept.
 func (s *server) backupKeyTest(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Identity string `json:"identity"`
@@ -274,7 +243,6 @@ func (s *server) backupKeyTest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// newestEncryptedBackup is the most recent .age file among the on-demand and nightly database backups.
 func newestEncryptedBackup() string {
 	var cands []string
 	for _, pat := range []string{filepath.Join(scdBackupDir, "db-*.sql.gz.age")} {
@@ -291,8 +259,6 @@ func newestEncryptedBackup() string {
 	}
 	return cands[0]
 }
-
-// --------------------------------------------------------------------------- `scd backup-crypt` -------
 
 // backupCryptMain is the nightly shell backup's way to the same encryption:
 //

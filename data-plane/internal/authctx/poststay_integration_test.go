@@ -2,20 +2,9 @@
 
 package authctx
 
-// POST_STAY_PIN AUTH CONTEXTS.
-//
-// The PMS method and the post-stay method share a table and almost nothing else, and the tests that matter
-// here are the ones that would have passed if POST_STAY_PIN had simply been added to the existing PMS path:
-//
-//   * a PMS context requires IN_HOUSE, an interface Revision, occupancy evidence and freshness. A post-stay
-//     guest has checked OUT and was never proven from occupancy evidence, so reusing that issuer would have
-//     rejected every legitimate post-stay context;
-//   * ConsumeTx re-verifies live subject state PER METHOD. A method with no arm gets no re-verification at
-//     all — the context stays usable for its whole TTL whatever happens to its subject. For post-stay that is
-//     the next-occupant leak itself, so TestIntegration_PostStay_ReinstatementBetweenIssueAndConsume is the
-//     single most important test in this file: it fails outright if the arm is removed.
-//
-// These run against the same PHASE3_TEST_DSN database as the rest of the package, with migration 0027 applied.
+// POST_STAY_PIN contexts differ from PMS ones: the guest has checked out and has no occupancy evidence.
+// ConsumeTx re-verifies subject state per method; without a post-stay arm the context would outlive its
+// episode (the next-occupant leak), which TestIntegration_PostStay_ReinstatementBetweenIssueAndConsume pins.
 
 import (
 	"context"
@@ -32,9 +21,8 @@ type psFixture struct {
 
 const psHash = `$argon2id$v=19$m=65536,t=1,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo`
 
-// seedPostStay takes the ordinary fixture to the state a post-stay guest is actually in: a profile minted for
-// the CURRENT episode, and a Stay that has checked out. Writes go through the Phase-5 controlled operation,
-// because that is the only way the profile table accepts them.
+// seedPostStay mints a profile for the current episode and checks the Stay out, through the controlled
+// operation (the only write path the profile table accepts).
 func seedPostStay(t *testing.T, p *pgxpool.Pool, f fixture) psFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -73,7 +61,7 @@ func psGrant(f psFixture, ttl int) PostStayGrant {
 		Device: f.device, GuestNetwork: f.network, TTLSeconds: ttl}
 }
 
-// reinstate starts a NEW episode on the origin Stay — the room's next occupant, in one statement.
+// reinstate starts a new episode on the origin Stay (the room's next occupant).
 func reinstate(t *testing.T, p *pgxpool.Pool, f psFixture) {
 	t.Helper()
 	ctx := context.Background()
@@ -112,8 +100,7 @@ func TestIntegration_PostStay_IssueAndConsume(t *testing.T) {
 	if c.Method != "POST_STAY_PIN" {
 		t.Fatalf("method = %q, want POST_STAY_PIN", c.Method)
 	}
-	// The SUBJECT is the profile. A caller that read c.Stay and treated it as the subject would be attaching
-	// post-stay access to the room again, which is the thing this phase exists to prevent.
+	// The subject is the profile, never c.Stay, or post-stay access would attach to the room again.
 	if c.PostStayProfile != f.profile {
 		t.Fatalf("PostStayProfile = %q, want %q", c.PostStayProfile, f.profile)
 	}
@@ -122,8 +109,7 @@ func TestIntegration_PostStay_IssueAndConsume(t *testing.T) {
 	}
 }
 
-// THE ONE THAT MATTERS. The context is minted while the profile is valid, the room is then re-let, and the
-// context must die even though it is inside its TTL, unconsumed, and presented from the same device.
+// The context must die when the room is re-let, even inside its TTL, unconsumed, from the same device.
 func TestIntegration_PostStay_ReinstatementBetweenIssueAndConsume(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -172,8 +158,7 @@ func TestIntegration_PostStay_RevokedProfileCannotBeConsumed(t *testing.T) {
 	}
 }
 
-// A context may not be issued at all against a profile that is already dead: minting one and letting it fail
-// later would leave a row claiming an authentication that never should have happened.
+// No context may be issued against a dead profile, or a row would claim an authentication that never happened.
 func TestIntegration_PostStay_IssueRefusesDeadProfile(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -194,7 +179,6 @@ func TestIntegration_PostStay_IssueRefusesDeadProfile(t *testing.T) {
 	}
 }
 
-// An IN_HOUSE guest has not checked out, so there is nothing "post" about their stay yet.
 func TestIntegration_PostStay_IssueRefusesBeforeCheckout(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -227,7 +211,6 @@ func TestIntegration_PostStay_IssueRefusesBeforeCheckout(t *testing.T) {
 	}
 }
 
-// A context pinned to one device is unusable from another, exactly as for every other method.
 func TestIntegration_PostStay_PresenterIsPinned(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -244,7 +227,6 @@ func TestIntegration_PostStay_PresenterIsPinned(t *testing.T) {
 	}
 }
 
-// An incomplete grant is refused BEFORE any SQL, with the same sanitized error the PMS path uses.
 func TestIntegration_PostStay_IssueRejectsIncomplete(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

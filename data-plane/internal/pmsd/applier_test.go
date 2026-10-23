@@ -1,8 +1,5 @@
 package pmsd
 
-// Composition-root tests for the Stay-Event application worker: what the DAEMON does, not what the packages
-// can do. These are the tests that would have caught "the engine exists but nothing runs it".
-
 import (
 	"context"
 	"errors"
@@ -23,7 +20,6 @@ type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// fakeApplier records what the worker asked it to do.
 type fakeApplier struct {
 	mu       sync.Mutex
 	calls    map[string]int
@@ -55,7 +51,6 @@ func (f *fakeApplier) callsFor(iface string) int {
 	return f.calls[iface]
 }
 
-// fakeRepo is the minimum of Repo the applier path uses.
 type applierRepo struct {
 	Repo
 	ifaces []Interface

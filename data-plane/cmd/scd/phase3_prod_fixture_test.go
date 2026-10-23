@@ -2,23 +2,9 @@
 
 package main
 
-// A FIXTURE THE REAL BASELINE ACCEPTS.
-//
-// The shared newAuthFixture cannot seed this database, and that is not a bug in it — it targets the DARK
-// schema, which is deliberately looser. Three production rules break it:
-//
-//   * public.tenants declares slug and name NOT NULL; the DARK table carries only id.
-//   * guest_networks_bridge_uniq and guest_networks_untagged_parent_uniq mean every fixture needs its own
-//     bridge and parent interface. The shared one hardcodes 'br-p3' on 'ens192', so the second fixture in a
-//     run collides with the first.
-//   * The writerguard refuses a direct INSERT into the stay family unless the transaction has opened a
-//     controlled operation. The shared fixture seeds stays on a pooled query.
-//
-// Earlier attempts relaxed the schema instead — defaults on the platform tables, disabled triggers, a dropped
-// unique constraint. Every one of those made this database less like production, which defeats the only
-// reason it exists. Satisfying the rules is the point, so this fixture satisfies them: it supplies the
-// required columns, derives unique names from the per-fixture subnet the harness already allocates, and opens
-// a controlled operation exactly as real code does before touching a Stay.
+// A fixture the production baseline accepts (never relax the schema): tenants need slug and name, each
+// fixture needs its own bridge and parent interface (unique constraints), and stay-family inserts must run
+// inside an opened controlled operation.
 
 import (
 	"context"
@@ -46,8 +32,7 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 
 	claimFreeFixtureOctet(t, p)
 	f := &authFixture{pool: p, net: nextFixtureNet()}
-	// The subnet is already unique per fixture, so it is the natural source for the two names production
-	// requires to be unique. Dots and slashes are not valid in an interface name.
+	// The per-fixture subnet seeds the unique names; dots and slashes are invalid in an interface name.
 	uniq := strings.NewReplacer("/", "-", ".", "-").Replace(f.net.subnet)
 
 	tx, err := p.Begin(ctx)
@@ -55,8 +40,6 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 		t.Fatalf("begin seed: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// Satisfy the writerguard rather than disable it: this is the call real code makes before touching the
-	// stay family, so the fixture obeys the rule the product enforces instead of switching it off.
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
 		t.Fatalf("open controlled operation: %v", err)
 	}
@@ -111,8 +94,7 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Fresh occupancy evidence from the pinned Revision, and a healthy feed. Without both, nothing authorises
-	// and every test below would fail for a reason that has nothing to do with privilege.
+	// Without fresh occupancy evidence and a healthy feed nothing authorises.
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays
 		SET occupancy_evidence_at=now(), occupancy_ingested_at=now(), occupancy_revision_id=$2::uuid,
 		    occupancy_normalization_version=1, occupancy_clock_suspect=false, occupancy_evidence_version=1
@@ -127,14 +109,12 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 		f.tenant, f.site, f.iface, f.revision); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}
-	// scd pins the PUBLISHED revision pointer, never max(revision_no); an unpublished revision is correctly
-	// refused, so without this the resolve never authenticates.
+	// scd pins the published revision pointer, never max(revision_no).
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$3
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("publish the interface revision: %v", err)
 	}
-	// Same for the catalog: the offer engine reads current_revision_id, so a package that never got its
-	// pointer set is invisible and the verify returns no offers at all.
+	// The offer engine reads current_revision_id; without the pointer no offers appear.
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.internet_packages ip SET current_revision_id = r.id
 		  FROM iam_v2.internet_package_revisions r
 		 WHERE r.package_id = ip.id AND ip.tenant_id=$1 AND ip.site_id=$2`, f.tenant, f.site); err != nil {
@@ -153,13 +133,8 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	return f
 }
 
-// serviceRolePhase3 returns the Phase-3 auth arm bound to a pool where EVERY connection runs as svc_scd.
-//
-// SET LOCAL ROLE inside one test transaction proves the offer lock; it cannot prove the grant, because the
-// grant opens its own transactions through the pool. Production runs the whole of scd as svc_scd, so the only
-// honest way to exercise verify -> offer -> grant -> Purchase -> Entitlement -> Session against the real
-// privilege model is to make the handler's own pool that role. Any grant this role is missing then fails here
-// rather than in front of a guest, which is exactly how the offer-lock defect escaped.
+// serviceRolePhase3 returns the auth arm bound to a pool where every connection runs as svc_scd: SET LOCAL ROLE
+// in one transaction cannot prove the grant, which opens its own transactions through the pool.
 func (f *authFixture) serviceRolePhase3(t *testing.T) *phase3Auth {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(os.Getenv("PHASE3_TEST_DSN"))
@@ -179,8 +154,7 @@ func (f *authFixture) serviceRolePhase3(t *testing.T) *phase3Auth {
 	if who != "svc_scd" {
 		t.Fatalf("the pool runs as %q, not svc_scd; this test would prove nothing about the production role", who)
 	}
-	// A signed licence with a FINITE guest cap, so the grant's concurrent-guest reservation (advisory lock plus
-	// the appliance-scoped session count) actually runs as svc_scd rather than short-circuiting on "unlimited".
+	// A finite guest cap, so the concurrent-guest reservation runs as svc_scd instead of short-circuiting.
 	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan",
 		lic: signedLicence(t, 1000, true, false)}
 	p3 := newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, srv)

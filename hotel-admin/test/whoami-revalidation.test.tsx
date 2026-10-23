@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 
-// A ROLE CHANGED WHILE THE CONSOLE IS OPEN REACHES THE ROLE-GATED SCREENS WITHOUT A RELOAD.
-//
-// The layout re-validates /auth/whoami every 30 seconds. It used to throw a successful answer away, so the
-// shared identity stayed whatever it was when the layout first mounted: a revoked role kept its controls
-// (which then failed server-side) and a granted one stayed hidden until a full reload.
-
 const get = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -15,7 +9,6 @@ vi.mock("@/lib/api", async () => {
 
 import { WhoamiProvider, useOperatorRoles, useWhoamiSession, WHOAMI_REVALIDATE_MS } from "@/lib/whoami-context";
 
-// Renders of the role-gated page, which is what a quiet poll must not disturb.
 let renders = 0;
 function Roles() {
   const roles = useOperatorRoles();
@@ -25,7 +18,6 @@ function Roles() {
 
 function Shell({ onInvalid }: { onInvalid: () => void }) {
   const { me, loading } = useWhoamiSession(onInvalid);
-  // Like the layout: pages render once the identity is known.
   return <WhoamiProvider value={me}>{loading ? null : <Roles />}</WhoamiProvider>;
 }
 

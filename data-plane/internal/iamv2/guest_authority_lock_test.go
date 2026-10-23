@@ -4,9 +4,7 @@ import "testing"
 
 func env(m map[string]string) Getenv { return func(k string) string { return m[k] } }
 
-// locked() drives enforceGuestAuthorityLock the way LoadConfigFromEnv does, but with the build constant
-// supplied explicitly -- so a single `go test` run proves the behaviour of BOTH builds, and neither one can
-// pass merely because the run happened to be compiled the other way.
+// locked() takes the build constant explicitly so one test run covers both builds.
 func locked(t *testing.T, on bool, e map[string]string) (Config, error) {
 	t.Helper()
 	methods := map[Method]bool{}
@@ -29,8 +27,7 @@ func locked(t *testing.T, on bool, e map[string]string) (Config, error) {
 	return c, c.Validate()
 }
 
-// A production build must not be able to select the superseded guest-auth authority, and must say so rather
-// than starting in a degraded state. "It isn't taken" is not the same as "it cannot be selected".
+// A production build must refuse to select the superseded guest-auth authority, not start degraded.
 func TestProductionRefusesToDisableTheIAMv2GuestAuthority(t *testing.T) {
 	for _, key := range []string{EnvVoucher, EnvAccount} {
 		for _, off := range []string{"false", "0"} {
@@ -44,16 +41,14 @@ func TestProductionRefusesToDisableTheIAMv2GuestAuthority(t *testing.T) {
 	}
 }
 
-// The master switch cannot be used to reach the same end by another route: with it off every method reports
-// disabled, which is exactly how the runtime behaved before IAM-v2 existed.
+// The master switch must not be a second route to the same end.
 func TestProductionRefusesMasterOff(t *testing.T) {
 	if _, err := locked(t, true, map[string]string{EnvMaster: "false"}); err == nil {
 		t.Fatal("master=false was accepted on a production build, leaving the guest IAM authority unset")
 	}
 }
 
-// Locked ON means locked ON: a production build reports IAM-v2 as the authority for the guest credential
-// families even when the environment says nothing at all about them.
+// A production build keeps IAM-v2 the authority for the guest credential families even with no env flags.
 func TestProductionLocksTheGuestMethodsOn(t *testing.T) {
 	c, err := locked(t, true, map[string]string{EnvMaster: "true"})
 	if err != nil {
@@ -69,9 +64,7 @@ func TestProductionLocksTheGuestMethodsOn(t *testing.T) {
 	}
 }
 
-// External-effect methods stay configurable, because enabling them reaches an SMS/email/OAuth provider and
-// that is gated by its own decision. They are never redirected to the superseded path either -- "off" here
-// means "not enabled", not "use the old implementation".
+// External-effect methods (SMS/email/OAuth) stay configurable; "off" means not enabled, never the superseded path.
 func TestExternalEffectMethodsRemainConfigurable(t *testing.T) {
 	c, err := locked(t, true, map[string]string{EnvMaster: "true", EnvOTP: "false", EnvSocial: "false"})
 	if err != nil {
@@ -85,8 +78,7 @@ func TestExternalEffectMethodsRemainConfigurable(t *testing.T) {
 	}
 }
 
-// The DEVELOPMENT appliance deliberately exercises both authorities and its accepted evidence depends on
-// being able to. The lock is a production-BUILD property, not a global one.
+// The lock is a production-build property; development builds exercise both authorities.
 func TestDevelopmentBuildKeepsTheConfigurableBehaviour(t *testing.T) {
 	c, err := locked(t, false, map[string]string{EnvMaster: "true", EnvVoucher: "false", EnvAccount: "false"})
 	if err != nil {
@@ -100,8 +92,7 @@ func TestDevelopmentBuildKeepsTheConfigurableBehaviour(t *testing.T) {
 	}
 }
 
-// The lock must be reachable only through the build, never through the environment. If any STAYCONNECT_IAMV2_*
-// value could turn it on or off, it would be exactly the configuration switch it exists to remove.
+// The lock is reachable only through the build; no STAYCONNECT_IAMV2_* value may toggle it.
 func TestTheLockItselfIsNotConfigurable(t *testing.T) {
 	for _, k := range []string{EnvMaster, EnvVoucher, EnvAccount, EnvOTP, EnvSocial, EnvSocialStub} {
 		for _, v := range []string{"true", "false", "1", "0"} {
@@ -110,7 +101,6 @@ func TestTheLockItselfIsNotConfigurable(t *testing.T) {
 			}
 		}
 	}
-	// And the profile the binary reports is the constant, not anything read from the environment.
 	want := "development"
 	if productionBuild {
 		want = "production"

@@ -2,19 +2,6 @@
 
 package stayengine
 
-// OCCUPANCY EVIDENCE IS WHAT MAKES PMS ROOM SIGN-IN POSSIBLE AT ALL.
-//
-// A guest can type the right room and the right surname, the resolver can match exactly one Stay and record
-// VERIFIED, and the sign-in still fails — because minting a PMS Auth Context additionally requires the Stay to
-// carry recent, revision-matched occupancy evidence. internal/authctx and iam_v2.issue_or_return_pms_context
-// both enforce that; nothing wrote it. Every mirrored Stay had a NULL occupancy_evidence_at, so every verified
-// guest was refused with CONTEXT_INVALID behind the uniform failure message.
-//
-// These tests pin the four things that made that possible, against the real processor and the real triggers:
-// that a confirming event stamps evidence at all, that the values come from the event rather than the server
-// clock, that a checkout does NOT refresh occupancy, and that the stamped Stay actually satisfies the SQL
-// eligibility predicate the authentication path applies.
-
 import (
 	"context"
 	"testing"
@@ -24,8 +11,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
-// seedPinnedRevision publishes a revision and pins the runtime to it, which is the state of any interface that
-// has ever connected. The unpinned seed used by the lifecycle tests is a pre-commissioning state.
+// seedPinnedRevision publishes a revision and pins the runtime to it, as for any interface that has connected.
 func seedPinnedRevision(t *testing.T, p *pgxpool.Pool, s scope) string {
 	t.Helper()
 	var rev string
@@ -66,8 +52,7 @@ func readEvidence(t *testing.T, p *pgxpool.Pool, s scope, res string) evidence {
 	return e
 }
 
-// insertLiveReceivedAt is insertLive with an explicit arrival time and clock-suspect flag, because the whole point of
-// the evidence is that it reflects the record rather than the moment we happened to process it.
+// insertLiveReceivedAt is insertLive with an explicit arrival time and clock-suspect flag.
 func insertLiveReceivedAt(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string,
 	receivedAt time.Time, clockSuspect bool) {
 	t.Helper()
@@ -80,16 +65,13 @@ func insertLiveReceivedAt(t *testing.T, p *pgxpool.Pool, s scope, identity, even
 	}
 }
 
-// An arrival stamps evidence; a further confirmation refreshes it and advances the version; a checkout does
-// not. The version matters because an Auth Context pins the value it was issued under, so a stale context is
-// invalidated by the next confirmation rather than surviving on its own timestamp.
+// The version matters because an Auth Context pins it, so the next confirmation invalidates a stale context.
 func TestIntegration_OccupancyEvidenceStampedOnConfirmationNotCheckout(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seed(t, p)
 	rev := seedPinnedRevision(t, p, s)
-	// Wired with the real Converter because this test drives a checkout: the engine refuses to flip a Stay
-	// itself, so an unwired Processor cannot reach the assertion that matters here.
+	// The engine refuses to flip a Stay itself, so a checkout needs the real Converter.
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 
 	arrival := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
@@ -113,7 +95,6 @@ func TestIntegration_OccupancyEvidenceStampedOnConfirmationNotCheckout(t *testin
 		t.Fatal("a trustworthy event must not produce clock-suspect evidence")
 	}
 
-	// A later confirmation for the same Stay refreshes the evidence and advances the version.
 	later := arrival.Add(30 * time.Minute)
 	insertLiveReceivedAt(t, p, s, "ev-gc", "GC", pay("R-EV1", "14332", "Example", "Guest", "F1", "", ""), later, false)
 	process(t, pr, s)
@@ -138,10 +119,8 @@ func TestIntegration_OccupancyEvidenceStampedOnConfirmationNotCheckout(t *testin
 	}
 }
 
-// p3_stay_lifecycle_guard refuses a version change without a material evidence change, so a repeat event
-// carrying identical evidence must refresh ingested_at and leave the version alone. Bumping unconditionally
-// does not merely record the wrong number — the trigger aborts the transaction and the event stops being
-// processed at all.
+// p3_stay_lifecycle_guard rejects a version change without a material evidence change, aborting the
+// transaction, so identical evidence must leave the version alone.
 func TestIntegration_IdenticalEvidenceDoesNotBumpTheVersion(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -154,7 +133,6 @@ func TestIntegration_IdenticalEvidenceDoesNotBumpTheVersion(t *testing.T) {
 	process(t, pr, s)
 	first := readEvidence(t, p, s, "R-EV4")
 
-	// Same instant, same revision, same clock trust: nothing material has changed.
 	insertLiveReceivedAt(t, p, s, "ev-b", "GC", pay("R-EV4", "14335", "Example", "Guest", "F4", "", ""), at, false)
 	process(t, pr, s)
 
@@ -167,9 +145,7 @@ func TestIntegration_IdenticalEvidenceDoesNotBumpTheVersion(t *testing.T) {
 	}
 }
 
-// A feed whose timestamp we do not trust must produce evidence that is MARKED suspect, not evidence that is
-// silently accepted. Authentication declines clock-suspect evidence, so carrying the flag through is what
-// makes that check reachable at all.
+// Authentication declines clock-suspect evidence, so the flag must be carried through.
 func TestIntegration_OccupancyEvidenceCarriesClockSuspect(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -186,9 +162,7 @@ func TestIntegration_OccupancyEvidenceCarriesClockSuspect(t *testing.T) {
 	}
 }
 
-// The end the guest actually experiences: after a confirming event, the Stay satisfies the same eligibility
-// predicate the authentication path applies. This is the assertion that would have caught the defect — the
-// lifecycle tests all passed while every real sign-in was refused.
+// After a confirming event the Stay satisfies the eligibility predicate the authentication path applies.
 func TestIntegration_StampedStayIsEligibleForAPMSContext(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -200,7 +174,7 @@ func TestIntegration_StampedStayIsEligibleForAPMSContext(t *testing.T) {
 		time.Now().UTC(), false)
 	process(t, pr, s)
 
-	// Exactly the predicate in iam_v2.issue_or_return_pms_context and internal/authctx, freshness included.
+	// Mirrors iam_v2.issue_or_return_pms_context and internal/authctx, freshness included.
 	const maxAgeSeconds = 300
 	var eligible bool
 	if err := p.QueryRow(context.Background(), `SELECT

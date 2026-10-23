@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-// RETENTION AND THE NIGHTLY SCHEDULE WERE SHOWN AND NOT EDITABLE.
-//
-// A screen that displays a policy an operator cannot change tells them something is under their control when
-// it is not. These assert the knobs, their bounds, what is in force when nothing has been saved, and that
-// untouched values travel with the ones that changed.
-
 const get = vi.fn();
 const put = vi.fn();
 const post = vi.fn();
@@ -24,7 +18,6 @@ vi.mock("@/lib/api", () => ({
 beforeEach(() => { get.mockReset(); put.mockReset(); post.mockReset(); del.mockReset(); });
 afterEach(() => vi.resetModules());
 
-/** The schema the appliance serves, matching stayconnect-backup-cleanup's own defaults. */
 const SETTINGS = {
   retention: [
     { key: "BACKUP_ENABLED", label: "Scheduled backups", unit: "0 = off, 1 = on", default: 0, min: 0, max: 1, value: 0, explains: "Off until you switch it on." },
@@ -59,8 +52,6 @@ describe("backup retention is editable, not just visible", () => {
 
     const field = await screen.findByLabelText(/Service binaries/i);
     expect((field as HTMLInputElement).value).toBe("5");
-    // An operator cannot set a value responsibly without knowing what it does and what it may be.
-    // (SettingField states it as "Default 5 versions; allowed 2–30.")
     expect(screen.getByText(/Default 5 versions; allowed 2–30/)).toBeTruthy();
     // the backup schedule and counts are not in the sweep list: they live on the Scheduled backups card
     expect(screen.queryAllByLabelText(/Backups kept/i).length).toBeLessThanOrEqual(1);
@@ -68,8 +59,6 @@ describe("backup retention is editable, not just visible", () => {
   });
 
   it("says the defaults are in force when nothing has been saved", async () => {
-    // A freshly onboarded appliance has no config file. "No policy saved" and "no policy in force" are
-    // different claims, and only the first is true.
     mockBackups();
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
@@ -91,8 +80,7 @@ describe("backup retention is editable, not just visible", () => {
     const [path, body] = put.mock.calls[0];
     expect(path).toBe("/backups/settings");
     expect(body.retention.KEEP_BINARIES).toBe(9);
-    // Untouched knobs travel too: sending only what changed would let the appliance rewrite the rest to
-    // defaults it never asked for.
+    // Untouched knobs travel too, or the appliance would rewrite them to defaults.
     expect(body.retention.DISK_WARN).toBe(80);
     expect(body.schedule).toBe("02:15");
     expect(body.password).toBe("pw");
@@ -106,7 +94,3 @@ describe("backup retention is editable, not just visible", () => {
     expect(screen.queryByRole("button", { name: /Save retention policy/i })).toBeNull();
   });
 });
-
-// The portal-branding half of this file moved to test/portal-settings.test.tsx when that screen was rebuilt
-// as Portal settings. The assertions were not dropped -- upload, SVG refusal, the six shipped languages, one
-// language at a time and the completeness count are all made there, against the page that now exists.

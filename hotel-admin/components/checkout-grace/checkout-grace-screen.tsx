@@ -1,13 +1,6 @@
 "use client";
 
-// Checkout grace — the hotel's policy for guests who check out while still online.
-//
-// The screen answers three questions in order: is grace working and whose terms are in force (status strip and
-// warnings); what exactly does a departing guest receive (the policy card, written as product facts rather than
-// a form); and who changed it, when and why (the history). Editing happens in a sheet with a review step.
-//
-// "Nothing published" is not "nothing happening": a site with no policy still gives departing guests the
-// built-in emergency terms, and the screen says so rather than showing an empty state.
+// Unpublished sites still give departing guests built-in emergency terms.
 
 import * as React from "react";
 import Link from "next/link";
@@ -57,8 +50,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
   const [state, setState] = React.useState<GraceState | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [history, setHistory] = React.useState<GraceHistoryItem[]>([]);
-  /** false when the appliance cannot read the publication record. "No history" and "I cannot see the
-   *  history" are different claims. */
+  /** Distinguish an unreadable publication record from an empty history. */
   const [historyAvailable, setHistoryAvailable] = React.useState(true);
   const [editing, setEditing] = React.useState(false);
   const [justPublished, setJustPublished] = React.useState<number | null>(null);
@@ -68,8 +60,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
       const s = await api.get<GraceState>("/checkout-grace");
       setState(s);
       setLoadError(null);
-      // History is layered on and allowed to be missing: a policy screen that fails because a ledger read
-      // failed would be a worse outage than the one it reports.
+      // Keep policy visible when the history ledger cannot be read.
       try {
         const h = await api.get<GraceHistoryResp>("/checkout-grace/history");
         setHistory(h?.data ?? []);
@@ -108,7 +99,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
     setEditing(false);
     setJustPublished(newVersion);
     toast.success("Grace Period policy published", `Version ${newVersion} applies to future checkouts.`);
-    // Re-read rather than patch locally: what is in force is the server's answer.
+    // Re-read the server's authoritative policy after publishing.
     await load();
   }
 
@@ -193,7 +184,6 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
             </Callout>
           )}
 
-          {/* Status strip: is grace working, and whose terms. */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Policy in force"
@@ -268,7 +258,6 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
             </section>
           )}
 
-          {/* The policy, as product facts. */}
           {effective && baseTerms && (
             <Card>
               <CardHeader>

@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 
-// "NOTHING PUBLISHED YET" IS NOT "NOTHING IS HAPPENING".
-//
-// A guest who checks out of a site with no published policy still receives a grace period -- the built-in
-// emergency fallback -- and their departure raises a critical alert. These assert the question the page exists
-// to answer: what does a guest checking out right now actually get, and did anyone choose it.
-
 const get = vi.fn();
 const put = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -25,8 +19,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.resetModules());
 
-// The real built-in constants, as data-plane/internal/grace reports them: 60 min, 5/2 Mbps, 500 MB,
-// reject-new, device limit 0. If these ever change in Go, this fixture is deliberately the thing that looks wrong.
+// The real built-in constants from data-plane/internal/grace: 60 min, 5/2 Mbps, 500 MB, reject-new, device limit 0.
 const emergency = {
   source: "EMERGENCY_FALLBACK",
   duration_seconds: 3600,
@@ -93,20 +86,17 @@ describe("checkout grace states what is actually in force", () => {
     });
     await renderScreen();
 
-    // The emergency warning, as a distinct status tone and in words.
     const attention = screen.getByLabelText("Needs attention");
     expect(within(attention).getByText(/Departing guests are on the emergency fallback/i)).toBeTruthy();
     expect(within(attention).getByText(/not a decision made for this site/i)).toBeTruthy();
     expect(screen.getAllByText("Emergency fallback").length).toBeGreaterThan(0);
 
-    // The real terms, not a shrug.
     const strip = screen.getByLabelText("Grace allowance");
     expect(within(strip).getByText("1 h")).toBeTruthy();
     expect(within(strip).getByText("5 Mbps")).toBeTruthy();
     expect(within(strip).getByText("2 Mbps")).toBeTruthy();
     expect(within(strip).getByText("500 MB")).toBeTruthy();
 
-    // And that it has ALREADY happened -- six times.
     const usedCard = screen.getByText("Emergency fallback used").closest(".rounded-lg")!;
     expect(usedCard.textContent).toMatch(/6/);
     expect(usedCard.textContent).toMatch(/critical alert/i);
@@ -157,7 +147,6 @@ describe("checkout grace states what is actually in force", () => {
     expect(within(strip).getByText("1 GB")).toBeTruthy();
     expect(screen.getByTestId("grace-sentence").textContent).toMatch(/30 minutes after checkout/);
     const details = screen.getByLabelText("Policy details");
-    // The eligibility window is no longer shown: the converter never read it (audit H-19).
     expect(within(details).queryByText("Stay rules after checkout")).toBeNull();
     expect(within(details).getByText(/Up to 2 devices/)).toBeTruthy();
     expect(within(details).getByText(/built automatically from this policy/)).toBeTruthy();
@@ -253,7 +242,6 @@ describe("checkout grace states what is actually in force", () => {
   it("a read-only role sees the terms but cannot open the editor", async () => {
     mockGrace({ published: false, config_version: 0, effective: emergency, emergency_history: { count: 0 } });
     await renderScreen(false);
-    // The editor is not offered at all to a role the server would refuse.
     expect(screen.queryByRole("button", { name: /Create site policy|Edit policy/i })).toBeNull();
     expect(screen.getByText(/can view this policy but not change it/i)).toBeTruthy();
   });

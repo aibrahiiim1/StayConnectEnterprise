@@ -5,16 +5,9 @@ import (
 	"testing"
 )
 
-// THE FIRST UNTAGGED GUEST NETWORK ON A FACTORY-CLEAN APPLIANCE.
-//
-// netplan refuses to generate when a bridge member is defined nowhere:
-//
-//	Error in network definition: br-g-xxxx: interface 'ens192' is not defined
-//
-// The renderer used to declare ethernets only for TRUNK parents, assuming an untagged parent was already
-// configured by the base netplan. On a factory-clean appliance the base netplan declares the WAN interface
-// and nothing else, so the first untagged network could never apply. Reverting the renderer to
-// trunk-parents-only makes every case below fail.
+// The first untagged guest network on a factory-clean appliance: netplan refuses to generate when a bridge member is
+// defined nowhere, and the base netplan declares only the WAN interface. A trunk-parents-only renderer fails every
+// case below.
 
 // parentIsDeclared reports whether the rendered YAML declares iface under ethernets.
 func parentIsDeclared(yaml, iface string) bool {
@@ -24,7 +17,6 @@ func parentIsDeclared(yaml, iface string) bool {
 		case line == "  ethernets:":
 			in = true
 			continue
-		// any other two-space top-level key ends the ethernets block
 		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && strings.HasSuffix(line, ":"):
 			in = false
 		}
@@ -68,8 +60,7 @@ func TestTrunkParentStillDeclared(t *testing.T) {
 	}
 }
 
-// A parent shared by an untagged bridge and a tagged VLAN must be declared EXACTLY once: netplan rejects a
-// duplicate mapping key, so de-duplication is correctness and not tidiness.
+// A parent shared by an untagged bridge and a tagged VLAN is declared exactly once: netplan rejects duplicate mapping keys.
 func TestSharedParentDeclaredOnce(t *testing.T) {
 	got := string(RenderNetplan([]GuestNetwork{
 		{Name: "a", NetworkType: "untagged", ParentInterface: "ens192",
@@ -82,8 +73,7 @@ func TestSharedParentDeclaredOnce(t *testing.T) {
 	}
 }
 
-// THE RENDER IS FINGERPRINTED TO DECIDE WHETHER THE CONFIGURATION CHANGED, so identical input must produce
-// byte-identical output. Map iteration order is random; without sorting, every render looked like a change.
+// The render is fingerprinted, so identical input must give byte-identical output; map order is random without sorting.
 func TestRenderIsDeterministic(t *testing.T) {
 	nets := []GuestNetwork{
 		{Name: "c", NetworkType: "untagged", ParentInterface: "ens224",
@@ -99,7 +89,6 @@ func TestRenderIsDeterministic(t *testing.T) {
 			t.Fatalf("render is not deterministic; the change fingerprint would be meaningless\n--- first ---\n%s\n--- got ---\n%s", first, got)
 		}
 	}
-	// and the parents must be in sorted order
 	iEns192 := strings.Index(first, "\n    ens192:\n")
 	iEns224 := strings.Index(first, "\n    ens224:\n")
 	iEns256 := strings.Index(first, "\n    ens256:\n")

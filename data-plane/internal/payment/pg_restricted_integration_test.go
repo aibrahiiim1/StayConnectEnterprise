@@ -11,19 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// THE RESTRICTED-ROLE END-TO-END PROOF.
-//
-// Every other test in this package connects as the schema owner, which can do anything. That makes them
-// proofs about LOGIC and not about PRIVILEGE: a runtime that silently depends on owner rights would pass
-// all of them and then fail the moment it was deployed with the credentials it is supposed to have.
-//
-// These tests connect as a login role holding ONLY sc_payment_runtime, and drive the complete journey --
-// resolve identity, create the intent, cross the durable boundary, apply an authenticated outcome, settle,
-// and grant the entitlement through the existing Phase-2 writer. If any step needed a privilege the role
-// does not hold, it fails here rather than in production.
-//
-// The negative half matters just as much: the same role must remain unable to reach the same outcomes by
-// any route other than the sanctioned one.
+// Restricted-role end-to-end proof: other tests connect as the schema owner and prove logic, not privilege. These
+// connect as a login role holding only sc_payment_runtime and drive the whole journey; the same role must be unable to
+// reach the outcomes any other way.
 
 func runtimePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -44,8 +34,7 @@ func runtimePool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// assertNotOwner proves the connection really is restricted, so a green result cannot come from a DSN that
-// quietly fell back to the owner.
+// assertNotOwner: a green result must not come from a DSN that fell back to the owner.
 func assertNotOwner(t *testing.T, rp *pgxpool.Pool) {
 	t.Helper()
 	var user string
@@ -65,17 +54,14 @@ func assertNotOwner(t *testing.T, rp *pgxpool.Pool) {
 	}
 }
 
-// The whole journey, under the real restricted role.
 func TestIntegrationRestricted_FullPaymentToEntitlementUnderLeastPrivilege(t *testing.T) {
-	owner := pool(t) // fixtures only: seeding a tenant is an administrative act, not a runtime one
+	owner := pool(t)
 	rp := runtimePool(t)
 	assertNotOwner(t, rp)
 	ctx := context.Background()
 	s := seedPaidChain(t, owner)
 
-	// Everything from here runs on restricted connections. There are TWO of them, deliberately: the
-	// execution credential and the outcome credential are separate authorities (0024), and an end-to-end
-	// proof that used one connection for both would be proving the pre-0024 arrangement.
+	// Two restricted connections, deliberately: the execution and outcome credentials are separate authorities.
 	op := outcomePool(t)
 	granter := SQLGranter{Pool: rp}
 	e := NewEngineWithOutcome(liveCfg, rp, op, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), granter)
@@ -100,12 +86,10 @@ func TestIntegrationRestricted_FullPaymentToEntitlementUnderLeastPrivilege(t *te
 	if n := scan1[int](t, owner, `SELECT count(*)::int FROM iam_v2.entitlements WHERE purchase_id=$1`, s.purchase); n != 1 {
 		t.Fatalf("expected exactly one entitlement, got %d", n)
 	}
-	// the opening transition came with it, written by the controlled function rather than by the runtime
 	if n := scan1[int](t, owner, `SELECT count(*)::int FROM iam_v2.entitlement_state_transitions es
 		JOIN iam_v2.entitlements en ON en.id = es.entitlement_id WHERE en.purchase_id=$1`, s.purchase); n != 1 {
 		t.Fatalf("expected one opening transition, got %d", n)
 	}
-	// an authenticated replay under the same restricted role still grants nothing further
 	if _, err := e.HandleProviderNotification(ctx,
 		BuildNotification(in.ClientRef, "exec:"+in.ClientRef, OutcomeCaptured, "prv_"+in.ClientRef)); err != nil {
 		t.Fatalf("replay under the restricted role errored: %v", err)
@@ -115,7 +99,6 @@ func TestIntegrationRestricted_FullPaymentToEntitlementUnderLeastPrivilege(t *te
 	}
 }
 
-// The same role, trying to reach the same outcomes without the sanctioned path.
 func TestIntegrationRestricted_TheSameRoleCannotBypassThePath(t *testing.T) {
 	owner := pool(t)
 	rp := runtimePool(t)
@@ -155,13 +138,11 @@ func TestIntegrationRestricted_TheSameRoleCannotBypassThePath(t *testing.T) {
 			}
 		})
 	}
-	// and it still cannot see what a reporting role should not: the runtime holds no privilege on vouchers
 	if _, err := rp.Exec(ctx, `SELECT count(*) FROM iam_v2.vouchers`); err == nil {
 		t.Fatal("the payment runtime can read the voucher table")
 	}
 }
 
-// The operator role can perform the sanctioned review and nothing else.
 func TestIntegrationRestricted_OperatorCanReviewAndOnlyReview(t *testing.T) {
 	owner := pool(t)
 	dsn := os.Getenv("PHASE4_OPERATOR_DSN")
@@ -184,7 +165,6 @@ func TestIntegrationRestricted_OperatorCanReviewAndOnlyReview(t *testing.T) {
 	if !canExec {
 		t.Fatal("the operator role cannot execute the sanctioned review operation; it is not operational")
 	}
-	// ... and holds no direct write anywhere it could use instead
 	for _, tbl := range []string{"posting_review_actions", "posting_review_state", "pms_postings",
 		"posting_outbox", "settlements", "payment_transactions", "entitlements"} {
 		var w bool
@@ -197,6 +177,5 @@ func TestIntegrationRestricted_OperatorCanReviewAndOnlyReview(t *testing.T) {
 			t.Fatalf("the operator role holds a direct write on iam_v2.%s", tbl)
 		}
 	}
-	// the reporting role sees the redacted views and NOT the underlying detail
 	_ = owner
 }

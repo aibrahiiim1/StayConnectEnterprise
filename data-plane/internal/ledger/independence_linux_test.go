@@ -17,7 +17,6 @@ func fakeSys(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	mk := func(p string) { _ = os.MkdirAll(filepath.Join(root, p), 0o755) }
-	// sda with partitions sda1, sda2; sdb with sdb1; a device-mapper volume over sda2 and sdb1
 	for _, d := range []string{"devices/pci0/block/sda/sda1", "devices/pci0/block/sda/sda2", "devices/pci1/block/sdb/sdb1", "devices/virtual/block/dm-0", "dev/block"} {
 		mk(d)
 	}
@@ -84,7 +83,7 @@ func TestProductionIndependenceRefusesTheRootFilesystem(t *testing.T) {
 	dir := t.TempDir()
 	err := ProductionIndependence([]string{"/opt/stayconnect"})(dir)
 	if err == nil {
-		// t.TempDir might live on its own tmpfs mount on some systems; then it is refused for another reason or accepted legitimately
+		// t.TempDir may be its own tmpfs mount; then it is refused for another reason or accepted.
 		t.Skipf("%s is on a mount of its own here", dir)
 	}
 	if !strings.Contains(err.Error(), "own disk") && !strings.Contains(err.Error(), "cannot tell") && !strings.Contains(err.Error(), "same") {

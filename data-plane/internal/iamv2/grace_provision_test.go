@@ -5,15 +5,10 @@ import (
 	"testing"
 )
 
-// D32: normal grace is SYSTEM-provisioned, one hidden package per Site, and Hotel Admin controls policy only.
-//
-// These assert the three properties that make that decision real rather than nominal: provisioning converges
-// instead of accumulating, the package is absent from the operator catalogue, and the operator publisher
-// still cannot create one.
 func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
-	seedPlanOnly(t, db) // an enabled plan revision for the grace revision to pin
+	seedPlanOnly(t, db)
 	repo := NewPgCommerceAdminRepository(db)
 	prov := NewGraceProvisioner(repo)
 
@@ -28,8 +23,8 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 		t.Fatalf("first provision did not create the package and its revision: %+v", first)
 	}
 
-	// IDEMPOTENCE. Running again must converge on the same package and revision, not publish another. The
-	// revision is immutable and live entitlements pin it, so re-publishing on every boot would fork history.
+	// Running again must converge on the same package and revision: the revision is immutable and live
+	// entitlements pin it.
 	second, err := prov.EnsureSiteGracePackage(ctx, repo, p2Tenant, p2Site)
 	if err != nil {
 		t.Fatalf("second provision: %v", err)
@@ -41,7 +36,6 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 		t.Fatalf("provisioning moved the package/revision: %+v -> %+v", first, second)
 	}
 
-	// SHAPE. It must satisfy exactly what the contract re-validates at every checkout.
 	var isSystem, active bool
 	var ptype, settlement string
 	var price int64
@@ -57,7 +51,6 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 			isSystem, active, ptype, price, settlement)
 	}
 
-	// HIDDEN. It must not appear in the operator catalogue.
 	pkgs, err := repo.ListPackages(ctx, p2Tenant, p2Site)
 	if err != nil {
 		t.Fatal(err)
@@ -69,11 +62,8 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 		}
 	}
 
-	// POLICY IS THE OPERATOR'S. The provisioned package must be a valid target for SetGrace, and provisioning
-	// must NOT have chosen a policy on the operator's behalf.
-	// Provisioning must NOT have chosen a policy on the operator's behalf: a provisioned package with no
-	// policy is the correct intermediate state, because the policy is a commercial question D32 assigns to
-	// Hotel Admin.
+	// Provisioning must not choose a policy on the operator's behalf; a package with no policy is the correct
+	// intermediate state.
 	before, err := repo.GetGraceConfig(ctx, p2Tenant, p2Site)
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +71,7 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 	if before.GracePackageRevisionID != "" {
 		t.Fatalf("provisioning set grace policy on the operator's behalf: %+v", before)
 	}
-	// ...and publishing a policy converges onto THAT package rather than creating a competing one. The
-	// startup-provisioned row and the publication path must agree about which package is the site's grace
-	// package; if they did not, a site would end up with two system packages and the one the conversion looks
-	// at would depend on which code path ran last.
+	// Publishing a policy converges onto the provisioned package rather than creating a competing one.
 	_, pkgRev, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
 		TenantID: p2Tenant, SiteID: p2Site,
 		Policy: SystemGracePolicy{DurationSeconds: 1800, DownKbps: 4000, UpKbps: 1500,
@@ -115,12 +102,7 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 	}
 }
 
-// The system package's ACTIVATION is not operator-controlled (D32).
-//
-// The HTTP surface additionally requires a reason and a password re-confirmation, but those are checks a
-// determined operator simply satisfies -- neither says "this package is not yours". Deactivating the system
-// grace package would silently disable checkout grace for the whole site while every screen still looked
-// normal, so the refusal is asserted here, in the write itself, where the UI affordances cannot bypass it.
+// Activation of the system package is refused in the write itself, where UI affordances cannot bypass it.
 func TestSystemGracePackageActivationIsNotOperatorControlled(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
@@ -146,24 +128,19 @@ func TestSystemGracePackageActivationIsNotOperatorControlled(t *testing.T) {
 		t.Fatal("the system grace package was deactivated despite the refusal")
 	}
 
-	// A NON-system package must still be deactivatable: the rule is about provenance, not a blanket freeze.
 	pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active,is_system) VALUES ($1,$2,'ORDINARY',true,false) RETURNING id::text`, p2Tenant, p2Site)
 	if _, err := a.SetActive(ctx, p2Tenant, p2Site, pkg, false); err != nil {
 		t.Fatalf("an ordinary package must remain operator-controlled: %v", err)
 	}
 }
 
-// D32 END TO END: policy in, a grace package the REAL checkout validator accepts out.
-//
-// The property that matters is not "a package was created" but "the package the conversion will judge at a
-// departure is the one the operator's policy describes". So this publishes a policy and then asks
-// iam_v2.grace_package_mismatch_reason -- the same function ConvertAtCheckout uses -- for a verdict.
+// Publishes a policy, then asks iam_v2.grace_package_mismatch_reason (the function ConvertAtCheckout uses) for
+// a verdict.
 func TestSystemGracePolicyProducesAPackageTheCheckoutValidatorAccepts(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
 	repo := NewPgCommerceAdminRepository(db)
-	// A NULL-tenant operator: publish_checkout_grace_policy accepts an actor whose tenant_id IS NULL or
-	// matches, and the scratch database has no public.tenants row for p2Tenant to point a FK at.
+	// A NULL-tenant operator: the scratch database has no public.tenants row for p2Tenant to reference.
 	actor := scan1(t, db, `INSERT INTO public.operators (id,email,password_hash,status,tenant_id)
 		VALUES (gen_random_uuid(),'grace-'||substr(md5(random()::text),1,8)||'@dev.local','x','active',NULL)
 		RETURNING id::text`)
@@ -181,8 +158,7 @@ func TestSystemGracePolicyProducesAPackageTheCheckoutValidatorAccepts(t *testing
 		t.Fatalf("publication returned version %d", v)
 	}
 
-	// THE REAL VALIDATOR. A non-NULL reason is the conversion's own verdict that this policy would fall back
-	// to Emergency Grace at every departure.
+	// A non-NULL reason means the conversion would fall back to Emergency Grace at every departure.
 	var pkgRev string
 	var reason *string
 	_ = publishedRev
@@ -198,26 +174,17 @@ func TestSystemGracePolicyProducesAPackageTheCheckoutValidatorAccepts(t *testing
 	if reason != nil {
 		t.Fatalf("the published policy would be REJECTED at checkout: %s", *reason)
 	}
-	// THE AUDIT ROW IS NOT ASSERTED HERE, AND THAT IS A FIXTURE LIMIT RATHER THAN A GAP IN THE BOUNDARY.
-	//
-	// p2DB truncates iam_v2.internet_package_revisions CASCADE, and
-	// iam_v2.checkout_grace_policy_publications carries an FK to grace_package_revision_id -- so the shared
-	// fixture cascade-deletes the very ledger this test would read. Asserting it here would be asserting the
-	// fixture's teardown order, not the product.
-	//
-	// What DOES prove the canonical boundary was used is the optimistic-version check below:
-	// publish_checkout_grace_config (the raw writer) takes no version parameter at all, so a stale version
-	// being REFUSED can only have come from publish_checkout_grace_policy. The actor and the bounded reason
-	// code are enforced by that same function and by nothing else in this path.
+	// The audit row is not asserted: p2DB truncates package revisions CASCADE, which wipes the publications
+	// ledger. The stale-version refusal below proves publish_checkout_grace_policy was used, since the raw
+	// writer takes no version.
 
-	// OPTIMISTIC CONCURRENCY: republishing against a stale version must be refused, not silently overwrite.
+	// Republishing against a stale version must be refused.
 	if _, _, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
 		TenantID: p2Tenant, SiteID: p2Site, Policy: pol,
 		ActorOperatorID: actor, ReasonCode: "DEV_TRIAL_D32", ExpectedVersion: 0}); err == nil {
 		t.Fatal("a stale expected_version was accepted: two operators could silently overwrite each other")
 	}
 
-	// A CHANGED policy must produce a package that still matches -- the derivation is not a one-off.
 	pol2 := pol
 	pol2.DownKbps = 8000
 	pol2.DurationSeconds = 900
@@ -239,8 +206,6 @@ func TestSystemGracePolicyProducesAPackageTheCheckoutValidatorAccepts(t *testing
 	}
 }
 
-// The reserved system grace codes must be unreachable from the generic operator publisher, including by
-// code collision -- the door left open once the catalogue was hidden and activation protected.
 func TestOperatorCannotPublishOntoTheSystemGraceCodes(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
@@ -257,7 +222,6 @@ func TestOperatorCannotPublishOntoTheSystemGraceCodes(t *testing.T) {
 			t.Fatalf("an operator published onto the reserved system grace code %q", code)
 		}
 	}
-	// And an ordinary code still works, so the rule is about the reserved namespace and not a blanket freeze.
 	if res, err := a.PublishRevision(ctx, PackagePublishSpec{
 		TenantID: p2Tenant, SiteID: p2Site, PackageCode: "ordinary-pkg",
 		ServicePlanRevisionID: planRev,
@@ -268,21 +232,12 @@ func TestOperatorCannotPublishOntoTheSystemGraceCodes(t *testing.T) {
 	}
 }
 
-// PROVISIONING MUST NOT PIN THE RESERVED EMERGENCY PLAN, and this is not a hypothetical.
-//
-// The plan picker was `ORDER BY p.code LIMIT 1` over every enabled plan. On a site whose only plans are the
-// system ones -- which is every freshly onboarded appliance -- '__sys_emergency_grace_plan__' sorts first, so
-// provisioning deterministically built the normal grace package on top of the EMERGENCY catalog plan. The
-// checkout matcher refuses that revision outright with PLAN_IS_EMERGENCY_CATALOG, so the package existed,
-// could never be selected, and the Checkout Grace screen reported that no package was available.
-//
-// PRE-LIVE was in exactly that state, with selectable_grace_packages returning two candidates and both
-// excluded. The correct outcome is the documented intermediate one: no revision yet, waiting for the
-// operator's first policy.
+// Provisioning must not pin the reserved emergency plan: ORDER BY code sorts '__sys_emergency_grace_plan__'
+// first on a fresh appliance, and the matcher refuses it (PLAN_IS_EMERGENCY_CATALOG). The correct state is no
+// revision yet.
 func TestProvisioningSkipsRatherThanPinningAReservedEmergencyPlan(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()
-	// The ONLY plans on this site are the reserved emergency ones, as on a fresh appliance.
 	if _, err := db.Exec(ctx, `SELECT iam_v2.bootstrap_emergency_grace($1,$2)`, p2Tenant, p2Site); err != nil {
 		t.Fatalf("bootstrap emergency: %v", err)
 	}
@@ -298,7 +253,6 @@ func TestProvisioningSkipsRatherThanPinningAReservedEmergencyPlan(t *testing.T) 
 		t.Fatal("provisioning neither published nor said why it did not")
 	}
 
-	// And nothing in the system grace package points at the emergency plan.
 	var n int
 	if err := db.QueryRow(ctx, `
 	    SELECT count(*)
@@ -315,8 +269,7 @@ func TestProvisioningSkipsRatherThanPinningAReservedEmergencyPlan(t *testing.T) 
 		t.Fatalf("%d system grace revision(s) pin the reserved Emergency plan", n)
 	}
 
-	// THE OPERATOR IS STILL NOT STUCK. Publishing a policy derives its own plan and package, which is the
-	// whole route out of this state -- so the skip above is a waiting room, not a dead end.
+	// Publishing a policy derives its own plan and package, so the skip is a waiting room, not a dead end.
 	ver, rev, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
 		TenantID: p2Tenant, SiteID: p2Site,
 		Policy: SystemGracePolicy{DurationSeconds: 3600, DownKbps: 5000, UpKbps: 2000,

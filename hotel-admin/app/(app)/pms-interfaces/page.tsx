@@ -1,19 +1,7 @@
 "use client";
 
-// PMS CONNECTIONS — every link between this appliance and a property management system.
-//
-// This is the page an operator opens when guests cannot get online with their room number and nobody knows why,
-// so it leads with the answer: can guests sign in right now, how many guests does the appliance know about, and
-// when was a PMS last heard from. Below that, one card per connection says the same for that connection alone —
-// which system, whether it is on, which of the four checks room sign-in depends on is failing, which Wi-Fi
-// networks use it and what configuration is live. Everything else opens in a side sheet over the list.
-//
-// Connections that were created and never configured are real rows, but they are not live connections: they are
-// kept in their own folded group so a half-finished setup is never read as a PMS link that is down.
-//
-// Readiness is the server's verdict. `room_auth_ready` decides whether a connection can serve room sign-in, and
-// `roomSignInReadiness` works out which guest networks that affects; this page words them and does not re-derive
-// either.
+// Never-configured connections are kept in a folded group so a half-finished setup is not read as a PMS link that is down.
+// Readiness is the server's verdict (`room_auth_ready`, `roomSignInReadiness`); this page words it and does not re-derive it.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -44,12 +32,10 @@ type Filter = "all" | "attention" | "working";
 
 export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsConnection[] | null>(null);
-  // Live health per interface, so each card can answer "is it working" without the operator opening anything.
   const [health, setHealth] = useState<Record<string, PmsInterfaceHealth>>({});
-  // HEALTH ARRIVES AFTER THE LIST, AND UNTIL IT DOES NOTHING HERE KNOWS ANYTHING. Three states — not asked,
-  // answered, failed — so the summary never announces "not working" merely because it has not asked yet.
+  // Health arrives after the list; until it does the summary must not announce "not working".
   const [healthLoaded, setHealthLoaded] = useState(false);
-  // Site routing, for "which guest networks does this connection serve". null = could not be read.
+  // null = routing could not be read.
   const [routes, setRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
 
@@ -95,13 +81,12 @@ export default function PMSInterfacesPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // The provider catalogue and the operator's role change rarely; they are read once.
   useEffect(() => {
     void loadProviderCatalogue().then((c) => { setProviders(c.providers); setCatalogueAvailable(c.available); });
     void api.get<Whoami>("/auth/whoami").then((me) => setRoles(me?.roles ?? [])).catch(() => setRoles([]));
   }, []);
 
-  // A SLOW POLL WHILE MOUNTED, FASTER WHILE ANY GUEST LIST IS LOADING.
+  // Poll faster while any guest list is loading.
   const anySyncing = Object.values(health).some(isSyncing);
   usePoll(() => load(), anySyncing ? 4000 : 20000);
 
@@ -119,8 +104,7 @@ export default function PMSInterfacesPage() {
   const networksFor = useCallback((i: PmsConnection): string[] | null => {
     if (!routes) return null;
     return routes
-      // A client network is served by the interface it is ROUTED to, whatever routing_mode a row carries: the
-      // resolver only ever consults the mapped interface (see pms-routing).
+      // A network is served by the interface it is routed to whatever routing_mode says: the resolver consults only the mapped interface.
       .filter((r) => r.pms_interface_id === i.id)
       .map((r) => r.guest_network_name || "Unnamed network");
   }, [routes]);
@@ -132,7 +116,6 @@ export default function PMSInterfacesPage() {
   const working = (i: PmsConnection) => i.lifecycle_state === "ACTIVE" && health[i.id]?.room_auth_ready === true;
   const shown = live.filter((i) => filter === "all" || (filter === "attention" ? needsAttention(i) : working(i)));
 
-  // WHICH GUEST NETWORKS CAN SIGN GUESTS IN, per the routing — the site-wide answer to "is room sign-in working".
   const signIn = useMemo(
     () => roomSignInReadiness(list, healthLoaded ? Object.values(health) : null, routes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,10 +341,7 @@ export default function PMSInterfacesPage() {
   );
 }
 
-// ADVANCED DIAGNOSTICS — deliberately at the bottom and deliberately not in the menu (Product-Owner decision:
-// these screens stay reachable from here rather than from the sidebar). Both describe machinery that runs
-// without anyone and has no action on it; a property where everything works never needs either. When one of
-// them DOES have something, the operator is told here rather than having to go looking.
+// Diagnostics stay reachable from here rather than the sidebar; the operator is told here when one has something to show.
 function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
   return (
     <Card>
@@ -403,8 +383,7 @@ function RoomSignInStat({
   activeCount: number;
   ready: number;
 }) {
-  // Per guest network when the routing is known; otherwise the per-connection count, which is still the
-  // server's verdict for each connection.
+  // Per guest network when routing is known; otherwise the per-connection count.
   if (activeCount === 0) {
     return (
       <StatCard

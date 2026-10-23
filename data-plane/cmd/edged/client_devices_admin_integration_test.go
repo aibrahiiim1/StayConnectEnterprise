@@ -10,11 +10,6 @@ import (
 	"testing"
 )
 
-// DEVICES (client_devices_admin.go, migration 0118) against a real database and a real scd channel stand-in:
-// staff find a device by account name, see its package and place, release the place (the device is
-// disconnected through enforcement first; the package is untouched), prepare a device for a new sign-in test,
-// and change the daily client device-change limit with a reason and step-up.
-
 func (f *apiFixture) getDevices(t *testing.T, search string) (int, map[string]any) {
 	t.Helper()
 	req, _ := http.NewRequest("GET", f.srv.URL+"/edge/v1/client-devices", bytes.NewReader(nil))
@@ -102,7 +97,6 @@ func TestIntegration_ClientDevices_FindInspectReleaseAndPrepare(t *testing.T) {
 		t.Fatalf("a second release = %d %v", st, body)
 	}
 
-	// PREPARE FOR A TEST: another device, online, holding a place.
 	_, ent2, s2 := seedAccountWithSessions(t, f, "dev-tester", 1, "10.92.0.21")
 	dev2 := deviceOfSession(t, f, s2[0].id)
 	st, body = f.do(t, "POST", "/client-devices/"+dev2+"/prepare-test", map[string]any{"reason": "PRE-LIVE sign-in test"})

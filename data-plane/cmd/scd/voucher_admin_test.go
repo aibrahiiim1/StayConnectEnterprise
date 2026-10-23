@@ -1,15 +1,7 @@
 package main
 
-// WHAT THESE PIN, AND WHY THEY ARE HERE RATHER THAN IN AN INTEGRATION SUITE.
-//
-// The database owns the invariants that matter most -- the append-only trigger, the CHECK constraints, the
-// revoke kernel -- and they are proved against real DDL on a disposable PostgreSQL. What is left for a unit
-// test is the part written in Go, and in this surface that part is almost entirely REFUSALS: a window that
-// can never open, an actor the caller forgot to resolve, a reason too short to be a reason.
-//
-// The refusals are the interesting half. A voucher surface that accepts a bad validity window does not fail
-// -- it prints two hundred cards that a guest discovers are dead, and the failure surfaces as "that code is
-// not valid", which is indistinguishable from a wrong code.
+// Pins the Go-side refusals of the voucher admin surface (database invariants are proved against real DDL elsewhere): a window that can never open,
+// a missing actor, a too-short reason. A bad window prints cards a guest finds dead, indistinguishable from a wrong code.
 
 import (
 	"os"
@@ -44,8 +36,7 @@ func TestARedemptionWindowThatCanNeverOpenIsRefused(t *testing.T) {
 	}
 }
 
-// NO WINDOW IS THE NORMAL CASE and must stay legal: NULL on both columns means unbounded, which is what
-// every voucher this system could previously issue got, and what a hotel printing evergreen cards wants.
+// No window is the normal case and must stay legal: NULL on both columns means unbounded (evergreen cards).
 func TestNoWindowIsTwoNullsRatherThanAnError(t *testing.T) {
 	from, until, err := parseRedemptionWindow("", "")
 	if err != nil {
@@ -68,8 +59,7 @@ func TestAWindowThatOpensLaterIsAccepted(t *testing.T) {
 	}
 }
 
-// THE ACTOR IS NOT OPTIONAL. Every mutating route here receives the operator edged resolved from the
-// SESSION. If that could be defaulted, an audit row would name whoever the default was.
+// The actor is not optional: if the SESSION-resolved operator could be defaulted, an audit row would name whoever the default was.
 func TestTheActorAndTheReasonAreRefusedWhenMissing(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -94,8 +84,7 @@ func TestTheActorAndTheReasonAreRefusedWhenMissing(t *testing.T) {
 	}
 }
 
-// A reason of 501 characters is refused at the top end too: an unbounded free-text field on an append-only
-// table is somewhere to put something that is not a reason.
+// A reason of 501 characters is refused too: an unbounded free-text field on an append-only table is somewhere to put something that is not a reason.
 func TestAnUnboundedReasonIsRefused(t *testing.T) {
 	a := voucherActor{OperatorID: "op-1", OperatorLabel: "desk", Reason: strings.Repeat("x", 501)}
 	if err := a.validate(true); err == nil {
@@ -107,14 +96,8 @@ func TestAnUnboundedReasonIsRefused(t *testing.T) {
 	}
 }
 
-// THE AUDIT TABLE MUST NEVER GAIN A COLUMN THAT COULD HOLD A CODE.
-//
-// iam_v2.voucher_code_reveals records that a code was read, never the code. It is append-only and nothing
-// prunes it, so a code column would be a second, permanent copy of every guest secret anybody ever looked
-// at -- in the one table designed to be impossible to clean up.
-//
-// This reads the migration rather than the database so that it runs in the ordinary test suite, with no
-// container: the cost of catching this late is a schema that has already shipped.
+// The audit table must never gain a column that could hold a code: iam_v2.voucher_code_reveals is append-only and never pruned, so a code column
+// would be a permanent second copy of every revealed secret. Reads the migration so it runs without a database.
 func TestTheRevealAuditHasNoColumnThatCouldHoldACode(t *testing.T) {
 	raw, err := os.ReadFile("../../migrations/0087_the_operator_surface_a_voucher_needs.up.sql")
 	if err != nil {
@@ -130,8 +113,7 @@ func TestTheRevealAuditHasNoColumnThatCouldHoldACode(t *testing.T) {
 			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
 				continue
 			}
-			// The column name is the first token of a definition line. `voucher_count` and the CHECK
-			// clauses mention other things; only the declared name matters.
+			// The column name is the first token of a definition line; only the declared name matters.
 			name := strings.ToLower(strings.SplitN(trimmed, " ", 2)[0])
 			if strings.Contains(name, banned) {
 				t.Errorf("iam_v2.voucher_code_reveals declares %q, which could hold a code or part of one; "+

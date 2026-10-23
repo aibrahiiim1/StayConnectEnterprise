@@ -2,16 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// GUEST SIGN-IN ATTEMPTS — the screen, not the API.
-//
-// What these assert is the part a server test cannot: that an operator WITHOUT the credential permission is
-// never shown a value and is told why, that an operator WITH it sees the comparison unmasked, and that a room
-// the mirror does not hold produces a stated absence rather than empty fields which read as withheld data.
+// Screen behaviour: an operator without the credential permission never sees a value and is told why; one with it sees
+// the comparison unmasked;
+// a room the mirror does not hold gives a stated absence, not empty fields.
 
-// jsdom implements no ResizeObserver, and Radix measures its dialog content on mount. Without this the whole
-// tree throws during the first render and EVERY assertion fails with a message about the text it could not
-// find — which reads as a broken page rather than a missing browser API. Scoped to this file deliberately:
-// changing the shared setup would alter the environment twenty other suites already pass in.
+// jsdom implements no ResizeObserver and Radix measures dialog content on mount; scoped to this file rather than the
+// shared setup.
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -21,9 +17,7 @@ class ResizeObserverStub {
 
 const get = vi.fn();
 const post = vi.fn();
-// ApiError is part of the module's RUNTIME surface, not just its types: ErrorBanner does
-// `err instanceof ApiError` to decide whether to show a trace id. A mock that omits it makes that check
-// throw, React unmounts the tree, and the page renders as an empty div.
+// ApiError is runtime surface: ErrorBanner does `err instanceof ApiError`, so a mock that omits it unmounts the tree.
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return { ...actual, api: { get: (...a: any[]) => get(...a), post: (...a: any[]) => post(...a) } };
@@ -65,17 +59,13 @@ const CREDENTIALS = {
   additional_accepted_guests: 1,
 };
 
-/** wire mocks the three endpoints the page uses, with the operator's roles as the only variable. */
 function wire(roles: string[], overrides: Record<string, unknown> = {}) {
   get.mockImplementation((raw?: unknown) => {
-    // The harness invokes the spy once with no arguments while tearing the test down. Reading `.startsWith`
-    // on that call throws INSIDE the cleanup hook, which vitest reports as a failure of the test that had
-    // already passed — a teardown artefact wearing the costume of a product defect. Coercing first costs
-    // nothing and keeps the failure output about the page.
+    // The harness invokes the spy once with no arguments during teardown; coerce first so `.startsWith` does not throw
+    // in the cleanup hook.
     const path = typeof raw === "string" ? raw : "";
     if (path === "/auth/whoami") return Promise.resolve({ roles });
     if (path.startsWith("/guest-signin-attempts?")) {
-      // edged pages this list and counts the filtered set for the tiles.
       return Promise.resolve({ data: [ATTEMPT], meta: { has_more: false }, page: 1, page_size: 50, total: 1,
         summary: { total: 1, failed: 1, mismatch: 1, systemic: 0 } });
     }
@@ -88,7 +78,6 @@ function wire(roles: string[], overrides: Record<string, unknown> = {}) {
     path.startsWith("/guest-signin-credentials/") ? Promise.resolve(CREDENTIALS) : Promise.resolve({}));
 }
 
-/** B8: what the guest typed is revealed only after the operator confirms their password. */
 async function revealWithPassword(user: ReturnType<typeof userEvent.setup>) {
   await user.type(await screen.findByLabelText("Your password"), "my-own-password");
   await user.click(screen.getByRole("button", { name: /Show what was entered/ }));
@@ -112,18 +101,15 @@ describe("guest sign-in attempts", () => {
     expect(screen.getByText("Guest WiFi")).toBeTruthy();
     expect(screen.getByText("Room found, submitted value did not match")).toBeTruthy();
     expect(screen.getByText("Refused")).toBeTruthy();
-    // The device is present as SECONDARY information, which is what the Product Owner asked for.
     expect(screen.getByText("10.77.1.25")).toBeTruthy();
   });
 
-  // THE COMPARISON, UNMASKED. Anything less answers nothing: "OK••••••" beside "OK•••••••" is not a
-  // comparison, and the operators who reach this screen already hold the guest's room and stay.
+  // The comparison is unmasked: masked values beside each other compare nothing.
   it("shows an authorised operator the submitted and accepted values in full", async () => {
     wire(["front_office_operator"]);
     const user = await renderPage();
 
     await user.click(await screen.findByRole("button", { name: "Details" }));
-    // Nothing is fetched until the operator confirms their password.
     expect(screen.queryByText("Nottheguest")).toBeNull();
     expect(post).not.toHaveBeenCalled();
     await revealWithPassword(user);
@@ -133,13 +119,10 @@ describe("guest sign-in attempts", () => {
     expect(screen.getByText("MARIA DEL CARMEN")).toBeTruthy();
     expect(screen.getByText("OKONKWO")).toBeTruthy();
     expect(screen.getByText("RES-4001")).toBeTruthy();
-    // Nothing is redacted. If a masking character ever appears here, the panel has stopped answering.
     expect(screen.queryByText(/•/)).toBeNull();
     expect(screen.queryByText(/\*{3,}/)).toBeNull();
   });
 
-  // ...and an operator WITHOUT the second permission sees no value and is told which permission is missing,
-  // rather than an empty box that reads as a bug.
   it("tells an operator without the credential permission why the values are absent", async () => {
     wire(["site_viewer"]);
     const user = await renderPage();
@@ -151,14 +134,12 @@ describe("guest sign-in attempts", () => {
     for (const secret of ["Nottheguest", "MARIA DEL CARMEN", "OKONKWO", "RES-4001"]) {
       expect(screen.queryByText(secret)).toBeNull();
     }
-    // The page must never even ASK for values it may not show — a request that 403s is still a request that
-    // put the attempt id in an access log for no reason.
+    // The page must never ASK for values it may not show: a 403 request still lands the attempt id in an access log.
     expect(post.mock.calls.some((c) => String(c[0]).startsWith("/guest-signin-credentials/"))).toBe(false);
     expect(screen.queryByLabelText("Your password")).toBeNull();
   });
 
-  // NO EXPECTED VALUES ARE INVENTED. A room the mirror does not hold has nothing that would have been
-  // accepted, and the screen says so in the Product Owner's words rather than showing blanks.
+  // No expected values are invented for a room the mirror does not hold.
   it("states the absence plainly when the mirror holds no stay for the room", async () => {
     wire(["site_admin"], {
       result: "ROOM_NOT_IN_MIRROR",
@@ -173,9 +154,7 @@ describe("guest sign-in attempts", () => {
     await revealWithPassword(user);
     expect(await screen.findByText(/No eligible stay for this room exists in the appliance's guest list/i)).toBeTruthy();
     expect(screen.getByText(/Changes made in the PMS after the displayed last-sync time/i)).toBeTruthy();
-    // What the guest typed IS still shown — it is the one thing that is genuinely known here.
     expect(screen.getByText("Nottheguest")).toBeTruthy();
-    // ...and nothing is presented as having been expected.
     expect(screen.queryByText("OKONKWO")).toBeNull();
   });
 
@@ -203,8 +182,7 @@ describe("guest sign-in attempts", () => {
     get.mockImplementation((raw?: unknown) => {
       const path = typeof raw === "string" ? raw : "";
       if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
-      // Only the page's own call is made to fail. The teardown call described above must not reject, or an
-      // unhandled rejection from the cleanup hook is reported instead of the assertion.
+      // Only the page's own call fails; the teardown call must not reject.
       if (path === "") return Promise.resolve({});
       return Promise.reject(new Error("boom"));
     });

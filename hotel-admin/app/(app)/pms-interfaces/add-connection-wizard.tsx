@@ -1,16 +1,9 @@
 "use client";
 
-// ADD A PMS CONNECTION — choose the system, describe it, give it its credential, review, create.
-//
-// What the wizard does, in order, and nothing more:
-//   1. creates the connection (it starts with room sign-in paused — it cannot connect to anything yet);
-//   2. saves its configuration as a DRAFT;
-//   3. for a provider that signs in with a key, stores that credential (encrypted; needs the operator's password).
-// It does NOT publish and does NOT activate. Both change what happens to guests, both are separate confirmed
-// actions, and the last screen says so and points at them.
-//
-// If a step fails, what already succeeded is kept and "Try again" resumes from the failed step — pressing it
-// never creates a second connection.
+// Creates the connection (room sign-in paused), saves its configuration as a draft, and stores the
+// credential if the provider needs one. It never publishes or activates; both change what happens to guests
+// and are separate confirmed actions. After a failure, "Try again" resumes from the failed step and never
+// creates a second connection.
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
@@ -46,7 +39,6 @@ export function AddConnectionWizard({
   providers: PmsProvider[];
   catalogueAvailable: boolean;
   onChanged: () => void | Promise<void>;
-  /** Opens the new connection's sheet, on its configuration, to publish and activate. */
   onOpenConnection: (id: string) => void;
 }) {
   const toast = useToast();
@@ -72,7 +64,7 @@ export function AddConnectionWizard({
     : ["Provider", "Connection", "Review"];
   const reviewStep = steps.length - 1;
 
-  // A fresh wizard every time it opens. A half-finished connection from last time is already on the list.
+  // A half-finished connection from last time is already on the list.
   useEffect(() => {
     if (!open) return;
     const only = providers.length === 1 ? providers[0].kind : "";
@@ -150,7 +142,6 @@ export function AddConnectionWizard({
       await onChanged();
     } catch (e) {
       setErr(e);
-      // Whatever did succeed is on the list now; show it rather than waiting for the operator to close this.
       if (p.id) void onChanged();
     } finally {
       setBusy(false);

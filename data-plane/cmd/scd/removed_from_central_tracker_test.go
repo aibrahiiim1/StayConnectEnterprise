@@ -5,8 +5,7 @@ import (
 	"time"
 )
 
-// Audit B-21: two "not found" replies three seconds apart used to remove the licence for good. A deletion is
-// now acted on only when sustained: orphanConfirmReplies consecutive replies over at least orphanConfirmWindow.
+// A deletion is acted on only when sustained: orphanConfirmReplies consecutive replies over at least orphanConfirmWindow.
 
 func TestOrphanTrackerTwoQuickRepliesDoNotConfirm(t *testing.T) {
 	var o orphanTracker

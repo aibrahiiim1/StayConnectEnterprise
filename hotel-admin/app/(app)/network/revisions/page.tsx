@@ -25,7 +25,6 @@ import {
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 
-/** Presentation only: which states a person should look at. */
 const NEEDS = new Set(["pending_confirmation", "rolled_back", "failed"]);
 const PREVIEW = 15;
 
@@ -37,7 +36,6 @@ export default function RevisionsPage() {
   const [open, setOpen] = useState<NetRevision | null>(null);
   const [detail, setDetail] = useState<Record<string, NetRevisionDetail>>({});
   const [detailErr, setDetailErr] = useState<string | null>(null);
-  /** Clutter control. Nothing here removes a revision -- see the note below for why it must not. */
   const [filter, setFilter] = useState<"needs-attention" | "all">("all");
   const [showAll, setShowAll] = useState(false);
   const toast = useToast();
@@ -66,7 +64,6 @@ export default function RevisionsPage() {
     }
   }
 
-  // Keep and Roll back need the operator's password (the server requires it).
   const stepUp = useNetworkChangeStepUp();
 
   function onConfirm(id: string) {
@@ -138,11 +135,8 @@ export default function RevisionsPage() {
         />
       )}
 
-      {/* WHY THERE IS NO DELETE HERE.
-          A revision is what rollback rolls back TO, and what the current configuration's provenance points
-          at. Removing one does not tidy the list, it makes the remaining history misleading: a gap reads as
-          "nothing happened" and a rollback target that no longer exists fails at the worst possible moment.
-          So the clutter is handled by filtering and folding, and every revision stays. */}
+      {/* No delete: a revision is a rollback target and the current configuration's provenance, so clutter is
+          handled by filtering and folding. */}
       {rows !== null && rows.length > 0 && (
         <Toolbar className="items-center">
           <FilterChips

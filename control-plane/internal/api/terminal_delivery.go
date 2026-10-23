@@ -19,28 +19,21 @@ import (
 	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
-// terminalTimeout is how long Phase 1 waits for the appliance's signed ack before
-// raising a security alert (and NOT falsely reporting the box decommissioned).
+// terminalTimeout is how long Phase 1 waits for the signed ack before raising an alert; the box is not reported decommissioned.
 func terminalTimeout() time.Duration { return 10 * time.Minute }
 
-// beginTerminalDelivery starts retirement of an appliance INSIDE THE CALLER'S TRANSACTION, so the licence
-// revocation the caller made in the same transaction and the signed terminal assignment commit together or
-// not at all: there is never a retirement whose licence is revoked but whose terminal document was never
-// signed (the appliance would keep its cached assignment and never be told), nor the reverse.
+// beginTerminalDelivery starts retirement inside the caller's transaction, so the caller's licence revocation and
+// the signed terminal assignment commit together (a revoked licence with no terminal document would leave the
+// appliance on its cached assignment, never told).
 //
-// NORMAL (emergency=false) — two phases:
+// Normal, two phases:
 //
-//	Phase 1: mint a higher-version signed TERMINAL assignment (revoked/unassigned/
-//	         decommissioned) and record delivery as pending. Credentials are NOT
-//	         touched, so the still-trusted appliance can fetch the document, clear
-//	         its authority, and return a signed acknowledgment. Phase 2 (cert +
-//	         revocation) runs only when that ack arrives (see AckHandler).
+//	Phase 1: mint a higher-version signed terminal assignment and record delivery as pending. Credentials are
+//	         untouched so the appliance can fetch it, clear its authority and acknowledge. Phase 2 (cert
+//	         revocation) runs only when that ack arrives (AckHandler).
 //
-// EMERGENCY (emergency=true) — do NOT depend on a compromised box cooperating:
-//
-//	revoke the certificate, deny all API access immediately, and mark the
-//	terminal delivery UNCONFIRMED. A signed terminal document is still minted (so a
-//	recovered box would stand down), but nothing waits for it.
+// Emergency does not depend on a compromised box cooperating: the certificate is revoked and API access denied
+// at once and delivery is marked unconfirmed. The terminal document is still minted so a recovered box stands down.
 func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, terminalState, reason string, emergency bool) (int64, error) {
 	if terminalState != assignment.StateRevoked && terminalState != assignment.StateUnassigned &&
 		terminalState != assignment.StateDecommissioned {
@@ -49,9 +42,7 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, termina
 	if b.AssignKey == nil {
 		return 0, errors.New("assignment signing key not configured")
 	}
-	// Mint + persist the signed terminal assignment (higher version), under the signing guard (active key
-	// only). The minted terminal document carries NO tenant/site — a terminal state Clears(). It is the
-	// APPLIANCE that atomically clears its own tenant/site when it verifies and adopts the document; Central's
+	// The terminal document carries no tenant/site; the appliance clears its own when it adopts it, and Central's
 	// row keeps its last tenant_id with lifecycle_state marking the retirement.
 	ab := &AssignmentBase{Base: b, SignKey: b.AssignKey}
 	doc, err := ab.IssueTx(ctx, tx, id, terminalState)
@@ -63,7 +54,6 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, termina
 	deliveryState := "terminal_delivery_pending"
 	var timeoutAt any = time.Now().Add(terminalTimeout())
 	if emergency {
-		// Credentials pulled now; the ack (if it ever comes) is irrelevant.
 		deliveryState = "credential_revoked"
 		timeoutAt = nil
 	}
@@ -80,11 +70,10 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, termina
 	}
 
 	if emergency {
-		// Immediate Phase 2 — the guardrail is the caller (confirmation + step-up).
+		// The guardrail is the caller (confirmation and step-up).
 		if err := b.phase2ShutCredentials(ctx, tx, id, "emergency_compromise"); err != nil {
 			return ver, err
 		}
-		// Lifecycle goes terminal now; delivery stays UNCONFIRMED (acked_at NULL).
 		if _, err := tx.Exec(ctx, `UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`,
 			id, lifecycleForTerminal(terminalState)); err != nil {
 			return ver, err
@@ -93,7 +82,6 @@ func (b *Base) beginTerminalDelivery(ctx context.Context, tx pgx.Tx, id, termina
 	return ver, nil
 }
 
-// lifecycleForTerminal maps a signed terminal assignment state onto the stored identity lifecycle.
 func lifecycleForTerminal(state string) string {
 	if state == assignment.StateRevoked {
 		return "revoked"
@@ -101,9 +89,8 @@ func lifecycleForTerminal(state string) string {
 	return "decommissioned"
 }
 
-// phase2ShutCredentials revokes the appliance's client certificate (which the mTLS listener checks on
-// every call) and records the shutdown, inside the caller's transaction. It is called after a verified ack
-// (normal) or immediately (emergency). The caller audits appliance.credentials_revoked once it commits.
+// phase2ShutCredentials revokes the client certificate and records the shutdown in the caller's transaction, after a
+// verified ack (normal) or immediately (emergency). The caller audits appliance.credentials_revoked after commit.
 func (b *Base) phase2ShutCredentials(ctx context.Context, tx pgx.Tx, id, reason string) error {
 	if _, err := tx.Exec(ctx, `
         INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
@@ -123,8 +110,7 @@ func (b *Base) phase2ShutCredentials(ctx context.Context, tx pgx.Tx, id, reason 
 	return err
 }
 
-// AckHandler receives the appliance's SIGNED terminal-adoption acknowledgment over
-// the strict mTLS channel, and — only if it verifies — runs Phase 2.
+// AckHandler receives the appliance's signed terminal acknowledgment over the strict mTLS channel and, only if it verifies, runs Phase 2.
 func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
 	if ident == nil {
@@ -173,9 +159,8 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
-	// The ack must name the CURRENT terminal document (version + fingerprint) of a retirement that is
-	// actually in progress. An ack with no retirement on record, or for a retirement already completed, is
-	// refused: it must never be able to retire an appliance nobody retired.
+	// The ack must name the current terminal document of a retirement in progress; otherwise it could retire an
+	// appliance nobody retired.
 	var version int64
 	var signedDoc []byte
 	var deliveryState string
@@ -200,7 +185,6 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Record the ack, run Phase 2 and mark the identity retired, in one transaction.
 	raw, _ := json.Marshal(ack)
 	terminal := lifecycleForTerminal(ack.TerminalState)
 	steps := []struct {
@@ -229,7 +213,7 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 	}{
 		{`UPDATE appliances SET lifecycle_state=$2, replacement_pending=false, updated_at=now() WHERE id=$1`, []any{ident.ApplianceID, terminal}},
 		{`UPDATE appliance_terminal_delivery SET delivery_state='credential_revoked' WHERE appliance_id=$1`, []any{ident.ApplianceID}},
-		// A late ack confirms a retirement that had timed out: the "did not confirm" alert is now answered.
+		// A late ack answers the earlier "did not confirm" alert.
 		{`UPDATE appliance_security_alerts SET status='resolved', resolved=true, acknowledged_at=now()
            WHERE appliance_id=$1 AND kind='terminal_delivery_failed' AND NOT resolved`, []any{ident.ApplianceID}},
 	} {
@@ -250,9 +234,8 @@ func (b *Base) AckHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "credential_revoked", "version": ack.Version})
 }
 
-// ReconcileTerminalTimeouts flips pending deliveries past their timeout to
-// terminal_delivery_failed and raises a security alert. It does NOT report the
-// appliance as decommissioned — the ack never came, so completion is unconfirmed.
+// ReconcileTerminalTimeouts flips overdue pending deliveries to terminal_delivery_failed and raises an alert; the
+// appliance is not reported decommissioned because the ack never came.
 func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT appliance_id::text FROM appliance_terminal_delivery
@@ -275,8 +258,7 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 		}
 		var serial string
 		_ = b.DB.QueryRow(ctx, `SELECT COALESCE(serial,'') FROM appliances WHERE id=$1`, id).Scan(&serial)
-		// detail is jsonb: it used to be a bare string, which Postgres rejected, and the error was ignored,
-		// so this alert was never actually raised.
+		// detail is jsonb; a bare string is rejected by Postgres.
 		detail, _ := json.Marshal(map[string]string{
 			"reason": "the appliance did not acknowledge its retirement within policy; retirement is UNCONFIRMED and its credentials were NOT revoked. Investigate, or retire it again as an emergency.",
 		})
@@ -292,18 +274,11 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 	return n, nil
 }
 
-// -------- strict terminal endpoint --------
-
-// StrictApplianceAssignmentHandler serves GET /v1/appliance/assignment under the
-// full mTLS trust rules. It is the ONLY delivery channel for assignment documents
-// (there is no JWT fallback and no :443 mount).
+// StrictApplianceAssignmentHandler serves GET /v1/appliance/assignment under the full mTLS trust rules; it is the
+// only delivery channel for assignment documents (no JWT fallback, no :443 mount).
 func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter, r *http.Request) {
-	// IDENTITY COMES ONLY FROM THE VERIFIED CLIENT CERTIFICATE. This endpoint
-	// consults no appliance JWT or bearer token — any
-	// Authorization header on the request is ignored. The mTLS listener has
-	// already verified the certificate chain against the CA; here we bind the
-	// cert's URI-SAN appliance_id, and strictMTLSSelf enforces the exact
-	// fingerprint + serial match to this appliance's active Central record.
+	// Identity comes only from the verified client certificate; any Authorization header is ignored.
+	// strictMTLSSelf enforces the exact fingerprint and serial match to the active Central record.
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		logFetch(r.Context(), b.DB, "", "", "denied:no-cert")
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "client certificate required (mTLS only)")
@@ -337,7 +312,6 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 		return
 	}
 
-	// Nothing newer than what the appliance already acknowledged.
 	if version <= lastAcked {
 		logFetch(ctx, b.DB, appID, "", "not-modified:acked")
 		w.WriteHeader(http.StatusNoContent)
@@ -350,7 +324,6 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	// Self-scoped + identity-bound: never another appliance's document.
 	idFpr := ""
 	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&idFpr)
 	if doc.ApplianceID != appID ||
@@ -359,8 +332,7 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	// Signed by a currently-trusted (active|verify_only) assignment key — never an
-	// unknown or revoked signer.
+	// Only a currently trusted (active or verify_only) signer, never an unknown or revoked one.
 	var signerState string
 	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(state,'') FROM assignment_signing_keys WHERE key_id=$1`, doc.SignerKeyID).Scan(&signerState)
 	if !assignment.CanVerify(signerState) {
@@ -375,9 +347,8 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 	_, _ = w.Write(signedDoc)
 }
 
-// strictMTLSSelf enforces the certificate rules for the assignment channel:
-// mTLS present, cert URI-SAN == self, and an exact fingerprint+serial match to a
-// certificate that was actually issued to this appliance and is not revoked.
+// strictMTLSSelf requires mTLS, a URI-SAN equal to self, and an exact fingerprint and serial match to an unrevoked
+// certificate issued to this appliance.
 func strictMTLSSelf(w http.ResponseWriter, r *http.Request, db *pgxpool.Pool, applianceID string) bool {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "client certificate required (mTLS only)")

@@ -67,7 +67,7 @@ function Appliances() {
     } finally {
       setRefreshing(false);
     }
-    // The chip counts come from the Overview, which already counts the whole (role-scoped) fleet.
+    // Overview counts already respect the server's role scope.
     api.get<Overview>("/cloud/v1/overview", opts).then((o) => setCounts(o.appliances)).catch(() => {});
   }, [query]);
 

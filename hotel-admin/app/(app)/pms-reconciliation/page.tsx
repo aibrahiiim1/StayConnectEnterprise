@@ -1,31 +1,12 @@
 "use client";
 
-// PMS RECONCILIATION — the departures the appliance could not place, as decisions rather than as rows.
-//
-// WHAT THIS PAGE IS FOR. The dashboard said "12,026 messages need attention". There were 397 unresolved
-// departures; each one had been restaged on every reconnect for three weeks. A list of twelve thousand is a
-// list nobody opens, so the warning was true and ignored, which is the worst state a warning can be in.
-//
-// THERE IS NO ACTION ON THIS PAGE, AND THAT IS THE ANSWER RATHER THAN A GAP. It briefly had a "re-evaluate"
-// button that handed a recorded departure back to the ingestion engine. It could never have worked:
-// stay_events is strictly one-way, and a checkout boundary must be an APPLIED departure event. A departure
-// that went to review is resolved by the PMS sending one that can be applied — the PMS is the source of
-// truth for whether a guest has left, and this system asserting it from a re-read of an old message would be
-// claiming to know something it does not.
-//
-// THE FOUR RULES THIS PAGE OBEYS, all of them because breaking one would disconnect a resident guest:
-//
-//   1. A PLANNED DEPARTURE DATE IS NOT A CHECKOUT. "Past their departure date" is its own tab and closes
-//      nothing. Guests extend; PMSs run late.
-//   2. TWO STAYS IN ONE ROOM ARE NOT A DUPLICATE. Sharing is ordinary. The rooms tab is titled as a fact,
-//      not as a fault, and it exists because it is what makes a room-keyed departure undecidable.
-//   3. AN OLD DEPARTURE NEVER APPLIES TO TODAY'S OCCUPANT. If the one stay in that room arrived after the
-//      departure was raised, the case is LATER OCCUPANT and there is no button.
-//   4. AN EMPTY ROOM DOES NOT PROVE AN OLD DEPARTURE WAS HANDLED. Those cases read "nothing outstanding",
-//      never "resolved", because nobody proved anything — the subject simply left.
-//
-// AND THE ONE IT OBEYS MOST: A CASE WITH NO ANSWER STAYS ON THE LIST. The count is not reduced by hiding
-// anything. Every case says which evidence it is waiting for.
+// Read-only by design: stay_events is one-way and a checkout boundary must be an applied departure event, so
+// a case is resolved when the PMS sends one that applies. Rules, each to avoid disconnecting a resident guest:
+//   1. A planned departure date is not a checkout (guests extend, PMSs run late).
+//   2. Two stays in one room are not a duplicate (sharing is ordinary).
+//   3. An old departure never applies to today's occupant (LATER_OCCUPANT has no action).
+//   4. An empty room does not prove an old departure was handled ("nothing outstanding", never "resolved").
+// A case with no answer stays on the list, saying which evidence it waits for.
 
 import { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck, DoorOpen, CalendarClock, Users } from "lucide-react";
@@ -46,9 +27,7 @@ import { FilterChips } from "@/components/ui/data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
-// STATE_WORDS is the vocabulary. Each entry says what the state means and, for the ones that cannot be
-// acted on, WHAT EVIDENCE IS MISSING — because "we can't do anything" without a reason is indistinguishable
-// from "we didn't try".
+// Each entry says what the state means and, where nothing can be done, which evidence is missing.
 const STATE_WORDS: Record<
   ReconciliationState,
   { label: string; tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }
@@ -112,8 +91,6 @@ export default function PMSReconciliationPage() {
   const [err, setErr] = useState<unknown>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Roles are read, and deliberately used for nothing: this page offers no action to any role.
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -198,9 +175,6 @@ export default function PMSReconciliationPage() {
       />
 
       <ErrorBanner err={err} />
-      {/* THE HEADLINE THAT REPLACED A ROW COUNT. Both numbers are shown: the number of decisions, and the
-          number of recorded copies behind them. The second is the single most useful fact about this feed
-          and is exactly what the old count was reporting as if it were the first. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Unresolved departures" value={summary ? num(summary.cases) : "—"} />
         <StatCard
@@ -360,9 +334,7 @@ export default function PMSReconciliationPage() {
                           Still listed — they may have extended
                         </Badge>
                       ) : s.room_now_holds_another_stay ? (
-                        // The strongest statement this screen can make, and the one an operator can act on:
-                        // the PMS has that room under a different reservation, so it has been re-let and our
-                        // record of this guest is stale beyond doubt.
+                        // The PMS has the room under another reservation, so our record of this guest is stale.
                         <Badge tone="err" dot>
                           Room re-let — the PMS has it under another reservation
                         </Badge>

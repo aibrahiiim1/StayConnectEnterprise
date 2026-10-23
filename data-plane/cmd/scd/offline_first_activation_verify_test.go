@@ -89,9 +89,7 @@ func (r *offlineRig) pkg(t *testing.T, signAssignmentWith ed25519.PrivateKey) []
 	return b
 }
 
-// F8: the signed assignment inside a first-activation package is verified exactly as boot verifies it, BEFORE
-// anything is written. A package whose vendor signature is fine but whose assignment was signed by a key the
-// appliance does not trust is refused, and the appliance is left exactly as it was.
+// The signed assignment inside a first-activation package is verified as boot verifies it, before anything is written: an untrusted assignment signer is refused and the appliance is left as it was.
 func TestOfflineActivationVerifiesAssignmentBeforeAdopting(t *testing.T) {
 	restartAfterActivation = func() {}
 	rig := newOfflineRig(t)
@@ -113,7 +111,6 @@ func TestOfflineActivationVerifiesAssignmentBeforeAdopting(t *testing.T) {
 		t.Fatal("a refused package must not bind an appliance id")
 	}
 
-	// The same package with a trusted assignment signer is applied.
 	w = httptest.NewRecorder()
 	rig.s.centralOfflinePackage(w, httptest.NewRequest(http.MethodPost, "/v1/central/offline-package",
 		bytes.NewReader(rig.pkg(t, rig.asgPriv))))

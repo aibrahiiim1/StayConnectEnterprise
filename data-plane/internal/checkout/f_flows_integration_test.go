@@ -8,14 +8,8 @@ import (
 	"time"
 )
 
-// F3–F7 of the Phase-3 flow suite. F1 (Room Move preservation) and F2 (stale-event no-op) live with the Stay
-// engine that owns those flows; F3–F7 are Checkout-conversion flows and live here. Each test is named for the
-// flow it proves so the evidence maps 1:1 onto the plan.
-
-// F3 — ORIGIN-AGNOSTIC CHECKOUT CONVERSION. The conversion depends ONLY on the Entitlement being ACTIVE and
-// valid at the boundary, never on how it was obtained. The "prepaid" case here is an ISOLATED TEST FIXTURE
-// with a zero amount and no settlement method: it is NOT evidence of any live payment, and no financial
-// posting of any kind occurs — paid access remains out of scope for this phase.
+// F3 — conversion depends only on the Entitlement being ACTIVE and valid at the boundary, never on its origin.
+// The "prepaid" case is a zero-amount fixture, not evidence of any payment.
 func TestIntegration_F3_OriginAgnosticConversion(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -25,10 +19,9 @@ func TestIntegration_F3_OriginAgnosticConversion(t *testing.T) {
 		f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 		win := f.boundary.Add(48 * time.Hour)
 		ent := seedEnt(t, p, f, &win, []txn{{"ACTIVE", f.boundary.Add(-time.Hour)}})
-		// relabel the purchase trigger to the origin under test (amount stays 0 — fixture, not a payment)
 		trigger := origin
 		if origin == "GUEST_SELECTION_FIXTURE" {
-			trigger = "VOUCHER_REDEMPTION" // an ordinary non-admin origin; still zero amount
+			trigger = "VOUCHER_REDEMPTION"
 		}
 		if err := guardedExec(p, commerceFamily, `UPDATE iam_v2.purchases SET trigger=$2, amount_minor=0
 			WHERE id=(SELECT purchase_id FROM iam_v2.entitlements WHERE id=$1)`, ent, trigger); err != nil {
@@ -41,16 +34,14 @@ func TestIntegration_F3_OriginAgnosticConversion(t *testing.T) {
 		if !r.GraceCreated || r.IsEmergency {
 			t.Fatalf("%s: grace=%v emergency=%v, want an ordinary grace regardless of origin", origin, r.GraceCreated, r.IsEmergency)
 		}
-		// nothing financial was recorded by the conversion
 		if n := count(t, p, `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND amount_minor <> 0`, f.stay); n != 0 {
 			t.Fatalf("%s: the conversion recorded a non-zero amount", origin)
 		}
 	}
 }
 
-// F4 — GRANDFATHERING. Devices whose authorization interval contains the boundary keep access on the grace
-// Entitlement and their live sessions are rebound WITHOUT a logout; a device deauthorized BEFORE the boundary
-// is not in the cohort.
+// F4 — devices authorized at the boundary keep access on the grace Entitlement and their sessions are rebound
+// without a logout; a device deauthorized before the boundary is excluded.
 func TestIntegration_F4_Grandfathering(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -84,9 +75,7 @@ func TestIntegration_F4_Grandfathering(t *testing.T) {
 	}
 }
 
-// F5 — VALIDITY WINDOW. An Entitlement whose own validity window had already elapsed at the boundary is NOT
-// valid at the boundary, so no grace is created. (The Stay's Grace eligibility rule is exactly this: an ACTIVE
-// and VALID Entitlement at effective_checkout_at — never a separate configurable eligibility window.)
+// F5 — an Entitlement whose validity window elapsed before the boundary earns no grace.
 func TestIntegration_F5_ValidityWindowAtBoundary(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -94,7 +83,7 @@ func TestIntegration_F5_ValidityWindowAtBoundary(t *testing.T) {
 	c := NewConverter(p)
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	b := f.boundary
-	expired := b.Add(-30 * time.Minute) // window ended BEFORE the boundary
+	expired := b.Add(-30 * time.Minute)
 	ent := seedEnt(t, p, f, &expired, []txn{{"ACTIVE", b.Add(-2 * time.Hour)}})
 	r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
 	if err != nil {
@@ -111,8 +100,8 @@ func TestIntegration_F5_ValidityWindowAtBoundary(t *testing.T) {
 	}
 }
 
-// F6 — EMERGENCY FALLBACK. When the configured grace package does not match the published typed policy, the
-// conversion falls back to the canonical Emergency-Grace catalog rather than granting a policy nobody approved.
+// F6 — a configured grace package that disagrees with the published policy falls back to the canonical
+// Emergency-Grace catalog rather than granting an unapproved policy.
 func TestIntegration_F6_EmergencyFallback(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -129,7 +118,6 @@ func TestIntegration_F6_EmergencyFallback(t *testing.T) {
 		t.Fatalf("grace=%v emergency=%v, want an EMERGENCY grace when the configured package disagrees with the policy",
 			r.GraceCreated, r.IsEmergency)
 	}
-	// the emergency grace came from the canonical system catalog, and the operator can see why
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements e
 		JOIN iam_v2.internet_package_revisions ipr ON ipr.id=e.package_revision_id
 		JOIN iam_v2.internet_packages ip ON ip.id=ipr.package_id
@@ -141,8 +129,7 @@ func TestIntegration_F6_EmergencyFallback(t *testing.T) {
 	}
 }
 
-// F7 — EPISODE IDEMPOTENCY. Converting the same checkout episode twice creates exactly ONE grace and ONE
-// audit row; a REINSTATEMENT starts a new episode, which may convert again on its own boundary.
+// F7 — converting one checkout episode twice creates one grace and one audit row; a reinstatement starts a new episode.
 func TestIntegration_F7_EpisodeIdempotency(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

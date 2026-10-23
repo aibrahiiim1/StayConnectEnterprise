@@ -2,17 +2,9 @@
 
 package main
 
-// POST-STAY PIN, END TO END ON scd, against the real schema: a guest signs in by room, the stay checks out, a
-// PIN is issued, the departed guest presents it, chooses a post-stay package and gets a SESSION that is
-// enforced -- not an entitlement id passed off as a session id.
-//
-// Every scd call below carries EXACTLY the body portald forwards (phase5_poststay_handlers.go: {"device"} on
-// issue, {"device","pin"} on verify, {"device","auth_context_id","package_revision_id"} on convert). scd
-// decodes with DisallowUnknownFields, so a key that drifted on either side fails here. The portald half --
-// that the page's script sends {pin} and then {auth_context_id, package_revision_id}, and that portald turns
-// those into these bodies -- is pinned in cmd/portald/phase5_poststay_flow_test.go against the real template.
-//
-// NO REAL GUEST DATA APPEARS IN THIS FILE.
+// Post-stay PIN end to end on scd: room sign-in, checkout, PIN issue, verify, post-stay package, enforced SESSION.
+// Calls carry exactly the bodies portald forwards (phase5_poststay_handlers.go); scd uses DisallowUnknownFields
+// so drift fails here. The portald half is pinned in cmd/portald/phase5_poststay_flow_test.go. No real guest data.
 
 import (
 	"bytes"
@@ -45,7 +37,7 @@ func newPostStayFixture(t *testing.T) *postStayFixture {
 		srv: f.srv, p3: f.p3, store: poststay.New(f.pool, thr), ctxs: authctx.NewStore(f.pool),
 		contextTTL: 10 * time.Minute, pinValid: 24 * time.Hour,
 	}}
-	// Two free post-stay packages (the guest chooses) and one PRICED one, which must never be offered.
+	// Two free post-stay packages and one priced one, which must never be offered.
 	mk := func(code string, price int64, methods string) string {
 		var rev, pkg string
 		if err := f.pool.QueryRow(context.Background(), `WITH
@@ -89,9 +81,8 @@ func psCall(t *testing.T, h http.HandlerFunc, body map[string]any) psResponse {
 	return out
 }
 
-// signInByRoomThenCheckOut gives the fixture device a real room-sign-in lineage on the stay, then checks the
-// stay out the way the checkout path does: the room entitlement terminated at the boundary, its device
-// interval closed, its session ended, the stay CHECKED_OUT with posting off.
+// signInByRoomThenCheckOut gives the device a room-sign-in lineage, then checks the stay out as the checkout
+// path does (entitlement terminated, device interval closed, session ended, CHECKED_OUT with posting off).
 func (f *postStayFixture) signInByRoomThenCheckOut(t *testing.T) {
 	t.Helper()
 	soleOccupant(t, f.authFixture)
@@ -138,13 +129,13 @@ func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
 	f.signInByRoomThenCheckOut(t)
 	defer f.startEnforcementOwnerAtEpoch(t, 2)()
 
-	// ISSUE: portald forwards {"device"} only.
+	// issue
 	iss := psCall(t, f.ps.issueHandler, map[string]any{"device": f.device()})
 	if iss.Outcome != psOutcomeIssued || iss.PIN == "" {
 		t.Fatalf("no PIN was issued for a checked-out stay this device signed in on: %+v", iss)
 	}
 
-	// VERIFY: portald forwards {"device","pin"}. The reply carries the grantable packages.
+	// verify: the reply carries the grantable packages
 	ver := psCall(t, f.ps.verifyHandler, map[string]any{"device": f.device(), "pin": iss.PIN})
 	if ver.Outcome != psOutcomeVerified || ver.AuthContextID == "" {
 		t.Fatalf("the PIN did not verify: %+v", ver)
@@ -160,7 +151,7 @@ func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
 		t.Fatal("a priced post-stay package was offered; the conversion grants zero-price only")
 	}
 
-	// CONVERT: portald forwards {"device","auth_context_id","package_revision_id"}.
+	// convert
 	conv := psCall(t, f.ps.convertHandler, map[string]any{
 		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
 	if conv.Outcome != psOutcomeGranted || conv.SessionID == "" || conv.EntitlementID == "" {
@@ -170,8 +161,7 @@ func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
 		t.Fatal("the session id is the entitlement id again; no session was opened")
 	}
 
-	// The session is a real, ENFORCED row on the new entitlement, for this device, labelled post-stay; the
-	// entitlement is the chosen package; the stay is POST_STAY_ACTIVE.
+	// The session is an enforced row on the new entitlement, for this device, labelled post-stay; the stay is POST_STAY_ACTIVE.
 	var state, method, sessEnt, pkg, entStatus, stayStatus string
 	if err := f.pool.QueryRow(context.Background(), `
 		SELECT s.state, COALESCE(s.credential_method,''), s.entitlement_id::text, e.package_revision_id::text,
@@ -188,7 +178,7 @@ func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
 			entStatus, stayStatus)
 	}
 
-	// A RETRY of the same conversion (a lost reply) returns the same session rather than refusing.
+	// A retry (lost reply) returns the same session rather than refusing.
 	again := psCall(t, f.ps.convertHandler, map[string]any{
 		"device": f.device(), "auth_context_id": ver.AuthContextID, "package_revision_id": f.pkgB})
 	if again.Outcome != psOutcomeGranted || again.SessionID != conv.SessionID {
@@ -196,8 +186,7 @@ func TestIntegration_PostStay_PINToEnforcedSessionEndToEnd(t *testing.T) {
 	}
 }
 
-// NO PACKAGE, NO GRANT: the conversion without a package_revision_id (what the page used to send) is refused,
-// and it consumes nothing -- the guest can still choose with the same context.
+// A conversion without a package_revision_id is refused and consumes nothing.
 func TestIntegration_PostStay_ConversionWithoutAPackageIsRefused(t *testing.T) {
 	f := newPostStayFixture(t)
 	f.signInByRoomThenCheckOut(t)
@@ -222,8 +211,7 @@ func TestIntegration_PostStay_ConversionWithoutAPackageIsRefused(t *testing.T) {
 	}
 }
 
-// A SITE WITH NO FREE POST-STAY PACKAGE ISSUES NO CONTEXT: the PIN verifies, but nothing could be granted, so
-// the guest gets the uniform answer instead of a context redeemable against nothing.
+// A site with no free post-stay package issues no context: the PIN verifies but nothing could be granted.
 func TestIntegration_PostStay_NoGrantablePackageMeansNoContext(t *testing.T) {
 	f := newPostStayFixture(t)
 	f.signInByRoomThenCheckOut(t)

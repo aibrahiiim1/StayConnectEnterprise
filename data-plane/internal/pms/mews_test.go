@@ -12,19 +12,13 @@ import (
 	"time"
 )
 
-// fakeMews stands in for api.mews.com. It routes three endpoints:
-//
-//	/spaces/getAll        → configurable space list
-//	/reservations/getAll  → configurable reservation list
-//	/customers/getAll     → responds with every customer the caller asks for
-//
-// It also verifies that every request body carries the expected auth
-// fields so contract drift shows up in tests, not in prod.
+// fakeMews serves /spaces/getAll, /reservations/getAll and /customers/getAll and verifies every request carries the
+// auth fields, so contract drift shows in tests.
 type fakeMews struct {
 	mu            sync.Mutex
 	spaces        []fakeSpace
-	reservations  map[string][]fakeRes    // keyed by spaceID
-	customers     map[string]fakeCustomer // keyed by customerID
+	reservations  map[string][]fakeRes
+	customers     map[string]fakeCustomer
 	lastSpacesReq map[string]any
 	srv           *httptest.Server
 }
@@ -63,7 +57,6 @@ func newFakeMews(t *testing.T) *fakeMews {
 		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		// Every request must include the three auth fields.
 		for _, k := range []string{"ClientToken", "AccessToken", "Client"} {
 			if _, ok := body[k]; !ok {
 				t.Errorf("missing %s in request to %s", k, r.URL.Path)
@@ -127,7 +120,7 @@ func newMewsAt(t *testing.T, baseURL string) *Mews {
 func TestMewsConfigureRequiresTokens(t *testing.T) {
 	m := NewMews("x")
 	err := m.Configure(ProviderConfig{
-		Connection: ConnectionConfig{BaseURL: "https://x", APIKey: "a"}, // no client_token
+		Connection: ConnectionConfig{BaseURL: "https://x", APIKey: "a"},
 	})
 	if err == nil {
 		t.Error("missing client_token should fail Configure")
@@ -150,7 +143,6 @@ func TestMewsRefreshSpacesBuildsMap(t *testing.T) {
 	if m.rooms["101"] != "space-101" || m.rooms["102"] != "space-102" {
 		t.Errorf("room map wrong: %+v", m.rooms)
 	}
-	// Outgoing request carries EnterpriseIds = [enterprise-1].
 	ids, _ := f.lastSpacesReq["EnterpriseIds"].([]any)
 	if len(ids) != 1 || ids[0].(string) != "enterprise-1" {
 		t.Errorf("EnterpriseIds wrong: %v", ids)
@@ -216,15 +208,12 @@ func TestMewsValidateGuestNoMatch(t *testing.T) {
 func TestMewsValidateGuestRefetchesOnMiss(t *testing.T) {
 	f := newFakeMews(t)
 	defer f.Close()
-	// Start with empty spaces — first ValidateGuest call will miss the map.
 	f.mu.Lock()
 	f.spaces = nil
 	f.mu.Unlock()
 
 	m := newMewsAt(t, f.srv.URL)
-	// Intentionally skip the initial refreshSpaces — ValidateGuest must do it.
 
-	// Now the room gets added upstream.
 	f.mu.Lock()
 	f.spaces = []fakeSpace{{ID: "space-9", Number: "9"}}
 	f.reservations["space-9"] = []fakeRes{{

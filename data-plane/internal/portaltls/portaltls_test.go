@@ -55,7 +55,6 @@ func parseCSR(t *testing.T, b []byte) *x509.CertificateRequest {
 	return csr
 }
 
-// THE CSR NAMES EXACTLY ONE DNS NAME AND CARRIES A P-256 KEY -- what Central's validation demands.
 func TestTheCSRNamesExactlyOneHostAndCarriesAP256Key(t *testing.T) {
 	s, _, _ := fixture(t)
 	csrPEM, err := s.NewPendingKey(host)
@@ -76,7 +75,6 @@ func TestTheCSRNamesExactlyOneHostAndCarriesAP256Key(t *testing.T) {
 	if !s.HasPending(host) {
 		t.Fatal("the key must be kept as the pending key until its certificate installs")
 	}
-	// The same pending key rebuilds the same public key into a new CSR.
 	again, err := s.PendingCSR(host)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +110,6 @@ func TestInstallVerifiesAndInstallsAtomically(t *testing.T) {
 	if s.HasPending(host) {
 		t.Fatal("the pending key must be gone once installed")
 	}
-	// The installed pair loads as a TLS key pair -- what portald does.
 	if _, err := tls.LoadX509KeyPair(s.CertPath(host), s.KeyPath(host)); err != nil {
 		t.Fatalf("installed pair does not load: %v", err)
 	}
@@ -128,7 +125,6 @@ func TestInstallVerifiesAndInstallsAtomically(t *testing.T) {
 			}
 		}
 	}
-	// No temporary file is left behind.
 	ents, _ := os.ReadDir(s.Dir)
 	for _, e := range ents {
 		if strings.Contains(e.Name(), ".tmp-") {
@@ -195,7 +191,6 @@ func TestInspectDetectsAMissingFileAndAMismatchedPair(t *testing.T) {
 	if _, err := s.Install(host, chain); err != nil {
 		t.Fatal(err)
 	}
-	// A key replaced underneath the certificate.
 	if _, err := s.NewPendingKey(host); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +256,6 @@ func TestAMissingKeyGroupFallsBackToRootOnlyAndSaysSo(t *testing.T) {
 	}
 }
 
-// THE OPT-IN TEST ROOTS: a chain to a root outside the system pool verifies only when that root is configured.
 func TestExtraRootsAreOptInAndCAOnly(t *testing.T) {
 	now := time.Now()
 	ca, _ := portaltlstest.New(now)
@@ -283,7 +277,6 @@ func TestExtraRootsAreOptInAndCAOnly(t *testing.T) {
 	if _, err := s.Install(host, chain); err != nil {
 		t.Fatalf("with the configured test root: %v", err)
 	}
-	// A leaf in a roots bundle is refused.
 	leafFile := filepath.Join(dir, "leaf.pem")
 	_ = os.WriteFile(leafFile, chain, 0o644)
 	if _, err := portaltls.LoadExtraRoots(leafFile); err == nil {

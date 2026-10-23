@@ -8,19 +8,15 @@ import (
 	"time"
 )
 
-// Assignment status as seen by the appliance.
 const (
 	StatusCurrent = "current" // verified and not past expires_at
 	StatusStale   = "stale"   // past expires_at and Central has not refreshed it
 	StatusNone    = "none"    // never assigned
 )
 
-// Record is the appliance's DURABLE assignment state.
-//
-// The signed assignment is configuration, not an auth token: a hotel must keep
-// serving guests through a Central outage, so the last successfully-verified
-// document stays authoritative even after it expires. Previous is retained so a
-// bad adoption can be rolled back.
+// Record is the appliance's durable assignment state. The assignment is configuration, not an auth token: the last
+// verified document stays authoritative after it expires so a hotel serves through a Central outage. Previous is
+// kept for rollback.
 type Record struct {
 	Current  *Document `json:"current"`
 	Previous *Document `json:"previous,omitempty"`
@@ -35,16 +31,12 @@ type Record struct {
 	StaleSince         string `json:"stale_since,omitempty"`
 }
 
-// Store persists the Record as the appliance's LOCAL source of truth for
-// tenant/site. It lives beside (not inside) the identity so a factory reset can
-// wipe either independently.
+// Store persists the Record beside (not inside) the identity so a factory reset can wipe either independently.
 type Store struct{ Dir string }
 
 func (s *Store) path() string { return filepath.Join(s.Dir, "assignment.json") }
 
-// Load returns the persisted record. It accepts the legacy on-disk format (a bare
-// signed Document) and upgrades it in memory, so an appliance that was assigned
-// before this change keeps its assignment across the upgrade.
+// Load accepts the legacy on-disk format (a bare signed Document) and upgrades it in memory.
 func (s *Store) Load() (*Record, error) {
 	b, err := os.ReadFile(s.path())
 	if err != nil {
@@ -66,7 +58,6 @@ func (s *Store) Load() (*Record, error) {
 	}, nil
 }
 
-// Doc returns the currently-applied signed document (nil if none).
 func (s *Store) Doc() *Document {
 	r, err := s.Load()
 	if err != nil || r == nil {
@@ -94,8 +85,7 @@ func (s *Store) save(r *Record) error {
 	return os.Chmod(s.path(), 0o644)
 }
 
-// Adopt atomically applies a newly-verified document: the outgoing one is kept as
-// Previous (rollback-safe), and refresh/staleness metadata is reset.
+// Adopt atomically applies a verified document, keeping the outgoing one as Previous and resetting staleness.
 func (s *Store) Adopt(d *Document) error {
 	if d == nil {
 		return errors.New("nil assignment")
@@ -116,9 +106,8 @@ func (s *Store) Adopt(d *Document) error {
 	return s.save(rec)
 }
 
-// NoteRefresh records a refresh attempt against Central. ok=true means Central
-// answered (even with "no change"), which clears staleness. ok=false only records
-// the attempt — it NEVER downgrades the assignment.
+// NoteRefresh records a refresh attempt. ok=true means Central answered, which clears staleness; ok=false only
+// records the attempt and never downgrades the assignment.
 func (s *Store) NoteRefresh(ok bool) {
 	r, err := s.Load()
 	if err != nil || r == nil {
@@ -129,10 +118,8 @@ func (s *Store) NoteRefresh(ok bool) {
 	if ok {
 		r.LastRefreshSuccess = now
 	}
-	// Staleness tracks the DOCUMENT, not the link: reaching Central does not make an
-	// expired document current — only adopting a newer one does (see Adopt). So keep
-	// stale_since set while the held document is still past its expiry, and clear it
-	// only when the document itself is no longer expired.
+	// Staleness tracks the document, not the link: reaching Central does not make an expired document current, only
+	// adopting a newer one does, so stale_since stays set while the held document is expired.
 	if IsExpired(r.Current, time.Now()) {
 		if r.StaleSince == "" {
 			r.StaleSince = now
@@ -143,7 +130,6 @@ func (s *Store) NoteRefresh(ok bool) {
 	_ = s.save(r)
 }
 
-// Clear removes the local assignment (factory reset only — never expiry).
 func (s *Store) Clear() error {
 	err := os.Remove(s.path())
 	if errors.Is(err, os.ErrNotExist) {
@@ -152,8 +138,7 @@ func (s *Store) Clear() error {
 	return err
 }
 
-// Status reports current/stale/none. Stale means "past expiry and not refreshed";
-// it is an operator warning, NOT a loss of authority.
+// Status reports current/stale/none. Stale is an operator warning, not a loss of authority.
 func (s *Store) Status() string {
 	r, err := s.Load()
 	if err != nil || r == nil || r.Current == nil {
@@ -165,11 +150,8 @@ func (s *Store) Status() string {
 	return StatusCurrent
 }
 
-// Resolved returns the operational tenant/site + state + version.
-//
-// Ownership is derived ONLY from the state of the last verified document. An
-// expired document still grants tenant/site — expiry never unassigns an
-// appliance; only a newer signed unassigned/revoked/decommissioned document does.
+// Resolved returns the operational tenant/site, state and version. Ownership derives only from the last verified
+// document: an expired one still grants tenant/site, and only a newer signed terminal document unassigns.
 func (s *Store) Resolved() (tenantID, siteID, state string, version int64) {
 	r, err := s.Load()
 	if err != nil || r == nil || r.Current == nil {

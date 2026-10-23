@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// TestAEAD_OwnerBoundAAD proves the AES-256-GCM secret decryption is bound to the EXACT owner via AAD: a
-// ciphertext sealed for one (tenant,site,interface,generation) fails authentication under any other owner's
-// AAD, and the nil/empty AAD used before is no longer accepted.
 func TestAEAD_OwnerBoundAAD(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {
@@ -46,8 +43,6 @@ func TestAEAD_OwnerBoundAAD(t *testing.T) {
 	}
 }
 
-// TestOwnerAAD_Deterministic proves the AAD is stable and distinguishes each identity field (length-prefixed,
-// no boundary ambiguity between adjacent fields).
 func TestOwnerAAD_Deterministic(t *testing.T) {
 	a := Interface{TenantID: "t", SiteID: "s", ID: "i"}
 	sg := SecretGeneration{ID: "g"}

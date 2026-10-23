@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-// CARD DISPUTES ARE REACHABLE WHATEVER THE REVIEW FLAG (audit O-23). edged mounts the card-case routes under
-// financial-review even when room-charge review is off; the page then shows the cases alone instead of a broken
-// review queue.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

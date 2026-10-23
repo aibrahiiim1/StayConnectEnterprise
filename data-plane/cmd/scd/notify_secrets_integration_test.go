@@ -20,8 +20,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 )
 
-// NOTIFICATION SECRETS ARE SEALED, OPENED BY SCD ALONE, AND THE PLAINTEXT COLUMN IS RETIRED (contract §7.3).
-// Needs PHASE3_TEST_DSN; skipped otherwise.
+// Notification secrets are sealed, opened by scd alone, and the plaintext column is retired. Needs PHASE3_TEST_DSN; skipped otherwise.
 
 func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
@@ -40,7 +39,6 @@ func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testin
 	if _, err := pool.Exec(ctx, `INSERT INTO public.tenants (id, slug, name) VALUES ($1,'t-notify','t') ON CONFLICT (id) DO NOTHING`, tenant); err != nil {
 		t.Fatal(err)
 	}
-	// An SMTP sender written the way edged now writes it: no api_key, settings in extra.
 	var id string
 	if err := pool.QueryRow(ctx, `INSERT INTO public.notification_providers (tenant_id, channel, kind, enabled, from_address, from_name, extra)
 		VALUES ($1,'email','smtp',true,'wifi@example.com','Wi-Fi','{"host":"smtp.example.com","port":"587","security":"starttls","username":"wifi@example.com"}'::jsonb)
@@ -78,7 +76,6 @@ func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testin
 	if g := store("hunter2"); g != 1 {
 		t.Fatalf("first generation must be 1, got %d", g)
 	}
-	// Nothing readable is stored, and the column is NULL.
 	var apiKey *string
 	var ct []byte
 	if err := pool.QueryRow(ctx, `SELECT p.api_key, g.ciphertext FROM public.notification_providers p
@@ -88,7 +85,6 @@ func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testin
 	if apiKey != nil || bytes.Contains(ct, []byte("hunter2")) {
 		t.Fatal("the secret must be sealed and the plaintext column NULL")
 	}
-	// scd opens it; another key does not.
 	if got, ok := s.openNotifySecret(ctx, id); !ok || got != "hunter2" {
 		t.Fatalf("open: %q %v", got, ok)
 	}
@@ -100,7 +96,6 @@ func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testin
 	if _, ok := (&server{db: pool, tenID: tenant, notifyKey: wk}).openNotifySecret(ctx, id); ok {
 		t.Fatal("a different key must not open the secret")
 	}
-	// A new secret supersedes the old generation; exactly one is current.
 	if g := store("hunter3"); g != 2 {
 		t.Fatalf("second generation must be 2, got %d", g)
 	}
@@ -112,7 +107,6 @@ func TestIntegration_NotificationSecretIsSealedAndPreferredByTheLoader(t *testin
 	if got, _ := s.openNotifySecret(ctx, id); got != "hunter3" {
 		t.Fatalf("the current generation must be the newest, got %q", got)
 	}
-	// The loader builds the SMTP sender from the sealed secret (not the stub).
 	res, err := notifyloader.LoadWithSecrets(ctx, pool, tenant, s.openNotifySecret, s.notifyFallback.mail, s.notifyFallback.sms, s.notifyFallback.whatsapp)
 	if err != nil || res.MailerKind != notifyloader.KindSMTP {
 		t.Fatalf("the loader must build smtp from the sealed secret: kind=%q err=%v", res.MailerKind, err)

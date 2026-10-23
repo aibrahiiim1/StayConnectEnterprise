@@ -1,21 +1,8 @@
 package main
 
-// THE portal_https HEALTH CHECK — the administrator alert the contract requires when the Client Portal is not
-// served over HTTPS (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §1.6, §4).
-//
-// It is not a supervised SERVICE (there is no unit to restart and no process to probe), so it is not one of
-// services(). It is a check over the state scd persists, reported beside the services on Diagnostics, on the
-// Portal HTTPS page, and as an attention item on the Overview.
-//
-// Three levels:
-//
-//	ok        HTTPS is active.
-//	warn      the HTTP fallback is in force and HTTPS has never worked here yet (typically NOT_CONFIGURED:
-//	          Central has no DNS/ACME configuration; NO_HOSTNAME: no hostname allocated; or the first
-//	          certificate is still on its way). Expected on a new appliance; nothing has been lost.
-//	critical  the fallback is in force AFTER HTTPS had been working (a certificate was installed at some
-//	          point), or a served certificate expires within 7 days and has not been renewed. Clients have lost,
-//	          or are about to lose, the HTTPS portal and social sign-in.
+// portal_https health check over the state scd persists (not a supervised service).
+// Levels: ok = HTTPS active; warn = HTTP fallback and HTTPS never worked yet (expected on a new appliance);
+// critical = fallback after HTTPS had worked, or a served certificate expires within 7 days unrenewed.
 
 import (
 	"context"
@@ -30,8 +17,7 @@ const (
 	portalCheckCritical = "critical"
 )
 
-// portalExpiryAlert is how close to expiry an unrenewed certificate becomes an alert. Renewal normally happens
-// at two thirds of a 90-day lifetime (about 30 days left), so 7 days means renewal has failed for weeks.
+// portalExpiryAlert: renewal normally happens ~30 days before expiry, so 7 days left means renewal has failed.
 const portalExpiryAlert = 7 * 24 * time.Hour
 
 type portalHTTPSCheck struct {
@@ -78,8 +64,7 @@ func evaluatePortalHTTPS(st portalTLSState, certs []portalCertificate, now time.
 		}
 		base := "The Client Portal is on the HTTP fallback" + since + ": " + portalFallbackWord(st.FallbackReason) +
 			". Clients can still sign in with a code; emails carry the code only and social sign-in is not offered."
-		// "Having been active" is read from the certificates: a certificate that was ever installed means HTTPS
-		// worked here. Before that, whatever the reason, the portal is still being set up.
+		// Any certificate ever installed means HTTPS worked here; before that the portal is still being set up.
 		if !everInstalled {
 			c.Level, c.Message = portalCheckWarn, base+" HTTPS has not been set up on this appliance yet."
 			return c
@@ -87,8 +72,7 @@ func evaluatePortalHTTPS(st portalTLSState, certs []portalCertificate, now time.
 		c.Level, c.Message = portalCheckCritical, base+" HTTPS was working before and has stopped."
 		return c
 	}
-	// HTTPS is active. A served certificate that is close to expiry and still not renewed is the warning that
-	// comes before the outage.
+	// HTTPS is active; a near-expiry unrenewed certificate warns before the outage.
 	for _, ce := range certs {
 		if ce.InstalledAt == nil || ce.NotAfter == nil {
 			continue
@@ -110,8 +94,7 @@ func evaluatePortalHTTPS(st portalTLSState, certs []portalCertificate, now time.
 	return c
 }
 
-// portalHTTPSHealth reads the persisted state and evaluates it. ok=false when the state is unreadable; the
-// caller then reports nothing rather than a guess.
+// portalHTTPSHealth returns ok=false when the state is unreadable; the caller then reports nothing.
 func (s *server) portalHTTPSHealth(ctx context.Context) (portalHTTPSCheck, bool) {
 	if s.db == nil {
 		return portalHTTPSCheck{}, false

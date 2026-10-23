@@ -2,13 +2,6 @@
 
 package main
 
-// THE ACCOUNTING WRITER BOUNDARY, and the attribution cases that only appear once a Session is REBOUND.
-//
-// Usage is the one kind of Phase-3 state that cannot be reconciled against a second copy: a plausible row is
-// indistinguishable from a real one, and a wrong checkpoint silently changes every future measurement. These
-// tests prove that the only way to write it is the controlled operation, and that a sample is attributed to
-// whichever Entitlement was in force WHEN IT WAS MEASURED — never to whichever one happens to be current.
-
 import (
 	"context"
 	"strings"
@@ -16,12 +9,8 @@ import (
 	"time"
 )
 
-// asProbe creates a NON-OWNER role and gives it FULL table DML on the accounting chain. That is deliberately
-// the worst realistic case: the point of the boundary is that even a role which has every table privilege
-// still cannot write accounting state, because writing it requires BEING the controlled operation. A probe
-// without privileges would fail with "permission denied" and prove nothing about the guard.
-//
-// The role lives only in the disposable test database and is never a service role.
+// asProbe creates a non-owner role with full table DML on the accounting chain: even that role must not be able
+// to write accounting state. A probe without privileges would fail with "permission denied" and prove nothing.
 func asProbe(t *testing.T, f *ingestFixture) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -34,9 +23,7 @@ func asProbe(t *testing.T, f *ingestFixture) {
 	}
 }
 
-// rawDenied runs a statement as the privileged-but-not-owner probe and asserts the controlled-writer boundary
-// refused it. The message must name the boundary: an operator debugging a failed write has to know it was
-// policy, not a transient error.
+// rawDenied asserts the controlled-writer boundary, not some other error, refused the statement.
 func rawDenied(t *testing.T, f *ingestFixture, what, sql string, args ...any) {
 	t.Helper()
 	ctx := context.Background()
@@ -51,16 +38,12 @@ func rawDenied(t *testing.T, f *ingestFixture, what, sql string, args ...any) {
 	if _, err := tx.Exec(ctx, sql, args...); err == nil {
 		t.Fatalf("%s was accepted as a raw write; the controlled-writer boundary did not hold", what)
 	} else if !strings.Contains(err.Error(), "controlled") && !strings.Contains(err.Error(), "immutable") {
-		// The refusal must come from the boundary itself — either the controlled-writer guard or the
-		// append-only/immutability guard in front of it. Anything else (a constraint, a type error, a
-		// permission error) would mean this statement was blocked by accident and a differently-shaped one
-		// might not be.
+		// Only the controlled-writer or immutability guard counts; any other error means it was blocked by accident.
 		t.Fatalf("%s failed for the wrong reason: %v", what, err)
 	}
 }
 
-// rawAllowed runs a statement as the same probe and asserts it SUCCEEDS — the boundary has to be precise, not
-// a blanket lock that would break the ordinary session writes every other subsystem depends on.
+// rawAllowed asserts the boundary is precise, not a blanket lock on ordinary session writes.
 func rawAllowed(t *testing.T, f *ingestFixture, what, sql string, args ...any) {
 	t.Helper()
 	ctx := context.Background()
@@ -77,8 +60,6 @@ func rawAllowed(t *testing.T, f *ingestFixture, what, sql string, args ...any) {
 	}
 }
 
-// Every table in the measurement chain refuses raw runtime DML. The runtime role can call the operation; it
-// cannot write the rows the operation produces.
 func TestIntegration_Acct_RawWritesAreRefused(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -90,21 +71,20 @@ func TestIntegration_Acct_RawWritesAreRefused(t *testing.T) {
 	c.absolutes(t, "br-guest", "10.9.0.1", 1400, 2600)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// INVENTED USAGE: a row with no measurement behind it.
+	// invented usage
 	rawDenied(t, f, "a raw accounting_records INSERT", `
 		INSERT INTO iam_v2.accounting_records (tenant_id, site_id, session_id, sample_seq, bytes_up, bytes_down, sampled_at)
 		VALUES ($1,$2,$3,99,500,500,now())`, f.tenant, f.site, sess)
 
-	// REWRITTEN HISTORY: changing what a stored measurement says.
+	// rewritten history
 	rawDenied(t, f, "a raw accounting_records UPDATE",
 		`UPDATE iam_v2.accounting_records SET bytes_up = 0 WHERE session_id=$1`, sess)
 
-	// ERASED HISTORY.
+	// erased history
 	rawDenied(t, f, "a raw accounting_records DELETE",
 		`DELETE FROM iam_v2.accounting_records WHERE session_id=$1`, sess)
 
-	// THE WORST ONE: moving the value every FUTURE delta is computed from. A checkpoint set back to zero would
-	// make the next ordinary observation bill the guest for the session's entire history.
+	// A checkpoint reset to zero would bill the guest for the session's entire history.
 	rawDenied(t, f, "a raw checkpoint UPDATE",
 		`UPDATE iam_v2.accounting_checkpoints SET prev_bytes_up = 0, prev_bytes_down = 0 WHERE session_id=$1`, sess)
 	rawDenied(t, f, "a raw checkpoint DELETE",
@@ -115,15 +95,13 @@ func TestIntegration_Acct_RawWritesAreRefused(t *testing.T) {
 		   prev_bytes_up, prev_bytes_down, prev_sampled_at, last_classification)
 		VALUES ($1,$2,$3,$4,'br-evil',1,1,0,0,now(),'BASELINED')`, f.tenant, f.site, sess, f.device)
 
-	// SESSION TOTALS: a total moved without a record behind it.
+	// a total moved without a record behind it
 	rawDenied(t, f, "a raw session usage UPDATE",
 		`UPDATE iam_v2.sessions SET bytes_up = bytes_up + 10000 WHERE id=$1`, sess)
 
-	// ...while the ordinary, non-accounting parts of a Session stay writable.
 	rawAllowed(t, f, "an ordinary session write",
 		`UPDATE iam_v2.sessions SET expires_at = now() + interval '1 hour' WHERE id=$1`, sess)
 
-	// and everything that WAS stored is still exactly what the operation stored
 	var up, down int64
 	if err := f.pool.QueryRow(ctx,
 		`SELECT bytes_up, bytes_down FROM iam_v2.accounting_records WHERE session_id=$1`, sess).Scan(&up, &down); err != nil {
@@ -134,9 +112,6 @@ func TestIntegration_Acct_RawWritesAreRefused(t *testing.T) {
 	}
 }
 
-// The controlled function is the ONLY approved writer, and it is not executable by PUBLIC. Together with the
-// table guards this is what makes "zero persistent runtime privileges while DARK" a checkable property rather
-// than a deployment convention.
 func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -155,8 +130,7 @@ func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 	if !secdef {
 		t.Fatal("the accounting operation is not SECURITY DEFINER; the table guards could never be satisfied")
 	}
-	// A SECURITY DEFINER function without a pinned search_path is a privilege-escalation primitive: the caller
-	// chooses which schema the unqualified names inside it resolve to.
+	// An unpinned search_path on a SECURITY DEFINER function lets the caller choose which schema names resolve to.
 	pinned := false
 	for _, c := range cfg {
 		if strings.HasPrefix(c, "search_path=") {
@@ -170,7 +144,7 @@ func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 		t.Fatal("the accounting operation does not pin its search_path")
 	}
 
-	// PUBLIC EXECUTE is revoked: reachability is granted deliberately, per role, at Gate-P — never inherited.
+	// PUBLIC EXECUTE is revoked; access is granted per role.
 	var publicExec bool
 	if err := f.pool.QueryRow(ctx, `
 		SELECT has_function_privilege('public',
@@ -182,8 +156,7 @@ func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 		t.Fatal("PUBLIC can execute the accounting operation")
 	}
 
-	// The table guards resolve the SAME owner, by unambiguous signature. If they resolved a different role, the
-	// operation's own writes would be refused by its own boundary.
+	// The table guards must resolve the same owner, or the operation's own writes would be refused.
 	var guardOwner string
 	if err := f.pool.QueryRow(ctx, `SELECT iam_v2.p3_controlled_writer_owner('accounting')`).Scan(&guardOwner); err != nil {
 		t.Fatalf("the accounting writer family is not resolvable: %v", err)
@@ -192,8 +165,7 @@ func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 		t.Fatalf("the guard expects writer %q but the operation runs as %q", guardOwner, owner)
 	}
 
-	// The superseded sample-sequence function is GONE, not merely unused: a second, weaker way to write
-	// accounting rows is a bypass whether or not anything calls it today.
+	// The superseded function must be gone: a second, weaker writer is a bypass even if unused.
 	var stillThere bool
 	if err := f.pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -205,10 +177,7 @@ func TestIntegration_Acct_ControlledFunctionShape(t *testing.T) {
 	}
 }
 
-// ATTRIBUTION AT SAMPLE TIME, across a Grace rebinding. A sample measured BEFORE the boundary belongs to the
-// pre-boundary Entitlement even if it is ingested after the rebinding — and a sample measured after belongs to
-// the new one. Attributing by "the session's current entitlement" would charge a departing guest's browsing to
-// the grace allowance, and would make a Folio impossible to reconstruct.
+// A sample belongs to the Entitlement bound when it was measured, even if ingested after a grace rebinding.
 func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -221,27 +190,21 @@ func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T)
 
 	c := newFakeCounters()
 	c.absolutes(t, "br-guest", "10.9.0.1", 1000, 1000)
-	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now().Add(-30*time.Minute)) // baseline
+	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now().Add(-30*time.Minute))
 
-	// the guest browses, and that traffic is measured while the FIRST entitlement is bound
 	beforeBoundary := time.Now().Add(-20 * time.Minute)
 	c.absolutes(t, "br-guest", "10.9.0.1", 1300, 1500)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", beforeBoundary); n != 1 {
 		t.Fatal("the pre-boundary observation was not accepted")
 	}
 
-	// the stay ends and the session is rebound to a second (grace) entitlement, through the controlled
-	// operations — the binding history is append-only and gapless by construction
 	boundary := time.Now().Add(-15 * time.Minute)
 	if _, err := f.pool.Exec(ctx, `
 		SELECT iam_v2.terminate_entitlement_at_boundary($1, $2, 'CHECKOUT')`, first, boundary); err != nil {
 		t.Fatalf("terminate at the boundary: %v", err)
 	}
 	second := f.grantEntitlement(t, boundary, nil)
-	// The device is admitted to the successor entitlement BEFORE its session is rebound onto it. That is
-	// what the production checkout-grace path does -- it only rebinds sessions whose device it has already
-	// grandfathered onto the new entitlement -- and Phase-6 migration 0032 now makes the alternative
-	// unrepresentable: a live session may not sit on an entitlement it has no authorization binding for.
+	// Admit the device before rebinding: a live session may not sit on an entitlement it has no authorization binding for.
 	if _, err := f.pool.Exec(ctx,
 		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, second, f.device, boundary); err != nil {
 		t.Fatalf("admit the device to the successor entitlement: %v", err)
@@ -256,7 +219,6 @@ func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T)
 		t.Fatalf("pre-boundary usage = %d/%d, want 300/500", upBefore, downBefore)
 	}
 
-	// traffic measured AFTER the boundary must land on the grace entitlement
 	c.absolutes(t, "br-guest", "10.9.0.1", 1500, 1900)
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now().Add(-5*time.Minute)); n != 1 {
 		t.Fatal("the post-boundary observation was not accepted")
@@ -268,8 +230,7 @@ func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T)
 		t.Fatalf("grace usage = %d/%d, want 200/400", u, d)
 	}
 
-	// and the pre-boundary record is STILL attributed to the pre-boundary entitlement after the rebinding —
-	// the attribution is a property of the interval history, not of a pointer that has since moved
+	// Attribution comes from the interval history, not a pointer that has since moved.
 	if n := f.countRows(t, `
 		SELECT count(*) FROM iam_v2.accounting_records ar
 		 WHERE ar.session_id=$1 AND EXISTS (
@@ -281,9 +242,7 @@ func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T)
 	}
 }
 
-// A sample whose measurement time falls in a gap with NO binding is refused outright. The tempting fallback —
-// "attribute it to the session's current entitlement" — is exactly how usage from an unbound window silently
-// lands on whichever allowance happens to be open.
+// A sample in a gap with no binding is refused, never attributed to the session's current entitlement.
 func TestIntegration_Acct_NoBindingIsRefusedNotAttributedToTheCurrentOne(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -292,10 +251,8 @@ func TestIntegration_Acct_NoBindingIsRefusedNotAttributedToTheCurrentOne(t *test
 	c.absolutes(t, "br-guest", "10.9.0.1", 100, 100)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// close the open interval, leaving the session bound to nothing at all. Closing the latest open interval
-	// once is the only mutation the append-only history permits, and it is exactly what a termination does.
+	// Close the open interval, leaving the session bound to nothing.
 	gap := time.Now()
-	// (session_entitlement_bindings is the 'session_binding' controlled family on the production schema.)
 	if err := opExec(t, f.pool, "session_binding", `
 		UPDATE iam_v2.session_entitlement_bindings SET bound_until=$2
 		 WHERE session_id=$1 AND bound_until IS NULL`, sess, gap.Add(-time.Minute)); err != nil {
@@ -309,8 +266,7 @@ func TestIntegration_Acct_NoBindingIsRefusedNotAttributedToTheCurrentOne(t *test
 	if rows := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, sess); rows != 0 {
 		t.Fatalf("an unattributable sample stored %d records", rows)
 	}
-	// the checkpoint is untouched, so the traffic is not lost: once a binding exists again, the delta is still
-	// measurable from the last known-good value
+	// The checkpoint is untouched, so the traffic is not lost.
 	if up, down, _, _ := f.checkpoint(t, sess); up != 100 || down != 100 {
 		t.Fatalf("a refused sample moved the checkpoint to %d/%d", up, down)
 	}
@@ -319,10 +275,8 @@ func TestIntegration_Acct_NoBindingIsRefusedNotAttributedToTheCurrentOne(t *test
 	}
 }
 
-// A Session's interface is ACCOUNTING IDENTITY and cannot be rewritten. The scenario this used to simulate —
-// a guest appearing on a different bridge — is really a NEW Session, and it must get its OWN counter series:
-// measuring the new bridge's counters against the old bridge's checkpoint would compute a delta between two
-// unrelated series, typically a huge phantom burst or a regression that stalls accounting entirely.
+// A guest on a different bridge is a new Session with its own counter series; measuring it against the old
+// checkpoint would compute a delta between unrelated series.
 func TestIntegration_Acct_ADifferentBridgeIsADifferentSeries(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -331,14 +285,11 @@ func TestIntegration_Acct_ADifferentBridgeIsADifferentSeries(t *testing.T) {
 	c.absolutes(t, "br-guest", "10.9.0.1", 5000, 9000)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// rewriting the interface in place is refused: it would retroactively change which physical counters this
-	// Session is measured against
 	rawDenied(t, f, "a raw session interface rewrite",
 		`UPDATE iam_v2.sessions SET ingress_interface='br-g301' WHERE id=$1`, sessA)
 	rawDenied(t, f, "a raw session address rewrite",
 		`UPDATE iam_v2.sessions SET ip='10.9.0.77'::inet WHERE id=$1`, sessA)
 
-	// the real flow: the guest reappears on another guest bridge as a NEW session
 	started := time.Now().Add(-time.Hour)
 	entB := f.grantEntitlementFor(t, f.device2, started)
 	sessB := f.openSessionOn(t, entB, f.device2, started, "10.9.0.2", "br-g301")
@@ -351,14 +302,13 @@ func TestIntegration_Acct_ADifferentBridgeIsADifferentSeries(t *testing.T) {
 	if n := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id IN ($1,$2)`, sessA, sessB); n != 2 {
 		t.Fatalf("checkpoints = %d, want one per counter series", n)
 	}
-	// and nothing was billed for the apparent "drop" from 5000 to 10 across the two series
 	if rows := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id IN ($1,$2)`, sessA, sessB); rows != 0 {
 		t.Fatalf("two separate series produced %d accounting rows", rows)
 	}
 }
 
-// TWO DEVICES SHARING ONE ENTITLEMENT are measured independently and their usage adds up. A checkpoint keyed
-// only by session (or only by class minor) would let one device's counter be used as the other's baseline.
+// Devices sharing one entitlement are measured independently; a checkpoint keyed only by session or class
+// minor would use one device's counter as the other's baseline.
 func TestIntegration_Acct_TwoDevicesOnOneEntitlement(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -389,9 +339,7 @@ func TestIntegration_Acct_TwoDevicesOnOneEntitlement(t *testing.T) {
 	}
 }
 
-// While DARK, the accounting pass issues NO Phase-3 query and writes nothing — and the legacy writer keeps
-// ownership. A dark appliance that had started writing iam_v2 rows would be the single worst outcome of this
-// whole subsystem: unreviewed state, on a site that never enabled the feature.
+// While dark, the accounting pass issues no query, writes nothing and leaves the legacy writer in charge.
 func TestIntegration_Acct_DarkWritesNothingAnywhere(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -417,15 +365,8 @@ func TestIntegration_Acct_DarkWritesNothingAnywhere(t *testing.T) {
 	}
 }
 
-// POISON TESTS for the attribution fallback that used to exist.
-//
-// The delayed-detection trigger previously answered "which Entitlement owned this sample" by falling back to
-// iam_v2.sessions.entitlement_id when no binding interval covered sampled_at. That pointer says who owns the
-// session NOW; a sample asks who owned it THEN. The two differ for exactly the window that matters — after a
-// Grace rebinding — and the fallback also silently rescued rows the ingestion operation would have refused.
-//
-// These tests force the unattributable case directly at the table, as a forged row would, and prove nothing
-// is created: no accounting row, no delayed row, no session-total change, no checkpoint advance.
+// A forged row with no binding at its sample time must not fall back to sessions.entitlement_id (who owns the
+// session now, not then): nothing is created and nothing moves.
 func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -441,10 +382,8 @@ func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t 
 	ckUp, ckDown, _, _ := f.checkpoint(t, sess)
 	records := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, sess)
 
-	// close the interval so the session is bound to NOTHING at the forged sample's time, while
-	// sessions.entitlement_id still points at the entitlement — precisely the state the old fallback used.
+	// Leave sessions.entitlement_id pointing at the entitlement but unbound at the forged sample's time.
 	gap := time.Now()
-	// (session_entitlement_bindings is the 'session_binding' controlled family on the production schema.)
 	if err := opExec(t, f.pool, "session_binding", `
 		UPDATE iam_v2.session_entitlement_bindings SET bound_until=$2
 		 WHERE session_id=$1 AND bound_until IS NULL`, sess, gap.Add(-time.Minute)); err != nil {
@@ -458,7 +397,6 @@ func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t 
 		t.Fatal("setup: the session lost its current pointer, so this test would prove nothing")
 	}
 
-	// A forged INSERT straight at the table — the shape a compromised or buggy writer would produce.
 	_, err := f.pool.Exec(ctx, `
 		INSERT INTO iam_v2.accounting_records (tenant_id, site_id, session_id, sample_seq, bytes_up, bytes_down, sampled_at)
 		VALUES ($1,$2,$3,9999,777,888,$4)`, f.tenant, f.site, sess, gap)
@@ -469,7 +407,6 @@ func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t 
 		t.Fatalf("the forged row was refused for the wrong reason: %v", err)
 	}
 
-	// nothing moved
 	if n := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, sess); n != records {
 		t.Fatalf("accounting rows changed from %d to %d", records, n)
 	}
@@ -484,8 +421,7 @@ func TestIntegration_Acct_ForgedRowCannotBeAttributedThroughTheCurrentPointer(t 
 	}
 }
 
-// The controlled operation and the triggers beneath it must give the SAME binding answer. If the operation
-// refuses a sample the triggers would have attributed (or vice versa), the boundary has a seam.
+// The operation and the triggers beneath it must give the same binding answer, or the boundary has a seam.
 func TestIntegration_Acct_OperationAndTriggersShareOneBindingAnswer(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -494,7 +430,6 @@ func TestIntegration_Acct_OperationAndTriggersShareOneBindingAnswer(t *testing.T
 	c.absolutes(t, "br-guest", "10.9.0.1", 10, 10)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// the resolver is the single source of truth; ask it directly at a covered and an uncovered instant
 	var covered, uncovered *string
 	if err := f.pool.QueryRow(ctx,
 		`SELECT iam_v2.p3_entitlement_at($1, now())::text`, sess).Scan(&covered); err != nil {
@@ -511,7 +446,6 @@ func TestIntegration_Acct_OperationAndTriggersShareOneBindingAnswer(t *testing.T
 		t.Fatalf("the resolver attributed a pre-session instant to %s", *uncovered)
 	}
 
-	// and the operation agrees: a sample before the session started is refused, not attributed
 	if _, err := f.pool.Exec(ctx, `
 		SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,'br-guest',4097,1,50,50, now() - interval '10 hours')`,
 		f.tenant, f.site, sess, f.device); err == nil {
@@ -519,13 +453,8 @@ func TestIntegration_Acct_OperationAndTriggersShareOneBindingAnswer(t *testing.T
 	}
 }
 
-// THE COUNTER-SOURCE BINDING, validated inside PostgreSQL.
-//
-// acctd derives the device, bridge and class minor before it calls. Every one of these tests supplies a
-// value acctd would never produce, because the operation must be able to refuse a caller that computed them
-// wrongly, was fed the wrong Session, or is replaying one guest's counters under another's identity. If the
-// only thing standing between a wrong tuple and a stored measurement is the daemon's own arithmetic, the
-// database is not a boundary — it is a recorder.
+// The counter-source binding is validated inside PostgreSQL: values acctd would never produce must be refused,
+// or the database is a recorder rather than a boundary.
 func TestIntegration_Acct_SourceBindingIsProvenInTheDatabase(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -534,7 +463,6 @@ func TestIntegration_Acct_SourceBindingIsProvenInTheDatabase(t *testing.T) {
 	c.absolutes(t, "br-guest", "10.9.0.1", 1000, 1000)
 	f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now())
 
-	// the class this session's address really occupies, computed by the database itself
 	var trueMinor int
 	if err := f.pool.QueryRow(ctx,
 		`SELECT iam_v2.p3_expected_class_minor(ip) FROM iam_v2.sessions WHERE id=$1`, sess).Scan(&trueMinor); err != nil {
@@ -568,7 +496,6 @@ func TestIntegration_Acct_SourceBindingIsProvenInTheDatabase(t *testing.T) {
 		}
 	}
 
-	// and none of them created a second counter series to accrue against
 	if n := f.countRows(t, `SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id=$1`, sess); n != 1 {
 		t.Fatalf("checkpoints for the session = %d, want exactly the one authoritative series", n)
 	}
@@ -577,15 +504,13 @@ func TestIntegration_Acct_SourceBindingIsProvenInTheDatabase(t *testing.T) {
 	}
 }
 
-// A Session that records no interface cannot be measured at all. Substituting a default would be the caller
-// deciding where the counters came from — exactly what the in-database validation exists to prevent.
+// A Session with no recorded interface cannot be measured; a default would let the caller decide the counter source.
 func TestIntegration_Acct_SessionWithoutAnInterfaceIsNotMeasurable(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	started := time.Now().Add(-time.Hour)
 	ent := f.grantEntitlement(t, started, nil)
-	// Admitted first, for the same reason as everywhere else: a live session with no authorization binding
-	// is a state the product cannot produce and migration 0032 refuses.
+	// A live session with no authorization binding is refused, so admit the device first.
 	if _, err := f.pool.Exec(ctx,
 		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, ent, f.device, started); err != nil {
 		t.Fatalf("authorize the device: %v", err)
@@ -604,7 +529,6 @@ func TestIntegration_Acct_SessionWithoutAnInterfaceIsNotMeasurable(t *testing.T)
 		t.Fatal("a session with no ingress interface was measured against a caller-supplied bridge")
 	}
 
-	// and the pass itself skips it and says so, rather than quietly accounting nothing
 	c := newFakeCounters()
 	c.absolutes(t, "br-guest", "10.9.0.5", 10, 10)
 	ep := newEpochs()
@@ -617,9 +541,8 @@ func TestIntegration_Acct_SessionWithoutAnInterfaceIsNotMeasurable(t *testing.T)
 	}
 }
 
-// TEMPORAL ORDER within one counter series. Time only moves forward, and the checkpoint's persisted
-// prev_sampled_at is what makes that enforceable: without comparing against it, a delayed delivery of an
-// OLDER reading would be treated as new usage and dated into a window that may already be frozen.
+// Time only moves forward within a series: without comparing against prev_sampled_at, a late OLDER reading
+// would count as new usage dated into a possibly frozen window.
 func TestIntegration_Acct_SampleTimeCannotMoveBackwards(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -642,23 +565,20 @@ func TestIntegration_Acct_SampleTimeCannotMoveBackwards(t *testing.T) {
 		t.Fatalf("second observation: %s %v", c, err)
 	}
 
-	// an OLDER observation with changed counters, arriving late
 	if _, err := ing(1500, 1700, t0.Add(time.Minute)); err == nil {
 		t.Fatal("an observation dated before the last accepted one was accepted as new usage")
 	} else if !strings.Contains(err.Error(), "ACCT_STALE_SAMPLE") {
 		t.Fatalf("wrong refusal: %v", err)
 	}
 
-	// an EXACT replay is the uncertain-commit case: it must report what was PERSISTED, and it must be
-	// distinguishable from a fresh acceptance so a retry is not counted as new traffic
+	// An exact replay (uncertain commit) reports what was persisted, marked as a replay, so a retry is not new traffic.
 	if c, err := ing(1400, 1600, t1); err != nil {
 		t.Fatalf("exact replay: %v", err)
 	} else if c != "REPLAY:ACCEPTED" {
 		t.Fatalf("an exact replay reported %q; want the persisted classification, marked as a replay", c)
 	}
 
-	// the SAME instant with ADVANCED counters is real usage measured by a coarse clock, not a contradiction:
-	// refusing it would discard measured bytes to defend an assumption about the caller's clock resolution
+	// The same instant with advanced counters is real usage on a coarse clock; refusing it would discard bytes.
 	if c, err := ing(1450, 1650, t1); err != nil {
 		t.Fatalf("a same-instant advance was refused: %v", err)
 	} else if c != "ACCEPTED" {
@@ -672,15 +592,12 @@ func TestIntegration_Acct_SampleTimeCannotMoveBackwards(t *testing.T) {
 		t.Fatalf("the checkpoint is at %d/%d", u, d)
 	}
 
-	// and forward progress still works
 	if c, err := ing(1500, 1700, t1.Add(time.Minute)); err != nil || c != "ACCEPTED" {
 		t.Fatalf("a later observation was refused: %s %v", c, err)
 	}
 }
 
-// A delayed delivery must not make a CURRENT delta appear to belong to a historical Entitlement. The
-// watermark freezes a boundary decision; a sample dated into that frozen window is recorded as DELAYED
-// evidence and must not rewrite the frozen totals.
+// A sample dated into a frozen watermark window is recorded as DELAYED evidence and must not rewrite the frozen totals.
 func TestIntegration_Acct_DelayedDeliveryCannotRewriteAFrozenWindow(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -702,9 +619,7 @@ func TestIntegration_Acct_DelayedDeliveryCannotRewriteAFrozenWindow(t *testing.T
 		t.Fatal(err)
 	}
 
-	// freeze the decision as a boundary would
 	boundary := t0.Add(10 * time.Minute)
-	// (entitlement_boundary_watermarks is the 'checkout_conversion' controlled family on the production schema.)
 	var wm string
 	wtx := opTx(t, f.pool, "checkout_conversion")
 	defer func() { _ = wtx.Rollback(ctx) }()
@@ -726,7 +641,6 @@ func TestIntegration_Acct_DelayedDeliveryCannotRewriteAFrozenWindow(t *testing.T
 		t.Fatal(err)
 	}
 
-	// a sample measured inside the frozen window but delivered now
 	if c, err := ing(700, 800, t0.Add(8*time.Minute)); err != nil {
 		t.Fatalf("the delayed observation was refused outright: %v", err)
 	} else if c != "DELAYED" {
@@ -746,19 +660,13 @@ func TestIntegration_Acct_DelayedDeliveryCannotRewriteAFrozenWindow(t *testing.T
 	}
 }
 
-// THE FIRST-EPOCH HOLE. Between "the class exists" and "acctd's first periodic pass reads it" the guest is
-// already online. Without a registered origin that first observation has nothing to subtract from, so it
-// BASELINES — and everything used in that window is discarded. It is invisible precisely because a baseline
-// is a normal outcome: nothing looks wrong while every guest's first seconds vanish.
-//
-// This drives the real sequence: the TC owner registers what it read at creation, the guest uses the network,
-// and only then does the first accounting pass run.
+// Without a registered origin, the first observation only baselines and traffic before the first pass is lost
+// silently. The TC owner registers what it read at creation, then the guest uses the network, then the first pass runs.
 func TestIntegration_Acct_TrafficBeforeTheFirstPassIsBilledExactlyOnce(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
 	ent, sess, ep := f.live(t, "10.9.0.1", "br-guest")
 
-	// netd creates the class and registers what the counters actually read at that instant
 	created := time.Now().Add(-2 * time.Minute)
 	var outcome string
 	if err := f.pool.QueryRow(ctx, `
@@ -770,7 +678,6 @@ func TestIntegration_Acct_TrafficBeforeTheFirstPassIsBilledExactlyOnce(t *testin
 		t.Fatalf("origin outcome = %q", outcome)
 	}
 
-	// the guest browses BEFORE the first periodic pass
 	c := newFakeCounters()
 	c.absolutes(t, "br-guest", "10.9.0.1", 400, 900)
 
@@ -781,7 +688,6 @@ func TestIntegration_Acct_TrafficBeforeTheFirstPassIsBilledExactlyOnce(t *testin
 		t.Fatalf("usage = %d/%d, want the whole 400/900 used before the first pass", u, d)
 	}
 
-	// and it is billed ONCE: a second pass with unchanged counters adds nothing
 	if n := f.p3.accountingPass(ctx, c, ep, "br-lan", time.Now()); n != 0 {
 		t.Fatalf("a second pass re-billed %d observations", n)
 	}
@@ -790,8 +696,7 @@ func TestIntegration_Acct_TrafficBeforeTheFirstPassIsBilledExactlyOnce(t *testin
 	}
 }
 
-// Re-registering the SAME generation must not move the origin forward. If it did, every restart of the TC
-// owner would forgive whatever had been used since the class was created — the exact loss the origin closes.
+// Re-registering the same generation must not move the origin, or every TC-owner restart forgives usage.
 func TestIntegration_Acct_ReRegisteringOneGenerationDoesNotForgiveUsage(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()
@@ -811,7 +716,6 @@ func TestIntegration_Acct_ReRegisteringOneGenerationDoesNotForgiveUsage(t *testi
 	if out := reg(1, 0, 0, t0); out != "ORIGIN_REGISTERED" {
 		t.Fatalf("first registration = %q", out)
 	}
-	// the guest uses 300/300, then the owner restarts and re-registers the SAME generation
 	if out := reg(1, 300, 300, t0.Add(time.Minute)); out != "ORIGIN_UNCHANGED" {
 		t.Fatalf("re-registering one generation returned %q; it must not move the origin", out)
 	}
@@ -824,7 +728,6 @@ func TestIntegration_Acct_ReRegisteringOneGenerationDoesNotForgiveUsage(t *testi
 		t.Fatalf("usage = %d/%d; re-registration forgave real traffic", u, d)
 	}
 
-	// a NEW generation legitimately restarts the series from its stated origin
 	if out := reg(2, 0, 0, time.Now()); out != "ORIGIN_RESET" {
 		t.Fatalf("a new generation returned %q", out)
 	}
@@ -833,8 +736,7 @@ func TestIntegration_Acct_ReRegisteringOneGenerationDoesNotForgiveUsage(t *testi
 	}
 }
 
-// An origin that does not describe the Session is refused, exactly like an observation that does not: it IS
-// a checkpoint write, and a pre-seeded checkpoint for someone else's series is the same attack surface.
+// An origin that does not describe the Session is refused like an observation: it is a checkpoint write.
 func TestIntegration_Acct_ClassOriginIsSourceBound(t *testing.T) {
 	f := newIngest(t, 0)
 	ctx := context.Background()

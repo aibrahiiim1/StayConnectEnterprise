@@ -6,11 +6,8 @@ import (
 	"log/slog"
 )
 
-// Code is the CLOSED, bounded vocabulary of machine error codes that pmsd may persist to
-// iam_v2.pms_interface_runtime, emit as a metric label, or write to structured logs. Nothing derived from
-// an arbitrary err.Error() string is ever persisted or exported — only a Code from this set. This prevents
-// a PMS endpoint, guest field, room number, reservation number, Folio number, secret, or stack trace from
-// leaking into durable state or telemetry.
+// Code is the closed vocabulary of error codes pmsd may persist, label or log. Nothing derived from err.Error()
+// is ever exported, so no PMS endpoint, guest field, room, reservation, folio or secret can leak.
 type Code string
 
 const (
@@ -39,8 +36,6 @@ const (
 	CodeOutboundBlocked     Code = "OUTBOUND_FRAME_BLOCKED"
 	CodeUnclassified        Code = "UNCLASSIFIED" // never carries the raw text
 
-	// REST provider failures (polled HTTPS connectors). Bounded like every other code: the provider's
-	// response body, URL and credential never reach one.
 	CodeProviderAuth        Code = "PROVIDER_AUTH_FAILED"      // 401/403 or a refused token request
 	CodeProviderRateLimited Code = "PROVIDER_RATE_LIMITED"     // 429 persisted past the bounded retries
 	CodeProviderTimeout     Code = "PROVIDER_TIMEOUT"          // request timeout / 408 / 504 after retries
@@ -49,7 +44,6 @@ const (
 	CodeProviderRejected    Code = "PROVIDER_REQUEST_REJECTED" // any other 4xx
 )
 
-// codeSet is the authoritative allowlist; Valid() and tests assert nothing outside it is ever produced.
 var codeSet = map[Code]struct{}{
 	CodeNone: {}, CodeDBUnavailable: {}, CodeLockNotAcquired: {}, CodeLockSessionLost: {},
 	CodeInterfaceDisabled: {}, CodeAssignmentChanged: {}, CodeRevisionInvalid: {}, CodeRevisionChanged: {},
@@ -69,8 +63,7 @@ func (c Code) String() string {
 	return string(c)
 }
 
-// typedErr binds a Code to an underlying error for local diagnostics only. The underlying error is NEVER
-// persisted or exported — only Code() is.
+// typedErr binds a Code to an underlying error for local diagnostics; only Code() is ever persisted or exported.
 type typedErr struct {
 	code Code
 	err  error
@@ -80,7 +73,6 @@ func (e *typedErr) Error() string { return e.code.String() } // deliberately no 
 func (e *typedErr) Unwrap() error { return e.err }
 func (e *typedErr) Code() Code    { return e.code }
 
-// coded wraps err with a machine Code. If err already carries a Code it is preserved.
 func coded(code Code, err error) error {
 	if err == nil {
 		return &typedErr{code: code}
@@ -88,8 +80,7 @@ func coded(code Code, err error) error {
 	return &typedErr{code: code, err: err}
 }
 
-// Classify returns the bounded Code for an error. It inspects typed wrappers and structural conditions
-// only; it NEVER inspects or returns err.Error() text.
+// Classify returns the bounded Code for an error from its type only, never from err.Error() text.
 func Classify(err error) Code {
 	if err == nil {
 		return CodeNone
@@ -114,8 +105,7 @@ func Classify(err error) Code {
 	}
 }
 
-// Stage is a bounded lifecycle-stage label (closed set) safe for logs/metrics. It describes WHERE in the
-// ownership cycle an event happened, never WHAT data was involved.
+// Stage is a closed-set lifecycle label: where in the ownership cycle, never what data.
 type Stage string
 
 const (
@@ -144,8 +134,7 @@ func (s Stage) safe() string {
 	return string(s)
 }
 
-// LogEvent is the CLOSED vocabulary of structured log-line names pmsd may emit. A caller-provided free-text
-// message never reaches the logs — only a LogEvent from this set.
+// LogEvent is the closed vocabulary of log-line names; free-text messages never reach the logs.
 type LogEvent string
 
 const (
@@ -166,17 +155,7 @@ const (
 	EventSupervisorAssignChange LogEvent = "SUPERVISOR_ASSIGNMENT_CHANGED"
 	EventSupervisorNoAssignment LogEvent = "SUPERVISOR_NO_ASSIGNMENT"
 
-	// THE SUCCESS PATH, WHICH USED TO EMIT NOTHING AT ALL.
-	//
-	// Every event above is a failure. That was the entire vocabulary, so a recovery was INVISIBLE: on
-	// 2026-09-05 the Protel socket was restored, pmsd reconnected in-process, self-requested a resync and
-	// published generation 184 — and the journal showed a wall of DIAL_FAILED lines and then silence. An
-	// operator could not tell a recovered feed from a dead one, because both look identical when the only
-	// thing a daemon says out loud is what went wrong.
-	//
-	// These three name the moments an operator is actually watching for. They carry the same bounded machine
-	// fields as every other line: an interface UUID, a generation, a stage, a count. No guest, reservation,
-	// room, name or PMS payload value can reach them — SafeFields is still the only way in.
+	// Success-path events, so a recovered feed is distinguishable from a dead one in the journal.
 	EventWorkerConnected       LogEvent = "WORKER_CONNECTED"
 	EventWorkerResyncRequested LogEvent = "WORKER_RESYNC_REQUESTED"
 	EventWorkerResyncPublished LogEvent = "WORKER_RESYNC_PUBLISHED"
@@ -200,14 +179,12 @@ func (e LogEvent) safe() string {
 	return string(e)
 }
 
-// UUIDValue is a parsed-and-validated identity for logging. An unparseable identity renders as a fixed
-// placeholder — an arbitrary string can never reach a log line through it.
+// UUIDValue is a validated identity for logging; an unparseable one renders as a fixed placeholder.
 type UUIDValue struct {
 	s     string
 	valid bool
 }
 
-// NewUUIDValue validates s as a canonical UUID; invalid input yields a placeholder value object.
 func NewUUIDValue(s string) UUIDValue {
 	_, err := parseUUID16(s)
 	return UUIDValue{s: s, valid: err == nil}
@@ -219,22 +196,18 @@ func (u UUIDValue) String() string {
 	return u.s
 }
 
-// SafeFields are the ONLY values allowed into a pmsd structured log line. Every field is a bounded machine
-// value — a validated UUID value object, a monotonic counter, a closed-set stage label — NEVER
-// PMS/guest/secret-derived text. The raw error is deliberately absent: it stays in memory for control flow
-// (Classify inspects its type only) and is never rendered, redacted, or serialized.
+// SafeFields are the only values allowed into a pmsd log line: bounded machine values, never PMS, guest or
+// secret-derived text. The raw error is deliberately absent and never rendered.
 type SafeFields struct {
 	InterfaceID UUIDValue
 	Generation  int64
 	Stage       Stage
 	Attempt     int
-	// Records is a count of domain records in a completed sync. It is a magnitude and nothing else: how many,
-	// never which. Only the progress lines render it, so no existing failure line changes shape.
+	// Records is a count of domain records in a completed sync, rendered by progress lines only.
 	Records int64
 }
 
-// logEvent emits a CLOSED LogEvent + Code + SafeFields. It receives no free-text message and no raw error;
-// every field is validated/bounded, so no canary can pass through. Nil logger is a no-op.
+// logEvent emits a closed LogEvent, Code and SafeFields; it takes no free text or raw error. A nil logger is a no-op.
 func logEvent(log *slog.Logger, event LogEvent, code Code, sf SafeFields) {
 	if log == nil {
 		return
@@ -248,10 +221,7 @@ func logEvent(log *slog.Logger, event LogEvent, code Code, sf SafeFields) {
 	)
 }
 
-// logProgress is logEvent for the things that went RIGHT: same closed vocabulary, same bounded fields, same
-// impossibility of free text — at INFO, because a reconnect is not an error and an operator filtering on
-// severity should still see it. It exists because the absence of one of these lines was, for a whole day,
-// indistinguishable from an outage.
+// logProgress is logEvent at INFO for successes, so operators filtering on severity still see a reconnect.
 func logProgress(log *slog.Logger, event LogEvent, sf SafeFields) {
 	if log == nil {
 		return

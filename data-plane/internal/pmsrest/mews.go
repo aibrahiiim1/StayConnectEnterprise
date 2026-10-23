@@ -1,8 +1,6 @@
 package pmsrest
 
-// Mews Connector API client.
-//
-// Documentation (verified 2026-09-24):
+// Mews Connector API references:
 //   - https://docs.mews.com/connector-api/operations/reservations      reservations/getAll/2023-06-06
 //   - https://docs.mews.com/connector-api/operations/customers         customers/getAll
 //   - https://docs.mews.com/connector-api/operations/companionships    companionships/getAll
@@ -25,12 +23,10 @@ import (
 
 const mewsClientName = "StayConnect Enterprise 1.0"
 
-// mewsPage is the Limitation object; Count is at most 1000 per the pagination guideline.
 var mewsPage = 1000 // a var only so contract tests can page with small pages
 
-// mewsCollidingLookback bounds the CollidingUtc window used to list in-house reservations. A Started
-// reservation's interval intersects [now-30d, now+1d] unless its scheduled end is more than 30 days past,
-// which would be an in-house guest a month past departure. The API caps any interval at three months.
+// mewsCollidingLookback bounds the CollidingUtc window for in-house reservations: a Started reservation
+// intersects [now-30d, now+1d] unless its end is over 30 days past. The API caps intervals at three months.
 const mewsCollidingLookback = 30 * 24 * time.Hour
 
 type mewsClient struct {
@@ -100,8 +96,7 @@ func (c *mewsClient) scope(p map[string]any) map[string]any {
 	return p
 }
 
-// reservations pages reservations/getAll/2023-06-06 with the given filters until the cursor is null or a
-// page is short. max > 0 stops after that many (the probe).
+// max > 0 stops after that many reservations (the probe).
 func (c *mewsClient) reservations(ctx context.Context, filters map[string]any, max int) ([]mewsReservation, error) {
 	var out []mewsReservation
 	var cursor *string
@@ -226,7 +221,6 @@ func (c *mewsClient) customers(ctx context.Context, ids []string) (map[string]me
 	return out, nil
 }
 
-// companions returns reservation id -> companion customer ids (the reservation owner excluded later).
 func (c *mewsClient) companions(ctx context.Context, resIDs []string) (map[string][]string, error) {
 	out := map[string][]string{}
 	for start := 0; start < len(resIDs); start += mewsPage {
@@ -268,7 +262,6 @@ func (c *mewsClient) companions(ctx context.Context, resIDs []string) (map[strin
 	return out, nil
 }
 
-// normalise resolves names, rooms and companions for a batch of raw reservations.
 func (c *mewsClient) normalise(ctx context.Context, raw []mewsReservation) ([]Reservation, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -355,8 +348,7 @@ func (c *mewsClient) normalise(ctx context.Context, raw []mewsReservation) ([]Re
 		}
 		res.Arrival = localDate(parseInstant(arr), loc)
 		res.Departure = localDate(parseInstant(dep), loc)
-		// Occupants: the owner (primary) plus every companion. Reported only when there is more than the
-		// primary to say, so a single-guest stay carries no sharer list at all.
+		// Sharers only when there is more than the primary.
 		if cs := comp[r.ID]; len(cs) > 0 {
 			seen := map[string]bool{}
 			if n, ok := names[owner]; ok && owner != "" {

@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
 import { agoWords, kindLabel, ledgerHeadline, STORAGE_KINDS, type LedgerStatus } from "@/lib/ledger-words";
 
-// The erasure ledger card: the secondary storage is mandatory, set up and verified here; the two copies are
-// shown plainly, and a problem with the ledger is never presented as a problem with guest internet access.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();

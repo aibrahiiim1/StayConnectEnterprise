@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// joinBridge answers /v1/sessions/activate with the given status/body and records what it was asked.
 func joinBridge(t *testing.T, status int, body string, got *map[string]any) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,8 +43,7 @@ func joinReply(method string) []byte {
 	return b
 }
 
-// A guest whose credential already holds ACTIVE access joins it: no package page, and the activation carries
-// this device's own sign-in, which is what admits a device other than the purchaser.
+// A guest whose credential already holds ACTIVE access joins it, and the activation carries this device's own sign-in.
 func TestAlreadyEntitledSignInJoinsInsteadOfBuying(t *testing.T) {
 	var got map[string]any
 	h := joinBridge(t, http.StatusOK, `{"session_id":"s-9","enforced":true}`, &got)
@@ -63,8 +61,7 @@ func TestAlreadyEntitledSignInJoinsInsteadOfBuying(t *testing.T) {
 	}
 }
 
-// A FULL DEVICE LIMIT LEADS TO THE CHOICE OF WHICH DEVICE TO REPLACE (device_pages.go), with this sign-in kept
-// for it -- not to a sentence with nothing to act on.
+// A full device limit leads to the choice of which device to replace (device_pages.go), keeping this sign-in.
 func TestJoinOverTheDeviceLimitOffersReplacement(t *testing.T) {
 	var got map[string]any
 	h := joinBridge(t, http.StatusConflict, `{"error":"MAX_DEVICES_REACHED"}`, &got)

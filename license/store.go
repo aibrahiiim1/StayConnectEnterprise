@@ -10,50 +10,24 @@ import (
 	"time"
 )
 
-// Store persists the appliance's license material under a directory
-// (default /etc/stayconnect/license):
-//
-//	current.json    — latest verified Envelope
-//	state.json      — monotonic anti-rollback record + validation timestamps
-//	revoked.json    — license_ids named by authenticated revocation notices
-//
-// Anti-rollback rules enforced here:
-//   - a newly installed document must not have issued_at older than the
-//     currently installed one (prevents replaying an old, more generous
-//     license after a downgrade or revocation);
-//   - the evaluation clock never runs backwards: we persist the highest
-//     wall-clock time observed and evaluate against max(now, high-water)
-//     when the clock has been set back beyond tolerance.
+// Persisted version and clock high-water marks prevent license replay and clock rollback.
 type Store struct {
 	dir      string
 	verifier *Verifier
 }
 
-// ErrRollback is returned when an older/superseded/replayed license is
-// presented. Callers surface it to operators as LICENSE_ROLLBACK_REJECTED.
 var ErrRollback = errors.New("LICENSE_ROLLBACK_REJECTED: license rollback rejected")
 
 const clockRollbackTolerance = 48 * time.Hour
 
 type storeState struct {
-	// InstalledIssuedAt of the current document (monotonic, legacy rule).
 	InstalledIssuedAt time.Time `json:"installed_issued_at"`
-	// HighestVersion is the highest license_version this appliance has ever
-	// accepted (v3 anti-rollback). Any document with a lower version — or the
-	// same version under a different license_id/fingerprint — is rejected,
-	// even if its signature is valid, its dates are unexpired, its limit is
-	// higher, or Central is offline. Survives restart/reboot/re-import;
-	// removed only by an authorized factory reset (which wipes the dir).
+	// Persists across restarts so a valid signature cannot replay an older grant.
 	HighestVersion int64 `json:"highest_version"`
-	// AcceptedLicenseID / AcceptedFingerprint identify the exact document at
-	// HighestVersion, so a DIFFERENT document forged/reused at the same
-	// version is also rejected.
-	AcceptedLicenseID   string `json:"accepted_license_id"`
-	AcceptedFingerprint string `json:"accepted_fingerprint"`
-	// HighWater is the max wall-clock time this appliance has observed.
-	HighWater time.Time `json:"high_water"`
-	// LastCloudValidation is the last time the cloud confirmed this
-	// license (successful license fetch or explicit ack).
+	// The same version is accepted only for the identical document.
+	AcceptedLicenseID   string    `json:"accepted_license_id"`
+	AcceptedFingerprint string    `json:"accepted_fingerprint"`
+	HighWater           time.Time `json:"high_water"`
 	LastCloudValidation time.Time `json:"last_cloud_validation"`
 }
 
@@ -93,9 +67,7 @@ func (s *Store) readRevoked() map[string]bool {
 	return out
 }
 
-// Install verifies and persists a new envelope. now is injected for tests.
-// Verify decodes and cryptographically verifies raw WITHOUT persisting it —
-// used to enforce hardware/identity binding before a license is written to disk.
+// Verify leaves storage untouched so binding checks can reject a license before installation.
 func (s *Store) Verify(raw []byte) (*Document, error) {
 	env, err := DecodeEnvelope(raw)
 	if err != nil {
@@ -116,16 +88,11 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 	st := s.readState()
 	fpr := fmt.Sprintf("%x", sha256.Sum256([]byte(env.PayloadB64)))
 
-	// A previously revoked license can never be re-installed, even with a
-	// valid signature and unexpired dates.
+	// Revocation overrides a valid signature and future expiry.
 	if s.readRevoked()[doc.LicenseID] {
 		return nil, fmt.Errorf("%w: license %s was revoked", ErrRollback, doc.LicenseID)
 	}
-	// Monotonic version anti-rollback (v3+). Once any versioned document has
-	// been accepted, every replacement must carry a HIGHER version; the same
-	// version is accepted only for the byte-identical document (idempotent
-	// re-import of the current file). Legacy unversioned documents (version 0)
-	// are rejected once a versioned one has been accepted.
+	// Only an identical re-import may reuse a version; unversioned licenses cannot replace versioned ones.
 	if st.HighestVersion > 0 {
 		switch {
 		case doc.LicenseVersion < st.HighestVersion:
@@ -166,7 +133,6 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 	return doc, nil
 }
 
-// MarkCloudValidated records a successful cloud license confirmation.
 func (s *Store) MarkCloudValidated(now time.Time) error {
 	st := s.readState()
 	st.LastCloudValidation = now
@@ -176,9 +142,7 @@ func (s *Store) MarkCloudValidated(now time.Time) error {
 	return s.writeState(st)
 }
 
-// AddRevocation records an authenticated revocation notice. The notice
-// itself must be verified by the caller (it arrives over the mutually
-// authenticated sync channel or as a signed document).
+// The caller must authenticate the revocation notice before storing its license ID.
 func (s *Store) AddRevocation(licenseID string) error {
 	rev := s.readRevoked()
 	rev[licenseID] = true
@@ -195,7 +159,6 @@ func (s *Store) AddRevocation(licenseID string) error {
 
 var ErrNoLicense = errors.New("no license installed")
 
-// Load returns the current verified document without evaluating state.
 func (s *Store) Load() (*Document, error) {
 	raw, err := os.ReadFile(s.path("current.json"))
 	if err != nil {
@@ -208,8 +171,7 @@ func (s *Store) Load() (*Document, error) {
 	return s.verifier.Verify(env)
 }
 
-// Evaluate loads the current document and computes its operational state,
-// applying clock-rollback protection and updating the high-water mark.
+// Evaluation uses the high-water mark if the system clock moves back beyond tolerance.
 func (s *Store) Evaluate(now time.Time) (Evaluation, error) {
 	doc, err := s.Load()
 	if err != nil {

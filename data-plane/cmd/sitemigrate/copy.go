@@ -11,11 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// maxBindParams keeps batches safely under Postgres' 65535 bind-parameter
-// limit on the extended protocol.
+// maxBindParams keeps batches under the Postgres 65535 bind-parameter limit.
 const maxBindParams = 60000
 
-// copyResult summarises what happened to one table during a real run.
 type copyResult struct {
 	Table        string
 	SourceRows   int64 // scoped rows in source at copy time
@@ -28,8 +26,6 @@ type copyResult struct {
 	Appended     bool  // PK-less hypertable appended via --force-append
 }
 
-// columnTypes reads (name, formatted SQL type) pairs for a public table from
-// the connected database's catalogs, in attnum order.
 func columnTypes(ctx context.Context, c *pgx.Conn, table string) ([]string, map[string]string, error) {
 	rows, err := c.Query(ctx, `
 		SELECT a.attname, format_type(a.atttypid, a.atttypmod)
@@ -56,9 +52,8 @@ func columnTypes(ctx context.Context, c *pgx.Conn, table string) ([]string, map[
 	return names, types, rows.Err()
 }
 
-// buildInsertSQL renders a multi-row INSERT with per-column casts back to the
-// destination's types (values travel as text, so nothing is lossy) and an
-// ON CONFLICT (<pk>) DO NOTHING clause for idempotency when a PK exists.
+// Values travel as text with per-column casts back to the destination types, so nothing is lossy; ON CONFLICT (<pk>) DO NOTHING makes it idempotent
+// when a PK exists.
 func buildInsertSQL(table string, cols, types []string, pk string, nrows int) string {
 	var b strings.Builder
 	b.WriteString("INSERT INTO ")
@@ -89,8 +84,6 @@ func buildInsertSQL(table string, cols, types []string, pk string, nrows int) st
 	return b.String()
 }
 
-// batchSizeFor caps the configured batch size so ncols*rows stays under the
-// bind-parameter limit.
 func batchSizeFor(configured, ncols int) int {
 	if ncols <= 0 {
 		return configured
@@ -104,18 +97,9 @@ func batchSizeFor(configured, ncols int) int {
 	return configured
 }
 
-// copyTable streams one table's scoped rows source→dest in batches.
-//
-// Values are SELECTed with ::text casts and INSERTed with casts back to the
-// destination column types: an exact round-trip for every type involved
-// (timestamptz — both sessions run in UTC —, uuid, inet, macaddr, jsonb,
-// integer[]), which preserves timestamps verbatim.
-//
-// A batch that trips an integrity error (class 23xxx: FK orphan pointing
-// outside the scoped set, or a non-PK unique clash) is retried row-by-row;
-// offending rows are logged and skipped cleanly. Checking against the live
-// dest state makes cascaded orphans (a voucher whose skipped batch made it
-// unreferencable, etc.) resolve naturally because parents were copied first.
+// Values are SELECTed with ::text and INSERTed with casts back to the destination types (both sessions run in UTC), an exact round trip. A batch that
+// trips an integrity error (class 23xxx) is retried row by row and offending rows are skipped; checking against the live dest lets cascaded orphans
+// resolve because parents were copied first.
 func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg config, log *slog.Logger) (copyResult, error) {
 	res := copyResult{Table: spec.Name}
 
@@ -127,8 +111,7 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg conf
 		return res, fmt.Errorf("dest count: %w", err)
 	}
 
-	// PK-less hypertables: ON CONFLICT cannot dedupe them, so a non-empty
-	// dest means re-running would duplicate rows. Skip unless --force-append.
+	// PK-less hypertables cannot dedupe via ON CONFLICT, so a non-empty dest would duplicate on rerun: skip unless --force-append.
 	if spec.PK == "" && res.PreDestRows > 0 {
 		if !cfg.ForceAppend {
 			res.SkippedTable = true
@@ -167,8 +150,7 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg conf
 	fullSQL := buildInsertSQL(spec.Name, cols, types, spec.PK, batchRows)
 	oneSQL := buildInsertSQL(spec.Name, cols, types, spec.PK, 1)
 
-	// Indexes of nullable FK columns — used as a last-resort retry for rows
-	// whose FK target is legitimately outside the scoped set.
+	// Nullable FK column indexes: last-resort retry for rows whose FK target is legitimately outside the scoped set.
 	nullableFK, err := nullableFKCols(ctx, dst, spec.Name)
 	if err != nil {
 		return res, fmt.Errorf("fk introspection: %w", err)
@@ -211,7 +193,6 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg conf
 		if !isIntegrityErr(err) {
 			return err
 		}
-		// Retry row-by-row so only the offending rows are skipped.
 		for _, r := range batch {
 			args := make([]any, len(r))
 			for i, v := range r {
@@ -223,9 +204,7 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg conf
 				res.Copied += tag.RowsAffected()
 				res.Conflicts += 1 - tag.RowsAffected()
 			case isFKErr(err) && len(nullableIdx) > 0:
-				// The FK target was excluded from the scoped set (e.g. a
-				// skipped platform-admin operator). Null the nullable FK
-				// columns and retry once: keep the row, lose the pointer.
+				// The FK target was excluded from the scoped set (e.g. a skipped platform-admin operator): null the nullable FKs and retry once.
 				retry := make([]any, len(args))
 				copy(retry, args)
 				for _, i := range nullableIdx {
@@ -281,23 +260,18 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, spec tableSpec, cfg conf
 	return res, nil
 }
 
-// isIntegrityErr reports whether err is a Postgres integrity-constraint
-// violation (SQLSTATE class 23: FK, unique, not-null, check).
 func isIntegrityErr(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23")
 }
 
-// isFKErr reports a foreign-key violation specifically (SQLSTATE 23503).
 func isFKErr(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
-// nullableFKCols returns the table's FK columns that are nullable in dest.
-// Rows whose FK target was legitimately excluded from the scoped set (e.g. a
-// voucher_batch created_by a skipped platform admin) are copied with those
-// columns nulled instead of being dropped — provenance is lost, data is not.
+// Rows whose FK target was legitimately excluded (e.g. a voucher_batch created_by a skipped platform admin) are copied with those columns nulled:
+// provenance is lost, data is not.
 func nullableFKCols(ctx context.Context, dst *pgx.Conn, table string) (map[string]bool, error) {
 	rows, err := dst.Query(ctx, `
         SELECT DISTINCT a.attname

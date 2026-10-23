@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// Audit B-10: the endpoint-wide damper was charged by every attempt, including attempts the client's own rules
-// refused or that came from a hard-blocked client, so one client could exhaust it and lock everybody out.
-
 func TestGlobalRuleIsNotChargedForAClientItsOwnRulesRefuse(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
@@ -19,7 +16,7 @@ func TestGlobalRuleIsNotChargedForAClientItsOwnRulesRefuse(t *testing.T) {
 	global := Rule{Kind: ScopeEndpoint, Value: "auth", Method: MethodAny, Limit: 50, Global: true}
 	attacker := Rule{Kind: ScopeDevice, Value: "02:00:00:00:00:aa", Method: "account", Limit: 5, Block: 15 * time.Minute}
 
-	for i := 0; i < 500; i++ { // far beyond the global limit, from one blocked client
+	for i := 0; i < 500; i++ {
 		if _, err := s.Allow(ctx, global, attacker); err != nil {
 			t.Fatal(err)
 		}
@@ -64,7 +61,6 @@ func TestGlobalRuleStillRefusesAnApplianceWideFlood(t *testing.T) {
 }
 
 func TestNonGlobalEndpointRuleKeepsItsOldBehaviour(t *testing.T) {
-	// Callers that do not mark a rule Global (post-stay PIN) see no change: every rule is charged.
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
 	clk := time.Date(2026, 10, 16, 9, 0, 5, 0, time.UTC)

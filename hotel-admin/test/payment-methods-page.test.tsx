@@ -1,16 +1,7 @@
-// INTERNET OFFERING → PAYMENT METHODS.
-//
-// Pinned here: the four methods and nothing else (no Cash), each module-backed method reports the one state
-// that stands in its way with readiness codes in words (unknown codes verbatim), the Card payment configuration
-// appears only once Card payment is manageable, credentials are write-only (no stored value is ever rendered,
-// every input opens empty, and only what the operator typed is sent), LIVE is disabled where the provider does
-// not allow it, and a role without write access is offered no control.
-
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-// A site licensed for every module (the scenarios below are a hotel with every module).
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
@@ -23,9 +14,7 @@ vi.mock("@/lib/api", async (orig) => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
 });
 
-// The role table does not carry payment-providers for every role yet (the Delivery Owner wires it), so a
-// synthetic "payments_reader" stands in for a role that may read and not write. site_admin and the real
-// matrix are untouched.
+// The role table lacks payment-providers for some roles, so a synthetic "payments_reader" stands in for read-only.
 vi.mock("@/lib/roles", async (orig) => {
   const actual = await (orig() as Promise<typeof import("@/lib/roles")>);
   return {
@@ -123,9 +112,7 @@ describe("Payment methods — the four methods", () => {
     expect(within(card).getByText("Not ready")).toBeInTheDocument();
     expect(within(card).getByText("No active provider account")).toBeInTheDocument();
     expect(within(card).getByText("This appliance has no payment key")).toBeInTheDocument();
-    // An unknown code is shown verbatim, in a code element.
     expect(within(card).getByText("SOMETHING_NEW").tagName).toBe("CODE");
-    // A method the site is not licensed for is not presented at all.
     expect(screen.queryByTestId("method-Room charge")).toBeNull();
   });
 
@@ -145,7 +132,6 @@ describe("Payment methods — the four methods", () => {
     routes(["site_admin"], { card_payment: mod("card_payment", { licensed: false, manageable: false }), room_charge: mod("room_charge") });
     render(<PaymentMethodsPage />);
     await screen.findByTestId("method-Room charge");
-    // Not licensed: no Card payment card, no configuration, and the accounts API is never called.
     expect(screen.queryByTestId("method-Card payment")).toBeNull();
     expect(g).not.toHaveBeenCalledWith("/payment-providers/accounts");
   });
@@ -196,7 +182,6 @@ describe("Payment methods — Card payment configuration", () => {
     fireEvent.change(screen.getByLabelText(/^Provider/), { target: { value: "paymob" } });
     const live2 = within(screen.getByLabelText(/^Mode/)).getByRole("option", { name: /LIVE/ }) as HTMLOptionElement;
     expect(live2.disabled).toBe(false);
-    // Paymob's region is its own select.
     expect(within(screen.getByLabelText(/^Region/)).getByRole("option", { name: "egypt" })).toBeInTheDocument();
   });
 
@@ -278,7 +263,6 @@ describe("Payment methods — Card payment configuration", () => {
   });
 });
 
-// AUDIT O-12 and O-24: only the DEFAULT active account takes card checkouts.
 describe("Payment methods — the default account decides", () => {
   const SECOND = { ...ACCOUNT, id: "acc-2", display_name: "Spare Stripe", merchant_account_ref: "acct_456", currency: "EUR", is_default: false, conversion_supported: true, provider_converts: false };
   function withAccounts(accounts: unknown[], packages: unknown[] = [], current: Record<string, unknown> = {}) {
@@ -309,8 +293,6 @@ describe("Payment methods — the default account decides", () => {
   });
 
   it("names a live card package whose currency only a NON-default account settles", async () => {
-    // A EUR package, a default USD account and a spare EUR one: checkouts use the USD account, so EUR is not
-    // offered by card. The old check looked at every active account and stayed silent.
     withAccounts([ACCOUNT, SECOND],
       [{ package_id: "pk-eur", code: "EURDAY", name: "Euro day", active: true, current_revision_id: "r1", price_minor: 900, currency: "EUR" },
        { package_id: "pk-usd", code: "USDDAY", name: "Dollar day", active: true, current_revision_id: "r2", price_minor: 900, currency: "USD" }],

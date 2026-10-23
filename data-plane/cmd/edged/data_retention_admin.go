@@ -1,17 +1,9 @@
 package main
 
-// GUEST-DATA RETENTION (migrations 0127, 0134 and 0140; GDPR remediation plan C1, F5 and F6; Product-Owner decisions D-C1, D-C1a, D-C3;
-// docs/OPERATIONAL_SETTINGS_POLICY.md).
-//
-//	GET /edge/v1/data-retention/   the periods, their bounds and defaults, the change log and recent runs
-//	PUT /edge/v1/data-retention/   change them: password step-up, a reason, audited
-//
-// How long guest personal data is kept before scd's hourly run anonymises it: PMS stay data after checkout,
-// devices and sessions, inactive guest identities, expired single-use records, the audit log, and how long
-// sign-in attempts are kept before they are deleted. Shortening a period anonymises history on the next run, so
-// it sits under the "backups" key with accounting retention (site administrators write, the roles that can see
-// backups can see it) and asks for the password. The defaults come from the database
-// (iam_v2.data_retention_defaults); the bounds below mirror the table CHECKs, which are the authority.
+// How long guest personal data is kept before scd's hourly run anonymises it (sign-in attempts and system logs
+// are deleted instead). Shortening a period anonymises history on the next run, so the setting sits under the
+// "backups" key and asks for the password. Defaults come from iam_v2.data_retention_defaults; the bounds below
+// mirror the table CHECKs, which are the authority.
 
 import (
 	"net/http"
@@ -36,11 +28,9 @@ var dataRetentionBounds = []retentionBound{
 	{"expired_record_days", 1, 365, "days after the record expired"},
 	{"audit_log_days", 90, 3650, "days"},
 	{"sign_in_attempt_days", 7, 365, "days (attempts are deleted, not anonymised)"},
-	// System logs (0134, GDPR plan F5, D-F5): 14 days by default; up to two years where a hotel's law asks for
-	// connection logs to be kept longer. scd removes them (cmd/scd/log_retention.go).
+	// Up to two years where local law asks for connection logs to be kept longer; scd removes them.
 	{"log_days", 1, 730, "days (system logs are deleted)"},
-	// Staff notes (0140, GDPR audit C4): the free text on PMS case decisions, device-slot actions and post-stay
-	// revocations is replaced by a fixed text after this period; the records stay.
+	// Free text on PMS case decisions, device-slot actions and post-stay revocations is replaced after this period.
 	{"staff_note_days", 30, 3650, "days (the note is removed, the record stays)"},
 }
 

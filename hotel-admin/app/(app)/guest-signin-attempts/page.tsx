@@ -1,22 +1,8 @@
 "use client";
 
-// GUEST SIGN-IN ATTEMPTS — the screen that answers "why can't this guest get online".
-//
-// It exists because that question had no answer. A guest arrives at the desk, the operator has the PMS on one
-// screen and nothing on the other, and the only available move is to ask the guest to type it again while
-// somebody watches a log. Everything on this page is arranged around the one comparison that ends that
-// conversation: what they entered, beside what we would have accepted.
-//
-// TWO PERMISSIONS, AND THE SECOND ONE IS REAL. The list, the rooms, the results and the diagnostic reasons
-// need View_Guest_SignIn_Attempts. The submitted and accepted VALUES need View_Guest_SignIn_Credentials as
-// well, they come from a different endpoint, and edged refuses that endpoint outright to an operator who
-// lacks it — this file hiding a panel is a courtesy, not the boundary. When the operator does hold it the
-// values are shown IN FULL and unmasked: these are the same people who already hold the guest's room, stay
-// and access credentials, and "OK••••••" beside "OK•••••••" answers nothing at all.
-//
-// IT DOES NOT INVENT EXPECTATIONS. When no stay for that room exists in the local mirror there is nothing
-// that would have been accepted, and the panel says so in words rather than showing empty fields that read
-// as "we have this and won't tell you".
+// Submitted and accepted VALUES need View_Guest_SignIn_Credentials, enforced by edged; hiding a panel here is a
+// courtesy, not the boundary.
+// With no stay in the local mirror nothing would have been accepted, and the panel says so.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, ShieldAlert, UserX } from "lucide-react";
@@ -43,9 +29,7 @@ import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
 
-// RESULT_WORDS turns a recorded code into a tone. The LABEL itself is not here: it comes from the server,
-// from the same Go map the codes are declared in, so a new result cannot appear on this screen as a raw
-// enum because somebody forgot to update a second list in the browser.
+// The label comes from the server's Go map so a new result code never shows as a raw enum.
 const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neutral"; meaning: string }> = {
   VERIFIED: { tone: "ok", meaning: "The guest proved who they are and was offered access." },
   CREDENTIAL_MISMATCH: {
@@ -96,7 +80,6 @@ const RESULT_WORDS: Record<string, { tone: "ok" | "warn" | "err" | "info" | "neu
   },
 };
 
-// The filter's own words. The row labels still come from the server; these only name the choices.
 const RESULT_FILTER_LABELS: Record<string, string> = {
   VERIFIED: "Connected",
   CREDENTIAL_MISMATCH: "Details did not match",
@@ -169,36 +152,25 @@ export default function GuestSignInAttemptsPage() {
   const [detail, setDetail] = useState<SignInAttemptDetail | null>(null);
   const [creds, setCreds] = useState<SignInAttemptCredentials | null>(null);
   const [credsErr, setCredsErr] = useState<unknown>(null);
-  // WHAT A GUEST TYPED IS SHOWN ONLY AFTER THE OPERATOR CONFIRMS THEIR PASSWORD (GDPR audit B8). The password
-  // is cleared as soon as it has been sent, and when the panel closes.
+  // Typed values are shown only after the operator confirms their password; it is cleared once sent and when the
+  // panel closes.
   const [credsPw, setCredsPw] = useState("");
   const [revealing, setRevealing] = useState(false);
 
-  // The credential permission is read once and FAILS CLOSED while it loads. The panel is not the boundary —
-  // edged is — but a screen that flashed the values open before roles arrived would be its own small leak.
+  // The credential permission fails closed while it loads; edged is the real boundary.
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, []);
   const maySeeCredentials = roles === null ? false : canRead("guest-signin-credentials", roles);
-  // THREE SEPARATE PERMISSIONS, AND NONE IMPLIES ANOTHER. Seeing the restrictions is not seeing what guests
-  // typed, and releasing one is not permission to change the property's thresholds. edged enforces all three;
-  // this file only decides what to offer.
+  // Three separate permissions, none implying another; edged enforces all of them.
   const maySeeRestrictions = roles === null ? false : canRead("guest-signin-restrictions", roles);
   const mayRelease = roles === null ? false : canWrite("guest-signin-restrictions", roles);
 
-  // The two halves of one question: why a guest could not connect, and whether their device is being asked to
-  // wait before trying again. A tab rather than a second page, because an operator moves between them while
-  // the guest is still standing there.
   const [tab, setTab] = useState<"attempts" | "restrictions">("attempts");
 
-  // PAGED ON THE SERVER, AND SEARCHED THERE. The list used to be the newest 200 attempts, and the search box
-  // filtered only those; on a busy night an attempt from earlier in the period could not be found. The room,
-  // result, type and range were already server filters; the search now is too, and travels in a header (it is
-  // where somebody types a room number), never the URL. Any change starts again at the first page.
-  //
-  // The period is measured from `anchor`, fixed until the range changes or the operator refreshes, so paging
-  // walks one stable question instead of a window that slides under it.
+  // Paged and searched on the server (search in a header, never the URL).
+  // The period is measured from a fixed `anchor` so paging walks one stable question.
   const path = useMemo(() => {
     const params = new URLSearchParams({ from: new Date(anchor - Number(range) * 3600_000).toISOString() });
     if (room.trim()) params.set("room", room.trim());
@@ -217,7 +189,6 @@ export default function GuestSignInAttemptsPage() {
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
   const load = (_manual?: boolean) => setAnchor(Date.now());
 
-  // The tiles count every attempt the filters select -- the server's count, not the page on screen.
   const sum = resp?.summary;
   const counts = {
     total: sum?.total ?? 0,
@@ -255,9 +226,7 @@ export default function GuestSignInAttemptsPage() {
     <ActiveRestrictions
       canRelease={mayRelease}
       onShowAttempts={(mac) => {
-        // "The related sign-in attempts" is the same list, filtered to that device. Widening the period
-        // as well, because the attempts that caused a restriction can already be older than the default
-        // window by the time somebody looks.
+        // Widen the period too: the attempts behind a restriction may predate the default window.
         setTab("attempts");
         setQuery(mac);
         setRoom("");
@@ -455,7 +424,6 @@ export default function GuestSignInAttemptsPage() {
               {RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
             </Callout>
 
-            {/* THE COMPARISON. It is the reason this screen exists, so it sits above the diagnostics. */}
             <h3 className="text-emphasis">What was entered, and what would have been accepted</h3>
             {!maySeeCredentials ? (
               <NotAvailable

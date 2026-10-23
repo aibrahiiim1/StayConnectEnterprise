@@ -3,12 +3,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * Segmented — a small two-or-three-way switch for a view mode ("Active / Recent", "Cards / Table").
- *
- * This is NOT Tabs and is deliberately a different control: it swaps a filter on the same content rather than
- * swapping panels, so it renders as a compact group of radios instead of a full tab strip.
- */
+/** A view filter uses radios because it does not switch panels. */
 export function Segmented<T extends string>({
   value,
   onChange,
@@ -69,11 +64,7 @@ export function Segmented<T extends string>({
   );
 }
 
-/**
- * TabList — the sections of one record (a customer's Sites, Appliances, Licenses…). WAI-ARIA tabs: one tab stop,
- * arrow keys / Home / End move between tabs, and each tab controls a `TabPanel` with the matching id. The
- * selected tab is owned by the caller, so it can live in the address (`?tab=sites`) and survive a reload.
- */
+/** The caller owns selection so it can persist the active tab in the URL. */
 export function TabList<T extends string>({
   value,
   onChange,
@@ -95,7 +86,6 @@ export function TabList<T extends string>({
     onChange(t.value);
     refs.current[t.value]?.focus();
   }
-  // The arrow keys belong to the focused tab (the tablist itself is not a tab stop).
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
     const i = tabs.findIndex((t) => t.value === value);
     if (e.key === "ArrowRight") { e.preventDefault(); move(i + 1); }
@@ -159,7 +149,7 @@ export function TabPanel({
       id={`${idBase}-panel-${value}`}
       aria-labelledby={`${idBase}-tab-${value}`}
       tabIndex={0}
-      // The panel is a tab stop, so it needs a visible focus indicator like every other one (WCAG 2.4.7).
+      // A keyboard-focusable panel needs a visible focus ring.
       className={cn("rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background", className)}
     >
       {children}

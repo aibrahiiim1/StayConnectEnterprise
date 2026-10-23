@@ -1,30 +1,8 @@
 package main
 
-// EMAIL ACCOUNTS: SELF-SERVICE REGISTRATION, VERIFICATION, SUSPENSION AND THE ONE-TIME GRACE HOUR
-// (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md; migration 0117).
-//
-// A client registers with an address and a password, is signed in at once and goes to the packages. The account
-// is an iam_v2.guest_access_accounts row (the ACCOUNT subject IAM-v2 already authenticates) marked
-// self_registered, site-specific, never a guest principal: an address -- verified or not -- is never an identity
-// factor, never links to a Client, never joins a client group.
-//
-// This file holds the state and the decisions; self_service_handlers.go holds the routes.
-//
-// THE PIECES, AND WHERE EACH DECISION LIVES
-//
-//	accountSuspended   the ONE suspension predicate, pure: self-registered, verification required by the site,
-//	                   policy SUSPEND, not verified, past the deadline, no live grace. The sweep, activation and
-//	                   every reply use it (or its SQL twin in the sweep, which must say the same thing).
-//	emailTokenHMAC     the emailed links: 256-bit random tokens, stored as HMAC-SHA256 only under a key derived
-//	                   from the appliance-local resume key (domain account-email-token:v1). The token is minted
-//	                   when the message is handed to the mail server, so the plaintext exists only in the email.
-//	account tokens     "recently signed in with the password on THIS device": HMAC(account, MAC, expiry), 15
-//	                   minutes, kept by portald in an HttpOnly cookie. Proof for status and resend; never for grace
-//	                   (grace requires the password again) and never a sign-in by itself.
-//	outbox             each token row is its own outbox entry; the send loop mints, sends, records, backs off.
-//	sweep              every 30 s: ends the live sessions of suspended accounts through the operator-disconnect
-//	                   path, queues reminders, and gives a deadline to unverified accounts that registered while
-//	                   verification was not required.
+// Email accounts: self-service registration, verification, suspension and the one-time grace hour. An account is a self_registered, site-specific
+// iam_v2.guest_access_accounts row; an address is never an identity factor, never links to a Client, never joins a client group.
+// The routes live in self_service_handlers.go.
 
 import (
 	"context"
@@ -48,26 +26,19 @@ import (
 )
 
 const (
-	// Key-derivation domains under the appliance-local resume key. Distinct domains make the emailed-link index,
-	// the account token and the remembered-device credential three unrelated keys although one file holds them.
+	// Distinct domains make the emailed-link index, the account token and the remembered-device credential unrelated keys from one file.
 	accountEmailTokenDomain   = "account-email-token:v1"
 	accountSessionTokenDomain = "account-session-token:v1"
 
-	accountTokenTTL = 15 * time.Minute
-	// A VERIFY link lives until the verification deadline and at least 24 hours (contract §4); a RESET link 30
-	// minutes.
+	accountTokenTTL        = 15 * time.Minute
 	verifyTokenMinLifetime = 24 * time.Hour
 	resetTokenLifetime     = 30 * time.Minute
 
-	// Settings are read through iam_v2.self_service_settings_get and cached this long: a change in the Admin
-	// Console reaches every decision within seconds, and a burst of sign-ins does not read the row each time.
 	selfServiceSettingsTTL = 10 * time.Second
 
-	// At most this many messages per send tick: a backlog after an outage drains steadily instead of handing the
-	// mail server hundreds of messages at once.
+	// Per send tick; a backlog after an outage drains steadily instead of flooding the mail server.
 	selfServiceSendBatch = 5
 
-	// Session end reasons recorded by this file (iam_v2.sessions.end_reason, free text like ENTITLEMENT_ENDED).
 	endReasonVerificationSuspended = "VERIFICATION_SUSPENDED"
 	endReasonPasswordReset         = "PASSWORD_RESET"
 
@@ -75,7 +46,6 @@ const (
 	tokenPurposeReset  = "RESET"
 )
 
-// selfServiceSettings is iam_v2.site_self_service_settings as enforced (contract §6).
 type selfServiceSettings struct {
 	VerificationRequired         bool
 	DeadlineHours                int
@@ -88,17 +58,13 @@ type selfServiceSettings struct {
 	RegistrationsPerDevicePerDay int
 }
 
-// defaultSelfServiceSettings are the contract defaults -- also the answer when the settings cannot be read for a
-// decision that must still be made (the sweep, activation): they are the strictest values a site can have, so a
-// read failure never loosens enforcement.
+// Strictest values, so a settings read failure never loosens enforcement (the sweep and activation still must decide).
 func defaultSelfServiceSettings() selfServiceSettings {
 	return selfServiceSettings{VerificationRequired: true, DeadlineHours: 24, SuspensionPolicy: "SUSPEND",
 		ReminderHoursBefore: 4, ResendCooldownSeconds: 60, ResendMaxPerDay: 5, GraceMinutes: 60,
 		MaxGraceExtensions: 1, RegistrationsPerDevicePerDay: 3}
 }
 
-// selfServiceBound is one setting's default and inclusive bounds -- the table CHECKs and the setter, in Go, so a
-// value read from anywhere is clamped into what the database itself would accept.
 type selfServiceBound struct{ Default, Min, Max int }
 
 var selfServiceBounds = map[string]selfServiceBound{
@@ -122,8 +88,7 @@ func clampSelfService(name string, v int) int {
 	return v
 }
 
-// normalized clamps every value into its bounds (and the reminder below the deadline). The database already
-// refuses out-of-bounds values; this is the second line, for a value from a test, a fake or a future reader.
+// Clamps every value into its bounds (and the reminder below the deadline); second line behind the database CHECKs.
 func (c selfServiceSettings) normalized() selfServiceSettings {
 	c.DeadlineHours = clampSelfService("verification_deadline_hours", c.DeadlineHours)
 	c.ReminderHoursBefore = clampSelfService("reminder_hours_before", c.ReminderHoursBefore)
@@ -141,23 +106,19 @@ func (c selfServiceSettings) normalized() selfServiceSettings {
 	return c
 }
 
-// selfServiceState is the Email accounts runtime state hung on the server.
 type selfServiceState struct {
 	mu       sync.Mutex
 	cached   selfServiceSettings
 	cachedAt time.Time
-	// load overrides the settings read (tests); nil reads iam_v2.self_service_settings_get.
-	load func(ctx context.Context) (selfServiceSettings, error)
-	// kick wakes the send loop the moment a message is queued, so a registration's email leaves at once rather
-	// than at the next tick. Buffered and non-blocking: a pending kick is enough.
+	load     func(ctx context.Context) (selfServiceSettings, error)
+	// Wakes the send loop when a message is queued; buffered and non-blocking, one pending kick is enough.
 	kick      chan struct{}
 	sendTick  time.Duration
 	sweepTick time.Duration
 }
 
-// initSelfService fixes the loop cadences. SCD_SELF_SERVICE_SEND_TICK and SCD_SELF_SERVICE_SWEEP_TICK exist so an
-// acceptance run does not wait on production timing; both are clamped to a floor, because a sweep that runs
-// continuously is load on the session table and a send loop that spins is load on the mail server.
+// SCD_SELF_SERVICE_*_TICK let acceptance runs skip production timing; both are floored because a spinning sweep loads the session table and a
+// spinning send loop loads the mail server.
 func (s *server) initSelfService(getenv func(string) string) {
 	s.selfService.kick = make(chan struct{}, 1)
 	s.selfService.sendTick = envDuration(getenv, "SCD_SELF_SERVICE_SEND_TICK", 15*time.Second, time.Second)
@@ -195,8 +156,7 @@ func (s *server) kickSelfServiceOutbox() {
 	}
 }
 
-// selfServiceSettingsRead answers the site's settings, cached briefly. An error is returned to callers that
-// must refuse (registration); callers that must still decide use selfServiceSettingsOrDefault.
+// Callers that must refuse (registration) get the error; callers that must still decide use selfServiceSettingsOrDefault.
 func (s *server) selfServiceSettingsRead(ctx context.Context) (selfServiceSettings, error) {
 	st := &s.selfService
 	st.mu.Lock()
@@ -241,9 +201,6 @@ func (s *server) selfServiceSettingsOrDefault(ctx context.Context) selfServiceSe
 	return c
 }
 
-// ---- the account and the one suspension predicate -----------------------------------------------------------
-
-// selfServiceAccountRow is the part of iam_v2.guest_access_accounts these decisions read.
 type selfServiceAccountRow struct {
 	ID             string
 	Username       string
@@ -268,18 +225,14 @@ type pgQueryRower interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// loadSelfServiceAccount reads one account of THIS site by id; pgx.ErrNoRows when there is none.
 func (s *server) loadSelfServiceAccount(ctx context.Context, q pgQueryRower, id string) (selfServiceAccountRow, error) {
 	return scanSelfServiceAccount(q.QueryRow(ctx, `SELECT `+selfServiceAccountCols+`
 	      FROM iam_v2.guest_access_accounts WHERE id = $1::uuid AND tenant_id = $2 AND site_id = $3`, id, s.tenID, s.siteID))
 }
 
-// accountSuspended is THE suspension predicate (contract §3): the account is suspended for Internet when it is
-// self-registered, the site requires verification with the SUSPEND policy, the address is not verified, the
-// deadline has passed, and no grace is running. A missing deadline is never past (an account registered while
-// verification was not required is given one by the sweep before it can be suspended). WARN_ONLY never suspends;
-// a site that does not require verification never suspends. The entitlement is not part of the question: a
-// suspension lifts the moment the account is verified or granted grace, with the package exactly as it was.
+// The ONE suspension predicate (the SQL in sweepSuspended must say the same): self-registered, verification required with SUSPEND policy,
+// unverified, past the deadline, no live grace. A missing deadline is never past; the entitlement is not part of it, so suspension lifts the
+// moment the account is verified or granted grace.
 func accountSuspended(a selfServiceAccountRow, set selfServiceSettings, now time.Time) bool {
 	if !a.SelfRegistered || !set.VerificationRequired || set.SuspensionPolicy != "SUSPEND" {
 		return false
@@ -290,13 +243,11 @@ func accountSuspended(a selfServiceAccountRow, set selfServiceSettings, now time
 	return a.GraceUntil == nil || !a.GraceUntil.After(now)
 }
 
-// graceAvailable: a suspended account that has not used its allowance (max_grace_extensions, hard maximum 3).
 func graceAvailable(a selfServiceAccountRow, set selfServiceSettings, now time.Time) bool {
 	return accountSuspended(a, set, now) && a.GraceUsed < set.MaxGraceExtensions
 }
 
-// resendWait answers how long until another VERIFY message may be queued: the cooldown after the newest one,
-// or -- when the rolling 24-hour allowance is spent -- until the oldest of those leaves the window (limited).
+// Wait until another VERIFY message may be queued: the cooldown, or until the oldest leaves the rolling 24 h window when the allowance is spent.
 func resendWait(newest, oldestInDay *time.Time, inDay int, set selfServiceSettings, now time.Time) (wait time.Duration, limited bool) {
 	if inDay >= set.ResendMaxPerDay && oldestInDay != nil {
 		if w := oldestInDay.Add(24 * time.Hour).Sub(now); w > 0 {
@@ -318,7 +269,7 @@ func ceilSeconds(d time.Duration) int {
 	return int((d + time.Second - 1) / time.Second)
 }
 
-// selfServiceAccount is the account block every reply carries (contract §7). Never a password, hash or token.
+// The account block every reply carries; never a password, hash or token.
 type selfServiceAccount struct {
 	Verified             bool       `json:"verified"`
 	VerificationRequired bool       `json:"verification_required"`
@@ -329,7 +280,6 @@ type selfServiceAccount struct {
 	ResendAvailableIn    int        `json:"resend_available_in"`
 }
 
-// tokenStats is the VERIFY history resendWait needs.
 type tokenStats struct {
 	newest, oldestInDay *time.Time
 	inDay               int
@@ -345,8 +295,7 @@ func (s *server) verifyTokenStats(ctx context.Context, q pgQueryRower, accountID
 	return st, err
 }
 
-// accountView builds the reply block. The resend wait is best effort: unreadable history reads as "now", and the
-// resend route itself re-checks inside its transaction.
+// Best effort: unreadable history reads as "now"; the resend route re-checks inside its transaction.
 func (s *server) accountView(ctx context.Context, a selfServiceAccountRow, set selfServiceSettings, now time.Time) *selfServiceAccount {
 	v := &selfServiceAccount{
 		Verified:             a.VerifiedAt != nil,
@@ -367,9 +316,8 @@ func (s *server) accountView(ctx context.Context, a selfServiceAccountRow, set s
 	return v
 }
 
-// decorateSelfServiceResult adds the account block and the account token to a successful ACCOUNT sign-in, for a
-// self-registered account only. A failure to read leaves the reply as a plain account sign-in: the sign-in
-// itself succeeded, and activation applies the suspension rule on its own.
+// Adds the account block and token to a successful ACCOUNT sign-in of a self-registered account; a read failure leaves a plain sign-in since
+// activation applies the suspension rule itself.
 func (s *server) decorateSelfServiceResult(ctx context.Context, out *iamv2GuestResult, accountID, mac string) {
 	if s.db == nil || out == nil {
 		return
@@ -389,15 +337,14 @@ func (s *server) decorateSelfServiceResult(ctx context.Context, out *iamv2GuestR
 	out.AccountToken = s.issueAccountToken(a.ID, mac, now)
 }
 
-// accountSuspendedByID is the activation check: is the subject of this entitlement a suspended account?
-// Read inside the activation transaction so a grace or a verification racing it is seen.
+// Activation check, read inside the activation transaction so a racing grace or verification is seen.
 func (s *server) entitlementAccountSuspended(ctx context.Context, tx pgx.Tx, entitlementID string, set selfServiceSettings) (bool, error) {
 	a, err := scanSelfServiceAccount(tx.QueryRow(ctx, `SELECT a.id::text, a.username, a.self_registered, a.enabled,
 	         a.email_verified_at, a.verification_deadline, a.grace_until, a.grace_extensions_used
 	    FROM iam_v2.entitlements e JOIN iam_v2.guest_access_accounts a ON a.id = e.guest_account_id
 	   WHERE e.id = $1::uuid`, entitlementID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // not an account entitlement
+		return false, nil
 	}
 	if err != nil {
 		return false, err
@@ -405,11 +352,7 @@ func (s *server) entitlementAccountSuspended(ctx context.Context, tx pgx.Tx, ent
 	return accountSuspended(a, set, time.Now()), nil
 }
 
-// ---- keys, emailed-link tokens, account tokens ----------------------------------------------------------------
-
-// selfServiceKey derives a purpose key from the appliance-local resume key. nil when the key file is absent
-// (initClientResume logged it): then no link can be minted or checked and no account token issued -- the
-// account still signs in, and the messages stay queued until the key is back.
+// nil when the key file is absent: no link is minted or checked and no token issued; sign-in still works and messages stay queued.
 func (s *server) selfServiceKey(domain string) []byte {
 	if len(s.resumeKey) < 32 {
 		return nil
@@ -419,20 +362,17 @@ func (s *server) selfServiceKey(domain string) []byte {
 	return h.Sum(nil)
 }
 
-// emailTokenHMAC is the stored blind index of an emailed token.
 func emailTokenHMAC(key []byte, token string) []byte {
 	h := hmac.New(sha256.New, key)
 	h.Write([]byte(token))
 	return h.Sum(nil)
 }
 
-// emailTokenKeyID names the key a token was indexed under (a fingerprint, never the key).
 func emailTokenKeyID(key []byte) string {
 	sum := sha256.Sum256(append([]byte("key-id\x00"), key...))
 	return "aet1:" + hex.EncodeToString(sum[:8])
 }
 
-// newEmailToken returns 256 random bits, URL-safe.
 func newEmailToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -441,8 +381,8 @@ func newEmailToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// issueAccountToken binds an account to the device that just proved its password, for 15 minutes:
-// "v1.<payload>.<mac>" with payload = base64url(account|device MAC|expiry unix). "" without a key.
+// Binds an account to the device that just proved its password, 15 min: "v1.<payload>.<mac>"; empty without a key. Proves status/resend only,
+// never grace (which needs the password again) and never a sign-in.
 func (s *server) issueAccountToken(accountID, mac string, now time.Time) string {
 	key := s.selfServiceKey(accountSessionTokenDomain)
 	hw, err := net.ParseMAC(strings.TrimSpace(mac))
@@ -456,8 +396,7 @@ func (s *server) issueAccountToken(accountID, mac string, now time.Time) string 
 	return "v1." + payload + "." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// parseAccountToken returns the account an account token names, when it is genuine, unexpired and presented
-// by the device it was issued to. Any failure is the same "" -- a forged, expired or borrowed token says nothing.
+// Any failure is the same empty answer: a forged, expired or borrowed token says nothing.
 func (s *server) parseAccountToken(tok, mac string, now time.Time) string {
 	key := s.selfServiceKey(accountSessionTokenDomain)
 	hw, err := net.ParseMAC(strings.TrimSpace(mac))
@@ -486,8 +425,7 @@ func (s *server) parseAccountToken(tok, mac string, now time.Time) string {
 	return f[0]
 }
 
-// queueEmailToken supersedes the account's unused tokens of the purpose and queues a new one for the outbox. The
-// token itself is minted at send time (sendOneAccountEmail), so the row holds no secret yet.
+// The token is minted at send time (sendOneAccountEmail), so the row holds no secret yet.
 func queueEmailToken(ctx context.Context, tx pgx.Tx, tenantID, siteID, accountID, purpose string, expires time.Time) error {
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.account_email_tokens SET superseded_at = now()
 	     WHERE account_id = $1::uuid AND purpose = $2 AND used_at IS NULL AND superseded_at IS NULL`, accountID, purpose); err != nil {
@@ -498,7 +436,6 @@ func queueEmailToken(ctx context.Context, tx pgx.Tx, tenantID, siteID, accountID
 	return err
 }
 
-// verifyTokenExpiry: until the deadline, and at least 24 hours (contract §4).
 func verifyTokenExpiry(deadline *time.Time, now time.Time) time.Time {
 	exp := now.Add(verifyTokenMinLifetime)
 	if deadline != nil && deadline.After(exp) {
@@ -507,9 +444,6 @@ func verifyTokenExpiry(deadline *time.Time, now time.Time) time.Time {
 	return exp
 }
 
-// ---- the outbox -------------------------------------------------------------------------------------------------
-
-// sendBackoff is the wait after the n-th attempt: 30 s doubling, at most 30 minutes.
 func sendBackoff(attempts int) time.Duration {
 	d := 30 * time.Second
 	for i := 1; i < attempts && d < 30*time.Minute; i++ {
@@ -521,9 +455,8 @@ func sendBackoff(attempts int) time.Duration {
 	return d
 }
 
-// accountLinkBase is where an emailed link points: https://<canonical hostname> while the portal is on HTTPS,
-// otherwise http://<portal address> (contract §4). Both are the LOCAL portal, reachable on the guest Wi-Fi before
-// sign-in, which is why no walled-garden entry is needed. "" when the site has neither (no portal address).
+// https://<canonical hostname> while the portal is on HTTPS, else http://<portal address>; both are the LOCAL portal, reachable before sign-in
+// without a walled-garden entry. Empty when the site has neither.
 func accountLinkBase(st PortalTLSState) string {
 	if st.HTTPSActive && st.Canonical != "" {
 		return "https://" + st.Canonical
@@ -538,13 +471,12 @@ func accountLinkBase(st PortalTLSState) string {
 	return ""
 }
 
-// The link paths portald serves: a GET shows a page whose button POSTs (mail scanners prefetch links).
+// A GET shows a page whose button POSTs (mail scanners prefetch links).
 const (
 	accountVerifyPath = "/account/verify"
 	accountResetPath  = "/account/reset"
 )
 
-// accountEmailMessage is the plain-text message for a token. Short, and it says what to do if it was not you.
 func accountEmailMessage(purpose, to, link string, deadline *time.Time) mail.Message {
 	if purpose == tokenPurposeReset {
 		return mail.Message{To: to, Subject: "Reset your Wi-Fi account password",
@@ -561,13 +493,8 @@ func accountEmailMessage(purpose, to, link string, deadline *time.Time) mail.Mes
 	return mail.Message{To: to, Subject: "Verify your email for Wi-Fi access", Text: text}
 }
 
-// sendOneAccountEmail claims the next due message, mints its token, sends it and records the outcome. Returns
-// false when nothing is due (or nothing could be claimed).
-//
-// THE ORDER IS THE POINT. The token is minted and its HMAC committed, with the attempt counted and the next
-// attempt scheduled, BEFORE the mail server is called: a crash or a timeout mid-send then leaves a row that is
-// retried after its backoff, never one that is resent in a tight loop, and a message the server did accept
-// carries a token the database already knows. A retry mints a new token, so at most the latest one sent works.
+// The token HMAC, attempt count and next attempt are committed BEFORE the mail server is called: a crash or timeout mid-send is retried after
+// its backoff, never resent in a tight loop. A retry mints a new token, so only the latest works. Returns false when nothing is due.
 func (s *server) sendOneAccountEmail(ctx context.Context, key []byte) bool {
 	var id, purpose, to string
 	var deadline *time.Time
@@ -645,10 +572,8 @@ func (s *server) sendDueAccountEmails(ctx context.Context) {
 	if s.db == nil || s.tenID == "" {
 		return
 	}
-	// A message still unsent when its link expires can never be sent: retire it, so the outbox index holds
-	// only rows that can still go and a long mail outage does not leave each poll skipping a growing backlog.
-	// So is one for an account staff REMOVED (edged guest_accounts_manage.go: disabled, username moved to
-	// "<name>.removed-<id>.invalid"); a merely disabled account keeps its queue and is skipped until re-enabled.
+	// Retire unsent messages whose link expired, and those of accounts staff REMOVED (disabled, username moved to "<name>.removed-<id>.invalid");
+	// a merely disabled account keeps its queue.
 	if _, err := s.db.Exec(ctx, `UPDATE iam_v2.account_email_tokens t SET superseded_at = now()
 	     WHERE t.tenant_id = $1 AND t.site_id = $2
 	       AND t.sent_at IS NULL AND t.used_at IS NULL AND t.superseded_at IS NULL
@@ -669,7 +594,6 @@ func (s *server) sendDueAccountEmails(ctx context.Context) {
 	}
 }
 
-// selfServiceSendLoop drains the outbox every send tick, and at once when a message is queued.
 func (s *server) selfServiceSendLoop(ctx context.Context) {
 	tick := s.selfService.sendTick
 	if tick <= 0 {
@@ -688,9 +612,6 @@ func (s *server) selfServiceSendLoop(ctx context.Context) {
 	}
 }
 
-// ---- the sweep ----------------------------------------------------------------------------------------------------
-
-// selfServiceSweepLoop runs the sweep every sweep tick (30 s by default).
 func (s *server) selfServiceSweepLoop(ctx context.Context) {
 	tick := s.selfService.sweepTick
 	if tick <= 0 {
@@ -708,8 +629,6 @@ func (s *server) selfServiceSweepLoop(ctx context.Context) {
 	}
 }
 
-// selfServiceSweep is one pass: deadlines for accounts that have none while verification is required, reminders,
-// and the end of every live session of a suspended account.
 func (s *server) selfServiceSweep(ctx context.Context) {
 	if s.db == nil || s.tenID == "" || s.siteID == "" {
 		return
@@ -730,9 +649,8 @@ func (s *server) selfServiceSweep(ctx context.Context) {
 	}
 }
 
-// sweepGiveDeadlines: an unverified self-registered account with no deadline registered while the site did not
-// require verification. Now that it does, the account gets the full deadline from now -- never one already in
-// the past -- and a verification message.
+// An unverified self-registered account with no deadline (registered while verification was not required) gets the full deadline from now,
+// never one already past, and a verification message.
 func (s *server) sweepGiveDeadlines(ctx context.Context, set selfServiceSettings) bool {
 	rows, err := s.db.Query(ctx, `
 	    SELECT id::text FROM iam_v2.guest_access_accounts
@@ -772,8 +690,7 @@ func (s *server) sweepGiveDeadlines(ctx context.Context, set selfServiceSettings
 	return queued
 }
 
-// sweepReminders queues the one reminder `reminder_hours_before` the deadline (0 = off). The reminder is a fresh
-// VERIFY message; the earlier link is superseded by it, so exactly one live link exists.
+// Queues the one reminder reminder_hours_before the deadline (0 = off) as a fresh VERIFY message, superseding the earlier link.
 func (s *server) sweepReminders(ctx context.Context, set selfServiceSettings) bool {
 	if set.ReminderHoursBefore <= 0 {
 		return false
@@ -817,9 +734,7 @@ func (s *server) sweepReminders(ctx context.Context, set selfServiceSettings) bo
 	return queued
 }
 
-// sweepSuspended ends every live session whose entitlement belongs to a suspended account. The SQL is the
-// accountSuspended predicate for a site whose settings say SUSPEND (the caller checked them): self-registered,
-// unverified, past the deadline, no running grace.
+// SQL twin of accountSuspended for a site whose settings say SUSPEND (the caller checked them).
 func (s *server) sweepSuspended(ctx context.Context) {
 	rows, err := s.db.Query(ctx, `
 	    SELECT se.id::text, COALESCE(host(se.ip), '')
@@ -855,12 +770,8 @@ func (s *server) sweepSuspended(ctx context.Context) {
 	}
 }
 
-// endSessionNow is the operator-disconnect path for one session: the row is ended first (so netd's convergence
-// can only agree), then the address leaves the authorization set and its shaping class goes (denyAtGate, the
-// same kernel steps /v1/sessions/revoke takes). Idempotent: an already-ended session changes nothing.
-//
-// The row is ended through the controlled session-end writer (endSessionControlled), which -- unlike a raw
-// UPDATE -- may also end a session still PENDING_ENFORCEMENT.
+// The operator-disconnect path: the row is ended first (so netd convergence can only agree), then the address leaves the authorization set
+// and its shaping class goes. Idempotent. endSessionControlled may also end a session still PENDING_ENFORCEMENT.
 func (s *server) endSessionNow(ctx context.Context, sessionID string, ip net.IP, reason string) error {
 	ended, err := s.endSessionControlled(ctx, s.db, sessionID, reason)
 	if err != nil {
@@ -878,8 +789,7 @@ func (s *server) endSessionNow(ctx context.Context, sessionID string, ip net.IP,
 	return nil
 }
 
-// endLiveSessionsOfAccount ends every live session of an account (a completed password reset: whoever held the
-// old password -- a squatter on someone else's address -- loses the connection with it).
+// Ends every live session of an account after a completed password reset, so whoever held the old password loses the connection.
 func (s *server) endLiveSessionsOfAccount(ctx context.Context, accountID, reason string) int {
 	rows, err := s.db.Query(ctx, `
 	    SELECT se.id::text, COALESCE(host(se.ip), '')

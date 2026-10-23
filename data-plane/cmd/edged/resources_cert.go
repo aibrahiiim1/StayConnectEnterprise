@@ -7,15 +7,9 @@ import (
 	"strings"
 )
 
-// Hotel Admin TLS certificate — status surface + manual controls.
-//
-// The renewal LIFECYCLE lives in the root-run manager script
-// (/usr/local/sbin/stayconnect-hotel-admin-cert-manager), driven by a systemd
-// timer. edged runs unprivileged (stayconnect) and is sandboxed with
-// NoNewPrivileges, so it CANNOT run the privileged manager itself. It enforces
-// Hotel-IT permission + password step-up here, then proxies the actual exec to
-// scd (which runs as root) over the local socket. edged never handles private
-// key material and never mints certs itself.
+// Hotel Admin TLS certificate status and manual controls. Renewal lives in the root-run manager
+// (/usr/local/sbin/stayconnect-hotel-admin-cert-manager); edged is sandboxed (NoNewPrivileges) and never handles
+// key material, so it enforces permission and step-up here and proxies the privileged exec to scd.
 const (
 	certStatusFile = "/etc/caddy/hotel-admin/status.json"
 )
@@ -33,27 +27,19 @@ func readCertStatus() map[string]any {
 	return st
 }
 
-// hotelAdminCertGet returns the last-known certificate status (subject, issuer,
-// serial, fingerprint, SANs, dates, days remaining, thresholds, renewal history,
-// current management IP, SAN-match). No private key or secret material.
 func (s *server) hotelAdminCertGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, readCertStatus())
 }
 
-// hotelAdminCertCheck runs a diagnostic-only validation of the ACTIVE certificate
-// (no rotation). The privileged work runs in scd (root); the UI re-fetches
-// GET /hotel-admin-cert for the refreshed status afterwards.
+// hotelAdminCertCheck validates the active certificate without rotating; the privileged work runs in scd.
 func (s *server) hotelAdminCertCheck(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "hotel_admin_cert.check", "hotel_admin_cert", "", nil)
 	s.scd.proxy(w, r, http.MethodPost, "/v1/hotel-admin-cert/check", map[string]any{})
 }
 
-// hotelAdminCertRotate forces a rotation through the SAME safe lifecycle as the
-// automatic timer (mint → validate → atomic swap → caddy reload → dual-URL health
-// → rollback on failure). Gated HERE by Hotel-IT permission (route), password
-// step-up, a reason and a typed confirmation; the privileged mint/swap runs in
-// scd. It cannot upload a key or bypass validation. The manager itself audits the
-// outcome (renewal_succeeded/failed, rollback_*).
+// hotelAdminCertRotate forces a rotation through the same lifecycle as the timer (mint, validate, atomic swap,
+// reload, health, rollback on failure). Gated by Hotel-IT permission, step-up, a reason and a typed
+// confirmation; it cannot upload a key. The manager audits the outcome.
 func (s *server) hotelAdminCertRotate(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password     string `json:"password"`

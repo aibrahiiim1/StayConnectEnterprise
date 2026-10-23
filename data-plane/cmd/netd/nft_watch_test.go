@@ -7,8 +7,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// B-26: AFTER `systemctl restart nftables` THE TABLE IS GONE, and the periodic re-assertion rebuilds it from the
-// in-force intent -- without waiting for a reboot or a network change.
+// After `systemctl restart nftables` the table is gone; the periodic re-assertion rebuilds it from the in-force intent.
 func TestPeriodicReassertionRebuildsAFlushedTable(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
@@ -30,7 +29,7 @@ func TestPeriodicReassertionRebuildsAFlushedTable(t *testing.T) {
 	}
 }
 
-// Steady state: the re-assertion issues NO mutation, so a healthy appliance's guests are never touched by it.
+// Steady state: no mutation.
 func TestPeriodicReassertionIsANoOpWhenTheRulesetMatches(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
@@ -43,7 +42,6 @@ func TestPeriodicReassertionIsANoOpWhenTheRulesetMatches(t *testing.T) {
 	}
 }
 
-// Nothing in force (factory-clean), or an apply in progress: the re-assertion stands aside.
 func TestPeriodicReassertionStandsAside(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
@@ -60,7 +58,6 @@ func TestPeriodicReassertionStandsAside(t *testing.T) {
 	}
 }
 
-// The management pin is part of the render, so a WAN address change converges the ruleset to the new pin.
 func TestReassertionFollowsTheManagementAddress(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)

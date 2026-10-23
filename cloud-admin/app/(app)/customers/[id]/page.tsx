@@ -83,7 +83,6 @@ function CustomerView({ id }: { id: string }) {
       setDialog(null);
       await load();
     } catch (e) {
-      // A refused or taken name is shown under the Name field, which takes focus.
       if (nameField && e instanceof ApiError && (e.status === 400 || e.status === 409)) renameErr.fail({ name: e.message });
       else setDErr(e);
     } finally {
@@ -236,8 +235,7 @@ function CustomerView({ id }: { id: string }) {
 const SUMMARY_BUTTON =
   "rounded text-headline tabular hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-/** "3 sites, open the Sites tab": a number alone does not say what it counts or what the button does. The number
- *  comes first so the name still starts with the visible text (WCAG 2.5.3). */
+/** Include the count's subject in the button name so its purpose is clear to screen readers. */
 function countLabel(n: number, one: string, many: string, tab: string): string {
   return `${n} ${n === 1 ? one : many}, open the ${tab} tab`;
 }
@@ -285,7 +283,6 @@ type SiteDraft = { name: string; code: string; timezone: string; country: string
 
 type SiteField = "name" | "timezone" | "country" | "siteType" | "code";
 
-/** Which field the server's refusal of a site is about, from its sentence (400) or a taken code (409). */
 function siteFieldOf(e: ApiError): SiteField | null {
   if (e.status !== 400 && e.status !== 409) return null;
   const m = e.message.toLowerCase();

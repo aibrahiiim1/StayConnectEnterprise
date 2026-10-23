@@ -6,16 +6,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// THE COMPOSITION, NOT THE VALIDATOR.
-//
-// validatePlanSpec's own tests pass a capability flag the test chose, so they prove the rule and nothing
-// about whether the running service ever reaches it with the right value. The defect this closes was
-// invisible to every one of them: main.go handed the commerce admin s.phase6.AggregateTimeOn() BEFORE
-// anything had assigned s.phase6, so the capability was pinned OFF whatever the environment said. The bug
-// lived entirely in the ORDER of two statements.
-//
-// So these tests drive the wiring step main.go actually calls, with the config loaded from environment
-// values the same way, and assert what the admin ended up with.
+// These drive the wiring step main.go calls, with config loaded from the environment, to catch ordering
+// bugs (the capability was once read before s.phase6 was assigned).
 
 func adminFor(t *testing.T, env map[string]string) *iamv2.CommerceAdmin {
 	t.Helper()
@@ -31,14 +23,13 @@ func adminFor(t *testing.T, env map[string]string) *iamv2.CommerceAdmin {
 	return admin
 }
 
-// The default: no flags, no capability. This is every real environment today.
 func TestStartupWiringLeavesAggregateCapabilityOff(t *testing.T) {
 	if adminFor(t, map[string]string{}).AggregateOnlineTimeAllowed() {
 		t.Fatal("a service started with no Phase-6 flags may publish AGGREGATE_ONLINE_TIME revisions")
 	}
 }
 
-// Master alone is not the capability: turning Phase 6 on is not asking for this mode.
+// Master alone does not grant the capability.
 func TestStartupWiringNeedsBothFlags(t *testing.T) {
 	master := map[string]string{iamv2.EnvPhase6Master: "true"}
 	if adminFor(t, master).AggregateOnlineTimeAllowed() {
@@ -46,8 +37,7 @@ func TestStartupWiringNeedsBothFlags(t *testing.T) {
 	}
 }
 
-// THE REGRESSION. With the coherent pair on, the capability must actually arrive -- which it did not before,
-// because the config was read before it was loaded.
+// Regression: with both flags on, the capability must reach the admin.
 func TestStartupWiringGrantsTheCapabilityWhenBothFlagsAreOn(t *testing.T) {
 	both := map[string]string{
 		iamv2.EnvPhase6Master:        "true",
@@ -59,8 +49,7 @@ func TestStartupWiringGrantsTheCapabilityWhenBothFlagsAreOn(t *testing.T) {
 	}
 }
 
-// A child flag without its master is a deployment mistake and must be loud, not silently off -- so the
-// startup path fails rather than producing a half-configured admin.
+// A child flag without its master fails startup rather than silently staying off.
 func TestStartupWiringRefusesAnIncoherentFlagPair(t *testing.T) {
 	env := map[string]string{iamv2.EnvPhase6AggregateTime: "true"}
 	if _, err := iamv2.LoadPhase6ConfigFromEnv(func(k string) string { return env[k] }); err == nil {
@@ -68,7 +57,6 @@ func TestStartupWiringRefusesAnIncoherentFlagPair(t *testing.T) {
 	}
 }
 
-// The wiring never panics on a nil admin: a dark build may not construct one at all.
 func TestApplyAggregateCapabilityToleratesNoAdmin(t *testing.T) {
 	applyAggregateTimeCapability(nil, iamv2.Phase6Config{})
 }

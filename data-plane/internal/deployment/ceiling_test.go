@@ -6,8 +6,6 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// The identity add-ons are deployed exactly when IAM-v2 accepts their kind of identity: WhatsApp with SMS and
-// Email (a one-time code), Social on its own. A ceiling that allows nothing optional deploys none of them.
 func TestIdentityModulesFollowTheirIAMv2Method(t *testing.T) {
 	var zero Ceiling
 	for _, m := range []string{lic.ModuleEmailOTP, lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP, lic.ModuleSocialLogin} {
@@ -20,7 +18,6 @@ func TestIdentityModulesFollowTheirIAMv2Method(t *testing.T) {
 		otp.ModuleDeployed(lic.ModuleEmailOTP) || otp.ModuleDeployed(lic.ModuleSocialLogin) {
 		t.Fatal("OTP method did not deploy exactly the code modules (email sign-in is no longer a code)")
 	}
-	// Email sign-in is Email accounts: an ACCOUNT subject, deployed with the ACCOUNT method and nothing else.
 	acc := zero.WithAccounts(true)
 	if !acc.ModuleDeployed(lic.ModuleEmailOTP) || acc.ModuleDeployed(lic.ModuleSMSOTP) || acc.ModuleDeployed(lic.ModuleSocialLogin) {
 		t.Fatal("the ACCOUNT method must deploy email sign-in and only it")

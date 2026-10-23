@@ -5,8 +5,6 @@ import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cn } from "@/lib/utils";
 import { useRadioKeys } from "./data";
 
-// Radix Tabs, so arrow-key navigation and the tab/panel ARIA relationship come for free. The admin's existing
-// tab strips are plain buttons plus a `useState`, which look like tabs and behave like nothing.
 export const Tabs = TabsPrimitive.Root;
 
 export function TabsList({ className, ...p }: React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>) {
@@ -43,8 +41,7 @@ export function TabsContent({
 }: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
-      // Radix makes every panel a tab stop (tabIndex=0), so it needs a visible ring like every other stop (WCAG
-      // 2.4.7); removing the outline with nothing in its place made the focus vanish between the tabs and the panel.
+      // Keyboard-focusable panels need a visible focus ring.
       className={cn(
         "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background animate-fade-in",
         className,
@@ -54,12 +51,7 @@ export function TabsContent({
   );
 }
 
-/**
- * Segmented — a small two-or-three-way switch for a view mode ("Active / Recent", "Cards / Table").
- *
- * This is NOT Tabs and is deliberately a different control: it swaps a filter on the same content rather than
- * swapping panels, so it renders as a compact group of radios instead of a full tab strip.
- */
+/** A view filter uses radios because it does not switch panels. */
 export function Segmented<T extends string>({
   value,
   onChange,
@@ -75,13 +67,10 @@ export function Segmented<T extends string>({
   className?: string;
   label?: string;
 }) {
-  // The radiogroup keyboard contract (arrows, Home/End, one tab stop), the same one the theme toggle and the
-  // filter chips use. role="radio" promises it; without it each segment was its own tab stop.
+  // Radio semantics require arrow navigation and one tab stop.
   const onKeyDown = useRadioKeys(options.map((o) => o.value), value, onChange);
   const known = options.some((o) => o.value === value);
   return (
-    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex, useRadioKeys), never the group
-    // itself, which is the ARIA pattern; jsx-a11y reads the container role as a control.
     // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div
       role="radiogroup"

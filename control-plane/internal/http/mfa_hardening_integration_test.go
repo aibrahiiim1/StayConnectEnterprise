@@ -20,8 +20,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/totp"
 )
 
-// enrolledOperator makes an active operator with a confirmed authenticator. It returns the id, the secret, the
-// step the confirming code used, and the recovery codes.
+// enrolledOperator returns the id, secret, step used by the confirming code, and recovery codes.
 func enrolledOperator(t *testing.T, mfa *auth.MFA, email string) (string, []byte, int64, []string) {
 	t.Helper()
 	ctx := context.Background()
@@ -59,9 +58,6 @@ func newTestMFA(t *testing.T) *auth.MFA {
 	return mfa
 }
 
-// Product-Owner decision D-R3 (2026-10-20): a new set of recovery codes needs, on top of the password step-up, a
-// CURRENT code from the authenticator app -- checked like a sign-in code (never twice, wrong ones locking) -- and
-// a recovery code is not accepted for it.
 func TestNewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 	mfa := newTestMFA(t)
 	ctx := context.Background()
@@ -99,7 +95,6 @@ func TestNewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 	if failed() != 1 {
 		t.Fatalf("a wrong code was not counted (failed_codes %d)", failed())
 	}
-	// The code that confirmed the app has been used: replayed, it is refused and counted.
 	if code, b := call(map[string]string{"code": totp.Code(secret, used)}); code != 400 || b["error"] != "wrong_code" {
 		t.Fatalf("a replayed code = %d %v", code, b)
 	}
@@ -115,7 +110,6 @@ func TestNewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 	if failed() != 0 {
 		t.Fatal("a right code did not clear the count")
 	}
-	// That code is now used too, and the old recovery codes are gone.
 	if code, _ := call(map[string]string{"code": now}); code != 400 {
 		t.Fatalf("the same code twice = %d", code)
 	}
@@ -128,7 +122,6 @@ func TestNewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 		t.Fatalf("replacement audited %d times", replaced)
 	}
 
-	// Wrong codes here lock the authenticator exactly like at sign-in.
 	if _, err := mfa.DB.Exec(ctx, `UPDATE central_security_settings SET signin_lock_failures = 3 WHERE id`); err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +133,6 @@ func TestNewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 	}
 }
 
-// A burst of wrong codes sent at once is held to the lockout: each check waits for the previous one's count, so
-// no more than signin_lock_failures codes are ever checked before the lock lands.
 func TestParallelWrongCodesCannotOutrunTheLockout(t *testing.T) {
 	mfa := newTestMFA(t)
 	ctx := context.Background()
@@ -183,7 +174,6 @@ func TestParallelWrongCodesCannotOutrunTheLockout(t *testing.T) {
 	}
 }
 
-// A recovery code is accepted with spaces, tabs or line breaks anywhere in it.
 func TestRecoveryCodeWithInnerWhitespace(t *testing.T) {
 	mfa := newTestMFA(t)
 	id, _, _, codes := enrolledOperator(t, mfa, "ws@central.test")

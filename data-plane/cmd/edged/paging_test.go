@@ -199,8 +199,7 @@ func TestPageLeases_SearchesOrdersAndPagesTheWholeList(t *testing.T) {
 	}
 }
 
-// A NON-LATIN SEARCH SURVIVES THE HEADER. The Admin Console percent-encodes it (a browser refuses non-Latin-1 in a
-// header); Stays and Client accounts decode it exactly; a plain header from a script is taken as typed.
+// The Admin Console percent-encodes non-Latin search text (browsers refuse non-Latin-1 in a header); a plain header from a script is taken as typed.
 func TestHeaderSearchTextDecodesAnEncodedName(t *testing.T) {
 	cases := map[string]string{
 		"%D8%A3%D8%AD%D9%85%D8%AF%20%D8%B9%D9%84%D9%8A": "أحمد علي",

@@ -1,20 +1,5 @@
 "use client";
 
-// THE MODAL THE ADMIN DID NOT HAVE.
-//
-// Every edit in this product used to open a form INSIDE the page: "Add package" pushed a card above the table,
-// "Edit" pushed another one, and the list the operator was editing scrolled out of view underneath. On a long
-// screen the form could open entirely off-screen, so the click appeared to do nothing — and with two of them
-// open at once there was no way to tell which record a Save applied to.
-//
-// This is Radix Dialog, so the hard parts are correct rather than approximated: focus moves into the dialog and
-// is restored on close, Escape and the overlay dismiss it, the background is inert to the screen reader, and the
-// page behind does not scroll.
-//
-// `DialogForm` exists because nearly every use here is the same shape: a titled form with a footer that has
-// Cancel on the left of a single confirming action, an error line above it, and a busy state that disables both.
-// Twelve screens hand-rolled that layout in twelve slightly different ways.
-
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -50,12 +35,7 @@ export function DialogContent({
           "motion-reduce:animate-none",
         )}
       />
-      {/*
-        The positioning is a CENTRED FLEX WRAPPER rather than the usual `top-1/2 -translate-y-1/2`, because
-        these dialogs hold real forms: a package editor is taller than a laptop viewport. A translated, fixed
-        panel clips its own top and bottom with no way to reach them. This one is bounded to the viewport and
-        scrolls INSIDE, so the header and footer stay put and the fields scroll between them.
-      */}
+      {/* A centered wrapper keeps tall forms scrollable without clipping the header or footer. */}
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-6">
         <DialogPrimitive.Content
           className={cn(
@@ -64,7 +44,6 @@ export function DialogContent({
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
             "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
-            // Reduced motion: the panel simply appears and disappears. The state change stays; the movement goes.
             "motion-reduce:animate-none",
             SIZES[size],
             className,
@@ -114,7 +93,6 @@ export function DialogDescription({
   );
 }
 
-// The scrolling middle. Anything that can be long goes in here, not in the dialog root.
 export function DialogBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-4", className)} {...p} />;
 }
@@ -131,13 +109,7 @@ export function DialogFooter({ className, ...p }: React.HTMLAttributes<HTMLDivEl
   );
 }
 
-/**
- * DialogForm — a dialog whose body is a form and whose footer is its submit.
- *
- * The submit button lives in the footer but belongs to the form in the body, which is why the form carries an
- * id and the button carries `form={id}`: a footer outside the <form> element cannot submit it otherwise, and
- * moving the footer inside would make it scroll away with the fields.
- */
+/** The footer submits the body form by ID so it stays visible while fields scroll. */
 export function DialogForm({
   open,
   onOpenChange,
@@ -206,16 +178,7 @@ export function DialogForm({
   );
 }
 
-/**
- * ConfirmDialog — replaces `window.confirm` and, more importantly, the `window.prompt` chains.
- *
- * Disabling a package asked for a reason with `window.prompt`, then asked for a password with a SECOND
- * `window.prompt`. Cancelling the second left the operator with no idea whether the first had taken effect, the
- * password was typed into a field that shows its characters, and neither prompt could say what the action would
- * do. All three are properties of the browser dialog, not of the code using it.
- *
- * `requireReason` and `requirePassword` cover the step-up the backend already enforces on consequential routes.
- */
+/** Collect reasons and passwords together so cancellation cannot leave the action's state ambiguous. */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -247,36 +210,29 @@ export function ConfirmDialog({
   busy?: boolean;
   error?: unknown;
   requireReason?: boolean;
-  /** Minimum reason length the backend accepts (default 1: non-empty). */
+  /** Match the server's minimum reason length. */
   reasonMinLength?: number;
   reasonLabel?: string;
   reasonPlaceholder?: string;
   requirePassword?: boolean;
   passwordLabel?: string;
-  /** The audit log's limit for a typed reason. */
   reasonMaxLength?: number;
-  /** When the reason is a choice rather than free text. */
   reasonOptions?: { value: string; label: string }[];
-  /** TYPED CONFIRMATION for the heaviest actions: the operator must type exactly this (a name, a serial,
-   *  a word such as REVOKE) before the button enables. Compared exactly, case included. */
+  /** Require exact, case-sensitive confirmation for consequential actions. */
   confirmText?: string;
-  /** What the action will do, shown as a danger list above the fields. */
   consequences?: React.ReactNode[];
   onConfirm: (args: { reason: string; password: string }) => void | Promise<void>;
   children?: React.ReactNode;
 }) {
   const [reason, setReason] = React.useState("");
   const [password, setPassword] = React.useState("");
-  // Real ids, so the label is PROGRAMMATICALLY associated with its input rather than merely sitting above it.
-  // The first version rendered the label as a <div>, which looks identical and is invisible to a screen reader
-  // and to `getByLabelText` — a control asking for a password with no accessible name.
+  // Real IDs bind labels to inputs for screen readers.
   const reasonId = React.useId();
   const passwordId = React.useId();
   const typedId = React.useId();
   const [typed, setTyped] = React.useState("");
 
-  // Clearing on close rather than on open: a password must not survive in component state after the dialog
-  // that collected it has gone.
+  // Clear the password when the dialog closes.
   React.useEffect(() => {
     if (!open) {
       setReason("");
@@ -367,12 +323,6 @@ export function ConfirmDialog({
   );
 }
 
-/**
- * DetailDialog — a read-only panel for "view this record".
- *
- * Several lists answer "tell me more about this row" by expanding an extra <tr> underneath it, which pushes
- * every following row down and cannot hold more than a few lines. This is the same information with room for it.
- */
 export function DetailDialog({
   open,
   onOpenChange,

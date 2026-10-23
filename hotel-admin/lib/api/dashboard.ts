@@ -1,9 +1,6 @@
-// THE OVERVIEW CONTRACT (GET /edge/v1/reports/overview?range=24h|7d|30d, GET /reports/appliance-resources).
-//
-// Mirrors data-plane/cmd/edged/resources_overview.go. Every block carries its own `available`/`reason`; a block
-// that is unavailable is rendered as the reason, never as zeros. `normalizeOverview` fills a block the payload
-// did not carry (an older edged, a proxy error page) as unavailable, so a partial response degrades to an honest
-// surface instead of a client-side exception.
+// Overview contract (mirrors data-plane/cmd/edged/resources_overview.go). An unavailable block renders its reason,
+// never zeros;
+// normalizeOverview fills blocks a payload lacks as unavailable.
 
 import { api } from "@/lib/api";
 
@@ -251,10 +248,6 @@ export function fetchOverview(range: OverviewRange): Promise<OverviewSnapshot> {
   return api.get<OverviewSnapshot>(`/reports/overview?range=${encodeURIComponent(range)}`);
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// normalisation
-// ---------------------------------------------------------------------------------------------------------
-
 const ABSENT: Block = { available: false, reason: "section_absent_from_response" };
 const arr = <T,>(v: T[] | undefined | null): T[] => (Array.isArray(v) ? v : []);
 
@@ -342,10 +335,6 @@ export function normalizeOverview(d: Partial<OverviewSnapshot> | null | undefine
   };
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// words
-// ---------------------------------------------------------------------------------------------------------
-
 const REASONS: Record<string, string> = {
   not_permitted_for_role: "Your role does not include this information.",
   section_absent_from_response: "This appliance's software does not report this yet.",
@@ -377,8 +366,7 @@ export function reasonText(reason?: string): string {
   return REASONS[reason] ?? "Not available on this appliance.";
 }
 
-// The session's credential label (iamv2/credential.go): how the client signed in. PRINCIPAL is what a session
-// recorded before the channel was kept (an email, phone or social sign-in, unspecified).
+// Credential label: how the client signed in. PRINCIPAL is a session recorded before the channel was kept.
 const METHODS: Record<string, string> = {
   PMS: "Room number",
   VOUCHER: "Voucher",

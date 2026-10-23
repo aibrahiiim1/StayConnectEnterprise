@@ -10,27 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ---- item 1: full voucher PostgreSQL integration test (disposable iam_v2 DB) ----
-//
-// Proves the Phase 1B voucher credential path end-to-end against real DDL:
-//   * the voucher is resolved by its blind-index HMAC (never by plaintext);
-//   * a valid UNUSED voucher inside its window yields a VOUCHER auth_context pinned to the
-//     correct tenant/site/device/guest-network, and the voucher STAYS UNUSED (Phase 1B does
-//     not redeem or grant);
-//   * every non-redeemable state/window is denied generically (invalid_code vs not_redeemable);
-//   * a wrong tenant/site/HMAC never resolves;
-//   * NO redemption, purchase, settlement, entitlement, or session row is ever created.
-
-// testVHMAC is the scratch voucher blind-index: HMAC-SHA256(site-scoped key, code). It matches the
-// shape the real scd computes; the test only needs determinism, not the production key.
+// testVHMAC is a deterministic stand-in for the voucher blind index (HMAC-SHA256 of a site-scoped key and code).
 func testVHMAC(_ context.Context, tenantID, siteID, code string) ([]byte, error) {
 	mac := hmac.New(sha256.New, []byte("scratch-voucher-key|"+tenantID+"|"+siteID))
 	mac.Write([]byte(code))
 	return mac.Sum(nil), nil
 }
 
-// seedVoucherChain truncates and rebuilds the minimal plan/package/key-generation ancestry the
-// vouchers FK graph requires, so the test owns a clean commerce subtree.
 func seedVoucherChain(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()

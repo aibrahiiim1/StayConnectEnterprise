@@ -9,17 +9,9 @@ import (
 	"testing"
 )
 
-// TWO CONNECTIONS AT ONE PROPERTY MUST NOT SHARE A SET OF RETRY BOUNDS.
-//
-// Until now they did: the settings were keyed (tenant, site), and the screen warned the operator about it in
-// a box -- "these apply to the whole site, not just this connection". A hotel running a second PMS, or an
-// old and a new connector side by side during a migration, is exactly the case where one flaky link wants
-// patient backoff and the healthy one must not be slowed to match. Under the old key, tuning either tuned
-// both, silently.
-//
-// The isolation is asserted through the HTTP surface rather than against the table, because that is where an
-// operator actually changes these: a definer function that separates two interfaces correctly, reached by a
-// handler that passes the wrong id, is still one property with one set of bounds.
+// Two connections at one property must not share retry bounds: one flaky link wants patient backoff without
+// slowing a healthy one. Asserted through the HTTP surface, since a correct definer function reached by a handler
+// passing the wrong id would still be one set of bounds.
 func TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface(t *testing.T) {
 	f := newAPI(t, "site_admin")
 	ctx := context.Background()
@@ -44,8 +36,7 @@ func TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface(t *te
 		return out
 	}
 
-	// BOTH START UNCONFIGURED, on the approved defaults. is_default is the honest report that nobody has
-	// touched them -- distinct from somebody having set them to the same numbers.
+	// Both start unconfigured on the defaults; is_default reports that nobody touched them, distinct from setting the same numbers.
 	beforeA, beforeB := get(a), get(b)
 	for name, s := range map[string]interfaceConnectionSettings{"A": beforeA, "B": beforeB} {
 		if !s.IsDefault {
@@ -57,7 +48,7 @@ func TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface(t *te
 		}
 	}
 
-	// TUNE ONLY A. Every field, so that a leak into B cannot hide behind a value that happened to match.
+	// Tune only A, every field, so a leak into B cannot hide behind a matching value.
 	code, body := f.do(t, http.MethodPut, "/pms-interfaces/"+a+"/connection-settings", map[string]any{
 		"backoff_min_ms":          2000,
 		"backoff_max_ms":          120000,
@@ -72,7 +63,6 @@ func TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface(t *te
 
 	afterA, afterB := get(a), get(b)
 
-	// A CHANGED, and says it is no longer on defaults.
 	if afterA.BackoffMinMs != 2000 || afterA.BackoffMaxMs != 120000 || afterA.StableResetSeconds != 300 ||
 		afterA.LinkDownAlertSeconds != 60 || afterA.BlockedAfterRefusals != 9 {
 		t.Errorf("A did not take the new bounds: %+v", afterA)
@@ -84,8 +74,7 @@ func TestIntegration_API_ConnectionRecoverySettingsAreIsolatedPerInterface(t *te
 		t.Errorf("A's config_version should advance: %d -> %d", beforeA.ConfigVersion, afterA.ConfigVersion)
 	}
 
-	// B IS UNTOUCHED. This is the whole point, and it is asserted field by field rather than with a struct
-	// comparison so a failure names the value that leaked.
+	// B is untouched, asserted field by field so a failure names the value that leaked.
 	if afterB.BackoffMinMs != beforeB.BackoffMinMs {
 		t.Errorf("B's backoff_min_ms moved with A: %d -> %d", beforeB.BackoffMinMs, afterB.BackoffMinMs)
 	}

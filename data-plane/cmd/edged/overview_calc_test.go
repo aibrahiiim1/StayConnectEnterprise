@@ -20,8 +20,6 @@ func mustWindow(t *testing.T, key string, now time.Time) overviewWindow {
 	return w
 }
 
-// ------------------------------------------------------------------------------------------------ window --
-
 func TestWindowsAreAlignedToLocalBoundariesAndEndWithTheCurrentBucket(t *testing.T) {
 	now := time.Date(2026, 9, 24, 14, 37, 12, 0, cairo)
 
@@ -75,8 +73,6 @@ func TestBucketOfIsHalfOpen(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------------------------- delta vs cumulative --
-
 func TestSamplesAreDeltasAndABucketIsTheirSum(t *testing.T) {
 	w := mustWindow(t, "24h", time.Date(2026, 9, 24, 14, 37, 0, 0, cairo))
 	b0 := w.Start
@@ -88,8 +84,7 @@ func TestSamplesAreDeltasAndABucketIsTheirSum(t *testing.T) {
 		t.Fatalf("delta buckets = %v, want [150 7 ...]: each sample is the bytes since the previous one", got[:2])
 	}
 
-	// The same rows read as if they were cumulative would difference them — and report a reset. This is the
-	// mistake the overview must not make with this table, pinned so the difference is visible.
+	// Reading the same rows as cumulative would difference them and report a reset: the mistake to avoid.
 	cum := perBucketBytes(w, times, vals, counterCumulative)
 	if cum[0] == got[0] {
 		t.Fatal("cumulative and delta readings agree on data where they must not; the test proves nothing")
@@ -112,8 +107,7 @@ func TestCumulativeCountersAreDifferencedWithResets(t *testing.T) {
 }
 
 func TestTheSampleQuerySumsRowsRatherThanDifferencingThem(t *testing.T) {
-	// The encoding decision lives in SQL. If someone "fixes" it to lag()/difference the rows, every bucket goes
-	// wrong; this holds the query to the delta reading established from the writer.
+	// The encoding decision lives in SQL; "fixing" it to lag()/difference the rows would make every bucket wrong.
 	src, err := os.ReadFile("resources_overview.go")
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +119,7 @@ func TestTheSampleQuerySumsRowsRatherThanDifferencingThem(t *testing.T) {
 	if strings.Contains(s, "lag(ar.bytes") {
 		t.Error("the sample query differences the rows; accounting_records holds deltas, not counters")
 	}
-	// And it must be index-led: session_id = ANY, never a bare time predicate.
+	// It must be index-led: session_id = ANY, never a bare time predicate.
 	if !strings.Contains(s, "ar.session_id = ANY($1::uuid[])") {
 		t.Error("the sample query is no longer led by session_id = ANY; it would scan the whole table")
 	}
@@ -160,8 +154,6 @@ func TestRollupAttributesTrafficToNetworksAndPackages(t *testing.T) {
 		t.Errorf("sessions with data = %d, want 2", r.SessionsWithData)
 	}
 }
-
-// ------------------------------------------------------------------------------------------ concurrency --
 
 func tp(t time.Time) *time.Time { return &t }
 
@@ -216,8 +208,6 @@ func TestConcurrencyIgnoresSessionsOutsideTheWindow(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------------------------------ pool sizes --
-
 func TestPoolSizeIsCorrectForAnyIPv4Range(t *testing.T) {
 	cases := []struct {
 		start, end string
@@ -241,8 +231,6 @@ func TestPoolSizeIsCorrectForAnyIPv4Range(t *testing.T) {
 		}
 	}
 }
-
-// ------------------------------------------------------------------------------------------------ leases --
 
 func TestLeaseAggregationCountsOnlyCurrentLeasesPerNetworkAndPool(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
@@ -287,8 +275,6 @@ func TestLeaseAggregationCountsOnlyCurrentLeasesPerNetworkAndPool(t *testing.T) 
 		t.Error("a network with no pool must have no utilisation, not 0%")
 	}
 }
-
-// ------------------------------------------------------------------------------------- network blocks --
 
 func sampleNets() ([]ovNetRow, []ovPoolRow) {
 	_, sn, _ := net.ParseCIDR("10.20.0.0/22")
@@ -360,8 +346,6 @@ func TestAKeaThatCannotBeAskedIsReportedAsUnknownNotZero(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------------------------------- attention --
-
 func ids(items []attentionItem) []string {
 	out := make([]string, len(items))
 	for i, it := range items {
@@ -429,7 +413,6 @@ func TestAttentionRulesEachLinkToTheScreenThatFixesThem(t *testing.T) {
 			t.Errorf("%s = %+v, want a titled link to %s", it.ID, it, href)
 		}
 	}
-	// Errors lead.
 	seenWarn := false
 	for _, it := range got {
 		if it.Severity == "warn" {
@@ -486,8 +469,6 @@ func TestAttentionNeverReadsABlockTheCallerWasRefused(t *testing.T) {
 		t.Fatalf("attention derived from refused blocks: %v", ids(got))
 	}
 }
-
-// ---------------------------------------------------------------------------------------- permissions --
 
 func TestTheOverviewIsMountedUnderReports(t *testing.T) {
 	src, err := os.ReadFile("resources_site.go")
@@ -552,7 +533,7 @@ func TestTheHandlerConsultsTheBlockKeys(t *testing.T) {
 	}
 }
 
-// A PACKAGE NOBODY CAN BUY BY CARD is raised, with the two currencies and what to change.
+// A package nobody can buy by card is raised, with the two currencies and what to change.
 func TestAttentionRaisesAPackageNobodyCanBuyByCard(t *testing.T) {
 	got := deriveAttention(attentionInput{CardUnsellable: []attentionPackage{
 		{Name: "OneDay", Currency: "USD", AccountCurrency: "GBP"},

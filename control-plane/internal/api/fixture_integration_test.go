@@ -1,8 +1,5 @@
 package api
 
-// Shared fixture for the database integration tests in this package. Every test gets its own copy of the
-// fully migrated Central schema (internal/testdb) and talks to it through the real handlers.
-
 import (
 	"bytes"
 	"context"
@@ -59,7 +56,6 @@ func newFixture(t *testing.T) *fixture {
 			Roles: []string{"platform_owner"}, CreatedAt: time.Now()}}
 }
 
-// customerSite creates a customer with one site.
 func (f *fixture) customerSite(name string) (string, string) {
 	f.t.Helper()
 	cust, _, err := createCustomer(f.ctx, f.pool, name, "")
@@ -85,7 +81,6 @@ func newBox(serial, hwf string) box {
 	return box{priv: priv, pubB64: base64.RawStdEncoding.EncodeToString(pub), serial: serial, hwf: hwf}
 }
 
-// registerToken signs a registration body the way the appliance does.
 func registerToken(t *testing.T, bx box, body []byte) string {
 	t.Helper()
 	pub := bx.priv.Public().(ed25519.PublicKey)
@@ -108,7 +103,6 @@ func registerBody(bx box) []byte {
 	return body
 }
 
-// register posts a signed registration and returns the recorder.
 func (f *fixture) register(bx box) *httptest.ResponseRecorder {
 	f.t.Helper()
 	body := registerBody(bx)
@@ -133,7 +127,6 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return m
 }
 
-// operatorCall drives an operator handler with the platform owner's session and the {id} URL parameter.
 func (f *fixture) operatorCall(h http.HandlerFunc, method, id string, body any) *httptest.ResponseRecorder {
 	f.t.Helper()
 	return f.operatorCallAs(f.session, h, method, map[string]string{"id": id}, body)
@@ -157,7 +150,6 @@ func (f *fixture) operatorCallAs(s *auth.Session, h http.HandlerFunc, method str
 	return rec
 }
 
-// activate runs the real activation for a waiting appliance at (cust, site).
 func (f *fixture) activate(appID, cust, site string, cap int) {
 	f.t.Helper()
 	rec := f.operatorCall(f.base.activate, http.MethodPost, appID, map[string]any{

@@ -14,13 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// THE OPERATOR LISTS PAGE OVER EVERY ROW, NOT OVER WHAT THE BROWSER LOADED.
-//
-// The activity trail stopped at 500 entries, the sessions list and PMS activity at 200, and each searched and
-// counted only what it had loaded. These tests hold the server to the shared contract: ?page / ?page_size,
-// meta.has_more, totals over every match, search in a header, and pages that neither repeat nor skip a row.
+// The server pages over every row (?page / ?page_size, meta.has_more, totals over every match, search in a
+// header), and pages neither repeat nor skip a row.
 
-// getWithHeader sends one GET with an optional request header (the lists' search travels in a header).
 func (f *apiFixture) getWithHeader(t *testing.T, path string, headers map[string]string) (int, map[string]any) {
 	t.Helper()
 	req, err := http.NewRequest("GET", f.srv.URL+"/edge/v1"+path, bytes.NewReader(nil))
@@ -41,8 +37,7 @@ func (f *apiFixture) getWithHeader(t *testing.T, path string, headers map[string
 	return resp.StatusCode, out
 }
 
-// pageThrough walks every page of path (which must already carry its query) and returns each row's key in
-// order, failing on a repeated key or a page that disagrees with has_more.
+// pageThrough walks every page of path (which must already carry its query), failing on a repeated key or a page that disagrees with has_more.
 func (f *apiFixture) pageThrough(t *testing.T, path string, size int, headers map[string]string, key func(map[string]any) string) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -77,11 +72,8 @@ func (f *apiFixture) pageThrough(t *testing.T, path string, size int, headers ma
 	}
 }
 
-// ---------------------------------------------------------------------------------------------- audit ---
-
-// seedAudit writes n entries for the fixture's tenant. Entries come in pairs that share one timestamp, which
-// is exactly the case an offset over "ORDER BY ts" alone gets wrong. Every fifth is a network change made by
-// "op-net"; the rest are sign-ins.
+// seedAudit entries come in pairs sharing a timestamp, which an offset over "ORDER BY ts" alone gets wrong.
+// Every fifth is a network change by "op-net"; the rest are sign-ins.
 func (f *apiFixture) seedAudit(t *testing.T, n int) time.Time {
 	t.Helper()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -112,7 +104,6 @@ func TestIntegration_Audit_PagesEveryEntryWithoutRepeatsOrGaps(t *testing.T) {
 	if status != 200 || body["total"] != float64(130) {
 		t.Fatalf("total = %v (status %d), want 130", body["total"], status)
 	}
-	// The per-action counts cover the period, whichever filter is applied.
 	counts := map[string]float64{}
 	for _, a := range body["actions"].([]any) {
 		m := a.(map[string]any)
@@ -144,7 +135,7 @@ func TestIntegration_Audit_FiltersAndSearchNarrowTheWholeTrail(t *testing.T) {
 	if status != 200 || body["total"] != float64(26) {
 		t.Fatalf("action filter total = %v", body["total"])
 	}
-	// The per-action counts are NOT narrowed by the action filter.
+	// Per-action counts are not narrowed by the action filter.
 	if len(body["actions"].([]any)) != 2 {
 		t.Fatalf("actions under a filter = %v", body["actions"])
 	}
@@ -156,13 +147,11 @@ func TestIntegration_Audit_FiltersAndSearchNarrowTheWholeTrail(t *testing.T) {
 		t.Fatalf("prefix total = %v", body["total"])
 	}
 
-	// The search travels in a header and reaches entries far past the first page.
 	keys := f.pageThrough(t, "/audit?x=1", 5, map[string]string{auditSearchHeader: "target-12"}, auditKey)
 	// target-12 and target-120..129.
 	if len(keys) != 11 {
 		t.Fatalf("search target-12 matched %v", keys)
 	}
-	// The address is searchable.
 	if _, body = f.getWithHeader(t, "/audit?page_size=5", map[string]string{auditSearchHeader: "10.9.0.7"}); body["total"] == float64(0) {
 		t.Fatal("an address search found nothing")
 	}
@@ -172,16 +161,12 @@ func TestIntegration_Audit_FiltersAndSearchNarrowTheWholeTrail(t *testing.T) {
 	if body["total"] != float64(26) {
 		t.Fatalf("title search total = %v, want 26", body["total"])
 	}
-	// The actor filter matches the actor.
 	if _, body = f.do(t, "GET", "/audit?actor=op-net", nil); body["total"] != float64(26) {
 		t.Fatalf("actor filter total = %v", body["total"])
 	}
 }
 
-// ------------------------------------------------------------------------------------------- sessions ---
-
-// seedSessions creates one account entitlement with one active session, then n ended sessions on the same
-// device. Ended sessions need no live authorization binding, so the fixture can make as many as a test wants.
+// seedSessions creates one active session plus n ended ones on the same device; ended sessions need no live authorization binding.
 func (f *apiFixture) seedSessions(t *testing.T, n int) {
 	t.Helper()
 	ctx := context.Background()
@@ -225,14 +210,12 @@ func TestIntegration_Sessions_PagedWithTotalsOverEverySession(t *testing.T) {
 		t.Fatalf("bytes_total = %v", sum["bytes_total"])
 	}
 
-	// The state filter still narrows the list, and the legacy spelling still works.
 	if _, body = f.do(t, "GET", "/sessions?state=active", nil); body["total"] != float64(1) {
 		t.Fatalf("active total = %v", body["total"])
 	}
 	if _, body = f.do(t, "GET", "/sessions?state=closed", nil); body["total"] != float64(120) {
 		t.Fatalf("closed total = %v", body["total"])
 	}
-	// The kind filter runs on the server.
 	if _, body = f.do(t, "GET", "/sessions?kind=room", nil); body["total"] != float64(0) {
 		t.Fatalf("room kind total = %v", body["total"])
 	}
@@ -253,12 +236,10 @@ func TestIntegration_Sessions_SearchInAHeaderCoversEverySession(t *testing.T) {
 	if body["total"] != float64(1) {
 		t.Fatalf("address search total = %v, want 1", body["total"])
 	}
-	// The account's username matches every session on it.
 	_, body = f.getWithHeader(t, "/sessions?page_size=5", map[string]string{sessionSearchHeader: "guest-alw-61"})
 	if body["total"] != float64(121) {
 		t.Fatalf("username search total = %v, want 121", body["total"])
 	}
-	// The search narrows the total but not the tiles.
 	if body["summary"].(map[string]any)["kinds"].(map[string]any)["account"] != float64(121) {
 		t.Fatalf("summary narrowed by search: %v", body["summary"])
 	}
@@ -268,10 +249,7 @@ func TestIntegration_Sessions_SearchInAHeaderCoversEverySession(t *testing.T) {
 	}
 }
 
-// ----------------------------------------------------------------------------------------- PMS events ---
-
-// seedStayEvents inserts n PENDING, unmatched messages (the only shape the append-only trigger accepts at
-// insert) one second apart. Every tenth is a check-out.
+// seedStayEvents inserts n PENDING, unmatched messages (the only shape the append-only trigger accepts) one second apart; every tenth is a check-out.
 func (f *apiFixture) seedStayEvents(t *testing.T, n int) string {
 	t.Helper()
 	ctx := context.Background()
@@ -314,7 +292,6 @@ func TestIntegration_PMSEvents_PagedSearchedAndCounted(t *testing.T) {
 		t.Fatal("no newest_received_at")
 	}
 
-	// The status filter narrows the list; the tiles still describe every message.
 	if _, body = f.do(t, "GET", "/pms-events?processing_status=APPLIED", nil); body["total"] != float64(0) ||
 		body["summary"].(map[string]any)["pending"] != float64(230) {
 		t.Fatalf("status filter: total %v summary %v", body["total"], body["summary"])
@@ -336,8 +313,6 @@ func TestIntegration_PMSEvents_PagedSearchedAndCounted(t *testing.T) {
 		t.Fatalf("a bad page = %d, want 400", status)
 	}
 }
-
-// --------------------------------------------------------------------------------- PMS resolutions ---
 
 func TestIntegration_PMSResolutions_PagedWithASummaryOfTheRecentWindow(t *testing.T) {
 	f := newAPI(t)
@@ -376,8 +351,6 @@ func TestIntegration_PMSResolutions_PagedWithASummaryOfTheRecentWindow(t *testin
 	}
 }
 
-// ------------------------------------------------------------------------------- sign-in attempts ---
-
 func TestIntegration_SignInAttempts_PagedWithServerSearch(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -397,7 +370,6 @@ func TestIntegration_SignInAttempts_PagedWithServerSearch(t *testing.T) {
 	if body["total"] != float64(130) || sum["total"] != float64(130) || sum["mismatch"] != float64(32) {
 		t.Fatalf("total %v summary %v", body["total"], sum)
 	}
-	// The room filter is exact; the search header matches part of a room or a reason's words.
 	if _, body = f.do(t, "GET", "/guest-signin-attempts?room=230", nil); body["total"] != float64(1) {
 		t.Fatalf("room filter total = %v", body["total"])
 	}

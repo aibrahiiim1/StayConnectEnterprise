@@ -21,7 +21,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
-// withCA gives the fixture a real appliance CA, recorded the way ctrlapi records it at boot.
 func (f *fixture) withCA() {
 	f.t.Helper()
 	ca, err := pki.LoadOrCreate(filepath.Join(f.t.TempDir(), "ca.key"), 1)
@@ -35,7 +34,6 @@ func (f *fixture) withCA() {
 	f.base.CA = ca
 }
 
-// issueCert files a CSR for the appliance and has Central sign it; returns the parsed certificate.
 func (f *fixture) issueCert(appID string) *x509.Certificate {
 	f.t.Helper()
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
@@ -57,7 +55,6 @@ func (f *fixture) issueCert(appID string) *x509.Certificate {
 	return cert
 }
 
-// mtlsRequest runs one request through mtlsCertBinding presenting cert, as appliance appID.
 func (f *fixture) mtlsRequest(appID string, cert *x509.Certificate) int {
 	h := mtlsCertBinding(f.pool)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	req := httptest.NewRequest(http.MethodGet, "/v1/appliance/hello", nil)
@@ -68,7 +65,6 @@ func (f *fixture) mtlsRequest(appID string, cert *x509.Certificate) int {
 	return rec.Code
 }
 
-// ack posts a signed terminal acknowledgment over the (simulated) mTLS channel.
 func (f *fixture) ack(appID string, bx box, cert *x509.Certificate, a assignment.Ack) *httptest.ResponseRecorder {
 	assignment.SignAck(bx.priv, &a)
 	raw, _ := json.Marshal(a)
@@ -80,15 +76,13 @@ func (f *fixture) ack(appID string, bx box, cert *x509.Certificate, a assignment
 	return rec
 }
 
-// X-9: retirement is atomic. When the terminal assignment cannot be signed, the licence is NOT revoked and no
-// retirement is recorded: the appliance is exactly as it was and the operator can retry.
+// Retirement is atomic: if the terminal assignment cannot be signed, the licence is not revoked and nothing is recorded.
 func TestRetirementIsAtomic(t *testing.T) {
 	f := newFixture(t)
 	cust, site := f.customerSite("Atomic")
 	app := decode(t, f.register(newBox("SC-TEST-0006", "hwf-6")))["appliance_id"].(string)
 	f.activate(app, cust, site, 30)
 
-	// The signing key stops being allowed to sign.
 	if _, err := f.pool.Exec(f.ctx, `UPDATE assignment_signing_keys SET state='verify_only'`); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +97,6 @@ func TestRetirementIsAtomic(t *testing.T) {
 		t.Fatal("a retirement that did not start must leave no terminal delivery record")
 	}
 
-	// Signing allowed again: the same retirement goes through, licence revocation and terminal document together.
 	if _, err := f.pool.Exec(f.ctx, `UPDATE assignment_signing_keys SET state='active'`); err != nil {
 		t.Fatal(err)
 	}
@@ -119,13 +112,11 @@ func TestRetirementIsAtomic(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM appliance_signed_assignments WHERE appliance_id=$1 AND state='decommissioned'`, app); n != 1 {
 		t.Fatal("a signed decommissioned assignment must be current")
 	}
-	// A second normal retire while one is in progress is refused.
 	if rec = f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "again"}); rec.Code != http.StatusConflict {
 		t.Fatalf("a second normal retirement must be refused, got %d", rec.Code)
 	}
 }
 
-// P4: the signing guard fails closed -- a key Central has no record of does not sign.
 func TestUnregisteredAssignmentKeyDoesNotSign(t *testing.T) {
 	f := newFixture(t)
 	cust, site := f.customerSite("Guard")
@@ -144,8 +135,6 @@ func TestUnregisteredAssignmentKeyDoesNotSign(t *testing.T) {
 	}
 }
 
-// P4: a rotated-out certificate is refused on the mTLS listener after the overlap and then recorded as
-// revoked; the terminal ack is accepted only for a retirement in progress, and retires every certificate.
 func TestSupersededCertificatesAndAckRules(t *testing.T) {
 	f := newFixture(t)
 	f.withCA()
@@ -175,7 +164,6 @@ func TestSupersededCertificatesAndAckRules(t *testing.T) {
 		t.Fatal("the superseded certificate must now be revoked")
 	}
 
-	// An ack with no retirement in progress is refused, whatever it says.
 	var ver int64
 	_ = f.pool.QueryRow(f.ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, app).Scan(&ver)
 	rec := f.ack(app, bx, second, assignment.Ack{ApplianceID: app, Version: ver, TerminalState: "decommissioned", AdoptedAt: time.Now().Unix()})
@@ -186,7 +174,6 @@ func TestSupersededCertificatesAndAckRules(t *testing.T) {
 		t.Fatal("a refused ack must not retire the appliance")
 	}
 
-	// A real retirement, acknowledged with the current terminal document.
 	if rec = f.operatorCall(f.base.retire, http.MethodPost, app, map[string]any{"reason": "returned"}); rec.Code != http.StatusOK {
 		t.Fatalf("retire: %d %s", rec.Code, rec.Body.String())
 	}

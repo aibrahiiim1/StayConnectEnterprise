@@ -20,34 +20,27 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/backupcrypt"
 )
 
-// Names of the objects kept at the external destination.
 const (
 	ExternalObject = "erasure-ledger.jsonl"
 	ExternalHead   = "erasure-ledger.head.json"
 )
 
 var (
-	// ErrNotConfigured: no secondary storage is set up. Erasure is refused until it is: the ledger needs two copies.
+	// ErrNotConfigured: no secondary storage is set up; erasure is refused because the ledger needs two copies.
 	ErrNotConfigured = errors.New("the secondary storage for the erasure ledger is not set up")
-	// ErrConflict: what was offered does not continue the ledger as it stands.
-	ErrConflict = errors.New("the entry does not continue the erasure ledger")
-	// ErrLocalDamaged: the copy on the appliance is damaged and must be healed before anything is added.
-	ErrLocalDamaged = errors.New("the erasure ledger on the appliance is damaged")
-	// ErrExternalAhead: the secondary storage holds erasures this appliance does not have (for example after the appliance's
-	// own copy was lost). Overwriting it would destroy them, so nothing is written until it has been recovered from.
+	ErrConflict      = errors.New("the entry does not continue the erasure ledger")
+	ErrLocalDamaged  = errors.New("the erasure ledger on the appliance is damaged")
+	// ErrExternalAhead: the secondary storage holds erasures this appliance lacks; overwriting it would destroy them.
 	ErrExternalAhead = errors.New("the secondary storage holds newer erasures than this appliance")
-	// ErrExternalFork: the two copies disagree about an entry they both have.
-	ErrExternalFork = errors.New("the secondary storage and this appliance disagree about an erasure")
+	ErrExternalFork  = errors.New("the secondary storage and this appliance disagree about an erasure")
 )
 
-// ExternalError is a failure of the secondary storage (not of the appliance), so a caller can tell the administrator which
-// of the two places to look at.
+// ExternalError is a failure of the secondary storage, so callers can tell which place to look at.
 type ExternalError struct{ Err error }
 
 func (e *ExternalError) Error() string { return "the secondary storage failed: " + e.Err.Error() }
 func (e *ExternalError) Unwrap() error { return e.Err }
 
-// LocalError is a failure of the appliance's own storage.
 type LocalError struct{ Err error }
 
 func (e *LocalError) Error() string {
@@ -55,15 +48,15 @@ func (e *LocalError) Error() string {
 }
 func (e *LocalError) Unwrap() error { return e.Err }
 
-// Cipher is who the external copy is encrypted to: the hotel's backup key holders (public keys only; the appliance cannot
-// read the copy back, which is why recovery from it needs a key holder's key, exactly like a backup).
+// Cipher is who the external copy is encrypted to: the backup key holders (public keys only), so recovery needs a
+// key holder's key, exactly like a backup.
 type Cipher struct {
 	Recipients  []age.Recipient
 	Fingerprint string
 }
 
-// HeadInfo is the small plain-text note kept next to the external copy. It lets the appliance see how far that copy has
-// reached, and whether the object is still the one it wrote, WITHOUT being able to decrypt it. It carries no personal data.
+// HeadInfo is the plain-text note beside the external copy: how far it reached and whether the object is still the
+// one written, without decrypting. It carries no personal data.
 type HeadInfo struct {
 	Ledger       string `json:"ledger"`
 	Seq          int64  `json:"seq"`
@@ -77,20 +70,16 @@ type HeadInfo struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
-// Config wires a Store.
 type Config struct {
 	// LocalPath is the primary copy: a file on the appliance, mode 0600.
 	LocalPath string
-	// Dest is the secondary copy; nil when not set up.
-	Dest Destination
+	Dest      Destination
 	// Cipher returns the recipients for the external copy, or nil for none. Called on every push.
 	Cipher func(ctx context.Context) (*Cipher, error)
-	// Now is the clock, replaceable in tests.
-	Now func() time.Time
+	Now    func() time.Time
 }
 
-// Store maintains the two copies. All of its methods are safe to call concurrently; they serialise on one lock, which is
-// what makes "append, then replicate" one step.
+// Store maintains the two copies; methods serialise on one lock so "append, then replicate" is one step.
 type Store struct {
 	Config
 	mu   sync.Mutex
@@ -99,7 +88,6 @@ type Store struct {
 
 type destBox struct{ d Destination }
 
-// NewStore returns a Store for cfg.
 func NewStore(cfg Config) *Store {
 	s := &Store{Config: cfg}
 	if cfg.Dest != nil {
@@ -117,7 +105,6 @@ func (s *Store) SetDest(d Destination) {
 	s.dest.Store(&destBox{d})
 }
 
-// Destination is the secondary storage, or nil when it is not set up.
 func (s *Store) Destination() Destination { return s.getDest() }
 
 func (s *Store) getDest() Destination {
@@ -161,12 +148,9 @@ func (s *Store) ReadLocal() Copy {
 	return Copy{Name: "local", Present: true, Parse: ParseChain(b)}
 }
 
-// Commit makes entries durable in BOTH places, or in neither: it appends them to the primary copy (fsynced and read back),
-// replaces the secondary copy (read back byte for byte), and only then returns nil. If the secondary storage fails, the
-// primary copy is put back as it was. The caller reports an erasure as done only after Commit returned nil.
-//
-// Commit is idempotent: entries the primary copy already holds, with the same hashes, are skipped, so a retry after an
-// interrupted call is safe.
+// Commit makes entries durable in both places or neither: it appends to the primary (fsynced, read back), replaces
+// the secondary (read back) and restores the primary if the secondary fails. Idempotent: entries already held with
+// the same hashes are skipped. Report an erasure as done only after Commit returns nil.
 func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -229,9 +213,8 @@ func (s *Store) Commit(ctx context.Context, entries []Entry) error {
 	return nil
 }
 
-// Abort removes entries that Commit made durable but whose database transaction then failed, so the ledger never records
-// an erasure that was not reported. It only removes the tail, and only if the tail is exactly those entries. (If the process
-// dies before Abort runs, reconciliation adopts the entries instead: see Reconcile in the appliance.)
+// Abort removes entries Commit made durable whose database transaction then failed, only if the tail is exactly
+// those entries. If the process dies first, reconciliation adopts them instead.
 func (s *Store) Abort(ctx context.Context, entries []Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -246,7 +229,7 @@ func (s *Store) Abort(ctx context.Context, entries []Entry) error {
 	}
 	for i := 0; i < k; i++ {
 		if cur.Parse.Entries[n-k+i].Hash != entries[i].Hash {
-			return nil // not ours: leave it
+			return nil
 		}
 	}
 	keep, err := Encode(cur.Parse.Entries[:n-k])
@@ -257,7 +240,7 @@ func (s *Store) Abort(ctx context.Context, entries []Entry) error {
 		return &LocalError{err}
 	}
 	if s.getDest() != nil {
-		_ = s.pushExternalLocked(ctx, true) // these were our own entries: take them back from the secondary too (best effort)
+		_ = s.pushExternalLocked(ctx, true)
 	}
 	return nil
 }
@@ -289,7 +272,6 @@ func (s *Store) appendLocal(fresh []Entry, size int64) error {
 		return err
 	}
 	syncDir(filepath.Dir(s.LocalPath))
-	// Read back: what is on the disk must be a valid chain reaching the last entry.
 	back := s.ReadLocal()
 	if !back.Present || back.Parse.Err != nil || back.Parse.Torn {
 		_ = os.Truncate(s.LocalPath, size)
@@ -309,7 +291,6 @@ func syncDir(dir string) {
 	}
 }
 
-// PushExternal replaces the secondary copy with the primary one, and proves it by reading it back.
 func (s *Store) PushExternal(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

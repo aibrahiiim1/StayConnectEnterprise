@@ -2,14 +2,8 @@
 
 package main
 
-// THE PMS INTERFACE ADMIN SURFACE, over real HTTP against a real PostgreSQL 16.
-//
-// These run through the actual chi router with the actual session/RBAC middleware, so a handler that
-// disagrees with its own schema, its own role table, or its own audit path fails here rather than on an
-// appliance. Nothing touches a production database, an appliance or a PMS.
-//
-// The fixture publishes revision 1 while revision 2 exists, deliberately. Every assertion about "which
-// Revision is live" would pass by accident if the newest were always the published one.
+// The fixture publishes revision 1 while revision 2 exists, so "which Revision is live" cannot pass by
+// accident when the newest is always the published one.
 
 import (
 	"bytes"
@@ -23,8 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// testSecretKeyHex is a 32-byte AES key for the disposable database only. It never leaves this file and is
-// not a credential for anything that exists.
+// testSecretKeyHex is a 32-byte AES key for the disposable test database only.
 const (
 	testSecretKeyID  = "00000000-0000-4000-8000-0000000000aa"
 	testSecretKeyHex = "1f8b0800000000000003fedcba98765432100123456789abcdef001122334455"
@@ -70,9 +63,8 @@ func (f *apiFixture) labelOf(t *testing.T, iface string) string {
 	return label
 }
 
-// The published Revision is the one the interface POINTS AT, not the newest. A property rolling back to an
-// earlier configuration is the case that makes "highest revision_no" wrong — and it is exactly the case where
-// showing the wrong answer sends an operator to debug configuration that is not running.
+// The published Revision is the one the interface points at, not the highest revision_no: after a rollback the
+// wrong answer would send an operator to debug configuration that is not running.
 func TestIntegration_API_PublishedRevisionIsThePointedAtOneNotTheNewest(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, rev2 := f.seedInterface(t)
@@ -98,8 +90,7 @@ func TestIntegration_API_PublishedRevisionIsThePointedAtOneNotTheNewest(t *testi
 	}
 }
 
-// A Revision's config is operator-authored, so it will eventually contain a credential somebody pasted into
-// the wrong field. An admin page is exactly where that becomes a screenshot in a support ticket.
+// Revision config is operator-authored and may contain a credential pasted into the wrong field; it is redacted.
 func TestIntegration_API_RevisionConfigIsRedacted(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -117,14 +108,13 @@ func TestIntegration_API_RevisionConfigIsRedacted(t *testing.T) {
 	if !bytes.Contains(raw, []byte("[redacted]")) {
 		t.Fatal("nothing was redacted, so the redaction never ran")
 	}
-	// Redacting everything would be useless: the operator still has to be able to read the configuration.
+	// Non-secret configuration must stay readable.
 	if !bytes.Contains(raw, []byte("pms.local")) {
 		t.Fatal("redaction removed the ordinary configuration too")
 	}
 }
 
-// Publishing takes a step-up. It changes what every subsequent guest is resolved against, so an unattended or
-// stolen session must not be enough on its own.
+// Publishing takes a step-up: it changes what every later guest resolves against, so a stolen session is not enough.
 func TestIntegration_API_PublishingRequiresStepUp(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, rev2 := f.seedInterface(t)
@@ -147,8 +137,7 @@ func TestIntegration_API_PublishingRequiresStepUp(t *testing.T) {
 	}
 }
 
-// A reason code is required, because "why is this property on revision 7?" gets asked months later by someone
-// who was not there.
+// A reason code is required so the record can answer later why a property is on a given revision.
 func TestIntegration_API_PublishingRequiresAReason(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, rev2 := f.seedInterface(t)
@@ -160,9 +149,8 @@ func TestIntegration_API_PublishingRequiresAReason(t *testing.T) {
 	}
 }
 
-// THE OPTIMISTIC CONFLICT. Two operators open the form; one publishes; the second must be refused rather than
-// silently reverting the first. The refusal carries what is published NOW, so the UI can show the difference
-// instead of asking the operator to guess why they were refused.
+// Optimistic conflict: a second operator is refused rather than silently reverting the first, and the refusal
+// carries what is published now so the UI can show the difference.
 func TestIntegration_API_ConcurrentPublicationIsRefusedNotOverwritten(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, rev2 := f.seedInterface(t)
@@ -173,7 +161,6 @@ func TestIntegration_API_ConcurrentPublicationIsRefusedNotOverwritten(t *testing
 	if code != http.StatusOK {
 		t.Fatalf("the first publication failed: %d %v", code, body)
 	}
-	// the second operator still believes rev1 is live
 	code, body = f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/publish", map[string]any{
 		"revision_id": rev1, "expected_revision_id": rev1, "reason_code": "ROLLBACK", "password": f.password,
 	})
@@ -193,8 +180,7 @@ func TestIntegration_API_ConcurrentPublicationIsRefusedNotOverwritten(t *testing
 	}
 }
 
-// A successful publication is audited with both the new and the previous Revision, so the record answers
-// "what changed" rather than merely "something changed".
+// A publication is audited with both the new and previous Revision, so the record says what changed.
 func TestIntegration_API_PublicationIsAudited(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, rev2 := f.seedInterface(t)
@@ -218,8 +204,7 @@ func TestIntegration_API_PublicationIsAudited(t *testing.T) {
 	}
 }
 
-// A Revision belonging to ANOTHER interface must not be publishable: every subsequent resolution would be
-// decided against configuration written for a different PMS.
+// A Revision of another interface must not be publishable: resolution would use configuration written for a different PMS.
 func TestIntegration_API_ARevisionFromAnotherInterfaceCannotBePublished(t *testing.T) {
 	f := newAPI(t)
 	ifaceA, rev1A, _ := f.seedInterface(t)
@@ -233,9 +218,8 @@ func TestIntegration_API_ARevisionFromAnotherInterfaceCannotBePublished(t *testi
 	}
 }
 
-// CROSS-SITE REFUSAL. Every read is scoped to this appliance's site, and another site's interface is
-// indistinguishable from one that does not exist — a different answer would confirm what a neighbouring
-// property runs.
+// Reads are scoped to this site, and another site's interface is indistinguishable from a missing one, so a
+// different answer cannot confirm what a neighbouring property runs.
 func TestIntegration_API_AnotherSitesInterfaceIsNotFound(t *testing.T) {
 	f := newAPI(t)
 	var otherIface string
@@ -251,7 +235,6 @@ func TestIntegration_API_AnotherSitesInterfaceIsNotFound(t *testing.T) {
 	if code, _ := f.do(t, http.MethodGet, "/pms-interfaces/"+otherIface, nil); code != http.StatusNotFound {
 		t.Fatalf("another site's interface returned %d, want 404", code)
 	}
-	// absent from the listing, not merely un-fetchable
 	code, body := f.do(t, http.MethodGet, "/pms-interfaces", nil)
 	if code != http.StatusOK {
 		t.Fatalf("list status %d", code)
@@ -260,7 +243,6 @@ func TestIntegration_API_AnotherSitesInterfaceIsNotFound(t *testing.T) {
 	if bytes.Contains(raw, []byte(otherIface)) || bytes.Contains(raw, []byte("Neighbour PMS")) {
 		t.Fatal("the listing disclosed another site's interface")
 	}
-	// and its revisions and health are equally unreachable
 	for _, p := range []string{"/pms-interfaces/" + otherIface + "/revisions", "/pms-interfaces/" + otherIface + "/health"} {
 		_, b := f.do(t, http.MethodGet, p, nil)
 		raw, _ := json.Marshal(b)
@@ -270,8 +252,7 @@ func TestIntegration_API_AnotherSitesInterfaceIsNotFound(t *testing.T) {
 	}
 }
 
-// RBAC. A viewer sees the evidence and cannot act on it; the front desk is the same. Publishing and rotating
-// belong to the role that owns the integration.
+// A viewer or the front desk sees the evidence but cannot act; publishing and rotating belong to the integration's owner role.
 func TestIntegration_API_ReadOnlyRolesCannotPublishOrRotate(t *testing.T) {
 	for _, role := range []string{"site_viewer", "front_office_operator"} {
 		t.Run(role, func(t *testing.T) {
@@ -295,9 +276,7 @@ func TestIntegration_API_ReadOnlyRolesCannotPublishOrRotate(t *testing.T) {
 	}
 }
 
-// THE CREDENTIAL IS WRITE-ONLY. There is no endpoint that returns it; this proves the surrounding surfaces do
-// not leak it either — not the detail, not the listing, not the revision config, not the rotation's own
-// response, and not the audit log.
+// The credential is write-only: the detail, listing, revision config, rotation response and audit log must not leak it.
 func TestIntegration_API_ARotatedCredentialIsNeverReadableAgain(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -326,8 +305,7 @@ func TestIntegration_API_ARotatedCredentialIsNeverReadableAgain(t *testing.T) {
 			t.Fatalf("%s disclosed the credential", path)
 		}
 	}
-	// the audit records that it happened, not what it was — and not a hash either, since a hash of a short
-	// operator-chosen string is not much of a secret
+	// The audit records that it happened, not the value or a hash (a hash of a short string is guessable).
 	var payload []byte
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT payload FROM public.audit_log WHERE action='pms_interface.secret_rotated' AND target_id=$1
@@ -348,8 +326,7 @@ func TestIntegration_API_ARotatedCredentialIsNeverReadableAgain(t *testing.T) {
 	}
 }
 
-// Rotating twice supersedes the first generation. Two live generations would make "which credential does the
-// connector use" a question answered by an ORDER BY.
+// Rotating twice supersedes the first generation; two live ones would leave the credential choice to an ORDER BY.
 func TestIntegration_API_RotationSupersedesThePreviousGeneration(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -375,7 +352,7 @@ func TestIntegration_API_RotationSupersedesThePreviousGeneration(t *testing.T) {
 	}
 }
 
-// Rotation also takes a step-up and a reason: it is the action that can silently disconnect a property.
+// Rotation takes a step-up and a reason: it can silently disconnect a property.
 func TestIntegration_API_RotationRequiresStepUpAndAReason(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -403,8 +380,7 @@ func TestIntegration_API_RotationRequiresStepUpAndAReason(t *testing.T) {
 	}
 }
 
-// Without an encryption key the rotation is REFUSED, not stored in the clear. A credential written
-// unencrypted "for now" is a credential written unencrypted forever, and nothing downstream would notice.
+// Without an encryption key the rotation is refused, never stored in the clear.
 func TestIntegration_API_RotationWithoutAnEncryptionKeyIsRefused(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -428,16 +404,13 @@ func TestIntegration_API_RotationWithoutAnEncryptionKeyIsRefused(t *testing.T) {
 	}
 }
 
-// Health is DERIVED. The runtime row carries facts; the four dimensions and the backlog are computed at read
-// time, so nothing can keep saying "healthy" after it stops being true.
+// Health is derived at read time from the runtime row's facts, so nothing keeps saying "healthy" after it stops being true.
 func TestIntegration_API_InterfaceHealthIsDerivedFromTheFacts(t *testing.T) {
 	f := newAPI(t)
 	iface, rev1, _ := f.seedInterface(t)
 	ctx := context.Background()
 
-	// CONNECTED is only a legal runtime state when the row also pins WHAT it connected with (pir_connected_pins).
-	// Seeding it any other way would seed a state the appliance itself can never produce, and the test would be
-	// proving the handler against a shape that does not occur.
+	// CONNECTED is legal only when the row also pins what it connected with (pir_connected_pins).
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id,site_id,pms_interface_id,runtime_generation,pinned_revision_id,credential_mode,
 		 transport_status,continuity_status,sync_status,last_connected_at,last_heartbeat_at,last_valid_event_at)
@@ -457,8 +430,7 @@ func TestIntegration_API_InterfaceHealthIsDerivedFromTheFacts(t *testing.T) {
 			t.Fatalf("seed pending event: %v", err)
 		}
 	}
-	// Events are ADMITTED as PENDING and only the engine moves one to a terminal state — the schema enforces
-	// that directly. So the review event is seeded the way the engine produces it: admitted, then moved.
+	// The schema lets only the engine move a PENDING event to a terminal state, so seed it admitted, then moved.
 	var review string
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
@@ -490,15 +462,13 @@ func TestIntegration_API_InterfaceHealthIsDerivedFromTheFacts(t *testing.T) {
 	if h["review_events"] != float64(1) {
 		t.Fatalf("review backlog = %v, want 1", h["review_events"])
 	}
-	// The oldest pending timestamp is what separates "a busy morning" from "a stuck processor", and it is the
-	// number an operator actually acts on.
+	// The oldest pending timestamp separates a busy morning from a stuck processor.
 	if h["oldest_pending_at"] == nil {
 		t.Fatal("the backlog does not say how old the oldest waiting event is")
 	}
 }
 
-// An interface with NO runtime row has never connected. That is a real state and must read as UNKNOWN rather
-// than fail, because "we have never heard from this PMS" is exactly what an operator needs to be told.
+// An interface with no runtime row has never connected and must read as UNKNOWN rather than fail.
 func TestIntegration_API_AnInterfaceThatNeverConnectedReportsUnknown(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -512,8 +482,7 @@ func TestIntegration_API_AnInterfaceThatNeverConnectedReportsUnknown(t *testing.
 	}
 }
 
-// Guest-network routing shows both what IS mapped and what is NOT. A guest network with no mapping resolves
-// against nothing, and that absence is invisible in a list of what exists.
+// Guest-network routing shows what is not mapped too: an unmapped network resolves against nothing, invisibly.
 func TestIntegration_API_RoutingNamesTheUnmappedGuestNetworksToo(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t)
@@ -548,14 +517,12 @@ func TestIntegration_API_RoutingNamesTheUnmappedGuestNetworksToo(t *testing.T) {
 	}
 }
 
-// Source conflicts name BOTH interfaces by their operator-facing labels. A conflict rendered as two UUIDs is
-// a conflict nobody resolves.
+// Source conflicts name both interfaces by their operator-facing labels, not UUIDs.
 func TestIntegration_API_SourceConflictsNameBothInterfaces(t *testing.T) {
 	f := newAPI(t)
 	ifaceA, _, _ := f.seedInterface(t)
 	ifaceB, _, _ := f.seedInterface(t)
-	// The conflict is symmetric, so the schema fixes an orientation (psc_order: interface_a < interface_b) to
-	// stop the same pair being recorded twice in opposite directions.
+	// psc_order (interface_a < interface_b) stops the same pair being recorded twice in opposite directions.
 	if ifaceB < ifaceA {
 		ifaceA, ifaceB = ifaceB, ifaceA
 	}

@@ -1,8 +1,4 @@
-// API client — talks to /api/edge/v1/* which Next.js rewrites to edged, the
-// Hotel Admin API on the appliance. The site is implicit (edged is physically
-// connected to exactly one site DB) so no tenant_id/site_id params anywhere.
-// Cookies flow naturally same-origin; no credentials: 'include' needed.
-
+// Client for /api/edge/v1/*, which Next rewrites to edged. The site is implicit, so no tenant/site params.
 
 export class ApiError extends Error {
   status: number;
@@ -22,22 +18,15 @@ export class ApiError extends Error {
   }
 }
 
-// All edged resources live under /edge/v1. The Next proxy strips /api.
 export const EDGE_BASE = "/api/edge/v1";
 
-// BACKGROUND REQUESTS ARE NOT ACTIVITY. edged extends a session's idle limit on every request except those
-// carrying this header, so the console marks what it asks on its own -- polls, refresh timers, the whoami
-// check. Without it a screen that polls (dashboard, sessions, interfaces, ...) kept the session alive for ever
-// and the idle warning closed itself.
+// Marks a request as background: edged does not extend the session idle limit for it, so polls
+// cannot keep a session alive forever.
 export const BACKGROUND_HEADER = "X-OneGate-Background";
 
 let backgroundSpans = 0;
 
-/**
- * inBackground runs `fn` -- a poll or timer callback -- with every GET it starts marked as background, including
- * GETs started after an await inside it, until the promise `fn` returns settles. Only GETs: an operator's save
- * that happens to land while a poll is in flight is still an action, and polls only read.
- */
+/** Runs `fn` with every GET it starts (even after an await) marked background. Only GETs: a save is still an action. */
 export function inBackground<T>(fn: () => T): T {
   backgroundSpans++;
   let out: T;
@@ -80,25 +69,15 @@ async function request<T>(
 }
 
 export const api = {
-  // headers: for a value that must not travel in the URL (edged logs request lines) -- e.g. a stay search,
-  // which is often a guest's name.
+  // headers: for values that must not travel in the URL (edged logs request lines), e.g. a stay search.
   get:   <T>(path: string, headers?: Record<string, string>) =>
     request<T>("GET", path, undefined, headers ? { headers } : undefined),
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
   del:   <T>(path: string, body?: any)    => request<T>("DELETE", path, body),
-  // upload sends a file as multipart/form-data.
-  //
-  // IT EXISTS BECAUSE THE ONE CALL THAT DID NOT USE THIS CLIENT WAS BROKEN. Portal asset upload hand-wrote
-  // `fetch("/edge/v1/portal-assets")` because FormData must not carry a JSON content-type — and dropped the
-  // `/api` prefix that EDGE_BASE carries. Only `/api/*` is rewritten to edged, so the request matched no
-  // route, Next redirected it to the login page, and the browser re-POSTed the image at a page that answers
-  // HTML. The parse failed and the operator was told the image was refused. Both uploads failed identically,
-  // for a reason that had nothing to do with the image.
-  //
-  // The content-type is deliberately NOT set: fetch derives it from the FormData along with the multipart
-  // boundary, and setting it by hand produces a body no server can parse.
+  // Content-type is deliberately NOT set: fetch derives it and the multipart boundary from the FormData.
+  // Uses EDGE_BASE: a hand-written fetch without the `/api` prefix is not rewritten to edged.
   upload: async <T>(path: string, file: File, field = "file"): Promise<T> => {
     const form = new FormData();
     form.append(field, file);
@@ -108,8 +87,7 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, payload);
     return payload as T;
   },
-  // postRaw sends a pre-serialized body (e.g. a pasted license envelope)
-  // without re-encoding it.
+  // postRaw sends a pre-serialized body without re-encoding it.
   postRaw: async <T>(path: string, raw: string): Promise<T> => {
     const res = await fetch(`${EDGE_BASE}${path}`, {
       method: "POST",
@@ -124,16 +102,8 @@ export const api = {
   },
 };
 
-// ------- Types (edged /edge/v1 response shapes) -------
-
-// A phase-gated surface that edged has NOT enabled answers 404 "page not found" for every path under it,
-// because the routes are never mounted. Rendered raw, an operator sees "HTTP 404" on a screen the menu just
-// offered them, which reads as a broken product rather than a capability that is deliberately off.
-//
-// This is not something the UI can pre-empt: the screens are compiled in at BUILD time (NEXT_PUBLIC_PHASE*)
-// while mounting is decided at RUNTIME by edged's own flags, so the two can disagree on a given appliance --
-// and on this one they do. Saying so plainly is the honest surface. It is NOT a way to turn the capability
-// on: enabling it is a deliberate deployment decision, made in edged's configuration, not here.
+// A phase-gated surface edged has not mounted answers 404; screens are compiled in at build time while
+// mounting is a runtime flag, so the UI says the capability is off rather than showing a raw 404.
 export function surfaceUnavailableMessage(e: unknown, surface: string): string {
   if (e instanceof ApiError && e.status === 404) {
     return `${surface} is not enabled on this appliance. The screens are present in this build, but the ` +
@@ -145,9 +115,7 @@ export function surfaceUnavailableMessage(e: unknown, surface: string): string {
 export type ListResp<T> = {
   data: T[];
   meta: { has_more: boolean };
-  // Which domain answered. Present on surfaces where legacy and IAM-v2 have genuinely different contracts,
-  // so a screen with ZERO rows can still tell which one it is talking to. Per-row authority cannot: an empty
-  // list has no rows to ask.
+  // Which domain answered, so an empty list can still tell which contract it is talking to.
   authority?: "iam_v2" | "legacy";
 };
 
@@ -158,12 +126,9 @@ export type Whoami = {
   roles: string[];
   site_id: string;
   expires_at: string;
-  /** The session can only change its password until this is false (edged 0119). */
   must_change_password?: boolean;
 };
 
-// GuestAccessPlan — the local `ticket_templates` rows, renamed per the edge
-// domain language (duration/caps/bandwidth/price for a guest access tier).
 export type GuestAccessPlan = {
   id: string; tenant_id: string; code: string; name: string;
   description?: string | null;
@@ -173,23 +138,14 @@ export type GuestAccessPlan = {
   price_cents?: number | null; currency?: string | null;
 };
 
-// THE VOUCHER TYPES, AS THE PRODUCT ACTUALLY SHIPS THEM.
-//
-// What was here described the legacy surface: a batch row of its own, a template_id, a code_prefix, a
-// char_mode with four values, and `totals` counting an "exhausted" state. None of it matched iam_v2, and
-// nothing imported either type -- they were the last trace of a screen that no longer exists, kept alive by
-// the fact that dead types compile.
-//
-// Under iam_v2 a BATCH IS NOT A ROW. It is the set of vouchers sharing a batch_id, minted per print run, so
-// it is derived rather than fetched -- which is why there is no VoucherBatch type here any more.
+// Under iam_v2 a batch is not a row: it is the set of vouchers sharing a batch_id, derived rather than fetched.
 export type VoucherState = "UNUSED" | "REDEEMED" | "REVOKED" | "REDEMPTION_EXPIRED";
 
 export type VoucherSummary = {
   unused: number; redeemed: number; revoked: number; redemption_expired: number;
 };
 
-// The code FORMAT the property chose (migration 0085). config_version 0 means nobody has chosen and these
-// are the defaults -- distinguishable from a property that deliberately saved the same values.
+// config_version 0 means nobody has chosen and these are defaults.
 export type VoucherCodeFormat = {
   code_mode: "numbers" | "mixed";
   code_length: 6 | 7 | 8;
@@ -197,8 +153,7 @@ export type VoucherCodeFormat = {
   updated_at?: string;
 };
 
-// One entry in the append-only record of who recovered a code in the clear. There is deliberately no field
-// that could carry a code: this records THAT one was read, never which.
+// Append-only record of who recovered a code in the clear. No field can carry a code: it records THAT one was read.
 export type VoucherReveal = {
   revealed_at: string;
   action: "REVEAL" | "EXPORT";
@@ -209,25 +164,17 @@ export type VoucherReveal = {
   selection: string | null;
 };
 
-// Guest Username/Password account (password is never returned).
 export type GuestAccount = {
   id: string; username: string; display_name?: string | null; notes?: string | null;
-  // ABSENT under IAM-v2 authority, which has no template/plan on the credential at all -- see the
-  // guest-accounts screen. Optional so the type cannot promise a field the backend does not send.
+  // Absent under IAM-v2, which has no template/plan on the credential.
   template_id?: string | null; enabled: boolean;
   valid_from?: string | null; valid_until?: string | null;
   last_login_at?: string | null; login_count: number;
-  // THERE IS NO locked_until HERE, AND THAT IS NOT AN OMISSION. iam_v2.guest_access_accounts has the column
-  // and the authenticator would honour it, but nothing in the product ever sets it: repeated-failure
-  // protection is per DEVICE (Client sign-in protection, migration 0068). Carrying it made the screen report
-  // a lockout count that was structurally zero.
+  // No locked_until: nothing sets it; repeated-failure protection is per device.
   // Derived (list/get): plan device cap + live distinct active devices.
   max_devices?: number | null; active_devices?: number;
-  // When the account was created. ABSENT for accounts created before migration 0104, which recorded none.
   created_at?: string | null; updated_at?: string;
-  // EMAIL ACCOUNTS (self-service contract §2-§3, migration 0117). A self-registered account was opened by the
-  // client on the portal; its username is their email address. `suspended` is computed by edged from the site's
-  // Email accounts settings and is ABSENT when those could not be read.
+  // Self-registered accounts: username is the email; `suspended` is absent when site settings could not be read.
   self_registered?: boolean;
   email_verified?: boolean;
   email_verified_at?: string | null;
@@ -237,7 +184,6 @@ export type GuestAccount = {
   suspended?: boolean;
 };
 
-/** One account's management view: edged GET /guest-accounts/{id}/manage. */
 export type GuestAccountDevice = {
   id: string; mac: string; status: "AUTHORIZED" | "DISCONNECTED" | string; online: boolean;
   first_authorized?: string | null; last_authorized?: string | null;
@@ -253,14 +199,11 @@ export type GuestAccountManage = {
   entitlements: GuestAccountPackage[];
   entitlements_total: number;
   removed: boolean;
-  // What Remove does: "delete" (never used: the row goes) or "remove" (history kept, address freed).
   removal: "delete" | "remove";
 };
-/** Devices (edged /client-devices, migration 0118). */
 export type DevicePackage = {
   entitlement_id: string; status: string; package_name: string; free: boolean;
   subject_kind: "ACCOUNT" | "VOUCHER" | "ROOM" | "CLIENT" | "OPEN"; subject_label?: string; account_id?: string;
-  // AUTHORIZED: the device holds a place on the package. DISCONNECTED: its place was freed.
   slot: "AUTHORIZED" | "DISCONNECTED" | string; slot_reason?: string;
   first_authorized?: string | null; last_authorized?: string | null; window_ends_at?: string | null;
   consumed_data_bytes: number; data_quota_bytes?: number | null; max_devices?: number | null; places_in_use: number;
@@ -268,8 +211,7 @@ export type DevicePackage = {
 export type ClientDeviceRow = {
   id: string; mac: string; last_ip?: string; first_seen?: string | null; last_seen?: string | null;
   online: boolean; online_ip?: string; current?: DevicePackage | null;
-  // On the Wi-Fi right now (an active DHCP lease), whether or not it has signed in. A row with an empty id is a
-  // device on the Wi-Fi that has never signed in.
+  // On the Wi-Fi now (active DHCP lease); an empty id means it has never signed in.
   on_network?: boolean; lease_ip?: string; hostname?: string; lease_expires?: string | null;
 };
 export type ClientDeviceDetail = {
@@ -284,12 +226,10 @@ export type ClientDeviceDetail = {
 };
 export type DeviceSettings = { client_device_changes_per_day: number };
 
-/** What DELETE /guest-accounts/{id} did. */
 export type GuestAccountRemoveResp = {
   status: "deleted" | "removed"; history_kept?: boolean; disconnected_sessions?: number; disconnect_failures?: number;
 };
 
-/** Email accounts' terms (contract §6): edged GET/PUT /self-service-settings. Bounds come from the server. */
 export type SelfServiceSettings = {
   verification_required: boolean;
   verification_deadline_hours: number;
@@ -302,7 +242,6 @@ export type SelfServiceSettings = {
   registrations_per_device_per_day: number;
 };
 export type SelfServiceBound = { key: keyof SelfServiceSettings; min: number; max: number; unit: string; default: number };
-/** One row of the append-only change log, as the database holds it. */
 export type SelfServiceChange = { changed_at: string; changed_by?: string; change_reason?: string } & Record<string, unknown>;
 export type SelfServiceSettingsResp = {
   settings: SelfServiceSettings;
@@ -315,23 +254,20 @@ export type SelfServiceSettingsResp = {
   awaiting_assignment?: boolean;
 };
 
-/** One page of client accounts, newest first, with totals over EVERY matching account (not just this page). */
 export type GuestAccountsPage = ListResp<GuestAccount> & {
   page: number;
   page_size: number;
   summary: { total: number; enabled: number; disabled: number; devices_online: number };
 };
 
-// Response of create / set-password: password reveal is one-time only.
+// Password reveal is one-time only.
 export type GuestAccountCreateResp = { account: GuestAccount; generated_password?: string };
-// disconnected_sessions is present only when the reset asked for a disconnect, and it is the number of
-// sessions the appliance CONFIRMED ended. disconnect_failures counts the devices scd could not take off the
-// network, so the screen can say so instead of reporting a clean success.
+// disconnected_sessions counts sessions the appliance CONFIRMED ended; disconnect_failures counts devices scd could not
+// remove.
 export type GuestAccountPasswordResp = {
   status: string; disconnected_sessions?: number; disconnect_failures?: number; generated_password?: string;
 };
 
-/** The format of GENERATED client-account passwords (migration 0104). The bounds come from the server. */
 export type AccountPasswordStyle = {
   key: string;
   label: string;
@@ -365,10 +301,7 @@ export type AccountPasswordFormatChange = {
   new_config_version: number;
 };
 
-// NOTE THE ABSENCE OF `code`. The old type had one, and a `code_display` beside it, from a surface where
-// the list carried the plaintext. A list is a screen an operator leaves open; a code on it would be a
-// reveal with no password, no reason and no record. The only thing a list shows is the last four
-// characters, which is enough to match a card in somebody's hand and not enough to be one.
+// No `code` on the list type: a list left open must not reveal one. Only the last four characters are shown.
 export type Voucher = {
   id: string;
   code_last4: string;
@@ -382,9 +315,7 @@ export type Voucher = {
   issued_by: string | null;
 };
 
-// SubjectKind — the four things an Entitlement can belong to, which is therefore the four things a session can
-// belong to. The database guarantees exactly one (iam_v2 ent_one_subject), so this is a closed set rather than a
-// convention. An empty string means the session's entitlement could not be read, not that it has no subject.
+// The four things an Entitlement (hence a session) can belong to. An empty string means unreadable, not subject-less.
 export type SubjectKind = "room" | "account" | "voucher" | "guest" | "open" | "";
 
 export type Session = {
@@ -396,8 +327,7 @@ export type Session = {
   expires_at?: string | null;
   bytes_up: number; bytes_down: number;
 
-  // WHO, WHERE AND ON WHAT — see edged's resources_sessions.go for why each of these is safe to send and why a
-  // voucher code and a guest principal's contact details are deliberately NOT among them.
+  // A voucher code and a guest principal's contact details are deliberately NOT included.
   credential_method?: string | null;
   ingress_interface?: string | null;
   guest_network_name?: string | null;
@@ -425,31 +355,24 @@ export type Session = {
   time_used_seconds?: number | null;
 
   active_devices?: number;
-  // How many times this client has had this package, counting the current one (0 = unknown).
   package_acquisitions?: number;
 };
 
-// ---- Phase 3 (DARK) PMS stay resolution + checkout grace -------------------
-// These mirror edged's resources_phase3.go exactly. Resolution evidence deliberately carries NO guest
-// identity: an operator learns that a resolution succeeded, never who it was.
+// Resolution evidence deliberately carries no guest identity.
 
 export type Stay = {
   id: string; pms_interface_id: string; pms_interface_label?: string; external_reservation_id: string;
   room?: string | null; status: string; lifecycle_version: number;
   arrival?: string | null; departure?: string | null;
   effective_checkout_at?: string | null; posting_allowed: boolean; occupants: number;
-  // The primary occupant, so the list can be searched the way an operator actually thinks about a stay.
   primary_guest?: string | null;
-  // Why posting is closed, and which side decided it.
   posting_block_reason?: string | null; posting_permission_source?: string | null;
-  // When the PMS last confirmed this occupancy — the evidence guest sign-in is judged against.
   occupancy_evidence_at?: string | null;
-  // Hotel attributes. VIP and travel agent arrive from Protel FIAS through this property's mapped fields (A1 VIP
-  // flag, A0 travel agent); room type and rate plan only where a connector sends them. Absent = not stated.
+  // VIP / travel agent come from Protel FIAS mapped fields (A1, A0); room type and rate plan only where a connector
+  // sends them.
   vip?: boolean | null; room_type?: string | null; rate_plan?: string | null; travel_agent?: string | null;
 
-  // WHICH INTERNET THIS ROOM HAS. The live entitlement's package and the service plan behind it — absent when
-  // the stay has no live access, which is a real and common state rather than a missing value.
+  // Absent when the stay has no live access (a common state, not a missing value).
   access_status?: string | null;
   access_package_code?: string | null;
   access_package_name?: string | null;
@@ -458,14 +381,12 @@ export type Stay = {
   access_up_kbps?: number | null;
   access_max_devices?: number | null;
   access_active_devices?: number;
-  // Devices HOLDING A PLACE on the package -- what the device limit is enforced against. A device keeps its
-  // place after it signs out, so a stay can be at the limit with nobody online (audit H-14).
+  // Devices holding a place on the package (what the device limit is enforced against); a device keeps its place after
+  // sign-out.
   access_authorized_devices?: number;
-  // The caller may not see guest names or reservation numbers (audit H-7).
   identity_hidden?: boolean;
 };
 
-/** One page of stays, with totals over EVERY stay that matches (not just this page). */
 export type StaysPage = {
   data: Stay[];
   meta: { has_more: boolean };
@@ -474,19 +395,15 @@ export type StaysPage = {
   summary: { total: number; with_internet: number; devices_online: number; arriving: number; vip: number };
 };
 
-/** A travel agent the PMS has named on a stay, for the package editor's picker. */
 export type TravelAgent = { name: string; in_house: number; stays: number };
 
 export type StayDetail = Stay & {
   occupant_list: { display_name?: string | null; is_primary: boolean }[];
-  // Room charge blocks on this stay, active first, then the most recent cleared ones (Phase-0 Amendment A1).
-  // There are no folios: a room charge targets the reservation (room number + reservation number).
+  // Room charges target the reservation (room + reservation number); there are no folios.
   posting_blocks?: StayPostingBlock[];
-  // A room charge for this stay is pending, being sent or under review (only one may exist at a time).
   room_charge_open?: boolean;
 };
 
-/** One reasoned stop on room charging for a stay. Only ADMIN_BLOCK is an operator's to set or clear. */
 export type StayPostingBlock = {
   reason: "PMS_NO_POST" | "PMS_DATA_SUSPECT" | "POSTING_UNRESOLVED" | "ADMIN_BLOCK" | string;
   source: "PMS_ANSWER" | "POSTING_LEDGER" | "OPERATOR" | string;
@@ -504,36 +421,25 @@ export type StayEvent = {
   id: string; pms_interface_id: string; external_event_identity: string; event_type: string;
   processing_status: string; review_code?: string | null; stay_id?: string | null;
   pms_timestamp_utc?: string | null; received_at: string;
-  // What the event is ABOUT. Absent on an event the appliance could not match to a stay — which is usually
-  // precisely why it is still waiting.
+  // Absent when the appliance could not match the event to a stay.
   pms_interface_label?: string;
   room?: string | null;
   external_reservation_id?: string | null;
   primary_guest?: string | null;
   stay_status?: string | null;
-  // A review message that carries a decision (acknowledged, linked, expired, answered by the guest list) no
-  // longer needs one. decision is that disposition.
   decided?: boolean;
   decision?: string | null;
-  // What the message itself names, for linking it (absent when the caller may not see reservations).
   message_reservation?: string | null;
   message_room?: string | null;
-  // The caller may not see guest names or reservation numbers (audit H-7).
   identity_hidden?: boolean;
 };
 
 export type PmsResolution = {
   id: string; guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string;
-  // The network's own name. No guest, room or reservation appears on this surface by design.
   guest_network_name?: string | null;
 };
 
-// GUEST SIGN-IN ATTEMPTS.
-//
-// Two shapes, because there are two permissions. SignInAttempt and SignInAttemptDetail carry NO credential
-// value of any kind — not masked, absent — and SignInAttemptCredentials is fetched from its own endpoint
-// behind its own permission. A single type with optional secret fields is how a surface that "hides" them in
-// one view eventually ships them in another.
+// Credential values are never in SignInAttempt/Detail; SignInAttemptCredentials has its own endpoint and permission.
 export type SignInAttempt = {
   id: string;
   occurred_at: string;
@@ -559,8 +465,6 @@ export type SignInAttemptDetail = SignInAttempt & {
   mirror_last_complete_sync_at?: string | null;
   entitlement_id?: string | null;
   session_id?: string | null;
-  // Whether a sealed half exists at all, so the panel can say "the key was unavailable when this was
-  // recorded" instead of showing an empty box that reads as a permission problem.
   credentials_available: boolean;
 };
 
@@ -574,21 +478,15 @@ export type SignInAttemptCredentials = {
   additional_accepted_guests?: number;
 };
 
-// ---- guest sign-in protection ------------------------------------------------------
-//
-// The policy and the restrictions are separate types behind separate permissions, for the same reason the
-// attempts and the credentials are: a single shape with optional fields is how a boundary that holds in one
-// view stops holding in the next.
+// Policy and restrictions are separate types behind separate permissions.
 
 export type GuestSignInProtection = {
   max_failed_attempts: number;
   observation_window_seconds: number;
   restriction_seconds: number;
-  // The site has never saved a policy and is running on the approved defaults. NOT "protection is off" —
-  // there is no off.
+  // Never saved: running on approved defaults (not "protection off").
   is_default: boolean;
-  // The server's own bounds, sent so the form validates against the same numbers the server enforces
-  // instead of a copy that can drift.
+  // The server's bounds, so the form validates against the same numbers.
   limits: {
     min_failed_attempts: number;
     max_failed_attempts: number;
@@ -604,7 +502,6 @@ export type GuestSignInProtectionChange = {
   changed_at: string;
   changed_by: string;
   reason?: string;
-  // Absent on a site's first saved policy: there was no stored row to report.
   old_max_failed_attempts?: number | null;
   old_observation_window_seconds?: number | null;
   old_restriction_seconds?: number | null;
@@ -617,15 +514,13 @@ export type GuestSignInRestriction = {
   id: string;
   device_mac: string;
   guest_network?: string;
-  // UNVERIFIED INPUT — the room this device last TYPED. The field name says so, and every label that
-  // renders it says so too.
+  // UNVERIFIED INPUT: the room this device last typed.
   last_submitted_room?: string;
   failure_count: number;
   reason: string;
   restricted_at: string;
   expires_at: string;
-  // Computed by the server at the moment of the read, so a screen left open overnight cannot count down
-  // against a clock that drifted from the appliance's.
+  // Server-computed at read time so an open screen does not count down against a drifting client clock.
   remaining_seconds: number;
 };
 
@@ -641,9 +536,7 @@ export type CheckoutGraceConfig = {
   config_version: number;
 };
 
-// GraceHistoryEntry is one published version of the hotel's policy, as provenance reads: who, when, why, and
-// the exact terms that version put in force. The snapshot comes from the append-only publication ledger, not
-// from recomputing today's config -- a history that re-derived its own numbers would describe nothing.
+// One published version of the hotel's policy, from the append-only publication ledger.
 export type GraceHistoryEntry = {
   config_version: number;
   published_at: string;
@@ -660,9 +553,7 @@ export type GraceHistoryEntry = {
   } | null;
 };
 
-// GracePackageOption is one selectable Checkout-Grace package revision, described by its own IMMUTABLE
-// attributes. RETAINED FOR DIAGNOSTICS ONLY: the operator no longer picks a package, because the system
-// derives the one that expresses their policy exactly. See the form for why picking could never work.
+// Retained for diagnostics only: the system derives the package that expresses the policy.
 export type GracePackageOption = {
   package_revision_id: string;
   package_code: string;
@@ -689,8 +580,7 @@ export type OperationalAlert = {
   audit_id: string; stay_id: string; lifecycle_version: number;
   alert_code: string; trigger: string; reason_code?: string | null;
   boundary_at: string; boundary_clock_suspect: boolean; created_at: string;
-  // the lifecycle head the operator is looking at. Every action sends it back, so a concurrent change is a
-  // clean 409 rather than a silent overwrite.
+  // Sent back with every action so a concurrent change is a 409, not a silent overwrite.
   state: "OPEN" | "ACKNOWLEDGED";
   seq: number;
   state_changed_at?: string | null;
@@ -706,8 +596,6 @@ export type Operator = {
   updated_at: string;
 };
 
-// EdgeOperator is the shape edged's /operators returns: roles is a flat
-// string[] and there is no updated_at (unlike the control-plane Operator).
 export type EdgeOperator = {
   id: string;
   email: string;
@@ -715,13 +603,10 @@ export type EdgeOperator = {
   status: "active" | "disabled" | string;
   roles: string[];
   created_at: string;
-  /** Their next sign-in can only set a new password (edged 0119). */
   must_change_password?: boolean;
-  /** An authenticator app is set up (edged 0132); without one, the next sign-in sets one up. */
   two_step_enrolled?: boolean;
 };
 
-/** Admin Console session limits (edged /operators/session-policy, migration 0132). */
 export type SessionPolicy = {
   idle_timeout_minutes: number;
   max_session_hours: number;
@@ -734,7 +619,6 @@ export type SessionPolicyBound = {
   label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
-/** How long a disabled staff account is kept before it is anonymised (edged /operators/account-retention, 0138). */
 export type AccountRetention = {
   disabled_account_days: number;
   config_version: number;
@@ -746,7 +630,6 @@ export type AccountRetentionBound = {
   label: string; unit: string; min: number; max: number; default: number; explains: string;
 };
 
-/** Admin Console sign-in protection (edged /operators/signin-protection, migration 0119). */
 export type SigninProtection = {
   account_max_failures: number;
   account_window_seconds: number;
@@ -769,11 +652,9 @@ export type WalledGardenRule = {
   ports?: number[] | null;
   description?: string | null;
   created_at: string;
-  /** Wider than the site's widest-network policy (stored before it, or before it was narrowed). */
   wider_than_policy?: boolean;
 };
 
-/** GET/PUT /walled-garden/policy (migration 0125): the widest network a rule may name. */
 export type WalledGardenPolicy = {
   widest_prefix_len: number; min: number; max: number; default: number;
   config_version: number; updated_at?: string | null; updated_by?: string | null;
@@ -865,14 +746,9 @@ export type SocialOAuthProvider = {
   display_name?: string;
   client_id: string;
   scopes?: string;
-  /** Portal host names whose callback URL the hotel registered in its own provider app (contract §5). */
   callback_hosts: string[];
-  /** The callback URL for every portal host name this appliance has now, registered or not. */
   callback_urls: { hostname: string; kind: string; url: string; canonical: boolean }[];
-  /** Write-only secret: true for every stored provider (a provider is created only together with its secret). */
   secret_set: boolean;
-  /** Whether clients are offered it right now, and why not: disabled | http_fallback | needs_hotel_domain |
-   *  callback_not_registered. */
   offered: boolean;
   offered_reason?: string;
   tenant?: string;   // Microsoft: directory (tenant) ID, or common / organizations / consumers
@@ -889,14 +765,12 @@ export type NotificationProvider = {
   id: string;
   tenant_id: string;
   channel: "email" | "sms" | "whatsapp";
-  // "ses" is no longer offered for a NEW sender (edged refuses it until an adapter exists); a stored row of
-  // that kind is still listed so it can be removed.
+  // "ses" is not offered for a new sender; a stored row of that kind is still listed so it can be removed.
   kind: "stub" | "sendgrid" | "smtp" | "ses" | "twilio" | "meta_whatsapp" | "twilio_whatsapp";
   enabled: boolean;
   display_name?: string;
   api_user?: string;       // Twilio account SID / Meta phone number ID — not a secret
-  // The non-secret settings of a WhatsApp template or an SMTP relay. The secret (API key, token or SMTP
-  // password) travels as `api_key`, write-only, and is never part of this.
+  // The secret travels as `api_key`, write-only, never in this shape.
   extra?: {
     template_name?: string; language?: string; content_sid?: string;
     host?: string; port?: string; security?: "starttls" | "tls" | "none"; username?: string; timeout_seconds?: string | number;
@@ -911,12 +785,7 @@ export type NotificationProvider = {
   updated_at: string;
 };
 
-/** POST /notification-providers/{id}/test answers 200 either way; `ok` says whether the message went out. */
 export type NotificationTestResult = { ok: boolean; kind?: string; error?: string; message?: string };
-
-// ------- Client groups (GET/POST/PATCH/DELETE /edge/v1/client-groups) -------
-// docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md section 3. A group is a site policy object:
-// a Client is a member when ANY rule matches, and a Client who matches several groups gets the lowest priority.
 
 export type ClientGroupRuleType = "EMAIL_DOMAIN" | "IDP_TENANT" | "IDP_HOSTED_DOMAIN";
 export type ClientGroupRule = {
@@ -933,7 +802,6 @@ export type ClientGroup = {
   id: string;
   name: string;
   description?: string | null;
-  /** 1..1000; lower wins when a Client matches several groups. Default 100. */
   priority: number;
   enabled: boolean;
   rules: ClientGroupRule[];
@@ -964,9 +832,6 @@ export type AuditEntry = {
   payload?: Record<string, unknown> | null;
 };
 
-// ------- Appliance & licence (GET /edge/v1/central/status) -------
-// docs/CENTRAL_CONTROL_PLANE.md section 8. scd computes every state; the UI only words them.
-
 export type ActivationState = "not_registered" | "waiting" | "activating" | "activated" | "retired";
 export type LicenseState =
   | "none" | "active" | "expiring" | "grace" | "expired" | "suspended" | "revoked" | "wrong_hardware";
@@ -983,10 +848,8 @@ export type CentralStatus = {
     valid_until: string | null;
     grace_ends_at: string | null;
     days_left: number | null;
-    /** null: no licence, or no cap (unlimited). */
     max_concurrent_online_guests: number | null;
     current_online_guests: number | null;
-    /** The WAN adapter differs from the one the licence names. The licence stays in force. */
     hardware_notice?: string;
   };
   central: { state: CentralLinkState; last_contact_at: string | null; last_error: string | null };
@@ -1004,21 +867,14 @@ export type CentralStatus = {
     software_version?: string;
     build_profile?: string;
     permissive_blocked?: string;
-    /**
-     * Qualifies a "retired" activation. "removed_from_central": Central deleted this appliance after it had
-     * held a customer -- it keeps its data, admits no new guests and needs a factory-clean install and a new
-     * activation to be used again.
-     */
+    /** "removed_from_central" blocks new guests and requires factory-clean installation. */
     reason?: string;
   };
 };
 
-/** POST /edge/v1/central/refresh -- the status plus the network checks Check now ran. */
 export type CentralRefresh = CentralStatus & {
   diagnostics?: { dns_ok?: boolean; central_https?: boolean; central_mtls?: boolean; clock?: string };
 };
-
-// ------- Health / reports / backups -------
 
 export type EdgeHealth = {
   service: string;
@@ -1027,13 +883,11 @@ export type EdgeHealth = {
   status: "ok" | "degraded";
   db: boolean;
   scd: boolean;
-  /** Section 8 licence state, from the same scd computation as /central/status. */
   license_state?: LicenseState | null;
   license_installed?: boolean;
   activation?: ActivationState | null;
 };
 
-// ReportsSummary mirrors the aggregates edged computes from local data.
 export type ReportsSummary = {
   active_sessions: number;
   sessions_today: number;
@@ -1045,11 +899,8 @@ export type ReportsSummary = {
   tz?: string;
 };
 
-// ------- Dashboard snapshot (GET /reports/dashboard) -------
-//
-// One read, many independently-fallible sections. `available: false` on a section means this appliance does not
-// have that surface (no PMS, charges not deployed) — the UI says so instead of rendering zeros, because a zero
-// and an absence are different facts and only one of them means "nothing happened tonight".
+// Each section can fail independently; `available: false` means the appliance lacks that surface, which is not zero
+// activity.
 
 export type DashSection = { available: boolean; reason?: string };
 
@@ -1114,7 +965,6 @@ export type DashPms = DashSection & {
   events_today: number;
   events_applied_today: number;
   events_needing_review: number;
-  /** Outstanding cases that are NOT operational work and do not clear on their own. Counted apart. */
   historical_exceptions?: number;
 };
 
@@ -1150,7 +1000,6 @@ export type DashPackage = {
 
 export type DashboardSnapshot = {
   generated_at: string;
-  /** The appliance's local midnight that every "today" figure is measured from. */
   day_start: string;
   guests: DashGuests;
   data: DashData;
@@ -1174,12 +1023,8 @@ export type BackupRecord = {
   error?: string | null;
 };
 
-// Portal branding is a free-form jsonb document (logo, T&C, languages…).
 export type PortalBranding = Record<string, unknown>;
 
-// ------- Networking (Phase 19 — /edge/v1/network, single "network" key) -------
-
-// Interface — a NIC as discovered by netd (proxied through edged).
 export type Interface = {
   name: string;
   mac: string;
@@ -1193,7 +1038,6 @@ export type Interface = {
 
 export type Pool = { start_ip: string; end_ip: string };
 
-// GuestNetwork mirrors edged's guestNetworkRow (JSON shape).
 export type GuestNetwork = {
   id: string;
   name: string;
@@ -1222,7 +1066,6 @@ export type GuestNetwork = {
   dns_servers?: string[];
 };
 
-// Input for create/update (subset of the row plus dns_servers).
 export type GuestNetworkInput = {
   name: string;
   description?: string;
@@ -1253,7 +1096,6 @@ export type GuestNetworkStatus = {
   active_clients: number;
 };
 
-// DhcpLease — Kea lease shape (hyphenated keys preserved verbatim).
 export type DhcpLease = {
   "ip-address": string;
   "hw-address": string;
@@ -1278,7 +1120,6 @@ export type ValidationResult = { ok: boolean; issues?: ValidationIssue[] };
 
 export type HealthCheck = { name: string; ok: boolean; detail?: string };
 
-// ValidateResult — POST /network/validate return.
 export type ValidateResult = {
   revision_id?: string;
   seq?: number;
@@ -1286,7 +1127,6 @@ export type ValidateResult = {
   validation: ValidationResult;
 };
 
-// ApplyResult — POST /network/apply return.
 export type ApplyResult = {
   revision_id: string;
   seq: number;
@@ -1308,7 +1148,6 @@ export type NetRevision = {
   failure_reason?: string | null;
 };
 
-// RevisionEvent / RevisionHealth — from GET /network/revisions/{id}.
 export type RevisionEvent = { phase: string; ok: boolean; detail?: unknown; at?: string };
 export type RevisionHealth = { check_name: string; ok: boolean; detail?: string; at?: string };
 
@@ -1321,9 +1160,6 @@ export type NetRevisionDetail = {
   events?: RevisionEvent[];
   health?: RevisionHealth[];
 };
-
-// ------- System (WAN/LAN) networking — the appliance's own base network -------
-// GET /edge/v1/network/system  (proxied to netd). WAN = uplink + management.
 
 export type SysConnState = {
   gateway_reachable: boolean;
@@ -1377,7 +1213,6 @@ export type SysNetState = {
   pending?: SysNetPending;
 };
 
-// Proposal to change WAN and/or LAN. Only the sections present are changed.
 export type SysWANProposal = {
   mode: "static" | "dhcp";
   ip?: string;
@@ -1413,7 +1248,6 @@ export type SysNetApplyResp = {
   verify?: Record<string, boolean>;
 };
 
-/** What the appliance reports about its own backup posture. Every field is measured, never assumed. */
 export type BackupHealth = {
   retention?: Record<string, any>;
   retention_readable: boolean;
@@ -1441,7 +1275,6 @@ export type BackupVerifyResult = {
   duration: string;
 };
 
-/** One retention knob, with everything needed to set it responsibly. The appliance owns the schema. */
 export type RetentionSetting = {
   key: string; label: string; unit: string;
   default: number; min: number; max: number; value: number; explains: string;
@@ -1471,30 +1304,23 @@ export type SysNetAudit = {
   backup_path: string;
 };
 
-// ---- Phase 3 (DARK): the PMS interface itself -------------------------------
-// The credential never appears in any of these shapes. There is no field for it because there is no endpoint
-// that returns it — see the write-only rule in edged's resources_phase3_interfaces.go.
+// The credential never appears in these shapes: no endpoint returns it.
 
 export type PmsInterface = {
   id: string; connector_kind: string; display_label: string; lifecycle_state: string;
   current_revision_id?: string; current_revision_no?: number | null;
   revision_count: number; published: boolean;
   secret_generation?: number | null; secret_rotated_at?: string | null;
-  // Projections of the published Revision, so the list can say what the interface points at without the
-  // operator opening its revision history.
   endpoint?: string | null; source_timezone?: string | null; financial_base_currency?: string | null;
 };
 
 export type PmsRevision = {
   id: string; revision_no: number; source_timezone: string; posting_target_model: string;
   normalization_version: number; source_fingerprint?: string;
-  /** Revision columns an edit must carry forward (audit H-3). */
   financial_base_currency?: string | null;
   financial_base_currency_exponent?: number | null;
-  // already redacted by edged; the client never un-redacts anything
   config: Record<string, unknown>;
   published: boolean;
-  /** Provenance comes from the audit log, which is the only place it is stored. Absent means unrecorded. */
   authored_at?: string | null;
   published_at?: string | null;
   actor_id?: string;
@@ -1504,10 +1330,8 @@ export type PmsRevision = {
 
 export type PmsInterfaceHealth = {
   pms_interface_id: string;
-  // Whether this interface can currently serve Room authentication, decided by the server from the same
-  // runtime and active Revision that Phase 3 reads — including the Revision's own heartbeat_timeout_ms,
-  // which a client cannot know. Excludes Stay-specific occupancy evidence: that is per guest, not per feed.
-  // room_auth_reason is a bounded code from a closed set, empty when ready.
+  // Whether this interface can serve Room authentication now, decided server-side (including heartbeat_timeout_ms);
+  // excludes per-guest occupancy evidence. room_auth_reason is a closed-set code, empty when ready.
   room_auth_ready?: boolean;
   room_auth_reason?: string;
   transport_status: string; last_connected_at?: string | null; last_heartbeat_at?: string | null;
@@ -1517,16 +1341,12 @@ export type PmsInterfaceHealth = {
   last_complete_sync_at?: string | null; last_sync_failure_code?: string;
   in_house_stays: number; last_stay_event_at?: string | null;
   pending_events: number; review_events: number; oldest_pending_at?: string | null;
-  // SYNCHRONIZATION. Note what is absent and stays absent: there is no total, no percentage and no
-  // remaining-record field, because FIAS provides no total before the end of a sync and any such number
-  // would be invented by the client. sync_records_received is a real running count of records staged so far.
+  // No total/percentage/remaining field: FIAS gives no total before sync ends. sync_records_received is a running
+  // count.
   sync_stage?: string; sync_stage_at?: string | null;
   sync_records_received?: number; sync_records_skipped?: number;
   sync_failure_code?: string;
-  // Two DIFFERENT facts. sync_stage=COMPLETE means a generation was published; materialization_ready means
-  // the applier has finished writing it into the Stay tables. The UI renders the effective state from both.
-  // last_sync_in_house_count is gone: it was stamped at the publish barrier and described the roster the sync
-  // replaced, contradicting the live figure on the same screen.
+  // sync_stage=COMPLETE means published; materialization_ready means the applier finished writing Stay tables.
   materialization_ready?: boolean;
   resync_command_reason?: string; resync_command_requested_at?: string | null;
 };
@@ -1538,18 +1358,13 @@ export type PmsGuestNetworkRoute = {
 };
 
 export type PmsSourceConflict = {
-  /** Detected now from the connections' published configuration rather than read from a stored record. */
   detected?: boolean;
   id: string; interface_a: string; interface_a_label?: string;
   interface_b: string; interface_b_label?: string;
   severity?: string; resolution?: string;
 };
 
-// ---------------------------------------------------------------- Phase 4 (DARK): financial operations
-//
-// These mirror the edged financial-ops surface exactly. Note what the types CANNOT express: there is no
-// provider reference, no idempotency key and no guest field anywhere. The API does not send them, and the
-// client cannot invent a place to put them.
+// No provider reference, idempotency key or guest field exists in these shapes; the API never sends them.
 
 export type FinancialHealth = {
   outbox_queued: number;
@@ -1585,7 +1400,6 @@ export type FinancialSettlement = {
   amount_minor: number;
   currency: string;
   currency_exponent: number;
-  // Context for an operator: the package, when it was taken, and how the client got access.
   package_name?: string | null;
   at?: string | null;
   source?: "ROOM" | "VOUCHER" | "ACCOUNT" | "OPEN" | "" | null;
@@ -1601,7 +1415,6 @@ export type FinancialPayment = {
   currency: string;
   currency_exponent: number;
   parent_transaction_id: string | null;
-  /** The provider's report of what it settled a captured charge as (migration 0112), when it has reported. */
   settlement_report?: {
     settlement_currency: string; settlement_amount_minor: number; exchange_rate?: string | null;
     fee_minor?: number | null; net_minor?: number | null; provider_balance_ref?: string | null; converted: boolean;
@@ -1628,8 +1441,6 @@ export type RecoveryHold = {
   held_at: string;
 };
 
-// The four conclusions an operator may reach about a held item. Held deliberately in one place so the UI
-// and the database cannot drift into offering different words for the same decision.
 export const RECOVERY_RESOLUTIONS = [
   "CONFIRMED_COMPLETED",
   "CONFIRMED_NOT_COMPLETED",
@@ -1638,12 +1449,8 @@ export const RECOVERY_RESOLUTIONS = [
 ] as const;
 export type RecoveryResolution = (typeof RECOVERY_RESOLUTIONS)[number];
 
-// Postings held by recovery that were NEVER transmitted. They cannot appear in the Manual Review queue,
-// which keys on attempts, so before this they were reachable from no operator surface at all -- the one
-// state a restore can produce that nobody could decide.
-//
-// eligible_for_retry_authorization is SERVED, not computed here. The screen must not be able to disagree
-// with the database about what is allowed.
+// Postings held by recovery that were never transmitted; not in Manual Review. eligible_for_retry_authorization is
+// served, not computed.
 export type ZeroAttemptRow = {
   posting_id: string;
   outbox_id: string;
@@ -1665,11 +1472,7 @@ export type ZeroAttemptQueue = {
   eligibility: string;
 };
 
-// ---------------------------------------------------------------- Phase 4 (DARK): Manual Review
-//
-// The action catalog and the evidence contract are SERVED, not declared here. §15's rules live in the
-// database; a second copy in the frontend would drift, and the first symptom would be an operator offered
-// an action the backend refuses.
+// The action catalog and evidence contract are SERVED; a frontend copy would drift.
 
 export type ReviewActionDoc = {
   action: string;
@@ -1705,7 +1508,6 @@ export type ReviewAttempt = {
   pa_as_status: string | null;
   sent_at: string;
   response_at: string | null;
-  // Why the appliance wrote nothing, when outcome is NOT_SENT (e.g. ROOM_CHANGED).
   not_sent_reason?: string | null;
 };
 
@@ -1715,7 +1517,6 @@ export type ReviewPostingDetail = {
     settlement_id: string;
     purchase_id: string;
     stay_id: string | null;
-    /** The reservation number (G#) the charge was pinned to at purchase. It never changes. */
     g_number: string | null;
     posting_interface_revision_id?: string;
     connector_kind: string;
@@ -1744,22 +1545,7 @@ export type ReviewPostingDetail = {
   limitations: string[];
 };
 
-// ---------------------------------------------------------------------------------------------------------
-// PMS RECONCILIATION — unresolved departures as cases, not as rows.
-// ---------------------------------------------------------------------------------------------------------
-
-/**
- * resolution_state is computed by the server from current evidence, and the UI never re-derives it.
- *
- *  RESOLVABLE             one candidate stay, it began before the departure, and the PMS's own latest
- *                         complete roster does not contain it — so a departure sent from the PMS for that
- *                         room will apply cleanly. NOT an action this system can take on its own.
- *  SUPERSEDED_ROOM_EMPTY  the room holds nobody now. Nothing outstanding, and nothing to close.
- *  ROOM_SHARED            more than one stay in the room — undecidable from a room number, by construction.
- *  LATER_OCCUPANT         the one stay in that room arrived AFTER the departure was raised.
- *  ROSTER_CONTRADICTS     the PMS's current roster still lists this stay as in house.
- *  NEEDS_PMS_EVIDENCE     everything else, including anything seen with no complete roster to compare to.
- */
+/** The server owns resolution_state; incomplete rosters and shared rooms cannot justify automatic reconciliation. */
 export type ReconciliationState =
   | "RESOLVABLE"
   | "SUPERSEDED_ROOM_EMPTY"
@@ -1772,7 +1558,6 @@ export type ReconciliationCase = {
   case_key: string;
   reservation?: string;
   room?: string;
-  /** How many recorded copies of this one departure exist. Shown, not hidden — it describes the feed. */
   repeat_count: number;
   generations: number;
   first_seen_at: string;
@@ -1784,7 +1569,6 @@ export type ReconciliationCase = {
   candidate_stay_id?: string;
   roster_present: boolean;
   resolution_state: ReconciliationState;
-  /** True for every case: the PMS resolves them, never this screen. The state says which evidence is due. */
   needs_pms_evidence: boolean;
 };
 
@@ -1797,7 +1581,6 @@ export type ReconciliationSummary = {
   stays_past_departure_absent_from_roster: number;
 };
 
-/** Why a reconciliation run did or did not act. Every refusal is a guard with a reason, not an error. */
 export type ReconcileOutcome =
   | "COMPLETED"
   | "REFUSED_ROSTER_INCOMPLETE"
@@ -1824,7 +1607,6 @@ export type IntegrationBlocker = {
   blocker: "LINK_DOWN" | "RECONCILIATION_BLOCKED" | "DEPARTURE_FOR_UNKNOWN_STAY";
   since?: string | null;
   detail: string;
-  /** Almost always false: the mirror keeps authorising guests while the feed is down. */
   guests_affected: boolean;
 };
 
@@ -1840,11 +1622,7 @@ export type PmsConnectionSettings = {
 
 export type RosterReconciliationState = {
   blockers: IntegrationBlocker[];
-  /**
-   * NO connection_settings HERE ANY MORE. The recovery bounds belong to one interface, so they are read
-   * from GET /pms-interfaces/{id}/connection-settings. Leaving a site-wide copy on this payload would let a
-   * screen show one connection's values while another connection ran on different ones.
-   */
+  /** Recovery bounds are per interface (GET /pms-interfaces/{id}/connection-settings), never a site-wide copy here. */
   settings: {
     roster_trust_min: number;
     inventory_tolerance: number;
@@ -1854,16 +1632,13 @@ export type RosterReconciliationState = {
     is_default: boolean;
   };
   generation: number;
-  /** The LAST RECORDED run for this connection -- pmsd's automatic apply or an operator's dry run. Opening the
-   *  page runs nothing (audit H-13); a dry run is an explicit action. Null when nothing has run yet. */
+  /** The last recorded run; opening the page runs nothing. Null when none has run. */
   last_run?: ReconcileRun | null;
   last_run_mode?: "DRY_RUN" | "APPLY" | "";
   last_run_at?: string | null;
-  /** Older appliances answered with a dry run computed on every open. */
   preview?: ReconcileRun;
   undisposed_cases: number;
   pms_interface_id: string;
-  /** The connections a run can be about, the default first (audit H-21). */
   interfaces?: { id: string; label: string; connector_kind: string; lifecycle_state: string;
     published_generation: number; last_complete_sync_at?: string | null }[];
 };
@@ -1891,6 +1666,5 @@ export type StayPastDeparture = {
   departure?: string | null;
   days_past_departure: number;
   roster_present: boolean;
-  /** Stronger than "not listed": the PMS has that room under a DIFFERENT reservation, so it has been re-let. */
   room_now_holds_another_stay: boolean;
 };

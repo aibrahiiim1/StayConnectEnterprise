@@ -1,6 +1,4 @@
-// THE USAGE EXPLORER'S PERIOD. The list summed the last 30 days while a source's detail summed all time, so one
-// room showed two totals on one screen (audit C-8). Both now read the period chosen on the page, and edged's
-// list and detail apply the same [from, to) (resources_usage.go parseWindow).
+// The usage explorer period: list and detail share one [from, to) window (edged resources_usage.go parseWindow).
 
 export const PERIODS = [
   { value: "7", label: "Last 7 days" },
@@ -11,7 +9,6 @@ export const PERIODS = [
 ] as const;
 export type Period = (typeof PERIODS)[number]["value"];
 
-/** The from/to query for a period, or an error for an unusable custom range. Custom days are local whole days. */
 export function periodQuery(period: Period, fromDay: string, toDay: string, now = new Date()): { qs: string; error?: string } {
   if (period !== "custom") {
     const from = new Date(now.getTime() - Number(period) * 86_400_000);

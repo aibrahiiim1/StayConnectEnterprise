@@ -31,7 +31,6 @@ func TestTheDevelopmentStubReturnsOnlyToThisPortalsCallback(t *testing.T) {
 	if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "http://portal.test:8380/auth/social/callback?provider=google&state=s-1&code=") {
 		t.Fatalf("the portal's own callback: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	// The consent page carries the portal's CSP.
 	q := url.Values{"provider": {"google"}, "state": {"s-1"}, "redirect_uri": {"http://portal.test:8380/auth/social/callback"}}
 	r := httptest.NewRequest(http.MethodGet, "http://portal.test:8380/api/oauth/stub/authorize?"+q.Encode(), nil)
 	r.RemoteAddr = "10.20.0.50:4321"
@@ -39,7 +38,6 @@ func TestTheDevelopmentStubReturnsOnlyToThisPortalsCallback(t *testing.T) {
 	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("the stub page has no CSP: %q", csp)
 	}
-	// The confirm form is held to the same rule.
 	r = httptest.NewRequest(http.MethodPost, "http://portal.test:8380/api/oauth/stub/authorize-confirm",
 		strings.NewReader(url.Values{"provider": {"google"}, "state": {"s"}, "redirect_uri": {"https://evil.example/cb"}, "email": {"a@example.com"}}.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")

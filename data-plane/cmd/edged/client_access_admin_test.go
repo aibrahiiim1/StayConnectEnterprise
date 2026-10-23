@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// THE ADMIN CONSOLE'S HALF OF THE CLIENT-ACCESS CONTRACT, VALIDATED WHERE THE OPERATOR IS LOOKING.
-
 func TestClientGroupWritesAreValidatedWithTheEvaluatorsOwnRules(t *testing.T) {
 	name := "Employees"
 	ok := clientGroupWrite{Name: &name, Rules: &[]clientGroupRule{
@@ -35,7 +33,6 @@ func TestClientGroupWritesAreValidatedWithTheEvaluatorsOwnRules(t *testing.T) {
 			t.Errorf("%s must be refused", label)
 		}
 	}
-	// A refusal names the rule by its position, in words an operator can act on.
 	msg := validateClientGroupWrite(bad["malformed rule"], false)
 	if !strings.HasPrefix(msg, "rule 1:") {
 		t.Fatalf("refusal must name the rule: %q", msg)
@@ -54,7 +51,6 @@ func TestSMTPProvidersAreValidatedAndSESIsNoLongerOffered(t *testing.T) {
 	if msg := validateNotifyProvider(good); msg != "" {
 		t.Fatalf("valid SMTP refused: %s", msg)
 	}
-	// Port follows the transport when left blank; an internal relay needs no credentials at all.
 	relay := notifyProviderShape{Channel: "email", Kind: "smtp", FromAddress: "wifi@example.com",
 		Extra: map[string]string{"host": "relay.internal", "security": "none"}}
 	if msg := validateNotifyProvider(relay); msg != "" {
@@ -75,7 +71,6 @@ func TestSMTPProvidersAreValidatedAndSESIsNoLongerOffered(t *testing.T) {
 			t.Errorf("%s must be refused", label)
 		}
 	}
-	// What the API shows of an SMTP row never includes a secret, and does include the connection settings.
 	pub := publicExtra(`{"host":"h","port":"587","security":"starttls","username":"u","password":"leak"}`)
 	if pub["password"] != "" || pub["host"] != "h" || pub["username"] != "u" {
 		t.Fatalf("public extra must show settings and never a secret: %v", pub)

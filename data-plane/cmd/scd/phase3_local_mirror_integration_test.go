@@ -2,19 +2,9 @@
 
 package main
 
-// ROOM SIGN-IN DURING A PMS OUTAGE, through the handlers scd actually serves, against a real PostgreSQL.
-//
-// The Product Owner's rule is that a live PMS socket must not be required for a new Room sign-in when
-// StayConnect already holds trustworthy PMS-derived Stay data locally. iam_v2.p3_feed_authorizes is where that
-// rule lives and internal/authctx pins the predicate directly; what those cannot show is whether a guest can
-// actually walk the path while the interface is down — whether the resolver, the Auth Context, the offer
-// engine and the grant all still function with no PMS behind them.
-//
-// THE REQUEST BODIES HERE ARE THE ONES PORTALD SENDS. Not a paraphrase: `room` plus exactly one verification
-// field plus `request_id` plus a `device` the appliance derived, which is the shape
-// cmd/portald/pms_phase3_forwarding_test.go pins on the other side of the hop. The two suites meet at that
-// shape deliberately — the defect corrected in PC-0002 was a portald struct that dropped fields scd expected,
-// and it survived precisely because each side was tested against its own idea of the contract.
+// Room sign-in during a PMS outage: a live PMS socket is not required when trustworthy Stay data is held
+// locally (iam_v2.p3_feed_authorizes). Bodies match cmd/portald/pms_phase3_forwarding_test.go's shape so
+// both sides of the hop are tested against one contract.
 
 import (
 	"bytes"
@@ -25,8 +15,7 @@ import (
 	"testing"
 )
 
-// postGrant posts a grant and decodes it as the grant response, which carries the Session and Entitlement the
-// plain phase3Response does not.
+// postGrant posts a grant and decodes the grant response (Session and Entitlement).
 func postGrant(t *testing.T, f *authFixture, contextID, pkgRev string) phase3GrantResp {
 	t.Helper()
 	raw, _ := json.Marshal(map[string]any{
@@ -42,11 +31,8 @@ func postGrant(t *testing.T, f *authFixture, contextID, pkgRev string) phase3Gra
 	return out
 }
 
-// takeInterfaceOffline reproduces what pmsd writes when a real PMS transport fails: the socket is gone, a
-// resync is required before live events can be trusted again, and the mirror is left exactly as it was.
-//
-// Continuity stays CONTINUOUS because no events were MISSED — the feed stopped rather than skipping. That
-// distinction is the whole basis for trusting the mirror, so it is set explicitly rather than inherited.
+// takeInterfaceOffline reproduces what pmsd writes on a transport failure. Continuity stays CONTINUOUS
+// because no events were missed (the feed stopped rather than skipping), which is the basis for trusting the mirror.
 func takeInterfaceOffline(t *testing.T, f *authFixture, errCode string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
@@ -60,7 +46,7 @@ func takeInterfaceOffline(t *testing.T, f *authFixture, errCode string) {
 	}
 }
 
-// THE RULE, walked by a guest. Protel is unreachable; the guest signs in anyway and ends up with a Session.
+// Protel is unreachable; the guest signs in anyway and ends up with a Session.
 func TestIntegration_Phase3Auth_SignsInWhilePMSIsDisconnected(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -84,8 +70,7 @@ func TestIntegration_Phase3Auth_SignsInWhilePMSIsDisconnected(t *testing.T) {
 		t.Fatalf("the grant refused a verified offline guest: %+v", grant)
 	}
 
-	// The Session is real, and it is not marked as provisional or degraded anywhere: an outage sign-in is a
-	// normal sign-in, which is the point of the rule.
+	// An outage sign-in is a normal sign-in, not marked provisional or degraded.
 	var sessions int
 	if err := f.pool.QueryRow(ctx,
 		`SELECT count(*) FROM iam_v2.sessions s
@@ -98,11 +83,7 @@ func TestIntegration_Phase3Auth_SignsInWhilePMSIsDisconnected(t *testing.T) {
 	}
 }
 
-// SCENARIO 3 — AN OUTAGE MUST NOT CUT OFF A GUEST WHO IS ALREADY ONLINE.
-//
-// This is the one that would hurt most in a real hotel: a guest signs in while the PMS is healthy, the
-// interface drops an hour later, and their Internet keeps working. Entitlements and Sessions never consulted
-// the feed predicate, and this asserts that they still do not.
+// An outage must not cut off a guest already online: Entitlements and Sessions never consult the feed predicate.
 func TestIntegration_Phase3Auth_DisconnectDoesNotRevokeExistingAccess(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -140,21 +121,15 @@ func entitlementAndSessionState(t *testing.T, f *authFixture, sessionID string) 
 	return state
 }
 
-// SCENARIO 4 — A CHECKED-OUT GUEST IS STILL REFUSED WHILE THE PMS IS DOWN.
-//
-// The local-mirror rule relaxes the FEED requirement and nothing else. Stay lifecycle is judged from the same
-// locally persisted state, so a guest the mirror records as checked out is refused exactly as they would be on
-// a live feed — and Checkout-Grace, not Room sign-in, remains the path that serves them.
+// A checked-out guest is still refused while the PMS is down; the mirror rule relaxes only the feed requirement.
 func TestIntegration_Phase3Auth_CheckedOutStayIsRefusedWhileOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 
 	takeInterfaceOffline(t, f, "DIAL_FAILED")
 	if _, err := controlledExec(context.Background(), f.pool, "stay",
-		// effective_checkout_at is required by stays_checkedout_needs_boundary: a checked-out Stay must carry
-		// the boundary that Checkout-Grace is measured from, so there is no such thing as a checkout without one.
-		// posting_allowed=false in the same statement, exactly as internal/checkout does: the
-		// posting_only_in_house CHECK is evaluated before the AFTER trigger that recomputes it.
+		// effective_checkout_at is required by stays_checkedout_needs_boundary. posting_allowed=false in the same
+		// statement, as internal/checkout does: posting_only_in_house is checked before the AFTER trigger recomputes it.
 		`UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now() WHERE id=$1`,
 		f.stay); err != nil {
 		t.Fatalf("check the stay out: %v", err)
@@ -168,11 +143,7 @@ func TestIntegration_Phase3Auth_CheckedOutStayIsRefusedWhileOffline(t *testing.T
 	}
 }
 
-// SCENARIO 7 — A WRONG VERIFICATION VALUE STILL FAILS, and fails IDENTICALLY.
-//
-// During an outage the resolver is comparing against local data, which is exactly when an implementation is
-// tempted to be helpful. It must not be: a wrong surname offline and a wrong surname online are the same
-// answer, or the portal becomes an occupancy oracle precisely when nobody is watching the PMS.
+// A wrong value fails identically offline and online, or the portal becomes an occupancy oracle.
 func TestIntegration_Phase3Auth_WrongVerificationStillFailsWhileOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -187,7 +158,7 @@ func TestIntegration_Phase3Auth_WrongVerificationStillFailsWhileOffline(t *testi
 		t.Fatal("a wrong verification value verified while the PMS was down")
 	}
 	if recBad.Code == recOK.Code && recBad.Body.String() == recOK.Body.String() {
-		return // identical envelopes are the desired outcome for the failure case
+		return
 	}
 	recMissing, _ := post(t, f.p3.resolveHandler,
 		f.resolveBody("999", "Okonkwo", "", "00000046-0000-4000-8000-000000000000"))
@@ -197,9 +168,7 @@ func TestIntegration_Phase3Auth_WrongVerificationStillFailsWhileOffline(t *testi
 	}
 }
 
-// SCENARIO 6, at the handler rather than the predicate — a never-synchronised interface refuses everyone while
-// disconnected. There is no local guest list to answer from, and answering anyway would authorise from an
-// empty table.
+// A never-synchronised interface refuses everyone while disconnected; there is no local guest list.
 func TestIntegration_Phase3Auth_NeverSynchronisedRefusesWhileOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -219,8 +188,7 @@ func TestIntegration_Phase3Auth_NeverSynchronisedRefusesWhileOffline(t *testing.
 	}
 }
 
-// SCENARIO 5, at the handler — an unresolved continuity gap refuses everyone, offline included. The missing
-// events are exactly the ones that would have said this guest had left.
+// An unresolved continuity gap refuses everyone, offline included (missed events may include a checkout).
 func TestIntegration_Phase3Auth_ContinuityGapRefusesWhileOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -239,19 +207,14 @@ func TestIntegration_Phase3Auth_ContinuityGapRefusesWhileOffline(t *testing.T) {
 	}
 }
 
-// SCENARIO 8/9 — MULTI-PMS NAMESPACING AND AMBIGUITY ARE UNCHANGED BY THE OUTAGE.
-//
-// Room numbers are scoped per interface and STRICT resolution is automatic, neither of which is a property of
-// the transport. An offline path that started searching more widely — because "the PMS is down, let us be
-// helpful" — would hand one hotel's guest another hotel's Stay.
+// Multi-PMS namespacing and ambiguity are unchanged by the outage; searching wider offline could hand one
+// hotel's guest another hotel's Stay.
 func TestIntegration_Phase3Auth_NamespacingAndAmbiguitySurviveTheOutage(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	takeInterfaceOffline(t, f, "DIAL_FAILED")
 
-	// The fixture already seeds two Stays that collide on room 412 + surname "Shared" — the same ambiguity
-	// TestIntegration_Phase3Auth_AmbiguityGrantsNothing uses on a healthy feed. Reusing it means this test
-	// asserts the outage changes nothing, rather than asserting a differently-constructed ambiguity.
+	// Reuses the fixture's room-412 "Shared" ambiguity so the outage is the only variable.
 	_, res := post(t, f.p3.resolveHandler,
 		f.resolveBody("412", "Shared", "", "00000049-0000-4000-8000-000000000000"))
 	if res.Outcome == outcomeVerified {

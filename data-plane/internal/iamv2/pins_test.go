@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// ---- item 9: auth_context pin validation happens BEFORE any SQL ----
-
 func TestAuthContextSpecValidate(t *testing.T) {
 	good := AuthContextSpec{
 		TenantID: "t", SiteID: "s", Method: MethodAccount,
@@ -54,12 +52,10 @@ func TestSubjectForMethodCompatibility(t *testing.T) {
 	}
 }
 
-// finalize rejects a missing guest network deterministically and issues NO SQL (spy repo asserts the
-// device/auth_context calls never happen).
+// finalize must reject a missing guest network before issuing any SQL.
 func TestFinalizeMissingNetworkNoSQL(t *testing.T) {
 	rec := &recordingRepo{}
 	a, _ := New(Config{MasterEnabled: true, Methods: map[Method]bool{MethodAccount: true}}, rec, NopObserver{})
-	// craft a request whose credentials resolve but whose Device omits the guest network.
 	_, err := a.finalizeForTest(context.Background(), MethodAccount, Subject{GuestAccountID: "acc-1"},
 		Request{TenantID: "t", SiteID: "s", Device: DeviceContext{MAC: "aa:bb:cc:dd:ee:ff"}})
 	if CodeOf(err) != ErrInvalidInput {
@@ -70,7 +66,6 @@ func TestFinalizeMissingNetworkNoSQL(t *testing.T) {
 	}
 }
 
-// finalizeForTest exposes finalize inside a transaction for the pin test.
 func (a *Authenticator) finalizeForTest(ctx context.Context, m Method, subj Subject, req Request) (Result, error) {
 	var res Result
 	err := a.repo.WithTx(ctx, func(tx Tx) error {
@@ -81,7 +76,6 @@ func (a *Authenticator) finalizeForTest(ctx context.Context, m Method, subj Subj
 	return res, err
 }
 
-// recordingRepo counts device/auth_context writes to prove they are not reached on invalid pins.
 type recordingRepo struct{ upserts, creates int }
 
 func (r *recordingRepo) WithTx(ctx context.Context, fn func(Tx) error) error {

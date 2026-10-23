@@ -14,21 +14,6 @@ import (
 	"time"
 )
 
-// AN UNAUTHENTICATED GUEST'S HTTPS GOES UNANSWERED, AGAINST A REAL KERNEL, WITH REAL PACKETS.
-//
-// The renderer's tests prove the rule text and its order. These prove what only the kernel decides, with the
-// REAL render installed by the same engine netd runs:
-//
-//	an unsigned-in guest's TCP SYN to an outside :443 gets NOTHING back -- no reset, no refusal -- so the
-//	connection times out. That timeout is what makes Chromium run its captive-portal check and open its login
-//	tab (captive_portal_tab_reloader.cc); a reset cancels the check.
-//	that SYN never leaves the WAN: a listener there would have answered it, and a counter there sees nothing.
-//	a signed-in guest still reaches the same :443.
-//
-// The instrument is a real listener on :443 in the WAN namespace. tcpProbe reports "connected" when the SYN
-// reached it and was answered, "refused" when anything answered with a reset, and "timeout" when nothing did.
-
-// wanListener runs a TCP listener on :443 in the WAN namespace for the test's lifetime.
 func wanListener(t *testing.T) {
 	t.Helper()
 	wan := wanNS()
@@ -96,7 +81,6 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 	wanListener(t)
 	synsAtWAN := wanSYNCounter(t)
 
-	// UNAUTHENTICATED: nothing answers, and nothing leaves.
 	for i := 0; i < 2; i++ {
 		if got := tcpProbe(t, guestNS, wanIP, "443"); got != "timeout" {
 			t.Fatalf("unauthenticated guest -> %s:443 = %s; want an unanswered SYN (timeout). "+
@@ -108,7 +92,6 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 		t.Fatalf("%d SYN(s) to :443 from an unauthenticated guest arrived on the WAN side", n)
 	}
 
-	// AUTHENTICATED: the same :443 is reached, and the counter sees it -- which also proves the counter counts.
 	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	if got := tcpProbe(t, guestNS, wanIP, "443"); got != "connected" {
 		t.Fatalf("authenticated guest -> %s:443 = %s; a signed-in guest must reach HTTPS", wanIP, got)
@@ -117,7 +100,6 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 		t.Fatal("the authenticated SYN connected but the WAN counter saw nothing; the instrument is broken")
 	}
 
-	// And signed out again, it is unanswered again (a new flow; nothing is carried by the established accept).
 	run(t, nftWrapper, "delete", "element", "inet", "stayconnect", "auth_ipv4", "{ \""+guestIface+"\" . "+guestIP+" }")
 	before := synsAtWAN()
 	if got := tcpProbe(t, guestNS, wanIP, "443"); got != "timeout" {
@@ -128,17 +110,13 @@ func TestKernel_UnauthenticatedGuest443GetsNoResetAndNeverLeavesTheWAN(t *testin
 	}
 }
 
-// AN APPLIANCE UPGRADED FROM THE SOFTWARE THAT HAD TEMPORARY VERIFICATION ACCESS.
-//
-// Its live table holds verify_ipv4 with a device in it, the per-device quota and rate maps and their named
-// objects, and the meter/admit rules -- and that device is on the Internet through them. One converge to the
-// current render must leave none of it: no set, no map, no object, no mark rule; the device off the Internet;
-// and a signed-in guest's authorization carried across exactly as before.
+// An upgrade from verification-access software must converge away verify_ipv4, its quota/rate maps and mark
+// rules, take that device offline and carry signed-in guests' authorization across.
 func TestKernel_UpgradeFromAVerificationAccessTableRemovesItCleanly(t *testing.T) {
 	e := newEngine(t)
 	c := context.Background()
 	wan := convergeTopo().WANInterface
-	const otherGuest = "10.77.0.9" // a signed-in guest, carried; the namespace guest holds only a verification window
+	const otherGuest = "10.77.0.9"
 	old := `table inet stayconnect
 delete table inet stayconnect
 table inet stayconnect {
@@ -195,9 +173,8 @@ add element inet stayconnect auth_ipv4 { "` + guestIface + `" . ` + otherGuest +
 	if out, err := exec.Command(nftWrapper, "-f", p).CombinedOutput(); err != nil {
 		t.Fatalf("loading the verification-era ruleset: %v — %s", err, strings.TrimSpace(string(out)))
 	}
-	// Probed by TCP to a port nobody listens on in the WAN namespace: a forwarded SYN is answered by the WAN
-	// host's reset ("refused"), a dropped one by nothing ("timeout"). Each probe is a NEW flow, so neither
-	// result can ride on conntrack state left by an earlier one.
+	// Probed by TCP to an unlistened port in the WAN namespace: forwarded is "refused" (reset), dropped is "timeout".
+	// Each probe is a new flow so conntrack cannot carry results between probes.
 	if got := tcpProbe(t, guestNS, wanIP, "22"); got != "refused" {
 		t.Fatalf("precondition: the device holding a verification window does not reach the WAN through it (%s)", got)
 	}

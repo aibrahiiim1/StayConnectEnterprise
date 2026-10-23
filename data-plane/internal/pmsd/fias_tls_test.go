@@ -18,7 +18,6 @@ import (
 	"time"
 )
 
-// A self-signed PMS certificate, as a hotel's Protel interface would have.
 func selfSigned(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -31,7 +30,7 @@ func selfSigned(t *testing.T) tls.Certificate {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
-// pmsServer accepts one connection; with tlsCert nil it speaks plain TCP. It echoes one line back.
+// pmsServer accepts one connection (plain TCP when cert is nil) and echoes one line.
 func pmsServer(t *testing.T, cert *tls.Certificate) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

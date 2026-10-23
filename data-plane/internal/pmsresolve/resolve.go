@@ -1,11 +1,8 @@
-// Package pmsresolve is the Increment-5 STRICT multi-PMS resolver decision core. Given the COMPLETE vector of
-// per-interface candidate verdicts (derived from the TRUSTED guest network, never client hints), it decides a
-// single authoritative outcome under strict, fail-closed rules. It NEVER short-circuits on the first or
-// fastest candidate — the caller must gather the whole vector first. Reason codes are internal (audit/metrics)
-// only; the guest sees a uniform non-success response.
+// Package pmsresolve decides one fail-closed outcome from the complete vector of per-interface verdicts
+// (from the trusted guest network, never client hints). It never short-circuits; the caller gathers the
+// whole vector first. Reason codes are internal; the guest sees a uniform non-success response.
 package pmsresolve
 
-// CandidateOutcome is one interface's determinate verdict for the guest evidence.
 type CandidateOutcome string
 
 const (
@@ -17,13 +14,11 @@ const (
 	UnsupportedEvidence CandidateOutcome = "UNSUPPORTED_EVIDENCE" // interface can't evaluate this evidence → indeterminate
 )
 
-// Candidate is one interface's verdict in the vector.
 type Candidate struct {
 	InterfaceID string
 	Outcome     CandidateOutcome
 }
 
-// Resolution is the final strict outcome.
 type Resolution string
 
 const (
@@ -33,25 +28,20 @@ const (
 	ResIndeterminate Resolution = "INDETERMINATE" // any UNAVAILABLE/STALE/UNSUPPORTED, unmapped, or over-cap → fail closed
 )
 
-// Outcome is the resolver result. InterfaceID is set ONLY for ResVerified. Reason is a bounded internal code.
+// InterfaceID is set only for ResVerified; Reason is a bounded internal code.
 type Outcome struct {
 	Resolution  Resolution
 	InterfaceID string
 	Reason      string
 }
 
-// Resolve evaluates the COMPLETE candidate vector under STRICT rules (the only mode; no fallback, even for a
-// single candidate). maxCandidates bounds the vector (0 = unbounded). Precedence:
-//  1. unmapped (empty vector) → INDETERMINATE (fail closed) — there is nothing to trust.
-//  2. over the candidate cap → INDETERMINATE (fail closed).
-//  3. ≥2 VERIFIED or any AMBIGUOUS_LOCAL → AMBIGUOUS (discriminator escalation).
-//  4. any UNAVAILABLE/STALE/UNSUPPORTED_EVIDENCE → INDETERMINATE (fail closed) — we cannot prove
-//     exactly-one, so we never guess.
-//  5. exactly one VERIFIED (all others therefore NO_MATCH) → VERIFIED (success).
-//  6. otherwise (zero VERIFIED, all NO_MATCH) → NO_MATCH.
-//
-// A slow VERIFIED still beats a fast NO_MATCH because the decision runs only on the full vector — timing is
-// the caller's concern, not this function's.
+// Resolve is strict with no fallback, even for a single candidate. maxCandidates bounds the vector (0 =
+// unbounded). Precedence:
+//  1. empty vector or over the cap → INDETERMINATE (nothing to trust);
+//  2. ≥2 VERIFIED or any AMBIGUOUS_LOCAL → AMBIGUOUS (discriminator escalation);
+//  3. any UNAVAILABLE/STALE/UNSUPPORTED_EVIDENCE → INDETERMINATE (exactly-one can't be proven, never guess);
+//  4. exactly one VERIFIED → VERIFIED;
+//  5. otherwise → NO_MATCH.
 func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 	if len(candidates) == 0 {
 		return Outcome{Resolution: ResIndeterminate, Reason: "UNMAPPED"}
@@ -73,7 +63,7 @@ func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 		case NoMatch:
 			noMatch++
 		default:
-			// an unknown verdict is never treated as determinate → fail closed.
+			// An unknown verdict is never determinate.
 			indeterminate++
 		}
 	}
@@ -90,7 +80,6 @@ func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 	}
 }
 
-// GuestVisible reports whether the outcome may reveal the matched interface to the guest. ONLY a successful
-// single-verified resolution does; every non-success is a uniform, detail-free response (no PMS / property /
-// interface / candidate / failure detail leaks to the guest — reason codes stay in audit/metrics).
+// GuestVisibleSuccess: only a single-verified resolution is visible; every non-success must be uniform and
+// detail-free (no PMS, property, interface or failure detail reaches the guest).
 func (o Outcome) GuestVisibleSuccess() bool { return o.Resolution == ResVerified }

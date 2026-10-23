@@ -1,25 +1,13 @@
 package main
 
-// GUEST SIGN-IN ATTEMPTS — the operator surface over iam_v2.sign_in_attempts.
+// Guest sign-in attempts over iam_v2.sign_in_attempts, under two permissions:
 //
-// TWO PERMISSIONS, NOT ONE, AND THE SPLIT IS THE POINT.
+//	guest-signin-attempts     (View_Guest_SignIn_Attempts)    — the list, rooms, results, reasons
+//	guest-signin-credentials  (View_Guest_SignIn_Credentials) — what the guest typed and what would be accepted
 //
-//	guest-signin-attempts     (View_Guest_SignIn_Attempts)    — the list, the rooms, the results, the reasons
-//	guest-signin-credentials  (View_Guest_SignIn_Credentials) — what the guest typed and what we would accept
-//
-// The first answers "is sign-in working, and for whom is it not"; the second answers one guest's specific
-// question at the desk and is, unavoidably, their credential material. A role that needs the first does not
-// automatically need the second, and collapsing them would mean every operator who can look at a dashboard
-// can also read every value every guest has typed for the last thirty days.
-//
-// THE CREDENTIAL ROUTE IS A PROXY, AND THAT IS DELIBERATE. edged holds no sealing key. It checks the
-// permission, records who asked, and then asks scd — which runs as root behind a unix socket and holds the
-// key — to open that one row. The check and the key sit on opposite sides of a process boundary, so neither a
-// stolen edged session nor a copy of the database is sufficient on its own.
-//
-// NOTHING HERE TRUSTS THE CLIENT FOR SCOPE. There is no tenant or site parameter on any of these routes; both
-// are bound from the appliance's own signed assignment into every query, exactly as every other edged
-// resource does it. A request cannot name another site to read.
+// They are separate so a dashboard-level role cannot read guests' credential material.
+// The credential route is a proxy: edged holds no sealing key, so it checks the permission, records who asked, and asks scd to open the row.
+// There is no tenant or site parameter; both come from the appliance's signed assignment.
 
 import (
 	"encoding/json"
@@ -32,9 +20,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 )
 
-// signInAttemptRow is the LIST projection: everything an operator may see with the first permission alone.
-// Note what is absent — no submitted value, no accepted value, no ciphertext. Those are not "hidden by the
-// UI"; they are not in this struct and never reach the response.
+// signInAttemptRow is the LIST projection: no submitted value, accepted value or ciphertext is in this struct.
 type signInAttemptRow struct {
 	ID           string    `json:"id"`
 	OccurredAt   time.Time `json:"occurred_at"`
@@ -44,8 +30,7 @@ type signInAttemptRow struct {
 	ResultLabel  string    `json:"result_label"`
 	Succeeded    bool      `json:"succeeded"`
 	VerifierKind string    `json:"verifier_kind"`
-	// MirrorAgeSeconds is how stale the local PMS roster was at that instant. It is the first thing to look
-	// at when several guests fail at once, which is why it is a list column rather than a detail field.
+	// MirrorAgeSeconds is how stale the local PMS roster was then; the first thing to check when several guests fail at once.
 	MirrorAgeSeconds *int64 `json:"mirror_age_seconds,omitempty"`
 	TransportStatus  string `json:"pms_transport_status,omitempty"`
 	DeviceIP         string `json:"device_ip,omitempty"`
@@ -54,7 +39,6 @@ type signInAttemptRow struct {
 	LatencyMS        *int64 `json:"latency_ms,omitempty"`
 }
 
-// signInAttemptDetail adds the comparison context — still without a single credential value.
 type signInAttemptDetail struct {
 	signInAttemptRow
 	MatchedField           string     `json:"matched_field,omitempty"`
@@ -64,8 +48,7 @@ type signInAttemptDetail struct {
 	MirrorLastCompleteSync *time.Time `json:"mirror_last_complete_sync_at,omitempty"`
 	EntitlementID          string     `json:"entitlement_id,omitempty"`
 	SessionID              string     `json:"session_id,omitempty"`
-	// CredentialsAvailable says whether a sealed half exists at all, so the panel can distinguish "you may
-	// not see this" from "there is nothing to see because the key was missing when it was recorded".
+	// CredentialsAvailable distinguishes "not permitted" from "nothing sealed because the key was missing".
 	CredentialsAvailable bool `json:"credentials_available"`
 }
 
@@ -76,25 +59,15 @@ func (s *server) signInAttemptsRoutes() http.Handler {
 	return r
 }
 
-// signInCredentialsRoutes is mounted under its OWN resource key, which is what makes the second permission a
-// real, server-enforced boundary rather than a flag the UI consults. A caller holding only
-// guest-signin-attempts is refused by middleware here, before this handler runs — so hiding the button in the
-// browser and calling the API directly are the same answer.
-//
-// THE REVEAL IS A POST WITH THE OPERATOR'S PASSWORD (GDPR audit B8): what a guest typed is shown only after the
-// operator confirms it is them, and the password travels in the body, never the URL or a header. The roles that
-// may reveal hold "write" on this resource because revealing is its only action.
+// signInCredentialsRoutes is mounted under its own resource key so the second permission is enforced by middleware, not the UI.
+// The reveal is a POST with the operator's password in the body (never URL or header); revealing is the resource's only action, hence "write".
 func (s *server) signInCredentialsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/{id}", s.getSignInAttemptCredentials)
 	return r
 }
 
-// THE ATTEMPTS LIST IS PAGED, AND ITS SEARCH RUNS ON THE SERVER.
-//
-// It used to be the newest 200 attempts with a search box that filtered only those, so on a busy night an
-// attempt from earlier in the period could not be found. The search text travels in X-Signin-Search, never the
-// URL: edged logs request lines, and the box is where somebody types a room number.
+// The attempts list is paged and searched on the server; the search text travels in X-Signin-Search, never the URL (edged logs request lines).
 const signInSearchHeader = "X-Signin-Search"
 
 // signInAttemptFilter is the WHERE clause the page, its total and its tiles share. $1 tenant, $2 site, $3 room,
@@ -107,15 +80,12 @@ const signInAttemptFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
 		   AND ($7::timestamptz IS NULL OR a.occurred_at >= $7::timestamptz)
 		   AND ($8::timestamptz IS NULL OR a.occurred_at <= $8::timestamptz)`
 
-// signInSearchMatch is the search. $9 the ILIKE pattern (NULL for no search), $10 the result codes whose
-// plain-language reason contains the search text -- the reason is what the operator reads, so it is what they
-// type, and it lives in the Go map beside the codes.
+// signInSearchMatch is the search. $9 the ILIKE pattern (NULL for no search), $10 the result codes whose reason text contains the search.
 const signInSearchMatch = `($9::text IS NULL
 		   OR a.submitted_room ILIKE $9 OR a.guest_network_name ILIKE $9 OR a.result ILIKE $9
 		   OR host(a.device_ip) ILIKE $9 OR a.device_mac::text ILIKE $9 OR a.request_id::text ILIKE $9
 		   OR a.result = ANY($10))`
 
-// The tiles' groupings. The same codes the screen counted when it counted in the browser.
 var (
 	signInMismatchResults = []string{"CREDENTIAL_MISMATCH", "ROOM_NOT_IN_MIRROR"}
 	signInSystemicResults = []string{"MIRROR_STALE_OR_MISSING_CHANGE", "ROUTING_OR_INTERFACE_FAILURE", "SERVICE_UNAVAILABLE"}
@@ -146,8 +116,7 @@ func signInResultsLabelled(q string) []string {
 	return out
 }
 
-// signInAttemptsSummary counts every attempt the filters select -- the period, room, result, network and type --
-// not the page and not the search, so the tiles describe the question the operator asked of the server.
+// signInAttemptsSummary counts every attempt the filters select, ignoring page and search.
 type signInAttemptsSummary struct {
 	Total    int `json:"total"`
 	Failed   int `json:"failed"`
@@ -174,9 +143,7 @@ func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// Filters are applied in SQL rather than in the browser: a desk looking for one room must not have to
-	// pull thirty days of rows to find it, and the empty-string default means "no filter" without a second
-	// query shape to keep correct.
+	// Filters are applied in SQL; the empty-string default means no filter.
 	args := []any{s.tenantID, s.siteID,
 		strings.ToUpper(strings.TrimSpace(q.Get("room"))), strings.TrimSpace(q.Get("result")),
 		strings.TrimSpace(q.Get("network")), strings.TrimSpace(q.Get("credential_type")),
@@ -224,9 +191,7 @@ func (s *server) listSignInAttempts(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
-		// The plain-language reason comes from the SAME Go map the codes are declared in, so the screen and
-		// the recorder cannot drift. A label rendered in the browser would be a second list to maintain, and
-		// the failure mode of forgetting is a raw enum in front of someone helping a guest.
+		// The reason comes from the same Go map the codes are declared in, so the screen and recorder cannot drift.
 		e.ResultLabel = signinattempt.Result(e.Result).Label()
 		e.Succeeded = signinattempt.Result(e.Result).Succeeded()
 		out = append(out, e)
@@ -263,9 +228,7 @@ func (s *server) getSignInAttempt(w http.ResponseWriter, r *http.Request) {
 			&e.MatchedField, &e.MatchedStayID, &e.RoomInMirror, &e.EligibleStayCandidates,
 			&e.MirrorLastCompleteSync, &e.EntitlementID, &e.SessionID, &sealedLen)
 	if err != nil {
-		// An id from another site and an id that never existed answer identically: the site scope is in the
-		// WHERE clause, so both are simply "no row", and an operator cannot probe for the existence of
-		// another site's attempts by watching which ids fail differently.
+		// Another site's id and a nonexistent id answer identically (the site scope is in the WHERE), so ids cannot be probed.
 		jsonErr(w, http.StatusNotFound, "not_found", "no such attempt")
 		return
 	}
@@ -275,18 +238,10 @@ func (s *server) getSignInAttempt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, e)
 }
 
-// getSignInAttemptCredentials returns the submitted and accepted values IN FULL, unmasked.
-//
-// Unmasked is the Product Owner's decision and it is not a concession: these are the same operators who
-// already hold the guest's room, stay and access credentials, and a panel showing "OK••••••" beside
-// "OK•••••••" answers nothing. What protects the guest is not asterisks — it is that the values are sealed at
-// rest, that a distinct permission is required, that the response is uncacheable, and that every read is
-// recorded against the operator who made it.
+// getSignInAttemptCredentials returns the submitted and accepted values unmasked (Product Owner decision).
+// Protection is sealing at rest, the distinct permission, no-store, and an audit row per read.
 func (s *server) getSignInAttemptCredentials(w http.ResponseWriter, r *http.Request) {
-	// NO-STORE FIRST, BEFORE ANY WORK, so it is present on EVERY exit from this handler and not only on the
-	// one that carries values. An error body on this route still names an attempt id an operator asked
-	// about, and a 503 cached by a proxy is a 503 the operator keeps seeing after the fault is fixed.
-	// Setting it last is the version of this that looks correct and leaves the failure paths cacheable.
+	// Set no-store first so every exit path carries it, including errors.
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
 	w.Header().Set("Pragma", "no-cache")
 
@@ -308,16 +263,12 @@ func (s *server) getSignInAttemptCredentials(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// THE AUDIT IS WRITTEN BEFORE THE VALUES ARE FETCHED, not after. A read that fails downstream is still a
-	// read that was ATTEMPTED by a named operator against a named attempt, and that is what an audit trail is
-	// for; recording only successes would leave the interesting case — someone probing ids — invisible.
+	// The audit is written before the values are fetched: a failed read is still an attempted read, and id probing must be visible.
 	s.audit(r, "guest_signin_attempt.credentials_viewed", "sign_in_attempt", id, map[string]any{
 		"site_id": s.siteID,
 	})
 
-	// scd is where the key lives, so with no client there is nothing to ask and nothing to show. It is a
-	// clean refusal rather than a crash: a nil dereference here would drop the operator's connection and
-	// look, from the browser, exactly like a network fault on the appliance.
+	// scd holds the key; with no client, refuse cleanly rather than nil-deref.
 	if s.scd == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "unavailable",
 			"the sign-in credential store is not reachable")
@@ -339,15 +290,11 @@ func (s *server) getSignInAttemptCredentials(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// The no-store headers were set at the top of this handler. Without them this response can sit in a
-	// browser cache, a corporate proxy or a disk image long after the thirty-day purge has removed the row it
-	// came from — which would make the retention promise false by a mechanism nobody on the appliance can see.
+	// no-store (set at the top) keeps this out of caches that would outlive the retention purge.
 	writeJSON(w, http.StatusOK, out)
 }
 
-// nullableTime turns an optional RFC3339 query parameter into a value the query can treat as "no bound".
-// Anything unparseable is treated as absent rather than as an error: a filter a human mistyped should show
-// them everything, not an error page.
+// nullableTime turns an optional RFC3339 query parameter into a bound; unparseable means absent.
 func nullableTime(v string) *time.Time {
 	v = strings.TrimSpace(v)
 	if v == "" {

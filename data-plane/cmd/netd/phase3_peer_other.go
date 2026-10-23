@@ -2,9 +2,7 @@
 
 package main
 
-// On a non-Linux development host there is no SO_PEERCRED, so there is no way to know who is calling. The stub
-// therefore fails CLOSED rather than pretending the caller is authorized: netd only runs on the appliance, and
-// a build that cannot authenticate its producer must not be able to mutate shaping.
+// No SO_PEERCRED off Linux, so this fails closed: a build that cannot authenticate its producer must not mutate shaping.
 
 import (
 	"errors"

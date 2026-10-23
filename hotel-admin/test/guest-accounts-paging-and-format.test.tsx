@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// CLIENT ACCOUNTS: paged, searched and counted on the server, newest first; and the generated-password format,
-// whose bounds come from the appliance rather than from this bundle.
-
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -36,7 +33,6 @@ const account = (i: number) => ({
   created_at: new Date(Date.UTC(2026, 8, 1) + i * 60_000).toISOString(),
 });
 
-// The server answers newest first: account 130 is the newest.
 function pageOf(page: number, size: number, total: number) {
   const from = (page - 1) * size;
   const n = Math.max(0, Math.min(size, total - from));
@@ -94,7 +90,6 @@ describe("Client accounts — server paging", () => {
     expect(screen.getByText("130")).toBeTruthy(); // the counter is the site, not the page
     expect(screen.getByText("11")).toBeTruthy(); // devices online, from the server summary
 
-    // Newest first, in the order the server sent.
     const names = screen.getAllByText(/^user-\d{3}$/).map((e) => e.textContent);
     expect(names.slice(0, 3)).toEqual(["user-130", "user-129", "user-128"]);
     expect(names).toHaveLength(50);
@@ -145,7 +140,6 @@ describe("Client accounts — server paging", () => {
     const newest = pending.filter((p) => p.headers).at(-1)!;
     newest.resolve({ ...pageOf(1, 50, 1), data: [{ ...account(1), username: "zed" }] });
     expect(await screen.findByText("zed")).toBeTruthy();
-    // The stale page-2 answer lands last and must change nothing.
     pending.find((p) => p.path.includes("page=2"))!.resolve(pageOf(2, 50, 130));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.getByText("zed")).toBeTruthy();
@@ -161,7 +155,6 @@ describe("Client accounts — generated-password format", () => {
     const user = userEvent.setup();
     render(<Page />);
 
-    // Current format and its history are on the page.
     expect(await screen.findByText("Upper and lower case letters and digits")).toBeTruthy();
     expect(screen.getByTestId("password-format-example").textContent).toMatch(/^[A-HJ-NP-Za-km-z2-9]{14}$/);
     expect(screen.getByText(/keypad kiosk/)).toBeTruthy();
@@ -201,7 +194,6 @@ describe("Client accounts — generated-password format", () => {
     expect(await screen.findByText("Upper and lower case letters and digits")).toBeTruthy();
     expect(screen.getByText(/can see the format but not change it/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /change format/i })).toBeNull();
-    // The desk still creates accounts.
     expect(screen.getByRole("button", { name: /add account/i })).toBeTruthy();
   });
 });

@@ -1,17 +1,7 @@
 "use client";
 
-// GUEST ACTIVITY — what the internet packages actually did.
-//
-// WHAT IT WAS. A list of OFFER QUOTES, each phrased "Room X was offered Y". Most access here is never quoted —
-// vouchers, guest accounts, checkout grace, emergency grace, staff grants — so all of it was invisible, every
-// visible row claimed an offer, the offer time printed was really its expiry, prices were divided by a guessed
-// 100, and the "see what this stay used" link went to the general usage page.
-//
-// WHAT IT IS. Every grant, whatever produced it, from the purchase record forward: which package, how it was
-// given, to which room (with its PMS connection), whether it is in use, what it used, on how many devices —
-// filtered by period, package, source, status and room, paged on the server, with a summary of the period on
-// top. "Offered" appears only when a portal offer really existed, and no time is shown that was not recorded.
-// A row opens the full record in a sheet, with a link to that stay's own usage.
+// Every grant, whatever produced it, from the purchase record forward. "Offered" appears only when a portal
+// offer really existed, and no time is shown that was not recorded.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -48,16 +38,14 @@ function When({ at }: { at?: string | null }) {
   return <time dateTime={at} title={formatDate(at)}>{formatRelative(at)}</time>;
 }
 
-/** datetime-local ("YYYY-MM-DDTHH:mm", local time) → RFC 3339, or undefined when incomplete. */
+/** datetime-local value to RFC 3339, or undefined when incomplete. */
 function localToISO(v: string): string | undefined {
   if (!v) return undefined;
   const t = new Date(v);
   return Number.isFinite(t.getTime()) ? t.toISOString() : undefined;
 }
 
-/** Sources that exist only because of hospitality (stays, grace, post-stay, PMS transfer). */
 const HOSPITALITY_SOURCES = ["CHECKOUT_GRACE", "EMERGENCY_GRACE", "POST_STAY_CONVERSION", "CROSS_PMS_TRANSFER"];
-/** Modules through which a client signs in by email, phone or a social account. */
 const IDENTITY_MODULES = ["email_otp", "sms_otp", "whatsapp_otp", "social_login"];
 
 export function ActivityTab({ guard, setErr }: TabProps) {
@@ -70,11 +58,8 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
 
-  // HOW ACCESS CAN HAVE BEEN GIVEN HERE. The hospitality ways -- grace, emergency grace, after-stay access, a
-  // move between PMS connections -- are offered as filters only where hospitality is licensed or has left
-  // records; "Email, phone or social sign-in" only where an identity module is licensed. The filter currently
-  // chosen always stays listed, so a selection can never be hidden under its own control. Rows are data and
-  // are shown as the server returns them.
+  // Hospitality sources are offered only where hospitality is licensed or has records, and the identity
+  // source only where an identity module is licensed; the chosen filter always stays listed.
   const caps = useCapabilities();
   const stays = moduleHasHistory(caps, "hospitality");
   const identity = IDENTITY_MODULES.some((m) => moduleLicensed(caps, m));
@@ -91,7 +76,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   useEffect(() => {
     api.get<ListResp<PackageSummary>>("/commercial-packages")
       .then((r) => setPackages(r.data ?? []))
-      .catch(() => setPackages([])); // the filter simply lists fewer packages; the view still works
+      .catch(() => setPackages([]));
   }, []);
 
   const customReady = range !== "custom" || (!!localToISO(customFrom) && !!localToISO(customTo));
@@ -111,7 +96,6 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   }, [range, customFrom, customTo, packageID, source, status, q, offset, customReady, guard, setErr]);
   useEffect(() => { load(); }, [load]);
 
-  // Any filter change goes back to the first page.
   const reset = <T,>(set: (v: T) => void) => (v: T) => { setOffset(0); set(v); };
 
   const s = resp?.summary;
@@ -159,8 +143,7 @@ export function ActivityTab({ guard, setErr }: TabProps) {
                 </Select>
               </Field>
             </div>
-            {/* The server searches rooms and reservations and nothing else, so the box exists only where stays
-                can: a neutral placeholder on a search that can only match a room would be a promise it breaks. */}
+            {/* The server searches only rooms and reservations, so the box exists only where stays do. */}
             {stays && (
               <SearchInput value={q} onChange={reset(setQ)} delay={300}
                 placeholder="Room or reservation" label="Search by room or reservation" />
@@ -294,13 +277,11 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   );
 }
 
-/** One grant, in full: what, how, who, the timeline of what happened, and what it used. */
 function ActivityRecord({ r }: { r: ActivityRow }) {
   const st = statusWords(r.status);
   const ended = endReasonText(r.end_reason);
 
-  // THE TIMELINE HOLDS ONLY RECORDED MOMENTS. No offer time (the offer does not record one), and nothing that is
-  // not on the record is filled in.
+  // Only recorded moments; the offer records no time, so none is shown.
   const events: { at: string; title: string; body?: string; tone: "ok" | "info" | "neutral" | "warn" | "err" }[] = [];
   if (r.had_offer && r.offer_taken_at) events.push({ at: r.offer_taken_at, title: "Offer taken on the portal", tone: "info" });
   if (r.started_at) events.push({ at: r.started_at, title: "Access started", tone: "ok" });
@@ -353,8 +334,6 @@ function ActivityRecord({ r }: { r: ActivityRow }) {
             { label: "Price", value: priceText(r.price_minor, r.currency, r.currency_exponent) },
             { label: "How it was given", value: r.source_label },
             { label: "Portal offer", value: r.had_offer ? "Chosen from an offer on the portal" : "Given without a portal offer" },
-            // A room and a reservation are facts of a stay: shown when this grant has one, never as an empty
-            // "Room —" on a site that has no rooms.
             ...(r.room ? [
               { label: "Room", value: `Room ${r.room}`, hint: r.pms_interface },
               { label: "Reservation", value: r.reservation || "—" },

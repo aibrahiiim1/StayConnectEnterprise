@@ -1,9 +1,5 @@
 package pmsd
 
-// Startup-ordering and reconciliation tests. These cover the two failure modes that a package-level test
-// cannot see: a daemon that keeps admitting events nothing applies, and application loops that drift out of
-// step with the set of live Interfaces.
-
 import (
 	"context"
 	"errors"
@@ -14,14 +10,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// nilApplier is a concrete type whose nil pointer is stored in a non-nil interface — the classic typed-nil.
 type nilApplier struct{}
 
 func (n *nilApplier) ProcessNext(ctx context.Context, tenant, site, iface string) (bool, error) {
 	return false, nil
 }
 
-// dialSpy records whether ANY PMS connection was attempted.
 type dialSpy struct {
 	mu sync.Mutex
 	n  int
@@ -39,7 +33,6 @@ func (d *dialSpy) count() int {
 	return d.n
 }
 
-// closeSpy proves the repository is released when startup fails.
 type closeSpy struct {
 	applierRepo
 	closed bool
@@ -47,8 +40,7 @@ type closeSpy struct {
 
 func (c *closeSpy) Close() error { c.closed = true; return nil }
 
-// Every way the applier can fail to exist must stop the daemon BEFORE a connector worker or PMS socket starts,
-// and must release the repository it had already opened.
+// A failed applier construction must stop the daemon before any connector or PMS socket starts and release the repository.
 func TestApplierConstructionFailsClosedBeforeAnyConnectorWork(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -94,7 +86,6 @@ func TestApplierConstructionFailsClosedBeforeAnyConnectorWork(t *testing.T) {
 	}
 }
 
-// reconcileRepo lets a test change the ACTIVE interface set between reconciliations.
 type reconcileRepo struct {
 	applierRepo
 	mu     sync.Mutex
@@ -118,7 +109,6 @@ func (r *reconcileRepo) ListActiveInterfaces(ctx context.Context, tenant, site s
 }
 func (r *reconcileRepo) Close() error { return nil }
 
-// waitFor polls until cond holds or the deadline passes.
 func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -131,8 +121,6 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// A newly published Interface gets a loop without a restart; one that stops being ACTIVE has its loop stopped;
-// a returning Interface gets a fresh loop; and unrelated Interfaces are never disturbed.
 func TestApplierReconcilesInterfaceChanges(t *testing.T) {
 	ap := newFakeApplier()
 	repo := &reconcileRepo{}
@@ -175,9 +163,7 @@ func TestApplierReconcilesInterfaceChanges(t *testing.T) {
 	}
 }
 
-// loopLedger watches the supervisor's loop lifecycle from outside and records, per Interface, every start and
-// stop with its generation. It is what makes "exactly one live loop per Interface" an assertion rather than a
-// hope: counting live loops directly is the only way to distinguish a REPLACEMENT from a DUPLICATE.
+// loopLedger records every loop start and stop per Interface with its generation, to tell a replacement from a duplicate.
 type loopLedger struct {
 	mu    sync.Mutex
 	live  map[string]int      // interface -> currently live loops
@@ -224,10 +210,7 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// ONE production supervisor, hammered with concurrent reconcile-triggering changes: there must never be two
-// live loops for one Interface, and a removed loop must fully stop before its replacement starts (generations
-// must not overlap). The previous four-supervisor test could not show this — four supervisors keep four
-// independent loop maps, so it only ever proved that they all drain.
+// One supervisor under repeated changes: never two live loops for one Interface, and generations must not overlap.
 func TestSingleSupervisorKeepsExactlyOneLoopPerInterface(t *testing.T) {
 	ap := newFakeApplier()
 	repo := &reconcileRepo{}
@@ -282,18 +265,15 @@ func TestSingleSupervisorKeepsExactlyOneLoopPerInterface(t *testing.T) {
 			}
 		}
 	}
-	// i1 was never removed, so it must have run exactly one generation for the whole test
 	if _, _, events := ledger.snapshot("i1"); len(events) != 2 || events[0] != "start:1" {
 		t.Fatalf("an untouched interface was disturbed: %v", events)
 	}
-	// i2 must have been replaced, never duplicated
 	if _, _, events := ledger.snapshot("i2"); len(events) < 4 {
 		t.Fatalf("i2 was expected to stop and restart at least once: %v", events)
 	}
 }
 
-// A slow-draining removed loop must not overlap with its replacement: the supervisor waits for the old
-// generation to finish before a new one for the same Interface can start.
+// A slow-draining removed loop must finish before its replacement starts.
 func TestReplacementLoopWaitsForTheOldOneToDrain(t *testing.T) {
 	slow := &slowApplier{delay: 200 * time.Millisecond, inner: newFakeApplier()}
 	repo := &reconcileRepo{}
@@ -325,7 +305,6 @@ func TestReplacementLoopWaitsForTheOldOneToDrain(t *testing.T) {
 	}
 }
 
-// slowApplier makes each application take measurable time, so a removal lands mid-flight.
 type slowApplier struct {
 	delay time.Duration
 	inner *fakeApplier

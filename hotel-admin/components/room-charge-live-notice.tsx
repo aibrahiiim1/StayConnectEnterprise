@@ -1,12 +1,6 @@
 "use client";
 
-// "ROOM-CHARGE POSTING IS LIVE ON THIS APPLIANCE" (Product-Owner decision D-E).
-//
-// D47 authorises real room-charge posting on the PRE-LIVE appliance, and that stays. What was missing is that the
-// console never said so: an operator testing a package, a PMS connection or the room charge screen could not tell
-// that a client choosing "charge to room" creates a real charge on a guest's reservation in the PMS. The notice is
-// shown wherever posting is in effect -- the room_charge module is EFFECTIVE (licensed, switched on and ready,
-// which includes the appliance's transmit switch) -- and nowhere else.
+// Show the notice only when room-charge posting can create real PMS charges on guest reservations.
 
 import { Callout } from "@/components/ui/error-banner";
 import { moduleEffective, useCapabilities } from "@/lib/capabilities";

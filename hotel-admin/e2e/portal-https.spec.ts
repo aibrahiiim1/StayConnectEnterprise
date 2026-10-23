@@ -1,13 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// NETWORKING → PORTAL HTTPS (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §8).
-//
-// The edged backend is mocked at the network layer; no real backend, DB, appliance, Central or guest data is
-// touched. What this defends in a real browser: the destination is offered under Networking, the fallback is
-// stated with its reason, the hotel domain's DNS records are shown to publish, and a change goes out with the
-// password the server requires.
-
 const ONEGATE = "abcd1234.gw.onegate.work";
 
 function doc(domain: string | null) {

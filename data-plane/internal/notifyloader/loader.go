@@ -1,15 +1,4 @@
-// Package notifyloader resolves a tenant's email, SMS and WhatsApp providers
-// from the DB and returns ready-to-use mail.Mailer / sms.Sender /
-// whatsapp.Sender instances. WhatsApp is its own channel, never an SMS kind.
-//
-// scd's startup chain:
-//  1. Load(ctx, db, tenantID, fallbacks)
-//  2. Returned Mailer/Sender are wired into the server struct
-//  3. If no enabled row for a channel, the matching fallback is used
-//     (typically a Stub for dev / unconfigured tenants)
-//
-// This module also wraps the chosen provider so every Send() goes through
-// the same metric instrumentation (success/failure/latency).
+// Package notifyloader resolves a tenant's email, SMS and WhatsApp providers from the DB, with fallbacks.
 package notifyloader
 
 import (
@@ -28,50 +17,37 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/whatsapp"
 )
 
-// WhatsApp provider kinds stored in notification_providers.kind (channel 'whatsapp').
 const (
 	KindMetaWhatsApp   = "meta_whatsapp"
 	KindTwilioWhatsApp = "twilio_whatsapp"
-	// KindSMTP is the site's own mail server (channel 'email'): host, port, security and username live in
-	// extra; the password is the sealed secret; from_address / from_name are the envelope sender.
-	KindSMTP = "smtp"
+	KindSMTP           = "smtp"
 )
 
-// SecretOpener returns the sealed secret of a provider row (iam_v2.notification_provider_secret_generations),
-// or ok=false when none is stored or it cannot be opened. nil means "plaintext api_key only".
+// SecretOpener returns the sealed secret of a provider row, or ok=false when none is stored or it cannot be opened; nil
+// means plaintext api_key only.
 type SecretOpener func(ctx context.Context, providerID string) (secret string, ok bool)
 
-// Result holds the resolved channels. Either field is always non-nil; on
-// error the caller can still fall back without nil-checking everywhere.
 type Result struct {
 	Mailer   mail.Mailer
 	Sender   sms.Sender
 	WhatsApp whatsapp.Sender
 
-	// MailerKind / SenderKind report which implementation won (so logs
-	// and the metrics layer can label by provider). "stub" when the
-	// fallback was used.
 	MailerKind   string
 	SenderKind   string
 	WhatsAppKind string
 }
 
-// providerRow is one enabled notification_providers row.
 type providerRow struct {
 	id                                                         string
 	channel, kind, apiKey, apiUser, fromAddr, fromName, region string
 	extra                                                      map[string]string
 }
 
-// ProviderRow is the exported shape for building a single sender outside the boot path (the Admin Console's
-// "send a test" uses it on a freshly read row).
 type ProviderRow struct {
 	ID, Channel, Kind, Secret, APIUser, FromAddress, FromName, Region string
 	Extra                                                             map[string]string
 }
 
-// BuildOne constructs the sender for one row. Exactly one of the three results is non-nil; kind names the
-// implementation, "stub" when the row could not be built.
 func BuildOne(r ProviderRow, fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (mail.Mailer, sms.Sender, whatsapp.Sender, string) {
 	row := providerRow{id: r.ID, channel: r.Channel, kind: r.Kind, apiKey: r.Secret, apiUser: r.APIUser,
 		fromAddr: r.FromAddress, fromName: r.FromName, region: r.Region, extra: r.Extra}
@@ -89,17 +65,14 @@ func BuildOne(r ProviderRow, fallbackMail mail.Mailer, fallbackSMS sms.Sender, f
 	return nil, nil, nil, "stub"
 }
 
-// Load picks one row per channel (the enabled one — at most one by the
-// partial unique index in migration 0016) and constructs the matching
-// implementation. Returns the fallbacks unchanged on any error so scd
-// always boots with a usable sender pair.
+// Load picks the single enabled row per channel and returns the fallbacks on any error so scd always boots with a
+// usable sender.
 func Load(ctx context.Context, db *pgxpool.Pool, tenantID string,
 	fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (*Result, error) {
 	return LoadWithSecrets(ctx, db, tenantID, nil, fallbackMail, fallbackSMS, fallbackWA)
 }
 
-// LoadWithSecrets is Load with a sealed-secret opener. A sealed generation is preferred over the plaintext
-// api_key column; a row with neither keeps its fallback.
+// LoadWithSecrets prefers a sealed generation over the plaintext api_key; a row with neither keeps its fallback.
 func LoadWithSecrets(ctx context.Context, db *pgxpool.Pool, tenantID string, open SecretOpener,
 	fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) (*Result, error) {
 
@@ -142,7 +115,6 @@ func LoadWithSecrets(ctx context.Context, db *pgxpool.Pool, tenantID string, ope
 	return resolve(found, fallbackMail, fallbackSMS, fallbackWA), nil
 }
 
-// parseExtra reads the string-valued keys of the extra jsonb column; anything else is ignored.
 func parseExtra(raw string) map[string]string {
 	out := map[string]string{}
 	var m map[string]any
@@ -157,8 +129,6 @@ func parseExtra(raw string) map[string]string {
 	return out
 }
 
-// resolve picks the implementation for each channel from the enabled rows (at most one per channel by the
-// partial unique index); a channel without a usable row keeps its fallback.
 func resolve(rows []providerRow, fallbackMail mail.Mailer, fallbackSMS sms.Sender, fallbackWA whatsapp.Sender) *Result {
 	out := &Result{
 		Mailer: fallbackMail, MailerKind: "stub",
@@ -178,8 +148,8 @@ func resolve(rows []providerRow, fallbackMail mail.Mailer, fallbackSMS sms.Sende
 	return out
 }
 
-// buildWhatsApp maps a whatsapp row onto its adapter. api_key is the secret (Meta access token / Twilio auth
-// token); api_user is the Meta phone number ID / Twilio account SID.
+// api_key is the secret (Meta access token / Twilio auth token); api_user is the Meta phone number ID / Twilio account
+// SID.
 func buildWhatsApp(r providerRow, fallback whatsapp.Sender) (whatsapp.Sender, string) {
 	switch r.kind {
 	case KindMetaWhatsApp:
@@ -215,7 +185,6 @@ func buildMailer(r providerRow, fallback mail.Mailer) (mail.Mailer, string) {
 	case KindSMTP:
 		m, err := mail.NewSMTP(SMTPConfigFromRow(r.extra, r.apiKey, r.fromAddr, r.fromName))
 		if err != nil {
-			// The operator sees the same reason on save; here it is a boot-time fact for the log only.
 			slog.Warn("notifyloader: smtp construct failed; using stub", "err", err)
 			return fallback, "stub"
 		}
@@ -227,7 +196,6 @@ func buildMailer(r providerRow, fallback mail.Mailer) (mail.Mailer, string) {
 	return fallback, "stub"
 }
 
-// SMTPConfigFromRow reads an smtp provider's non-secret settings from its extra column and joins the secret.
 // extra keys: host, port, security (starttls|tls|none), username, timeout_seconds.
 func SMTPConfigFromRow(extra map[string]string, password, fromAddr, fromName string) mail.SMTPConfig {
 	sec := mail.SMTPSecurity(extra["security"])
@@ -273,13 +241,6 @@ func buildSender(kind, accountSID, authToken, fromNumber string, fallback sms.Se
 	return fallback, "stub"
 }
 
-// ----- Metric-instrumented wrappers -----
-//
-// Wrap the chosen implementation so every Send() emits:
-//   scd_notification_send_total{channel,provider,result}
-//   scd_notification_send_duration_seconds{channel,provider}
-// and bumps last_success_at / last_error on the DB row for admin UI.
-
 type instrumentedMailer struct {
 	inner    mail.Mailer
 	kind     string
@@ -288,7 +249,6 @@ type instrumentedMailer struct {
 	tenantID string
 }
 
-// WrapMailer adds metric instrumentation + DB health updates.
 func WrapMailer(m mail.Mailer, kind string, met *metrics.Registry, db *pgxpool.Pool, tenantID string) mail.Mailer {
 	return &instrumentedMailer{inner: m, kind: kind, met: met, db: db, tenantID: tenantID}
 }
@@ -345,7 +305,6 @@ type instrumentedWhatsApp struct {
 	tenantID string
 }
 
-// WrapWhatsApp adds metric instrumentation + DB health updates to the WhatsApp channel.
 func WrapWhatsApp(s whatsapp.Sender, kind string, met *metrics.Registry, db *pgxpool.Pool, tenantID string) whatsapp.Sender {
 	return &instrumentedWhatsApp{inner: s, kind: kind, met: met, db: db, tenantID: tenantID}
 }
@@ -366,9 +325,7 @@ func (i *instrumentedWhatsApp) Send(ctx context.Context, msg whatsapp.Message) e
 	return err
 }
 
-// updateHealth bumps last_success_at OR last_error / last_error_at on the
-// active provider row. Best-effort; failure to write health doesn't bubble
-// up to the caller (the actual send already succeeded or failed).
+// Best-effort: a failed health write never fails the send.
 func updateHealth(ctx context.Context, db *pgxpool.Pool, tenantID, channel string, sendErr error) {
 	if db == nil || tenantID == "" {
 		return

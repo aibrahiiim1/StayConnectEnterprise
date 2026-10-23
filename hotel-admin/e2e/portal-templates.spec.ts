@@ -1,15 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { portalHTML } from "./portal-page";
 
-// THE PORTAL'S TEMPLATES, IN A REAL BROWSER.
-//
-// A template is presentation over ONE page: the same forms, ids and script under every layout. What only a
-// browser can prove is that each layout actually leaves those forms VISIBLE and SUBMITTABLE -- at desktop width
-// and on a 390px phone -- and that the cascade guard holds: a hotel stylesheet that tries to hide the sign-in
-// (form{display:none!important} and friends) restyles nothing that matters.
-//
-// The page is portald's real template (./portal-page renders templates.go), served through page.route with
-// the appliance's answers stubbed. No appliance, no database, no guest data.
+// Templates share one sign-in form; hostile hotel CSS must not hide it on desktop or phone.
 
 const TEMPLATES = ["classic", "split", "immersive", "headerbar", "editorial", "kiosk"] as const;
 
@@ -18,8 +10,7 @@ const VIEWPORTS = [
   { name: "phone", width: 390, height: 844 },
 ] as const;
 
-/** A stylesheet written to break the sign-in. The portal removes !important on the server; the page removes it
- *  again and wraps the rest in the hotel's layer, under the unlayered guard. */
+/** Challenge the unlayered form guard with a hotel stylesheet that tries to hide sign-in. */
 const HOSTILE_CSS = `
 form { display: none !important; }
 .panels, .sc-signin { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
@@ -61,9 +52,7 @@ async function serve(page: Page, template: string, design: Record<string, unknow
   });
 }
 
-/** The guest's two doors, each filled in and submitted the way a guest would. */
 async function signInBothWays(page: Page, posted: Posted[]) {
-  // Guest Login (room) is the first group and opens by default.
   const room = page.locator("#pms-room");
   await expect(room).toBeVisible();
   await expect(page.locator("#form-pms button[type=submit]")).toBeVisible();
@@ -73,10 +62,7 @@ async function signInBothWays(page: Page, posted: Posted[]) {
   await expect(page.locator("#pms-err")).toContainText("could not verify");
   expect(posted.some((p) => p.path === "/auth/pms/phase3" && p.body.includes('"room":"412"'))).toBe(true);
 
-  // The account door: since the one-journey landing (contract §6.2) it is a chip under "Or sign in with",
-  // not a group tab. The voucher form behind it is a plain HTML POST.
   await page.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])').click();
-  // The chip opens the shared account panel; a guest with a voucher turns "Use Personal Account" off.
   await page.locator("#use-personal").uncheck();
   const voucher = page.locator("#voucher");
   await expect(voucher).toBeVisible();
@@ -100,7 +86,6 @@ for (const vp of VIEWPORTS) {
       await page.goto("http://localhost/portal");
       await expect(page.locator("html")).toHaveAttribute("data-template", tpl);
 
-      // No horizontal scroll on a phone: the page is exactly as wide as the screen.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow, "the page scrolls sideways").toBeLessThanOrEqual(1);
 
@@ -116,12 +101,10 @@ for (const vp of VIEWPORTS) {
       const posted: Posted[] = [];
       await serve(page, tpl, { hotel_name: "Semantics Demo", custom_css: HOSTILE_CSS }, posted);
       await page.goto("http://localhost/portal");
-      // The hotel sheet really was applied -- in its layer -- so the assertion below is about the guard.
       await expect(page.locator("style#sc-hotel")).toHaveCount(1);
       const css = await page.locator("style#sc-hotel").textContent();
       expect(css).toContain("@layer hotel");
       expect(css).not.toMatch(/!\s*important/i);
-      // The ways in (chips under "Or sign in with", contract §6.2) survive the sheet that tries to hide them.
       await expect(page.locator("#alt-methods button").first()).toBeVisible();
       await signInBothWays(page, posted);
     });
@@ -176,8 +159,7 @@ for (const tpl of TEMPLATES) {
 }
 
 test("the guard does not fight the page's own switches", async ({ page }) => {
-  // The guard is unlayered but NOT !important, so the sign-in script's inline show/hide still wins: flipping
-  // to the personal account hides the voucher form and shows the credentials form, under every template.
+  // Leave the guard without !important so the sign-in script's inline show/hide still wins.
   for (const tpl of TEMPLATES) {
     const posted: Posted[] = [];
     await page.unrouteAll({ behavior: "ignoreErrors" });

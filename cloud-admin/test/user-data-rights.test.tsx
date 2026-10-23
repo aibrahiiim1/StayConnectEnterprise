@@ -3,9 +3,6 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockFetch, PLATFORM_ME, renderAs } from "./helpers";
 
-// GDPR audit B5 (migration 0055): a Central user's email can be corrected, and the platform can download one
-// person's data to hand to them, with a reason.
-
 vi.mock("next/navigation", async () => (await import("./navigation")).navigationModule);
 
 import { UsersManager } from "@/components/users-manager";

@@ -1,11 +1,7 @@
 //go:build integration && phase4
 
-// PHASE-4 TEST OWNERSHIP. The `phase4` tag is not decoration: these tests need the Phase-4 schema
-// (migrations 0011-0026), and the PHASE-3 regression gate builds a database that stops at 0010. With
-// only the `integration` tag they compiled into the Phase-3 gate's ./cmd/edged/ package and failed
-// against a schema in which `financial_base_currency` and `p4_declare_financial_recovery` cannot exist
-// -- a false failure that says nothing about Phase 3 and hides anything that would say something.
-// The tag is what makes the schema requirement structural rather than a naming convention.
+// The phase4 tag is needed: the Phase-3 regression gate builds a schema without the Phase-4 objects, so
+// without it these tests compile into that gate and fail falsely.
 
 package main
 
@@ -17,13 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Real HTTP + real PostgreSQL contract tests for the Phase-4 financial OPERATIONS surface.
-//
-// The database already enforces the recovery rules, and the payment package's own matrix proves them. What
-// only exists at the API is the authorization and the redaction: that this surface needs the financial
-// permission, that a recovery decision is step-up authenticated and takes its author from the session, that
-// an out-of-scope settlement is indistinguishable from an absent one, and that no response here carries a
-// correlation handle an operator could use to act out of band.
+// The database enforces the recovery rules; these tests cover what exists only at the API: the financial
+// permission, step-up with the author taken from the session, out-of-scope settlements indistinguishable from
+// absent ones, and no correlation handle in any response.
 
 func TestIntegrationFinOpsAPI_HealthCarriesNoIdentifiers(t *testing.T) {
 	f := newAPI(t, "payments_operator")
@@ -31,7 +23,6 @@ func TestIntegrationFinOpsAPI_HealthCarriesNoIdentifiers(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("health: %d %s", code, raw)
 	}
-	// The whole point of the shape: a redacted surface cannot leak what it has no field for.
 	for _, forbidden := range []string{"provider_ref", "idempotency_key", "provider_txn_ref"} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("health response carried %q:\n%s", forbidden, raw)
@@ -46,7 +37,6 @@ func TestIntegrationFinOpsAPI_HealthCarriesNoIdentifiers(t *testing.T) {
 }
 
 func TestIntegrationFinOpsAPI_RequiresTheFinancialPermission(t *testing.T) {
-	// An operator with no financial permission cannot read the surface at all.
 	f := newAPI(t, "guest_relations_operator")
 	if code, _ := f.doRaw(t, "GET", "/financial-ops/health", nil); code != 403 && code != 404 {
 		t.Fatalf("a non-financial role read the financial operations surface: %d", code)
@@ -94,8 +84,7 @@ func TestIntegrationFinOpsAPI_RecoveryDecisionsNeedStepUpAndTakeTheirAuthorFromT
 		t.Fatalf("a refused decision was recorded as %s", *resolved)
 	}
 
-	// An actor cannot even be OFFERED. The decoder rejects an unknown field outright, which is stronger
-	// than accepting and ignoring it: there is no version of this request that names its own author.
+	// The decoder rejects an unknown field outright, so no request can name its own author.
 	if code, _ := f.do(t, "POST", "/financial-ops/recovery/holds/"+holdID+"/resolve", map[string]any{
 		"resolution": "CONFIRMED_NOT_COMPLETED",
 		"note":       "checked the provider dashboard; nothing was charged",
@@ -156,14 +145,13 @@ func TestIntegrationFinOpsAPI_ReleaseIsRefusedWhileWorkIsUnreconciled(t *testing
 	}
 }
 
-// Same tenant, different site. This is the isolation a fresh-tenant-per-fixture test cannot see.
+// Same tenant, different site: isolation a fresh-tenant-per-fixture test cannot see.
 func TestIntegrationFinOpsAPI_AnotherSiteOfTheSameTenantIsInvisible(t *testing.T) {
 	a := newAPI(t, "payments_operator")
 	b := newAPIIn(t, a.tenant, "payments_operator")
 	ctx := context.Background()
 
-	// Site B gets its own commercial chain. Skipping when one is absent would turn the isolation proof
-	// into a no-op the day the fixture changes, which is the failure mode this test exists to rule out.
+	// Site B gets its own commercial chain; skipping when one is absent would turn the isolation proof into a no-op.
 	var planID, planRev, pkgID, pkgRev, purchaseID, settlementID string
 	q := func(dst *string, sql string, args ...any) {
 		t.Helper()
@@ -197,8 +185,7 @@ func TestIntegrationFinOpsAPI_AnotherSiteOfTheSameTenantIsInvisible(t *testing.T
 		t.Fatalf("seed site B: %v", err)
 	}
 
-	// Site A's operator asking for it must get the same answer, BYTE FOR BYTE, as for one that does not
-	// exist. A different message would confirm that another property's settlement is there to be found.
+	// The answer must be byte-for-byte that for a missing settlement, or it confirms another property's exists.
 	codeReal, bodyReal := a.doRaw(t, "GET", "/financial-ops/settlements/"+settlementID, nil)
 	codeFake, bodyFake := a.doRaw(t, "GET",
 		"/financial-ops/settlements/11111111-2222-3333-4444-555555555555", nil)

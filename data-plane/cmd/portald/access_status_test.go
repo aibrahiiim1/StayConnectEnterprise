@@ -1,10 +1,6 @@
 package main
 
-// A GUEST WHOSE PACKAGE RAN OUT MUST BE TOLD, AND TOLD NOTHING ELSE.
-//
-// Two sentences, chosen by the server, shown above an unchanged sign-in form. These cases pin both halves:
-// the message appears for DATA and TIME, and the surface leaks no guest, room, reservation or PMS identity —
-// which is the whole reason the answer is a bounded word rather than a description of what ended.
+// A guest whose package ran out is told, and told nothing else: no guest, room, reservation or PMS identity leaks.
 
 import (
 	"encoding/json"
@@ -16,7 +12,6 @@ import (
 	"testing"
 )
 
-// scdSaying is an scd that answers the access-status hop with one reason.
 type scdSaying struct{ reason string }
 
 func (s scdSaying) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -74,8 +69,7 @@ func TestAccessStatus_TimeExpiryIsExplained(t *testing.T) {
 	}
 }
 
-// THE ORDINARY CASE. A device that has not just run out gets no notice at all — not an error, because an
-// error here would appear on the first connection of every guest's stay.
+// A device that has not just run out gets no notice, not an error.
 func TestAccessStatus_NothingToSayIsSilentAndSuccessful(t *testing.T) {
 	for _, reason := range []string{"", "SOMETHING_ELSE", "ADDRESS_NO_LONGER_OWNED", "ENTITLEMENT_ENDED"} {
 		code, out, _ := askStatus(t, statusFixture(t, reason))
@@ -88,7 +82,6 @@ func TestAccessStatus_NothingToSayIsSilentAndSuccessful(t *testing.T) {
 	}
 }
 
-// scd being unreachable must not break the page: the sign-in form is what the guest needs either way.
 func TestAccessStatus_AnUnavailableLookupIsSilent(t *testing.T) {
 	h := &handler{scd: &http.Client{Transport: darkScd{}}, clock: newRecordingClock()}
 	h.arpCache = func(net.IP) (net.HardwareAddr, bool) {
@@ -101,7 +94,6 @@ func TestAccessStatus_AnUnavailableLookupIsSilent(t *testing.T) {
 	}
 }
 
-// A device the appliance cannot place on its own neighbour table gets no notice, and no error either.
 func TestAccessStatus_UnknownDeviceGetsNoNotice(t *testing.T) {
 	h := statusFixture(t, "DATA")
 	h.arpCache = func(net.IP) (net.HardwareAddr, bool) { return nil, false }
@@ -111,7 +103,6 @@ func TestAccessStatus_UnknownDeviceGetsNoNotice(t *testing.T) {
 	}
 }
 
-// THE DISCLOSURE RULE. The whole point of answering with a bounded word is that nothing else can ride along.
 func TestAccessStatus_LeaksNoGuestOrPMSIdentity(t *testing.T) {
 	for _, reason := range []string{"DATA", "TIME"} {
 		_, _, raw := askStatus(t, statusFixture(t, reason))
@@ -127,8 +118,7 @@ func TestAccessStatus_LeaksNoGuestOrPMSIdentity(t *testing.T) {
 	}
 }
 
-// The two sentences are the complete vocabulary. A new reason must not be able to reach a guest without
-// somebody choosing its wording here.
+// The two sentences are the complete vocabulary; a new reason needs a deliberate wording here.
 func TestAccessStatus_MessageVocabularyIsClosed(t *testing.T) {
 	if len(endedMessages) != 2 {
 		t.Fatalf("the guest-facing vocabulary grew to %d entries without review", len(endedMessages))

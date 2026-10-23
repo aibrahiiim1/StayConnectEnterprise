@@ -2,9 +2,6 @@ package auth
 
 import "testing"
 
-// A recovery code is accepted however it was typed or pasted: lower case, a dash, and spaces, tabs or line
-// breaks anywhere in it, not only at the ends. The result is the code as generated (recoveryAlphabet, upper
-// case, no separator).
 func TestRecoveryCodeNormalisation(t *testing.T) {
 	for _, in := range []string{
 		"ABCDE-FGHJK", "abcde-fghjk", "ABCDEFGHJK", " ABCDE FGHJK ", "ABCDE\tFGHJK", "ABCDE-\nFGHJK",

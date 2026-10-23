@@ -1,6 +1,3 @@
-// CLIENTS AREA AND ROLE PARITY, audit remediation (2026-10-16). One file for the small console rules the fixes
-// added; the screens themselves keep their own suites.
-
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -14,7 +11,6 @@ import { offeredWords } from "@/lib/portal-https";
 
 describe("the console's role table is the server's (L-2)", () => {
   it("is read from the generated file, not written by hand", () => {
-    // Every cell the generated table holds is what canRead / canWrite answer.
     for (const [role, row] of Object.entries(generated.roles as Record<string, Record<string, string>>)) {
       for (const [res, p] of Object.entries(row)) {
         expect(canRead(res, [role]), `${role} read ${res}`).toBe(true);
@@ -87,8 +83,6 @@ describe("code-method readiness (C-13) and the Offered words (C-14)", () => {
     expect(offeredWords("method_off", "google")).toMatch(/switched off under Sign-in methods/);
   });
 });
-
-// ----------------------------------------------------------------------------------- the layout ---------
 
 vi.mock("next/navigation", () => ({
   usePathname: () => currentPath,

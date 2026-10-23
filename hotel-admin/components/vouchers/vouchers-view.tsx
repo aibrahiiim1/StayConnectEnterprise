@@ -1,23 +1,7 @@
 "use client";
 
-// THE VOUCHER SCREEN.
-//
-// FOUR JOBS, KEPT APART:
-//
-//   ISSUE    prints a batch. The codes appear once, in the issue dialog, and nowhere else.
-//   REVEAL   recovers ONE code for a card already in circulation. Password, a reason, a permanent record.
-//   EXPORT   recovers a whole batch under the same gate, with one record naming the size of the selection.
-//   CANCEL   ends an UNUSED card that has not expired. A redeemed card cannot be cancelled: that guest already
-//            has access, and taking access back is an entitlement action on a different screen.
-//
-// THE HONEST SENTENCE ABOUT CONFIDENTIALITY. Unlike a post-stay PIN or a guest password -- both hashed -- a
-// voucher code is encrypted and CAN be read again. So nothing here promises "you will never see this again"
-// about a reveal; it says who will see that you looked, which is true. Only the ISSUE response is one-time
-// in the sense that matters: after it, getting a code back is an audited act.
-//
-// STATUS IS WHAT THE CARD IS, NOT WHAT THE ROW SAYS. Nothing writes REDEMPTION_EXPIRED; expiry is enforced at
-// sign-in from the validity window. The server reports an effective state computed with that same rule, and
-// every filter, count and button on this screen uses it. The stored state is not changed.
+// Voucher codes can be recovered only through an audited reveal or export after their one-time issue response.
+// Expiry is computed from the validity window at sign-in; filters and actions use the same effective state.
 
 import * as React from "react";
 import { Ban, CalendarClock, CheckCircle2, Plus, Settings2, Ticket, TicketCheck } from "lucide-react";
@@ -60,7 +44,7 @@ const PAGE = 50;
 type StatusFilter = "all" | EffectiveStatus;
 type Tab = "vouchers" | "batches" | "access" | "security";
 
-/** The counts each status chip shows, from a summary. Falls back to stored states for an older server. */
+/** Fall back to stored-state counts for older servers without summary counts. */
 function chipCounts(s: VoucherSummaryFull | null): Record<StatusFilter, number | undefined> {
   if (!s) return { all: undefined, available: undefined, not_yet_valid: undefined, expired: undefined, redeemed: undefined, cancelled: undefined };
   const total = s.total ?? s.unused + s.redeemed + s.revoked + s.redemption_expired;
@@ -79,9 +63,8 @@ export function VouchersView(props: {
   canRevealCodes: boolean;
   canReadFormat: boolean;
   canEditFormat: boolean;
-  /** Whether the portal settings can be read, for the hotel name printed on cards. */
   canReadBranding?: boolean;
-  /** The role is known and may look but not print, cancel or reveal: say so once, under the header. */
+  /** Show read-only roles that they cannot print, cancel, or reveal codes. */
   readOnly?: boolean;
 }) {
   const { canIssue, canRevealCodes, canReadFormat, canEditFormat, canReadBranding = false, readOnly = false } = props;
@@ -90,7 +73,6 @@ export function VouchersView(props: {
   const [reloadKey, setReloadKey] = React.useState(0);
   const reload = React.useCallback(() => setReloadKey((k) => k + 1), []);
 
-  // ---- summary strip (whole property) ----
   const [summary, setSummary] = React.useState<VoucherSummaryFull | null>(null);
   const [summaryErr, setSummaryErr] = React.useState<unknown>(null);
   React.useEffect(() => {
@@ -103,7 +85,6 @@ export function VouchersView(props: {
       .catch(setSummaryErr);
   }, [reloadKey]);
 
-  // ---- filters ----
   const [status, setStatus] = React.useState<StatusFilter>("all");
   const [search, setSearch] = React.useState("");
   const [pkg, setPkg] = React.useState("");
@@ -123,7 +104,7 @@ export function VouchersView(props: {
     return p;
   }, [last4, searchProblem, pkg, batch]);
 
-  // Chip counts describe the population the other filters select, so they come from a FILTERED summary.
+  // Chip counts follow the other active filters.
   const [filteredSummary, setFilteredSummary] = React.useState<VoucherSummaryFull | null>(null);
   React.useEffect(() => {
     if (!narrowed) {
@@ -137,7 +118,6 @@ export function VouchersView(props: {
   }, [narrowed, filterQuery, reloadKey]);
   const counts = chipCounts(narrowed ? filteredSummary : summary);
 
-  // ---- the list ----
   const [list, setList] = React.useState<VoucherListResp | null>(null);
   const [listErr, setListErr] = React.useState<unknown>(null);
   React.useEffect(() => {
@@ -159,7 +139,6 @@ export function VouchersView(props: {
       });
   }, [filterQuery, status, offset, reloadKey, searchProblem]);
 
-  // ---- what the filters can offer ----
   const [grantable, setGrantable] = React.useState<Grantable[]>([]);
   const [batches, setBatches] = React.useState<VoucherBatch[]>([]);
   React.useEffect(() => {
@@ -184,7 +163,6 @@ export function VouchersView(props: {
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [grantable, batches]);
 
-  // ---- access log (reveals) ----
   const [reveals, setReveals] = React.useState<VoucherReveal[] | null>(null);
   const [revealsErr, setRevealsErr] = React.useState<unknown>(null);
   React.useEffect(() => {
@@ -198,7 +176,6 @@ export function VouchersView(props: {
       .catch(setRevealsErr);
   }, [canRevealCodes, reloadKey]);
 
-  // ---- the hotel name printed on cards ----
   const [hotelName, setHotelName] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
     if (!canReadBranding) return;
@@ -208,7 +185,6 @@ export function VouchersView(props: {
       .catch(() => setHotelName(undefined));
   }, [canReadBranding]);
 
-  // ---- dialogs and sheets ----
   const [issueOpen, setIssueOpen] = React.useState(false);
   const [selected, setSelected] = React.useState<VoucherRow | null>(null);
   const [focusBatch, setFocusBatch] = React.useState<{ id: string } | null>(null);

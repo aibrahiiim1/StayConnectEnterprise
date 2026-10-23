@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// D-C / O-8: ADMIN_APPROVAL has no approval workflow, so a plan cannot be published with it; the other two
-// policies (REJECT_NEW_DEVICE, and DISCONNECT_OLDEST now that the database implements it) publish.
+// ADMIN_APPROVAL has no approval workflow, so a plan cannot be published with it.
 func TestPlanPublishRefusesAdminApprovalWithAReason(t *testing.T) {
 	if msg := planSpecErr(t, func(s *PlanPublishSpec) { s.DeviceLimitPolicy = "ADMIN_APPROVAL" }); !strings.Contains(msg, "not available") ||
 		!strings.Contains(msg, "DISCONNECT_OLDEST") {
@@ -20,8 +19,8 @@ func TestPlanPublishRefusesAdminApprovalWithAReason(t *testing.T) {
 	}
 }
 
-// D-C / O-5: speed steps were shown and never applied. The editor may save one grant step with no overrides
-// (an optional match condition is still allowed: it is enforced, as an eligibility condition).
+// The editor may save one grant step with no overrides; an optional match condition is allowed (it is enforced
+// as an eligibility condition).
 func TestGrantTiersEnforceableRefusal(t *testing.T) {
 	ok := [][]GrantTier{
 		{{Order: 10, Value: map[string]any{}}},

@@ -1,13 +1,5 @@
-// Command acceptance exercises the Central contract (docs/CENTRAL_CONTROL_PLANE.md) end to end against a
-// running ctrlapi, playing both the operator and the appliance:
-//
-//	register (token-less, self-signed) -> WAITING -> Activate (inline customer + site, licence) -> CSR
-//	auto-signed -> ACTIVATED -> mTLS hello + certificate-only assignment -> licence suspend/resume/set/
-//	expiry/grace (appliance never cut off) -> rebind keeps terms -> offline files -> roles -> move (same
-//	customer only; licence carried with the same terms) -> retire (normal + emergency) -> delete -> a
-//	retired identity cannot register again -> replacement retires the old box through its signed ack ->
-//	an appliance reporting holds_customer_id (identity reset without factory reset) activates only for that
-//	customer, online and offline; plus replay/body-tamper rejection, step-up, audit, /metrics.
+// Command acceptance exercises the Central contract end to end against a running ctrlapi, playing both
+// the operator and the appliance.
 //
 // It creates its own fixtures (serials ACC-*, customers "Acceptance *") and needs:
 //
@@ -101,7 +93,6 @@ func main() {
 	op := login(pa)
 	reauth(op)
 
-	// ---------------- registration -> WAITING ----------------
 	a1 := newAppliance("ACC-A1-" + run)
 	code, body := a1.register()
 	check(code == 200 && a1.id != "", "registration is token-less and self-signed (HTTP %d)", code)
@@ -112,17 +103,14 @@ func main() {
 	check(strings.Contains(get(op, "/cloud/v1/overview"), `"waiting_activation"`), "the overview lists it as needing attention")
 	_ = body
 
-	// A CSR sent while waiting is queued, not signed.
 	a1.tlsPriv = newKey()
 	code, _ = a1.signed("POST", "/v1/appliance/csr", jb(map[string]any{"csr_pem": makeCSR(a1.tlsPriv, a1.id)}))
 	check(code == 202, "a waiting appliance's CSR is queued (HTTP %d)", code)
 
-	// ---------------- step-up ----------------
 	op2 := login(pa) // fresh session: no step-up yet
 	code, body = do(op2, "POST", "/cloud/v1/appliances/"+a1.id+"/activate", activateBody("", "Acceptance Hotels "+run, "", "Main "+run))
 	check(code == 403 && strings.Contains(body, "reauth_required"), "activation without step-up is refused (HTTP %d)", code)
 
-	// ---------------- activate ----------------
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/activate", activateBody("", "Acceptance Hotels "+run, "", "Main "+run))
 	check(code == 200, "activate with an inline customer and site (HTTP %d %s)", code, trunc(body))
 	custID, siteID := field(body, "customer_id"), field(body, "site_id")
@@ -132,7 +120,6 @@ func main() {
 	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/activate", activateBody(custID, "", siteID, ""))
 	check(code == 409, "activating again is refused: activate is WAITING-only (HTTP %d)", code)
 
-	// ---------------- certificate + mTLS ----------------
 	fetch := a1.get("/v1/appliance/certificate")
 	a1.certPEM, a1.caPEM = field(fetch, "certificate_pem"), field(fetch, "ca_chain")
 	check(a1.certPEM != "" && certHasURI(a1.certPEM, a1.id), "the appliance collects a certificate bound to its id")
@@ -144,14 +131,12 @@ func main() {
 	code, _ = a1.mtls("GET", "/v1/appliance/assignment-registry", true)
 	check(code == 200 || code == 204, "assignment registry reachable over mTLS (HTTP %d)", code)
 
-	// ---------------- replay / tamper ----------------
 	tok := a1.token("GET", "/v1/appliance/hello", nil)
 	c1, c2 := rawSigned("GET", "/v1/appliance/hello", tok, nil), rawSigned("GET", "/v1/appliance/hello", tok, nil)
 	check(c1 == 200 && c2 == 401, "a replayed signed request is refused (%d then %d)", c1, c2)
 	tok = a1.token("POST", "/v1/appliance/csr", []byte(`{}`))
 	check(rawSigned("POST", "/v1/appliance/csr", tok, []byte(`{"csr_pem":"tampered"}`)) == 401, "a body-modified signed request is refused")
 
-	// ---------------- licence operations never cut the appliance off (F4) ----------------
 	licID := sub(get(op, "/cloud/v1/appliances/"+a1.id), "license", "id")
 	code, body = do(op, "POST", "/cloud/v1/licenses/"+licID+"/suspend", jb(map[string]string{"reason": "acceptance"}))
 	check(code == 200 && field(body, "state") == "suspended", "suspend issues a signed suspended licence (HTTP %d)", code)
@@ -181,7 +166,6 @@ func main() {
 	licID = field(body, "id")
 	until := field(body, "valid_until")
 
-	// ---------------- rebind keeps the terms (F8) ----------------
 	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/rebind-wan-mac", jb(map[string]any{"reason": "NIC swap", "new_mac": "02:00:00:aa:bb:99"}))
 	check(code == 200, "rebind WAN MAC (HTTP %d)", code)
 	det := get(op, "/cloud/v1/appliances/"+a1.id)
@@ -192,7 +176,6 @@ func main() {
 		"rebind keeps cap and valid_until (no unlimited/365-day reset)")
 	licID = newLic
 
-	// ---------------- offline licence is the appliance's own (F10) ----------------
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/offline-license", jb(map[string]any{}))
 	if code == 503 {
 		ok("offline licence file: vendor key not configured on this ctrlapi (503) — skipped")
@@ -203,7 +186,6 @@ func main() {
 			"the offline licence file carries THIS appliance's current signed licence (HTTP %d)", code)
 	}
 
-	// ---------------- customer roles ----------------
 	custAdmin := "acc-admin-" + run + "@example.test"
 	reauth(op)
 	code, _ = do(op, "POST", "/cloud/v1/customers/"+custID+"/users", jb(map[string]any{"email": custAdmin, "password": pass, "role": "tenant_admin"}))
@@ -250,7 +232,6 @@ func main() {
 	code, _ = do(sp, "PATCH", "/cloud/v1/security-alerts/00000000-0000-0000-0000-000000000000", jb(map[string]string{"status": "resolved"}))
 	check(code == 403, "security-alert triage needs security.manage, not view (HTTP %d)", code)
 
-	// ---------------- move ----------------
 	otherSite := field(post(op, "/cloud/v1/customers/"+other+"/sites", jb(map[string]any{"name": "Other " + run, "timezone": "UTC"}), 201), "id")
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/move", jb(map[string]any{"customer_id": other, "site_id": otherSite, "reason": "sold"}))
 	check(code == 409 && field(body, "error") == "cross_customer_move" && strings.Contains(field(body, "message"), "factory-reset"),
@@ -269,7 +250,6 @@ func main() {
 	code, body = a1.mtls("GET", "/v1/appliance/assignment", false)
 	check(code == 200 && field(body, "site_id") == annex, "the appliance receives a newly signed assignment")
 
-	// ---------------- site/customer delete guards (F3) ----------------
 	code, _ = do(op, "DELETE", "/cloud/v1/sites/"+annex, jb(map[string]any{"confirm": "Annex " + run, "reason": "x"}))
 	check(code == 409, "a site with an appliance cannot be deleted — 409, not 500 (HTTP %d)", code)
 	code, _ = do(op, "DELETE", "/cloud/v1/sites/"+siteID, jb(map[string]any{"confirm": "Main " + run, "reason": "empty now"}))
@@ -277,7 +257,6 @@ func main() {
 	code, _ = do(op, "DELETE", "/cloud/v1/customers/"+custID, jb(map[string]any{"confirm": "Acceptance Hotels " + run, "reason": "x"}))
 	check(code == 409, "a customer with sites cannot be deleted (HTTP %d)", code)
 
-	// ---------------- retire ----------------
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a1.id+"/retire", jb(map[string]any{"reason": "end of life"}))
 	check(code == 200 && field(body, "activation") == "retiring", "retire starts two-phase delivery: RETIRING (HTTP %d)", code)
 	check(sub(body, "license", "state") == "revoked", "the licence is revoked at once")
@@ -304,7 +283,6 @@ func main() {
 		"the same hardware with a new identity (factory reset) registers as WAITING (HTTP %d)", code)
 	check(strings.Contains(get(op, "/cloud/v1/audit?appliance_id="+a1.id), "appliance.deleted"), "audit history outlives the appliance")
 
-	// ---------------- replacement: the old box is retired through its signed acknowledgment ----------------
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a2.id+"/activate", activateBody(custID, "", annex, ""))
 	check(code == 200, "activate A2 at the annex (HTTP %d)", code)
 	a2.tlsPriv = newKey()
@@ -340,7 +318,6 @@ func main() {
 	code, _ = a2.mtls("GET", "/v1/appliance/hello", true)
 	check(code != 200, "and only now are its credentials revoked (HTTP %d)", code)
 
-	// ---------------- offline first activation ----------------
 	a4 := newAppliance("ACC-A4-" + run)
 	req := &activation.Request{SchemaVersion: activation.SchemaVersion, RequestID: "req-" + run, Serial: a4.serial,
 		PublicKey: b64(a4.priv.Public().(ed25519.PublicKey)), WANMAC: "02:00:00:00:04:01", CreatedAt: time.Now().Unix(), Nonce: "n-" + run}
@@ -361,9 +338,6 @@ func main() {
 		}
 	}
 
-	// ---------------- an appliance that still holds a customer's data (identity reset, no factory reset) ----------------
-	// It registers with a new key but reports holds_customer_id inside its signed body. Central keeps it
-	// WAITING, shows whose data it holds, and activates it for that customer or not at all.
 	code, body = do(op, "POST", "/cloud/v1/customers", jb(map[string]any{"name": "Acceptance Other " + run}))
 	custY := field(body, "id")
 	check((code == 200 || code == 201) && custY != "", "a second customer exists (HTTP %d)", code)
@@ -392,7 +366,6 @@ func main() {
 	check(field(get(op, "/cloud/v1/appliances/"+a5.id), "activation") == "waiting" &&
 		!strings.Contains(get(op, "/cloud/v1/customers?q=Acceptance+Inline+"+run), "Acceptance Inline "+run),
 		"a refused activation changed nothing (still WAITING, no inline customer created)")
-	// A customer deleted from Central is still another customer's data.
 	a6 := newAppliance("ACC-A6-" + run)
 	a6.holds = "00000000-0000-4000-8000-00000000dead"
 	a6.register()
@@ -401,18 +374,15 @@ func main() {
 		"an appliance can hold a customer Central no longer knows (name is null)")
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a6.id+"/activate", activateBody(custID, "", annex, ""))
 	check(code == 409 && field(body, "error") == "holds_other_customer_data", "and it is refused for any existing customer (HTTP %d)", code)
-	// Registering again replaces the value; after a real factory reset the appliance reports none.
 	a6.holds = ""
 	code, _ = a6.register()
 	check(code == 200 && field(get(op, "/cloud/v1/appliances/"+a6.id), "holds_customer_id") == "",
 		"a registration without holds_customer_id clears it (HTTP %d)", code)
 	code, _ = do(op, "POST", "/cloud/v1/appliances/"+a6.id+"/activate", activateBody(custY, "", "", "Y main "+run))
 	check(code == 200, "an appliance holding nothing activates for any customer (HTTP %d)", code)
-	// Same customer: legitimate breakglass recovery.
 	code, body = do(op, "POST", "/cloud/v1/appliances/"+a5.id+"/activate", activateBody(custID, "", annex, ""))
 	check(code == 200 && field(body, "customer_id") == custID, "the appliance activates for the customer whose data it holds (HTTP %d %s)", code, trunc(body))
 
-	// Offline: the activation request carries the same signed field and the import applies the same rule.
 	a7 := newAppliance("ACC-A7-" + run)
 	req7 := &activation.Request{SchemaVersion: activation.SchemaVersion, RequestID: "req7-" + run, Serial: a7.serial,
 		PublicKey: b64(a7.priv.Public().(ed25519.PublicKey)), WANMAC: "02:00:00:00:07:01", CreatedAt: time.Now().Unix(),
@@ -434,7 +404,6 @@ func main() {
 		check(code == 200, "but can for the customer it holds (HTTP %d)", code)
 	}
 
-	// ---------------- system ----------------
 	check(strings.Contains(get(op, "/cloud/v1/trust"), `"assignment_keys"`), "trust & keys")
 	check(strings.Contains(get(op, "/cloud/v1/audit?action=appliance.activated"), "appliance.activated"), "platform audit filters by action")
 	req2, _ := http.NewRequest("GET", base+"/metrics", nil)
@@ -468,8 +437,6 @@ func activateBody(customerID, newCustomer, siteID, newSite string) []byte {
 	}
 	return jb(b)
 }
-
-// ---------------- operator helpers ----------------
 
 func login(email string) *http.Client {
 	jar, _ := cookiejar.New(nil)
@@ -519,8 +486,6 @@ func post(cl *http.Client, path string, body []byte, want int) string {
 	}
 	return out
 }
-
-// ---------------- appliance helpers ----------------
 
 func newKey() ed25519.PrivateKey { _, p, _ := ed25519.GenerateKey(rand.Reader); return p }
 
@@ -585,7 +550,6 @@ func (a *appliance) mtls(method, path string, signed bool) (int, string) {
 	return resp.StatusCode, string(b)
 }
 
-// mtlsBody is mtls for a signed request with a body.
 func (a *appliance) mtlsBody(method, path string, body []byte) (int, string) {
 	keyDER, _ := x509.MarshalPKCS8PrivateKey(a.tlsPriv)
 	pair, err := tls.X509KeyPair([]byte(a.certPEM), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
@@ -664,8 +628,6 @@ func certHasURI(certPEM, appID string) bool {
 	}
 	return false
 }
-
-// ---------------- JSON helpers ----------------
 
 func jb(v any) []byte { b, _ := json.Marshal(v); return b }
 

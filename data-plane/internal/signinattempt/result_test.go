@@ -2,9 +2,7 @@ package signinattempt
 
 import "testing"
 
-// EVERY RESULT HAS A CLASS AND A LABEL, and the tests enumerate AllResults rather than a hand-written list so
-// that adding a Result and forgetting either one fails here instead of reaching an operator's screen as a raw
-// enum or a guest's screen as an unexplained default.
+// Every Result must have a class and a label; the tests enumerate AllResults so a forgotten one fails here.
 func TestEveryResultHasALabelAndAGuestClass(t *testing.T) {
 	for _, r := range AllResults {
 		if _, ok := labels[r]; !ok {
@@ -21,12 +19,8 @@ func TestEveryResultHasALabelAndAGuestClass(t *testing.T) {
 	}
 }
 
-// THE NON-DISCLOSURE PROPERTY, asserted as a property rather than as prose.
-//
-// Everything a guest could learn about ONE ROOM by submitting values must produce the SAME class. If any of
-// these ever diverged, someone in the lobby could submit room numbers and read off which rooms are occupied,
-// which have checked out, and which are shared -- without ever seeing a distinguishing message, just by
-// noticing that one class of answer came back for some rooms and another for others.
+// Everything a guest could learn about one room by submitting values must produce the same class; otherwise
+// someone in the lobby could read off which rooms are occupied, checked out or shared.
 func TestPerRoomOutcomesAreIndistinguishableToTheGuest(t *testing.T) {
 	perRoom := []Result{RoomNotInMirror, CredentialMismatch, StayNotEligible, AmbiguousRoomCandidates}
 	want := perRoom[0].GuestClass()
@@ -41,9 +35,7 @@ func TestPerRoomOutcomesAreIndistinguishableToTheGuest(t *testing.T) {
 	}
 }
 
-// ...and the mirror image: a condition that is true for EVERY guest on the site right now may be reported as
-// technical, because knowing it identifies nobody. A guest learns "sign-in is not working here", which anyone
-// standing in the lobby can already see.
+// A condition true for every guest on the site may be reported as technical, since it identifies nobody.
 func TestSiteWideConditionsAreTechnical(t *testing.T) {
 	for _, r := range []Result{MirrorStaleOrMissingChange, RoutingOrInterfaceFailure, ServiceUnavailable, SpentRequestID} {
 		if got := r.GuestClass(); got != GuestTechnical {
@@ -52,8 +44,7 @@ func TestSiteWideConditionsAreTechnical(t *testing.T) {
 	}
 }
 
-// A wrong credential must NEVER produce the technical message. That is the Product Owner's rule stated
-// directly: "Do not use the technical message for an ordinary wrong credential."
+// A wrong credential must never produce the technical message.
 func TestAnOrdinaryMismatchIsNeverTechnical(t *testing.T) {
 	if CredentialMismatch.GuestClass() == GuestTechnical {
 		t.Fatal("an ordinary wrong value would tell the guest to contact Reception")
@@ -83,9 +74,7 @@ func TestClassifyVerifier(t *testing.T) {
 		{"Ngozi", VerifierFullName},
 		{"RES-4001", VerifierReservationLike},
 		{"4001", VerifierReservationLike},
-		// A surname carrying a digit is LABELLED as identifier-like, and that is harmless because the label
-		// decides nothing. The legacy "either" mode DID decide on this shape, and that is why a guest whose
-		// name contained a digit could never sign in.
+		// A surname carrying a digit is labelled identifier-like; harmless because the label decides nothing.
 		{"Smith2", VerifierReservationLike},
 		{"who@example.com", VerifierUnknown},
 		{"{}", VerifierUnknown},
@@ -97,17 +86,12 @@ func TestClassifyVerifier(t *testing.T) {
 	}
 }
 
-// The classification is a LABEL. This asserts the property that matters: nothing in this package offers a way
-// to turn a VerifierKind into a field choice, because that is the defect room_any exists to remove.
+// The classification is a label: nothing here may turn a VerifierKind into a field choice.
 func TestTheVerifierLabelDecidesNothing(t *testing.T) {
-	// A value classified as identifier-like and a value classified as a name must reach the same machinery:
-	// the package exposes no per-kind branch at all, so this is asserted by the absence of such an API plus
-	// the fact that GuestClass and Label take a Result, never a VerifierKind.
 	if VerifierReservationLike == VerifierFullName {
 		t.Fatal("the kinds collapsed")
 	}
-	// Label/GuestClass signatures are Result-only; a compile error here would mean a kind-sensitive path
-	// had been added.
+	// Result-only signatures; a compile error here means a kind-sensitive path was added.
 	var _ func(Result) string = func(r Result) string { return r.Label() }
 	var _ func(Result) GuestClass = func(r Result) GuestClass { return r.GuestClass() }
 }

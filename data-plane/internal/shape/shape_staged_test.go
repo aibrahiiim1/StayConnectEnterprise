@@ -1,12 +1,8 @@
 package shape
 
-// Command-level proof of the staged provisioning contract, without a kernel. A recording runner captures
-// every `tc`/`ip` invocation so we can assert the exact shape of each stage:
-//
-//   - a PREPARED class has a class + leaf qdisc but NO guest forwarding filter (it carries no packets);
-//   - ACTIVATION is what adds the forwarding filter;
-//   - a RE-RATE is `tc class change` (which preserves the byte counters), never delete+add (which resets them);
-//   - ABORT removes the filter and the class and then proves the class is gone.
+// Command-level proof of staged provisioning without a kernel: a recording runner captures every tc/ip
+// call. Prepare adds a class but no forwarding filter; activation adds it; re-rate is `class change`, never
+// delete+add; abort removes both and proves the class gone.
 
 import (
 	"context"
@@ -19,7 +15,7 @@ import (
 type recordingRunner struct {
 	mu   sync.Mutex
 	cmds []string
-	// classShow/filterShow are the canned outputs for the two read commands (default empty = "nothing there").
+	// canned outputs for the read commands (empty = nothing there)
 	classShow  string
 	filterShow string
 }
@@ -59,8 +55,7 @@ func newTestClient() (*Client, *recordingRunner) {
 
 var testIP = net.ParseIP("10.0.0.5")
 
-// A PREPARED class exists but does not forward: it has the class and its leaf qdisc on BOTH the bridge and the
-// ifb, and NO u32 guest forwarding filter with a flowid.
+// A prepared class has the class and leaf qdisc on both bridge and ifb, but no forwarding filter.
 func TestPrepareInstallsClassWithoutForwardingFilter(t *testing.T) {
 	c, rr := newTestClient()
 	if err := c.PrepareSession(context.Background(), "br-guest", testIP, 8000, 3000); err != nil {
@@ -73,13 +68,11 @@ func TestPrepareInstallsClassWithoutForwardingFilter(t *testing.T) {
 	if !rr.has("class add dev ifb-guest parent 1: classid " + cid) {
 		t.Fatal("no upload class was prepared on the ifb")
 	}
-	// The forwarding filter is the thing that MUST be absent in the prepared state.
 	if rr.has("filter add") && rr.has("flowid "+cid) {
 		t.Fatal("a guest forwarding filter was installed during PREPARE; the class would carry packets before it is accountable")
 	}
 }
 
-// ACTIVATION adds the forwarding filters (dst on the bridge, src on the ifb), which is what starts forwarding.
 func TestActivateAddsForwardingFilters(t *testing.T) {
 	c, rr := newTestClient()
 	if err := c.PrepareSession(context.Background(), "br-guest", testIP, 8000, 3000); err != nil {
@@ -97,8 +90,7 @@ func TestActivateAddsForwardingFilters(t *testing.T) {
 	}
 }
 
-// A RE-RATE is a `tc class change` — which preserves the class's byte counters — and NEVER a delete+add, which
-// would reset them. This is the command-level proof that "changing rates does not reset counters".
+// A re-rate is `tc class change` (counters preserved), never delete+add (counters reset).
 func TestReRateIsClassChangeNotDeleteAdd(t *testing.T) {
 	c, rr := newTestClient()
 	if err := c.ReRateSession(context.Background(), "br-guest", testIP, 20000, 9000); err != nil {
@@ -111,14 +103,11 @@ func TestReRateIsClassChangeNotDeleteAdd(t *testing.T) {
 	if !rr.has("class change dev ifb-guest parent 1: classid " + cid) {
 		t.Fatal("re-rate did not use `class change` on the ifb")
 	}
-	// The counter-preservation guarantee is exactly that no delete/add of the class happened.
 	if rr.has("class del dev br-guest") || rr.has("class add dev br-guest parent 1: classid "+cid) {
 		t.Fatal("re-rate deleted and re-added the class; the counters would have reset")
 	}
 }
 
-// ABORT strips the forwarding filter, removes the class, and then PROVES the class is gone (an empty class
-// show). With the class removed it returns nil — the fail-closed success case.
 func TestAbortRemovesAndVerifies(t *testing.T) {
 	c, rr := newTestClient()
 	rr.classShow = "" // `class show` returns nothing => the class is gone
@@ -133,20 +122,16 @@ func TestAbortRemovesAndVerifies(t *testing.T) {
 	}
 }
 
-// ABORT returns an error when it CANNOT prove the class is gone (class show still lists the minor), so the
-// caller can escalate to the forwarding-denial quarantine.
+// Abort errors when it cannot prove the class gone, so the caller can escalate to the quarantine.
 func TestAbortFailsWhenClassSurvives(t *testing.T) {
 	c, rr := newTestClient()
 	minor, _ := MinorForIP(testIP)
-	// `class show` still reports the class => removal not proven.
 	rr.classShow = "class htb 1:" + itoahex(minor) + " parent 1: prio 0 rate 8000Kbit\n Sent 0 bytes 0 pkt\n"
 	if err := c.AbortSession(context.Background(), "br-guest", testIP); err == nil {
 		t.Fatal("abort reported success while the class was still present")
 	}
 }
 
-// RemoveClassification strips the tc classification filters (the tc quarantine), so a class that will not
-// delete meters nothing. It does NOT deny internet access — only the nft gate does that.
 func TestRemoveClassificationStripsFilters(t *testing.T) {
 	c, rr := newTestClient()
 	if err := c.RemoveClassification(context.Background(), "br-guest", testIP); err != nil {
@@ -157,7 +142,6 @@ func TestRemoveClassificationStripsFilters(t *testing.T) {
 	}
 }
 
-// SessionForwarding reports true only when the per-IP filter pref is present on BOTH devices.
 func TestSessionForwardingReadsBothDirections(t *testing.T) {
 	c, rr := newTestClient()
 	minor, _ := MinorForIP(testIP)

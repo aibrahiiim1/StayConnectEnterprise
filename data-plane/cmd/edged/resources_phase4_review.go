@@ -1,29 +1,11 @@
 package main
 
-// Phase-4 Financial Manual Review — the operator surface required by FINAL Contract §15.
-//
-// DARK BY DEFAULT, exactly like the Phase-3 surface: these routes are mounted only when the Phase-4 master
-// flag AND its admin flag are both ON. While dark the paths do not exist at all, rather than existing and
-// answering "disabled" — an unmounted route cannot leak a financial schema that is not live yet.
-//
-// WHAT THIS ADDS OVER THE DATABASE WRITER. iam_v2.record_posting_review_action already enforces the action
-// catalog, the action/state matrix, reviewer concurrency, single-use retry authorization and the immutable
-// ledger. None of that is authorization. §15 additionally requires that a decision be made by an
-// authenticated operator who holds `financial-review` write and who has just re-entered their password,
-// with a mandatory reason and real evidence. That is what lives here:
-//
-//	authorization   resourcePermission("financial-review") + the role matrix in auth.go
-//	identity        the actor is taken from the SESSION and never from the request body
-//	step-up         s.reauth(r, password) against the operator's own stored hash
-//	scope           every query is scoped by tenant AND SITE, not tenant alone
-//
-// The actor binding is the part worth being explicit about: the request body carries no actor field at
-// all. There is nothing for a caller to spoof, because there is no parameter to put a forged identity in.
-//
-// SCOPE. Every financial query below filters on tenant_id AND site_id. An earlier version filtered on
-// tenant alone, and its test happened to give each fixture a fresh tenant AND a fresh site — so it proved
-// cross-TENANT isolation and silently proved nothing about two sites under one tenant, which is the
-// arrangement a multi-property customer actually has. The tests now build exactly that case.
+// Financial manual review (contract §15). Mounted only when the Phase-4 master and admin flags are on; while dark
+// the paths do not exist, so an unmounted route cannot leak a financial schema that is not live.
+// The DB writer enforces the action catalog, state matrix, concurrency and the immutable ledger; none of that is
+// authorization. Here: resourcePermission("financial-review"), the actor taken from the SESSION (the body has no
+// actor field, so nothing can be spoofed), s.reauth step-up, and every query scoped by tenant AND site
+// (tenant-only scoping would leave two sites under one tenant unisolated).
 
 import (
 	"encoding/json"
@@ -35,8 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// reviewActions is the EXACT §15 catalog. There is no generic approve action, and this map is the only
-// place the API will accept an action name from — an unknown action never reaches the database.
+// The exact §15 catalog and the only place an action name is accepted; an unknown action never reaches the database.
 var reviewActions = map[string]struct {
 	terminal        bool
 	needsEvidence   bool
@@ -62,24 +43,19 @@ func (s *server) financialReviewRoutes() http.Handler {
 	r.Get("/actions", s.listReviewActionCatalog)
 	r.Get("/postings/{id}", s.getReviewPosting)
 	r.Post("/postings/{id}/actions", s.postReviewAction)
-	// Card disputes and chargebacks (0115): cases resolved explicitly; full-refund terminations listed.
 	r.Get("/card-cases", s.listCardCases)
 	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
 	return r
 }
 
-// cardCasesRoutes is the card-dispute part of financial review ALONE, mounted when the PMS financial review
-// surface is off. Card disputes and chargebacks are opened by scd whenever card payment is in use (0115) and
-// never end access by themselves; behind the review flag, a site taking cards with review off had cases that
-// nobody could reach, so a chargeback could be neither kept nor ended.
+// Card-dispute part of financial review alone, mounted when the PMS review surface is off: cases would
+// otherwise be unreachable, so a chargeback could be neither kept nor ended.
 func (s *server) cardCasesRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/card-cases", s.listCardCases)
 	r.Post("/card-cases/{id}/resolve", s.resolveCardCase)
 	return r
 }
-
-// ---------------------------------------------------------------- catalog
 
 type reviewActionDoc struct {
 	Action        string `json:"action"`
@@ -89,8 +65,6 @@ type reviewActionDoc struct {
 	Summary       string `json:"summary"`
 }
 
-// listReviewActionCatalog lets the operator UI render exactly the approved actions and their meaning,
-// rather than hard-coding a second copy of the catalog in the frontend that could drift from §15.
 func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request) {
 	out := make([]reviewActionDoc, 0, len(reviewActions))
 	for _, name := range []string{"CONFIRM_POSTED", "CONFIRM_NOT_POSTED_RETRY", "CONFIRM_NOT_POSTED_ABANDON",
@@ -101,7 +75,6 @@ func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actions": out,
-		// The UI renders its evidence form from this, so the allowlist cannot drift between the two.
 		"evidence_contract": map[string]any{
 			"source_types":  evidenceSourceTypes,
 			"max_reference": maxEvidenceReference,
@@ -117,8 +90,6 @@ func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request)
 			"CREATE_REVERSAL records an audited ledger row only, and the correction in the PMS is manual.",
 	})
 }
-
-// ---------------------------------------------------------------- queue
 
 type reviewQueueRow struct {
 	PostingID       string  `json:"posting_id"`
@@ -142,8 +113,7 @@ const reviewQueueCols = `p.posting_id::text, p.pms_interface_id::text, p.executi
 	p.outbox_state, p.review_version, p.terminal_review_action,
 	coalesce(p.awaiting_manual_review,false), p.created_at::text`
 
-// listReviewQueue returns the postings an operator has to act on: anything UNKNOWN and undecided, anything
-// parked in HELD_RECOVERY, and anything already escalated. Scope is the site's tenant, always.
+// Scope is the site's tenant, always.
 func (s *server) listReviewQueue(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -178,8 +148,6 @@ func (s *server) listReviewQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
-// ---------------------------------------------------------------- detail
-
 type reviewAttempt struct {
 	AttemptNo  int     `json:"attempt_no"`
 	PNumber    string  `json:"p_number"`
@@ -189,7 +157,7 @@ type reviewAttempt struct {
 	PAStatus   *string `json:"pa_as_status"`
 	SentAt     string  `json:"sent_at"`
 	ResponseAt *string `json:"response_at"`
-	// NotSentReason is pmsd's bounded reason when the attempt was NOT_SENT (e.g. ROOM_CHANGED).
+	// pmsd's bounded reason when the attempt was NOT_SENT (e.g. ROOM_CHANGED).
 	NotSentReason *string `json:"not_sent_reason,omitempty"`
 }
 
@@ -201,12 +169,7 @@ type reviewHistoryEntry struct {
 	CreatedAt string          `json:"created_at"`
 }
 
-// getReviewPosting returns everything §15 says an operator needs before deciding: the derived state, the
-// PINNED evidence the charge was authorized against, the full attempt history with its P# and PA outcome,
-// and the immutable review history.
-//
-// It deliberately returns NO connector secret, no secret-generation material and no guest personal data
-// beyond the room and folio numbers that are the financial targeting evidence itself.
+// Returns no connector secret, no secret-generation material and no guest personal data beyond the room and folio numbers that are the targeting evidence.
 func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -288,8 +251,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"posting": q,
-		// The PINNED evidence: the exact objects this charge was authorized against. An operator deciding
-		// whether money moved needs to see what it was attached to, not the current state of the world.
+		// The exact objects the charge was authorized against, not the current state of the world.
 		"pinned_evidence": map[string]any{
 			"settlement_id": settlementID, "purchase_id": purchaseID, "stay_id": stayID,
 			"g_number": gNumber, "posting_interface_revision_id": revisionID,
@@ -316,9 +278,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// availableActions narrows the catalog to what is actually applicable, so the UI never offers an operator
-// a decision the database will refuse. It is a CONVENIENCE, not the enforcement: the database re-checks
-// every one of these, and it is the database's answer that decides.
+// A convenience so the UI never offers a refused decision; the database re-checks every one and its answer decides.
 func (s *server) availableActions(q reviewQueueRow, attempts []reviewAttempt) []string {
 	if len(attempts) == 0 {
 		return []string{"ESCALATE"} // nothing has been transmitted, so there is nothing to decide about
@@ -343,25 +303,19 @@ func (s *server) availableActions(q reviewQueueRow, attempts []reviewAttempt) []
 	return out
 }
 
-// ---------------------------------------------------------------- the decision
-
 type reviewActionRequest struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
-	// Evidence is a CLOSED structured shape, not a blob. §15 requires it for every terminal action, and
-	// §11 forbids secrets and card data in audit payloads — an append-only ledger cannot be redacted
-	// afterwards, so the shape itself has to make a secret unrepresentable. See phase4_review_evidence.go.
+	// Evidence is a closed structured shape: the append-only ledger cannot be redacted afterwards, so the shape must
+	// make a secret or card data unrepresentable (phase4_review_evidence.go).
 	Evidence reviewEvidenceInput `json:"evidence"`
-	// ExpectedVersion is the review version the operator's screen was rendered from. Supplying it turns
-	// "two operators clicked at the same time" into a refusal for the second, rather than two decisions.
+	// The review version the screen was rendered from; a second concurrent operator is refused instead of deciding twice.
 	ExpectedVersion *int `json:"expected_version"`
 	// ReversalAmountMinor is meaningful only for CREATE_REVERSAL; nil reverses the whole charge.
 	ReversalAmountMinor *int64 `json:"reversal_amount_minor"`
-	// Password is the step-up. §15 requires password re-authentication for every review action.
+	// Password is the step-up (§15).
 	Password string `json:"password"`
-	//
-	// NOTE: there is deliberately NO actor field. The actor is the authenticated session, and a request
-	// cannot name someone else.
+	// There is deliberately no actor field: the actor is the session.
 }
 
 func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
@@ -395,8 +349,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "only CREATE_REVERSAL carries an amount")
 		return
 	}
-	// STEP-UP. §15 requires password re-authentication for every review action, including ESCALATE: the
-	// audit record names an operator, and it should not be possible to write one from a stolen cookie.
+	// Step-up applies to every action including ESCALATE, so the audit record cannot be written from a stolen cookie.
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
@@ -406,21 +359,17 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// Scope check BEFORE the decision: the posting must belong to this site's tenant. Without this, a
-	// valid operator of one property could decide another property's money.
+	// Scope check before the decision, by tenant AND site: an operator of one property must not decide another's money.
 	var owned bool
-	// tenant AND site: a valid operator of one property must not decide another property's money, even
-	// when both properties belong to the same customer. The response is 404 rather than 403 so the API
-	// does not confirm that an out-of-scope posting exists.
+	// 404, not 403, so the API does not confirm an out-of-scope posting exists.
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.pms_postings
 		WHERE id=$1 AND tenant_id=$2 AND site_id=$3)`, id, s.tenantID, s.siteID).Scan(&owned); err != nil || !owned {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such posting in this site")
 		return
 	}
 
-	// The decision and its consequence commit together: a terminal decision on a room-charge posting moves
-	// the settlement (CONFIRM_POSTED settles and grants, ABANDON fails it, RETRY requeues the one authorised
-	// attempt) in the same transaction as the ledger row, so neither can exist without the other.
+	// The decision and its consequence commit in one transaction: a terminal decision on a room-charge posting moves
+	// the settlement (CONFIRM_POSTED settles and grants, ABANDON fails it, RETRY requeues the authorised attempt).
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
@@ -448,9 +397,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the decision could not be recorded")
 		return
 	}
-	// The console's audit trail records the decision too. The review ledger is the financial authority; the
-	// audit log is where an operator looks for "who did what on this appliance", and a money decision that
-	// appears in one and not the other is a gap someone will fall into.
+	// Also written to the console audit log, so a money decision does not appear in only one of the two trails.
 	s.audit(r, "financial_review.decided", "pms_posting", id, map[string]any{
 		"action": in.Action, "action_id": actionID, "reason": reason, "applied": applied,
 		"expected_version": in.ExpectedVersion, "reversal_amount_minor": in.ReversalAmountMinor,
@@ -463,8 +410,6 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// classifyReviewError maps the database's own financial refusals onto HTTP, so an operator sees a
-// conflict as a conflict rather than as an opaque 500.
 func classifyReviewError(err error) (int, string) {
 	m := err.Error()
 	switch {
@@ -485,9 +430,7 @@ func classifyReviewError(err error) (int, string) {
 	return http.StatusInternalServerError, "internal"
 }
 
-// reviewErrorMessage returns the database's own explanation, which names the rule that refused and is what
-// an operator can act on. It carries no secret and no guest personal data — these refusals talk about
-// attempt numbers, states and amounts.
+// The database's explanation names the rule that refused; it carries no secret or guest data (attempt numbers, states, amounts).
 func reviewErrorMessage(err error) string {
 	m := err.Error()
 	if i := strings.Index(m, "ERROR: "); i >= 0 {

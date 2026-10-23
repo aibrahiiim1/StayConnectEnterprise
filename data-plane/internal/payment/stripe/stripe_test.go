@@ -172,7 +172,6 @@ func TestCreate4xxIsNotCreated(t *testing.T) {
 		}
 		assertNoSecret(t, err)
 	}
-	// Bad key at the provider: the fake answers 401 with a message quoting a masked key.
 	_, srv := newFake(t, nil)
 	r := req()
 	r.Credentials = creds("sk_test_WRONGKEYE123")
@@ -197,12 +196,10 @@ func TestCreateAmbiguous(t *testing.T) {
 			t.Fatalf("HTTP %d must be ambiguous: %v", code, err)
 		}
 	}
-	// Malformed 200.
 	_, srv := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) { fmt.Fprint(w, `{not json`) })
 	if _, err := adapter(srv).CreateCheckout(context.Background(), req()); err == nil || errors.Is(err, payment.ErrCheckoutNotCreated) {
 		t.Fatalf("malformed must be ambiguous: %v", err)
 	}
-	// Timeout after sending.
 	_, srv = newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) { time.Sleep(500 * time.Millisecond) })
 	_, err := adapter(srv, WithTimeout(100*time.Millisecond)).CreateCheckout(context.Background(), req())
 	if err == nil || errors.Is(err, payment.ErrCheckoutNotCreated) {
@@ -252,7 +249,6 @@ func TestCreateRefusesBeforeSending(t *testing.T) {
 	if len(f.requests) != 0 {
 		t.Fatal("a refused create reached the provider")
 	}
-	// Accepted minor-unit rules.
 	ok, srv2 := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
 		fmt.Fprint(w, `{"id":"cs_test_1","url":"https://checkout.stripe.com/x","payment_method_types":["card"]}`)
 	})
@@ -270,10 +266,8 @@ func TestCreateRefusesBeforeSending(t *testing.T) {
 	_ = ok
 }
 
-// ---------------------------------------------------------------- status
-
 type world struct {
-	session  string // JSON for GET /v1/checkout/sessions/cs_test_1
+	session  string
 	list     string
 	search   string
 	byPI     string
@@ -365,18 +359,15 @@ func TestStatusMapping(t *testing.T) {
 			}
 		}
 	}
-	// Unknown session id → NOT_FOUND.
 	_, srv := worldServer(t, &world{})
 	res, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
 	if err != nil || res.State != payment.CheckoutNotFound {
 		t.Fatalf("%+v %v", res, err)
 	}
-	// A session belonging to another reference is refused, not mapped.
 	_, srv = worldServer(t, &world{session: strings.Replace(sess("complete", "paid", intent("succeeded", chargeJSON(0, false))), `"client_reference_id":"`+ref, `"client_reference_id":"sc_ffffffffffffffffffffffffffffffff`, 1)})
 	if _, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1")); err == nil {
 		t.Fatal("foreign session accepted")
 	}
-	// Unrecognised status is an error, not a guess.
 	_, srv = worldServer(t, &world{session: sess("weird", "paid", "")})
 	if _, err := adapter(srv).QueryStatus(context.Background(), query("cs_test_1")); err == nil {
 		t.Fatal("unknown status mapped")
@@ -436,7 +427,6 @@ func TestResolveByClientRef(t *testing.T) {
 		t.Fatal("list is not windowed")
 	}
 
-	// Not in the list, found by payment-intent metadata search.
 	f, srv = worldServer(t, &world{
 		list:    `{"data":[],"has_more":false}`,
 		search:  fmt.Sprintf(`{"data":[{"id":"pi_1","metadata":{"onegate_client_ref":%q}}],"has_more":false}`, ref),
@@ -457,14 +447,12 @@ func TestResolveByClientRef(t *testing.T) {
 		t.Fatal("search query not by client reference")
 	}
 
-	// Nowhere → NOT_FOUND.
 	_, srv = worldServer(t, &world{list: `{"data":[],"has_more":false}`, search: `{"data":[],"has_more":false}`})
 	res, err = adapter(srv).QueryStatus(context.Background(), query(""))
 	if err != nil || res.State != payment.CheckoutNotFound {
 		t.Fatalf("%+v %v", res, err)
 	}
 
-	// Page bound hit without an answer → error, never NOT_FOUND.
 	_, srv = worldServer(t, &world{list: `{"data":[{"id":"cs_x","client_reference_id":"sc_ffffffffffffffffffffffffffffffff"}],"has_more":true}`})
 	if _, err := adapter(srv).QueryStatus(context.Background(), query("")); err == nil {
 		t.Fatal("unbounded list proved NOT_FOUND")
@@ -510,7 +498,6 @@ func TestTestConnection(t *testing.T) {
 		t.Fatal("live key accepted for TEST")
 	}
 	assertNoSecret(t, err)
-	// Provider-reported mode contradicts the key.
 	_, srv2 := newFake(t, func(w http.ResponseWriter, r *http.Request, form url.Values) {
 		fmt.Fprint(w, `{"object":"balance","livemode":true}`)
 	})
@@ -524,8 +511,8 @@ func TestTestConnection(t *testing.T) {
 	_ = f
 }
 
-// THE SETTLEMENT AS STRIPE BOOKED IT (contract §9): read from the charge's balance transaction, the exchange
-// rate kept exactly as Stripe sent it, nothing computed. Presentment stays what was charged (USD 10.50).
+// Settlement as Stripe booked it: the rate is kept exactly as sent and nothing is computed; presentment stays what was
+// charged.
 func TestCapturedStatusCarriesTheProvidersSettlementReport(t *testing.T) {
 	bt := `{"id":"txn_1","object":"balance_transaction","amount":823,"currency":"gbp","exchange_rate":0.783912,"fee":44,"net":779}`
 	ch := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":`+bt, 1)
@@ -559,7 +546,6 @@ func TestCapturedStatusCarriesTheProvidersSettlementReport(t *testing.T) {
 	if res.Settlement == nil || res.Settlement.ExchangeRate != "" || res.Settlement.Currency != "USD" {
 		t.Fatalf("same-currency report: %+v", res.Settlement)
 	}
-	// Not expanded yet (an id string): no report, not an error.
 	ch3 := strings.Replace(chargeJSON(0, false), `{"id":"ch_1"`, `{"id":"ch_1","balance_transaction":"txn_3"`, 1)
 	_, srv = worldServer(t, &world{session: sess("complete", "paid", intent("succeeded", ch3))})
 	res, err = adapter(srv).QueryStatus(context.Background(), query("cs_test_1"))
@@ -584,7 +570,6 @@ func TestStripeConvertsOnlyBetweenSupportedCurrencies(t *testing.T) {
 	}
 }
 
-// A refusal without a code carries Stripe's sentence, with anything key-like or card-like removed.
 func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T) {
 	got := providerCode([]byte(`{"error":{"type":"invalid_request_error","message":"In order to use Checkout, you must set an account or business name at https://dashboard.stripe.com/account."}}`))
 	if !strings.Contains(got, "message=In order to use Checkout, you must set an account or business name") {
@@ -599,8 +584,7 @@ func TestProviderCodeCarriesARedactedSentenceWhenStripeGivesNoCode(t *testing.T)
 	}
 }
 
-// A MANAGED PAYMENTS ACCOUNT refuses payment_method_types; the adapter retries card-only with Managed Payments
-// off, and never creates twice. Found live on PRE-LIVE with the site's Stripe TEST account.
+// A Managed Payments account refuses payment_method_types; the adapter retries without it and never creates twice.
 func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
 	for _, accepts := range []string{"card_only", "neither"} {
 		var calls int
@@ -647,7 +631,6 @@ func TestCreateCheckoutOnAManagedPaymentsAccount(t *testing.T) {
 	}
 }
 
-// A session that would offer anything but card is expired before any client sees it, and is not created.
 func TestCreateCheckoutRefusesASessionOfferingUnapprovedMethods(t *testing.T) {
 	for _, types := range []string{`["card","link"]`, `["klarna"]`, `[]`, ``} {
 		var expired bool
@@ -673,7 +656,6 @@ func TestCreateCheckoutRefusesASessionOfferingUnapprovedMethods(t *testing.T) {
 	}
 }
 
-// A capture by a method that is not approved never reports CAPTURED; it stays unresolved for review.
 func TestCaptureByAnUnapprovedMethodIsNotCaptured(t *testing.T) {
 	for _, pm := range []string{`"payment_method_details":{"type":"link"},`, `"payment_method_details":{"type":"klarna"},`, ``} {
 		ch := strings.Replace(chargeJSON(0, false), `"payment_method_details":{"type":"card"},`, pm, 1)

@@ -1,12 +1,6 @@
 package main
 
-// THE ACCESSIBILITY WORDS, IN EVERY SHIPPED LANGUAGE (WCAG 2.2 AA remediation).
-//
-// link.newtab is read after a link that opens a new tab (the privacy notice and the terms), visually hidden:
-// a screen-reader user is told before the tab changes under them. otp.valid tells a guest how long the code
-// they were sent stays usable -- {n} is the minutes the server reported for that code, never a number written
-// here. otp.resend and otp.resent are the code step's "Send a new code" and its confirmation. They join
-// builtinStrings at start-up like privacyStrings, so there is still one dictionary.
+// Accessibility words in every shipped language; {n} in otp.valid is the minutes the server reported, never a number written here. They join builtinStrings at start-up.
 var a11yStrings = map[string]map[string]string{
 	"en": {
 		"link.newtab": "(opens in a new tab)",
@@ -46,7 +40,7 @@ var a11yStrings = map[string]map[string]string{
 	},
 }
 
-// The accessibility words join the one dictionary at start-up; a key defined twice is refused loudly.
+// A key defined twice is refused loudly.
 func init() {
 	for code, words := range a11yStrings {
 		dst := builtinStrings[code]

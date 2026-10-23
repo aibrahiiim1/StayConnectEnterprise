@@ -1,33 +1,18 @@
 package main
 
-// AN APPLIANCE CENTRAL HAS DELETED, AND WHAT IT MAY DO ABOUT IT.
+// An appliance Central has deleted. Changing an appliance's customer goes through retire, factory-clean, new
+// activation; there is no in-place cross-customer path. A re-registered appliance with a new key would be
+// indistinguishable from a genuine factory reset and could carry customer A's data to customer B, so the
+// reset depends on what the appliance has held:
 //
-// Product-Owner rule: changing an appliance's customer goes through retire -> FACTORY-CLEAN -> new activation.
-// There is no in-place cross-customer path.
+//   - Never held a customer (no granting assignment ever, no tenant rows): clears its identity and registers again.
+//   - Has held a customer (granting or terminal assignment on disk, or tenant data): stops serving new guests
+//     (licence and client certificate removed), KEEPS identity, assignment and local records, generates no new
+//     key and never registers again. The fact is recorded durably; the only way out is the factory-clean
+//     procedure (deploy/scripts/provision-fresh-appliance.sh,
+//     docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) and a new activation. There is no remote wipe.
 //
-// The orphan detection (the hello probe in main.go) used to break that rule. When Central answered "not
-// enrolled / unknown appliance / not found" twice, scd cleared its identity, assignment, licence and client
-// certificate and restarted -- and the restarted scd generated a NEW identity key and registered itself as a
-// fresh waiting appliance, while the previous customer's data was still in the local database. Central cannot
-// tell that registration from a genuine factory reset, so the box could be activated for a different customer
-// and carry customer A's data into customer B (the cross-tenant purge is gated and refuses, leaving it stuck
-// fail-closed rather than clean).
-//
-// So the reset now depends on what the appliance has held:
-//
-//   - NEVER held a customer (no granting assignment on disk, ever; no tenant rows in the site database): a
-//     waiting appliance whose record was deleted. There is nothing to carry, so it may clear its identity and
-//     register again exactly as before.
-//   - HAS held a customer (a granting or terminal assignment on disk, or tenant data in the site database):
-//     it stops serving new guests (the licence and the client certificate are removed), KEEPS its identity,
-//     its assignment and every local record, does NOT generate a new key and does NOT register again. It
-//     records the fact durably, so a restart or a reboot changes nothing, and says so plainly in Hotel Admin.
-//     The only way out is the factory-clean procedure (deploy/scripts/provision-fresh-appliance.sh,
-//     docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md) followed by a new activation. There is no remote wipe.
-//
-// A TERMINAL assignment (revoked / decommissioned / unassigned) is the second case: the appliance held a
-// customer before it was retired, so if Central later deletes the retired record the appliance lands here
-// rather than re-registering under a new key.
+// A terminal assignment (revoked / decommissioned / unassigned) counts as having held a customer.
 
 import (
 	"context"
@@ -42,10 +27,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// removedFromCentralCode is the refusal code and the status reason for this state.
 const removedFromCentralCode = "removed_from_central"
 
-// removedRecord is the durable marker. Its presence IS the state.
+// removedRecord is the durable marker; its presence is the state.
 type removedRecord struct {
 	At          string `json:"at"`
 	ApplianceID string `json:"appliance_id"`
@@ -83,14 +67,12 @@ func writeRemoved(path string, rec removedRecord) error {
 	return os.Rename(tmp, path)
 }
 
-// mayRegister decides whether an appliance with no identity may register itself with Central: self-registration
-// on, a Central configured, and NOT removed from Central after holding a customer. A removed appliance never
-// registers again, under any key, until it is factory-reset.
+// mayRegister reports whether an appliance with no identity may self-register: enabled, a Central configured,
+// and not removed after holding a customer (never again, under any key, until factory-reset).
 func mayRegister(autoRegister bool, ctrlBase string, removed *removedRecord) bool {
 	return autoRegister && ctrlBase != "" && removed == nil
 }
 
-// orphanPaths are the directories the orphan reset touches.
 type orphanPaths struct {
 	IdentityDir, AssignmentDir, LicenseDir, CertDir, Marker string
 }
@@ -156,29 +138,18 @@ func (s *server) handleConfirmedOrphan(ctx context.Context, p orphanPaths) strin
 	return "removed"
 }
 
-// SUSTAINED "NOT FOUND" BEFORE ACTING (audit B-21).
-//
-// Removal used to follow two "not found" replies three seconds apart. Two replies that close together are one
-// observation of one moment: a Central restored from an older backup, a database failover, a mis-routed
-// request or a few seconds of a broken deploy all answer that way and then recover -- and on an appliance that
-// has held a customer the reaction is permanent (licence removed, marker written, factory-clean required).
-//
-// So the deletion must be SUSTAINED: at least orphanConfirmReplies consecutive "not found" replies, the first
-// and the last at least orphanConfirmWindow apart. Any successful hello, and any other definite reply from
-// Central, resets the count -- Central answering anything but "not found" is evidence the record exists. A
-// transport failure (no reply at all) is no evidence either way and leaves the count as it is.
-//
-// These are licensing-protocol constants, not hotel operational values: an administrator has no reason to
-// tune how much evidence the appliance needs before it believes Central deleted it, and making it shorter is
-// only a way to lose a licence by accident. With the default five-minute hello cadence, a real deletion is
+// Removal requires a sustained "not found": at least orphanConfirmReplies consecutive replies, first and last
+// at least orphanConfirmWindow apart. Two close replies are one observation (a restored backup, failover or
+// broken deploy answers that way and recovers) and the reaction is permanent. Any other definite reply
+// resets the count; a transport failure leaves it as is. These are licensing-protocol constants, not hotel
+// settings: shortening them only loses licences by accident. At the five-minute hello cadence deletion is
 // acted on after about ten minutes.
 const (
 	orphanConfirmReplies = 3
 	orphanConfirmWindow  = 10 * time.Minute
 )
 
-// orphanTracker accumulates the evidence. It is used from the single hello goroutine; the mutex keeps it safe
-// should that ever change.
+// orphanTracker accumulates the evidence; used from the single hello goroutine, the mutex covers future changes.
 type orphanTracker struct {
 	mu    sync.Mutex
 	count int
@@ -208,7 +179,6 @@ func (o *orphanTracker) observe(now time.Time, replied, notFound bool) bool {
 	return false
 }
 
-// restartSelf restarts scd so every subsystem re-evaluates. Tests replace s.restartFn.
 func (s *server) restartSelf() {
 	if s.restartFn != nil {
 		s.restartFn()
@@ -217,11 +187,9 @@ func (s *server) restartSelf() {
 	restartSCDUnit()
 }
 
-// isRemovedFromCentral reports whether this appliance is in the removed state.
 func (s *server) isRemovedFromCentral() bool { return s.removed.Load() != nil }
 
-// refuseWhileRemoved answers an operator action that would re-enter a customer's licence or activation on a
-// removed appliance. The only way back is a factory-clean install and a new activation.
+// refuseWhileRemoved refuses operator actions that would re-enter a customer's licence or activation on a removed appliance.
 func (s *server) refuseWhileRemoved(w http.ResponseWriter) bool {
 	if !s.isRemovedFromCentral() {
 		return false

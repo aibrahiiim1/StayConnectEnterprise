@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// worker owns exactly one PMS Interface. Its runtime generation is allocated ATOMICALLY in PostgreSQL per
-// successful ownership; every axis write uses an exact compare-and-set on that generation so a previous
-// owner cannot overwrite the current owner's state.
+// worker owns one PMS Interface; every axis write is a CAS on its runtime generation so a previous owner
+// cannot overwrite the current owner's state.
 type worker struct {
 	iface   Interface
 	repo    Repo
@@ -28,10 +27,8 @@ func (w *worker) stop(grace time.Duration) {
 }
 
 func (w *worker) run(ctx context.Context) {
-	// The bounds are read fresh on every cycle rather than captured once, so an operator widening the
-	// backoff for a PMS that restarts nightly takes effect on the next reconnect instead of the next
-	// deployment. An unreadable setting falls back to the compiled defaults and says so once -- a
-	// configuration problem must never be a reason to stop reconnecting to a hotel's PMS.
+	// Bounds are re-read every cycle so operator changes apply on the next reconnect. An unreadable setting
+	// falls back to compiled defaults (warned once): config problems must never stop reconnecting.
 	settings := ConnectionSettings{
 		BackoffMin: w.deps.BackoffMin, BackoffMax: w.deps.BackoffMax,
 		StableResetAfter: w.deps.StableResetAfter,
@@ -69,13 +66,8 @@ func (w *worker) run(ctx context.Context) {
 	}
 }
 
-// ownAndServe performs the strict ordered ownership protocol:
-//
-//	lock -> re-read Interface/Revision/SecretGeneration -> validate -> allocate generation (atomic, pins
-//	revision+secret) -> decrypt secret -> dial -> serve (per-axis CAS) -> disconnect-persist.
-//
-// A lock loser opens NO socket and NEVER loads ciphertext / decrypts / dials. On lock loss the transport is
-// closed and serving stops.
+// ownAndServe order matters: lock, re-read, validate, allocate generation, decrypt, dial, serve. A lock loser
+// opens no socket and never decrypts or dials; on lock loss the transport closes and serving stops.
 func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	sf := func(st Stage) SafeFields {
 		return SafeFields{InterfaceID: NewUUIDValue(w.iface.ID), Generation: w.gen, Stage: st, Attempt: w.attempt}
@@ -99,10 +91,10 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 	if !got {
-		return 0, coded(CodeLockNotAcquired, nil) // competing owner: NO socket, NO secret
+		return 0, coded(CodeLockNotAcquired, nil)
 	}
 
-	// re-read AFTER ownership (lifecycle/revision/secret may have changed between discovery and lock)
+	// Re-read after ownership: state may have changed between discovery and lock.
 	iface, rev, sg, err := w.repo.LoadInterface(ctx, w.iface.TenantID, w.iface.SiteID, w.iface.ID)
 	if err != nil {
 		logEvent(w.deps.log(), EventWorkerNotDialable, Classify(err), sf(StageReRead))
@@ -116,16 +108,13 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		logEvent(w.deps.log(), EventWorkerRevisionInvalid, Classify(err), sf(StageReRead))
 		return 0, err
 	}
-	// A Secret Generation is required + validated ONLY for AUTH_KEY. A NONE (no-auth, e.g. Protel FIAS)
-	// connector must have NO Secret Generation (rev.Validate already rejects a NONE carrying one).
 	if rev.RequiresSecret() && (sg.ID == "" || sg.Superseded || sg.ID != rev.ActiveSecretGenerationID) {
 		logEvent(w.deps.log(), EventWorkerSecretMissing, CodeSecretMissing, sf(StageSecret))
 		return 0, coded(CodeSecretMissing, nil)
 	}
 	w.iface = iface
 
-	// atomic generation allocation (pins revision + credential mode + secret when AUTH_KEY); a stale owner is
-	// rejected here
+	// A stale owner is rejected here.
 	gen, err := w.repo.AllocateRuntimeGeneration(ctx, GenerationRequest{
 		TenantID: iface.TenantID, SiteID: iface.SiteID, PMSInterfaceID: iface.ID,
 		PinnedRevisionID: rev.ID, PinnedSecretGenerationID: sg.ID, CredentialMode: rev.CredentialMode,
@@ -140,7 +129,7 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	}
 	w.gen = gen
 
-	// startup transport axis: CONNECTING (never fabricate heartbeat/complete-sync/HEALTHY)
+	// Startup is CONNECTING; never fabricate heartbeat, complete-sync or healthy.
 	if err := w.repo.UpdateTransport(ctx, TransportUpdate{
 		axisBase: w.ax(gen), Status: TransportConnecting, LastConnectAttemptAt: ptr(w.deps.now()),
 	}); err != nil {
@@ -148,8 +137,7 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 
-	// decrypt the selected secret ONLY after ownership + generation, and ONLY for AUTH_KEY; zero it right
-	// after dial. A NONE connector decrypts nothing and dials with no secret material.
+	// Decrypt only after ownership and generation, only for AUTH_KEY; zeroed right after dial.
 	var secret SecretMaterial
 	if rev.RequiresSecret() {
 		secret, err = w.deps.DecryptSecret(ctx, iface, rev, sg)
@@ -161,7 +149,7 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	}
 
 	conn, dialErr := w.deps.Dial(ctx, DialParams{Iface: iface, Rev: rev, Secret: secret})
-	secret.Zero() // never retained beyond dial (safe no-op for a NONE connector's empty secret)
+	secret.Zero()
 	if dialErr != nil {
 		logEvent(w.deps.log(), EventWorkerDialFailed, Classify(dialErr), sf(StageDial))
 		_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeDialFailed))
@@ -169,7 +157,7 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	// cancel serving immediately on lock loss (ownership gone)
+	// Cancel serving immediately on lock loss.
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
 	go func() {
@@ -182,7 +170,6 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		}
 	}()
 
-	// per-ownership bounded typed queue (owned + closed here)
 	q := NewBoundedQueue(w.deps.QueueCapacity, w.deps.QueueEnqueueTimeout)
 	defer q.Close()
 	sink := &workerSink{w: w, ctx: sctx, gen: gen, q: q}
@@ -208,17 +195,14 @@ func (w *worker) disc(gen int64, code Code) TransportUpdate {
 
 func ptr(t time.Time) *time.Time { return &t }
 
-// workerSink translates protocol evidence into INDEPENDENT-axis CAS updates and DURABLE inbox rows. It uses
-// the worker (serve) context — never context.Background() — and the pinned generation. Any persist error
-// (including stale generation) is returned so the adapter stops serving and the transport closes.
+// workerSink uses the serve context (never Background) and the pinned generation; any persist error,
+// including a stale generation, is returned so the adapter stops and the transport closes.
 //
-// Application barrier (§H) + resync state machine (§G) live here. The fields below are touched ONLY by the
-// single Serve goroutine (the adapter calls sink methods serially), so they need no lock:
-//   - synced: a complete DS→DE resync generation has been PUBLISHED; until then LIVE admission is barred.
-//   - resyncing/resyncGen: inside a DS→DE window, domain records are STAGED under the allocated generation.
+// The fields below are touched only by the single Serve goroutine (no lock):
+//   - synced: a complete DS→DE generation is published; until then LIVE admission is barred.
+//   - resyncing/resyncGen: inside a DS→DE window, records are staged under the allocated generation.
 //
-// The bounded queue is now a best-effort WAKEUP channel only (durable rows are the authoritative store); a
-// full queue is benign (a poll backstop covers a dropped wakeup) and never forces a gap.
+// The queue is a best-effort wakeup only (durable rows are authoritative); a full queue is benign, never a gap.
 type workerSink struct {
 	w   *worker
 	ctx context.Context
@@ -229,13 +213,11 @@ type workerSink struct {
 	resyncing bool
 	resyncGen int64
 
-	// received counts records STAGED under the currently open generation. It is a plain field because only
-	// the Serve goroutine touches it, and it is reset at DS rather than accumulated across syncs: the number
-	// an operator watches must describe THIS roster, not every roster since the process started.
+	// received counts records staged under the open generation; reset at DS so the number describes this roster.
 	received int64
 
-	// What the sweep now in flight OBSERVED. Held until the publish succeeds: coverage describes an
-	// authoritative roster, and a sweep that never published never produced one.
+	// Coverage of the sweep in flight, held until the publish succeeds: an unpublished sweep never
+	// produced an authoritative roster.
 	covSeen      bool
 	covRooms     []string
 	covRoster    int
@@ -243,9 +225,7 @@ type workerSink struct {
 	covConflicts int
 }
 
-// stage writes durable operator-visible progress. Progress reporting must never break a sync, so a failed
-// write is swallowed here rather than returned — the alternative is a resync that aborts because a status
-// column could not be updated, which trades a working guest list for a tidier screen.
+// stage swallows write failures: progress reporting must never abort a resync.
 func (s *workerSink) stage(st SyncStage, u StageUpdate) {
 	u.axisBase = s.ax()
 	u.Stage = st
@@ -257,45 +237,32 @@ func (s *workerSink) ax() axisBase {
 }
 
 func (s *workerSink) OnConnected(at time.Time) error {
-	// SAY SO. This is the line whose absence made a recovered PMS look exactly like a dead one.
+	// Without this line a recovered PMS looks like a dead one.
 	logProgress(s.w.deps.log(), EventWorkerConnected, SafeFields{
 		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.gen, Stage: StageServe})
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastConnectedAt: &at})
 }
 func (s *workerSink) OnHeartbeat(at time.Time) error {
-	// transport axis ONLY — must not erase continuity/sync evidence
+	// Transport axis only; must not erase continuity/sync evidence.
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastHeartbeatAt: &at})
 }
 
-// RequireInitialResync raises the barrier at connect (§H): sync→RESYNC_REQUIRED, no LIVE admission until a
-// complete DS→DE generation is published.
 func (s *workerSink) RequireInitialResync(at time.Time) error {
 	s.synced = false
 	s.resyncing = false
-	// THE AUTOMATIC SYNC ENTERS THE SAME STAGE MODEL AS AN OPERATOR-REQUESTED ONE.
-	//
-	// It did not, and that was the whole of the problem: an operator watching a reconnect saw the connection
-	// come up and then nothing at all until DS arrived, because the stages only existed on the path a human
-	// had clicked. The first sync after a socket is restored is precisely the one somebody is watching.
-	//
-	// Counters are zeroed here rather than at DS so the screen does not show the previous roster's totals
-	// during the gap between requesting and receiving.
+	// The automatic sync uses the same stage model as an operator's. Counters are zeroed here, not at DS, so
+	// the previous roster's totals aren't shown between request and receipt.
 	zero := int64(0)
 	s.stage(StageRequesting, StageUpdate{RecordsReceived: &zero, RecordsSkipped: &zero})
-	// The daemon asked for this itself. Recording that distinguishes an automatic recovery from an operator
-	// who clicked Full Resync, which the durable record can only tell apart by resync_command_id being NULL.
 	logProgress(s.w.deps.log(), EventWorkerResyncRequested, SafeFields{
 		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.gen, Stage: StageServe})
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: &at})
 }
 
-// OnFullSyncRequested records that the DR is on the wire and the connector is waiting for the PMS to start.
 func (s *workerSink) OnFullSyncRequested() {
 	s.stage(StageWaiting, StageUpdate{})
 }
 
-// OnResyncStart (DS) allocates a NEW typed resync generation under the exact runtime-generation CAS and opens
-// the staging window (sync→RESYNC_IN_PROGRESS). Domain records until DE are STAGED under this generation.
 func (s *workerSink) OnResyncStart(at time.Time) error {
 	g, err := s.w.repo.AllocateResyncGeneration(s.ctx, ResyncScope{s.ax()})
 	if err != nil {
@@ -309,39 +276,31 @@ func (s *workerSink) OnResyncStart(at time.Time) error {
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
 }
 
-// RecordCoverage stores what the sweep observed on the sink, to be persisted with the publish. It is held
-// rather than written immediately so that an interrupted sweep -- one that never reaches DE's publish --
-// leaves no coverage row claiming a roster that never became authoritative.
+// RecordCoverage is held until the publish so an interrupted sweep leaves no coverage row for a roster that
+// never became authoritative.
 func (s *workerSink) RecordCoverage(rooms []string, rosterRecords, vacantRecords, conflictingRooms int) {
 	s.covRooms, s.covRoster, s.covVacant = rooms, rosterRecords, vacantRecords
 	s.covConflicts = conflictingRooms
 	s.covSeen = true
 }
 
-// OnResyncComplete (DE) ATOMICALLY publishes the complete resync generation (one runtime-row boundary update
-// + IN_SYNC/CONTINUOUS), then lowers the barrier. Nothing is published unless a resync window was open.
+// OnResyncComplete publishes the generation atomically and lowers the barrier; nothing is published unless a window was open.
 func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	if !s.resyncing || s.resyncGen == 0 {
-		// a DE without a preceding DS publishes nothing (partial/spurious) — leave the barrier up.
+		// A DE without a DS is spurious: leave the barrier up.
 		return nil
 	}
-	// PUBLISHING is written BEFORE the barrier runs, so an operator watching a large roster sees the sync
-	// reach its final step rather than sitting on RECEIVING through a publish that may take a moment.
+	// Written before the publish so a slow publish shows its final step, not RECEIVING.
 	s.stage(StagePublishing, StageUpdate{})
 	if err := s.w.repo.PublishResyncGeneration(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
-		// The generation was NOT published, so the previous mirror is still the live one — the operator has
-		// stale data, not partial data, which is the distinction this whole staging design exists to keep.
+		// Not published: the previous mirror stays live (stale, never partial).
 		s.stage(StageFailed, StageUpdate{FailureCode: "PUBLISH_FAILED"})
 		return err
 	}
 	s.resyncing = false
 	s.synced = true
-	// COVERAGE FIRST, THEN RECONCILE, and both after the publish. Coverage is the evidence that this roster
-	// described the building; reconciliation is what that evidence licenses. Neither can fail the sync: the
-	// roster is already published and guests are already authenticating against it, so a bookkeeping or
-	// reconciliation problem is logged and left for the NEXT complete sweep to retry. That retry is the whole
-	// deferral mechanism -- there is no queue, no flag and nothing for an operator to press, because a
-	// property that resyncs produces a fresh authoritative generation every time.
+	// Coverage first, then reconcile, both after the publish. Neither can fail the sync (guests already
+	// authenticate against the published roster): a problem is logged and the next complete sweep retries.
 	if s.covSeen {
 		if err := s.w.repo.RecordResyncCoverage(s.ctx, ResyncScope{s.ax()}, s.resyncGen,
 			s.covRooms, s.covRoster, s.covVacant, s.covConflicts); err != nil {
@@ -359,44 +318,32 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 			"absent_from_roster", out.AbsentFromRoster, "protected", out.Protected,
 			"rooms_enumerated", out.RoomsEnumerated, "rooms_expected", out.RoomsExpected)
 	}
-	// last_sync_in_house_count is NO LONGER STAMPED. It was written here, at the publish barrier, before the
-	// applier had written a single record of the new roster — so it reported the roster this sync REPLACED.
-	// On the live PRE-LIVE sync it read 461 beside a live 595 on the same screen. The column stays in the
-	// schema for rollback; nothing writes it and nothing reads it.
 	got := s.received
 	s.stage(StageComplete, StageUpdate{RecordsReceived: &got})
-	// THE ONE AN OPERATOR IS WAITING FOR: the roster is published and guests can authenticate against it. The
-	// record count is a magnitude, not content — how many, never which.
+	// The record count is a magnitude, never which records.
 	logProgress(s.w.deps.log(), EventWorkerResyncPublished, SafeFields{
 		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.resyncGen, Stage: StageServe, Records: got})
 	return nil
 }
 func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
-	// A socket lost mid-roster published nothing, so the last known-good mirror is untouched and still serving
-	// guests. INTERRUPTED rather than FAILED says exactly that: nothing was corrupted, the sync simply did not
-	// finish, and the operator can ask for another one.
 	switch {
 	case s.resyncing:
-		// Lost mid-roster: nothing was published, so the last known-good mirror is untouched.
+		// Lost mid-roster: nothing published, the last known-good mirror is untouched (INTERRUPTED, not FAILED).
 		s.stage(StageInterrupted, StageUpdate{FailureCode: code.String()})
 		s.resyncing = false
 	case !s.synced:
-		// Lost after the DR but before DS ever arrived. The sync never started, so INTERRUPTED would
-		// overstate what happened; FAILED with the transport's own code is what an operator can act on.
+		// Lost before DS: the sync never started, so FAILED with the transport code, not INTERRUPTED.
 		s.stage(StageFailed, StageUpdate{FailureCode: code.String()})
 	}
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportDisconnected, DisconnectedSince: &at, ErrorCode: code})
 }
 
-// OnDomainEvent routes a validated domain Event through the barrier + durable inbox:
-//   - inside a DS→DE window  → StageResyncEvent (immutable, under the resync generation; NOT live).
-//   - barrier up (not synced, no window) → NOT admitted (a poll/resync will re-establish the roster); the
-//     barrier stays up. Zero LIVE admissions occur until a generation is published.
-//   - synced → AdmitLiveEvent (durable append-first, ownership-proof + runtime-generation CAS) then record
-//     feed continuity. The bounded queue receives a best-effort WAKEUP with the durable row id.
+// OnDomainEvent routes through the barrier:
+//   - inside a DS→DE window: staged under the resync generation (not live);
+//   - barrier up (not synced, no window): not admitted, the requested resync re-establishes the roster;
+//   - synced: AdmitLiveEvent, then record continuity.
 //
-// The durable row is the AUTHORITATIVE store; a full wakeup queue is benign (never a gap). A stale owner
-// admits/stages nothing (ErrStaleGeneration is returned so the transport closes).
+// A stale owner admits nothing and gets ErrStaleGeneration so the transport closes.
 func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	row := s.inboxRow(ev)
 	switch {
@@ -405,9 +352,7 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		if _, err := s.w.repo.StageResyncEvent(s.ctx, row); err != nil {
 			return err
 		}
-		// Counted only after the durable stage succeeded, so the number is records we HAVE, not records we
-		// were sent. Reported every 25 to keep a large roster from turning one sync into thousands of writes;
-		// the exact final count is written at COMPLETE regardless.
+		// Counts durably staged records; reported every 25 to avoid thousands of writes (exact count at COMPLETE).
 		s.received++
 		if s.received%25 == 0 {
 			got := s.received
@@ -415,8 +360,7 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		}
 		return nil
 	case !s.synced:
-		// §H barrier: no LIVE admission before the initial sync completes. Hold (do not admit); the
-		// already-requested resync will produce the authoritative roster.
+		// Barrier: no LIVE admission before the initial sync completes.
 		return nil
 	default:
 		if _, err := s.w.repo.AdmitLiveEvent(s.ctx, row); err != nil {
@@ -426,8 +370,6 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	}
 }
 
-// inboxRow builds the durable, provenance-bound inbox row from a validated Event. It carries only bounded
-// typed fields (never the raw frame / secret) as a JSON payload for the Increment-4 Stay engine.
 func (s *workerSink) inboxRow(ev Event) InboxRow {
 	return InboxRow{
 		axisBase:              s.ax(),
@@ -444,23 +386,17 @@ func (s *workerSink) inboxRow(ev Event) InboxRow {
 	}
 }
 
-// OnDomainEvent's continuity-gap counterpart for records the adapter could not admit.
-
-// OnContinuityFault durably drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED for a record the adapter
-// could not admit (malformed/overlong/duplicate/failed normalization). Both axes move in ONE transaction under
-// the pinned generation; a failure is returned so the adapter closes the transport instead of continuing over
+// OnContinuityFault returns a persist failure so the adapter closes the transport rather than continue over
 // an unrecorded gap.
 func (s *workerSink) OnContinuityFault(ctx context.Context, code Code) error {
 	return s.markGapResync(code)
 }
 
-// markGapResync performs the ATOMIC two-axis continuity-gap + resync-required transition, tagging it with a
-// bounded typed reason code. It returns ErrStaleGeneration if ownership changed and any DB error otherwise.
 func (s *workerSink) markGapResync(reason Code) error {
 	return s.w.repo.MarkGapAndRequireResync(s.ctx, GapResyncRequest{axisBase: s.ax(), Reason: reason})
 }
 
-// QueueForTest exposes the per-ownership queue for integration tests only.
+// queue is for integration tests only.
 func (s *workerSink) queue() *BoundedQueue { return s.q }
 
 func clip(s string, n int) string {
@@ -477,8 +413,7 @@ func (d *Deps) rnd(n int64) int64 {
 	return time.Now().UnixNano()
 }
 
-// FinancialResyncDue asks the database whether the financial mirror should be proven again now
-// (p4_financial_resync_due). Any failure is "no": a status read that fails must not start a resync.
+// FinancialResyncDue treats any failure as "no": a failed status read must not start a resync.
 func (s *workerSink) FinancialResyncDue() bool {
 	q, ok := s.w.repo.(interface {
 		FinancialResyncDue(ctx context.Context, scope ResyncScope) (bool, error)
@@ -490,10 +425,8 @@ func (s *workerSink) FinancialResyncDue() bool {
 	return err == nil && due
 }
 
-// ClaimOperatorResync asks for an operator command, if one is pending for THIS owner.
-//
-// A claim failure is treated as "no command": the alternative is closing a healthy transport because a status
-// table could not be read, which would turn a cosmetic database hiccup into a guest-facing outage.
+// ClaimOperatorResync treats a claim failure as "no command": closing a healthy transport over an unreadable
+// status table would turn a database hiccup into a guest-facing outage.
 func (s *workerSink) ClaimOperatorResync() *ResyncCommand {
 	cmd, err := s.w.repo.ClaimResyncCommand(s.ctx, ResyncScope{s.ax()})
 	if err != nil {
@@ -502,15 +435,11 @@ func (s *workerSink) ClaimOperatorResync() *ResyncCommand {
 	return cmd
 }
 
-// RecordSkipped publishes the adapter's running skipped-record count. Only ever called with a real total the
-// adapter has actually observed; nothing here derives or estimates it.
 func (s *workerSink) RecordSkipped(n int64) {
 	s.stage(s.currentStage(), StageUpdate{RecordsSkipped: &n})
 }
 
-// currentStage reports the stage the sink believes it is in, so a skipped-record update does not accidentally
-// move a sync backwards or forwards. Outside a resync window there is no stage to preserve, and RECEIVING is
-// the only stage during which records are counted at all.
+// currentStage keeps a skipped-record update from moving the sync's stage.
 func (s *workerSink) currentStage() SyncStage {
 	if s.resyncing {
 		return StageReceiving

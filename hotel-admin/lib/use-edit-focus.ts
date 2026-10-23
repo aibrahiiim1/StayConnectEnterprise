@@ -2,24 +2,12 @@
 
 import { useEffect, useRef } from "react";
 
-// FOCUS FOR THE INLINE "CHANGE" PANELS (WCAG 2.4.3).
-//
-// Several settings cards swap their read-only view for a form in place: "Change" hides itself and the fields
-// appear. The button that had focus was unmounted, so the browser dropped focus on <body> -- a keyboard or
-// screen-reader user pressed Change and was thrown back to the top of the page, and pressing Save or Cancel did it
-// again. This keeps them where they were: opening moves focus to the first field, closing (saved or cancelled)
-// returns it to the button that opened the panel.
-//
-//   const { triggerRef, panelRef } = useEditFocus(editing);
-//   <Button ref={triggerRef} onClick={() => setEditing(true)}>Change</Button>
-//   {editing && <div ref={panelRef}>…fields…</div>}
-//
-// When the opener is not the one `triggerRef` names (a card with two ways in), focus returns to whatever had it
-// when the panel opened, if that is still on the page.
+// Focus for inline "Change" panels (WCAG 2.4.3): opening moves focus to the first field; closing returns it to the
+// opener
+// (`triggerRef`, else whatever had focus when the panel opened).
 
 const FIRST_FIELD = [
   'input:not([type="hidden"]):not([type="radio"]):not([disabled])',
-  // A radio group is entered at its checked option, as Tab would.
   'input[type="radio"]:checked:not([disabled])',
   "select:not([disabled])",
   "textarea:not([disabled])",
@@ -51,7 +39,6 @@ export function useEditFocus<P extends HTMLElement = HTMLDivElement, T extends H
     back?.focus();
   }, [editing]);
 
-  // Remember what had focus at the moment of opening, before the effect above moves it.
   if (editing && !was.current && typeof document !== "undefined") {
     const active = document.activeElement;
     opener.current = active instanceof HTMLElement && active !== document.body ? active : null;

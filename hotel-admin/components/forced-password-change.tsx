@@ -1,11 +1,6 @@
 "use client";
 
-// THE ONLY THING A MUST-CHANGE SESSION SEES (edged 0119).
-//
-// An operator who signed in with a weak password (a seeded admin/admin) or one an administrator chose for them
-// is confined by edged to whoami, logout and the password change; every other API call answers
-// password_change_required. So the console does not render its shell around a screen that cannot load: it
-// shows this, full page, until the password is changed -- then reloads into the console proper.
+// A must-change session can only inspect identity, sign out, or change its password until the reset succeeds.
 
 import { ShieldAlert } from "lucide-react";
 import { OneGateWordmark } from "@/components/brand";

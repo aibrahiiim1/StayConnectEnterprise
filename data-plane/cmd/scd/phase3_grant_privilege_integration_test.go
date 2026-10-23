@@ -1,29 +1,13 @@
 //go:build integration && prodprivilege
 
-// BUILD TAG: prodprivilege. These tests need the REAL Gate-P service roles with their REAL grants, which the
-// ordinary integration database deliberately does not have — it asserts the DARK posture, in which svc_scd
-// holds no runtime grants at all. Granting them there would break that assertion, and skipping these when the
-// role is absent is what let two privilege defects reach production green. So they get their own harness:
-// scripts/prod-privilege-integration.sh builds a PRODUCTION-LIKE database from the Gate-P files and runs only
-// this tag against it. Neither posture has to pretend to be the other.
+// Build tag prodprivilege: needs the real Gate-P service roles and grants, which the ordinary integration
+// database lacks (it asserts svc_scd holds none). scripts/prod-privilege-integration.sh builds a
+// production-like database and runs only this tag.
 
 package main
 
-// THE GRANT MUST WORK AS THE ROLE THAT ACTUALLY RUNS IT.
-//
-// The first real guest Room Login on the PRE-LIVE appliance verified correctly, minted an Auth Context and
-// recorded exactly one offer — and then refused at the grant. The offer row satisfied every condition the
-// grant checks. What failed was the row LOCK:
-//
-//	as svc_scd, SELECT ... FOR UPDATE  ->  ERROR: permission denied for table auth_context_offers
-//	as svc_scd, the same SELECT        ->  returns the row
-//
-// PostgreSQL requires SELECT *and* UPDATE for a row lock, and svc_scd holds SELECT only. Two things let that
-// reach a live guest. The suites here run as a superuser, so no privilege requirement is ever exercised; and
-// the handler turned every error into "package_not_offered_to_this_context", so a permission failure was
-// reported as an authorisation decision.
-//
-// These tests close both. They run the grant's own statements AS svc_scd, and they assert that an error which
+// The grant must work as the role that runs it. PostgreSQL requires SELECT and UPDATE for a row lock but
+// svc_scd holds SELECT only, so these run the grant's statements AS svc_scd and assert that an error that
 // is not "no such row" never becomes an auth answer.
 
 import (
@@ -37,9 +21,7 @@ import (
 	"time"
 )
 
-// requireServiceRole fails rather than skips. The least-privilege tests used to skip when svc_scd was absent,
-// which is exactly why two privilege defects reached production with CI green — a skipped assertion is not an
-// assertion. The harness provisions the Gate-P roles; if that stopped working, this must say so loudly.
+// requireServiceRole fails rather than skips: a skipped privilege assertion is not an assertion.
 func requireServiceRole(t *testing.T, f *authFixture, role string) {
 	t.Helper()
 	var exists bool
@@ -53,10 +35,7 @@ func requireServiceRole(t *testing.T, f *authFixture, role string) {
 	}
 }
 
-// THE REGRESSION, end to end and under the real role: verify -> offered package -> grant.
-//
-// The whole point is the last step. A guest who verifies and is offered a package must be able to redeem it
-// while scd is running as svc_scd, which is what production does.
+// End to end under the real role: verify, offered package, grant.
 func TestIntegration_Phase3Grant_SucceedsAsServiceRole(t *testing.T) {
 	f := newProdAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -70,8 +49,7 @@ func TestIntegration_Phase3Grant_SucceedsAsServiceRole(t *testing.T) {
 	}
 	offered := res.Offers[0].PackageRevisionID
 
-	// The grant's offer lock, run exactly as the handler runs it, but AS svc_scd. Before the fix this was an
-	// inline SELECT ... FOR UPDATE and raised "permission denied for table auth_context_offers".
+	// The offer lock as the handler runs it, but AS svc_scd (an inline FOR UPDATE is permission denied).
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -92,11 +70,8 @@ func TestIntegration_Phase3Grant_SucceedsAsServiceRole(t *testing.T) {
 	}
 }
 
-// THE PRIVILEGE MODEL, asserted rather than assumed.
-//
-// svc_scd must be able to LOCK an offer and must NOT be able to rewrite one. Granting UPDATE on the table
-// would give it both, and the fields it could then rewrite — matched tier, evidence version, expiry — are the
-// fields the grant validates against, so the role being checked would gain the ability to edit the check.
+// svc_scd must be able to lock an offer but not rewrite one: UPDATE would let it edit the fields (tier,
+// evidence version, expiry) the grant validates against.
 func TestIntegration_Phase3Grant_ServiceRoleCannotRewriteOffers(t *testing.T) {
 	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
@@ -124,11 +99,8 @@ func TestIntegration_Phase3Grant_ServiceRoleCannotRewriteOffers(t *testing.T) {
 	}
 }
 
-// A MISSING OFFER IS AN AUTH ANSWER; A BROKEN DATABASE IS NOT.
-//
-// The handler collapsed every error into package_not_offered_to_this_context, so a permission failure was
-// reported to the operator as an authorisation decision. The helper returns NO ROW for a genuinely absent
-// offer, which is the only case that may become that reason code.
+// A missing offer is an auth answer; a broken database is not. Only NO ROW may become the
+// package_not_offered_to_this_context reason.
 func TestIntegration_Phase3Grant_AbsentOfferReturnsNoRowNotAnError(t *testing.T) {
 	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
@@ -140,7 +112,7 @@ func TestIntegration_Phase3Grant_AbsentOfferReturnsNoRowNotAnError(t *testing.T)
 		t.Fatalf("setup: %+v", res)
 	}
 
-	// A package that was never offered to this context: the priced one the offer engine excludes.
+	// the priced package the offer engine excludes
 	var tier *int
 	var evidence int64
 	err := f.pool.QueryRow(ctx,
@@ -157,8 +129,7 @@ func TestIntegration_Phase3Grant_AbsentOfferReturnsNoRowNotAnError(t *testing.T)
 	}
 }
 
-// AN EXPIRED OFFER IS ALSO NO-ROW, not an error — the expiry test lives inside the locked read, so an offer
-// that lapses between resolve and grant is refused as an authorisation decision rather than a fault.
+// An expired offer is also no-row (expiry is tested inside the locked read), an authorisation decision not a fault.
 func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
 	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
@@ -170,14 +141,9 @@ func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
 		t.Fatalf("setup: %+v", res)
 	}
 
-	// THE OFFER IS MADE THROUGH THE APPROVED WRITER, then allowed to lapse on its own.
-	//
-	// An earlier version backdated the row with a direct UPDATE. The real schema refuses that — auth_context_offers
-	// is guarded, and only iam_v2.record_auth_context_offer may write it — and disabling the guard would have made
-	// this database less like production, which is the one thing this harness must not do. So the offer is
-	// recorded exactly as the offer engine records it, with a short life, and the test waits for it to expire.
-	// aco_expiry_after_offer requires expires_at > offered_at, so the expiry is computed in SQL against the same
-	// clock the insert stamps offered_at from.
+	// auth_context_offers is guarded (only iam_v2.record_auth_context_offer may write it), so the offer is
+	// recorded with a short life and left to expire. aco_expiry_after_offer needs expires_at > offered_at,
+	// so expiry is computed in SQL against the same clock.
 	if _, err := f.pool.Exec(ctx,
 		`SELECT iam_v2.record_auth_context_offer($1,$2,$3::uuid,$4::uuid,1,1,now() + interval '1200 milliseconds')`,
 		f.tenant, f.site, res.AuthContextID, f.priced); err != nil {
@@ -196,12 +162,7 @@ func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
 	}
 }
 
-// THE WHOLE ROOM LOGIN, AS THE ROLE THAT ACTUALLY SERVES IT.
-//
-// Everything above tests the offer lock in isolation. This runs the real chain a guest walks — verify, the
-// offer, the grant, and the Purchase, Entitlement and Session the grant creates — with scd's own pool running
-// as svc_scd, which is what the appliance does. Nothing here is granted for the test: if a statement in that
-// chain needs a privilege svc_scd does not hold, this fails, and the fix belongs in deploy/gatep.
+// The whole room login with scd's pool running as svc_scd; a missing privilege fails here and is fixed in deploy/gatep.
 func TestIntegration_Phase3Grant_FullChainAsServiceRole(t *testing.T) {
 	f := newProdAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -233,7 +194,7 @@ func TestIntegration_Phase3Grant_FullChainAsServiceRole(t *testing.T) {
 			"clean verify followed by a refusal at the grant", rec.Body.String())
 	}
 
-	// The census runs as the owner, so it reads what really landed rather than what svc_scd can see.
+	// The census runs as the owner to read what really landed.
 	c := f.census(t, res.AuthContextID)
 	if c.purchases != 1 || c.entitlements != 1 || c.sessions != 1 {
 		t.Fatalf("purchases=%d entitlements=%d sessions=%d, want exactly one of each", c.purchases,
@@ -244,12 +205,11 @@ func TestIntegration_Phase3Grant_FullChainAsServiceRole(t *testing.T) {
 	}
 }
 
-// ROOM CHARGE IS DECIDED UNDER THE REAL ROLE. On PRE-LIVE, with posting switched on, no room guest was ever
-// offered Room charge: the applicability statement read pms_interface_runtime (through an invoker function) as
-// svc_scd, which may not read it, and the resulting "permission denied" became "not applicable". Asserted three
-// ways, because the full statement short-circuits on any fixture that is not fully onboarded:
+// Room charge is decided under the real role: svc_scd may not read pms_interface_runtime, so a permission
+// error must not become "not applicable". Asserted three ways (the full statement short-circuits on an
+// un-onboarded fixture):
 //   - svc_scd can ask the narrow freshness reader (migration 0101);
-//   - svc_scd still cannot call the invoker function directly -- the reason the reader exists;
+//   - svc_scd cannot call the invoker function directly;
 //   - the applicability statement asks only the reader.
 func TestIntegration_Phase3Grant_RoomChargeApplicabilityRunsAsServiceRole(t *testing.T) {
 	f := newProdAuthFixture(t)
@@ -279,10 +239,8 @@ func TestIntegration_Phase3Grant_RoomChargeApplicabilityRunsAsServiceRole(t *tes
 	}
 }
 
-// A ROOM SIGN-IN RECORDS WHERE THE DEVICE WAS SEEN, as svc_scd. Activation admits a device only on a network it
-// has appeared on; a paid room charge activates its session later, from the portal's status page, and on
-// PRE-LIVE the device was refused as DEVICE_IDENTITY_MISMATCH after the charge had posted because nothing had
-// recorded the appearance.
+// A room sign-in records where the device was seen, as svc_scd; activation admits a device only on a network
+// it has appeared on, and a paid charge activates later.
 func TestIntegration_Phase3Grant_RoomSignInRecordsTheDeviceAppearance(t *testing.T) {
 	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")

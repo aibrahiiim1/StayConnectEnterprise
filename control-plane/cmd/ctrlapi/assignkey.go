@@ -13,10 +13,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 )
 
-// runGenRegistryKey generates the registry ROOT-OF-TRUST key. Its private half
-// signs the versioned trust registry on Central; its public half is the trust
-// anchor baked into each appliance (assignment-registry-root.pub). It is a
-// separate key from the assignment-signing keys it authorises.
+// runGenRegistryKey generates the registry root-of-trust key; its public half is the anchor baked into each
+// appliance. It is separate from the assignment-signing keys it authorises.
 //
 //	ctrlapi gen-registry-key --out /etc/stayconnect/assignment-registry-root.key \
 //	                         --pub-out /etc/stayconnect/assignment-registry-root.pub
@@ -48,13 +46,8 @@ func runGenRegistryKey(args []string) error {
 	return nil
 }
 
-// runGenAssignmentKey generates the DEDICATED Ed25519 assignment-signing key and,
-// optionally, the appliance trust-registry file to ship with it.
-//
-// This key signs ONLY appliance-assignment documents. It must never be the license,
-// command, update, CA or auth-callout key: appliances trust assignment signatures
-// exclusively through the assignment trust registry, so reusing another key would
-// simply be rejected as an unknown signer.
+// runGenAssignmentKey generates the dedicated assignment-signing key and optionally the trust-registry file.
+// It must never be reused from another purpose: appliances reject an unknown signer.
 //
 //	ctrlapi gen-assignment-key --out /etc/stayconnect/assignment-signing.key \
 //	                           --pub-out /etc/stayconnect/assignment-signing.pub \

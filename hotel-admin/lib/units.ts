@@ -1,27 +1,16 @@
-// Operator-facing units.
-//
-// The domain stores kbps, bytes and seconds because those are what the enforcement layer measures in. A hotel
-// operator does not think in any of them: they think "50 Mbps", "5 GB", "24 hours". Every screen that made
-// the operator do that conversion in their head was also a screen where a slipped zero silently published a
-// plan ten times faster or a quota ten times smaller than intended — and plan revisions are immutable, so the
-// mistake is permanent and has to be superseded rather than edited.
-//
-// So the conversion lives here, once, in both directions. Forms collect operator units and convert on submit;
-// tables convert back on display. The wire contract is untouched.
+// Operator units (Mbps, GB, hours) converted once, both ways, to the stored kbps/bytes/seconds. Plan revisions are
+// immutable, so a slipped zero is permanent.
 
-/** kbps → a short human string. 0/undefined means "not limited", which is a real, chosen value. */
 export function formatSpeed(kbps?: number | null): string {
   if (kbps === null || kbps === undefined) return "Unlimited";
   if (kbps <= 0) return "Unlimited";
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
-    // 50.0 reads worse than 50; 1.5 must keep its decimal.
     return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`;
   }
   return `${kbps} kbps`;
 }
 
-/** Mbps (as typed by an operator, possibly fractional) → kbps for the wire. */
 export function mbpsToKbps(mbps: string | number | undefined | null): number | undefined {
   if (mbps === "" || mbps === null || mbps === undefined) return undefined;
   const n = Number(mbps);
@@ -29,13 +18,11 @@ export function mbpsToKbps(mbps: string | number | undefined | null): number | u
   return Math.round(n * 1000);
 }
 
-/** kbps → Mbps for pre-filling a form field. */
 export function kbpsToMbps(kbps?: number | null): string {
   if (kbps === null || kbps === undefined || kbps <= 0) return "";
   return String(kbps / 1000);
 }
 
-/** bytes → GB/MB. Decimal GB (10^9), which is what a data allowance is sold in. */
 export function formatData(bytes?: number | null): string {
   if (bytes === null || bytes === undefined || bytes <= 0) return "Unlimited";
   const gb = bytes / 1_000_000_000;
@@ -43,7 +30,6 @@ export function formatData(bytes?: number | null): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
 
-/** GB (as typed) → bytes for the wire. */
 export function gbToBytes(gb: string | number | undefined | null): number | undefined {
   if (gb === "" || gb === null || gb === undefined) return undefined;
   const n = Number(gb);
@@ -56,7 +42,6 @@ export function bytesToGb(bytes?: number | null): string {
   return String(bytes / 1_000_000_000);
 }
 
-/** seconds → the largest sensible whole unit, e.g. "24 hours", "30 minutes", "7 days". */
 export function formatDuration(seconds?: number | null): string {
   if (seconds === null || seconds === undefined || seconds <= 0) return "Unlimited";
   const units: [number, string][] = [
@@ -71,13 +56,11 @@ export function formatDuration(seconds?: number | null): string {
       return `${n} ${name}${n === 1 ? "" : "s"}`;
     }
   }
-  // Not a whole number of any unit — report the closest sensible one rather than a bare second count.
   if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} hours`;
   if (seconds >= 60) return `${(seconds / 60).toFixed(0)} minutes`;
   return `${seconds} seconds`;
 }
 
-/** A {value, unit} duration pair from a form → seconds. */
 export function durationToSeconds(
   value: string | number | undefined | null,
   unit: "minutes" | "hours" | "days",
@@ -90,13 +73,8 @@ export function durationToSeconds(
 }
 
 /**
- * seconds → the {value, unit} pair a duration FIELD should be pre-filled with, in the largest unit that
- * divides exactly.
- *
- * This is durationToSeconds' inverse, and it exists because a form that collects a value and a unit cannot be
- * pre-filled from seconds alone. Leaving those fields blank on an edit was not neutral: the plan's existing
- * allowance was simply dropped when the operator saved, and re-typing it against a unit dropdown that had
- * reset to its default is how a one-day allowance becomes something else entirely.
+ * seconds to the {value, unit} pair a duration field is pre-filled with, in the largest unit that divides exactly
+ * (inverse of durationToSeconds).
  */
 export function secondsToDurationField(
   seconds: number | null | undefined,
@@ -105,45 +83,39 @@ export function secondsToDurationField(
   const fallback = units[units.length - 1];
   if (seconds === null || seconds === undefined || seconds <= 0) return { value: "", unit: fallback };
   const size = { days: 86400, hours: 3600, minutes: 60 } as const;
-  // Largest first, so 86400 reads as "1 day" rather than "24 hours".
   for (const u of ["days", "hours", "minutes"] as const) {
     if (units.includes(u) && seconds % size[u] === 0) return { value: String(seconds / size[u]), unit: u };
   }
-  // Not a whole number of any offered unit. The smallest offered one keeps the most precision; rounding is
-  // what the form would do on submit anyway, and showing the value beats showing nothing.
+  // Not a whole number of any unit: use the smallest offered one for precision.
   const smallest = units.reduce((a, b) => (size[a] <= size[b] ? a : b));
   return { value: String(+(seconds / size[smallest]).toFixed(4)), unit: smallest };
 }
 
-/** Minor currency units → a display string. Price 0 is FREE and says so — it is a product fact, not a zero. */
 export function formatPrice(minor?: number | null, currency?: string | null): string {
   if (minor === null || minor === undefined) return "—";
   if (minor === 0) return "Free";
   const cur = (currency || "").toUpperCase();
-  // Exponent 2 is the contract for the currencies this product supports; the PMS interface revision carries
-  // the authoritative exponent and this display never invents a different one.
+  // Exponent 2 is the contract for supported currencies; the PMS interface revision carries the authoritative one.
   return `${(minor / 100).toFixed(2)}${cur ? " " + cur : ""}`;
 }
 
-/** How many devices a plan allows, phrased as an operator would say it. */
 export function formatDevices(n?: number | null): string {
   if (n === null || n === undefined || n <= 0) return "—";
   return `${n} device${n === 1 ? "" : "s"}`;
 }
 
-/** Device-limit policy codes → operator wording. ADMIN_APPROVAL stays here only so plans published with it
- *  before still read correctly: there is no approval workflow, so it is not offered (SELECTABLE_DEVICE_LIMIT_POLICIES)
- *  and the appliance refuses to publish it. */
+/**
+ * Device-limit policy codes. ADMIN_APPROVAL stays only so older plans read correctly; it is not offered and the
+ * appliance refuses it.
+ */
 export const DEVICE_LIMIT_POLICIES: Record<string, string> = {
   REJECT_NEW_DEVICE: "Refuse the new device",
   DISCONNECT_OLDEST: "Disconnect the oldest device",
   ADMIN_APPROVAL: "Ask an operator to approve (not available)",
 };
 
-/** The policies a plan can be published with: both are enforced by the appliance (migration 0122). */
 export const SELECTABLE_DEVICE_LIMIT_POLICIES = ["REJECT_NEW_DEVICE", "DISCONNECT_OLDEST"] as const;
 
-/** Time-accounting modes → operator wording, with the distinction that actually matters spelled out. */
 export const TIME_ACCOUNTING_MODES: Record<string, string> = {
   VALIDITY_WINDOW: "Validity window — time runs from purchase, whether or not the client is online",
   ACTIVE_USAGE: "Active usage — time is consumed only while the client is connected",

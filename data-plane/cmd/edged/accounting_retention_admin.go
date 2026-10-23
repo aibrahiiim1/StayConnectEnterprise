@@ -1,16 +1,9 @@
 package main
 
-// ACCOUNTING-DETAIL RETENTION (migration 0122; Product-Owner decision D-H; docs/OPERATIONAL_SETTINGS_POLICY.md).
-//
-//	GET /edge/v1/accounting-retention/   the setting, its bounds, its change log and the recent purge runs
-//	PUT /edge/v1/accounting-retention/   change it: password step-up, a reason, audited
-//
-// How long the per-sample accounting detail (iam_v2.accounting_records) is kept. The default is 365 days (0131,
-// GDPR plan C2); the site administrator may choose 30-3650 days or unlimited, and unlimited means nothing is
-// ever purged. A retention lets acctd's hourly purge remove detail older than it -- only of sessions that have ended, and only once every entitlement they served has ended.
-// Totals on the entitlement and the session are never touched, and every purge that removed anything is
-// recorded. Shortening it removes history, so it sits under the "backups" key (data retention: site
-// administrators write, the roles that can see backups can see it) and asks for the password.
+// Retention of per-sample accounting detail (iam_v2.accounting_records): 30-3650 days or unlimited (nothing
+// purged). acctd's hourly purge removes only detail of ended sessions whose entitlements have all ended;
+// entitlement and session totals are never touched. Shortening removes history, so the setting sits under the
+// "backups" key and asks for the password.
 
 import (
 	"net/http"
@@ -23,7 +16,7 @@ import (
 const (
 	accountingRetentionMinDays = 30
 	accountingRetentionMaxDays = 3650
-	// accountingRetentionDefaultDays mirrors iam_v2.accounting_retention_default() (0131), which decides.
+	// accountingRetentionDefaultDays mirrors iam_v2.accounting_retention_default(), which decides.
 	accountingRetentionDefaultDays = 365
 )
 
@@ -104,8 +97,7 @@ func (s *server) getAccountingRetention(w http.ResponseWriter, r *http.Request) 
 
 func (s *server) setAccountingRetention(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		// DetailRetentionDays nil = unlimited. Unlimited must be stated, not implied by a missing field, so the
-		// request carries Unlimited explicitly when it means it.
+		// nil means unlimited, which must be stated explicitly via Unlimited, never implied by a missing field.
 		DetailRetentionDays *int   `json:"detail_retention_days"`
 		Unlimited           bool   `json:"unlimited"`
 		Reason              string `json:"reason"`

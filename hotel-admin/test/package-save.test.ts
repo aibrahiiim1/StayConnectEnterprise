@@ -1,10 +1,3 @@
-// WHICH SERVICE-PLAN REVISION A SAVE PINS.
-//
-// The operator picks a Service Plan by name. The revision is worked out here, and the two rules that matter
-// are opposites: choosing a different plan pins that plan's CURRENT revision, and leaving the choice alone
-// keeps the pin exactly where it was — because advancing it is a decision the Service Plans screen asks for
-// explicitly, package by package, and a package rename must never carry a technical change with it.
-
 import { describe, it, expect } from "vitest";
 import { decideSave, saveOutcomeMessage, planSummary } from "@/lib/package-save";
 
@@ -13,7 +6,6 @@ const silver = { plan_id: "plan-silver", current_revision_id: "rev-silver-1" };
 
 describe("decideSave", () => {
   it("keeps the existing pin when the plan is unchanged, even if the plan has moved on", () => {
-    // The package is on revision 3; the plan's current is 4. Saving a name change must NOT repin it.
     const d = decideSave({
       pinnedPlanRevisionID: "rev-gold-3",
       selected: gold,

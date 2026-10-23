@@ -1,17 +1,5 @@
 package http
 
-// THE SECOND SIGN-IN STEP (migration 0052; GDPR remediation plan C10, decision D-C10; auth/mfa.go).
-//
-//	POST /v1/auth/login                {email, password} -> {second_step: "code" | "enrol"}  (no session)
-//	POST /v1/auth/login/enrol                            -> {secret, otpauth_uri}            (first sign-in)
-//	POST /v1/auth/login/code           {code}            -> the session (whoami shape); first sign-in adds recovery_codes
-//	GET  /v1/auth/mfa                                    -> the operator's own two-step state
-//	POST /v1/auth/mfa/recovery-codes   {code} (after step-up) -> a new set of recovery codes (D-R3: needs a current code)
-//
-// The password step (login) is unchanged up to the point where it used to create the session. The password
-// step-up (/v1/auth/reauth) stays a password: re-confirming inside a session opened with two factors may use one
-// (NIST SP 800-63B section 7.2).
-
 import (
 	"encoding/json"
 	"errors"
@@ -40,7 +28,6 @@ func (d authDeps) clearPendingCookie(w http.ResponseWriter) {
 		Secure: d.Secure, SameSite: http.SameSiteStrictMode})
 }
 
-// beginSecondStep replaces the session the password used to open.
 func (d authDeps) beginSecondStep(w http.ResponseWriter, r *http.Request, op *auth.Operator) {
 	if d.MFA == nil || d.DB == nil {
 		slog.Error("sign-in refused: two-step sign-in is not configured (CTRLAPI_OPERATOR_MFA_KEY)")
@@ -66,7 +53,6 @@ func (d authDeps) beginSecondStep(w http.ResponseWriter, r *http.Request, op *au
 	writeJSON(w, http.StatusOK, map[string]string{"second_step": step})
 }
 
-// pending is the caller's "password accepted" state, or a 401 telling the console to start again.
 func (d authDeps) pending(w http.ResponseWriter, r *http.Request) (string, *auth.PendingSignin, bool) {
 	var p *auth.PendingSignin
 	c, err := r.Cookie(auth.PendingCookieName)
@@ -81,7 +67,6 @@ func (d authDeps) pending(w http.ResponseWriter, r *http.Request) (string, *auth
 	return c.Value, p, true
 }
 
-// loginEnrol: POST /v1/auth/login/enrol
 func (d authDeps) loginEnrol(w http.ResponseWriter, r *http.Request) {
 	tok, p, ok := d.pending(w, r)
 	if !ok {
@@ -110,7 +95,6 @@ func (d authDeps) loginEnrol(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": auth.MFAIssuer, "account": op.Email})
 }
 
-// loginCode: POST /v1/auth/login/code {code}
 func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Code string `json:"code"`
@@ -194,7 +178,6 @@ func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// openSession creates the console session after both steps, exactly as the password alone used to.
 func (d authDeps) openSession(w http.ResponseWriter, r *http.Request, op *auth.Operator, secondStep string) (*auth.Session, bool) {
 	create := d.NewSession
 	if create == nil {
@@ -230,7 +213,6 @@ func (d authDeps) openSession(w http.ResponseWriter, r *http.Request, op *auth.O
 	return sess, true
 }
 
-// mfaStatus: GET /v1/auth/mfa
 func (d authDeps) mfaStatus(w http.ResponseWriter, r *http.Request) {
 	s := auth.FromContext(r.Context())
 	st, err := d.MFA.Status(r.Context(), s.OperatorID)
@@ -241,12 +223,8 @@ func (d authDeps) mfaStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// mfaRecoveryCodes: POST /v1/auth/mfa/recovery-codes {code} (after the password step-up).
-//
-// A new set of recovery codes needs the password step-up AND a current 6-digit code from the authenticator app
-// (Product-Owner decision D-R3, 2026-10-20). The code is checked like a sign-in code: never accepted twice, and
-// wrong ones count towards the same lockout. A recovery code is not accepted here. A wrong code answers 400, not
-// 401: this route is inside a session, and the console reads a 401 as the sign-in having ended.
+// mfaRecoveryCodes needs a current authenticator code (never a recovery code), checked like a sign-in code.
+// A wrong code answers 400, not 401: the console reads a 401 as the sign-in having ended.
 func (d authDeps) mfaRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	s := auth.FromContext(r.Context())
 	var in struct {

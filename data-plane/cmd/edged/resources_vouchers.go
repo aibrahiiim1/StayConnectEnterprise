@@ -1,25 +1,13 @@
 package main
 
-// THE VOUCHER OPERATOR SURFACE, as Hotel Admin reaches it.
+// Voucher operator surface. Every code-touching operation proxies to scd, which owns the voucher DEK; svc_edged has no privilege on iam_v2.vouchers.
+// The only voucher material edged reads directly is the reveal audit.
 //
-// Every code-touching operation PROXIES to scd, and that is not an accident of where the route terminates.
-// scd owns the voucher DEK: it runs as root on a unix socket, edged runs as the unprivileged `stayconnect`
-// user and serves HTTP. `svc_edged` holds no privilege at all on iam_v2.vouchers, deliberately, and this
-// file does not ask for one. The only voucher material edged reads directly is the REVEAL AUDIT -- because
-// "who has already taken a copy of these cards" is the question that audit exists to answer, and hiding it
-// from the screen that performs a reveal would make the record ceremonial.
+// Three permission keys, three powers:
 //
-// THREE PERMISSION KEYS, BECAUSE THESE ARE THREE DIFFERENT POWERS:
-//
-//	vouchers               issue, list, revoke. The daily job: printing cards and cancelling a lost batch.
-//	voucher-codes          reveal and export -- recovering a guest secret IN THE CLEAR. The narrowest power
-//	                       here, and the only one that additionally requires a password step-up and a
-//	                       bounded reason at the route.
-//	voucher-code-settings  the 0085 code format. A property configuration decision, which is why it sits
-//	                       with the same role that owns auth-methods rather than with the desk.
-//
-// One key for all three would mean that whoever may print a card may also read every code a property has
-// ever issued, and that whoever may set the format must be able to read codes to do it. Neither follows.
+//	vouchers               issue, list, revoke (the daily job)
+//	voucher-codes          reveal and export codes in the clear; also needs a password step-up and bounded reason
+//	voucher-code-settings  the code format, a property configuration decision owned with auth-methods
 
 import (
 	"context"
@@ -33,20 +21,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ----- the daily surface: issue, list, revoke -------------------------------------------------------
-
 func (s *server) vouchersRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listVouchers)
 	r.Get("/summary", s.voucherSummary)
-	// WHAT A BATCH CAN GRANT. Without this the screen would have to ask an operator to paste the UUID of a
-	// package revision -- a value that appears nowhere they can see, because package authoring lives behind
-	// the Phase-2 commerce admin flag and this surface is deliberately not behind it. A form that demands
-	// an identifier the product never shows is a form nobody can complete, which is its own kind of
-	// unreachable feature.
+	// What a batch can grant: lets the screen offer package revisions instead of asking for a UUID (package authoring is behind a flag this surface is not behind).
 	r.Get("/grantable", s.listGrantablePackageRevisions)
-	// READ-ONLY, and under `vouchers` rather than `voucher-codes` because neither returns code material:
-	// a batch is a count of cards and a history is when a card was issued, redeemed or cancelled.
+	// Read-only, under `vouchers`: neither returns code material.
 	r.Get("/batches", s.listVoucherBatches)
 	r.Get("/{id}/history", s.voucherHistory)
 	r.Post("/issue", s.issueVouchers)
@@ -55,30 +36,10 @@ func (s *server) vouchersRoutes() http.Handler {
 	return r
 }
 
-// listGrantablePackageRevisions lists the package revisions a batch can be printed against.
-//
-// edged reads this itself: svc_edged already holds SELECT on iam_v2.internet_packages and
-// internet_package_revisions (Phase-2 commerce grants), and a package revision is not voucher material --
-// no key, no code, nothing sealed. Proxying it to scd would have been ceremony.
-//
-// PUBLISHED REVISIONS ONLY, meaning the one each package currently points at. An arbitrary historical
-// revision is still a legal target for the issuance path -- a voucher pins whatever revision it was issued
-// against, on purpose, so republishing cannot retroactively change what a printed card is worth -- but
-// offering a list of superseded revisions to choose from would invite printing cards against one by
-// accident.
-//
-// AND ACTIVE PACKAGES ONLY. `active` is the operator's own deactivation switch, and a first version of this
-// query ignored it: a package retired months ago still published a current revision, so it stayed in the
-// dropdown and an operator could print a hundred cards against something the property had deliberately
-// withdrawn. "Has a current revision" is a fact about history; "is active" is the fact an operator changed
-// on purpose, and this list has to represent the second.
-//
-// AND NOT THE SYSTEM PACKAGES. Read off PRE-LIVE, where this list returned five packages and two of them
-// were `__system_checkout_grace` and `__sys_emergency_grace_pkg__` -- is_system=true, active=true, both
-// with a published revision, both therefore offered to an operator as something to print guest cards
-// against. They are internal mechanisms: the grace a departing guest gets and the emergency grant, granted
-// by the engine on its own initiative. A voucher printed against one would be a card that hands out an
-// internal grace allocation, and the operator choosing it from a dropdown has no way to know that.
+// listGrantablePackageRevisions lists package revisions a batch can be printed against. edged reads it directly
+// (svc_edged has SELECT on the package tables; no voucher material).
+// Published revisions only (the one each package points at; vouchers may pin any revision, but listing superseded ones invites mistakes),
+// active packages only (the operator's deactivation switch), and no system packages (internal grace/emergency grants).
 func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -107,8 +68,7 @@ func (s *server) listGrantablePackageRevisions(w http.ResponseWriter, r *http.Re
 		Name        string `json:"name"`
 		PriceMinor  int64  `json:"price_minor"`
 		Currency    string `json:"currency"`
-		// How many minor units make a major one (2 for EUR, 0 for JPY). NULL when the revision never set it,
-		// in which case the screen falls back to the currency's own convention.
+		// Minor units per major unit (2 for EUR, 0 for JPY); NULL when unset, then the screen uses the currency's convention.
 		CurrencyExponent *int16 `json:"currency_exponent"`
 	}
 	out := []rev{}
@@ -142,14 +102,8 @@ func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 	s.proxyVoucherRows(w, r, "/v1/vouchers/batches?"+r.URL.RawQuery, "batches")
 }
 
-// proxyVoucherRows relays an scd voucher list and adds the names a screen needs next to the identifiers:
-// what package a revision is, and who an issuing operator is. scd returns only ids -- it has no reason to
-// read the operator table -- and a list of UUIDs is a list nobody can read.
-//
-// ADDITIVE AND BEST-EFFORT. The names are looked up from tables edged already reads (the package
-// catalogue it serves /grantable from, and the operator table it authenticates against). If a lookup fails
-// the rows are relayed exactly as scd sent them: a missing label is an inconvenience, a list that fails
-// because a label could not be found is an outage.
+// proxyVoucherRows relays an scd voucher list and adds package and operator names (scd returns only ids).
+// Best-effort: if a lookup fails the rows are relayed as scd sent them, since a missing label beats an outage.
 func (s *server) proxyVoucherRows(w http.ResponseWriter, r *http.Request, path, key string) {
 	st, raw, err := s.scd.call(r.Context(), http.MethodGet, path, nil)
 	if err != nil {
@@ -175,7 +129,6 @@ type voucherPackageLabel struct {
 	RevisionNo int
 }
 
-// voucherRowIDs collects the distinct package revision and issuing operator ids in a relayed list.
 func voucherRowIDs(raw []byte, key string) (revIDs, opIDs []string) {
 	var env map[string]json.RawMessage
 	if json.Unmarshal(raw, &env) != nil {
@@ -199,9 +152,7 @@ func voucherRowIDs(raw []byte, key string) (revIDs, opIDs []string) {
 	return revIDs, opIDs
 }
 
-// applyVoucherLabels adds package_name / package_code / package_revision_no and issued_by_label to each row
-// it can name. Pure, so the transformation is testable without a database. Anything it cannot parse is
-// returned untouched.
+// applyVoucherLabels adds package_name / package_code / package_revision_no and issued_by_label to each row it can name; pure, unparseable rows pass through.
 func applyVoucherLabels(raw []byte, key string, pkgs map[string]voucherPackageLabel, ops map[string]string) []byte {
 	if len(pkgs) == 0 && len(ops) == 0 {
 		return raw
@@ -268,7 +219,6 @@ func (s *server) voucherPackageLabels(ctx context.Context, ids []string) map[str
 	return out
 }
 
-// voucherOperatorLabels names the operators who issued cards: the display name, else the email.
 func (s *server) voucherOperatorLabels(ctx context.Context, ids []string) map[string]string {
 	out := map[string]string{}
 	if len(ids) == 0 {
@@ -290,13 +240,9 @@ func (s *server) voucherOperatorLabels(ctx context.Context, ids []string) map[st
 	return out
 }
 
-// voucherHistory answers what happened to ONE card after it was printed: when it was redeemed (the
-// entitlement it granted) and when and why it was cancelled (the operator audit record the revoke route
-// writes). It returns no code and no reveal record -- who READ a code is the voucher-codes audit, gated by
-// that permission, and does not leak through a route a read-only role can call.
-//
-// Each part is answered independently and says when it could not be: a history that silently omitted a
-// cancellation because the audit table was unreadable would read as "never cancelled".
+// voucherHistory answers what happened to ONE card: redemption (the entitlement it granted) and cancellation (the revoke audit record).
+// It returns no code and no reveal record. Each part is answered independently and says when it could not be,
+// so an unreadable audit table does not read as "never cancelled".
 func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if len(id) != 36 {
@@ -308,7 +254,6 @@ func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 
 	out := map[string]any{"voucher_id": id}
 
-	// Redemption: the entitlement a voucher granted names it as its subject.
 	type grant struct {
 		ActivatedAt  *string `json:"activated_at"`
 		Status       string  `json:"status"`
@@ -339,7 +284,6 @@ func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	out["entitlements"] = grants
 
-	// Cancellation: the audit record revokeVoucher writes on success.
 	type cancelled struct {
 		At     string  `json:"at"`
 		By     *string `json:"by"`
@@ -369,10 +313,8 @@ func (s *server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// issueVouchers mints a batch. A STEP-UP ACTION (T30): a batch is up to 500 cards worth access at the
-// package's price, so printing one is a money decision, not only a secret being created -- the console
-// session alone does not authorise it. The operator id comes from the SESSION, because "who printed these" is
-// a fact about the server's knowledge, not a field a client may choose.
+// issueVouchers mints a batch. Step-up action: a batch is up to 500 cards of paid access, so the console session alone does not authorise it.
+// The operator id comes from the session, never the client.
 func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PackageRevisionID string  `json:"package_revision_id"`
@@ -390,8 +332,7 @@ func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required to issue vouchers")
 		return
 	}
-	// Validated HERE as well as in scd, because a 400 an operator can read beats a 400 relayed from a
-	// socket, and because the window rule is a product rule rather than a storage rule.
+	// Validated here as well as in scd: a readable 400, and the window rule is a product rule, not a storage rule.
 	if in.ValidFrom != nil || in.ValidUntil != nil {
 		if err := validRedemptionWindow(in.ValidFrom, in.ValidUntil); err != nil {
 			jsonErr(w, http.StatusBadRequest, "invalid_window", err.Error())
@@ -423,8 +364,7 @@ func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st == http.StatusCreated {
-		// COUNT AND REVISION ONLY, NEVER A CODE -- not even a last4 in bulk. A batch log line is not the
-		// audited reveal action, and an audit payload outlives the one-time response it would be copying.
+		// Count and revision only, never a code (not even last4): an audit payload outlives the one-time response.
 		payload := map[string]any{"count": in.Count, "package_revision_id": in.PackageRevisionID}
 		var out struct {
 			BatchID string `json:"batch_id"`
@@ -439,12 +379,7 @@ func (s *server) issueVouchers(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-// revokeVoucher cancels an UNUSED card.
-//
-// It sits under `vouchers` rather than under `voucher-codes` because cancelling a card is not reading a
-// secret -- but it is destructive, so it carries the step-up and the bounded reason anyway. A batch is
-// cancelled because it was lost or stolen, and "who cancelled two hundred cards, and why" is a question
-// somebody will ask.
+// revokeVoucher cancels an UNUSED card. It sits under `vouchers` (no secret is read) but is destructive, so it carries step-up and a bounded reason.
 func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
@@ -488,12 +423,8 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-// validRedemptionWindow bounds the optional validity window.
-//
-// The authenticator already enforces [from, until) with NULL meaning unbounded
-// (internal/iamv2/repo_pg.go: voucherRedeemable), so this writes columns that already work. What it must
-// refuse is a window that can never open: an operator who prints two hundred cards that expired yesterday
-// finds out from a guest.
+// validRedemptionWindow bounds the optional validity window. The authenticator already enforces [from, until) with NULL unbounded;
+// this refuses a window that can never open.
 func validRedemptionWindow(from, until *string) error {
 	var f, u time.Time
 	var err error
@@ -516,8 +447,6 @@ func validRedemptionWindow(from, until *string) error {
 	return nil
 }
 
-// ----- the confidentiality surface: reveal and export ------------------------------------------------
-
 func (s *server) voucherCodesRoutes() http.Handler {
 	r := chi.NewRouter()
 	// The audit of itself. Read-only, and the only voucher table edged touches directly.
@@ -528,13 +457,11 @@ func (s *server) voucherCodesRoutes() http.Handler {
 }
 
 type voucherCodeActionReq struct {
-	// Password is the step-up. There is deliberately no actor field: an audit record whose author comes
-	// from the request body is not an audit record.
+	// Password is the step-up. There is no actor field: an author taken from the body is not an audit.
 	Password string `json:"password"`
 	Reason   string `json:"reason"`
-	// Export only.
-	BatchID string `json:"batch_id,omitempty"`
-	State   string `json:"state,omitempty"`
+	BatchID  string `json:"batch_id,omitempty"`
+	State    string `json:"state,omitempty"`
 }
 
 // revealVoucherCode recovers ONE code. Step-up, bounded reason, and an append-only row written by scd in
@@ -556,8 +483,7 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st == http.StatusOK {
-		// The reason, never the code. scd has already written the authoritative append-only row; this is
-		// the operator audit log the same action appears in, for the same reason every other mutation does.
+		// The reason, never the code. scd wrote the authoritative row; this is the operator audit log.
 		s.audit(r, "voucher.code_revealed", "voucher", id, map[string]any{"reason": in.Reason})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -565,7 +491,6 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-// exportVoucherCodes recovers a whole batch, under the same gate, with one audit row for the export.
 func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
 	in, actor, label, ok := s.voucherCodeStepUp(w, r)
 	if !ok {
@@ -665,19 +590,13 @@ func (s *server) listVoucherReveals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"reveals": out})
 }
 
-// ----- the format setting (0085). edged does this one itself. ----------------------------------------
-
 func (s *server) voucherCodeSettingsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getVoucherCodeSettings)
 	r.Put("/", s.setVoucherCodeSettings)
 	r.Get("/changes", s.listVoucherCodeSettingChanges)
-	// KEY ROTATION SITS HERE, not under `vouchers` and not under `voucher-codes`.
-	//
-	// It is key-lifecycle management, so it belongs to the role that already owns what a code looks like --
-	// the same reasoning that puts the format itself here. It is deliberately NOT under `voucher-codes`:
-	// retiring a generation reads no code and reveals nothing, and a desk role that may read one card's
-	// code has no business retiring the key that indexes every card in the building.
+	// Key rotation sits here, not under `vouchers` or `voucher-codes`: it is key-lifecycle management that reads no code,
+	// and a desk role must not retire the key that indexes every card.
 	r.Get("/key-generations", s.listVoucherKeyGenerations)
 	r.Post("/key-generations/{id}/supersede", s.rotateVoucherKeyGeneration)
 	return r
@@ -689,12 +608,8 @@ func (s *server) listVoucherKeyGenerations(w http.ResponseWriter, r *http.Reques
 	s.scd.proxy(w, r, http.MethodGet, "/v1/voucher-key-generations", nil)
 }
 
-// rotateVoucherKeyGeneration retires a generation under a password step-up and a bounded reason.
-//
-// Step-up because of what it is, not because of what it reads: rotation is a key-lifecycle action on the
-// material that indexes every voucher this property has ever issued, and "who retired generation 3, and
-// why" is a question somebody will ask. Codes already printed keep working -- each voucher pins the
-// generation that indexed it -- which is exactly why this is safe to offer at all.
+// rotateVoucherKeyGeneration retires a generation under a password step-up and bounded reason: a key-lifecycle action on the material indexing every voucher.
+// Printed codes keep working because each voucher pins the generation that indexed it.
 func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
@@ -739,9 +654,7 @@ func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Reque
 	_, _ = w.Write(resp)
 }
 
-// getVoucherCodeSettings answers what a code looks like at this property. It always answers: a site with no
-// saved row gets the column defaults with config_version 0, which is how "nobody has chosen" is
-// distinguishable from "somebody chose exactly these".
+// getVoucherCodeSettings always answers: a site with no saved row gets the column defaults with config_version 0.
 func (s *server) getVoucherCodeSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -763,9 +676,8 @@ func (s *server) getVoucherCodeSettings(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
-// setVoucherCodeSettings stores the format. The bounds are checked here, in the setter function and by the
-// table CHECK -- three places, because the first two stop a bad value being STORED and the third stops one
-// that was hand-edited in being USED.
+// setVoucherCodeSettings stores the format. Bounds are checked here, in the setter function and by the table CHECK:
+// the first two stop a bad value being stored, the CHECK stops a hand-edited one being used.
 func (s *server) setVoucherCodeSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Mode   string `json:"code_mode"`
@@ -781,14 +693,13 @@ func (s *server) setVoucherCodeSettings(w http.ResponseWriter, r *http.Request) 
 			"code_mode must be numbers (digits only) or mixed (digits and letters)")
 		return
 	}
-	// The Product-Owner requirement: not more than eight characters, for either mode.
+	// Not more than eight characters, for either mode.
 	if in.Length < 6 || in.Length > 8 {
 		jsonErr(w, http.StatusBadRequest, "invalid_length",
 			"code_length must be between 6 and 8 characters")
 		return
 	}
-	// The operator label comes from the SESSION. The setter function refuses an empty one -- "somebody
-	// changed it" is not an audit record -- and this is where the name it records comes from.
+	// The operator label comes from the session; the setter function refuses an empty one.
 	sess := sessFrom(r.Context())
 	if sess == nil || sess.OperatorID == "" {
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "no operator session")
@@ -815,14 +726,12 @@ func (s *server) setVoucherCodeSettings(w http.ResponseWriter, r *http.Request) 
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"code_mode": in.Mode, "code_length": in.Length, "config_version": version,
-		// Said here because the screen must say it: there is no restart, rebuild or deployment involved,
-		// and no already-printed card changes.
+		// No restart, rebuild or deployment is involved, and no already-printed card changes.
 		"notice": "This takes effect on the next batch you print. Codes already issued keep the format they " +
 			"were printed with and remain redeemable.",
 	})
 }
 
-// listVoucherCodeSettingChanges reads the append-only history of the format.
 func (s *server) listVoucherCodeSettingChanges(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()

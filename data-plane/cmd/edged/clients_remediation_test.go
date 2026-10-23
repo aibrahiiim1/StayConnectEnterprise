@@ -1,9 +1,5 @@
 package main
 
-// Unit tests for the Clients-area audit remediation (2026-10-16): reason bounds in characters (C-17), clearable
-// PATCH fields (C-9), the auth-methods shape check (C-20), the identity-provider Offered rule (C-14) and the
-// provider screens' module gate (C-15).
-
 import (
 	"encoding/json"
 	"net/http"
@@ -14,18 +10,16 @@ import (
 )
 
 func TestReasonBounds_CountCharactersNotBytes(t *testing.T) {
-	// Four Arabic characters are eight bytes: they are a four-character reason.
+	// Bounds count characters, not bytes: four Arabic characters are eight bytes.
 	if !validReason("سبب ا") || !validReason("شكرا") {
 		t.Fatal("a four-character Arabic reason was refused")
 	}
-	// 300 Arabic characters are 600 bytes and within the 500-character bound.
 	if !validReason(strings.Repeat("ع", 300)) {
 		t.Fatal("a 300-character Arabic reason was refused as too long")
 	}
 	if validReason(strings.Repeat("ع", reasonMaxChars+1)) {
 		t.Fatal("a reason over the bound was accepted")
 	}
-	// Surrounding spaces do not count.
 	if validReason("   ab   ") {
 		t.Fatal("padding made a two-character reason pass")
 	}
@@ -124,7 +118,6 @@ func TestApplySocialSwitch_OfferedHonoursTheSignInMethodSwitch(t *testing.T) {
 	if p.Offered || p.OfferedReason != "method_unknown" {
 		t.Fatalf("an unreadable switch must fail closed: %+v", p)
 	}
-	// A reason the application itself already gave is kept.
 	p = edgeSocialProvider{Provider: "google", Offered: false, OfferedReason: "http_fallback"}
 	applySocialSwitch(&p, map[string]bool{}, true)
 	if p.OfferedReason != "http_fallback" {

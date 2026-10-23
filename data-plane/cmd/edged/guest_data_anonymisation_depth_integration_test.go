@@ -12,9 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration 0147: an anonymised record keeps nothing that names the person, opens a door for them, or points a join
-// away from them -- and the same is true when retention anonymises it, and for what staff typed or are called.
-
 const removedNote = "Removed after the staff-notes period"
 
 func TestIntegration_Depth_AnAnonymisedStayAndItsPostStayAndStaffNotesKeepNothingIdentifying(t *testing.T) {
@@ -106,7 +103,6 @@ func TestIntegration_Depth_AnAnonymisedAccountKeepsNoReservationNoSecretNoHistor
 			t.Errorf("after the erasure, the account's %s still identifies (%s)", name, got)
 		}
 	}
-	// What the staff member did is kept: who and when. The staff member's own name is another matter (below).
 	if got := gdStr(t, f, `SELECT count(*)::text FROM iam_v2.device_slot_actions WHERE entitlement_id=$1 AND action='RELEASE'`, ent); got != "1" {
 		t.Errorf("the record that a release happened must stay: %s", got)
 	}
@@ -141,8 +137,6 @@ func TestIntegration_Depth_AnIdentityRememberedDeviceSecretIsReplacedNotJustRevo
 	}
 }
 
-// Retention is the same erasure by age: an entry about a guest follows the guest's period, and a departed staff
-// member's name leaves the records they acted in.
 func TestIntegration_Depth_AuditEntriesAboutAGuestFollowTheGuestsPeriodNotTheAuditLogs(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -212,7 +206,6 @@ func TestIntegration_Depth_ADepartedStaffMembersEmailLeavesTheRecordsTheyActedIn
 			t.Errorf("the departed member's email is still in the %s (%s rows)", name, got)
 		}
 	}
-	// And the tables are as append-only as before for everyone else.
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.guest_data_erasures SET erased_by='someone' WHERE tenant_id=$1`, f.tenant); err == nil {
 		t.Error("the register can be edited outside the scrub")
 	}
@@ -224,7 +217,6 @@ func TestIntegration_Depth_ADepartedStaffMembersEmailLeavesTheRecordsTheyActedIn
 	}
 }
 
-// The staff-notes period reaches every registered column, and only older ones.
 func TestIntegration_Depth_TheStaffNotesPeriodReachesEveryRegisteredColumn(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()

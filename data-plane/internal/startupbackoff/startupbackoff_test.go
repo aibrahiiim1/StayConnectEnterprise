@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// withTempDir points the tracker at a temp dir so tests don't touch /run.
 func withTempDir(t *testing.T) {
 	t.Helper()
 	d := t.TempDir()
@@ -18,7 +17,6 @@ func withTempDir(t *testing.T) {
 
 func TestFastStartsNoBackoff(t *testing.T) {
 	withTempDir(t)
-	// The first FastStarts restarts must impose no delay (fast transient recovery).
 	for i := 0; i < FastStarts; i++ {
 		start := time.Now()
 		tr := Guard("svc-fast")
@@ -33,9 +31,6 @@ func TestFastStartsNoBackoff(t *testing.T) {
 
 func TestBackoffEscalatesThenCrashLoop(t *testing.T) {
 	withTempDir(t)
-	// Simulate rapid restarts by recording starts directly (no real sleeping):
-	// after FastStarts, the level and computed delay must grow monotonically and
-	// the crash-loop flag must trip at CrashLoopLevel.
 	var last int64 = -1
 	sawCrashLoop := false
 	for i := 0; i < FastStarts+CrashLoopLevel+1; i++ {
@@ -57,8 +52,6 @@ func TestBackoffEscalatesThenCrashLoop(t *testing.T) {
 
 func TestWindowSelfResets(t *testing.T) {
 	withTempDir(t)
-	// Record several starts far enough apart that the window prunes them: the
-	// count must fall back and backoff clear.
 	recordOnly("svc-reset", time.Now().Add(-2*Window))
 	recordOnly("svc-reset", time.Now().Add(-2*Window))
 	tr := recordOnly("svc-reset", time.Now())

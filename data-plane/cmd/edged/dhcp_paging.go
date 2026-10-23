@@ -1,13 +1,7 @@
 package main
 
-// PAGING THE DHCP LISTS.
-//
-// The active-lease list comes whole from netd (which reads it from Kea); netd has no paging of its own, and a
-// guest network's pool is bounded, so edged pages the list it already holds rather than teaching netd and Kea a
-// second protocol. The search runs over the whole list before paging, so a lease on page 4 is found from page 1.
-//
-// A caller that sends no ?page / ?page_size gets the whole list exactly as before: the overview and older
-// screens read it that way.
+// netd returns the whole lease list and has no paging, so edged pages it here. Search runs over the whole list
+// before paging. A caller sending no ?page / ?page_size gets the whole list, as the overview expects.
 
 import (
 	"encoding/json"
@@ -17,7 +11,7 @@ import (
 	"strings"
 )
 
-// dhcpSearchHeader carries the DHCP screen's search (an address, a MAC or a device name), never the URL.
+// dhcpSearchHeader carries the search (address, MAC or device name) so it stays out of the URL.
 const dhcpSearchHeader = "X-Dhcp-Search"
 
 type dhcpLeasesPage struct {
@@ -28,9 +22,8 @@ type dhcpLeasesPage struct {
 	Total    int               `json:"total"`
 }
 
-// pageLeases filters netd's lease list by search, orders it by address so a page boundary is stable, and
-// returns one page. Each lease is passed through as netd wrote it: edged reads only the three fields it
-// searches and sorts by, so a field netd adds later still reaches the screen.
+// pageLeases orders by address so page boundaries are stable. Leases pass through as netd wrote them, so
+// fields netd adds later still reach the screen.
 func pageLeases(body []byte, search string, pg pageReq) (dhcpLeasesPage, error) {
 	var v struct {
 		Leases []json.RawMessage `json:"leases"`

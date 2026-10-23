@@ -2,17 +2,8 @@
 
 package main
 
-// THE LICENSED CONCURRENT-GUEST CAP UNDER CONCURRENCY.
-//
-// The cap used to live in the superseded session manager, which took a transaction advisory lock on the
-// APPLIANCE id and counted that appliance's active sessions before inserting. When the session authority
-// moved to iam_v2 the cap had to move with it, and the first version of that move kept the count but dropped
-// both the lock and the appliance scope. Neither loss is visible in a single-threaded test: the count is
-// still correct and the limit is still enforced -- right up to the moment two guests press Connect at once.
-//
-// So these tests are adversarial by construction. They drive the REAL gate (reserveLicensedSlot) from many
-// goroutines against a real PostgreSQL, in the same transaction that inserts the session, which is the only
-// arrangement in which the answer means anything.
+// The licensed concurrent-guest cap under concurrency: drives the REAL gate (reserveLicensedSlot) from many goroutines against PostgreSQL,
+// in the inserting transaction. Single-threaded tests cannot see a dropped lock or appliance scope.
 
 import (
 	"context"
@@ -28,12 +19,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// macSeq makes every fixture device MAC unique across the whole package.
 var macSeq int64
 
-// capFixture is deliberately minimal: one tenant, one site, and devices belonging to named appliances. The
-// cap is a property of the appliance and of the session's device, so nothing else is needed to exercise it,
-// and anything else would only add ways for the test to fail for an unrelated reason.
+// capFixture is minimal: one tenant, one site, and devices of named appliances; anything more adds unrelated failures.
 type capFixture struct {
 	pool       *pgxpool.Pool
 	tenant     string
@@ -56,41 +44,23 @@ func newCapFixture(t *testing.T) *capFixture {
 	t.Cleanup(p.Close)
 
 	f := &capFixture{pool: p}
-	// Two appliance identities under ONE tenant and ONE site. That pairing is the point: the licence must be
-	// scoped to the appliance even when everything above it is shared.
+	// Two appliances under ONE tenant and site: the licence must be scoped to the appliance even when everything above it is shared.
 	if err := p.QueryRow(ctx, `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).
 		Scan(&f.applianceA, &f.applianceB); err != nil {
 		t.Fatalf("appliance ids: %v", err)
 	}
-	// Once per fixture, before anything runs concurrently.
 	f.ensureTenantSite(t)
 	return f
 }
 
-// mint creates one full commerce chain and leaves its ACTIVE entitlement in f.entitle. Each admission gets
-// its OWN entitlement: the licence is a property of the APPLIANCE, so the thing being raced must be distinct
-// entitlements arriving at once, not several devices sharing one -- which would be the per-entitlement
-// device limit refusing, a different gate entirely.
+// mint creates one full commerce chain and returns its ACTIVE entitlement. Each admission needs its OWN entitlement: sharing one would trip the per-entitlement device limit, a different gate.
 func (f *capFixture) mint(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 	p := f.pool
-	// TENANT AND SITE, BUILT FOR WHICHEVER SCHEMA THIS IS.
-	//
-	// The reconstruction schema requires public.tenants.slug and name and public.sites.code and name; the
-	// Phase-3 integration schema the CI suites run against does not have them. Rather than pick one and fail
-	// on the other, the required text columns are discovered and filled. Hard-coding either shape made this
-	// suite pass locally and fail in CI for a reason that had nothing to do with the licence.
-	// mint returns its entitlement rather than storing it on the fixture: it runs concurrently, and a shared
-	// field handed every caller the SAME entitlement, so the per-entitlement device limit refused instead of
-	// the licence -- the wrong gate, and a green run that proved nothing.
-	// The minimal real chain an iam_v2.sessions row requires: tenant, site, service plan revision, package
-	// revision, purchase, entitlement. Every column filled here is NOT NULL with no default -- nothing is
-	// invented for convenience, and nothing beyond the chain is created, because anything extra would only
-	// add ways for this test to fail for a reason that is not the licence.
-	// The commerce writes below cross the accepted CONTROLLED-WRITER boundary, so the fixture opens the same
-	// controlled operation the product opens rather than being exempted from it. A fixture that could write
-	// where the runtime cannot would be testing a database this product never runs against.
+	// Tenant and site are built for whichever schema this is: required text columns are discovered and filled, since hard-coding either shape passed locally and failed in CI.
+	// mint returns its entitlement rather than storing it on the fixture: it runs concurrently, and a shared field handed every caller the same one.
+	// The minimal real chain an iam_v2.sessions row requires; commerce writes open the same controlled operation the product opens.
 	var ent string
 	if err := pgx.BeginFunc(ctx, p, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
@@ -128,10 +98,7 @@ func (f *capFixture) mint(t *testing.T) string {
 	SELECT e.id::text FROM e`, f.tenant, f.site).Scan(&ent); err != nil {
 			return err
 		}
-		// ACTIVE is not a value you write; it is a state you transition into, and the coherence constraint
-		// that says so is DEFERRED -- which is why the real grant path inserts the entitlement and applies
-		// its initial transition in ONE transaction. The fixture does the same rather than back-dating a
-		// status onto the row.
+		// ACTIVE is a transition, not a written value (the coherence constraint is DEFERRED), so insert and transition in ONE transaction as the real grant path does.
 		_, err := tx.Exec(ctx,
 			`SELECT iam_v2.apply_entitlement_transition($1::uuid,'ACTIVE',now(),'GRANT')`, ent)
 		return err
@@ -141,8 +108,7 @@ func (f *capFixture) mint(t *testing.T) string {
 	return ent
 }
 
-// ensureTenantSite creates the fixture's tenant and site once, filling any NOT NULL text column the local
-// schema happens to require.
+// ensureTenantSite creates the tenant and site once, filling any NOT NULL text column the local schema requires.
 func (f *capFixture) ensureTenantSite(t *testing.T) {
 	t.Helper()
 	if f.tenant != "" {
@@ -192,13 +158,10 @@ func (f *capFixture) ensureTenantSite(t *testing.T) {
 	}
 }
 
-// device creates a device owned by the given appliance and returns its id.
 func (f *capFixture) device(t *testing.T, appliance string, n int) string {
 	t.Helper()
 	var id string
-	// Globally unique across every fixture and every test in the package. The caller's n is kept only so a
-	// failure can be traced back to which admission it was; uniqueness comes from the counter, because these
-	// tests deliberately share one tenant and site and would otherwise collide on the device MAC.
+	// Globally unique across the package: tests share one tenant and site, so n only traces failures and the counter ensures uniqueness.
 	seq := atomic.AddInt64(&macSeq, 1)
 	mac := fmt.Sprintf("02:ca:%02x:%02x:%02x:%02x",
 		(seq>>24)&0xff, (seq>>16)&0xff, (seq>>8)&0xff, seq&0xff)
@@ -212,12 +175,8 @@ func (f *capFixture) device(t *testing.T, appliance string, n int) string {
 	return id
 }
 
-// admit runs the REAL gate and, if it admits, inserts the session -- in ONE transaction, which is what the
-// production path does and the only arrangement under which the advisory lock means anything.
-// slot is a fully prepared admission: its entitlement and device already exist, so the transaction that
-// races contains ONLY the contended work -- reserve, authorize, insert. Preparing inside the racing goroutine
-// was enough to hide the race entirely: the setup dominated the transaction and the contended window shrank
-// to almost nothing, so the test passed even with the advisory lock removed. It proved nothing.
+// slot is a fully prepared admission, so the raced transaction holds ONLY the contended work (reserve, authorize, insert).
+// Preparing inside the racing goroutine hid the race: the test passed even with the advisory lock removed.
 type slot struct {
 	entitlement string
 	device      string
@@ -235,15 +194,12 @@ func (f *capFixture) admitSlot(sl slot, limit int64, appliance string) error {
 		if err := reserveLicensedSlot(ctx, tx, appliance, limit); err != nil {
 			return err
 		}
-		// Device admission and the session row cross their own accepted controlled-writer families, exactly
-		// as they do in the production activation path.
+		// Device admission and the session row cross their own controlled-writer families, as in production.
 		for _, family := range []string{"device_auth", "session_binding"} {
 			if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
 				return err
 			}
 		}
-		// The accepted domain refuses a session for a device with no authorization binding on the
-		// entitlement, so admission is a real step here as it is in production.
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1::uuid,$2::uuid,now())`,
 			entitlement, deviceID); err != nil {
 			return err
@@ -257,14 +213,12 @@ func (f *capFixture) admitSlot(sl slot, limit int64, appliance string) error {
 	})
 }
 
-// admit prepares and admits in one step. Used where there is no race to preserve.
 func (f *capFixture) admit(t *testing.T, limit int64, appliance string, n int) error {
 	t.Helper()
 	return f.admitSlot(f.prepare(t, appliance, n), limit, appliance)
 }
 
-// insertSession performs the admission's writes on an existing transaction and then commits it. Split out so
-// the forced-interleaving test can hold a transaction open between the capacity check and the insert.
+// insertSession is split out so the forced-interleaving test can hold a transaction open between the capacity check and the insert.
 func (f *capFixture) insertSession(ctx context.Context, tx pgx.Tx, sl slot, commit func(context.Context) error) error {
 	for _, family := range []string{"device_auth", "session_binding"} {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
@@ -297,16 +251,12 @@ func (f *capFixture) activeOn(t *testing.T, appliance string) int64 {
 	return n
 }
 
-// THE LAST SLOT. With the licence one short of the number of guests pressing Connect at the same instant,
-// exactly one may be admitted. Without the advisory lock every contender reads the same pre-insert count,
-// every one finds the last slot free, and the appliance ends up over its licence by the number of
-// simultaneous logins -- the failure this test exists to make impossible to reintroduce.
+// The last slot: with the licence one short of the guests pressing Connect at once, exactly one may be admitted; without the advisory lock every contender sees the same count.
 func TestLicensedCapacityIntegrationLastSlotIsRaceSafe(t *testing.T) {
 	f := newCapFixture(t)
 	const contenders = 16
 	const limit int64 = 4
 
-	// Fill to one slot short, sequentially, so the race is only over the final admission.
 	for i := int64(0); i < limit-1; i++ {
 		if err := f.admit(t, limit, f.applianceA, int(i)); err != nil {
 			t.Fatalf("pre-fill %d: %v", i, err)
@@ -316,7 +266,6 @@ func TestLicensedCapacityIntegrationLastSlotIsRaceSafe(t *testing.T) {
 		t.Fatalf("pre-fill left %d active, want %d", got, limit-1)
 	}
 
-	// Prepared BEFORE the race so the raced transaction is only the contended work.
 	slots := make([]slot, contenders)
 	for i := range slots {
 		slots[i] = f.prepare(t, f.applianceA, 100+i)
@@ -329,7 +278,7 @@ func TestLicensedCapacityIntegrationLastSlotIsRaceSafe(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			<-start // released together; staggering them would test nothing
+			<-start
 			err := f.admitSlot(slots[i], limit, f.applianceA)
 			switch {
 			case err == nil:
@@ -367,30 +316,15 @@ func TestLicensedCapacityIntegrationLastSlotIsRaceSafe(t *testing.T) {
 	}
 }
 
-// THE RACE, FORCED RATHER THAN HOPED FOR.
-//
-// The stress test above releases many goroutines at once and checks the outcome. That is worth having, but it
-// is not proof: with the advisory lock REMOVED it still passed, three runs in a row, because each admission
-// is a millisecond of work and they happened not to interleave at the one instruction that matters.
-//
-// So this test does not leave the interleaving to chance. It drives two transactions by hand and holds them
-// both between the capacity check and the insert -- the exact window a lock exists to close:
-//
-//	tx A: reserve (sees the last slot free)
-//	tx B: reserve (WITHOUT a lock, also sees the last slot free)
-//	tx A: insert, commit
-//	tx B: insert, commit      -> the appliance is now one over its licence
-//
-// With the lock in place tx B blocks inside reserve until tx A commits, then sees the true count and refuses.
-// A test that cannot fail when the lock is removed is not evidence that the lock is doing anything, and this
-// one was checked by removing it.
+// Forces the race instead of hoping for it: two hand-driven transactions are held between the capacity check and the insert.
+// With the lock, tx B blocks inside reserve until tx A commits, then sees the true count and refuses.
+// The stress test above still passed with the lock removed, so this one was verified by removing it.
 func TestLicensedCapacityIntegrationForcedInterleavingCannotOverfill(t *testing.T) {
 	f := newCapFixture(t)
 	const limit int64 = 2
 	if err := f.admit(t, limit, f.applianceA, 900); err != nil {
 		t.Fatalf("pre-fill: %v", err)
 	}
-	// One slot left, two contenders prepared in advance.
 	slotA, slotB := f.prepare(t, f.applianceA, 901), f.prepare(t, f.applianceA, 902)
 
 	ctx := context.Background()
@@ -404,8 +338,7 @@ func TestLicensedCapacityIntegrationForcedInterleavingCannotOverfill(t *testing.
 		t.Fatalf("A must find the last slot free: %v", err)
 	}
 
-	// B runs concurrently and must not be able to claim the same slot. Its reserve is expected to BLOCK on
-	// A's advisory lock, so it runs in a goroutine and the test proves the blocking rather than assuming it.
+	// B must block on A's advisory lock, so it runs in a goroutine and the test proves the blocking.
 	type outcome struct{ err error }
 	bDone := make(chan outcome, 1)
 	bReserved := make(chan struct{})
@@ -425,7 +358,6 @@ func TestLicensedCapacityIntegrationForcedInterleavingCannotOverfill(t *testing.
 		bDone <- outcome{f.insertSession(ctx, txB, slotB, txB.Commit)}
 	}()
 
-	// B must still be blocked while A holds the lock. Without the lock it would already have reserved.
 	select {
 	case <-bReserved:
 		t.Fatal("B completed its capacity check while A was mid-admission: the check is not serialized, " +
@@ -451,10 +383,7 @@ func TestLicensedCapacityIntegrationForcedInterleavingCannotOverfill(t *testing.
 	}
 }
 
-// TWO APPLIANCES DO NOT SHARE, SERIALIZE OR LEAK CAPACITY. The licence is per appliance, so a full appliance
-// must not stop a second one -- same customer, same site -- from admitting its own guests, and the second
-// appliance's guests must not count against the first. A tenant- or site-scoped count fails this, and so does
-// a lock taken on anything broader than the appliance.
+// Two appliances do not share, serialize or leak capacity: the licence is per appliance, so a tenant- or site-scoped count or a broader lock fails this.
 func TestLicensedCapacityIntegrationAppliancesAreIndependent(t *testing.T) {
 	f := newCapFixture(t)
 	const limit int64 = 2
@@ -468,7 +397,6 @@ func TestLicensedCapacityIntegrationAppliancesAreIndependent(t *testing.T) {
 		t.Fatalf("appliance A is full and must refuse; got %v", err)
 	}
 
-	// B is untouched by A being full.
 	for i := 0; i < int(limit); i++ {
 		if err := f.admit(t, limit, f.applianceB, 300+i); err != nil {
 			t.Fatalf("appliance B must admit its own guests while A is full: %v", err)
@@ -485,16 +413,12 @@ func TestLicensedCapacityIntegrationAppliancesAreIndependent(t *testing.T) {
 	}
 }
 
-// TWO APPLIANCES RACING AT ONCE. The independence above is proven sequentially; this proves the LOCK is not
-// shared either. Both appliances contend for their own last slot simultaneously, and each must end at exactly
-// its own limit -- neither over (a lost race) nor under (one appliance's lock blocking the other's admission
-// until it gave up).
+// Two appliances racing at once: the LOCK must not be shared either; each must end at exactly its own limit.
 func TestLicensedCapacityIntegrationAppliancesRaceIndependently(t *testing.T) {
 	f := newCapFixture(t)
 	const limit int64 = 2
 	const contenders = 8
 
-	// Each appliance filled to one short of its own limit.
 	for _, ap := range []string{f.applianceA, f.applianceB} {
 		for i := int64(0); i < limit-1; i++ {
 			if err := f.admit(t, limit, ap, 500+int(i)); err != nil {
@@ -535,8 +459,7 @@ func TestLicensedCapacityIntegrationAppliancesRaceIndependently(t *testing.T) {
 	}
 }
 
-// AN UNLIMITED LICENCE TAKES NO LOCK AND COUNTS NOTHING. A zero or negative limit means unlimited, and must
-// not serialize admissions behind a lock that can never refuse anything.
+// An unlimited licence (zero or negative limit) takes no lock and counts nothing.
 func TestLicensedCapacityIntegrationUnlimitedDoesNotSerialize(t *testing.T) {
 	f := newCapFixture(t)
 	const n = 8

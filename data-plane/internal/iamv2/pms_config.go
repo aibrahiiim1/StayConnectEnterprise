@@ -5,23 +5,18 @@ import (
 	"strings"
 )
 
-// Phase-3 PMS Stay-domain feature flags. Deployment-controlled env only (no DB flag table, no admin UI).
-// Everything defaults OFF; when the master flag is OFF nothing Phase-3 constructs a repository, opens a
-// PMS connection, issues Phase-3 SQL, serves a Phase-3 route, or exposes any UI. Child flags are only
-// effective when the master flag is also ON (a child ON while master OFF is a fail-closed startup error).
-//
-// NEXT_PUBLIC_PHASE3_ADMIN is intentionally NOT listed here: it is a Hotel-Admin (Next.js) frontend
-// build/runtime gate, not a Go STAYCONNECT_* flag, and is never parsed by this package.
+// PMS Stay-domain feature flags, from env only. Everything defaults OFF; with the master OFF nothing
+// constructs a repository, opens a PMS connection or serves a route, and a child ON while master is OFF is a
+// fail-closed startup error. NEXT_PUBLIC_PHASE3_ADMIN is a Hotel-Admin frontend gate, never parsed here.
 const (
 	EnvPhase3Master        = "STAYCONNECT_PHASE3_MASTER"
-	EnvPhase3PMSConnector  = "STAYCONNECT_PHASE3_PMS_CONNECTOR"  // pmsd owns the PMS Interface socket(s)
-	EnvPhase3PMSIngest     = "STAYCONNECT_PHASE3_PMS_INGEST"     // Stay/Event ingestion pipeline
-	EnvPhase3PMSAuth       = "STAYCONNECT_PHASE3_PMS_AUTH"       // STRICT resolver + PMS Auth Context routes
-	EnvPhase3CheckoutGrace = "STAYCONNECT_PHASE3_CHECKOUT_GRACE" // checkout-grace execution
-	EnvPhase3Admin         = "STAYCONNECT_PHASE3_ADMIN"          // Hotel-Admin PMS/Stays/Routing API surface
+	EnvPhase3PMSConnector  = "STAYCONNECT_PHASE3_PMS_CONNECTOR"
+	EnvPhase3PMSIngest     = "STAYCONNECT_PHASE3_PMS_INGEST"
+	EnvPhase3PMSAuth       = "STAYCONNECT_PHASE3_PMS_AUTH"
+	EnvPhase3CheckoutGrace = "STAYCONNECT_PHASE3_CHECKOUT_GRACE"
+	EnvPhase3Admin         = "STAYCONNECT_PHASE3_ADMIN"
 )
 
-// PMSConfig holds the Phase-3 flag state.
 type PMSConfig struct {
 	MasterEnabled        bool
 	PMSConnectorEnabled  bool
@@ -31,52 +26,31 @@ type PMSConfig struct {
 	AdminEnabled         bool
 }
 
-// DefaultPMSConfig is all-OFF (the delivered/deployed state).
 func DefaultPMSConfig() PMSConfig { return PMSConfig{} }
 
-// Per-surface effective gates: a surface is live only when BOTH the master flag and its own flag are ON.
+// A surface is live only when both the master flag and its own flag are ON.
 func (c PMSConfig) ConnectorOn() bool     { return c.MasterEnabled && c.PMSConnectorEnabled }
 func (c PMSConfig) IngestOn() bool        { return c.MasterEnabled && c.PMSIngestEnabled }
 func (c PMSConfig) AuthOn() bool          { return c.MasterEnabled && c.PMSAuthEnabled }
 func (c PMSConfig) CheckoutGraceOn() bool { return c.MasterEnabled && c.CheckoutGraceEnabled }
 func (c PMSConfig) AdminOn() bool         { return c.MasterEnabled && c.AdminEnabled }
 
-// EnforcementOn reports whether this appliance must run the Phase-3 ENFORCEMENT PLANE: acctd's authenticated
-// shaping producer and netd's network writer.
-//
-// IT FOLLOWS THE MASTER FLAG, AND DELIBERATELY NOT ANY SURFACE FLAG.
-//
-// Enforcement is not a feature. It is the substrate every guest-session surface stands on: a Session commits
-// as PENDING_ENFORCEMENT and only the enforcement plane can make it real, so an appliance that mints sessions
-// without it produces access nobody delivers and rows nothing converges.
-//
-// It used to follow CheckoutGraceOn, and that is exactly how the first real guest Room Login failed. Room
-// authentication is enabled by STAYCONNECT_PHASE3_PMS_AUTH; Checkout Grace is an unrelated post-departure
-// feature; and tying the enforcement plane to the second meant the first could be fully live — verifying
-// guests, granting entitlements, opening sessions — on an appliance where nothing was watching for a session
-// to enforce. Two real guests reached PENDING_ENFORCEMENT and stayed there.
-//
-// Following the master flag also means enforcement cannot be half-enabled by a surface flag landing in one
-// service's environment and not another's, which is the other half of what happened: scd had PMS_AUTH, netd
-// and acctd had no Phase-3 flags at all.
-//
-// A fully dark appliance (master OFF) still runs nothing, which is the DARK contract. Beyond that the plane is
-// DATA-DRIVEN and costs nothing when idle — the same reasoning Phase-6 accrual already uses: with no sessions
-// the pass finds nothing to do, and it must be ready the moment one exists rather than switched on afterwards.
+// EnforcementOn (acctd's shaping producer, netd's network writer) follows the MASTER flag, deliberately not
+// any surface flag: enforcement is the substrate every guest-session surface stands on (a Session commits as
+// PENDING_ENFORCEMENT and only this plane makes it real). Tying it to a surface let Room Login go live with
+// nothing enforcing, and a surface flag set in one service's environment but not another's would half-enable
+// it. It is data-driven and idle at no cost when there are no sessions.
 func (c PMSConfig) EnforcementOn() bool { return c.MasterEnabled }
 
-// Enabled reports whether any Phase-3 surface is live (i.e. a repository/engine may be constructed).
 func (c PMSConfig) Enabled() bool {
 	return c.MasterEnabled &&
 		(c.PMSConnectorEnabled || c.PMSIngestEnabled || c.PMSAuthEnabled || c.CheckoutGraceEnabled || c.AdminEnabled)
 }
 
-// childOn is true if any child flag is set (regardless of master).
 func (c PMSConfig) anyChildSet() bool {
 	return c.PMSConnectorEnabled || c.PMSIngestEnabled || c.PMSAuthEnabled || c.CheckoutGraceEnabled || c.AdminEnabled
 }
 
-// Validate fails closed on an incoherent flag set (any child ON while the master flag is OFF).
 func (c PMSConfig) Validate() error {
 	if !c.MasterEnabled && c.anyChildSet() {
 		return &Error{Code: ErrConfig, Msg: "phase3 surface flag enabled while STAYCONNECT_PHASE3_MASTER is OFF"}
@@ -84,8 +58,7 @@ func (c PMSConfig) Validate() error {
 	return nil
 }
 
-// LoadPMSConfigFromEnv builds a PMSConfig from env. A malformed boolean is a startup failure (fail
-// closed), and any child flag set while master is OFF is rejected.
+// LoadPMSConfigFromEnv fails closed on a malformed boolean or any child flag set while master is OFF.
 func LoadPMSConfigFromEnv(get Getenv) (PMSConfig, error) {
 	master, err := parseBoolStrict(EnvPhase3Master, get(EnvPhase3Master))
 	if err != nil {
@@ -125,7 +98,6 @@ func LoadPMSConfigFromEnv(get Getenv) (PMSConfig, error) {
 	return c, nil
 }
 
-// SafeFlagSummary is a log-safe description (no secrets).
 func (c PMSConfig) SafeFlagSummary() string {
 	var b strings.Builder
 	b.WriteString("phase3 master=")

@@ -12,10 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Regressions for the final GDPR audit (migration 0147): erasure that rewrote the wrong audit rows, a stay link
-// that led into another person's reservation, a person's own phone kept "shared" because of their own erased
-// records, and entries about the guest that still named them.
-
 // audit_log is a hypertable: a row's ctid is unique only inside its chunk. The erasure must rewrite the rows it
 // means and no others, whatever chunk they are in.
 func TestIntegration_FinalAudit_ErasureRewritesOnlyTheRowsItMeans(t *testing.T) {
@@ -24,7 +20,6 @@ func TestIntegration_FinalAudit_ErasureRewritesOnlyTheRowsItMeans(t *testing.T) 
 	sfx := fmt.Sprint(time.Now().UnixNano())
 	email := "chunks-" + sfx + "@example.com"
 	acct, _, _ := seedEndedAccount(t, f, email, 400*24*time.Hour, "10.97.0.10")
-	// Fifty unrelated entries spread over twelve weeks (several chunks), and two that are about the account.
 	for i := 0; i < 50; i++ {
 		if _, err := f.pool.Exec(ctx, `INSERT INTO public.audit_log(ts,tenant_id,actor_type,actor_id,action,target_type,target_id,payload)
 			VALUES (now() - make_interval(days => $2::int),$1,'operator','op-1','other.thing','vlan',$3,jsonb_build_object('memo','keep me '||$4::text))`,

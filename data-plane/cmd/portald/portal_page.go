@@ -1,18 +1,7 @@
 package main
 
-// THE PAGES A GUEST READS, RENDERED IN THEIR LANGUAGE AND IN THE HOTEL'S LOOK.
-//
-// Presentation only. Nothing in this file decides whether a guest is let in, what they are told about why
-// not, how long anything waits, or which route a form posts to -- the handlers decide all of that and hand
-// this file a sentence or a page to draw. What lives here is:
-//
-//   - which of the hotel's languages this request should be answered in (the guest's own choice, then what
-//     their device asks for, then English), and the dictionary for it;
-//   - the hotel's published design as the handful of values a server-rendered page needs (name, logo,
-//     layout attributes, colours as CSS custom properties);
-//   - the map from the sentences the handlers already compose to translation keys, so a refusal reaches a
-//     guest in their language -- and so the raw codes a few paths used to pass straight through ("Voucher
-//     AUTH_DENIED.") become a sentence a person can act on.
+// Presentation only: language, the hotel's design and translation keys for server-rendered guest pages.
+// The handlers decide everything else.
 
 import (
 	"context"
@@ -33,11 +22,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
-// ---- language -------------------------------------------------------------------------------------------
-
-// offeredLanguages is the list the selector offers: the hotel's configured languages when it chose some
-// (each backed by shipped words or the hotel's own), otherwise the six the portal ships. The same rule the
-// sign-in page's script applies.
+// offeredLanguages: the hotel's configured languages, else the six shipped; same rule as the sign-in page's script.
 func offeredLanguages(d map[string]any) []portalLanguage {
 	var out []portalLanguage
 	if list, ok := d["languages"].([]any); ok {
@@ -77,8 +62,7 @@ func shippedLanguage(code string) (portalLanguage, bool) {
 	return portalLanguage{}, false
 }
 
-// rtlCode answers for a language the portal does not ship: a hotel may add Hebrew or Persian with its own
-// words, and those read right to left too.
+// rtlCode covers languages the portal does not ship (a hotel may add Hebrew or Persian with its own words).
 func rtlCode(code string) bool {
 	switch strings.SplitN(strings.ToLower(code), "-", 2)[0] {
 	case "ar", "he", "fa", "ur":
@@ -87,8 +71,7 @@ func rtlCode(code string) bool {
 	return false
 }
 
-// guestLanguage picks the language for one response: the guest's remembered choice (the sc-lang cookie the
-// selector writes), then the device's Accept-Language in its own order, then English.
+// guestLanguage: the sc-lang cookie, then Accept-Language in its own order, then English.
 func guestLanguage(r *http.Request, d map[string]any) portalLanguage {
 	offered := offeredLanguages(d)
 	find := func(code string) (portalLanguage, bool) {
@@ -136,8 +119,7 @@ func guestLanguage(r *http.Request, d map[string]any) portalLanguage {
 	return offered[0]
 }
 
-// guestWords is the dictionary for one language: English underneath, the shipped language over it, the
-// hotel's published wording over that. A blank override is not an override.
+// guestWords layers English, the shipped language, then the hotel's wording; a blank override is ignored.
 func guestWords(code string, d map[string]any) map[string]string {
 	out := make(map[string]string, len(builtinStrings["en"]))
 	for k, v := range builtinStrings["en"] {
@@ -158,7 +140,6 @@ func guestWords(code string, d map[string]any) map[string]string {
 	return out
 }
 
-// subset returns the keys with any of the prefixes -- what a page's own script needs, and nothing else.
 func subset(words map[string]string, prefixes ...string) map[string]string {
 	out := map[string]string{}
 	for k, v := range words {
@@ -172,22 +153,14 @@ func subset(words map[string]string, prefixes ...string) map[string]string {
 	return out
 }
 
-// ---- the hotel's design, for a server-rendered page -------------------------------------------------------
-
-// guestBrand is what a server-rendered page draws from the published design. Every value has already been
-// through portaldesign.ForGuests (colour and length patterns, font-stack characters, image URL rules).
+// guestBrand holds values already validated by portaldesign.ForGuests.
 type guestBrand struct {
-	// Help is the hotel's own help line (help_text), shown in the help sheet on every guest page.
 	Name, Welcome, Help string
-	// Logo was checked by ForGuests (an appliance path, an https URL or an inline image), which is what
-	// makes it safe to mark as a URL the template need not filter -- a data:image logo would otherwise be
-	// replaced by html/template's placeholder.
+	// Logo was checked by ForGuests; template.URL keeps html/template from replacing a data:image logo.
 	Logo                                          template.URL
 	Template, Density, Panel, HeroHeight, Surface string
-	// HeroLogo and CardLogo say which of the page's two logo slots the layout shows (heroTemplates).
-	HeroLogo, CardLogo bool
-	// Style is the design as custom properties on <html>, the same properties the sign-in page's script
-	// sets. It is built only from validated values; see cssURL for the one value that is not a token.
+	HeroLogo, CardLogo                            bool
+	// Style: validated values only; see cssURL for the one that is not a token.
 	Style template.CSS
 }
 
@@ -224,8 +197,7 @@ func brandFor(d map[string]any) guestBrand {
 		}
 		set("--sc-heading-font", pick("heading_font"))
 	}
-	// White words over a photograph always get enough darkening under them to read -- the stylesheet's
-	// default included, which is below the floor.
+	// Always darken enough under white text over a photograph, including the stylesheet default, which is below the floor.
 	if photo && overlay < minPhotoOverlay {
 		overlay = minPhotoOverlay
 		overlaySet = true
@@ -233,8 +205,7 @@ func brandFor(d map[string]any) guestBrand {
 	if overlaySet {
 		set("--sc-overlay", fmt.Sprintf("%.2f", overlay))
 	}
-	// The text colours the hotel's colours need (portal_colour.go), including --sc-ink, which is the hotel's
-	// text colour only when it reads on the card.
+	// Text colours; --sc-ink is the hotel's text colour only when it reads on the card.
 	for _, kv := range derivedColours(str("brand_color"), str("brand_color_dark"), str("text_color"), overlay, photo) {
 		set(kv[0], kv[1])
 	}
@@ -244,14 +215,10 @@ func brandFor(d map[string]any) guestBrand {
 	return b
 }
 
-// heroTemplates are the layouts that show the hotel's logo in the hero rather than in the card: the photographic
-// three put it over the photograph and the header bar puts it in the bar, and each of them hides the card's
-// copy. The page draws the logo only where its layout shows it, so an inline logo is not sent twice.
+// heroTemplates show the logo in the hero rather than the card, so the page draws it only where its layout shows it.
 var heroTemplates = map[string]bool{"split": true, "immersive": true, "editorial": true, "headerbar": true}
 
-// cssURL writes an image address as a CSS url(). The address was checked by ForGuests (an appliance path,
-// an https URL or an inline image); the characters that could end the string or the function are
-// percent-encoded anyway, so the value cannot become anything but one url().
+// cssURL percent-encodes characters that could end the string or function, so the value stays one url().
 func cssURL(u string) string {
 	r := strings.NewReplacer(`"`, "%22", `'`, "%27", `(`, "%28", `)`, "%29", `\`, "%5C", "\n", "", "\r", "", " ", "%20")
 	return `url("` + r.Replace(u) + `")`
@@ -270,9 +237,6 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-// ---- the page model every server-rendered guest page shares ------------------------------------------------
-
-// guestPage is the data a guest page template draws from.
 type guestPage struct {
 	Lang      string
 	Dir       string
@@ -281,24 +245,15 @@ type guestPage struct {
 	JS        template.JS       // the part of it the page's own script reads, as JSON
 	Languages []portalLanguage
 	Brand     guestBrand
-	// HotelSheet is the hotel's custom CSS as the pages after sign-in carry it: one <style id="sc-hotel">
-	// wrapping the sheet in `@layer hotel`, or empty. The sign-in page ignores it; its script applies the same
-	// sheet from /api/branding in the same way.
+	// HotelSheet is the hotel's custom CSS (<style id="sc-hotel"> in @layer hotel) for pages after sign-in; the sign-in page's script applies it itself.
 	HotelSheet template.HTML
-	// Leave is this device's sign-out token (leave.go): every Disconnect / Sign out form carries it.
-	Leave string
+	Leave      string
 }
 
-// reImportant matches what the sign-in page's script removes a second time before layering the hotel's sheet.
 var reImportant = regexp.MustCompile(`(?i)!\s*important`)
 
-// hotelSheet is the hotel's custom CSS for a server-rendered page, or "" when there is none.
-//
-// The value has already been through portaldesign.ForGuests -- rebuilt rule by rule from the allowlist edged
-// applies on save, with !important and any </style removed -- which is the same text /api/branding hands the
-// sign-in page. Two things are done again here, exactly as the sign-in page's script does them: !important is
-// stripped (it is the one thing that lets a layered rule outrank the unlayered guard), and the sheet goes
-// inside `@layer hotel`, below the guard. A sheet that could still close its element is not served at all.
+// hotelSheet is the hotel's CSS from ForGuests, with !important stripped (it would let a layered rule outrank the
+// unlayered guard) and wrapped in `@layer hotel`. A sheet that could still close its element is not served.
 func hotelSheet(d map[string]any) template.HTML {
 	css, _ := d["custom_css"].(string)
 	css = strings.TrimSpace(reImportant.ReplaceAllString(css, ""))
@@ -335,7 +290,6 @@ func buildGuestPage(r *http.Request, d map[string]any, nonce string, jsPrefixes 
 	return p
 }
 
-// capRunes keeps at most n characters: a value given back to a field is no longer than the field accepts.
 func capRunes(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n])
@@ -343,7 +297,6 @@ func capRunes(s string, n int) string {
 	return s
 }
 
-// fill replaces {name} placeholders.
 func fill(s string, kv ...string) string {
 	for i := 0; i+1 < len(kv); i += 2 {
 		s = strings.ReplaceAll(s, "{"+kv[i]+"}", kv[i+1])
@@ -387,11 +340,7 @@ func speed(words map[string]string, kbps float64) string {
 	return fill(words["unit.mbps"], "n", n)
 }
 
-// ---- the sentences the handlers compose, as translation keys -----------------------------------------------
-
-// serverMessageKeys maps every sentence a handler in this package passes to landing() to its key. The English
-// of each key is the sentence itself wherever that sentence was already fit for a guest, so an English guest
-// reads exactly what the handler wrote.
+// serverMessageKeys maps each sentence a handler passes to landing() to its translation key.
 var serverMessageKeys = map[string]string{
 	"Please enter a voucher code.":             "err.voucher.empty",
 	"Invalid voucher.":                         "err.voucher.invalid",
@@ -417,7 +366,6 @@ var serverMessageKeys = map[string]string{
 	"Please sign in again.":                                                                       "err.signin.again",
 	"We could not connect your device.":                                                           "err.connect",
 	"We could not bring your device online. Please try again in a moment.":                        "err.connect",
-	// The email account's refusals (account_handlers.go).
 	msgAcctEmpty:    "err.acct.empty",
 	msgAcctInvalid:  "err.acct.invalid",
 	msgAcctTaken:    "err.acct.taken",
@@ -427,10 +375,8 @@ var serverMessageKeys = map[string]string{
 	msgAcctLimit:    "err.acct.limit",
 }
 
-// serverMessageKey returns the key for a sentence a handler composed. The voucher refusal used to append
-// scd's raw code ("Voucher AUTH_DENIED."); every such sentence is the invalid-voucher message, which says no
-// more than the code did about why and says it in words. A sentence this map does not know is returned
-// with no key and is shown as written -- it was composed on the server, never by the guest.
+// serverMessageKey maps every voucher refusal to the invalid-voucher message; an unknown sentence is shown as written
+// (composed on the server, never by the guest).
 func serverMessageKey(msg string) string {
 	if k, ok := serverMessageKeys[msg]; ok {
 		return k
@@ -441,8 +387,7 @@ func serverMessageKey(msg string) string {
 	return ""
 }
 
-// localMessage is a server sentence in the guest's language, with its key and English so the sign-in page
-// can re-translate it when the guest switches language.
+// localMessage carries the key and English so the sign-in page can re-translate when the guest switches language.
 type localMessage struct{ Key, En, Text string }
 
 func localise(words map[string]string, msg string) localMessage {
@@ -461,20 +406,14 @@ func localise(words map[string]string, msg string) localMessage {
 	return localMessage{Key: k, En: en, Text: text}
 }
 
-// ---- the sign-in page --------------------------------------------------------------------------------------
-
-// landingView is the sign-in page's data. Error keeps its name and stays a plain string (the handler's
-// sentence, in the guest's language), so a test fixture that renders {{.Error}} still reads the message.
+// landingView: Error stays a plain string so a fixture rendering {{.Error}} still reads the message.
 type landingView struct {
 	guestPage
 	Error, ErrorKey, ErrorEn string
-	// ErrorForm is the plain-HTML form the refusal answers ("voucher", "account" or "email", from the route
-	// that rendered this page), so its fields can point at the message and the right form is the one showing.
-	// ErrorInvalid is set when the refusal is about what was typed rather than about the network.
+	// ErrorForm names the form ("voucher", "account" or "email") the refusal answers; ErrorInvalid means the input was wrong, not the network.
 	ErrorForm    string
 	ErrorInvalid bool
-	// EmailState is the Email panel's state on first paint: "signin" (the default), "create" or "forgot".
-	EmailState string
+	EmailState   string
 	// What the guest typed, given back so a typo can be corrected rather than retyped. Never the password.
 	VoucherValue, UsernameValue, EmailValue string
 	ClientIP, ClientMAC                     string
@@ -485,21 +424,16 @@ type landingView struct {
 	// The hotel's privacy notice (GDPR Art. 13): its own text, shown in place, and/or a link to a full notice.
 	PrivacyText string
 	PrivacyURL  template.URL // checked by ForGuests (CheckLinkURL)
-	// The shipped wording for the script, from languages.go -- the words the sign-in page can show, in every
-	// language, so a guest switching language needs no round trip. The after-sign-in pages' words are
-	// rendered by those pages and are not repeated here.
+	// Shipped sign-in wording in every language, so switching needs no round trip.
 	AllLanguages template.JS
 	Strings      template.JS
-	// The hotel's own wording and language list, so the first paint already uses them; the script reads the
-	// same two from /api/branding afterwards.
+	// Hotel wording and language list, so the first paint already uses them.
 	HotelWords template.JS
 	Configured template.JS
-	// Welcome is set when this device holds a valid remembered-device credential (client_resume.go): the page
-	// then leads with one Connect button for that Client instead of the sign-in forms.
+	// Welcome: a valid remembered-device credential; the page leads with one Connect button.
 	Welcome *welcomeView
 }
 
-// afterSignInPrefixes are the keys only the pages after sign-in use.
 var afterSignInPrefixes = []string{"pkg.", "online.", "tl.", "dev.", "errpage."}
 
 var (
@@ -508,7 +442,6 @@ var (
 	landingStringsJSON template.JS
 )
 
-// landingStringsJS is the same, as the JSON the page's script reads; built once.
 func landingStringsJS() template.JS {
 	landingStrings()
 	return landingStringsJSON
@@ -554,7 +487,6 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 		v.BrandName = p.T["brand.fallback"]
 	}
 	if errMsg != "" && r != nil && r.Method == http.MethodPost {
-		// Read-only: the handler has already parsed the form and chosen the message.
 		switch r.URL.Path {
 		case "/auth/voucher":
 			v.ErrorForm = "voucher"
@@ -568,8 +500,7 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 		case "/auth/account/register":
 			v.ErrorForm, v.EmailState = "email", "create"
 			v.EmailValue = capRunes(strings.TrimSpace(r.PostFormValue("email")), 254)
-			// An address already registered is answered on Sign in, with the address filled in: the client's
-			// choices are to sign in or to reset the password, and both start there (contract section 5).
+			// An already-registered address is answered on Sign in with the address filled in.
 			if msg.Key == "err.acct.taken" {
 				v.EmailState = "signin"
 			}
@@ -602,44 +533,31 @@ func newLandingView(r *http.Request, d map[string]any, nonce, errMsg, ip, mac st
 	return v
 }
 
-// ---- you're online -----------------------------------------------------------------------------------------
-
 type successView struct {
 	guestPage
-	// Reminder: an email account not verified yet -- the deadline, and Resend (account_handlers.go).
 	Reminder        *onlineReminder
 	SessionID       string
 	DurationSeconds int
 	HumanRemaining  string
-	// Unlimited: the appliance said this access has no end. Neither it nor HumanRemaining is set when the
-	// appliance could not be asked, and the page then states no time at all.
-	Unlimited bool
-	// ReturnCode is the open-selection return code of this client's session (contract MODULES §6.5).
+	// Unlimited: access has no end. Neither it nor HumanRemaining is set when the appliance could not be asked.
+	Unlimited  bool
 	ReturnCode string
 }
-
-// ---- the package choice ------------------------------------------------------------------------------------
 
 type packageRow struct{ ID, Name, Detail, Method, MethodKey, Price string }
 
 type packagesView struct {
 	guestPage
-	Packages []packageRow
-	// ReturnCode is shown once, to a client who just chose open package selection and got a new return code.
+	Packages   []packageRow
 	ReturnCode string
-	// Identity is the masked factor the Client signed in with ("" for a voucher, account or open subject).
-	Identity string
+	Identity   string
 	// FreeUsed: a free package was withheld only because this Client already had it (contract §6.1).
-	FreeUsed bool
-	// VoucherCTA: the site takes vouchers, so the page offers the code field (a voucher is never in the list).
+	FreeUsed   bool
 	VoucherCTA bool
-	// Error is why the client's last choice did not go through, in their language, shown ABOVE the same
-	// choices: a refused acquisition sends the client back to package selection, never to the sign-in page.
+	// Error is why the last choice failed, shown above the choices: a refused acquisition returns to package selection, not sign-in.
 	Error string
 }
 
-// guestPackage is one package as scd lists it: an opaque id, display text, the price and every acquisition
-// method this client may use for it right now.
 type guestPackage struct {
 	PackageID        string         `json:"package_id"`
 	Display          map[string]any `json:"display"`
@@ -649,7 +567,6 @@ type guestPackage struct {
 	CurrencyExponent int            `json:"currency_exponent"`
 }
 
-// methodKeys names each acquisition method's button text.
 var methodKeys = map[string]string{
 	"NOT_REQUIRED": "acq.connect", "ONLINE_PAYMENT": "acq.card", "PMS_POSTING": "acq.room", "PREPAID": "acq.connect",
 }
@@ -708,8 +625,6 @@ func packageRows(words map[string]string, pkgs []guestPackage) []packageRow {
 	return rows
 }
 
-// ---- the friendly failure page -----------------------------------------------------------------------------
-
 type errorView struct {
 	guestPage
 	Title     string
@@ -720,15 +635,12 @@ type errorView struct {
 
 var errorTmpl = template.Must(template.New("error").Parse(compactMarkup(errorHTML)))
 
-// renderGuestError draws the branded, translated failure page for a sign-in flow that has left the sign-in
-// page (the social provider's leg). The status code is the caller's and is unchanged; only what the guest
-// reads is.
+// renderGuestError draws the branded failure page for a flow that left the sign-in page; the status code is the caller's.
 func (h *handler) renderGuestError(w http.ResponseWriter, r *http.Request, status int, key string) {
 	h.renderGuestNotice(w, r, status, "errpage.title", key, "/", "errpage.back")
 }
 
-// renderGuestNotice is the same page with its own heading and way back, for a guest who is past sign-in (the
-// status page when the appliance cannot answer, a disconnect that could not tell which device asked).
+// renderGuestNotice is the same page with its own heading and way back, for a guest past sign-in.
 func (h *handler) renderGuestNotice(w http.ResponseWriter, r *http.Request, status int, titleKey, key, backHref, backKey string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -740,8 +652,6 @@ func (h *handler) renderGuestNotice(w http.ResponseWriter, r *http.Request, stat
 	})
 }
 
-// ---- connection status -------------------------------------------------------------------------------------
-
 type statusView struct {
 	guestPage
 	HasTime    bool
@@ -752,23 +662,19 @@ type statusView struct {
 
 var statusTmpl = template.Must(template.New("status").Parse(compactMarkup(statusHTML)))
 
-// scdStatus is the part of scd's /v1/sessions/status answer the page reads. scd sends ip, session_id and
-// active always, and the three online-time fields only for a package with an online-time allowance.
+// scdStatus: scd always sends ip, session_id and active, and the online-time fields only for a package with an online-time allowance.
 type scdStatus struct {
 	SessionID              string   `json:"session_id"`
 	Active                 bool     `json:"active"`
 	TimeMode               string   `json:"time_mode"`
 	RemainingOnlineSeconds *float64 `json:"remaining_online_seconds"`
 	HardExpiry             string   `json:"hard_expiry"`
-	// AccessEndsAt is the entitlement's calendar end, for any package that has one.
-	AccessEndsAt string `json:"access_ends_at"`
-	// OnlineTimeAllowance is scd's statement that remaining_online_seconds is a time allowance to show. It is
-	// set for the aggregate mode and, since migration 0122, for a validity-window plan with a time allowance.
+	AccessEndsAt           string   `json:"access_ends_at"`
+	// OnlineTimeAllowance: remaining_online_seconds is a time allowance to show.
 	OnlineTimeAllowance bool `json:"online_time_allowance"`
 }
 
-// remaining is how long this device's access has left: the earliest of the online time left, the hard expiry and
-// the calendar end. nil when scd reported none of them (access with no end).
+// remaining is the earliest of online time left, hard expiry and calendar end; nil when none (access with no end).
 func (st scdStatus) remaining(now time.Time) *time.Duration {
 	var out *time.Duration
 	take := func(d time.Duration) {
@@ -790,8 +696,6 @@ func (st scdStatus) remaining(now time.Time) *time.Duration {
 	return out
 }
 
-// deviceStatus asks scd about this device's session (the connection's address only). ok=false when scd could
-// not answer.
 func (h *handler) deviceStatus(ctx context.Context, ip net.IP) (scdStatus, bool) {
 	var st scdStatus
 	if ip == nil || h.scd == nil {
@@ -812,8 +716,6 @@ func (h *handler) deviceStatus(ctx context.Context, ip net.IP) (scdStatus, bool)
 	return st, true
 }
 
-// onlinePageHref is the way back to "You're online": the page the guest came from, rebuilt from the two values
-// the Status link carries (the session, and the duration that page was showing), or from scd's session id.
 func onlinePageHref(r *http.Request, sessionID string) string {
 	q := url.Values{}
 	s := r.URL.Query().Get("s")
@@ -847,9 +749,7 @@ func (h *handler) renderStatus(w http.ResponseWriter, r *http.Request, st scdSta
 	_ = statusTmpl.Execute(w, v)
 }
 
-// wantsHTML reports whether a request is a browser navigating rather than a script asking for data: it
-// prefers text/html to application/json. A fetch() with no Accept header sends */*, which prefers neither and
-// so keeps the JSON it has always had; a browser's navigation lists text/html first.
+// wantsHTML: a browser navigation prefers text/html; a fetch() with no Accept header sends */* and keeps JSON.
 func wantsHTML(r *http.Request) bool {
 	var html, jsonQ float64 = -1, -1
 	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {

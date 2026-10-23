@@ -13,8 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
-// commerce seeds the Grace catalog + published config the Checkout Converter needs, and (optionally) the
-// canonical Emergency catalog. Returns the grace package revision id.
+// commerce seeds the Grace catalog and config the Checkout Converter needs, optionally the Emergency catalog; returns the grace package revision id.
 func commerce(t *testing.T, p *pgxpool.Pool, s scope, bootstrapEmergency bool) string {
 	t.Helper()
 	ctx := context.Background()
@@ -36,7 +35,6 @@ func commerce(t *testing.T, p *pgxpool.Pool, s scope, bootstrapEmergency bool) s
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, pkgRev); err != nil {
 		t.Fatalf("pin current revision: %v", err)
 	}
-	// publish the typed policy through the ONLY legal writer
 	if _, err := p.Exec(ctx, `SELECT iam_v2.publish_checkout_grace_config($1,$2,$3,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400)`,
 		s.tenant, s.site, pkgRev); err != nil {
 		t.Fatalf("publish grace config: %v", err)
@@ -49,8 +47,7 @@ func commerce(t *testing.T, p *pgxpool.Pool, s scope, bootstrapEmergency bool) s
 	return pkgRev
 }
 
-// grantEntitlement creates the Stay's ACTIVE Entitlement + its initial history in ONE transaction (the deferred
-// coherence constraint forbids an Entitlement committing without history).
+// grantEntitlement creates the Entitlement and its history in one transaction (a deferred constraint forbids one without the other).
 func grantEntitlement(t *testing.T, p *pgxpool.Pool, s scope, stayID, pkgRev string, activatedAt time.Time) string {
 	t.Helper()
 	ctx := context.Background()
@@ -59,7 +56,6 @@ func grantEntitlement(t *testing.T, p *pgxpool.Pool, s scope, stayID, pkgRev str
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// purchases are a controlled-writer table ('commerce_intent') on the full schema
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +85,7 @@ func grantEntitlement(t *testing.T, p *pgxpool.Pool, s scope, stayID, pkgRev str
 	return ent
 }
 
-// insertLiveAt is insertLive with an explicit normalized PMS timestamp (the trusted checkout boundary source).
+// insertLiveAt is insertLive with an explicit normalized PMS timestamp (the trusted checkout boundary).
 func insertLiveAt(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string, ts time.Time) {
 	t.Helper()
 	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
@@ -101,10 +97,8 @@ func insertLiveAt(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, p
 	}
 }
 
-// TestIntegration_CheckoutSliceOneTransaction proves the Stay-Event application and the Checkout conversion are
-// ONE physical transaction: the engine does NOT pre-flip the Stay with the server clock; the Converter derives
-// the boundary from the SAME event, and the Stay flip, Entitlement termination, Grace creation, event APPLIED
-// state, application lineage and audit all commit together.
+// The event application and Checkout conversion are one transaction: the engine does not pre-flip the Stay with
+// the server clock, and flip, termination, Grace, APPLIED state, lineage and audit commit together.
 func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -113,7 +107,6 @@ func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	pkgRev := commerce(t, p, s, true)
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 
-	// arrival → IN_HOUSE, then an ACTIVE Entitlement granted before the checkout boundary
 	insertLive(t, p, s, "E-GI", "GI", pay("R900", "900", "Slice", "Vera", "F900", "260101", "260105"))
 	process(t, pr, s)
 	var stayID string
@@ -123,11 +116,9 @@ func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	boundary := time.Now().Add(-90 * time.Minute).Truncate(time.Microsecond)
 	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-2*time.Hour))
 
-	// the GO event carries the trusted normalized checkout timestamp
 	insertLiveAt(t, p, s, "E-GO", "GO", pay("R900", "900", "Slice", "Vera", "F900", "260101", "260105"), boundary)
 	process(t, pr, s)
 
-	// ONE transaction committed all of it
 	var status string
 	var effco time.Time
 	var posting bool
@@ -139,11 +130,9 @@ func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	if status != "CHECKED_OUT" || posting {
 		t.Fatalf("stay=%s posting=%v, want CHECKED_OUT/false", status, posting)
 	}
-	// the boundary is the EVENT's normalized timestamp — proving the engine did not pre-flip with now()
 	if !effco.Equal(boundary) {
 		t.Fatalf("boundary %v != trusted event timestamp %v (engine must not pre-flip with the server clock)", effco, boundary)
 	}
-	// exact application lineage: the Stay points at the GO event that drove it
 	var goEvent, goStatus string
 	if err := p.QueryRow(ctx, `SELECT id::text, processing_status FROM iam_v2.stay_events
 		WHERE pms_interface_id=$1 AND external_event_identity='E-GO'`, s.iface).Scan(&goEvent, &goStatus); err != nil {
@@ -152,7 +141,6 @@ func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	if goStatus != "APPLIED" || lastEvent != goEvent {
 		t.Fatalf("event=%s last_applied_event_id=%s want APPLIED + %s", goStatus, lastEvent, goEvent)
 	}
-	// old Entitlement terminated, exactly one Grace created, audit cites the same event
 	var oldStatus, oldReason string
 	if err := p.QueryRow(ctx, `SELECT status, COALESCE(terminal_reason,'') FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&oldStatus, &oldReason); err != nil {
 		t.Fatal(err)
@@ -168,16 +156,13 @@ func TestIntegration_CheckoutSliceOneTransaction(t *testing.T) {
 	}
 }
 
-// TestIntegration_CheckoutSliceRollsBackTogether proves the all-or-nothing property: when the conversion fails
-// (Emergency Grace required but its canonical catalog was never bootstrapped), NOTHING commits — the Event stays
-// PENDING, the Stay stays IN_HOUSE with no boundary, the Entitlement stays ACTIVE, and no Grace/audit exists.
+// When the conversion fails (Emergency catalog not bootstrapped) nothing commits: event PENDING, Stay IN_HOUSE, Entitlement ACTIVE, no Grace or audit.
 func TestIntegration_CheckoutSliceRollsBackTogether(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 	s := seed(t, p)
 	pkgRev := commerce(t, p, s, false) // NO emergency catalog
-	// make the configured policy unusable so the conversion must take the Emergency path
 	if _, err := p.Exec(ctx, `SELECT iam_v2.publish_checkout_grace_config($1,$2,NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400)`, s.tenant, s.site); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +182,6 @@ func TestIntegration_CheckoutSliceRollsBackTogether(t *testing.T) {
 		t.Fatal("expected the checkout slice to fail (emergency catalog unavailable)")
 	}
 
-	// EVERYTHING rolled back together
 	var evStatus string
 	_ = p.QueryRow(ctx, `SELECT processing_status FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND external_event_identity='E-GO2'`, s.iface).Scan(&evStatus)
 	if evStatus != "PENDING" {
@@ -222,9 +206,7 @@ func TestIntegration_CheckoutSliceRollsBackTogether(t *testing.T) {
 	}
 }
 
-// TestIntegration_CheckoutWithoutConverterFailsClosed proves there is NO legacy Stay-domain-only checkout path:
-// a GO event claimed by a Processor with no wired Converter fails closed and leaves the event PENDING and the
-// Stay IN_HOUSE (rather than silently establishing an unverified server-clock boundary).
+// A GO claimed by a Processor with no Converter fails closed (event PENDING, Stay IN_HOUSE) rather than setting an unverified server-clock boundary.
 func TestIntegration_CheckoutWithoutConverterFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -250,10 +232,8 @@ func TestIntegration_CheckoutWithoutConverterFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_EventOrderingUnderConcurrency proves per-Interface ordered application: with GI and GO for the
-// SAME Stay queued together and many processors racing, the GO can never be applied before the GI (which would
-// orphan it into MANUAL_REVIEW). Also proves >=24 concurrent integrated processors apply every event exactly
-// once with no deadlock and exactly one Grace.
+// With GI and GO queued together and 24 processors racing, the GO is never applied before the GI (it would
+// orphan into MANUAL_REVIEW), every event applies once, and there is no deadlock.
 func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -262,7 +242,6 @@ func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
 	commerce(t, p, s, true)
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 
-	// queue GI and GO for the same reservation BEFORE any processing, so ordering is genuinely contested
 	insertLive(t, p, s, "O-GI", "GI", pay("R910", "910", "Ord", "Er", "F910", "260101", "260105"))
 	insertLiveAt(t, p, s, "O-GO", "GO", pay("R910", "910", "Ord", "Er", "F910", "260101", "260105"), time.Now().Add(-time.Hour))
 
@@ -297,7 +276,6 @@ func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
 		t.Fatalf("concurrent integrated processing error: %v", e)
 	}
 
-	// ORDER held: the GO applied against an existing Stay (never an orphan MANUAL_REVIEW)
 	giStatus, _ := eventOutcome(t, p, s, "O-GI")
 	goStatus, goReview := eventOutcome(t, p, s, "O-GO")
 	if giStatus != "APPLIED" || goStatus != "APPLIED" {
@@ -311,7 +289,6 @@ func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
 	if status != "CHECKED_OUT" {
 		t.Fatalf("stay=%s, want CHECKED_OUT (ordered GI then GO)", status)
 	}
-	// exactly one audit for the episode (no double conversion under 24-way concurrency)
 	var auditN int
 	_ = p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID).Scan(&auditN)
 	if auditN != 1 {
@@ -319,9 +296,8 @@ func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
 	}
 }
 
-// TestIntegration_LateStageRollback forces a failure LATE in the conversion — after the boundary is set and the
-// original Entitlement has been terminated, the grace Purchase insert hits one_conversion_per_episode — and
-// proves the whole slice still rolls back: event PENDING, Stay IN_HOUSE with no boundary, Entitlement ACTIVE.
+// A failure late in the conversion (after termination, the grace Purchase hits one_conversion_per_episode) still
+// rolls back the whole slice.
 func TestIntegration_LateStageRollback(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -339,9 +315,8 @@ func TestIntegration_LateStageRollback(t *testing.T) {
 	boundary := time.Now().Add(-time.Hour).Truncate(time.Microsecond)
 	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-2*time.Hour))
 
-	// Pre-plant a CHECKOUT_GRACE purchase for THIS episode but NO audit row: the conversion passes its audit
-	// idempotency gate, terminates the original Entitlement, and only then collides on
-	// purchases.one_conversion_per_episode — a genuine LATE-stage failure.
+	// A pre-planted CHECKOUT_GRACE purchase with no audit row passes the audit gate, terminates the Entitlement,
+	// and only then collides on purchases.one_conversion_per_episode.
 	if err := guardedExec(p, []string{"commerce_intent"}, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state,checkout_episode)
 		VALUES ($1,$2,$3,$4,$5,'CHECKOUT_GRACE',0,'GRANTED',1)`, s.tenant, s.site, pkgRev, s.iface, stayID); err != nil {
@@ -369,16 +344,12 @@ func TestIntegration_LateStageRollback(t *testing.T) {
 	}
 }
 
-// paySharers builds an event payload carrying a full occupancy list.
 func paySharers(res, room, folio string, sharers string) string {
 	return `{"reservation":"` + res + `","room":"` + room + `","folio":"` + folio +
 		`","arrival_raw":"260101","departure_raw":"260105","sharers":[` + sharers + `]}`
 }
 
-// TestIntegration_SharersAndFolios proves sharing a Stay is ordinary and legal: several occupants are recorded
-// for one Stay with EXACTLY one primary, the primary can move between them across events without ever
-// duplicating. (Formerly also: the event's folio becomes the Stay's default posting target -- removed by
-// Amendment A1 / migration 0100; the FO field is ignored and the reservation is the posting target.)
+// Sharing a Stay is legal: several occupants with exactly one primary, which can move across events without duplicating.
 func TestIntegration_SharersAndFolios(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -403,11 +374,9 @@ func TestIntegration_SharersAndFolios(t *testing.T) {
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND external_guest_id='G1' AND is_primary`, stayID); n != 1 {
 		t.Fatal("the flagged occupant is not the primary")
 	}
-	// A1 (D46, migration 0100): the event's FO field is NOT stored -- a room charge targets the reservation,
-	// so there is no folio link to assert; assert instead that no folio table exists to receive one.
+	// The FO field is not stored (a room charge targets the reservation), so no folio table may exist.
 	assertNoFolioTables(t, p)
 
-	// a later event moves the primary AND adds a third occupant — still exactly one primary, no duplicates
 	insertLive(t, p, s, "SH-2", "GC", paySharers("R700", "700", "F700",
 		`{"external_guest_id":"G2","first_name":"Chas","last_name":"Babbage","is_primary":true},`+
 			`{"external_guest_id":"G3","first_name":"Mary","last_name":"Somerville"}`))
@@ -423,8 +392,7 @@ func TestIntegration_SharersAndFolios(t *testing.T) {
 	}
 }
 
-// TestIntegration_ContradictorySharerPayloadGoesToReview proves a payload that contradicts itself is never
-// half-applied or silently decided: it is routed to MANUAL_REVIEW with a bounded code and writes NOTHING.
+// A self-contradicting payload goes to MANUAL_REVIEW with a bounded code and writes nothing.
 func TestIntegration_ContradictorySharerPayloadGoesToReview(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -452,14 +420,8 @@ func TestIntegration_ContradictorySharerPayloadGoesToReview(t *testing.T) {
 	}
 }
 
-// TestIntegration_FolioFieldAppliesWithoutFolioSideEffect replaces the former
-// TestIntegration_FolioSourceConflictGoesToReview (which asserted MANUAL_REVIEW/CodeFolioStayConflict when two
-// reservations claimed the same GUEST folio). Phase-0 Amendment A1 (D46, migration 0100): a room charge targets
-// the reservation (RN + G#), not a folio. The stay engine no longer stores folios -- iam_v2.folios and
-// iam_v2.stay_folios are dropped and CodeFolioStayConflict is gone -- so a guest record's FO field is ignored.
-// This proves the new contract: two DIFFERENT reservations carrying the SAME FO value are both applied
-// normally (APPLIED, no MANUAL_REVIEW, no review code), each creates its own IN_HOUSE Stay, no source-conflict
-// row is written for the interface, and no folio table exists to receive a side effect.
+// A room charge targets the reservation, not a folio, so the FO field is ignored: two reservations with the same
+// FO both apply normally, with no review code and no source-conflict row.
 func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -467,7 +429,6 @@ func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 	pr := NewProcessor(p)
 	insertLive(t, p, s, "FC-1", "GI", paySharers("R710", "710", "FSHARED", `{"external_guest_id":"G1","last_name":"First","is_primary":true}`))
 	process(t, pr, s)
-	// a DIFFERENT reservation carrying the same FO value -- formerly a folio source conflict
 	insertLive(t, p, s, "FC-2", "GI", paySharers("R711", "711", "FSHARED", `{"external_guest_id":"G2","last_name":"Second","is_primary":true}`))
 	process(t, pr, s)
 	for _, ident := range []string{"FC-1", "FC-2"} {
@@ -480,7 +441,6 @@ func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 			t.Fatalf("%s: status=%s lv=%d, want IN_HOUSE/1", res, st, lv)
 		}
 	}
-	// a later update of the first stay carrying the FO field again is also applied normally
 	insertLive(t, p, s, "FC-3", "GC", paySharers("R710", "712", "FSHARED", `{"external_guest_id":"G1","last_name":"First","is_primary":true}`))
 	process(t, pr, s)
 	if st, code := eventOutcome(t, p, s, "FC-3"); st != "APPLIED" || code != "" {
@@ -489,12 +449,10 @@ func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 	if st, _, room := stayState(t, p, s, "R710"); st != "IN_HOUSE" || room != "712" {
 		t.Fatalf("R710 after GC: status=%s room=%s, want IN_HOUSE/712", st, room)
 	}
-	// no source-conflict row involving this interface
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.pms_source_conflicts
 		WHERE site_id=$1 AND (interface_a=$2 OR interface_b=$2)`, s.site, s.iface); n != 0 {
 		t.Fatalf("source conflicts = %d, want 0 (an FO field never conflicts)", n)
 	}
-	// no MANUAL_REVIEW anywhere on this interface
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_events
 		WHERE pms_interface_id=$1 AND processing_status='MANUAL_REVIEW'`, s.iface); n != 0 {
 		t.Fatalf("MANUAL_REVIEW events = %d, want 0", n)
@@ -502,7 +460,6 @@ func TestIntegration_FolioFieldAppliesWithoutFolioSideEffect(t *testing.T) {
 	assertNoFolioTables(t, p)
 }
 
-// assertNoFolioTables proves there is nowhere for a folio side effect to land (migration 0100 dropped them).
 func assertNoFolioTables(t *testing.T, p *pgxpool.Pool) {
 	t.Helper()
 	var folios, stayFolios *string
@@ -524,8 +481,7 @@ func countRows(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
-// F1 — ROOM MOVE PRESERVATION. A room move changes ONLY the lookup room number: the Stay identity, its
-// episode counter, its occupants and its reservation (the posting target, A1) all survive, because the room is evidence, never identity.
+// A room move changes only the room number: Stay identity, episode counter, occupants and reservation survive, since the room is evidence, never identity.
 func TestIntegration_F1_RoomMovePreservesTheStay(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -563,17 +519,14 @@ func TestIntegration_F1_RoomMovePreservesTheStay(t *testing.T) {
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID); n != 2 {
 		t.Fatalf("occupants after the move = %d, want the original 2 preserved", n)
 	}
-	// A1 (D46): the posting target is the reservation, which a room move keeps (formerly: the folio link).
 	var resv string
 	if err := p.QueryRow(ctx, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, stayID).Scan(&resv); err != nil || resv != "R800" {
 		t.Fatalf("reservation after the move = %q (%v), want R800 preserved", resv, err)
 	}
 }
 
-// F2 — STALE / REPLAYED EVENT IS A NO-OP. A replayed LIVE event identity cannot even be admitted to the
-// durable inbox (the identity is unique per interface), and a LATE event arriving against a Stay that has
-// already departed is never applied to it: it is routed to review, leaving the Stay's state and lineage
-// untouched. A stale fact can therefore never corrupt current state.
+// A replayed LIVE identity is refused by the inbox, and a late event against a departed Stay goes to review
+// without touching the Stay's state or lineage.
 func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -584,8 +537,7 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	insertLive(t, p, s, "F2-GI", "GI", pay("R810", "810", "Stale", "Event", "F810", "260101", "260105"))
 	process(t, pr, s)
 
-	// (a) the durable inbox refuses a second LIVE event with the SAME identity — a replay never becomes a fact
-	// (the 'stay' family is opened so the refusal is the genuine identity uniqueness, not the writer guard)
+	// The 'stay' family is opened so the refusal is genuine identity uniqueness, not the writer guard.
 	if err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload, pms_timestamp_utc,
 		 admission_kind, admission_runtime_generation, resync_generation, received_at)
@@ -594,7 +546,6 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 		t.Fatal("the durable inbox admitted a replayed LIVE event identity")
 	}
 
-	// depart the stay, then deliver a LATE change event for it
 	insertLiveAt(t, p, s, "F2-GO", "GO", pay("R810", "810", "Stale", "Event", "F810", "260101", "260105"), time.Now().Add(-time.Hour))
 	process(t, pr, s)
 	var stayID, room, status, lineage string
@@ -606,7 +557,6 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	insertLive(t, p, s, "F2-LATE", "GC", pay("R810", "999", "Stale", "Event", "F810", "260101", "260105"))
 	process(t, pr, s)
 
-	// (b) the late fact changed nothing and was recorded for review rather than applied
 	var afterRoom, afterStatus, afterLineage string
 	var afterVersion int
 	if err := p.QueryRow(ctx, `SELECT COALESCE(normalized_room_number,''), status, last_applied_event_version, last_applied_event_id::text
@@ -623,15 +573,10 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	}
 }
 
-// TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice proves the property that matters when more than
-// one pmsd instance exists: the loop-per-Interface bookkeeping inside a single process is NOT what prevents
-// double application — the database is. Two processors built on SEPARATE connection pools stand in exactly the
-// relationship two daemon processes have to the database (independent connections, no shared memory, no shared
-// loop map), and the per-Interface advisory application barrier plus the transactional event claim still
-// admit exactly one application per event.
+// The database, not in-process loop bookkeeping, prevents double application: processors on separate pools stand
+// in for two daemons, and the advisory barrier plus the transactional claim admit one application per event.
 func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
 	ctx := context.Background()
-	// two independent pools = two independent "processes" as far as PostgreSQL is concerned
 	p1 := pool(t)
 	defer p1.Close()
 	p2 := pool(t)
@@ -642,7 +587,6 @@ func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
 	daemonA := NewProcessorWithCheckout(p1, checkout.NewConverter(p1))
 	daemonB := NewProcessorWithCheckout(p2, checkout.NewConverter(p2))
 
-	// a full arrival + departure for the same reservation, queued before anything starts
 	insertLive(t, p1, s, "TP-GI", "GI", pay("R930", "930", "Two", "Daemons", "F930", "260101", "260105"))
 	insertLiveAt(t, p1, s, "TP-GO", "GO", pay("R930", "930", "Two", "Daemons", "F930", "260101", "260105"),
 		time.Now().Add(-time.Hour))
@@ -650,7 +594,7 @@ func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
 	for _, d := range []*Processor{daemonA, daemonB} {
-		for i := 0; i < 8; i++ { // several workers per "process", as a real daemon runs
+		for i := 0; i < 8; i++ {
 			wg.Add(1)
 			go func(d *Processor) {
 				defer wg.Done()
@@ -679,7 +623,6 @@ func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
 		t.Fatalf("cross-process application error: %v", e)
 	}
 
-	// each event applied exactly once, in order, with exactly one conversion
 	giStatus, _ := eventOutcome(t, p1, s, "TP-GI")
 	goStatus, goReview := eventOutcome(t, p1, s, "TP-GO")
 	if giStatus != "APPLIED" || goStatus != "APPLIED" {
@@ -694,15 +637,13 @@ func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
 	if status != "CHECKED_OUT" {
 		t.Fatalf("stay=%s, want CHECKED_OUT", status)
 	}
-	// the application counter is the strongest statement: exactly two applications happened, not three
 	if version != 2 {
 		t.Fatalf("last_applied_event_version = %d, want exactly 2 (one per event, applied once each)", version)
 	}
 	if n := countRows(t, p1, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID); n != 1 {
 		t.Fatalf("checkout audits = %d, want exactly 1", n)
 	}
-	// (this Stay never held an entitlement — both events are queued before anything can grant one — so the
-	// conversion correctly produces NO grace. The audit is the evidence that it ran exactly once.)
+	// The Stay never held an entitlement, so no grace is produced; the audit is the evidence the conversion ran once.
 	if n := countRows(t, p1, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID); n != 0 {
 		t.Fatalf("grace entitlements = %d: a Stay with no entitlement at the boundary must earn none", n)
 	}

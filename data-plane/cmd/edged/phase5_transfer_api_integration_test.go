@@ -2,14 +2,8 @@
 
 package main
 
-// THE CROSS-PMS TRANSFER API, against the real router, the real RBAC middleware and a real database.
-//
-// The transfer package's own suite proves the operation. What this proves is the SURFACE around it:
-//
-//   * the review signal is read-only, says out loud that it is not evidence, and authorizes nothing;
-//   * the preview writes nothing and takes no locks, so an operator can look before they commit;
-//   * execute is unreachable without permission, step-up and a bounded reason — each removed in turn;
-//   * a refused execute leaves the guest exactly as they were.
+// Cross-PMS transfer API surface against the real router, RBAC middleware and database.
+// The review signal is read-only; preview writes nothing; execute needs permission, step-up and a bounded reason.
 
 import (
 	"context"
@@ -45,14 +39,12 @@ func newTransferAPI(t *testing.T, roles ...string) *apiFixture {
 
 type xferFx struct{ stayA, stayB, stayA2, entA string }
 
-// seedTransferFixture builds two interfaces, an IN_HOUSE Stay on each, a second Stay on the first (the
-// room-move shape), and live access on the source.
+// seedTransfer builds two interfaces, an IN_HOUSE stay on each, a second stay on the first (room move), and live access on the source.
 func seedTransfer(t *testing.T, f *apiFixture) xferFx {
 	t.Helper()
 	ctx := context.Background()
 	var x xferFx
 	var pkg string
-	// stays are stay-family-guarded on the full appliance schema, so the seed opens that operation.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `WITH
 	  ia AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -120,7 +112,6 @@ func seedTransfer(t *testing.T, f *apiFixture) xferFx {
 	return x
 }
 
-// The review signal is a signal, and says so.
 func TestIntegration_TransferAPI_ReviewSignalAuthorizesNothing(t *testing.T) {
 	f := newTransferAPI(t)
 	code, raw := f.doRaw(t, http.MethodGet, "/stay-transfers/review-signals", nil)
@@ -139,7 +130,6 @@ func TestIntegration_TransferAPI_ReviewSignalAuthorizesNothing(t *testing.T) {
 	}
 }
 
-// The preview writes nothing. An operator can look at a transfer they will not perform.
 func TestIntegration_TransferAPI_PreviewIsReadOnly(t *testing.T) {
 	f := newTransferAPI(t)
 	x := seedTransfer(t, f)
@@ -179,7 +169,6 @@ func TestIntegration_TransferAPI_PreviewIsReadOnly(t *testing.T) {
 	}
 }
 
-// Each guard removed in turn, and the guest untouched by every refusal.
 func TestIntegration_TransferAPI_ExecuteRequiresTheFullWeight(t *testing.T) {
 	f := newTransferAPI(t)
 	x := seedTransfer(t, f)
@@ -279,8 +268,7 @@ func TestIntegration_TransferAPI_RBAC(t *testing.T) {
 			"password": g.password, "reason": "viewer should not transfer"}); code != http.StatusForbidden {
 		t.Fatalf("a viewer executed a transfer: %d", code)
 	}
-	// A viewer must not be able to PREVIEW either — the preview reveals another reservation's room number,
-	// and read on the lineage is not read on arbitrary stay pairs.
+	// A viewer must not preview either: it reveals another reservation's room number.
 	if code, _ := g.doRaw(t, http.MethodPost, "/stay-transfers/preview",
 		map[string]any{"from_stay_id": y.stayA, "to_stay_id": y.stayB}); code != http.StatusForbidden {
 		t.Fatalf("a viewer previewed a transfer: %d", code)

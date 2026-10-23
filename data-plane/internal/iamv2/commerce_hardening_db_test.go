@@ -12,8 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Phase-2 commerce DB-backed hardening tests (items 6/7/8/9/10/11) against the disposable iam_v2 DB.
-// Skipped unless PHASE2_TEST_DSN is set.
+// DB-backed hardening tests; skipped unless PHASE2_TEST_DSN is set.
 
 var p2Seq int64
 
@@ -37,8 +36,6 @@ func count(t *testing.T, db *pgxpool.Pool, sql string, args ...any) int {
 	return n
 }
 
-// newAccountChain creates a fresh guest account + device + unconsumed ACCOUNT auth_context bound to the
-// already-seeded package, so multiple independent quotes/confirms can run in one test.
 func newAccountChain(t *testing.T, db *pgxpool.Pool) (accountID, deviceID, authCtxID string) {
 	t.Helper()
 	i := nextSeq()
@@ -52,16 +49,9 @@ func newAccountChain(t *testing.T, db *pgxpool.Pool) (accountID, deviceID, authC
 	return
 }
 
-// addAuthContext adds another unconsumed ACCOUNT auth_context (fresh device) for an EXISTING account.
-
-// scan1Guarded runs a seed insert inside a transaction that has opened the named controlled operation.
-//
-// The auth_context and commerce_intent families are guarded in the DATABASE: a trigger refuses any write not
-// inside a transaction that opened a scope for that family. Those are real IAM-v2 invariants, not test
-// scaffolding, so the fixtures satisfy them the way production code does rather than being granted a way
-// around them. A pooled QueryRow runs in its own implicit transaction and cannot, which is why these seeds
-// stopped working once the guards landed -- and why nobody noticed, the suite being DSN-gated.
-// execGuarded is scan1Guarded for statements that return nothing.
+// Runs a seed insert inside a transaction that opens the named controlled operation: the auth_context and
+// commerce_intent families are guarded by a trigger, and a pooled QueryRow runs in its own implicit
+// transaction. execGuarded is the variant for statements returning nothing.
 func execGuarded(t *testing.T, db *pgxpool.Pool, family, sql string, args ...any) error {
 	t.Helper()
 	ctx := context.Background()
@@ -111,7 +101,6 @@ func addAuthContext(t *testing.T, db *pgxpool.Pool, accountID string) (deviceID,
 	return
 }
 
-// mkPrincipal + a fresh OTP auth_context bound to it.
 func newPrincipalChain(t *testing.T, db *pgxpool.Pool) (principalID, deviceID, authCtxID string) {
 	t.Helper()
 	i := nextSeq()
@@ -124,7 +113,6 @@ func newPrincipalChain(t *testing.T, db *pgxpool.Pool) (principalID, deviceID, a
 	return
 }
 
-// mkVoucher + a fresh VOUCHER auth_context bound to it (seeds the code-key generation the FK needs).
 func newVoucherChain(t *testing.T, db *pgxpool.Pool, pkgRevID string) (voucherID, deviceID, authCtxID string) {
 	t.Helper()
 	i := nextSeq()
@@ -141,20 +129,16 @@ func newVoucherChain(t *testing.T, db *pgxpool.Pool, pkgRevID string) (voucherID
 	return
 }
 
-// ---- item 6: every Quote/Purchase money pin substitution is rejected by PostgreSQL ----
-
 func TestC6PurchasePinSubstitutionRejected(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	e := newEngine(t, db, 5*time.Minute)
 	ctx := context.Background()
 
-	// each case: a fresh quote (unique offer_quote_id) whose purchase substitutes exactly ONE pin.
 	base := `INSERT INTO iam_v2.purchases
 	  (tenant_id,site_id,package_revision_id,offer_quote_id,auth_context_id,trigger,amount_minor,currency,currency_exponent,tax_code,tax_rate_bp,tax_amount_minor,settlement_mapping_id,state)
 	  VALUES ($1,$2,$3,$4,$5,'GUEST_SELECTION',$6,$7,$8,$9,$10,$11,$12,'PENDING')`
 
-	// the correct (matching) pin set for the free quote.
 	type pins struct {
 		pkgRev, currency any
 		amount           int64
@@ -199,8 +183,6 @@ func TestC6PurchasePinSubstitutionRejected(t *testing.T) {
 	}
 }
 
-// ---- item 7: an offer quote is immutable except the one-time consume ----
-
 func TestC7OfferQuoteImmutable(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -210,7 +192,6 @@ func TestC7OfferQuoteImmutable(t *testing.T) {
 	if err != nil || q.QuoteID == "" {
 		t.Fatalf("quote: %+v %v", q, err)
 	}
-	// direct mutation of any frozen pin is rejected.
 	for _, m := range []string{
 		`UPDATE iam_v2.offer_quotes SET price_minor=999 WHERE id=$1`,
 		`UPDATE iam_v2.offer_quotes SET currency='EUR' WHERE id=$1`,
@@ -223,13 +204,11 @@ func TestC7OfferQuoteImmutable(t *testing.T) {
 			t.Fatalf("mutation must be rejected: %s", m)
 		}
 	}
-	// the ONLY legal update: consume once (NULL -> timestamp). It is still a commerce_intent write, so it
-	// needs the scope open -- being the one permitted mutation does not exempt it from the family guard.
+	// Consuming is the one permitted mutation but still a commerce_intent write, so it needs the scope open.
 	if err := execGuarded(t, db, "commerce_intent",
 		`UPDATE iam_v2.offer_quotes SET consumed_at=now() WHERE id=$1`, q.QuoteID); err != nil {
 		t.Fatalf("one-time consume must be allowed: %v", err)
 	}
-	// re-consume / clear / mutate-after-consume all rejected.
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.offer_quotes SET consumed_at=NULL WHERE id=$1`, q.QuoteID); err == nil {
 		t.Fatal("clearing consumed_at must be rejected")
 	}
@@ -240,8 +219,6 @@ func TestC7OfferQuoteImmutable(t *testing.T) {
 		t.Fatal("post-consume mutation must be rejected")
 	}
 }
-
-// ---- item 8: the immutable duration/end policy is stamped onto the entitlement ----
 
 func TestC8DurationWindowStamped(t *testing.T) {
 	db := p2DB(t)
@@ -265,8 +242,6 @@ func TestC8DurationWindowStamped(t *testing.T) {
 		t.Fatalf("expected VALIDITY_WINDOW with a stamped window, got %s / %v", endMode, window)
 	}
 }
-
-// ---- item 9: fault injection at every mutation boundary -> zero partial rows ----
 
 var errFault = errors.New("injected fault")
 
@@ -335,13 +310,8 @@ func (t *faultTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (str
 	return id, t.trip("insert_entitlement")
 }
 
-// GrantQuotedEntitlement is THE boundary the free confirm actually crosses now.
-//
-// The three hooks above -- terminate, insert, mark-granted -- were the confirm path's steps until the
-// Phase-4 consolidation replaced them with the shared grant kernel (migration 0024). They have been
-// unreachable from this test ever since, so three of its seven "every boundary rolls back" cases were
-// proving nothing. The drift was masked by an earlier failure in the same test and only surfaced when that
-// was fixed. They are kept because the paid path still calls them; the free path's real boundary is here.
+// GrantQuotedEntitlement is the boundary the free confirm crosses; the terminate/insert/mark-granted hooks are
+// only reached by the paid path since the shared grant kernel replaced them.
 func (t *faultTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
 	id, superseded, err := t.CommerceTx.GrantQuotedEntitlement(ctx, tenantID, siteID, purchaseID)
 	if err != nil {
@@ -350,7 +320,7 @@ func (t *faultTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, 
 	return id, superseded, t.trip("grant_kernel")
 }
 func (t *faultTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
-	if err := t.trip("before_granted"); err != nil { // fail BEFORE marking granted
+	if err := t.trip("before_granted"); err != nil {
 		return err
 	}
 	return t.CommerceTx.MarkPurchaseGranted(ctx, purchaseID)
@@ -360,13 +330,11 @@ func TestC2RollbackAtEveryBoundary(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	ctx := context.Background()
-	// The boundaries the FREE confirm path actually crosses. terminate_entitlement / insert_entitlement /
-	// before_granted are no longer among them: the shared grant kernel absorbed those three steps, so a
-	// fault on them could never fire and the cases silently passed by not running.
+	// Only the boundaries the free confirm path actually crosses; a fault hook on a boundary it never reaches
+	// would pass without running.
 	boundaries := []string{"consume_quote", "consume_auth", "insert_purchase", "insert_settlement", "grant_kernel"}
 	for _, b := range boundaries {
 		acct, dev, ac := newAccountChain(t, db)
-		// build a quote with the real engine, then confirm through a fault-injecting repo.
 		eq := newEngine(t, db, 5*time.Minute)
 		q, err := eq.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: ac, PackageID: s.packageID, DeviceID: dev, GuestNetworkID: p2GN})
 		if err != nil || q.QuoteID == "" {
@@ -380,7 +348,6 @@ func TestC2RollbackAtEveryBoundary(t *testing.T) {
 		if cerr == nil && pr.Reason == "granted" {
 			t.Fatalf("%s: fault must abort the grant, got granted", b)
 		}
-		// zero partial rows for this subject; quote + auth-context NOT consumed.
 		if n := count(t, db, `SELECT count(*) FROM iam_v2.purchases WHERE auth_context_id=$1`, ac); n != 0 {
 			t.Fatalf("%s: %d purchase rows leaked", b, n)
 		}
@@ -396,7 +363,6 @@ func TestC2RollbackAtEveryBoundary(t *testing.T) {
 		if n := count(t, db, `SELECT count(*) FROM iam_v2.auth_contexts WHERE id=$1 AND consumed_at IS NOT NULL`, ac); n != 0 {
 			t.Fatalf("%s: auth-context was consumed despite rollback", b)
 		}
-		// after rollback the quote is still confirmable through the clean engine.
 		pr2, err := eq.ConfirmFreePurchase(ctx, ConfirmRequest{TenantID: p2Tenant, SiteID: p2Site, QuoteID: q.QuoteID, DeviceID: dev, GuestNetworkID: p2GN})
 		if err != nil || pr2.Reason != "granted" {
 			t.Fatalf("%s: quote must remain grantable after rollback: %+v %v", b, pr2, err)
@@ -404,13 +370,11 @@ func TestC2RollbackAtEveryBoundary(t *testing.T) {
 	}
 }
 
-// item 9 (tamper): a non-free (tampered/legacy) quote row can never be confirmed.
 func TestC2TamperedQuoteRejected(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	e := newEngine(t, db, 5*time.Minute)
 	ctx := context.Background()
-	// build a canonical snapshot to satisfy the snapshot check, then hand-insert a PRICED quote.
 	plan := PlanRevisionRow{ID: s.planRevID, DownKbps: 5000, MaxConcurrentDevices: 2, TimeAccountingMode: "VALIDITY_WINDOW"}
 	snap, _ := BuildGrantSnapshot(GrantTier{Order: 10, Value: map[string]any{}}, plan, PackageRevisionRow{ID: s.pkgRevID})
 	snap.EndMode = "MANUAL_END"
@@ -451,8 +415,6 @@ func phArgs(start, n int) string {
 	return out
 }
 
-// ---- item 10: one live entitlement per subject; supersession; cross-subject isolation ----
-
 func confirmFor(t *testing.T, db *pgxpool.Pool, e *CommerceEngine, packageID, dev, ac string) PurchaseResult {
 	t.Helper()
 	ctx := context.Background()
@@ -473,7 +435,6 @@ func TestC3SubjectUniquenessAndSupersession(t *testing.T) {
 	e := newEngine(t, db, 5*time.Minute)
 	ctx := context.Background()
 
-	// ACCOUNT subject: two sequential grants -> second supersedes first, exactly one live.
 	dev2, ac2 := addAuthContext(t, db, s.accountID)
 	first := confirmFor(t, db, e, s.packageID, s.deviceID, s.authCtxID)
 	second := confirmFor(t, db, e, s.packageID, dev2, ac2)
@@ -490,21 +451,16 @@ func TestC3SubjectUniquenessAndSupersession(t *testing.T) {
 		t.Fatalf("account must have exactly one live entitlement, got %d", n)
 	}
 
-	// VOUCHER subject: independent live entitlement (does not touch the account's).
 	_, vdev, vac := newVoucherChain(t, db, s.pkgRevID)
 	confirmFor(t, db, e, s.packageID, vdev, vac)
-	// PRINCIPAL (OTP) subject: independent live entitlement.
 	_, pdev, pac := newPrincipalChain(t, db)
 	confirmFor(t, db, e, s.packageID, pdev, pac)
 
-	// cross-subject isolation: account=1 live, voucher=1 live, principal=1 live; none superseded another.
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.entitlements WHERE status='ACTIVE'`); n != 3 {
 		t.Fatalf("three distinct subjects must yield 3 live entitlements, got %d", n)
 	}
 }
 
-// item 10 (concurrency): distinct quotes for the SAME subject, confirmed concurrently, converge on
-// exactly one live entitlement with no deadlock/orphan.
 func TestC3ConcurrentDistinctQuotesOneLive(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -514,7 +470,6 @@ func TestC3ConcurrentDistinctQuotesOneLive(t *testing.T) {
 	const n = 12
 	quotes := make([]string, n)
 	devs := make([]string, n)
-	// first quote reuses the seeded auth-context; the rest get fresh ones for the same account.
 	dev0, ac0 := s.deviceID, s.authCtxID
 	q0, _ := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: ac0, PackageID: s.packageID, DeviceID: dev0, GuestNetworkID: p2GN})
 	quotes[0], devs[0] = q0.QuoteID, dev0
@@ -539,26 +494,20 @@ func TestC3ConcurrentDistinctQuotesOneLive(t *testing.T) {
 	if granted < 1 {
 		t.Fatal("at least one distinct-quote confirm must grant")
 	}
-	// regardless of how many granted (each supersedes the prior), the subject ends with exactly ONE live.
 	if live := count(t, db, `SELECT count(*) FROM iam_v2.entitlements WHERE guest_account_id=$1 AND status IN ('PENDING','ACTIVE','SUSPENDED')`, s.accountID); live != 1 {
 		t.Fatalf("subject must converge on exactly one live entitlement, got %d", live)
 	}
 }
-
-// ---- item 11 (C5): non-PMS revision lifecycle — new revision, pointer move, old pins frozen,
-// activation toggle without history rewrite, and NO PMS settlement artifacts anywhere. ----
 
 func TestC5RevisionLifecycleNonPMS(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	ctx := context.Background()
 
-	// snapshot the published revision's pins.
 	var oldPrice int64
 	var oldRevNo int
 	db.QueryRow(ctx, `SELECT price_minor, revision_no FROM iam_v2.internet_package_revisions WHERE id=$1`, s.pkgRevID).Scan(&oldPrice, &oldRevNo)
 
-	// publish a NEWER revision of the same package and move the current-revision pointer.
 	newRev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
 		VALUES ($1,$2,$3,$4,$5,'GENERAL',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb,'{"name":"v2"}'::jsonb) RETURNING id::text`,
@@ -566,12 +515,10 @@ func TestC5RevisionLifecycleNonPMS(t *testing.T) {
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, newRev, s.packageID); err != nil {
 		t.Fatalf("pointer move: %v", err)
 	}
-	// same-parent/tenant/site invariant for the pointed revision.
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.internet_packages p JOIN iam_v2.internet_package_revisions r ON r.id=p.current_revision_id
 		WHERE p.id=$1 AND r.package_id=p.id AND r.tenant_id=p.tenant_id AND r.site_id=p.site_id`, s.packageID); n != 1 {
 		t.Fatal("current revision must share parent/tenant/site")
 	}
-	// old revision pins are unchanged (and immutable).
 	var chkPrice int64
 	db.QueryRow(ctx, `SELECT price_minor FROM iam_v2.internet_package_revisions WHERE id=$1`, s.pkgRevID).Scan(&chkPrice)
 	if chkPrice != oldPrice {
@@ -581,7 +528,6 @@ func TestC5RevisionLifecycleNonPMS(t *testing.T) {
 		t.Fatal("published revision must be immutable")
 	}
 
-	// deactivate + reactivate the package: a package-row toggle, no revision history rewrite.
 	before := count(t, db, `SELECT count(*) FROM iam_v2.internet_package_revisions WHERE package_id=$1`, s.packageID)
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET active=false WHERE id=$1`, s.packageID); err != nil {
 		t.Fatalf("deactivate: %v", err)
@@ -593,11 +539,9 @@ func TestC5RevisionLifecycleNonPMS(t *testing.T) {
 		t.Fatalf("activation toggle rewrote revision history: %d -> %d", before, after)
 	}
 
-	// NO PMS settlement artifacts were created or used by any Phase-2 path.
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.package_settlement_mappings`); n != 0 {
 		t.Fatalf("no settlement mapping may exist in Phase 2, got %d", n)
 	}
-	// Free grants settle NOT_REQUIRED and voucher redemptions PREPAID; no money rail was touched.
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.settlements WHERE method NOT IN ('NOT_REQUIRED','PREPAID')`); n != 0 {
 		t.Fatalf("no money-rail settlement may exist, got %d", n)
 	}

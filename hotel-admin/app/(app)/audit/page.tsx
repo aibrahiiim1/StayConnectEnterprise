@@ -1,24 +1,8 @@
 "use client";
 
-// ACTIVITY — who changed what, and when.
-//
-// WHAT THIS REPLACES. A raw table of the audit rows: a timestamp, an actor uuid, a dotted action code, a
-// target uuid, an IP and a payload column that said "—". Every fact was present and none of it was legible.
-//
-// The trail itself is unchanged and untouchable: append-only, nothing rewritten, nothing backfilled. What
-// changed is that the screen now reads it out loud. Each row leads with a sentence, a person and a time; the
-// exact action code, the ids, the address and the payload are one click away, because the day this screen
-// matters most is the day somebody needs the precise record rather than the readable one.
-//
-// SEVERITY IS NOT INVENTED. Three levels, assigned per action in lib/audit-words.ts: a notice (something
-// happened), a change (configuration moved) and a security event (someone saw a guest's typed credentials,
-// a backup left the appliance, an unlicensed-mode attempt was refused). Anything unrecognised is shown with
-// its code intact rather than guessed at.
-//
-// PAGED ON THE SERVER. The screen used to read the newest 500 entries and filter and count those in the
-// browser, so on a busy appliance anything older was unreachable and the filter counts described the 500.
-// The period, category, security filter and search now all run in edged, a page at a time; the filter counts
-// are the server's count of the whole period. The search text travels in a header, not the URL.
+// The trail is append-only; each row leads with a sentence, a person and a time, with the exact record one
+// click away. Severity is assigned per action in lib/audit-words.ts and unrecognised actions show their code.
+// Period, category, security filter and search run server-side in edged, a page at a time.
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
@@ -55,7 +39,7 @@ type Row = {
 };
 type AuditResp = PagedFields & {
   data?: Row[];
-  /** How many entries of each action code the period holds -- never narrowed by the category or search. */
+  /** Entries per action code for the period; never narrowed by the category or search. */
   actions?: { action: string; count: number }[];
 };
 
@@ -70,8 +54,7 @@ type Chip = "all" | "security" | AuditCategory;
 
 export default function ActivityPage() {
   const [range, setRange] = useState(RANGES[2]);
-  // The moment the period was measured from. Fixed until the period changes or the operator refreshes, so
-  // paging walks one stable question instead of a window that slides with every request.
+  // Fixed until the period changes or the operator refreshes, so paging walks a stable window.
   const [anchor, setAnchor] = useState(() => Date.now());
   const [chip, setChip] = useState<Chip>("all");
   const [text, setText] = useState("");
@@ -79,9 +62,7 @@ export default function ActivityPage() {
   const [names, setNames] = useState<Map<string, string>>(new Map());
 
   const period = `${range.label}|${anchor}`;
-  // The per-action counts of the period, from the server. They are what turns a category, the security filter
-  // and a search by readable title into the exact action codes the server filters by: the words live here, the
-  // rows live there.
+  // The server's per-action counts turn a category, the security filter or a title search into the action codes it filters by.
   const [counts, setCounts] = useState<{ period: string; byAction: Map<string, number> } | null>(null);
   const countsReady = counts?.period === period;
   const q = text.trim().toLowerCase();
@@ -97,8 +78,7 @@ export default function ActivityPage() {
     () => (q && counts ? [...counts.byAction.keys()].filter((a) => auditWords(a).title.toLowerCase().includes(q)) : []),
     [q, counts],
   );
-  // A category or a title search needs this period's counts first. Until they arrive the request asks only for
-  // the period (and its counts), and its rows are not shown as if they were the filtered answer.
+  // Until the counts arrive, the unfiltered rows are not shown as the filtered answer.
   const needsCounts = chip !== "all" || q !== "";
   const filterReady = !needsCounts || countsReady;
 
@@ -108,7 +88,7 @@ export default function ActivityPage() {
     if (filterReady && codes) p.set("action", codes.join(","));
     return `/audit?${p.toString()}`;
   }, [range, anchor, filterReady, codes]);
-  // THE SEARCH TRAVELS IN HEADERS, never the URL: the text, and the codes whose readable title matched it.
+  // The search text travels in headers, never the URL.
   const headers = useMemo(
     () => (q ? {
       "X-Audit-Search": encodeURIComponent(text.trim()),
@@ -120,7 +100,7 @@ export default function ActivityPage() {
   const list = useServerPage<AuditResp>({ path, headers });
   const { resp, current, err, loading } = list;
 
-  // Each answer carries the period's counts; keep them against the period they describe.
+  // Keep each answer's counts against the period they describe.
   useEffect(() => {
     if (!current || !resp?.actions) return;
     setCounts({ period, byAction: new Map(resp.actions.map((a) => [a.action, a.count])) });
@@ -128,13 +108,8 @@ export default function ActivityPage() {
 
   const rows = current && filterReady && resp ? resp.data ?? [] : null;
 
-  // THE OPERATOR DIRECTORY, ONCE. An audit row records who by id, which is the precise fact and the useless
-  // one -- nobody scanning for "who changed the retention policy" can read a uuid. The exact id stays in the
-  // expandable record; this is what puts a name on the summary line. Failure is silent on purpose: an
-  // activity trail that would not render because a second request failed is worse than one showing ids.
-  //
-  // ONLY FOR A ROLE THAT MAY READ THE DIRECTORY. Every other role was refused (403) on every visit -- a console
-  // error on load for each of them (audit L-2) -- and sees the ids, which is all it may see.
+  // Operator names for the summary line; failure is silent so the trail still renders with ids. Only roles
+  // that may read the directory ask, since others would get a 403 on every visit.
   const roles = useOperatorRoles();
   const mayReadOperators = roles !== null && canRead("operators", roles);
   useEffect(() => {
@@ -144,9 +119,7 @@ export default function ActivityPage() {
       .catch(() => {});
   }, [mayReadOperators]);
 
-  // Counts per filter, over the WHOLE period -- the server counted every entry, not the page on screen. Read
-  // straight from the current answer when there is one, so the counts arrive with the rows rather than a
-  // render later.
+  // Counts cover the whole period, read from the current answer so they arrive with the rows.
   const shownCounts = useMemo(
     () => (current && resp?.actions
       ? new Map(resp.actions.map((a) => [a.action, a.count]))
@@ -164,8 +137,7 @@ export default function ActivityPage() {
     return out;
   }, [shownCounts]);
 
-  // The Hotel filter only where hospitality has history -- or where a Hotel entry is in the period, because a
-  // filter must never be missing for rows that exist. The rows themselves are never filtered by module.
+  // The Hotel filter shows where hospitality has history or a Hotel entry is in the period; rows are never filtered by module.
   const caps = useCapabilities();
   const categories = auditCategoriesFor((m) =>
     moduleHasHistory(caps, m)
@@ -173,7 +145,6 @@ export default function ActivityPage() {
 
   const chipOptions: { value: Chip; label: React.ReactNode; count?: number; tone?: "warn" }[] = [
     { value: "all", label: "Everything", count: shownCounts ? chipCounts.all : undefined },
-    // SECURITY EVENTS FIRST, because that is the filter somebody reaches for under pressure.
     {
       value: "security",
       label: <><ShieldAlert className="size-3.5" aria-hidden /> Security</>,
@@ -327,7 +298,6 @@ export default function ActivityPage() {
                     {isOpen && (
                       <div id={panel} className="mb-4 me-4 ms-11 space-y-3 rounded-md border border-border bg-surface p-3 sm:me-5">
                         {w.note && <p className="text-sm text-muted-foreground">{w.note}</p>}
-                        {/* THE EXACT RECORD. Unchanged, for the day the readable version is not enough. */}
                         <KeyValueGrid
                           columns={2}
                           items={[

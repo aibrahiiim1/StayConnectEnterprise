@@ -1,14 +1,7 @@
 "use client";
 
-// "DELETE…" FOR A PACKAGE OR A PLAN.
-//
-// A package or plan may be deleted permanently only when nothing has ever used it (migration 0091): no grant,
-// purchase, portal offer, voucher, billing mapping, grace policy or guest account — and, for a plan, no package
-// version built on it. The server decides, from the same list the database refuses on; this dialog shows its
-// answer. When the answer is yes it asks for a reason and the operator's password and deletes. When it is no it
-// shows what is attached, with real counts, and offers the thing that IS possible — disabling, which stops it
-// being offered and keeps its history. If something starts using the item while the dialog is open, the delete
-// is refused by the server and the dialog switches to the refusal it returned.
+// Delete only unused packages or plans; the server rechecks dependencies at submission to catch concurrent use.
+// Deletion requires password and reason; disabling retains history when deletion is refused.
 
 import { useEffect, useId, useState } from "react";
 import { Trash2, Ban } from "lucide-react";
@@ -37,11 +30,8 @@ export function DeleteDialog({
   onOpenChange: (v: boolean) => void;
   kind: "package" | "plan";
   name: string;
-  /** Fetches the deletability answer for this record. */
   load: () => Promise<Deletability>;
-  /** Performs the deletion; omitted for a read-only operator. Throws the server's refusal. */
   onDelete?: (args: { reason: string; password: string }) => Promise<void>;
-  /** Offered as the alternative; omitted when the record cannot be disabled (already disabled, or a plan). */
   onDisableInstead?: () => void;
   disableLabel?: string;
 }) {
@@ -55,7 +45,7 @@ export function DeleteDialog({
   const passwordId = useId();
 
   useEffect(() => {
-    // Cleared on close: a password must not outlive the dialog that collected it.
+    // Clear the password when the dialog closes.
     if (!open) { setAnswer(null); setErr(null); setActionErr(null); setReason(""); setPassword(""); return; }
     let live = true;
     load().then((d) => { if (live) setAnswer(d); }).catch((e) => { if (live) setErr(e); });

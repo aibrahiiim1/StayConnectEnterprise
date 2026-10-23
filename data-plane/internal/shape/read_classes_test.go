@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// B-18: a FAILED counter read is not "no classes". Treating it so made netd re-create every class (a new epoch,
-// a restarted series, the bytes since the last reading lost) and made acctd read every counter as zero.
+// A failed counter read is not "no classes": that made netd re-create every class and acctd read zeros.
 func TestReadClassesFailureIsAnErrorNotAnEmptyInventory(t *testing.T) {
 	c := &Client{TCPath: "tc", IPPath: "ip", infraReady: map[string]bool{}, bridgeMu: map[string]*sync.Mutex{},
 		exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -20,7 +19,6 @@ func TestReadClassesFailureIsAnErrorNotAnEmptyInventory(t *testing.T) {
 	}
 }
 
-// The one failure that IS an empty inventory: the device does not exist (an IFB never created).
 func TestReadClassesAbsentDeviceIsEmpty(t *testing.T) {
 	c := &Client{TCPath: "tc", IPPath: "ip", infraReady: map[string]bool{}, bridgeMu: map[string]*sync.Mutex{},
 		exec: func(ctx context.Context, name string, args ...string) ([]byte, error) {

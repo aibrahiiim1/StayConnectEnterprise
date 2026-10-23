@@ -1,18 +1,9 @@
 package main
 
-// NOTIFICATION SENDERS, OPERATED LIKE A PRODUCT: contract docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §7.
-//
-// Three things the boot-time loader could not do:
-//   1. RELOAD. Senders were resolved once at start-up, so an SMTP change in the Admin Console took effect at
-//      the next restart. edged now pokes /v1/admin/notify/reload after every provider write.
-//   2. SEAL. The secret of a sender (SMTP password, API key, access token) is sealed by scd under
-//      notify_dek.key and stored in iam_v2.notification_provider_secret_generations; the plaintext api_key
-//      column is left NULL for every row written from now on. edged forwards the secret here once and never
-//      reads it back; the loader prefers a sealed generation and falls back to api_key for rows written
-//      before 0107, so nothing breaks on upgrade.
-//   3. TEST. "Send a test message" builds the sender from the row as stored -- the same construction the
-//      loader uses -- delivers one message to an operator-supplied address, and records the outcome on the
-//      row (last_success_at / last_error) where the Delivery page shows it.
+// Notification senders are operated like a product. Reload: edged pokes /v1/admin/notify/reload after every provider write.
+// Seal: a sender's secret is sealed by scd under notify_dek.key (iam_v2.notification_provider_secret_generations); edged
+// forwards it once and never reads it back, and the loader falls back to the plaintext api_key column only for rows written
+// before 0107. Test: a test message is built from the row as stored, sent to an operator-supplied address, and the outcome recorded on the row.
 
 import (
 	"context"
@@ -42,7 +33,6 @@ const (
 	notifyDomain  = "notify-secret-aead:v1"
 )
 
-// notifySet is the resolved sender trio, swapped atomically on reload.
 type notifySet struct {
 	mail     mail.Mailer
 	sms      sms.Sender
@@ -69,7 +59,6 @@ func (s *server) initNotifyKey(secretsDir string) {
 	}
 }
 
-// openNotifySecret is the loader's SecretOpener.
 func (s *server) openNotifySecret(ctx context.Context, providerID string) (string, bool) {
 	if !s.notifyKey.Present() || s.db == nil {
 		return "", false
@@ -93,7 +82,6 @@ func (s *server) openNotifySecret(ctx context.Context, providerID string) (strin
 	return string(plain), true
 }
 
-// loadNotify (re)resolves the senders from the database and swaps them in.
 func (s *server) loadNotify(ctx context.Context) {
 	nctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -111,8 +99,7 @@ func (s *server) loadNotify(ctx context.Context) {
 	slog.Info("notification providers loaded", "email", loaded.MailerKind, "sms", loaded.SenderKind, "whatsapp", loaded.WhatsAppKind)
 }
 
-// senders returns the current trio. Tests that set s.mail / s.sms / s.whatsapp directly are honoured: the
-// struct fields win when the swap set was never populated.
+// senders returns the current trio; fields set directly on s (tests) win when the swap set was never populated.
 func (s *server) senders() (mail.Mailer, sms.Sender, whatsapp.Sender) {
 	s.notify.mu.RLock()
 	defer s.notify.mu.RUnlock()
@@ -136,8 +123,7 @@ func (s *server) notifyAdminRoutes(r chi.Router) {
 	r.Get("/v1/admin/notify/providers/{id}/secret-state", s.notifySecretState)
 }
 
-// notifySecretState answers whether a current sealed generation exists for a provider row -- a yes/no only,
-// never the secret. edged asks this when validating a change to a sender whose plaintext column is NULL.
+// notifySecretState answers yes/no whether a current sealed generation exists for a provider row, never the secret.
 func (s *server) notifySecretState(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var sealed bool
@@ -157,8 +143,7 @@ func (s *server) notifyReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// notifySecretStore seals one secret for a provider row, supersedes the previous generation and clears the
-// plaintext column. edged has already authorised the operator; this socket is not reachable from the network.
+// notifySecretStore seals one secret, supersedes the previous generation and clears the plaintext column; edged has already authorised the operator.
 func (s *server) notifySecretStore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req struct {
@@ -220,7 +205,6 @@ func (s *server) notifySecretStore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "generation": next})
 }
 
-// notifyTest delivers one test message with the provider as stored. The outcome is recorded on the row.
 func (s *server) notifyTest(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req struct {
@@ -292,8 +276,7 @@ func (s *server) recordNotifyOutcome(ctx context.Context, id string, serr error)
 		_, _ = s.db.Exec(ctx, `UPDATE notification_providers SET last_success_at = now(), last_error = NULL, last_error_at = NULL WHERE id=$1::uuid AND tenant_id=$2`, id, s.tenID)
 		return
 	}
-	// The stored text is shown to every role that reads the provider screen: no recipient in it (B12). The
-	// answer to the test itself keeps the provider's words in full, for the administrator who typed the address.
+	// The stored text is shown to every role that reads the provider screen, so it holds no recipient; the test's own answer keeps the provider's words for the administrator who typed the address.
 	msg := notifyloader.ScrubContacts(serr.Error())
 	if len(msg) > 500 {
 		msg = msg[:500]

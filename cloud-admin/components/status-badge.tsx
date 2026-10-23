@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { activationInfo, connectionInfo, licenseInfo, type StateInfo } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-/** A state as a badge: always the word, the colour only reinforces it. The explanation is the hover title. */
+/** State text remains visible so color is never the sole cue. */
 export function StateBadge({ info, className }: { info: StateInfo; className?: string }) {
   return (
     <Badge tone={info.tone} dot className={className}>
@@ -23,7 +23,6 @@ export function LicenseBadge({ value, className }: { value: string | null | unde
   return <StateBadge info={licenseInfo(value ?? "none")} className={className} />;
 }
 
-/** A small label/value pair for fact lists (a <dl>). */
 export function Fact({ label, children, className }: { label: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("min-w-0", className)}>

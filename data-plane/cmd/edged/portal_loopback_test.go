@@ -10,12 +10,8 @@ import (
 	"testing"
 )
 
-// THE PORTAL PREVIEW AND BUILT-IN WORDING MUST NOT FOLLOW THE PORTAL'S HTTPS REDIRECT OFF THE BOX (audit L-1).
-//
-// On PRE-LIVE, with HTTPS active, GET /portal-branding/preview and /portal-branding/languages answered 503: edged
-// followed portald's 302 https://<canonical>/ to Caddy, which has no certificate for that name. These tests stand
-// up the three parties -- portald's HTTP listener, portald's TLS listener, and the place the redirect points to --
-// and assert who is asked.
+// The portal preview must not follow portald's HTTPS redirect off the box. These tests stand up portald's HTTP
+// listener, its TLS listener and the redirect target, and assert who is asked.
 
 type loopbackRig struct {
 	httpSrv, tlsSrv, offBox *httptest.Server
@@ -43,8 +39,7 @@ func newLoopbackRig(t *testing.T, httpsActive bool) *loopbackRig {
 	t.Cleanup(rig.tlsSrv.Close)
 	rig.httpSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if httpsActive {
-			// portald's httpFront: every page to the canonical HTTPS origin -- which, from the appliance host,
-			// is somewhere else entirely.
+			// portald's httpFront redirects every page to the canonical HTTPS origin.
 			http.Redirect(w, r, rig.offBox.URL+r.URL.Path, http.StatusFound)
 			return
 		}
@@ -73,7 +68,7 @@ func TestPortalLoopback_HTTPSInactiveReadsTheHTTPListener(t *testing.T) {
 
 func TestPortalLoopback_HTTPSActiveAsksTheTLSListenerOnLoopbackWithTheCanonicalHost(t *testing.T) {
 	rig := newLoopbackRig(t, true)
-	// httptest's certificate is issued for example.com, which stands in for the canonical portal hostname.
+	// httptest's certificate is for example.com, standing in for the canonical hostname.
 	st, body, err := rig.loopback().get(context.Background(), "/api/languages", "example.com")
 	if err != nil || st != 200 || !strings.Contains(string(body), "Welcome") {
 		t.Fatalf("get = %d %q %v", st, body, err)

@@ -2,18 +2,7 @@ import { describe, it, expect } from "vitest";
 import resolveConfig from "tailwindcss/resolveConfig";
 import tailwindConfig from "../tailwind.config";
 
-// THE MOST-USED UTILITY ON THIS ADMIN POINTED AT THE WRONG TOKEN.
-//
-// globals.css defines two deliberately different things: --muted is a quiet SURFACE (very nearly white in the
-// light theme) and --muted-foreground is a quiet LABEL. Its own comment says they exist so that "a quiet
-// label and a quiet panel be styled independently".
-//
-// Tailwind resolves `text-muted` to muted.DEFAULT, and DEFAULT was the surface. So 517 secondary labels
-// across these screens rendered at 1.12:1 against a white card -- not "low contrast", effectively invisible.
-// That is the grey text operators have been squinting past, and it was one mapping rather than 517 pages.
-//
-// This test pins the mapping. A future refactor that points DEFAULT back at the surface fails here instead of
-// silently making half the admin unreadable again.
+// `text-muted` must map to the quiet LABEL (--muted-foreground), not the near-white --muted surface (1.12:1 contrast).
 
 const cfg = resolveConfig(tailwindConfig as any);
 const colors = (cfg.theme as any).colors;
@@ -42,13 +31,10 @@ describe("quiet labels are readable", () => {
   });
 
   it("the quiet panel is still reachable, by a name that says what it is", () => {
-    // The three places that genuinely wanted a quiet SURFACE must not have been collateral damage.
     expect(colors["muted-surface"]).toContain("--muted");
   });
 
   it("the resulting contrast clears WCAG AA in both themes", () => {
-    // Values straight from globals.css. If someone darkens a card or lightens a label past the threshold,
-    // this fails with the number rather than with an opinion.
     const LIGHT_LABEL: [number, number, number] = [218, 13, 44];
     const LIGHT_CARD: [number, number, number] = [0, 0, 100];
     const DARK_LABEL: [number, number, number] = [220, 14, 64];
@@ -57,8 +43,6 @@ describe("quiet labels are readable", () => {
     expect(ratio(LIGHT_LABEL, LIGHT_CARD)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(DARK_LABEL, DARK_CARD)).toBeGreaterThanOrEqual(4.5);
 
-    // And the value it used to have does NOT -- so this test would have failed before the fix rather than
-    // passing for a reason unrelated to the defect.
     const OLD_LIGHT: [number, number, number] = [212, 22, 95];
     expect(ratio(OLD_LIGHT, LIGHT_CARD)).toBeLessThan(1.5);
   });

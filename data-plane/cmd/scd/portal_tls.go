@@ -1,25 +1,9 @@
 package main
 
-// THE PORTAL'S HTTPS CERTIFICATES, AND THE ONE ANSWER TO "IS THE PORTAL ON HTTPS RIGHT NOW".
-//
-// docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md sections 3, 4 and 7. Central owns the hostname, the
-// DNS record and the ACME order; THIS APPLIANCE owns the private key (generated here, never sent anywhere) and the
-// decision whether what Central issued is safe to serve. The agent below runs every five minutes and on a kick:
-//
-//	sync     POST /v1/appliance/portal-tls/sync  -- tell Central the portal address and the hotel domain the site
-//	         asked for; learn the OneGate hostname, the domain's verification state and each certificate's status
-//	order    when a hostname has no usable certificate (missing, expired, revoked, past renew_after, or not
-//	         matching its key): a NEW P-256 key, a CSR, POST /v1/appliance/portal-tls/orders
-//	collect  GET /v1/appliance/portal-tls/orders/{id} until ISSUED; verify, install atomically
-//	decide   canonical hostname, https_active and the fallback reason (contract section 4), persisted in
-//	         public.portal_tls_state and served to portald on GET /v1/portal/tls-state
-//
-// HTTPS NEVER DEPENDS ON CENTRAL BEING REACHABLE. Once a valid certificate is installed the portal stays on HTTPS
-// through an internet outage: the decision reads the certificate files and the portal address, not the last sync.
-// Central's reachability matters only when there is no usable certificate (CENTRAL_UNREACHABLE).
-//
-// THE FALLBACK IS THE APPROVED HTTP PORTAL (contract section 1, decision 6), not an error state: manual codes keep
-// working, emails carry the code alone, social sign-in is hidden, and recovery is automatic.
+// Portal HTTPS certificates (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md sections 3, 4, 7).
+// Central owns the hostname, DNS and ACME order; this appliance owns the private key (generated here, never
+// sent) and decides whether an issued certificate is safe to serve. HTTPS never depends on Central being
+// reachable once a valid certificate is installed; the HTTP fallback is the approved portal, not an error state.
 
 import (
 	"bytes"
@@ -105,8 +89,6 @@ type PortalTLSState struct {
 	Trust string `json:"trust"`
 }
 
-// ---- persistence ---------------------------------------------------------------------------------------------
-
 type ptSettings struct {
 	PortalIP     string // "" when the site has no portal address (every default candidate overlapped)
 	CustomDomain string // "" when none
@@ -153,8 +135,6 @@ type ptRepo interface {
 	UpsertCert(ctx context.Context, row *ptCertRow) error
 	DeleteCert(ctx context.Context, host string) error
 }
-
-// ---- Central (contract section 7) ----------------------------------------------------------------------------
 
 type ptSyncReq struct {
 	PortalIP     string  `json:"portal_ip"`
@@ -226,8 +206,6 @@ func (e *ptHTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d", e.Code)
 }
 func (e *ptHTTPError) Unwrap() error { return &httpStatusErr{code: e.Code} }
-
-// ---- the agent -----------------------------------------------------------------------------------------------
 
 type portalTLSAgent struct {
 	repo    ptRepo
@@ -821,8 +799,6 @@ func portalAddressUp(ip string) bool {
 	return false
 }
 
-// ---- the HTTP client to Central ------------------------------------------------------------------------------
-
 // ptHTTPCentral rides the same mutual-TLS transport and appliance JWT as every other /v1/appliance/ call
 // (central_retry.go): s.centralMTLS for the client certificate, applianceauth.SignRequest for the bearer.
 type ptHTTPCentral struct{ s *server }
@@ -936,8 +912,6 @@ func (c ptHTTPCentral) GetOrder(ctx context.Context, id string) (*ptOrder, error
 	}
 	return &o, nil
 }
-
-// ---- the database --------------------------------------------------------------------------------------------
 
 type ptPGRepo struct{ db *pgxpool.Pool }
 
@@ -1057,8 +1031,6 @@ func (r ptPGRepo) DeleteCert(ctx context.Context, host string) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM public.portal_certificates WHERE hostname = $1`, host)
 	return err
 }
-
-// ---- wiring and the local API --------------------------------------------------------------------------------
 
 // initPortalTLS builds the agent. talksToCentral is false for an appliance with no Central or one Central
 // removed: the agent still runs, and serves whatever valid certificate is installed until it expires.

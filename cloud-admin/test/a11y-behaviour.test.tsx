@@ -6,10 +6,6 @@ import { mockFetch, PLATFORM_ME, renderAs } from "./helpers";
 import { nav } from "./navigation";
 import { CUSTOMER, SITE } from "./fixtures";
 
-// The console's accessibility behaviour (WCAG 2.2 AA audit): page titles, an ended sign-in, the sign-in page's
-// reason and safe return, focus when the sign-in step changes, labelled controls, field-level errors and
-// descriptive names for buttons that show only a number.
-
 vi.mock("next/navigation", async () => (await import("./navigation")).navigationModule);
 vi.mock("qrcode", () => ({ default: { toDataURL: async () => "data:image/png;base64,AAAA" } }));
 
@@ -55,7 +51,7 @@ describe("the app shell", () => {
     }
     render(<AppLayout><Page /></AppLayout>);
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/login?next=%2Fcustomers&reason=expired"));
-    // The stale cookie is cleared first, or the sign-in page would bounce straight back.
+    // Clear stale cookies before redirect to avoid a sign-in loop.
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/auth/logout")).toBe(true);
   });
 });
@@ -81,7 +77,6 @@ describe("the sign-in page", () => {
     await waitFor(() => expect(document.title).toBe("Sign in · OneGate Central"));
     const notice = await screen.findByText(/Your sign-in ended/);
     expect(notice.closest("[role=status]")).toHaveAttribute("aria-live", "polite");
-    // The username field is for the browser's password manager: autocomplete says so.
     expect(screen.getByLabelText(/^Email/)).toHaveAttribute("autocomplete", "username");
     await signIn(user);
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/customers/c1?tab=sites"));
@@ -114,7 +109,6 @@ describe("the second sign-in step", () => {
     const user = userEvent.setup();
     mockFetch([{ method: "POST", match: "/api/v1/auth/login/code", body: { recovery_codes: ["AAAA-BBBB", "CCCC-DDDD"] } }]);
     render(<SigninSecondStep step="code" onDone={vi.fn()} onRestart={vi.fn()} />);
-    // Disabled until a code is typed, and it says why.
     const submit = screen.getByRole("button", { name: "Sign in" });
     expect(submit).toBeDisabled();
     expect(submit).toHaveAccessibleDescription("Enter your code to continue.");

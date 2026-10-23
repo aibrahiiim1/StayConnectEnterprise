@@ -1,20 +1,10 @@
 package main
 
-// THE ERASURE LEDGER, ON THE APPLIANCE (GDPR final mission; internal/ledger; migration 0148).
-//
-// Every erasure and every closed data-protection request is an entry in an append-only, hash-chained ledger that lives in
-// THREE places: the database (written in the same transaction as the erasure), a file on the appliance (the primary copy),
-// and an independent secondary storage the hotel sets up (a mounted external disk or share, an SFTP server, or an
-// S3-compatible bucket it owns). The first two are always present; the third is mandatory: until it is set up and verified,
-// erasure is refused.
-//
-// edged does the work of a request inside one database transaction. Before it commits, it hands the new entries to this
-// package (/v1/ledger/commit), which makes them durable in the primary copy and the secondary copy and reads both back. Only
-// when that succeeds does edged commit and tell the person. If either copy cannot be written, edged rolls back and nothing
-// was erased. An hourly reconciliation (and the start of every request) keeps the three in step, heals a missing or damaged
-// copy from the others, adopts an entry a crash left behind, and refuses to overwrite a copy that is ahead.
-//
-// Nothing here is sent to OneGate Central. The secondary storage belongs to the hotel.
+// The erasure ledger (internal/ledger): an append-only hash-chained record of every erasure and closed data-protection request, kept in the
+// database (same transaction as the erasure), a primary file on the appliance, and a mandatory independent secondary storage; until that is set up and verified, erasure is refused.
+// edged hands new entries to /v1/ledger/commit before it commits and commits only when both copies are durable and read back; otherwise it
+// rolls back and nothing was erased. Hourly reconciliation heals a missing or damaged copy and refuses to overwrite a copy that is ahead.
+// Nothing here goes to OneGate Central.
 
 import (
 	"context"
@@ -42,8 +32,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 )
 
-// ledgerLocalPath is the primary copy. It lives outside the backup folders on purpose: backups are rotated and restored, the
-// ledger is neither.
+// ledgerLocalPath is the primary copy, outside the backup folders on purpose: backups are rotated and restored, the ledger is neither.
 var ledgerLocalPath = "/var/lib/stayconnect/ledger/erasure-ledger.jsonl"
 
 // ledgerOwnPlaces are where the appliance keeps its own data; the secondary storage must be on none of those disks.
@@ -66,10 +55,8 @@ type ledgerRuntime struct {
 	destErr     string
 }
 
-// ledgerStatus is what the administrator sees and what edged checks before it starts an erasure.
 type ledgerStatus struct {
-	// ErasureAvailable is true only when both copies are healthy and in step with the database. It never affects guest
-	// internet access: a ledger problem stops erasure requests, nothing else.
+	// ErasureAvailable: both copies healthy and in step with the database. A ledger problem stops erasure requests only, never guest internet.
 	ErasureAvailable bool      `json:"erasure_available"`
 	State            string    `json:"state"` // ok | not_configured | attention | recovery_needed | blocked | unavailable
 	Message          string    `json:"message"`
@@ -100,8 +87,6 @@ type ledgerStatus struct {
 	} `json:"secondary"`
 }
 
-// ---- start-up ------------------------------------------------------------------------------------------------------
-
 func (s *server) ledgerInit(secretsDir string) {
 	if raw, err := localkeys.LoadExistingKey(filepath.Join(secretsDir, notifyKeyFile)); err == nil {
 		if k, err := sealbox.NewKey(ledgerSecretDomain, raw); err == nil {
@@ -113,7 +98,6 @@ func (s *server) ledgerInit(secretsDir string) {
 	s.ledgerRT.store = ledger.NewStore(ledger.Config{LocalPath: ledgerLocalPath, Cipher: s.ledgerCipher})
 }
 
-// ledgerCipher is who the secondary copy is encrypted to: the hotel's backup key holders.
 func (s *server) ledgerCipher(ctx context.Context) (*ledger.Cipher, error) {
 	keys, err := s.backupRecipientKeys(ctx)
 	if err != nil {
@@ -131,8 +115,6 @@ func (s *server) ledgerCipher(ctx context.Context) (*ledger.Cipher, error) {
 	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
 	return &ledger.Cipher{Recipients: rcpt, Fingerprint: hex.EncodeToString(sum[:8])}, nil
 }
-
-// ---- the destination: building it, saving it, loading it ---------------------------------------------------------------
 
 type ledgerDestConfig struct {
 	Kind        string `json:"kind"`
@@ -234,8 +216,6 @@ func (s *server) ledgerLoadDestination(ctx context.Context) error {
 	return nil
 }
 
-// ---- the reconciliation --------------------------------------------------------------------------------------------
-
 func parseEntries(doc []byte) ([]ledger.Entry, error) {
 	var e []ledger.Entry
 	if err := json.Unmarshal(doc, &e); err != nil {
@@ -262,9 +242,7 @@ func ledgerMissing(err error) bool {
 	return errors.As(err, &pgErr) && (pgErr.Code == "42883" || pgErr.Code == "42P01" || pgErr.Code == "3F000")
 }
 
-// ledgerReconcile brings the three copies into step and reports on them. It holds the ledger's advisory lock for its whole
-// run, so it can never see an erasure half done: an entry in the file that the database does not have is, while the lock is
-// held, a crash's leftover and not a request in flight.
+// ledgerReconcile holds the ledger's advisory lock for its whole run, so a file entry the database lacks is a crash's leftover, not a request in flight.
 func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 	rt := &s.ledgerRT
 	rt.reconcileMu.Lock()
@@ -338,7 +316,6 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 		return finish()
 	}
 
-	// ---- the primary copy against the database
 	local := rt.store.ReadLocal()
 	if local.Reach != nil {
 		st.Local.Error = local.Reach.Error()
@@ -374,8 +351,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 			local = rt.store.ReadLocal()
 		}
 	}
-	// A file that holds nothing but the first entry of ANOTHER ledger (a replacement appliance's own new ledger, left over after
-	// the database was restored from the appliance it replaces) says nothing about erasures: the database is the truth.
+	// A file holding only the first entry of ANOTHER ledger (a replacement appliance's new ledger after a restore from the old one) says nothing about erasures: the database is the truth.
 	if local.Present && local.Parse.Err == nil && len(local.Parse.Entries) == 1 && local.Parse.LedgerID() != head.Ledger {
 		if !healLocal("it held only the first entry of another ledger") {
 			st.State, st.Message = "attention", "the erasure ledger on the appliance could not be rebuilt"
@@ -401,8 +377,7 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 			le = local.Parse.Entries
 		}
 	case len(le) > len(dbE):
-		// The file holds entries the database lacks: erasures it has not yet been told of (a restore from an older backup, or
-		// an entry a crash left after the file was written but before the database committed). Applied now.
+		// The file holds entries the database lacks (a restore from an older backup, or a crash between file write and database commit): applied now.
 		adopt := len(dbE) == 1 && le[0].Ledger != head.Ledger
 		doc, _ := json.Marshal(le[len(dbE):])
 		if adopt {
@@ -433,7 +408,6 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 	}
 	st.Local.Present, st.Local.Intact, st.Local.Entries = true, true, len(le)
 
-	// ---- the secondary copy
 	dest := rt.store.Destination()
 	switch {
 	case dest == nil && destErr != "":
@@ -484,7 +458,6 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 	if err := tx.Commit(ctx); err != nil {
 		problem("the reconciliation could not be committed: %v", err)
 	}
-	// the destination's health, for the screen
 	if dest != nil {
 		ok := st.External.InSync
 		msg := st.External.Error
@@ -514,8 +487,6 @@ func (s *server) ledgerReconcile(ctx context.Context) ledgerStatus {
 
 func sha256hex(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
-// ---- HTTP: the surface edged calls --------------------------------------------------------------------------------------
-
 func (s *server) ledgerStatusGet(w http.ResponseWriter, r *http.Request) {
 	rt := &s.ledgerRT
 	rt.mu.Lock()
@@ -529,7 +500,6 @@ func (s *server) ledgerStatusGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cached)
 }
 
-// ledgerPrepare is asked before an erasure starts: reconcile, and say whether an erasure may begin.
 func (s *server) ledgerPrepare(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
 	defer cancel()
@@ -657,8 +627,7 @@ func (s *server) ledgerDestinationPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "storage_unusable", "message": err.Error()})
 		return
 	}
-	// A storage that already holds a ledger: another appliance's is never overwritten. This appliance's own (a recovery) is
-	// kept, and recovered from rather than replaced.
+	// Another appliance's ledger in the storage is never overwritten; this appliance's own (a recovery) is kept and recovered from.
 	probe := ledger.NewStore(ledger.Config{LocalPath: filepath.Join(os.TempDir(), "unused-ledger-probe"), Dest: dest})
 	info, _, found, perr := probe.ReadExternalHead(ctx)
 	if perr != nil {
@@ -724,9 +693,7 @@ type ledgerRecoverReq struct {
 	Identity string `json:"identity"`
 }
 
-// ledgerRecover brings the ledger back from the secondary storage when this appliance's own copy is behind or gone: it reads
-// and verifies the secondary copy with a backup key holder's key, checks it against what the database and the primary copy
-// witness, and only then applies and keeps it.
+// ledgerRecover reads and verifies the secondary copy with a backup key holder's key, checks it against the database and primary copy witnesses, and only then applies it.
 func (s *server) ledgerRecover(w http.ResponseWriter, r *http.Request) {
 	var in ledgerRecoverReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
@@ -876,7 +843,6 @@ func (s *server) ledgerCheckpoint(ctx context.Context) error {
 	return nil
 }
 
-// runLedger is the hourly job: reconcile, then the daily heartbeat.
 func (s *server) runLedger(ctx context.Context) {
 	// Never while a restore is swapping databases: the restore reconciles the ledger itself, in order, at the right moments.
 	if restoreInFlight.Load() || readMaintenance().Active {
@@ -897,8 +863,7 @@ func (s *server) runLedger(ctx context.Context) {
 	}
 }
 
-// ledgerLoop runs the reconciliation shortly after start-up and then every hour. It does not depend on the appliance having a
-// site yet: the ledger exists from the first migration.
+// ledgerLoop reconciles shortly after start-up and then hourly, whether or not the appliance has a site yet.
 func (s *server) ledgerLoop(ctx context.Context) {
 	select {
 	case <-ctx.Done():

@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// MANAGING A CLIENT ACCOUNT (guest_accounts_manage.go) against a real database: an unused account is deleted;
-// one with history is removed -- disconnected, disabled, its address free for a new registration -- while its
-// entitlement and sessions stay; and the verification adjustments touch only verification state.
-
 func idsOf(body map[string]any) map[string]bool {
 	out := map[string]bool{}
 	data, _ := body["data"].([]any)
@@ -27,7 +23,6 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 	f.app.scd = client
 	ctx := context.Background()
 
-	// 1. Never used: the row goes, with its queued verification email.
 	var unused string
 	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_access_accounts
 		(tenant_id, site_id, username, password_hash, self_registered, verification_deadline)
@@ -51,7 +46,6 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 		t.Fatal("an unused account is deleted")
 	}
 
-	// 2. With history: removed, not deleted.
 	acc, ent, sessions := seedAccountWithSessions(t, f, "used@example.com", 5000, "10.91.0.11")
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.guest_access_accounts SET self_registered = true,
 		verification_deadline = now() + interval '1 day', login_count = 2 WHERE id=$1`, acc); err != nil {
@@ -93,11 +87,9 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 	if auditCount(t, f, "guest_account.removed", acc) != 1 {
 		t.Fatal("the removal is audited")
 	}
-	// Removing again is a no-op.
 	if st, b := f.do(t, "DELETE", "/guest-accounts/"+acc, map[string]any{"password": f.password}); st != 200 || b["status"] != "removed" {
 		t.Fatalf("remove again = %d %v", st, b)
 	}
-	// Listed only under its own filter.
 	if _, all := f.getAccounts(t, "", ""); idsOf(all)[acc] {
 		t.Fatal("a removed account is not in the default list")
 	}
@@ -107,7 +99,6 @@ func TestIntegration_AccountManage_DeleteUnusedRemoveUsedAndReregister(t *testin
 	if st, rem := f.getAccounts(t, "?status=removed", ""); st != 200 || !idsOf(rem)[acc] {
 		t.Fatalf("status=removed lists it: %d %v", st, rem)
 	}
-	// The address is free again.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts
 		(tenant_id, site_id, username, password_hash, self_registered) VALUES ($1,$2,'used@example.com','$argon2id$fixture$x', true)`,
 		f.tenant, f.site); err != nil {
@@ -169,7 +160,6 @@ func TestIntegration_AccountManage_VerificationAdjustments(t *testing.T) {
 	}
 }
 
-// verifyBody is what Mark verified now requires: the operator's password and a bounded reason.
 func verifyBody(f *apiFixture) map[string]any {
 	return map[string]any{"password": f.password, "reason": "client showed the address at the desk"}
 }

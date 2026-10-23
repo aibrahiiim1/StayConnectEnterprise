@@ -1,16 +1,7 @@
 package main
 
-// PER-ROUTE REQUEST TIMEOUTS (audit N-3).
-//
-// Every request was bounded at 15 s by one middleware. A client-network apply creates bridges, waits for Kea
-// (up to 20 s on its own), restarts services and runs health checks; a WAN/LAN apply runs netplan, waits for
-// links and probes reachability. Both can take longer than 15 s on a real property, and the cancelled request
-// context reached netd -- so the operator saw an error while netd went on with (or was cut off in the middle
-// of) the change.
-//
-// The network applies, confirms and rollbacks now get a long bound of their own; everything else keeps 15 s.
-// netd also detaches those operations from the request (cmd/netd/main.go), so a closed browser tab can never
-// interrupt a change half-way.
+// Per-route request timeouts: network applies, confirms and rollbacks wait for netd (Kea alone can take 20 s) and get a long bound; everything else keeps 15 s.
+// netd detaches those operations from the request (cmd/netd/main.go), so a closed tab cannot interrupt a change half-way.
 
 import (
 	"net/http"
@@ -28,10 +19,8 @@ const (
 // longNetworkRoutes are the requests that wait for netd to change the appliance's networking.
 var longNetworkRoutes = regexp.MustCompile(`^/edge/v1/network/(apply|validate|system/(apply|confirm|rollback|validate)|revisions/[^/]+/(confirm|rollback))$`)
 
-// ledgerRouteTimeout is what a request that commits to the erasure ledger may take. Every erasure, and every answered or closed request,
-// is written to the appliance AND to the secondary storage (a disk, an SFTP server or a bucket) before it is reported as done; over a
-// slow link that is seconds per copy, and the 15-second default made such an erasure fail (and roll back) although nothing was wrong
-// (found on PRE-LIVE against an SFTP server that took four seconds to answer each call).
+// ledgerRouteTimeout bounds requests that commit to the erasure ledger: each write goes to the appliance AND secondary storage (disk, SFTP, bucket),
+// which over a slow link exceeds the 15 s default.
 const ledgerRouteTimeout = 4 * time.Minute
 
 // ledgerRoutes are the requests that commit to the erasure ledger (they all go through ledgerQuery).

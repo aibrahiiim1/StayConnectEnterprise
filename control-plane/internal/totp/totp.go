@@ -1,12 +1,6 @@
-// Package totp is the time-based one-time password of RFC 6238 that every authenticator app speaks: HMAC-SHA1,
-// 30-second steps, 6 digits. Those are the parameters Google Authenticator, Microsoft Authenticator and the rest
-// accept without asking, which is why they are fixed rather than configurable.
-//
-// The same code as data-plane/internal/totp (the appliance's): Central is a separate module and cannot import an
-// appliance internal package. Both are checked against RFC 6238's own test vectors; keep them identical.
-//
-// It only computes and checks codes. Keeping a code from being accepted twice (RFC 6238 section 5.2) needs a
-// record of the last step accepted, which the caller keeps: Check returns the step it matched.
+// Package totp implements RFC 6238 with the fixed parameters authenticator apps assume (HMAC-SHA1, 30 s, 6 digits).
+// It duplicates data-plane/internal/totp (separate module); keep them identical. Replay protection is the
+// caller's: Check returns the matched step so the last accepted one can be recorded.
 package totp
 
 import (
@@ -23,20 +17,15 @@ import (
 )
 
 const (
-	// Period is the length of one step.
-	Period = 30 * time.Second
-	// Digits is the length of a code.
-	Digits = 6
-	// SecretBytes is the secret size RFC 4226 recommends (160 bits, the HMAC-SHA1 block's natural key).
-	SecretBytes = 20
-	// Skew is how many steps either side of now a code is accepted for: one, so a phone clock 30 seconds off,
-	// or a code typed as it changes, still works (RFC 6238 section 6).
+	Period      = 30 * time.Second
+	Digits      = 6
+	SecretBytes = 20 // 160 bits, as RFC 4226 recommends
+	// Skew is the steps accepted either side of now, tolerating a phone clock 30 s off.
 	Skew = 1
 )
 
 var b32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// NewSecret returns a fresh random secret.
 func NewSecret() ([]byte, error) {
 	s := make([]byte, SecretBytes)
 	if _, err := rand.Read(s); err != nil {
@@ -45,13 +34,10 @@ func NewSecret() ([]byte, error) {
 	return s, nil
 }
 
-// EncodeSecret is the secret as people and apps type it: unpadded base32.
 func EncodeSecret(secret []byte) string { return b32.EncodeToString(secret) }
 
-// Step is the step number a moment falls in.
 func Step(t time.Time) int64 { return t.Unix() / int64(Period/time.Second) }
 
-// Code is the code for one step.
 func Code(secret []byte, step int64) string {
 	var msg [8]byte
 	binary.BigEndian.PutUint64(msg[:], uint64(step))
@@ -63,13 +49,11 @@ func Code(secret []byte, step int64) string {
 	return fmt.Sprintf("%0*d", Digits, v%1_000_000)
 }
 
-// Normalize strips the spaces and dashes people type and the app shows ("123 456").
 func Normalize(code string) string {
 	return strings.NewReplacer(" ", "", "-", "", " ", "").Replace(strings.TrimSpace(code))
 }
 
-// Check reports whether code is valid at now, and the step it matched. Every step in the window is compared in
-// constant time, so the answer takes the same time whichever step matched or none did.
+// Check reports whether code is valid at now and the step it matched; every step is compared in constant time.
 func Check(secret []byte, code string, now time.Time) (int64, bool) {
 	code = Normalize(code)
 	if len(code) != Digits {
@@ -90,8 +74,7 @@ func Check(secret []byte, code string, now time.Time) (int64, bool) {
 	return matched, ok
 }
 
-// URI is the otpauth:// link an authenticator app reads from the QR code. issuer and account are what the app
-// shows; both appear in the label and the issuer parameter, as the de-facto key-uri format asks.
+// URI is the otpauth:// link for the QR code.
 func URI(secret []byte, issuer, account string) string {
 	label := url.PathEscape(issuer) + ":" + url.PathEscape(account)
 	q := url.Values{}

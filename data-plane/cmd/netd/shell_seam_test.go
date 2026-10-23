@@ -8,17 +8,8 @@ import (
 	"testing"
 )
 
-// NOTHING IN PRODUCTION MAY CALL THE TEST SEAM DIRECTLY.
-//
-// a.runFn and a.outFn are the seams a test substitutes; they are nil in production, where a.run and
-// a.output are the real entry points. A helper that called a.runFn directly therefore panicked on the FIRST
-// real apply — inside an HTTP handler, where the router's Recoverer turned the nil-pointer dereference into
-// a 500. The apply never reached its own error path, so the revision was left stuck in "applying" with no
-// event and no rollback.
-//
-// Every unit test passed, because tests always set the seam. That is the point: no behavioural test in this
-// package can see this class of mistake, because the mistake is invisible precisely when a test is running.
-// So the guard reads the source instead.
+// Production must never call the test seams a.runFn and a.outFn directly: they are nil outside tests, so a direct call panics on the first real apply and strands the revision in applying.
+// No behavioural test can see this, so the guard reads the source.
 func TestNoDirectSeamCallsInProductionCode(t *testing.T) {
 	// a.runFn( / a.outFn( — a CALL, not the assignment in a struct literal or a nil check.
 	call := regexp.MustCompile(`\ba\.(runFn|outFn)\s*\(`)

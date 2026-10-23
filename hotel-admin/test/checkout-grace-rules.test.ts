@@ -14,8 +14,7 @@ import {
   validateDraft,
 } from "@/lib/api/checkout-grace";
 
-// The server's pattern, restated here on purpose: if edged's graceReasonCode ever changes, this test must be
-// revisited rather than silently following the client constant.
+// Keep this pattern independent of edged's constant so a server change requires review.
 const SERVER = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 describe("reason codes", () => {

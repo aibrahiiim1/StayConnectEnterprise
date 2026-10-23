@@ -2,21 +2,10 @@
 
 package posting
 
-// ROOM-CHARGE FINANCIAL FRESHNESS (decision D48, migration 0103).
-//
-// One definition decides whether money may move, and every stage asks it: the offer, the posting's creation, the
-// worker's claim, abort-before-send, the attempt's creation and pmsd's last check before the first byte. These
-// tests put the interface in each state that matters and ask ALL SIX stages, so a stage that disagrees fails here.
-//
-// The states, and what they prove:
-//   healthy quiet feed      no live guest event for 30 minutes (beyond the old 15-minute rule) on a connected,
-//                           heartbeat-healthy, CONTINUOUS, IN_SYNC interface with a recent complete resync: fresh
-//   live event, old mirror  a guest event a moment ago, but no complete resync within the mirror age: STALE -- a
-//                           live event is not proof that the whole mirror has missed nothing
-//   resync never succeeded  the last complete resync is past the 4-hour bound: STALE (fail closed)
-//   custom bound            the per-interface setting is honoured
-//   heartbeat stale, disconnected, gap detected, resync in progress, generation part-published, revision
-//   mismatch               each STALE with its own code
+// One freshness definition decides whether money may move, and six stages ask it (offer, posting
+// creation, worker claim, abort-before-send, attempt creation, pmsd's pre-wire check). Each state is run
+// through all six so a stage that disagrees fails. A live event alone is not freshness: the mirror also
+// needs a recent complete resync.
 
 import (
 	"context"
@@ -84,7 +73,6 @@ func freshnessBlock(t *testing.T, p *pgxpool.Pool, s rcScope) string {
 		s.tenant, s.site, s.iface, s.rev)
 }
 
-// ALL SIX STAGES, EVERY STATE.
 func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range freshnessCases() {
@@ -93,14 +81,13 @@ func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 			admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 			fresh := c.block == ""
 
-			// (0) the definition itself
 			s0 := seedRoomCharge(t, admin)
 			c.apply(t, admin, s0)
 			if got := freshnessBlock(t, admin, s0); got != c.block {
 				t.Fatalf("p4_interface_freshness_block = %q, want %q", got, c.block)
 			}
 
-			// (1) offer eligibility and (2) posting creation
+			// offer eligibility and posting creation
 			if got := scan1[bool](t, admin, `SELECT iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`, s0.tenant, s0.site, s0.iface); got != fresh {
 				t.Fatalf("offer: fresh=%v, want %v", got, fresh)
 			}
@@ -112,8 +99,7 @@ func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 				t.Fatalf("posting creation on a stale interface: %v", err)
 			}
 
-			// (3) worker claim and (4) abort-before-send: the posting was created while fresh; the state
-			// changes before the worker runs.
+			// worker claim and abort-before-send: created while fresh, stale before the worker runs
 			s1 := seedRoomCharge(t, admin)
 			posting := createRoomCharge(t, admin, s1)
 			c.apply(t, admin, s1)
@@ -132,7 +118,7 @@ func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 				}
 			}
 
-			// (5) attempt creation: the attempt row itself is refused on a stale interface
+			// attempt creation is refused on a stale interface
 			s2 := seedRoomCharge(t, admin)
 			p2 := createRoomCharge(t, admin, s2)
 			mustExec(t, admin, `UPDATE iam_v2.posting_outbox SET state='IN_FLIGHT' WHERE posting_id=$1`, p2)
@@ -147,7 +133,7 @@ func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 				t.Fatalf("attempt creation on a stale interface: %v", err)
 			}
 
-			// (6) pmsd's pre-wire authorisation: the state changes AFTER the attempt, before the first byte
+			// pmsd's pre-wire authorisation: the state changes after the attempt, before the first byte
 			s3 := seedRoomCharge(t, admin)
 			createRoomCharge(t, admin, s3)
 			tr3 := &pmsdLike{db: admin, iface: s3.iface, answer: okAnswer, before: func(int) { c.apply(t, admin, s3) }}
@@ -165,7 +151,6 @@ func TestD48_AllSixRoomChargeStagesAgree(t *testing.T) {
 	}
 }
 
-// pmsd's question: is the financial mirror due to be proven again (half the bound)?
 func TestD48_FinancialResyncDueAtHalfTheBound(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -190,7 +175,6 @@ func TestD48_FinancialResyncDueAtHalfTheBound(t *testing.T) {
 	}
 }
 
-// The setting: bounded, reasoned, attributed, logged.
 func TestD48_MirrorAgeSettingIsValidatedAndAudited(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)

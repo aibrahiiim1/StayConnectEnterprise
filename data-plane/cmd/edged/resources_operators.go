@@ -1,8 +1,6 @@
 package main
 
-// Local operator management. Ported from control-plane operators.go with the
-// tenant/platform scoping removed: every operator on the appliance belongs to
-// this site, and roles live in operator_roles with tenant_id NULL.
+// All operators belong to this site; roles live in operator_roles with tenant_id NULL.
 
 import (
 	"context"
@@ -20,14 +18,13 @@ type edgeOperator struct {
 	Status      string    `json:"status"`
 	Roles       []string  `json:"roles"`
 	CreatedAt   time.Time `json:"created_at"`
-	// MustChangePassword: the operator's next sign-in can only set a new password (0119).
+	// The next sign-in can only set a new password.
 	MustChangePassword bool `json:"must_change_password"`
-	// TwoStepEnrolled: an authenticator is set up (0132). Without one, the next sign-in sets one up.
+	// Without an authenticator, the next sign-in sets one up.
 	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 
-// isValidEdgeRole accepts site_admin plus every role in the rolePerms matrix
-// (which includes the legacy tenant_* roles kept for migrated operators).
+// Includes the legacy tenant_* roles kept for migrated operators.
 func isValidEdgeRole(role string) bool {
 	if role == "site_admin" {
 		return true
@@ -39,16 +36,13 @@ func isValidEdgeRole(role string) bool {
 func (s *server) operatorsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listEdgeOperators)
-	// Admin Console sign-in protection (0119): read with the operators list, changed by whoever may change
-	// operators, under step-up. Registered before /{id} so the literal path wins.
+	// Registered before /{id} so the literal path wins.
 	r.Get("/signin-protection", s.getSigninProtection)
 	r.Put("/signin-protection", s.setSigninProtection)
 	r.Get("/signin-protection/changes", s.listSigninProtectionChanges)
-	// Admin Console session limits (0132): idle and absolute, the same rules as sign-in protection.
 	r.Get("/session-policy", s.getSessionPolicy)
 	r.Put("/session-policy", s.setSessionPolicy)
 	r.Get("/session-policy/changes", s.listSessionPolicyChanges)
-	// How long a disabled account is kept before it is anonymised (0138, GDPR audit B4).
 	r.Get("/account-retention", s.getAccountRetention)
 	r.Put("/account-retention", s.setAccountRetention)
 	r.Post("/", s.createEdgeOperator)
@@ -60,9 +54,8 @@ func (s *server) operatorsRoutes() http.Handler {
 	return r
 }
 
-// confirmYourPassword is the step-up for changing a staff account (GDPR audit B7): creating one, resetting its
-// password, disabling it, and adding or removing a role all ask the administrator for their own password first.
-// The field is your_password because "password" in these bodies is the colleague's new one.
+// Step-up for changing a staff account: the administrator's own password goes in your_password, because
+// "password" in these bodies is the colleague's new one.
 func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, yours string) bool {
 	if !s.reauth(r, yours) {
 		s.reauthRefused(w, r, "your password is required to change a staff account")
@@ -71,10 +64,8 @@ func (s *server) confirmYourPassword(w http.ResponseWriter, r *http.Request, you
 	return true
 }
 
-// operatorIDParam is the {id} of an /operators/{id}/... route in canonical form (lower-case, hyphenated), or a
-// 400. Every "not yourself" check compares it with the session's operator id, which the database wrote in that
-// form: an upper-case or braced spelling of one's own id is the same row to Postgres, and compared raw it slipped
-// past "cannot disable / reset / demote yourself".
+// Canonical (lower-case, hyphenated) id or 400: an upper-case or braced spelling is the same row to Postgres
+// and would slip past the "not yourself" checks.
 func operatorIDParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id, ok := canonicalUUID(chi.URLParam(r, "id"))
 	if !ok {
@@ -83,7 +74,6 @@ func operatorIDParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, ok
 }
 
-// canonicalUUID accepts only the hyphenated 8-4-4-4-12 form and returns it lower-case.
 func canonicalUUID(s string) (string, bool) {
 	if !uuidRe.MatchString(s) {
 		return "", false
@@ -140,11 +130,10 @@ func (s *server) listEdgeOperators(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email       string `json:"email"`
-		DisplayName string `json:"display_name"`
-		Password    string `json:"password"`
-		Role        string `json:"role"`
-		// RequireChange: the new operator must choose their own password at first sign-in (0119).
+		Email         string `json:"email"`
+		DisplayName   string `json:"display_name"`
+		Password      string `json:"password"`
+		Role          string `json:"role"`
 		RequireChange bool   `json:"require_change"`
 		YourPassword  string `json:"your_password"`
 	}
@@ -229,8 +218,7 @@ func (s *server) createEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, op)
 }
 
-// disableEdgeOperator soft-deletes: status='disabled' and every live session
-// is destroyed. Self-disable is refused to avoid locking yourself out.
+// Soft-delete: destroys live sessions. Self-disable is refused.
 func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	id, ok := operatorIDParam(w, r)
 	if !ok {
@@ -268,11 +256,8 @@ func (s *server) disableEdgeOperator(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setEdgeOperatorPassword is an ADMINISTRATOR resetting somebody else's password (N-8). It ends every live
-// session of that operator -- a reset is how a suspected compromise is closed, and a session opened with the
-// old password must not outlive it -- and ends the account's sign-in lockout. require_change makes the operator
-// choose their own password at the next sign-in. An operator changes their OWN password at POST
-// /edge/v1/auth/password, which asks for the current one; resetting yourself here would skip that.
+// Administrator reset: ends every live session (a reset closes a suspected compromise) and the sign-in lockout.
+// Own password changes go through /edge/v1/auth/password, which asks for the current one.
 func (s *server) setEdgeOperatorPassword(w http.ResponseWriter, r *http.Request) {
 	id, ok := operatorIDParam(w, r)
 	if !ok {

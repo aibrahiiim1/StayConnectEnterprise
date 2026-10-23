@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROTEL_KIND, protelRevisionBody, valuesFromRevision, type PmsProvider, type PmsProviderField } from "@/lib/api/pms-connections";
 
-// GDPR plan C8: the FIAS TLS settings, stored nested as config.tls, come back into the form and are sent again,
-// so editing an encrypted connection never quietly turns encryption off.
+// Preserve nested FIAS TLS settings when editing a connection so encryption cannot silently turn off.
 const fields: PmsProviderField[] = [
   { key: "endpoint", label: "PMS address", type: "host_port", required: true },
   { key: "tls_enabled", label: "Encrypt", type: "bool", default: false },

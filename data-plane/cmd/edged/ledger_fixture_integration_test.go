@@ -17,9 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
-// The integration fixtures commit erasures through the REAL ledger package: a primary file and a secondary directory, both
-// verified on every commit, exactly what scd does in production. The database's ledger is shared by every test in the run, so
-// the files are rebuilt from it each time a fixture is made (what scd's reconciliation does at start-up).
+// Fixtures commit through the real ledger package; the database ledger is shared across the run, so the files are rebuilt from it per fixture.
 
 var (
 	sharedLedgerOnce  sync.Once
@@ -57,7 +55,6 @@ func sharedLedger(t testing.TB, pool *pgxpool.Pool) *ledger.Store {
 	return sharedLedgerStore
 }
 
-// storeLedger is the ledgerClient the fixtures use: the ledger package directly.
 type storeLedger struct {
 	st         *ledger.Store
 	prepareErr error

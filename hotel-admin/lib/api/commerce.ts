@@ -1,6 +1,5 @@
-// INTERNET PACKAGES, SERVICE PLANS AND PACKAGE ACTIVITY — the API shapes and the helpers every screen in this
-// area shares. Kept in one file so the price formatting, the source words and the status words cannot drift
-// between the Packages list, the activity view and the record sheets.
+// Internet packages, service plans and package activity: shared shapes and helpers, so wording cannot drift between
+// screens.
 
 import { api } from "@/lib/api";
 
@@ -28,14 +27,9 @@ export type RevisionInfo = {
 export type DeletabilityReason = { code: string; message: string; count?: number | null };
 export type Deletability = { deletable: boolean; reasons: DeletabilityReason[] };
 
-// ------------------------------------------------------------------------------------------ money --------
-
 /**
- * A price in minor units, formatted with the exponent it was recorded with.
- *
- * The exponent comes from the package revision (or the purchase). When the record genuinely carries none, 2 is
- * used — the exponent of every currency this product has published with — and `assumed` says so, so a screen
- * can mark it rather than present a guess as a fact. Price 0 is "Free": a product fact, not a zero.
+ * A price in minor units, formatted with its recorded exponent. When the record carries none, 2 is assumed and
+ * `assumed` says so. Price 0 is "Free".
  */
 export function formatMoney(
   minor?: number | null,
@@ -56,8 +50,6 @@ export function priceText(minor?: number | null, currency?: string | null, expon
   const m = formatMoney(minor, currency, exponent);
   return m.assumed ? `${m.text} (assumed 2 decimals)` : m.text;
 }
-
-// ------------------------------------------------------------------------------------- activity ---------
 
 export type ActivitySource =
   | "GUEST_SELECTION" | "VOUCHER_REDEMPTION" | "ACCOUNT_AUTO_GRANT" | "OTP_SOCIAL_DEFAULT" | "CHECKOUT_GRACE"

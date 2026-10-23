@@ -2,13 +2,8 @@
 
 package main
 
-// LICENCES FOR THE INTEGRATION FIXTURES.
-//
-// Every guest path now asks the appliance's licence before it admits anybody -- the room sign-in included --
-// so a fixture server with no licence manager is, correctly, an appliance that refuses every guest. These
-// helpers give a fixture the licence it means to test with, built the way the appliance builds it: a real
-// licstate.Manager, and where a limit or a state matters, a real vendor-signed document installed through the
-// same verification path a licence upload takes. Nothing here short-circuits the decision being tested.
+// Licences for the integration fixtures: every guest path asks the licence before admitting, so a fixture needs a real licstate.Manager,
+// and where a limit or state matters a real vendor-signed document installed through the upload verification path.
 
 import (
 	"context"
@@ -23,9 +18,7 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// devLicence is what a development build runs with when no licence is installed: Active, every feature,
-// no concurrent-guest limit. It is the licence every fixture that is NOT about licensing uses, so those tests
-// keep measuring what they were written to measure.
+// devLicence is what a development build runs with when no licence is installed: Active, every feature, no concurrent-guest limit.
 func devLicence() *licstate.Manager {
 	return licstate.New(nil, "", "", "", false)
 }

@@ -13,9 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var tkey = []byte("0123456789abcdef0123456789abcdef") // 32-byte test key
-
-// ---- unit (no DB) ----------------------------------------------------------
+var tkey = []byte("0123456789abcdef0123456789abcdef")
 
 func TestScopeKeyIrreversibleAndStable(t *testing.T) {
 	s := &Store{key: tkey, window: time.Minute, now: time.Now}
@@ -37,8 +35,6 @@ func TestNewValidation(t *testing.T) {
 		t.Fatal("short key should error")
 	}
 }
-
-// ---- integration (DB) ------------------------------------------------------
 
 func testDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -105,16 +101,12 @@ func TestConcurrentNoBypass(t *testing.T) {
 	}
 }
 
-// TestMixedRuleOrderNoDeadlock: many concurrent callers pass the SAME set of multi-scope rules in
-// RANDOMIZED order. Because Allow sorts+dedups before charging, every transaction acquires the row
-// locks in the same global order, so none deadlock — and the shared IP cap is still enforced exactly.
+// Callers pass the same rules in rotated order; Allow's sort keeps lock order global so none deadlock.
 func TestMixedRuleOrderNoDeadlock(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
 	const workers, ipLimit = 30, 8
-	// three scopes; the IP scope is the binding cap. Distinct identities/devices per worker so only the
-	// shared IP rule can deny.
 	var allowed int64
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -126,7 +118,6 @@ func TestMixedRuleOrderNoDeadlock(t *testing.T) {
 				{Kind: ScopeIdentity, Value: "id-mix", Method: "account", Limit: 1000},
 				{Kind: ScopeDevice, Value: "dev-mix", Method: "account", Limit: 1000},
 			}
-			// rotate the slice so callers pass rules in different orders
 			shift := i % 3
 			rules = append(rules[shift:], rules[:shift]...)
 			if d, err := s.Allow(ctx, rules...); err == nil && d.Allowed {
@@ -142,13 +133,11 @@ func TestMixedRuleOrderNoDeadlock(t *testing.T) {
 	}
 }
 
-// TestDuplicateRuleChargedOnce: a duplicated scope in one call must be charged only once per attempt
-// (dedup), so the limit reflects attempts, not how many times the caller listed the scope.
 func TestDuplicateRuleChargedOnce(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
-	// Same identity listed 3x (tightest limit wins on merge). Limit 2 -> first two attempts allowed.
+	// The same identity listed three times merges to the tightest limit, 2.
 	dup := func() []Rule {
 		return []Rule{
 			{Kind: ScopeIdentity, Value: "dupe", Method: "voucher", Limit: 5},
@@ -164,7 +153,6 @@ func TestDuplicateRuleChargedOnce(t *testing.T) {
 	if d, _ := s.Allow(ctx, dup()...); d.Allowed {
 		t.Fatal("3rd attempt must deny (dedup means one charge/attempt, tightest limit=2)")
 	}
-	// exactly one bucket row exists for the identity (not three)
 	var rows int
 	db.QueryRow(ctx, `SELECT count(*) FROM public.auth_throttle_buckets WHERE scope_kind='identity' AND method='voucher'`).Scan(&rows)
 	if rows != 1 {
@@ -172,8 +160,6 @@ func TestDuplicateRuleChargedOnce(t *testing.T) {
 	}
 }
 
-// TestHardBlockAcrossWindows: 1-minute window, 1-hour block; advancing the injected clock past
-// several window boundaries keeps the attempt denied until blocked_until; then it resumes.
 func TestHardBlockAcrossWindows(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
@@ -189,7 +175,6 @@ func TestHardBlockAcrossWindows(t *testing.T) {
 	if d, _ := s.Allow(ctx, rule); d.Allowed {
 		t.Fatal("2nd exceeds limit -> deny + 1h block")
 	}
-	// advance well past the 1-minute window, several times; block must persist
 	for _, adv := range []time.Duration{2 * time.Minute, 10 * time.Minute, 45 * time.Minute} {
 		clk = base.Add(adv)
 		d, _ := s.Allow(ctx, rule)
@@ -197,39 +182,34 @@ func TestHardBlockAcrossWindows(t *testing.T) {
 			t.Fatalf("attempt at +%v must remain blocked (block is 1h)", adv)
 		}
 	}
-	// a brand-new Store (simulated restart) with the SAME key still sees the durable block
+	// A new Store with the same key simulates a restart.
 	s2, _ := New(db, tkey, time.Minute)
 	s2.SetClock(func() time.Time { return base.Add(30 * time.Minute) })
 	if d, _ := s2.Allow(ctx, rule); d.Allowed {
 		t.Fatal("hard block must survive restart")
 	}
-	// after blocked_until, attempts resume in a fresh window
 	clk = base.Add(61 * time.Minute)
 	if d, _ := s.Allow(ctx, rule); !d.Allowed {
 		t.Fatal("after block expiry, attempts must resume")
 	}
 }
 
-// TestMethodIsolation: the same identity under different methods does not share a counter.
 func TestMethodIsolation(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
 	acct := Rule{Kind: ScopeIdentity, Value: "shared", Method: "account", Limit: 2}
 	otp := Rule{Kind: ScopeIdentity, Value: "shared", Method: "otp", Limit: 2}
-	// exhaust the account method
 	s.Allow(ctx, acct)
 	s.Allow(ctx, acct)
 	if d, _ := s.Allow(ctx, acct); d.Allowed {
 		t.Fatal("account method should be over limit")
 	}
-	// otp method for the same identity is unaffected
 	if d, _ := s.Allow(ctx, otp); !d.Allowed {
 		t.Fatal("otp method must have its own independent counter")
 	}
 }
 
-// TestGlobalMethodShared: MethodAny ("*") is deliberately shared across methods (e.g. endpoint damper).
 func TestGlobalMethodShared(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)
@@ -250,13 +230,11 @@ func TestCleanupNeverRemovesActiveBlock(t *testing.T) {
 	s.SetClock(func() time.Time { return base })
 	rule := Rule{Kind: ScopeIP, Value: "1.2.3.4", Method: "voucher", Limit: 1, Block: time.Hour}
 	s.Allow(ctx, rule)
-	s.Allow(ctx, rule) // triggers 1h block
-	// advance past window+grace but the block is still active -> cleanup must NOT delete it
+	s.Allow(ctx, rule)
 	s.SetClock(func() time.Time { return base.Add(30 * time.Minute) })
 	if n, err := s.Cleanup(ctx, time.Minute); err != nil || n != 0 {
 		t.Fatalf("cleanup removed an active block (n=%d err=%v)", n, err)
 	}
-	// advance past the block + grace -> cleanup removes it
 	s.SetClock(func() time.Time { return base.Add(2 * time.Hour) })
 	if n, err := s.Cleanup(ctx, time.Minute); err != nil || n != 1 {
 		t.Fatalf("cleanup should remove expired block (n=%d err=%v)", n, err)

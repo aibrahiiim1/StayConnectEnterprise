@@ -1,8 +1,5 @@
 "use client";
 
-// The small pieces: a loading placeholder, a meter, a toggle, a divider, a copyable identifier, a
-// definition list and an inline metric. Each one exists because three or more screens were building it inline.
-
 import * as React from "react";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import * as SeparatorPrimitive from "@radix-ui/react-separator";
@@ -10,7 +7,6 @@ import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./tooltip";
 
-/** Skeleton — a shaped placeholder. "Loading…" as body text makes a page jump when the real content lands. */
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-surface", className)} />;
 }
@@ -84,11 +80,7 @@ export function Switch({
   );
 }
 
-/**
- * Meter — a labelled proportion bar. Used for data allowance, licensed capacity, DHCP pool utilisation.
- *
- * The tone escalates automatically: a pool at 94% should not need the caller to remember to pass "warning".
- */
+/** Tone escalates with usage unless the caller supplies one. */
 export function Meter({
   value,
   max,
@@ -139,13 +131,7 @@ export function Meter({
   );
 }
 
-/**
- * MonoId — a long identifier, shortened, with copy-to-clipboard.
- *
- * Several screens print a raw UUID in a table cell. It is unreadable, it is the widest column on the page, and
- * it is almost always there because somebody might need to paste it into a support ticket — which is the one
- * thing a truncated, copyable chip does better than the full string.
- */
+/** Truncate long IDs visually while copying their full value. */
 export function MonoId({
   value,
   head = 8,
@@ -167,7 +153,7 @@ export function MonoId({
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {
-      /* clipboard denied — the tooltip still shows the full value */
+      /* The tooltip retains the full value if clipboard access is denied. */
     }
   }
 
@@ -194,7 +180,6 @@ export function MonoId({
   );
 }
 
-/** DList — a definition list with a consistent label column. The admin has dozens of these, all different. */
 export function DList({
   items,
   columns = 2,
@@ -218,7 +203,6 @@ export function DList({
   );
 }
 
-/** Metric — a label over a figure, for use inside a card that already has a title. */
 export function Metric({
   label, value, sub, tone, className,
 }: {

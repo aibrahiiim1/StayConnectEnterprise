@@ -1,14 +1,7 @@
 package pmsd
 
-// A DAEMON THAT ONLY SPEAKS WHEN IT FAILS CANNOT BE SEEN TO RECOVER.
-//
-// pmsd's whole log vocabulary was failures. On 2026-09-05 the Protel socket was restored, pmsd reconnected in
-// the same process, self-requested a resync and published generation 184 — and the journal held a wall of
-// DIAL_FAILED lines followed by silence. An operator could not distinguish a recovered feed from a dead one,
-// because a recovered feed said nothing at all. The durable record knew; nothing a human was watching did.
-//
-// These cases pin the success path AND pin that it bought no leak: the progress lines go through the same
-// closed vocabulary and the same bounded fields, so nothing PMS-, guest- or secret-derived can ride on them.
+// Progress lines must make a recovered feed audible, through the same closed vocabulary and bounded fields
+// so nothing PMS-, guest- or secret-derived can ride on them.
 
 import (
 	"bytes"
@@ -19,8 +12,7 @@ import (
 	"testing"
 )
 
-// THE THREE MOMENTS AN OPERATOR IS ACTUALLY WATCHING FOR, and they are INFO rather than ERROR: a reconnect is
-// not a fault, and somebody filtering their journal by severity should still see the feed come back.
+// A reconnect is INFO, not ERROR, so severity-filtered journals still show the feed returning.
 func TestProgress_TheSuccessPathIsAudibleAndIsNotAnError(t *testing.T) {
 	for _, ev := range []LogEvent{EventWorkerConnected, EventWorkerResyncRequested, EventWorkerResyncPublished} {
 		if !ev.Valid() {
@@ -51,8 +43,7 @@ func TestProgress_TheSuccessPathIsAudibleAndIsNotAnError(t *testing.T) {
 	}
 }
 
-// THE PUBLICATION LINE CARRIES A MAGNITUDE, NOT CONTENT. How many records were received is what tells an
-// operator the roster actually arrived; WHICH records is guest data and must never be in a log.
+// The publication line carries how many records arrived, never which (guest data).
 func TestProgress_PublicationReportsHowManyNeverWhich(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
@@ -63,7 +54,6 @@ func TestProgress_PublicationReportsHowManyNeverWhich(t *testing.T) {
 	if !strings.Contains(out, `"records":590`) {
 		t.Fatalf("the publication line does not say how many records arrived: %s", out)
 	}
-	// The field set is fixed and small. Anything else would be a channel for something that is not a count.
 	var line map[string]any
 	_ = json.Unmarshal(buf.Bytes(), &line)
 	allowed := map[string]bool{"time": true, "level": true, "msg": true, "code": true,
@@ -75,7 +65,7 @@ func TestProgress_PublicationReportsHowManyNeverWhich(t *testing.T) {
 	}
 }
 
-// NO CANARY, SAME AS THE FAILURE PATH. Every free-ish input is poisoned and none of it may reach the output.
+// Every free-form input is poisoned with a canary; none may reach the output.
 func TestProgress_NoCanaryInCapturedOutput(t *testing.T) {
 	for _, cn := range canaries {
 		var buf bytes.Buffer
@@ -93,7 +83,7 @@ func TestProgress_NoCanaryInCapturedOutput(t *testing.T) {
 	}
 }
 
-// A NIL LOGGER IS A NO-OP, not a panic. Observability must never be the thing that kills the daemon.
+// A nil logger is a no-op: observability must never kill the daemon.
 func TestProgress_NilLoggerIsSafe(t *testing.T) {
 	logProgress(nil, EventWorkerConnected, SafeFields{})
 }

@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// Validation error codes. Bounded machine codes the API returns as the "error" field of a 400.
 const (
 	CodeUnknownField    = "unknown_provider_field"
 	CodeFieldRequired   = "provider_field_required"
@@ -22,7 +21,6 @@ const (
 	CodeCredentialShape = "credential_invalid"
 )
 
-// ValidationError is a configuration refusal with a bounded code, the offending key and a plain message.
 type ValidationError struct {
 	Code    string
 	Field   string
@@ -35,9 +33,7 @@ func verr(code, field, format string, a ...any) *ValidationError {
 	return &ValidationError{Code: code, Field: field, Message: fmt.Sprintf(format, a...)}
 }
 
-// Coerce validates ONE supplied value against its field definition and returns the typed value (int64 for
-// int, string for url/host_port/string/enum, bool for bool). JSON numbers may arrive as json.Number (edged
-// decodes with UseNumber), float64 or an integer type; a fractional number is refused rather than rounded.
+// Coerce returns int64, string or bool by field type. A fractional number is refused, not rounded.
 func Coerce(f Field, raw any) (any, *ValidationError) {
 	switch f.Type {
 	case FieldInt:
@@ -120,8 +116,7 @@ func asInt(raw any) (int64, bool) {
 	return 0, false
 }
 
-// validHTTPSURL refuses anything but an absolute https URL with a host and no credentials, query or fragment.
-// Provider addresses are dialled with the property's credentials attached, so plain http is never acceptable.
+// validHTTPSURL: provider addresses are dialled with the property's credentials, so plain http is never acceptable.
 func validHTTPSURL(s string) string {
 	u, err := url.Parse(s)
 	switch {
@@ -139,11 +134,9 @@ func validHTTPSURL(s string) string {
 	return ""
 }
 
-// RESTConfig is the normalised, validated configuration of a REST provider revision.
 type RESTConfig struct {
 	Kind string
-	// Provider holds the provider-specific values (URLs, ids, poll settings), keyed by field key. It is stored
-	// verbatim as config.provider.
+	// Provider is stored verbatim as config.provider.
 	Provider       map[string]any
 	SourceTimezone string
 	MaxAuthCache   int64
@@ -152,13 +145,10 @@ type RESTConfig struct {
 	FullResync     time.Duration
 }
 
-// commonKeys are fields every REST schema carries that are NOT stored under config.provider but mapped onto
-// the revision's own columns / keys.
+// commonKeys are mapped onto the revision's own keys, not stored under config.provider.
 var commonKeys = map[string]bool{"source_timezone": true, "max_auth_cache_age_seconds": true}
 
-// NormalizeREST validates a REST provider's provider_config against its schema. Unknown keys are refused;
-// defaults fill omitted optional values; required values must be present. topTimezone/topMaxAuth are the
-// revision body's top-level values, used when provider_config does not carry them.
+// NormalizeREST refuses unknown keys. topTimezone/topMaxAuth are the revision's top-level fallbacks.
 func NormalizeREST(p Provider, in map[string]any, topTimezone string, topMaxAuth int64) (RESTConfig, *ValidationError) {
 	if !p.IsREST() {
 		return RESTConfig{}, verr(CodeUnknownKind, "", "%s is not a polled REST connector", p.Kind)
@@ -184,7 +174,7 @@ func NormalizeREST(p Provider, in map[string]any, topTimezone string, topMaxAuth
 		if !present || raw == nil {
 			switch {
 			case commonKeys[f.Key]:
-				continue // falls back to the top-level value
+				continue
 			case f.Default != nil:
 				raw = f.Default
 			case f.Required:
@@ -227,7 +217,6 @@ func NormalizeREST(p Provider, in map[string]any, topTimezone string, topMaxAuth
 	return out, nil
 }
 
-// Endpoint is the base address stored as config.endpoint (what pmsd's revision reads as the endpoint).
 func (c RESTConfig) Endpoint() string {
 	switch c.Kind {
 	case KindMews:
@@ -240,10 +229,9 @@ func (c RESTConfig) Endpoint() string {
 	return ""
 }
 
-// SourceIdentity is the provider's identity of the PHYSICAL property, fed to SourceFingerprint. It never
-// includes a credential. For Mews without an enterprise id the property is identified by its access token,
-// which is secret, so two such interfaces on one platform fingerprint alike: a duplicate-source warning that
-// errs towards asking the operator rather than missing a real duplicate.
+// SourceIdentity feeds SourceFingerprint and never includes a credential. Mews without an enterprise id is
+// identified by its (secret) token, so such interfaces on one platform fingerprint alike, erring towards a
+// duplicate-source warning rather than missing a real duplicate.
 func (c RESTConfig) SourceIdentity() string {
 	switch c.Kind {
 	case KindMews:
@@ -257,13 +245,11 @@ func (c RESTConfig) SourceIdentity() string {
 	return ""
 }
 
-// Timings are the seven revision duration keys pmsd.Revision requires, derived from the poll settings so a
-// REST revision satisfies exactly the same Validate() contract as a FIAS one:
+// Timings derives the seven durations pmsd.Revision requires from the poll settings:
 //
 //	dial/read/write timeout = request timeout
 //	heartbeat interval      = poll interval (each successful poll is the keep-alive)
-//	heartbeat timeout       = max(3 x poll, poll + 2 x request timeout): three missed polls, never less than
-//	                          one poll plus a slow request and its retry
+//	heartbeat timeout       = max(3 x poll, poll + 2 x request timeout)
 //	feed freshness          = heartbeat timeout
 //	complete sync           = full refresh interval
 func (c RESTConfig) Timings() map[string]int64 {
@@ -284,8 +270,6 @@ func (c RESTConfig) Timings() map[string]int64 {
 	}
 }
 
-// StoredConfig is the revision config jsonb for a REST provider: the same keys pgRepo.LoadInterface projects
-// for every connector, plus config.provider.
 func (c RESTConfig) StoredConfig() map[string]any {
 	cfg := map[string]any{
 		"endpoint":         c.Endpoint(),
@@ -307,10 +291,8 @@ func str(m map[string]any, k string) string {
 	return s
 }
 
-// NormalizeSecret validates a credential for a REST provider and returns the canonical JSON plaintext that is
-// sealed into the secret generation. raw is the request's "secret" value: a JSON object of the credential
-// fields, or a JSON string containing such an object. A provider with exactly one credential field also
-// accepts a plain string for it. Unknown keys are refused; values are never echoed in an error.
+// NormalizeSecret returns the canonical JSON plaintext to seal. raw is a credential object, a JSON string of
+// one, or (for a single-field provider) a plain string. Values are never echoed in an error.
 func NormalizeSecret(p Provider, raw json.RawMessage) ([]byte, *ValidationError) {
 	if p.Credential.Mode != CredentialAuthKey {
 		return nil, verr(CodeCredentialShape, "secret", "the %s connector does not use a stored credential", p.Label)
@@ -355,7 +337,7 @@ func NormalizeSecret(p Provider, raw json.RawMessage) ([]byte, *ValidationError)
 			return nil, verr(CodeFieldRequired, f.Key, "%s is required", f.Label)
 		}
 	}
-	b, _ := json.Marshal(out) // map keys marshal sorted: deterministic plaintext
+	b, _ := json.Marshal(out) // sorted keys: deterministic plaintext
 	return b, nil
 }
 
@@ -367,8 +349,7 @@ func credentialKeyList(p Provider) string {
 	return strings.Join(ks, ", ")
 }
 
-// ParseStoredProvider reads a stored config.provider object back into the typed map NormalizeREST produced
-// (numbers become int64). Used by pmsd, which reads the jsonb as bytes.
+// ParseStoredProvider rebuilds the typed map NormalizeREST produced (numbers become int64).
 func ParseStoredProvider(p Provider, raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("provider configuration missing")

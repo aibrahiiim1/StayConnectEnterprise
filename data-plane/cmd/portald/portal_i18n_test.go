@@ -1,12 +1,7 @@
 package main
 
-// EVERY GUEST PAGE, IN THE GUEST'S LANGUAGE, FROM THE APPLIANCE ALONE.
-//
-// The pages after sign-in used to be English-only and unbranded, and the server's refusals reached guests as
-// raw codes. These pin the redesign's promises: every page renders in Arabic right to left with Arabic words
-// in it; no default page names anything outside the appliance; every sentence a handler composes has a
-// translation; and the room sign-in sentences the page translates are exactly the server's closed set, so a
-// translated page distinguishes no more than the English one does.
+// Every guest page renders in the guest's language from the appliance alone, with no external addresses by default,
+// and the room sign-in sentences the page translates are exactly the server's closed set.
 
 import (
 	"html/template"
@@ -27,8 +22,7 @@ func mustParse(t *testing.T, name, src string) *template.Template {
 	return tpl
 }
 
-// guestPages renders the four guest pages (and the sign-in page carrying a refusal) the way a guest receives
-// them: through the production parse, with the given design and request headers.
+// guestPages renders the guest pages through the production parse with the given design and request headers.
 func guestPages(t *testing.T, design map[string]any, header http.Header) map[string]string {
 	t.Helper()
 	h := designHandler(t, design)
@@ -74,7 +68,6 @@ func TestEveryGuestPageRendersInArabicRightToLeft(t *testing.T) {
 	}
 	for _, header := range []http.Header{
 		{"Accept-Language": {"ar-EG,ar;q=0.9,en;q=0.5"}},
-		// The guest's own choice, remembered by the selector, outranks what the device asks for.
 		{"Accept-Language": {"en-GB,en"}, "Cookie": {"sc-lang=ar"}},
 	} {
 		pages := guestPages(t, map[string]any{"hotel_name": "Semantics Demo Hotel"}, header)
@@ -122,14 +115,12 @@ func TestEveryGuestPageRendersInEachShippedLanguage(t *testing.T) {
 var reAbsoluteURL = regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}`)
 
 func TestDefaultGuestPagesNameNothingOutsideTheAppliance(t *testing.T) {
-	// A captive portal is reached with no internet: a default page that names a font CDN, an analytics host or
-	// an icon set is a page that stalls on exactly the device it is for.
+	// A captive portal has no internet: a default page naming a CDN or analytics host stalls on the device it is for.
 	for name, html := range guestPages(t, map[string]any{}, nil) {
 		if m := reAbsoluteURL.FindAllString(html, -1); len(m) > 0 {
 			t.Errorf("the default %s page names an external address: %v", name, m)
 		}
 	}
-	// With a design, the only external addresses are the ones the hotel configured.
 	hotel := map[string]any{
 		"hotel_name": "Semantics Demo Hotel", "logo_url": "https://cdn.semantics-demo.example/logo.png",
 		"terms_url": "https://semantics-demo.example/terms",
@@ -161,7 +152,6 @@ func TestEveryServerSentenceHasATranslation(t *testing.T) {
 			}
 		}
 	}
-	// The sentences a test elsewhere pins as reaching the guest are shown to an English guest word for word.
 	for msg, key := range serverMessageKeys {
 		if builtinStrings["en"][key] == msg {
 			continue
@@ -173,7 +163,6 @@ func TestEveryServerSentenceHasATranslation(t *testing.T) {
 			t.Errorf("%q no longer reaches an English guest as written", msg)
 		}
 	}
-	// A raw scd code is never shown.
 	for _, raw := range []string{"Voucher AUTH_DENIED.", "Voucher VOUCHER_EXPIRED.", "Voucher INTERNAL."} {
 		if got := localise(builtinStrings["en"], raw); got.Key != "err.voucher.invalid" {
 			t.Errorf("%q maps to %q", raw, got.Key)
@@ -181,9 +170,7 @@ func TestEveryServerSentenceHasATranslation(t *testing.T) {
 	}
 }
 
-// THE ROOM SIGN-IN SENTENCES STAY THE SERVER'S. The page translates by looking up the English the server
-// sent; if the server's closed set and the page's keys ever disagree, a guest would silently get English --
-// or worse, a translation of a different sentence. The English of each key must BE the server's sentence.
+// The page translates by looking up the server's English; each key's English must be the server's sentence, or a guest silently gets another one.
 func TestRoomSignInTranslationsAreTheServersClosedSet(t *testing.T) {
 	en := builtinStrings["en"]
 	for key, server := range map[string]string{
@@ -199,7 +186,6 @@ func TestRoomSignInTranslationsAreTheServersClosedSet(t *testing.T) {
 	if got := strings.Replace(en["err.wait.seconds"], "{n}", "42", 1); got != guestAuthRateLimitedMessage(42) {
 		t.Errorf("err.wait.seconds renders %q; the server sends %q", got, guestAuthRateLimitedMessage(42))
 	}
-	// The page's pattern for the counted sentence matches what the server sends.
 	re := regexp.MustCompile(`^Too many attempts\. Please wait ([0-9]+) seconds and try again\.$`)
 	if !re.MatchString(guestAuthRateLimitedMessage(42)) || !strings.Contains(landingHTML, re.String()) {
 		t.Error("the sign-in page's countdown pattern no longer matches the server's sentence")
@@ -209,8 +195,7 @@ func TestRoomSignInTranslationsAreTheServersClosedSet(t *testing.T) {
 			t.Errorf("the sign-in page does not translate %s", key)
 		}
 	}
-	// One sentence for a wrong room AND a wrong name, in every language, and it never names either as the
-	// one that was wrong.
+	// One sentence for a wrong room and a wrong name, never naming which was wrong.
 	for _, l := range portalLanguages {
 		msg := strings.ToLower(builtinStrings[l.Code]["err.room.credential"])
 		for _, leak := range []string{"not found", "does not exist", "no such", "occupied", "checked out", "wrong name"} {
@@ -233,7 +218,6 @@ func TestSignInTabsAreAnAccessibleTablist(t *testing.T) {
 			t.Errorf("the sign-in tabs are missing %q", frag)
 		}
 	}
-	// Every error box is a live region, so a refusal is announced.
 	page := guestPages(t, map[string]any{}, nil)["sign-in"]
 	if n := strings.Count(page, `class="err"`); n == 0 || n != strings.Count(page, `class="err" role="alert"`)+strings.Count(page, `class="err" id=`) {
 		t.Errorf("an error box is not announced: %d boxes", n)
@@ -255,9 +239,7 @@ func TestTheOnlinePageNoLongerPrintsTheSessionID(t *testing.T) {
 	}
 }
 
-// THE SOCIAL PROVIDER'S RETURN LEG. A refusal there used to be a bare "Sign-in failed" page carrying scd's own
-// words, or a plain-text "device not on this Wi-Fi network". It is now the branded failure page in the guest's
-// language -- with the status code the handler always sent.
+// The social provider's return leg answers failures with the branded page and the handler's status code.
 func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
 	h := designHandler(t, map[string]any{"hotel_name": "Semantics Demo Hotel"})
 	for _, tc := range []struct {
@@ -292,9 +274,8 @@ func TestSocialSignInFailuresAreFriendlyPages(t *testing.T) {
 	}
 }
 
-// A real provider returns only code + state (no `provider` -- scd resolves it from the state row), and Sign in
-// with Apple returns them as a POST form (response_mode=form_post). Both must get past parameter checking to
-// the device check; a POST form without a code is the ordinary social failure page.
+// A real provider returns only code + state (scd resolves the provider from the state row); Apple returns them as a
+// form POST. Both must reach the device check.
 func TestSocialCallbackAcceptsProviderlessGETAndApplesFormPost(t *testing.T) {
 	h := designHandler(t, map[string]any{"hotel_name": "Semantics Demo Hotel"})
 	for _, tc := range []struct {

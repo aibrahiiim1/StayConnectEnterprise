@@ -1,32 +1,9 @@
 package main
 
-// AUTHORING A PMS INTERFACE AND ITS CONFIGURATION.
-//
-// WHAT WAS MISSING
-// ----------------
-// The PMS Interfaces screen could list interfaces, show their revisions, publish an EXISTING revision and
-// rotate a credential -- and nothing else. There was no way to create an interface, and no way to author a
-// revision's configuration, so the ENDPOINT the connector dials (host:port), its timeouts, its heartbeat
-// bounds, its credential mode and its timezone were unreachable from the product. Every interface on this
-// appliance exists because a test or a seed script wrote it directly into the database.
-//
-// An operator handed this build could not connect a PMS at all. That is not a missing nicety: it is the
-// entire configuration surface of the feature.
-//
-// WHAT THIS ADDS, AND WHAT IT REFUSES TO INVENT
-// ---------------------------------------------
-// Exactly the fields the IMPLEMENTED connector reads, taken from two places and nowhere else:
-//
-//   * pmsd.Revision.Validate()      -- endpoint, source timezone, normalization version, credential mode,
-//                                      and the read-only capability, which must be TRUE;
-//   * pgRepo.LoadInterface()        -- the config keys it projects: endpoint, dial/read/write timeouts,
-//                                      heartbeat interval/timeout, feed freshness, complete-sync bound,
-//                                      resync_supported, auth.credential_mode, auth.read_only.
-//
-// No protocol behaviour is invented here, no PMS topology is assumed, and no managed state is fabricated. A
-// revision authored here is a DRAFT: it is written, and it is not published. Publishing stays exactly where
-// it was -- a separate, password-confirmed action with its own reason code -- because publishing is what
-// changes "what every guest is resolved against from this moment on", and that boundary was accepted as-is.
+// Authoring a PMS interface and its revision configuration, using only the fields the implemented connector
+// reads: pmsd.Revision.Validate() and pgRepo.LoadInterface(). No protocol behaviour or managed state is invented.
+// A revision authored here is a DRAFT; publishing stays a separate, password-confirmed action because it changes
+// what every guest is resolved against from that moment.
 
 import (
 	"context"
@@ -49,30 +26,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
-// pmsAllowedKinds is the set of connector kinds the CANONICAL PMS runtime supports.
-//
-// It holds exactly one entry, and that is the honest number: pmsd declares the same single supported kind
-// (internal/pmsd.supportedConnectorKinds) and Revision.Validate refuses any other with REVISION_INVALID.
-//
-// So this is NOT the only thing standing between an unsupported kind and a bad connection — the runtime
-// already refuses one. What it prevents is the unsupported configuration being AUTHORED at all. Without it
-// an operator could create an Interface, configure a revision, publish it, and only then discover that the
-// connector rejects the whole thing: work that could never succeed, failing at the last step, reported as a
-// connection problem rather than as a connector this build does not implement.
-//
-// The legacy scd loader recognised six kinds (stub, protel-fias, opera-fias, fidelio-fias, mews, apaleo)
-// and this path reused that list, which is how five options pmsd would refuse came to be offered on the
-// canonical screen. Those implementations still exist and are not deleted here; they are simply not
-// presented as PMS Interface capability, so the product surface matches what the runtime can run.
-//
-// REJECTION IS HERE, NOT ONLY IN THE DROPDOWN. Hiding an option in the UI leaves the API accepting it, and
-// the API is what a script, a restored fixture or a future screen will use.
-//
-// A kind belongs in this map when pmsd declares support for it — the two lists are meant to agree.
-//
-// They now agree by construction: both derive from the provider registry (internal/pmsprovider), which lists
-// protel-fias (live-verified) and the REST connectors pmsd can run (Mews, Apaleo, OPERA Cloud). opera-fias,
-// fidelio-fias and stub remain unregistered and are refused here exactly as before.
+// The connector kinds the canonical PMS runtime supports; it agrees with pmsd by construction (both derive from
+// the provider registry, internal/pmsprovider). Rejection lives here, not only in the dropdown, so the API
+// refuses an unsupported kind and an operator never publishes a configuration the connector would reject.
 var pmsAllowedKinds = func() map[string]bool {
 	m := map[string]bool{}
 	for _, k := range pmsprovider.Kinds() {
@@ -82,22 +38,14 @@ var pmsAllowedKinds = func() map[string]bool {
 }()
 
 const (
-	// postingTargetUnset is the fail-closed default: while a revision carries it, PMS financial posting is
-	// impossible by construction (Phase-0 Amendment A1). Only financial onboarding records RESERVATION.
+	// The fail-closed default: while a revision carries it, PMS financial posting is impossible. Only financial onboarding records RESERVATION.
 	postingTargetUnset = "UNSET"
-	// credentialModeNone matches the supported connector: the FIAS link carries no transport authentication.
 	credentialModeNone = "NONE"
-	// canonicalNormalizationVersion is the normalisation contract THIS BUILD implements. It changes when the
-	// parsing/normalisation of the feed changes, which is a code change, never a configuration one.
+	// The normalisation contract this build implements; it changes with a code change, never configuration.
 	canonicalNormalizationVersion = 1
 )
 
-// The posting target and the credential mode are two fields this path no longer accepts from the caller.
-// The schema permits RESERVATION (recorded only by financial onboarding) and both credential modes — a
-// revision authored by a different, deliberate path may use them — but neither is a choice
-// an operator makes on this form, so the allowlists here would only describe options nothing can select.
-// The constants above carry the single value each field is now written with, and the reasons are recorded
-// at the point of enforcement in validateRevisionConfig.
+// The posting target and credential mode are not accepted from the caller; each is written with the single value above (see validateRevisionConfig).
 
 type createPMSInterfaceReq struct {
 	ConnectorKind string `json:"connector_kind"`
@@ -123,10 +71,8 @@ func (s *server) createPMSInterface(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// ONE PROTEL FIAS CONNECTION PER PROPERTY (audit H-11). The FIAS link is a single socket to the hotel's PMS
-	// and the appliance carries room charge over it (D45); a second protel-fias connection would be a second
-	// writer on the same PMS, and duplicate-source detection could only report it after the fact. A retired
-	// (DECOMMISSIONED) one does not count.
+	// One Protel FIAS connection per property: the FIAS link is a single socket to the PMS that also carries room
+	// charge, so a second would be a second writer. A DECOMMISSIONED one does not count.
 	if kind == pmsprovider.KindProtelFIAS {
 		var existing int
 		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_interfaces
@@ -142,9 +88,7 @@ func (s *server) createPMSInterface(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var id string
-	// AUTH_DISABLED, not ACTIVE. A new interface has no published revision and therefore no endpoint to
-	// reach, so calling it ACTIVE would advertise a connection that cannot exist. It becomes usable when a
-	// revision is published, which is a separate deliberate act.
+	// AUTH_DISABLED, not ACTIVE: a new interface has no published revision and no endpoint, so ACTIVE would advertise a connection that cannot exist.
 	if err := s.db.QueryRow(ctx, `
 	    INSERT INTO iam_v2.pms_interfaces (tenant_id, site_id, connector_kind, display_label, lifecycle_state)
 	    VALUES ($1,$2,$3,$4,'AUTH_DISABLED') RETURNING id::text`,
@@ -164,7 +108,6 @@ func allowedKindList() string {
 	for k := range pmsAllowedKinds {
 		out = append(out, k)
 	}
-	// deterministic message, so a refusal reads the same way twice
 	for i := 0; i < len(out); i++ {
 		for j := i + 1; j < len(out); j++ {
 			if out[j] < out[i] {
@@ -175,11 +118,7 @@ func allowedKindList() string {
 	return strings.Join(out, ", ")
 }
 
-// authorRevisionReq is the complete configuration of a connector revision. Every field is one the running
-// code reads; there are no placeholders and nothing here is decorative.
 type authorRevisionReq struct {
-	// Endpoint is the address the connector dials: host:port. This is the field whose absence from the UI
-	// made the whole screen unusable.
 	Endpoint             string `json:"endpoint"`
 	SourceTimezone       string `json:"source_timezone"`
 	PostingTargetModel   string `json:"posting_target_model"`
@@ -194,24 +133,18 @@ type authorRevisionReq struct {
 	HeartbeatTimeoutMS   int64  `json:"heartbeat_timeout_ms"`
 	FeedFreshnessMS      int64  `json:"feed_freshness_ms"`
 	CompleteSyncMS       int64  `json:"complete_sync_ms"`
-	// MaxAuthCacheAgeSeconds is the operator's override for how long PMS-derived Stay evidence may still
-	// authorise a Room sign-in. Absent, the bound is one complete_sync_ms cadence plus the heartbeat
-	// allowance, which is also what limits authentication while the transport is down (D39). This is the
-	// only lever for a property that needs a longer offline window, and it had no way into a Revision at
-	// all — the value could be read by the authentication path but never written by the admin API.
-	//
-	// Optional: 0 or absent means "no override", which is why it is not in the mandatory-bounds loop below.
+	// Operator override for how long PMS-derived Stay evidence may still authorise a Room sign-in. Absent, the bound
+	// is one complete_sync_ms cadence plus the heartbeat allowance, which also limits authentication while the
+	// transport is down. 0 or absent means no override, so it is outside the mandatory-bounds loop.
 	MaxAuthCacheAgeSeconds int64  `json:"max_auth_cache_age_seconds"`
 	FinancialBaseCurrency  string `json:"financial_base_currency"`
 	FinancialCurrencyExp   *int   `json:"financial_base_currency_exponent"`
-	// TLS on the FIAS link (GDPR plan C8), off unless asked for; the fingerprint pins a self-signed certificate.
+	// TLS on the FIAS link, off unless asked for; the fingerprint pins a self-signed certificate.
 	TLSEnabled    bool   `json:"tls_enabled"`
 	TLSCertSHA256 string `json:"tls_cert_sha256"`
-	// ProviderConfig carries the connector's settings keyed by the field keys GET /pms-providers publishes.
-	// Absent or empty for protel-fias means EXACTLY the validation and stored config this endpoint always
-	// produced. For protel-fias, when present, its keys are the top-level field names above and override them
-	// before the same validation runs. For a REST connector it is required and validated against the
-	// provider's schema (unknown keys refused), and stored under config.provider.
+	// Connector settings keyed by the field keys GET /pms-providers publishes. For protel-fias, present keys are the
+	// top-level field names and override them before the same validation; for a REST connector it is required and
+	// validated against the provider's schema (unknown keys refused), stored under config.provider.
 	ProviderConfig map[string]any `json:"provider_config"`
 }
 
@@ -222,13 +155,10 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	// With no provider_config the request is validated EXACTLY as it always was, before any database read, so
-	// a protel-fias caller sees the same answers in the same order. With provider_config the connector kind
-	// decides which schema applies, so validation waits for the interface lookup below.
+	// Without provider_config validation is unchanged and runs before any database read; with it the connector kind
+	// decides the schema, so validation waits for the interface lookup.
 	var cfg map[string]any
-	// PRESENCE, not length: a REST draft that accepts every provider default may legitimately send
-	// "provider_config": {}. For protel-fias an empty object maps nothing, so the same validation and the same
-	// stored config result as sending no provider_config at all.
+	// Presence, not length: "provider_config": {} is valid for a REST draft with all defaults, and maps nothing for protel-fias.
 	hasProviderCfg := in.ProviderConfig != nil
 	if !hasProviderCfg {
 		var verr error
@@ -241,13 +171,8 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// The interface must exist in THIS tenant and site, and must still be configurable.
-	//
-	// connector_kind used to be selected here and then never read -- a value fetched to prove existence and
-	// thrown away. The lifecycle state is the one that actually decides whether authoring means anything:
-	// DECOMMISSIONED is terminal, so a revision written against it is configuration that can never be
-	// published or dialled, and accepting it silently is how an operator ends up believing a retired
-	// interface was reconfigured.
+	// The interface must exist in THIS tenant and site and be configurable: DECOMMISSIONED is terminal, so a
+	// revision against it could never be published or dialled.
 	var lifecycle string
 	if err := s.db.QueryRow(ctx,
 		`SELECT lifecycle_state FROM iam_v2.pms_interfaces WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
@@ -261,9 +186,6 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 				"could never be published")
 		return
 	}
-	// PROVIDER-AWARE VALIDATION. The kind is read here only when it decides the schema: a request without
-	// provider_config against a protel-fias interface never reaches this branch's logic beyond the kind
-	// lookup, and is stored exactly as before.
 	var restCfg *pmsprovider.RESTConfig
 	var ignored []string
 	{
@@ -291,8 +213,7 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 			cfg = rc.StoredConfig()
 			ignored = ignoredTopLevelFields(&in)
 		case hasProviderCfg:
-			// protel-fias (or a legacy kind): provider_config keys are the top-level fields, then the SAME
-			// validation as always.
+			// protel-fias (or a legacy kind): provider_config keys are the top-level fields, then the same validation.
 			if perr := applyFIASProviderConfig(&in); perr != nil {
 				jsonErr(w, http.StatusBadRequest, perr.Code, perr.Message)
 				return
@@ -307,38 +228,18 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	}
 	raw, _ := json.Marshal(cfg)
 
-	// ALLOCATING revision_no IS A RACE, AND IT WAS LOSING.
-	//
-	// The number came from `(SELECT COALESCE(MAX(revision_no),0)+1 ...)` inside the INSERT. Under READ
-	// COMMITTED that subquery takes its snapshot at statement start and takes no lock, so two operators
-	// saving at the same moment both compute the same number. Proven deterministically against real
-	// PostgreSQL by overlapping two transactions: both allocated revision 9, and the second died with
-	//
-	//     duplicate key value violates unique constraint "pms_interface_revisions_pms_interface_id_revision_no_key"
-	//
-	// which this handler reported as HTTP 500 -- an internal error for a situation that is neither internal
-	// nor an error, and one that leaked an index name to the operator.
-	//
-	// A transaction-scoped advisory lock keyed on the interface makes allocation deterministic: the second
-	// writer waits, then reads a MAX that includes the first row, and BOTH succeed with adjacent numbers.
-	// The lock is per-interface, so authoring on one interface never blocks another, and it is released by
-	// commit or rollback without any unlock path to forget.
+	// Allocating revision_no is serialized: MAX()+1 inside the INSERT takes no lock under READ COMMITTED, so two
+	// concurrent saves computed the same number and one died on the unique constraint as a 500. A
+	// transaction-scoped advisory lock per interface makes the second writer wait and read the new MAX; it never
+	// blocks other interfaces and is released by commit or rollback.
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// The wait for that lock is BOUNDED, and running out of patience is not an internal error.
-	//
-	// An unbounded pg_advisory_xact_lock waits as long as it takes. Proven against a real database by holding
-	// the same lock externally for six seconds: the request blocked for 5017ms and then returned HTTP 500 --
-	// because dbCtx caps every statement at ten seconds and the context died first. The lock made allocation
-	// correct and moved the 500 rather than removing it.
-	//
-	// lock_timeout makes the outcome deterministic: acquire it quickly, or fail fast with SQLSTATE 55P03 and
-	// tell the operator something true and actionable. Three seconds is well inside the ten-second request
-	// budget, so the answer is always the handler's own rather than a deadline nobody can interpret.
+	// The lock wait is bounded: an unbounded wait outlives dbCtx's ten-second cap and surfaces as a 500. lock_timeout
+	// (three seconds) fails fast with SQLSTATE 55P03 so the handler returns a true, actionable answer.
 	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
 		return
@@ -354,39 +255,16 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// THE FINANCIAL CURRENCY PAIR IS A PHASE-4 COLUMN, AND THIS IS A PHASE-3 SURFACE.
-	//
-	// financial_base_currency and its exponent are added by migration 0011. Naming them unconditionally made
-	// the whole endpoint fail on any deployment that stops at 0010 -- which is exactly what the Phase-3 CI
-	// schema is, and it turned every authoring request there into a 500. The appliance carries every
-	// migration, so the defect was invisible on it.
-	//
-	// So the columns are named only when the operator actually supplied a currency. Authoring without one --
-	// the only sensible thing to do before Phase 4 exists -- works on both schemas, and asking for a currency
-	// where the schema cannot store it is refused with the reason rather than an internal error.
+	// financial_base_currency and its exponent come from migration 0011, so they are named only when the operator
+	// supplied a currency; otherwise authoring would fail on any schema that stops at 0010. A currency the schema cannot store is refused with the reason.
 	cur := strings.TrimSpace(in.FinancialBaseCurrency)
 
-	// SOURCE FINGERPRINT — implementation-controlled, never an operator field.
-	//
-	// Phase-0 §7 detects duplicate sources by source_fingerprint equality: two Interfaces that turn out to be
-	// the same physical PMS must be flagged, because PMS-settled purchases across such a pair are the case
-	// where one property's charge lands on another's folio. The column existed and the detector read it, but
-	// nothing ever wrote it, so every revision carried NULL — and NULL never equals NULL. The check was
-	// running and structurally incapable of matching.
-	//
-	// It is derived, not asked for. An operator cannot be expected to know whether two host:port pairs are the
-	// same PMS, and a fingerprint they could type is one they could mistype into a collision or out of a real
-	// one. Connector kind is part of the input because the same endpoint reached by two different protocols is
-	// not the same source, and the endpoint is lowercased so that Host:5003 and host:5003 fingerprint alike.
-	// FAIL CLOSED IF THE SOURCE IDENTITY CANNOT BE FULLY RESOLVED. An earlier version swallowed the read
-	// error and fingerprinted the endpoint alone, which is worse than not fingerprinting at all: two
-	// interfaces that ARE the same physical PMS would still collide correctly, but an interface whose kind
-	// failed to read would get a fingerprint no other revision of that same interface can ever reproduce —
-	// so duplicate-source detection would quietly compare identities that were computed under different
-	// rules and conclude, wrongly, that two sources differ.
-	//
-	// A fingerprint is a claim about identity. Refusing to make one from a partially-resolved identity is
-	// the only safe answer; the operator retries and nothing has been written.
+	// Source fingerprint: implementation-controlled, never an operator field. Duplicate-source detection compares
+	// source_fingerprint equality (two interfaces that are the same physical PMS must be flagged, since PMS-settled
+	// purchases could land on another property's folio); NULL never equals NULL, so it must always be written. It
+	// is derived from connector kind plus lowercased endpoint. Fail closed if the identity cannot be fully
+	// resolved: a fingerprint from partial identity would be computed under different rules and wrongly conclude
+	// sources differ. The operator retries and nothing has been written.
 	connectorKind, kerr := interfaceConnectorKind(ctx, tx, id)
 	if kerr != nil || strings.TrimSpace(connectorKind) == "" {
 		jsonErr(w, http.StatusInternalServerError, "internal",
@@ -396,7 +274,6 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	}
 	fingerprint := pmsSourceFingerprint(connectorKind, in.Endpoint)
 	if restCfg != nil {
-		// A REST source is identified by the provider's own property identity, never by a credential.
 		fingerprint = pmsprovider.SourceFingerprint(connectorKind, restCfg.SourceIdentity())
 		in.Endpoint = restCfg.Endpoint()
 	}
@@ -432,9 +309,7 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if err != nil {
-		// The lock removes the race between two callers of THIS endpoint. A unique violation can still reach
-		// here if a revision is inserted by some other path that does not take the lock, and that is a
-		// conflict the operator can act on by retrying -- so it is reported as one, with no index name in it.
+		// The lock only covers callers of THIS endpoint; a unique violation from another path is a conflict the operator can retry, reported without an index name.
 		if isUniqueViolation(err) {
 			jsonErr(w, http.StatusConflict, "conflict",
 				"another revision was created for this interface at the same moment: reload and save again")
@@ -447,8 +322,7 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
 		return
 	}
-	// The endpoint is recorded in the audit; the credential never is, and this path never accepts one --
-	// rotating a secret is its own endpoint with its own re-authentication.
+	// The endpoint is audited; the credential never is, and this path never accepts one (rotation is its own endpoint with re-authentication).
 	s.audit(r, "pms_interface_revision.authored", "pms_interface", id,
 		map[string]any{"revision_id": revID, "revision_no": revNo, "endpoint": in.Endpoint})
 	resp := map[string]any{
@@ -456,16 +330,14 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		"note": "Draft revision. Publish it to make it the interface's current configuration.",
 	}
 	if restCfg != nil {
-		// Said out loud rather than silently dropped: for a REST connector these top-level values are derived
-		// from provider_config, so anything the caller sent for them was not stored.
+		// Said out loud rather than silently dropped: for a REST connector these values derive from provider_config.
 		resp["ignored_fields"] = ignored
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// validateRESTRevision validates a REST connector's revision request. Top-level source_timezone and
-// max_auth_cache_age_seconds are honoured when provider_config does not carry them; the posting target stays
-// UNSET and no financial currency is accepted (financial posting exists only on the FIAS path).
+// Top-level source_timezone and max_auth_cache_age_seconds are honoured when provider_config lacks them; the
+// posting target stays UNSET and no financial currency is accepted (posting exists only on the FIAS path).
 func validateRESTRevision(prov pmsprovider.Provider, in *authorRevisionReq) (pmsprovider.RESTConfig, *pmsprovider.ValidationError) {
 	if s := strings.TrimSpace(in.PostingTargetModel); s != "" && s != postingTargetUnset {
 		return pmsprovider.RESTConfig{}, &pmsprovider.ValidationError{Code: "validation", Field: "posting_target_model",
@@ -490,8 +362,6 @@ func validateRESTRevision(prov pmsprovider.Provider, in *authorRevisionReq) (pms
 	return rc, nil
 }
 
-// ignoredTopLevelFields lists the FIAS-shaped top-level values a REST request carried that were not stored
-// because the REST connector derives them.
 func ignoredTopLevelFields(in *authorRevisionReq) []string {
 	out := []string{}
 	add := func(name string, set bool) {
@@ -511,10 +381,8 @@ func ignoredTopLevelFields(in *authorRevisionReq) []string {
 	return out
 }
 
-// applyFIASProviderConfig maps a protel-fias provider_config onto the top-level request fields it names,
-// each checked against the registry's field definition. Unknown keys are refused. The caller then runs
-// validateRevisionConfig unchanged, so the stored config is identical to a request that sent the same values
-// at the top level.
+// Maps a protel-fias provider_config onto the top-level fields, each checked against the registry; unknown keys
+// are refused and validateRevisionConfig then runs unchanged, so storage matches a top-level request.
 func applyFIASProviderConfig(in *authorRevisionReq) *pmsprovider.ValidationError {
 	prov, _ := pmsprovider.Get(pmsprovider.KindProtelFIAS)
 	for k, raw := range in.ProviderConfig {
@@ -568,8 +436,7 @@ func applyFIASProviderConfig(in *authorRevisionReq) *pmsprovider.ValidationError
 	return nil
 }
 
-// nullIfBlankText, not nullIfEmpty: that name already belongs to a helper in the integration-tagged test
-// files, and a plain `go build ./...` never compiles those, so the collision only appeared in CI.
+// Not nullIfEmpty: that name belongs to a helper in the integration-tagged test files, which a plain `go build ./...` never compiles.
 func nullIfBlankText(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -577,11 +444,7 @@ func nullIfBlankText(s string) any {
 	return strings.TrimSpace(s)
 }
 
-// validateRevisionConfig enforces the SAME contract pmsd.Revision.Validate() enforces at connect time.
-//
-// Checking it here is not duplication for its own sake: without it an operator can save a revision that
-// looks fine, publish it, and only then discover the connector refuses it -- with the failure surfacing as
-// a connection problem rather than as the configuration mistake it is.
+// Enforces the same contract as pmsd.Revision.Validate() at connect time, so a mistake surfaces here and not as a connection problem after publishing.
 func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	host, port, err := net.SplitHostPort(strings.TrimSpace(in.Endpoint))
 	if err != nil || host == "" {
@@ -594,18 +457,13 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	if strings.TrimSpace(in.SourceTimezone) == "" {
 		return nil, fmt.Errorf("source_timezone is required")
 	}
-	// A real IANA zone, loaded rather than pattern-matched: the connector converts PMS timestamps with it,
-	// and a zone the runtime cannot load turns every arrival and departure into the wrong moment.
+	// A real IANA zone, loaded rather than pattern-matched: a zone the runtime cannot load shifts every arrival and departure.
 	if _, lerr := time.LoadLocation(in.SourceTimezone); lerr != nil {
 		return nil, fmt.Errorf("source_timezone %q is not a known IANA time zone", in.SourceTimezone)
 	}
-	// A NEW REVISION STARTS AT UNSET, AND THE OPERATOR DOES NOT CHOOSE OTHERWISE HERE.
-	//
-	// posting_target_model decides what a room charge targets. RESERVATION (RN + G#) is a FINANCIAL
-	// determination: it needs the vendor's confirmation that the interface's reservation numbers are unique and
-	// never reused, and it is recorded by financial onboarding (Phase-0 Amendment A1). UNSET is the fail-closed
-	// default precisely so that posting is impossible until that has been done deliberately, so this path
-	// accepts only UNSET and says why.
+	// A new revision starts UNSET and this path accepts only UNSET: RESERVATION (RN + G#) is a financial
+	// determination (the vendor confirms reservation numbers are unique and never reused) recorded by financial
+	// onboarding, so posting stays impossible until done deliberately.
 	if strings.TrimSpace(in.PostingTargetModel) == "" {
 		in.PostingTargetModel = postingTargetUnset
 	}
@@ -615,20 +473,14 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 				"financial onboarding, with the vendor's confirmation, never by a form", postingTargetUnset)
 	}
 
-	// IMPLEMENTATION-CONTROLLED, NOT OPERATOR-CONTROLLED.
-	//
-	// normalization_version identifies how THIS BUILD parses and normalises the feed, and resync support is
-	// a property of the protocol adapter. Neither is a fact about the hotel, and neither is knowable from an
-	// admin screen — an operator typing 2 into a normalization field does not change how the connector
-	// parses anything; it just mislabels every event recorded under it. They are stamped from the
-	// implementation and any submitted value is ignored rather than honoured.
+	// Implementation-controlled: normalization_version and resync support describe this build's parser and adapter,
+	// not the hotel. Stamped from the implementation; any submitted value is ignored.
 	in.NormalizationVersion = canonicalNormalizationVersion
 	resyncTrue := true
 	in.ResyncSupported = &resyncTrue
 
-	// CREDENTIAL MODE FOLLOWS THE CONNECTOR. The Protel FIAS link carries no transport authentication, so
-	// NONE is the only truthful value and requiring the operator to state it added a way to be wrong: an
-	// interface saved as AUTH_KEY waits for a secret that will never exist and never connects.
+	// Credential mode follows the connector: the Protel FIAS link has no transport authentication, so NONE is the
+	// only truthful value (AUTH_KEY would wait for a secret that never exists).
 	if strings.TrimSpace(in.CredentialMode) == "" {
 		in.CredentialMode = credentialModeNone
 	}
@@ -638,10 +490,7 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 				"authentication, so there is no credential to configure", credentialModeNone)
 	}
 
-	// READ-ONLY IS NOT OPTIONAL. pmsd refuses any revision whose read-only capability is absent or false, so
-	// a write-capable PMS connection cannot be configured here at all -- and that refusal is the product
-	// decision, not an oversight to work around. Defaulted rather than demanded: it is fixed, so making the
-	// caller assert it was a formality that could only ever be got wrong.
+	// Read-only is not optional: pmsd refuses any revision without it, so a write-capable PMS connection cannot be configured here. Defaulted, since it is fixed.
 	if in.ReadOnly == nil {
 		readOnlyTrue := true
 		in.ReadOnly = &readOnlyTrue
@@ -679,10 +528,8 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 			return nil, fmt.Errorf("financial_base_currency_exponent must be between 0 and 4")
 		}
 	}
-	// Bounded independently of the millisecond timeouts: this is a seconds value and a legitimately long one
-	// (72 hours is 259200), so the 86400000 ceiling above would be meaningless here. The upper bound matches
-	// the one iam_v2.p3_feed_authorizes enforces when it reads the key, because a value the predicate will
-	// silently ignore is worse than one the API refuses: the operator would see it saved and believe it.
+	// Bounded independently of the millisecond timeouts (this is seconds; 72 hours is 259200). The upper bound
+	// matches iam_v2.p3_feed_authorizes, which silently ignores a larger value that the operator would believe saved.
 	if in.MaxAuthCacheAgeSeconds < 0 || in.MaxAuthCacheAgeSeconds > 604800 {
 		return nil, fmt.Errorf("max_auth_cache_age_seconds must be between 0 and 604800 seconds (7 days); " +
 			"0 or omitted means the default complete-sync bound applies")
@@ -697,9 +544,8 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 		}
 	}
 	resync := in.ResyncSupported != nil && *in.ResyncSupported
-	// The shape pgRepo.LoadInterface projects, key for key. Anything else an operator sent is dropped rather
-	// than stored: the config is read with ->> on named keys, so an unknown key is silently inert, and inert
-	// configuration that looks saved is how an operator ends up debugging a setting that never applied.
+	// The shape pgRepo.LoadInterface projects, key for key. Unknown keys are dropped: config is read with ->> on
+	// named keys, so an unknown key would be inert yet look saved.
 	cfg := map[string]any{
 		"endpoint":              strings.TrimSpace(in.Endpoint),
 		"dial_timeout_ms":       in.DialTimeoutMS,
@@ -715,13 +561,11 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 			"read_only":       true,
 		},
 	}
-	// Written only when set, so an unset override leaves the key ABSENT rather than present-and-zero. The
-	// predicate reads it with a regex that rejects 0, so both forms behave identically at authentication
-	// time — but an absent key reads as "not configured" to an operator, and "0" reads as a setting.
+	// Written only when set, so an unset override leaves the key absent rather than "0", which would read as a setting.
 	if in.MaxAuthCacheAgeSeconds > 0 {
 		cfg["max_auth_cache_age_seconds"] = in.MaxAuthCacheAgeSeconds
 	}
-	// Absent unless on, so every revision authored before C8 reads exactly as it did.
+	// Absent unless on.
 	if in.TLSEnabled {
 		tlsCfg := map[string]any{"enabled": true}
 		if pin != "" {
@@ -732,40 +576,26 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	return cfg, nil
 }
 
-// isLockNotAvailable reports PostgreSQL's lock_timeout expiry (SQLSTATE 55P03), which is contention rather
-// than failure: the caller can simply try again.
+// Lock_timeout expiry (SQLSTATE 55P03): contention, not failure; the caller can retry.
 func isLockNotAvailable(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
 }
 
-// isUndefinedColumn reports PostgreSQL's undefined_column (42703), which here means the deployment predates
-// the migration that adds the column rather than anything the request got wrong about its own shape.
+// Undefined column (42703): the deployment predates the migration that adds it.
 func isUndefinedColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42703"
 }
 
-// pmsSourceFingerprint is the stable identity of the PHYSICAL source a revision points at: connector kind
-// plus normalised endpoint, hashed. Two revisions — on the same appliance or on two Interfaces authored years
-// apart — fingerprint identically exactly when they dial the same PMS the same way.
-//
-// SHA-256 rather than the endpoint verbatim: the fingerprint is compared, listed and reported, and a hash
-// keeps a property's internal host and port out of screens and conflict records that only ever need to answer
-// "same source or not". Truncated to 32 hex characters, which is far beyond collision risk for the handful of
-// interfaces one appliance hosts and short enough to read in a comparison.
-//
-// The implementation now lives in the provider registry so pmsd, edged and every connector share one; the
-// regression test pins that it is byte-for-byte the function that was here.
+// Stable identity of the physical source: connector kind plus normalised endpoint, hashed (SHA-256 truncated to 32
+// hex) so a property's internal host and port stay out of screens and conflict records. Lives in the provider
+// registry so pmsd, edged and every connector share one.
 func pmsSourceFingerprint(connectorKind, endpoint string) string {
 	return pmsprovider.SourceFingerprint(connectorKind, endpoint)
 }
 
-// interfaceConnectorKind reads the interface's connector kind inside the authoring transaction.
-//
-// It returns the error rather than absorbing it. The kind is half of the source fingerprint's input, and a
-// fingerprint derived from half an identity is not a weaker fingerprint — it is a different one, which is
-// how a duplicate-source check ends up comparing values that were never comparable.
+// Returns the error rather than absorbing it: the kind is half the fingerprint's input, and a fingerprint from half an identity is a different one.
 func interfaceConnectorKind(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1`, id).Scan(&kind); err != nil {

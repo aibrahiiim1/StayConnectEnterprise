@@ -10,23 +10,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Keyring resolves an AEAD key by its encryption-key id. Keys are never logged, exported, or embedded in an
-// Event; only the key id / generation is recorded elsewhere.
+// Keyring resolves an AEAD key by id. Keys are never logged, exported or embedded in an Event.
 type Keyring interface {
 	Key(keyID string) ([]byte, bool)
 }
 
-// MapKeyring is a simple in-memory keyring (env-populated by the daemon).
 type MapKeyring map[string][]byte
 
 func (m MapKeyring) Key(keyID string) ([]byte, bool) { k, ok := m[keyID]; return k, ok }
 
 var ErrSecretDecrypt = errors.New("pmsd: secret decrypt failed")
 
-// NewPgSecretDecryptor builds a Deps.DecryptSecret that reads the ciphertext/nonce for the ACTIVE secret
-// generation from iam_v2.pms_interface_secret_generations and AES-256-GCM-decrypts it with the keyring key.
-// It runs ONLY after ownership + generation allocation (a lock loser never calls it). Plaintext is returned
-// as transient SecretMaterial (zeroed by the worker after dial) and is never logged.
+// NewPgSecretDecryptor runs only after ownership and generation allocation (a lock loser never calls it).
+// Plaintext is transient SecretMaterial, zeroed by the worker after dial and never logged.
 func NewPgSecretDecryptor(pool *pgxpool.Pool, kr Keyring) func(context.Context, Interface, Revision, SecretGeneration) (SecretMaterial, error) {
 	return func(ctx context.Context, iface Interface, rev Revision, sg SecretGeneration) (SecretMaterial, error) {
 		var ciphertext, nonce []byte
@@ -50,11 +46,8 @@ func NewPgSecretDecryptor(pool *pgxpool.Pool, kr Keyring) func(context.Context, 
 	}
 }
 
-// ownerAAD binds a secret ciphertext to its EXACT owner (tenant / site / interface / secret-generation) via
-// AES-GCM additional authenticated data, so a ciphertext provisioned for one interface or generation cannot
-// be decrypted in a different context (a swapped/replayed ciphertext row fails authentication). The
-// provisioning (encrypt) side MUST use the identical AAD. Deterministic + length-prefixed so no field
-// boundary is ambiguous.
+// ownerAAD binds a ciphertext to its exact tenant/site/interface/generation so a swapped or replayed row fails
+// authentication. Encryption must use this same AAD. Length-prefixed so no field boundary is ambiguous.
 func ownerAAD(iface Interface, sg SecretGeneration) []byte {
 	var b []byte
 	add := func(s string) {
@@ -70,8 +63,6 @@ func ownerAAD(iface Interface, sg SecretGeneration) []byte {
 	return b
 }
 
-// aeadOpen AES-256-GCM-opens ciphertext with the given nonce + owner-bound AAD. Isolated + pure so the
-// owner-binding is unit-testable without a database.
 func aeadOpen(key, nonce, ciphertext, aad []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, ErrSecretDecrypt
@@ -87,14 +78,9 @@ func aeadOpen(key, nonce, ciphertext, aad []byte) ([]byte, error) {
 	return gcm.Open(nil, nonce, ciphertext, aad)
 }
 
-// ---------- provisioning (the encrypt side) ----------
-
-// ErrSecretEncrypt is the single failure the provisioning side reports. It is deliberately not detailed: the
-// caller is an admin endpoint, and "which part of encrypting your credential failed" is not something an
-// operator can act on and not something worth putting in a response body.
+// ErrSecretEncrypt is deliberately undetailed: nothing about why encryption failed belongs in a response body.
 var ErrSecretEncrypt = errors.New("pmsd: secret encrypt failed")
 
-// SealedSecret is a credential ready to be stored as one generation row. It carries no plaintext.
 type SealedSecret struct {
 	GenerationID  string // the row id, chosen BEFORE sealing because it is part of the AAD
 	Ciphertext    []byte
@@ -103,15 +89,8 @@ type SealedSecret struct {
 	CipherVersion int
 }
 
-// SealSecret encrypts a credential for exactly one (tenant, site, interface, generation).
-//
-// The AAD is produced by the SAME ownerAAD the decrypt path uses — not a copy of it. That is the whole point
-// of the binding: a ciphertext provisioned for one interface or one generation must fail authentication
-// anywhere else, and two hand-written AAD builders would drift until it didn't.
-//
-// generationID must be the id the row will actually be stored under. Sealing under one id and inserting under
-// another produces a row that decrypts nowhere, and the failure surfaces later as an unreachable PMS rather
-// than as a rejected rotation.
+// SealSecret uses the same ownerAAD as decryption (two builders would drift). generationID must be the id the
+// row is stored under, else it decrypts nowhere and surfaces later as an unreachable PMS.
 func SealSecret(kr Keyring, keyID string, iface Interface, generationID string, plaintext []byte) (SealedSecret, error) {
 	key, ok := kr.Key(keyID)
 	if !ok || len(key) != 32 {
@@ -139,6 +118,5 @@ func SealSecret(kr Keyring, keyID string, iface Interface, generationID string, 
 	}, nil
 }
 
-// secretCipherVersion is the on-disk format marker for AES-256-GCM with the v1 owner AAD. It is stored with
-// every row so a future format change can be rolled out without guessing what an existing row is.
+// secretCipherVersion marks the on-disk format (AES-256-GCM, v1 owner AAD) stored with every row.
 const secretCipherVersion = 1

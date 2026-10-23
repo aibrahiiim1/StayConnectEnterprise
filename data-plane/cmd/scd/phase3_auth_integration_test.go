@@ -2,12 +2,8 @@
 
 package main
 
-// THE PHASE-3 GUEST PATH, end to end, through the handlers scd actually serves, against a real PostgreSQL 16.
-//
-// These are composition-root tests on purpose. Every individual piece — the resolver, the Auth Context, the
-// grant — already has its own tests and they all pass; what those cannot show is whether the pieces are wired
-// into a path that a guest can walk, and whether the wiring leaks anything. Two defects found earlier in this
-// phase were exactly of that kind: correct operations called with the wrong ids.
+// Phase-3 guest path end to end through scd's real handlers against PostgreSQL: composition-root tests of the
+// wiring (correct operations called with the wrong ids) and of what it leaks.
 
 import (
 	"bytes"
@@ -43,11 +39,8 @@ type authFixture struct {
 	pkgRev, gracePkgRev, priced string
 }
 
-// Each fixture gets its OWN subnet and MAC. Sharing one subnet across fixtures is not merely untidy: the
-// appliance resolves a device's network by "which enabled subnet contains this address", so two fixtures on
-// one subnet make that answer arbitrary and a test can silently resolve into another test's tenant.
-// (On a real appliance this cannot happen — one appliance serves one tenant, and netd rejects overlapping
-// enabled subnets — so the collision is an artefact of running many tenants in one disposable database.)
+// Each fixture gets its own subnet and MAC: the appliance resolves a network by which enabled subnet contains
+// the address, so a shared subnet could resolve into another test's tenant.
 var fixtureSeq atomic.Int64
 
 type fixtureNet struct {
@@ -66,20 +59,8 @@ func nextFixtureNet() fixtureNet {
 	}
 }
 
-// claimFreeFixtureNet points the shared fixture generator at a guest subnet that is NOT already present in
-// this database.
-//
-// The generator numbers subnets from a process-local counter, which is correct within one run and wrong
-// across runs: a disposable database that has been used before already holds 10.77.1.0/24 and its
-// neighbours, and the appliance resolves a device's network by "which enabled subnet contains this address".
-// Two networks with one subnet make that answer arbitrary, and the symptom is not a clear failure -- it is a
-// resolution that lands in another run's tenant and then trips a foreign key.
-//
-// It lives in the shared fixture now. It was scoped to one file while a Phase-3 activation test depended on
-// two fixtures sharing a traffic class; that test has since been corrected to create its second session
-// within its own scope, which is what "another session on the same class" actually means -- so every fixture
-// can have a subnet of its own and the whole suite becomes re-runnable against a database that has seen it
-// before.
+// claimFreeFixtureOctet points the fixture generator at a guest subnet not already in this database; a reused
+// database would otherwise hold the same subnet twice and resolve into another run's tenant.
 func claimFreeFixtureOctet(t *testing.T, p *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
@@ -99,7 +80,7 @@ func claimFreeFixtureOctet(t *testing.T, p *pgxpool.Pool) {
 	}
 	for n := 1; n < 200; n++ {
 		if !used[n] {
-			fixtureSeq.Store(int64(n - 1)) // the generator's next Add(1) yields n
+			fixtureSeq.Store(int64(n - 1))
 			return
 		}
 	}
@@ -121,11 +102,8 @@ func newAuthFixture(t *testing.T) *authFixture {
 
 	claimFreeFixtureOctet(t, p)
 	f := &authFixture{pool: p, net: nextFixtureNet()}
-	// On the full production schema the stay family is written only inside a controlled operation (the
-	// writerguard no longer lets the superuser through as the owner), so the whole seed runs in one
-	// transaction that opens the 'stay' operation exactly as real code does before touching a Stay.
-	// The parent interface and bridge are derived from the site id: production makes bridge_name globally
-	// unique and parent_interface unique among enabled untagged networks, and several packages share one DB.
+	// The stay family is writable only inside a controlled operation, so the whole seed runs in one transaction
+	// that opens it. Parent interface and bridge derive from the site id (both are unique in production).
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin seed: %v", err)
@@ -189,10 +167,8 @@ func newAuthFixture(t *testing.T) *authFixture {
 		Scan(&f.tenant, &f.site, &f.iface, &f.revision, &f.network, &f.stay, &f.otherStay, &f.pkgRev, &f.priced); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// A Stay can only authenticate a guest when it carries FRESH OCCUPANCY EVIDENCE produced by the same
-	// Revision the resolution authenticated against — that is the whole point of the Auth Context, and a
-	// fixture without it would be testing a path no real guest can take. The tuple is all-or-none, so every
-	// column is set together. Separate statement because a data-modifying CTE cannot see a sibling's insert.
+	// A Stay authenticates only with fresh occupancy evidence from the same Revision; the tuple is
+	// all-or-none. Separate statement because a data-modifying CTE cannot see a sibling's insert.
 	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.stays SET
 		  occupancy_evidence_at = now() - interval '10 seconds',
@@ -206,18 +182,13 @@ func newAuthFixture(t *testing.T) *authFixture {
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("seed occupancy evidence: %v", err)
 	}
-	// PUBLISH the interface revision. scd pins the published pointer, never max(revision_no), so a fixture
-	// that creates a revision without publishing it is correctly refused — which is the behaviour a Draft
-	// mid-configuration must get.
+	// scd pins the published pointer, never max(revision_no), so an unpublished revision would be refused.
 	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.pms_interfaces SET current_revision_id=$3
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("publish the interface revision: %v", err)
 	}
-	// A HEALTHY runtime row. Authorising a guest now depends on the FEED being connected and in sync as well
-	// as on the Stay: a PMS that is telling us nothing cannot vouch for anybody. These fixtures exercise the
-	// resolve → context → offer path, so the feed is put in the state where that path is the only thing under
-	// test; the feed rule itself is exercised in internal/authctx.
+	// A healthy runtime row: authorising a guest also requires a connected, in-sync feed (tested in internal/authctx).
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
 		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
@@ -226,8 +197,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		ON CONFLICT DO NOTHING`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("seed pms interface runtime: %v", err)
 	}
-	// The catalog's current-revision pointer is a separate statement: a data-modifying CTE cannot see a
-	// sibling CTE's insert.
+	// Separate statement: a data-modifying CTE cannot see a sibling CTE's insert.
 	if _, err := tx.Exec(ctx, `
 		UPDATE iam_v2.internet_packages ip SET current_revision_id = r.id
 		  FROM iam_v2.internet_package_revisions r
@@ -247,10 +217,8 @@ func newAuthFixture(t *testing.T) *authFixture {
 	return f
 }
 
-// controlledExec runs one fixture write inside a transaction that has opened the named controlled operation.
-// On the full production schema the controlled-writer triggers no longer let the superuser through as the
-// owner, so a fixture that reshapes a Stay (moves it, checks it out) or ages an Auth Context does so the way
-// real code must: in a transaction that has called iam_v2.begin_controlled_operation(family).
+// controlledExec runs a fixture write in a transaction that opened the controlled operation; the triggers do
+// not let the superuser through as the owner.
 func controlledExec(ctx context.Context, p *pgxpool.Pool, family, sql string, args ...any) (pgconn.CommandTag, error) {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -296,12 +264,10 @@ func (f *authFixture) resolveBody(room, last, res, reqID string) map[string]any 
 	}
 }
 
-// THE HAPPY PATH, and the ordering rule that matters most: the Session exists only because the Entitlement
-// does, and both appear in the same commit.
+// The Session exists only because the Entitlement does, and both appear in the same commit.
 func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// A grant succeeds only once the enforcement owner promotes the session.
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
@@ -310,8 +276,6 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 		t.Fatalf("a valid stay did not verify: %+v", res)
 	}
 	if len(res.Offers) != 1 || res.Offers[0].PackageRevisionID != f.pkgRev {
-		// the priced package must NOT be offered: paid access is out of scope and must never be silently
-		// granted for free
 		t.Fatalf("offers = %+v, want exactly the included package", res.Offers)
 	}
 	if res.Offers[0].DownKbps != 9000 {
@@ -333,7 +297,6 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 		t.Fatalf("the grant produced no access: %s", rec.Body.String())
 	}
 
-	// the session belongs to that entitlement, that device and that stay — nothing was invented
 	var entOfSession, deviceOfSession, stayOfEnt string
 	if err := f.pool.QueryRow(ctx, `
 		SELECT s.entitlement_id::text, s.device_id::text, e.stay_id::text
@@ -347,7 +310,6 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	if stayOfEnt != f.stay {
 		t.Fatalf("access was granted against stay %s, not the resolved one", stayOfEnt)
 	}
-	// and its attribution history opened at creation, so its usage can never be unattributable
 	var bindings int
 	if err := f.pool.QueryRow(ctx,
 		`SELECT count(*) FROM iam_v2.session_entitlement_bindings WHERE session_id=$1 AND bound_until IS NULL`,
@@ -357,7 +319,6 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	if bindings != 1 {
 		t.Fatalf("the session opened %d attribution intervals, want exactly 1", bindings)
 	}
-	// the whole chain committed: quote, purchase, entitlement history, device authorization
 	for _, q := range []struct{ what, sql string }{
 		{"purchase", `SELECT count(*) FROM iam_v2.purchases WHERE stay_id=$1 AND state='GRANTED'`},
 		{"entitlement history", `SELECT count(*) FROM iam_v2.entitlement_state_transitions t
@@ -375,24 +336,11 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	}
 }
 
-// A one-time context is one-time: it can produce AT MOST ONE grant, ever.
-//
-// "One-time" is a statement about what gets written, not about what the second caller is told. Presenting a
-// spent context twice must not produce a second Entitlement, a second Purchase, a second Quote or a second
-// Session — that is the property, and it is what this test measures.
-//
-// What the second caller is told depends on WHO is asking, and the two cases are covered separately:
-//
-//	the same device   → the session its own earlier grant already created, because the reply to that grant
-//	                    may simply have been lost (abandoned at portald's response-time budget, a dropped
-//	                    connection). Refusing there would strand a guest who has working access. See
-//	                    TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession.
-//	another device    → the uniform non-success. See
-//	                    TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession.
+// A spent context presented twice writes no second Entitlement, Purchase, Quote or Session. The same device
+// gets its earlier session back (the reply may have been lost); another device gets the uniform non-success
+// (see ...ARetryAfterALostReplyReturnsTheSameSession and ...AnotherDeviceCannotClaimTheGrantedSession).
 func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000005-0000-4000-8000-000000000000"))
@@ -417,9 +365,7 @@ func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 	}
 	second := grant()
 
-	// THE PROPERTY: nothing was granted a second time. Every row family the grant writes is counted, because
-	// a duplicate anywhere in the chain is a duplicate grant — an extra Purchase says the Folio was billed
-	// twice, an extra Session is a second period of access nobody authorised.
+	// Every row family the grant writes is counted; a duplicate anywhere is a duplicate grant (e.g. double billing).
 	counts := map[string]int{}
 	for name, sql := range map[string]string{
 		"entitlements": `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`,
@@ -440,26 +386,15 @@ func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 		}
 	}
 
-	// And the second answer names that same single grant rather than a new one. (A refusal here would also
-	// satisfy "one-time", but would strand a guest whose first reply was lost — see the doc comment.)
+	// A refusal would also satisfy "one-time" but would strand a guest whose first reply was lost.
 	if second.SessionID != first.SessionID || second.EntitlementID != first.EntitlementID {
 		t.Fatalf("the second presentation named different access:\n  first  %+v\n  second %+v", first, second)
 	}
 }
 
-// THE DISCLOSURE CONTRACT, as it now stands.
-//
-// Everything that can describe ONE ROOM answers identically — same status, same bytes. A wrong room, a wrong
-// name, an ambiguous match and a submission the server could not read are indistinguishable, because anything
-// else lets somebody in the lobby submit room numbers and read off which are occupied.
-//
-// WHAT CHANGED, AND WHY IT IS NOT A WEAKENING. The response now carries a coarse failure CLASS, so a guest
-// can be told whether to re-check what they typed or to try again later. The line is drawn on one rule: a
-// result that depends on what the guest typed, or on what the mirror holds about THEIR room, is one class;
-// only conditions true for every guest on the site at that moment are the other. A device on no mapped guest
-// network is the second kind — it is a networking fault that would refuse every guest on that device, and it
-// tells an attacker nothing about any room. The reasoning lives in internal/signinattempt.GuestClass; this
-// test is the proof that the per-room half of it holds through the real handler.
+// Everything that describes one room answers identically (same status, same bytes), or the lobby could
+// enumerate occupied rooms. Only conditions true for every guest on the site are a different class
+// (internal/signinattempt.GuestClass).
 func TestIntegration_Phase3Auth_EveryPerRoomNonSuccessIsIdentical(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -506,11 +441,8 @@ func TestIntegration_Phase3Auth_EveryPerRoomNonSuccessIsIdentical(t *testing.T) 
 	}
 }
 
-// A DEVICE ON NO MAPPED GUEST NETWORK IS THE OTHER KIND, and this is where the line sits.
-//
-// It is site-and-device state, not room state: every guest on that device gets it, no guest on any other
-// device does, and it identifies no room. Reporting it as "check your details" would send someone with a
-// networking problem round a loop nothing they type can escape.
+// A device on no mapped guest network is device state, not room state, so it is TECHNICAL; "check your
+// details" would send the guest in a loop.
 func TestIntegration_Phase3Auth_AnOffNetworkDeviceIsTechnicalNotCredential(t *testing.T) {
 	f := newAuthFixture(t)
 	raw, _ := json.Marshal(map[string]any{
@@ -529,14 +461,12 @@ func TestIntegration_Phase3Auth_AnOffNetworkDeviceIsTechnicalNotCredential(t *te
 	if out.FailureClass != string(signinattempt.GuestTechnical) {
 		t.Fatalf("failure_class = %q, want TECHNICAL", out.FailureClass)
 	}
-	// ...and it still discloses nothing else: no context, no offers, no reason.
 	if out.AuthContextID != "" || len(out.Offers) != 0 {
 		t.Fatalf("the refusal leaked a context or an offer: %s", rec.Body.String())
 	}
 }
 
-// An ambiguous match must never be resolved by picking. Two stays sharing a surname is precisely the case
-// where guessing hands one guest another's access.
+// An ambiguous match is never resolved by picking; that would hand one guest another's access.
 func TestIntegration_Phase3Auth_AmbiguityGrantsNothing(t *testing.T) {
 	f := newAuthFixture(t)
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Shared", "", "00000001-0000-4000-8000-000000000000"))
@@ -553,8 +483,7 @@ func TestIntegration_Phase3Auth_AmbiguityGrantsNothing(t *testing.T) {
 	}
 }
 
-// A PAID package is refused even when the guest names it directly. Paid access is out of scope for this
-// phase, and the failure mode to prevent is granting it for free because nothing checked the price.
+// A paid package is refused even when named directly, so nothing is granted free for lack of a price check.
 func TestIntegration_Phase3Auth_PricedPackageIsRefused(t *testing.T) {
 	f := newAuthFixture(t)
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000006-0000-4000-8000-000000000000"))
@@ -564,7 +493,7 @@ func TestIntegration_Phase3Auth_PricedPackageIsRefused(t *testing.T) {
 	rec := httptest.NewRecorder()
 	raw, _ := json.Marshal(map[string]any{
 		"auth_context_id":     res.AuthContextID,
-		"package_revision_id": f.priced, // never offered; named directly
+		"package_revision_id": f.priced,
 		"device":              map[string]string{"ip": f.net.guestIP, "mac": f.net.mac},
 	})
 	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
@@ -583,8 +512,7 @@ func TestIntegration_Phase3Auth_PricedPackageIsRefused(t *testing.T) {
 	}
 }
 
-// A context pinned to one device is unusable from another. Otherwise a guest who verified on their phone
-// could hand the context to any device on the network.
+// A context pinned to one device is unusable from another.
 func TestIntegration_Phase3Auth_ContextIsBoundToItsDevice(t *testing.T) {
 	f := newAuthFixture(t)
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000002-0000-4000-8000-000000000000"))
@@ -595,7 +523,7 @@ func TestIntegration_Phase3Auth_ContextIsBoundToItsDevice(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"auth_context_id":     res.AuthContextID,
 		"package_revision_id": f.pkgRev,
-		"device":              map[string]string{"ip": f.net.otherIP, "mac": "02:00:00:bb:00:02"}, // another device on the same network
+		"device":              map[string]string{"ip": f.net.otherIP, "mac": "02:00:00:bb:00:02"},
 	})
 	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
 	var out phase3GrantResp
@@ -605,8 +533,7 @@ func TestIntegration_Phase3Auth_ContextIsBoundToItsDevice(t *testing.T) {
 	}
 }
 
-// Resolution is idempotent per request id: a retried submit (the guest's second tap, or a flaky network)
-// records ONE resolution, not two, and returns the same answer.
+// A retried submit with the same request id records one resolution and returns the same answer.
 func TestIntegration_Phase3Auth_RetryIsIdempotent(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -617,8 +544,7 @@ func TestIntegration_Phase3Auth_RetryIsIdempotent(t *testing.T) {
 	}
 	var n int
 	if err := f.pool.QueryRow(ctx,
-		// Scoped to THIS fixture's tenant and site: the request id is a constant, and a database that has run
-		// this test before holds another tenant's row carrying the same id.
+		// Scoped to this fixture: the request id is constant and a reused database holds other tenants' rows with it.
 		`SELECT count(*) FROM iam_v2.auth_resolutions
 		  WHERE resolution_request_id=$1 AND tenant_id=$2 AND site_id=$3`,
 		"00000007-0000-4000-8000-000000000000", f.tenant, f.site).Scan(&n); err != nil {
@@ -629,14 +555,14 @@ func TestIntegration_Phase3Auth_RetryIsIdempotent(t *testing.T) {
 	}
 }
 
-// While DARK the arm is not constructed at all, so scd mounts no Phase-3 route and issues no Phase-3 SQL.
+// While dark the arm is not constructed: no Phase-3 route and no Phase-3 SQL.
 func TestIntegration_Phase3Auth_DarkConstructsNothing(t *testing.T) {
 	f := newAuthFixture(t)
 	for _, cfg := range []iamv2.PMSConfig{
 		{},
-		{MasterEnabled: true},  // master alone is not the auth surface
-		{PMSAuthEnabled: true}, // a child flag without its master
-		{MasterEnabled: true, AdminEnabled: true}, // a different surface entirely
+		{MasterEnabled: true},
+		{PMSAuthEnabled: true},
+		{MasterEnabled: true, AdminEnabled: true},
 	} {
 		if arm := newPhase3Auth(cfg, f.srv); arm != nil {
 			t.Fatalf("the auth arm was constructed while dark: %+v", cfg)
@@ -644,7 +570,7 @@ func TestIntegration_Phase3Auth_DarkConstructsNothing(t *testing.T) {
 	}
 }
 
-// The Auth Context expires. A verified identity left unused is not a standing permission.
+// An expired Auth Context grants nothing.
 func TestIntegration_Phase3Auth_ExpiredContextGrantsNothing(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -671,11 +597,7 @@ func TestIntegration_Phase3Auth_ExpiredContextGrantsNothing(t *testing.T) {
 	_ = time.Now
 }
 
-// ---- offers, published revisions, and grant binding -------------------------
-
-// addPackage creates a current, visible, free package with the given eligibility rules, and returns its
-// revision id. It is the shape a property actually configures: a package plus the rules that decide who sees
-// it.
+// addPackage creates a current, visible, free package with the given eligibility rules and returns its revision id.
 func (f *authFixture) addPackage(t *testing.T, code string, rules []map[string]any) string {
 	t.Helper()
 	ctx := context.Background()
@@ -711,8 +633,7 @@ func (f *authFixture) addPackage(t *testing.T, code string, rules []map[string]a
 	return pkgRev
 }
 
-// THE OFFER SET IS DECIDED BY THE RULES, not by the catalogue. The suite package is offered because this
-// Stay is in a SUITE; the standard-only package is not offered at all, even though it is free and visible.
+// The offer set follows the rules, not the catalogue: a STANDARD-only package is not offered to a SUITE stay.
 func TestIntegration_Phase3Auth_OffersFollowStayEligibility(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -740,8 +661,7 @@ func TestIntegration_Phase3Auth_OffersFollowStayEligibility(t *testing.T) {
 	}
 }
 
-// A guest may only redeem what was OFFERED TO THEM. Naming another free, generally-grantable package on the
-// site — one whose rules they do not satisfy — must fail closed, because "grantable" is not "authorised".
+// Naming a grantable package that was never offered must fail closed: "grantable" is not "authorised".
 func TestIntegration_Phase3Auth_GrantIsBoundToTheOfferedSet(t *testing.T) {
 	f := newAuthFixture(t)
 	standardOnly := f.addPackage(t, "STANDARD_ONLY", []map[string]any{
@@ -760,7 +680,7 @@ func TestIntegration_Phase3Auth_GrantIsBoundToTheOfferedSet(t *testing.T) {
 	rec := httptest.NewRecorder()
 	raw, _ := json.Marshal(map[string]any{
 		"auth_context_id":     res.AuthContextID,
-		"package_revision_id": standardOnly, // free, visible, current — but never offered to this Stay
+		"package_revision_id": standardOnly,
 		"device":              map[string]string{"ip": f.net.guestIP, "mac": f.net.mac},
 	})
 	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
@@ -779,9 +699,7 @@ func TestIntegration_Phase3Auth_GrantIsBoundToTheOfferedSet(t *testing.T) {
 	}
 }
 
-// An UNPUBLISHED higher-numbered Draft must never be pinned. Somebody mid-way through configuring a connector
-// change has not authorised anything, and the Auth Context would record their draft as the authority for a
-// guest's access.
+// An unpublished higher-numbered Draft must never be pinned.
 func TestIntegration_Phase3Auth_PinsThePublishedRevisionNotTheHighest(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -794,7 +712,6 @@ func TestIntegration_Phase3Auth_PinsThePublishedRevisionNotTheHighest(t *testing
 		f.tenant, f.site, f.iface).Scan(&draft); err != nil {
 		t.Fatalf("create the draft: %v", err)
 	}
-	// the publication pointer still names revision 1; the draft is not current
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "0000ff03-0000-4000-8000-000000000000"))
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("the stay did not verify: %+v", res)
@@ -813,12 +730,9 @@ func TestIntegration_Phase3Auth_PinsThePublishedRevisionNotTheHighest(t *testing
 	}
 }
 
-// ONE RESOLUTION, ONE LIVE CONTEXT. A guest tapping Connect repeatedly on a bad connection must not leave a
-// pile of independently redeemable credentials behind for one identity proof.
+// Repeated taps must not leave several redeemable credentials for one identity proof.
 func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 	const reqID = "0000ff04-0000-4000-8000-000000000000"
@@ -845,7 +759,6 @@ func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) 
 		t.Fatalf("live contexts for one resolution = %d, want exactly 1", live)
 	}
 
-	// once REDEEMED, a further retry must not silently hand back a fresh credential for the spent proof
 	var ctxID string
 	for id := range seen {
 		ctxID = id
@@ -868,8 +781,7 @@ func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) 
 	}
 }
 
-// Concurrent replays of one resolution converge on a single context: the uniqueness is enforced by the
-// database, not by the handler happening to be called sequentially.
+// Concurrent replays converge on one context; the database enforces the uniqueness.
 func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing.T) {
 	f := newAuthFixture(t)
 	const reqID = "0000ff05-0000-4000-8000-000000000000"
@@ -908,27 +820,15 @@ func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing
 	}
 }
 
-// ---- the enforcement owner, simulated ---------------------------------------
-//
-// The grant no longer returns success until the Session is genuinely network-active, because that is what
-// "connected" now means. In production the enforcement owner (netd) performs the kernel work and then promotes
-// the Session through iam_v2.activate_session_enforcement.
-//
-// These integration tests have no kernel, so they run that promotion themselves — through the REAL controlled
-// writer, against the real database. That is deliberate: it keeps the tests honest about the contract (a grant
-// only succeeds once something confirmed enforcement) AND exercises the activation operation's own rules
-// (source coherence, idempotency, refusal after end) on every grant path.
-
-// startEnforcementOwner promotes any PENDING_ENFORCEMENT session for this fixture, as netd would after both
-// kernel halves are proven. It stops when the returned function is called.
+// startEnforcementOwner stands in for netd (there is no kernel here): it promotes PENDING_ENFORCEMENT sessions
+// through the real controlled writer, exercising its coherence rules. The returned function stops it.
 func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
 	t.Helper()
 	return f.startEnforcementOwnerAtEpoch(t, 1)
 }
 
-// startEnforcementOwnerAtEpoch is startEnforcementOwner enforcing under class generation epoch. A device that
-// gets a SECOND session on the same address (the same tc class) is enforced by netd under a newer generation;
-// a test that opens one stops the first owner and starts another at a higher epoch, as netd would.
+// startEnforcementOwnerAtEpoch enforces under the given class generation; a second session on the same address
+// needs a newer one, so a test stops the first owner and starts another at a higher epoch.
 func (f *authFixture) startEnforcementOwnerAtEpoch(t *testing.T, epoch int64) func() {
 	t.Helper()
 	done := make(chan struct{})
@@ -963,13 +863,10 @@ func (f *authFixture) startEnforcementOwnerAtEpoch(t *testing.T, epoch int64) fu
 				if !ok {
 					continue
 				}
-				// THE SAME ORDER netd uses, and it is not optional: the activation operation verifies the
-				// accounting origin itself, so a promotion attempted without one is refused by the database.
-				// Registering it here is what keeps this simulation an honest stand-in rather than a shortcut.
+				// Same order as netd: activation verifies the accounting origin, so register it first.
 				_, _ = f.pool.Exec(context.Background(), `
 					SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,$7,0,0,now())`,
 					f.tenant, f.site, p.id, p.device, p.bridge, minor, epoch)
-				// The real controlled writer, with the real coherence rules.
 				_, _ = f.pool.Exec(context.Background(),
 					`SELECT iam_v2.activate_session_enforcement($1,$2,$3::uuid,$4,$5,$6)`,
 					f.tenant, f.site, p.id, p.bridge, minor, epoch)

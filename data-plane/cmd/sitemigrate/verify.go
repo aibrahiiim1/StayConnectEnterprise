@@ -10,10 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// orphanCount reports scoped source rows whose FK target falls outside the
-// scoped set (e.g. a session referencing a voucher of another tenant, or a
-// voucher_batch created_by a platform-admin-only operator that is not
-// migrated). Such rows are skipped cleanly during the copy.
+// Scoped source rows whose FK target falls outside the scoped set; skipped cleanly during the copy.
 type orphanCount struct {
 	Table    string
 	Col      string
@@ -21,9 +18,7 @@ type orphanCount struct {
 	Count    int64
 }
 
-// scanOrphans runs the FK pre-scan against the SOURCE. It is a per-edge scan
-// (not cascading): the copy itself is the authority — it validates against
-// the live dest, so cascaded orphans are also caught and skipped there.
+// A per-edge pre-scan of the SOURCE, not cascading: the copy validates against the live dest, which catches cascaded orphans.
 func scanOrphans(ctx context.Context, src *pgx.Conn, cfg config) ([]orphanCount, error) {
 	var out []orphanCount
 	for _, spec := range migrationTables {
@@ -61,18 +56,8 @@ func printOrphans(out io.Writer, orphans []orphanCount) {
 	w.Flush()
 }
 
-// verifyAndPrint recounts every table's scoped rows in dest and compares
-// against what the copy says should be there. Returns ok=false if any table
-// mismatches (caller exits non-zero).
-//
-// Expectations per table:
-//   - PK tables: dest == source - skipped_orphans (conflicts fold in — they
-//     were already present).
-//   - PK-less hypertable, dest was empty: dest == source - skipped.
-//   - PK-less hypertable, skipped (dest non-empty, no --force-append):
-//     reported as SKIPPED, not a mismatch — rerun with --force-append or
-//     reconcile manually.
-//   - PK-less hypertable with --force-append: dest == pre-existing + copied.
+// Recounts each table scoped rows in dest. PK tables: dest == source - skipped orphans. PK-less hypertables: dest == source - skipped when dest was empty,
+// SKIPPED (not a mismatch) when non-empty without --force-append, pre-existing + copied with it. ok=false on any mismatch.
 func verifyAndPrint(ctx context.Context, out io.Writer, dst *pgx.Conn, cfg config, results []copyResult) (bool, error) {
 	fmt.Fprintln(out, "\nVerification (scoped rows, source vs dest):")
 	w := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
@@ -118,9 +103,7 @@ func verifyAndPrint(ctx context.Context, out io.Writer, dst *pgx.Conn, cfg confi
 	return ok, nil
 }
 
-// sanity guard referenced by tests: no statement anywhere in this program may
-// mutate destructively. Kept as a compile-time-visible constant list so the
-// unit test can assert the invariant over the SQL builders' output.
+// No statement in this program may mutate destructively; kept visible so the unit test can assert it over the SQL builders output.
 var forbiddenSQL = []string{"TRUNCATE", "DELETE FROM", "DROP TABLE"}
 
 func containsForbidden(sql string) bool {

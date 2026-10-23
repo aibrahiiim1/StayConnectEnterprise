@@ -1,21 +1,7 @@
 "use client";
 
-// THE CROSS-PMS TRANSFER SCREEN (Phase 5, DARK).
-//
-// A transfer ENDS a guest's access on one property and re-establishes it on another. The screen is built so
-// that the operator sees what that means before they can do it:
-//
-//   * the review signals are shown and labelled as signals. They are ambiguous authentication outcomes, not
-//     transfers, and the panel says so in the words the API returns. There is deliberately no "transfer this
-//     one" button anywhere near them — an operator who could act directly from a signal would be acting on an
-//     inference nobody made.
-//   * the operator must PREVIEW before the confirm control appears at all. The preview names both rooms and
-//     counts the devices and sessions about to move, so the confirmation is a decision rather than a sentence.
-//   * a blocker is shown as plain language before the operator types anything. "This is a room move, not a
-//     transfer" costs one screen instead of a completed dialog and a rejected submission.
-//
-// Raw identifiers (network ids, stay ids) are never the main content: they sit in copyable chips for the one
-// moment someone needs to quote them, and dates are in the operator's locale.
+// Ambiguous sign-in signals are not evidence of transfer; require a preview before confirmation.
+// Transfer ends access at the source property and re-establishes it at the destination.
 
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeftRight, ArrowRight, History, Radar } from "lucide-react";
@@ -66,8 +52,7 @@ type TransferRow = {
   created_at: string;
 };
 
-// The ambiguous outcomes, in the words Guest sign-in checks uses. An unknown code is de-underscored rather
-// than hidden: a signal this table was not taught must still be countable.
+// Show unknown outcome codes instead of hiding signals the UI does not recognize.
 const OUTCOME_WORDS: Record<string, string> = {
   AMBIGUOUS: "More than one match",
   AMBIGUOUS_ROOM: "Room matched twice",
@@ -86,8 +71,7 @@ function StayLabel({ room, reservation }: { room: string; reservation: string })
   );
 }
 
-/** `rolesKnown` is false while the route shell is still reading the operator's roles, so the read-only notice
- *  does not flash at an operator who can act. */
+/** Wait for role loading before showing a read-only notice. */
 export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
   const toast = useToast();
   const [signals, setSignals] = useState<Signal[] | null>(null);
@@ -220,7 +204,6 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
 
       {rolesKnown && !canAct && <ReadOnlyNotice />}
 
-      {/* ------------------------------------------------------------------ the transfer form */}
       {canAct && (
         <Card>
           <CardHeader>
@@ -298,13 +281,11 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         </Card>
       )}
 
-      {/* ------------------------------------------------------------------ review signals */}
       <Card data-testid="review-signals">
         <CardHeader>
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2"><Radar className="size-4 text-muted-foreground" aria-hidden /> Review signals</CardTitle>
-            {/* The API's own words, rendered rather than paraphrased: a screen that softened them would be the
-                place the "ambiguity means the guest moved" habit starts. */}
+            {/* Preserve the API's warning so ambiguous outcomes cannot be mistaken for moves. */}
             <CardDescription data-testid="signal-notice">
               {signalNotice ||
                 "Ambiguous authentication outcomes. They are not transfers and are never evidence that a guest moved."}
@@ -329,8 +310,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               {signals.map((s) => (
                 <TR key={`${s.outcome_code}-${s.guest_network_id}`}>
                   <TD><Badge tone="warn">{outcomeWords(s.outcome_code)}</Badge></TD>
-                  {/* Plain text, not the copyable chip: this section is evidence with nothing to act on, and even a
-                      copy button would be a control inside it. The full id is in the tooltip. */}
+                  {/* Keep this evidence panel free of action controls. */}
                   <TD>
                     <span className="font-mono text-caption text-muted-foreground" title={`Client network ${s.guest_network_id}`}>
                       {s.guest_network_id.length > 12 ? `${s.guest_network_id.slice(0, 8)}…` : s.guest_network_id}
@@ -345,7 +325,6 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         )}
       </Card>
 
-      {/* ------------------------------------------------------------------ recorded transfers */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><History className="size-4 text-muted-foreground" aria-hidden /> Recorded transfers</CardTitle>
@@ -376,7 +355,6 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         )}
       </Card>
 
-      {/* ------------------------------------------------------------------ confirm */}
       <DialogForm
         open={confirming && preview !== null}
         onOpenChange={(v) => { if (!v) closeConfirm(); }}

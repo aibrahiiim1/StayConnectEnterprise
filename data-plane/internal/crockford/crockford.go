@@ -1,15 +1,5 @@
-// Package crockford generates human-friendly voucher codes.
-//
-// Alphabet: Crockford base32 — 0-9, A-Z minus I, L, O, U. 32 symbols, 5 bits
-// each. A 12-char code carries 60 bits of entropy — collision probability
-// after 10^6 codes is roughly 4e-7, so duplicates are astronomically rare and
-// the DB UNIQUE index is an adequate safety net.
-//
-// Display format: XXXX-XXXX-XXXX. Storage format: 12 chars, no dashes.
-// Normalize() handles input:
-//   - strip whitespace and dashes
-//   - uppercase
-//   - map I→1, L→1, O→0 (Crockford's documented ambiguity rules)
+// Package crockford generates 12-char Crockford base32 voucher codes (display XXXX-XXXX-XXXX, stored without
+// dashes). Duplicates are rare enough that the DB UNIQUE index is an adequate safety net.
 package crockford
 
 import (
@@ -20,7 +10,6 @@ import (
 
 const Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// Generate returns a 12-character code without dashes.
 func Generate() (string, error) {
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
@@ -33,8 +22,7 @@ func Generate() (string, error) {
 	return string(out), nil
 }
 
-// GenerateN returns n unique codes (deduped in-memory; the DB UNIQUE index
-// is still the authority on uniqueness across tenants).
+// GenerateN dedupes in memory only; the DB UNIQUE index is the authority across tenants.
 func GenerateN(n int) ([]string, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("n must be > 0")
@@ -58,8 +46,7 @@ func GenerateN(n int) ([]string, error) {
 	return out, nil
 }
 
-// Format inserts dashes at positions 4 and 8: "XXXXYYYYZZZZ" -> "XXXX-YYYY-ZZZZ".
-// Input shorter or longer than 12 is returned as-is (no panic).
+// Format returns input that is not 12 chars unchanged.
 func Format(code string) string {
 	if len(code) != 12 {
 		return code
@@ -67,9 +54,7 @@ func Format(code string) string {
 	return code[0:4] + "-" + code[4:8] + "-" + code[8:12]
 }
 
-// Normalize prepares a user-entered code for lookup: strips dashes and
-// whitespace, uppercases, maps the ambiguous letters per Crockford's rules.
-// Returns the 12-char canonical form (or whatever length survives cleanup).
+// Normalize strips dashes/whitespace, uppercases and applies Crockford's I/L->1, O->0 rules; U is dropped.
 func Normalize(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -78,7 +63,7 @@ func Normalize(s string) string {
 		case r == '-' || r == ' ' || r == '\t':
 			continue
 		case r >= 'a' && r <= 'z':
-			r = r - 32 // to upper
+			r = r - 32
 		}
 		switch r {
 		case 'I', 'L':
@@ -86,7 +71,7 @@ func Normalize(s string) string {
 		case 'O':
 			r = '0'
 		case 'U':
-			continue // Crockford forbids U — treat as typo and drop
+			continue
 		}
 		b.WriteRune(r)
 	}

@@ -1,20 +1,8 @@
 "use client";
 
-// LANGUAGES — what a guest is offered, and what the portal says in each one.
-//
-// THE DEFECT THIS REPLACES. Picking Italiano did nothing an operator could see: the editor had only the
-// ENGLISH list, so it drew fifty empty boxes with the English as placeholder text. The portal has spoken
-// complete Italian the whole time; the screen simply had no way to show it, and "select a language, nothing
-// changes" is indistinguishable from "this feature is broken".
-//
-// The fix is not to copy six dictionaries into the admin. That is 306 strings maintained twice, and drift
-// would surface as an operator confidently editing wording nobody reads. The portal owns its words; this
-// fetches them through edged and shows them.
-//
-// WHAT AN OPERATOR SEES NOW. Every field is filled in with the wording a guest actually gets. Typing over it
-// makes a customisation; putting it back removes the customisation rather than storing a second copy of the
-// shipped text. A hotel that has changed nothing stores nothing, and its Languages screen still shows it
-// exactly what its guests read.
+// The portal owns its built-in wording (fetched through edged, never copied into the admin, which would drift).
+// Fields show what a guest actually gets; typing over one makes a customisation and restoring it removes the
+// override, so a hotel that changed nothing stores nothing.
 
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -55,15 +43,9 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
 
-  // ONLY THE WORDING THIS SITE'S PORTAL CAN ACTUALLY SHOW. A string for room sign-in, a one-time code, social
-  // sign-in, card payment or a room charge is listed only while its module is licensed here -- a site without
-  // hospitality is not asked to translate "Room Number". Unknown module state lists only the core strings
-  // (fail closed). Every count on this screen is over this list, so "3 customised" means three the operator
-  // can see.
-  //
-  // A HIDDEN STRING'S SAVED TRANSLATION IS KEPT. Nothing here deletes a key it does not list: write() copies
-  // the language's whole map and changes one key, and "Reset all" removes only the listed keys. The document
-  // is saved whole, so a hidden translation round-trips unchanged and is there again if the licence returns.
+  // Only strings whose module is licensed here are listed; unknown module state lists only the core strings
+  // (fail closed). A hidden string's saved translation is kept: write() copies the whole language map and
+  // "Reset all" removes only listed keys, so it round-trips and returns if the licence does.
   const caps = useCapabilities();
   const strings = useMemo(
     () => PORTAL_STRINGS.filter((s) => stringApplies(s, (m: PortalModule) => moduleLicensed(caps, m))),
@@ -95,14 +77,10 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
   const offered = useMemo(() => offeredLanguages(d).map((l) => l.code), [d]);
   const current = known.find((l) => l.code === editing) ?? known[0];
   const builtinFor = (code: string) => shipped?.strings?.[code] ?? {};
-  /** WHETHER THE PORTAL SHIPS THIS LANGUAGE, which is not the same question as whether its wording has
-   *  arrived yet. Asking only the fetched map meant that for the second it was in flight — and for as long as
-   *  the portal service was down — every shipped language was reported as "51 strings will show English",
-   *  which is both alarming and false. The six are known to ship; only their words are being fetched. */
+  /** Whether the portal ships the language, not whether its wording has arrived: asking only the fetched map would report every shipped language as English while loading or when the portal is down. */
   const isBuiltIn = (code: string) =>
     Object.keys(builtinFor(code)).length > 0 || SHIPPED_LANGUAGES.some((l) => l.code === code);
 
-  /** The wording a guest receives for one string: the hotel's, or the portal's, or English. */
   function effective(code: string, key: string) {
     const own = d.translations?.[code]?.[key];
     if (own) return own;
@@ -133,12 +111,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
     });
   }
 
-  /** AN OVERRIDE IS ONLY STORED WHEN IT IS ACTUALLY DIFFERENT.
-   *
-   *  The field is pre-filled with the shipped wording, so without this every language an operator merely
-   *  LOOKED at would be saved back as fifty-one "customisations" identical to the built-ins — a document that
-   *  grows without bound and freezes the hotel's copy of wording the product is supposed to be able to
-   *  improve under it. Typing the shipped text back in, or pressing Reset, removes the key. */
+  /** An override is stored only when it differs from the shipped wording; the field is pre-filled, so otherwise merely viewing a language would freeze copies of built-ins. */
   function write(code: string, key: string, value: string) {
     setD((p) => {
       const all = { ...(p.translations ?? {}) };
@@ -152,8 +125,7 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
     });
   }
 
-  /** Back to the built-in wording for every string LISTED here. A translation for a string this site does not
-   *  show is not the operator's to reset from a screen that never showed it, so it stays. */
+  /** Resets only strings listed here; a translation for a hidden string stays. */
   function resetLanguage(code: string) {
     setD((p) => {
       const all = { ...(p.translations ?? {}) };
@@ -173,7 +145,6 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
   const showOffered = part !== "wording";
   const showWording = part !== "offered";
 
-  // Adding a language is a change, so a role that cannot save is not offered it at all.
   const addLanguage = !writable ? null : (
     <div className="space-y-2 border-t border-border pt-4">
       <div>
@@ -214,7 +185,6 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
 
   return (
     <div className="space-y-5">
-      {/* ---- which languages guests are offered ----------------------------------------------------- */}
       {showOffered && (
       <Card>
         <CardHeader><CardTitle>Client languages</CardTitle></CardHeader>
@@ -250,7 +220,6 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
       </Card>
       )}
 
-      {/* ---- the wording itself --------------------------------------------------------------------- */}
       {showWording && (
       <Card>
         <CardHeader><CardTitle>Wording</CardTitle></CardHeader>
@@ -259,8 +228,6 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
             <Callout tone="warning">{shippedErr}</Callout>
           )}
 
-          {/* The tablist is entered at its selected tab (roving tabIndex, arrows below), never the list itself, which
-              is the ARIA pattern; jsx-a11y reads the container role as a control. */}
           {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
           <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Language being edited"
             onKeyDown={(e) => {
@@ -380,7 +347,6 @@ export function LanguagesSection({ d, setD, writable, part = "all", onEditWordin
             </div>
           )}
 
-          {/* A language the portal does not ship. It arrives empty, and says so. */}
           {part === "all" && addLanguage}
 
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

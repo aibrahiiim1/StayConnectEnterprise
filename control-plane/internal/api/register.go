@@ -27,23 +27,15 @@ type registerReq struct {
 	Hostname            string `json:"hostname"`
 	Model               string `json:"model"`
 	PublicKey           string `json:"public_key"` // base64-raw Ed25519 (32 bytes)
-	// HoldsCustomerID is the customer whose data the appliance's local site database still holds; absent for
-	// a factory-clean appliance. It is inside the signed body. Stored on every registration (NULL when
-	// absent); activation for any other customer is refused (holdsOtherCustomerRefusal).
+	// HoldsCustomerID is inside the signed body; activation for any other customer is refused (holdsOtherCustomerRefusal).
 	HoldsCustomerID string `json:"holds_customer_id"`
 }
 
-// RegisterHandler is PUBLIC and TOKEN-LESS. A factory-clean appliance generates
-// its Ed25519 identity locally and calls this endpoint with a request SIGNED BY
-// THAT KEY (trust-on-first-use): the signature proves possession of the private
-// key for the enclosed public key. On success the appliance appears as Pending
-// Activation with its hardware inventory; no token of any kind is involved.
+// RegisterHandler is public and token-less: the request is signed by the appliance's own new identity key
+// (trust on first use), proving possession of the enclosed public key. The appliance then waits for activation.
 //
-// Clone protection: the identity key is the trust anchor. If a request presents
-// a KNOWN identity key from DIFFERENT hardware (different serial / hardware
-// fingerprint), that is a copied-identity clone — we raise a security alert and
-// reject, and (because the license binds to the original hardware) the clone can
-// never install an active license anyway.
+// Clone protection: a known identity key presented from different hardware is a copied identity, so it raises a
+// security alert and is rejected.
 func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
 	if err != nil {
@@ -73,7 +65,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the self-signed registration JWT against the ENCLOSED key (TOFU).
+	// Verified against the enclosed key (trust on first use).
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if token == "" {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "signed registration required")
@@ -90,7 +82,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "invalid registration signature")
 		return
 	}
-	// A captured registration is refused when replayed, like every other signed appliance request.
+	// A captured registration is refused when replayed.
 	if b.ReplayCache != nil {
 		if err := b.ReplayCache.Use(claims.Jti, time.Now()); err != nil {
 			Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "replay detected")
@@ -102,7 +94,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ip := clientIP(r)
 
-	// (1) Known identity key → same appliance re-registering, OR a clone.
+	// A known identity key is the same appliance re-registering, or a clone.
 	var appID, exSerial, exHWF, exLifecycle string
 	err = b.DB.QueryRow(ctx,
 		`SELECT id::text, serial, COALESCE(hardware_fingerprint,''), COALESCE(lifecycle_state,'')
@@ -145,8 +137,8 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
 		return
 	}
-	// A RETIRED identity key never comes back as a waiting appliance, even after its record was deleted: the
-	// box still holds whatever its previous customer left on it. Factory-reset it (a new key) first.
+	// A retired identity key never returns as a waiting appliance, even after deletion: the box may still hold
+	// the previous customer's data. It must be factory-reset (new key) first.
 	if retired, err := identityRetired(ctx, b.DB, req.PublicKey); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "lookup failed")
 		return
@@ -156,7 +148,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// (2) New identity key for hardware that has a LIVE row (same serial, not retired).
+	// A new identity key for hardware that has a live row (same serial, not retired).
 	var liveID, liveState, liveHWF string
 	err = b.DB.QueryRow(ctx, `
         SELECT id::text, COALESCE(lifecycle_state,''), COALESCE(hardware_fingerprint,'')
@@ -168,9 +160,8 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if liveID != "" {
 		if liveState != "pending_approval" && liveState != "" {
-			// Activated hardware already has a live identity: a new key there is a clone or a hijack of a known
-			// serial (serial and fingerprint are not secret). A legitimate factory reset of an activated box
-			// requires the operator to retire it first -- a deliberate, audited action.
+			// Serial and fingerprint are not secret, so a new key on activated hardware is a clone or hijack; a
+			// legitimate factory reset requires the operator to retire it first.
 			b.alertAndAudit(ctx, r, liveID, req.Serial, "hardware_reused", map[string]any{
 				"reason":                "same physical hardware presented a NEW identity key while the previous identity still exists — most likely a local factory reset of this box",
 				"same_hardware_serial":  req.Serial,
@@ -187,9 +178,8 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// (3) No live row: a brand-new appliance, or a RETIRED box coming back after a factory reset. Either way it
-	// gets a NEW row: whatever the retired row holds -- its licence history, audit trail, alerts, the previous
-	// customer -- stays with that row and is never shown to whoever activates this one.
+	// No live row: a new appliance, or a retired box back after a factory reset. Either gets a new row, so the
+	// retired row's history and previous customer are never shown to whoever activates this one.
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "create appliance failed")
@@ -210,8 +200,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	if len(previous) > 0 {
-		// Anything a previous identity of this hardware held is dead: its key is remembered as retired (so it can
-		// never register again) and any certificate still marked active is revoked.
+		// The previous identity is dead: its key is remembered as retired and any active certificate revoked.
 		if _, err := tx.Exec(ctx, `
             INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
             SELECT public_key, serial, id, 'hardware re-registered with a new identity (factory reset)'
@@ -247,7 +236,7 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
     `, req.Serial, req.PublicKey, req.WANMAC, req.LANMAC, req.HardwareFingerprint, req.Hostname, req.Model, ip, held).Scan(&appID)
 	if err != nil {
 		if isUniqueViolation(err) {
-			// A concurrent registration of the same serial won the race; this one is refused, never merged.
+			// A concurrent registration of the same serial won; this one is refused, never merged.
 			Fail(w, r, http.StatusConflict, CodeConflict, "another registration of this serial is in progress; retry")
 			return
 		}
@@ -271,12 +260,10 @@ func (b *IdentityBase) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": appID, "status": "pending_approval"})
 }
 
-// replaceWaitingIdentity adopts a NEW identity key on a WAITING appliance row -- the box was factory-reset
-// before anyone activated it. Serial and fingerprint are not secret, so the serial alone proves nothing: the
-// replacement is accepted only when the hardware fingerprint Central recorded for this row is present and is
-// exactly the one presented. Anything else is refused and raised as a security alert; the legitimate way
-// out is to delete the waiting appliance in the console, after which the box registers as new. Every
-// replacement is audited, accepted or refused.
+// replaceWaitingIdentity adopts a new identity key on a WAITING row (the box was factory-reset before activation).
+// The serial proves nothing, so it is accepted only when the recorded hardware fingerprint is present and exactly
+// matches; otherwise it is refused with a security alert (delete the waiting appliance to register as new).
+// Every replacement is audited.
 func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Request, ctx context.Context,
 	id, storedHWF string, req registerReq, held, ip string) {
 	if storedHWF == "" || req.HardwareFingerprint == "" || storedHWF != req.HardwareFingerprint {
@@ -311,8 +298,7 @@ func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Req
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance changed state; retry")
 		return
 	}
-	// The previous key is dead: remembered as retired so it can never register again, and any certificate it
-	// held is revoked. A waiting appliance holds no licence and no assignment.
+	// The previous key is remembered as retired and its certificates revoked.
 	if oldPub != "" {
 		if _, err := tx.Exec(ctx, `INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
             VALUES ($1,$2,$3,'replaced by a new identity while waiting (factory reset)') ON CONFLICT (public_key) DO NOTHING`,
@@ -359,8 +345,7 @@ func (b *IdentityBase) replaceWaitingIdentity(w http.ResponseWriter, r *http.Req
 	WriteJSON(w, http.StatusOK, map[string]any{"appliance_id": id, "status": "pending_approval"})
 }
 
-// alertAndAudit raises (or folds into an open) security alert and audits only when a NEW alert was raised, so
-// repeated unauthenticated attempts cost one alert and one audit row per window.
+// alertAndAudit audits only when a new alert was raised, so repeated unauthenticated attempts cost one row per window.
 func (b *IdentityBase) alertAndAudit(ctx context.Context, r *http.Request, applianceID, serial, kind string, detail map[string]any, ip string) {
 	isNew, err := raiseAlertOnce(ctx, b.DB, applianceID, serial, kind, detail, ip)
 	if err != nil {
@@ -373,7 +358,6 @@ func (b *IdentityBase) alertAndAudit(ctx context.Context, r *http.Request, appli
 	}
 }
 
-// identityRetired reports whether this identity key belonged to a retired appliance.
 func identityRetired(ctx context.Context, db *pgxpool.Pool, publicKey string) (bool, error) {
 	var n int
 	err := db.QueryRow(ctx, `SELECT count(*) FROM retired_appliance_identities WHERE public_key=$1`, publicKey).Scan(&n)

@@ -12,24 +12,10 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
-// THE WHOLE LIFECYCLE, DRIVEN BY THE CODE THAT ACTUALLY RUNS IT.
-//
-// Everything here enters through the inbox and is applied by Processor.ProcessNext with the real Checkout
-// Converter wired in -- the same two objects pmsd constructs in production. Nothing in this file writes to
-// iam_v2.stays. That restriction is the entire point.
-//
-// WHY IT MATTERS, stated plainly because I got this wrong once. An earlier version of these proofs performed
-// the reinstatement with a direct UPDATE that set status, bumped lifecycle_version and cleared the boundary.
-// It asserted the right things about the resulting rows and told me nothing about whether the engine would
-// ever produce that state from a GI -- and it quietly skipped the part the engine also does, which is to
-// re-pin the stay's application lineage to the applied event. That omission produced a false defect report:
-// a replayed checkout looked as though it could drag a reinstated stay back to CHECKED_OUT, when in truth
-// the lineage pin makes it impossible. A helper that imitates the production path can only ever test the
-// helper, and it will be wrong in exactly the places the real path is subtle.
-//
-// So: real events, real resolver, real transaction boundary, real converter.
+// Everything enters through the inbox and is applied by Processor.ProcessNext with the real Converter;
+// nothing here writes to iam_v2.stays, so the engine's own state (including lineage pinning) is what is tested.
 
-// currentStay reads the row the engine maintains. Reading is allowed; writing is not.
+// currentStay reads the row the engine maintains.
 func currentStay(t *testing.T, p *pgxpool.Pool, stayID string) (status string, lifecycle int, effco *time.Time, lastEvent *string) {
 	t.Helper()
 	if err := p.QueryRow(context.Background(), `
@@ -40,15 +26,12 @@ func currentStay(t *testing.T, p *pgxpool.Pool, stayID string) (status string, l
 	return
 }
 
-// redeliver attempts to ingest an event identity the interface has ALREADY accepted, and returns whether the
-// database refused it. Redelivery is stopped at ingestion, not at resolution: se_live_identity is unique on
-// (tenant, site, pms_interface_id, external_event_identity) for LIVE events, so a reconnect or resync that
-// resends a departure cannot even create a second row to be processed. Asserting the refusal is the honest
-// way to describe that boundary -- the earlier draft of this test tried to insert and process a duplicate,
-// which is not a sequence production can reach.
+// redeliver re-ingests an already accepted event identity and reports whether the database refused it.
+// Replay protection lives at ingestion: se_live_identity is unique per (tenant, site, interface, identity)
+// for LIVE events, so a duplicate never becomes a row to process.
 func redeliver(t *testing.T, p *pgxpool.Pool, s scope, identity, eventType, payloadJSON string) bool {
 	t.Helper()
-	// the 'stay' family is opened so a refusal is the genuine se_live_identity uniqueness, not the writer guard
+	// The stay family is opened so a refusal is the uniqueness, not the writer guard.
 	err := guardedExec(p, stayFamily, `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,pms_timestamp_raw,
 		 pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,
@@ -67,10 +50,7 @@ func countIn(t *testing.T, p *pgxpool.Pool, sql string, args ...any) int {
 	return n
 }
 
-// GI → entitlement → GO → Grace → GI → reinstated → re-authenticate → GO → second Grace.
-//
-// Each arrow is an event the processor applies. The assertions between them are about state the ENGINE
-// produced, never state this test placed.
+// GI, entitlement, GO, Grace, GI (reinstated), re-authenticate, GO, second Grace.
 func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -80,7 +60,6 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 	guest := pay("R-RE1", "512", "Nakamura", "Aiko", "F-RE1", "260201", "260205")
 
-	// ---- 1. ARRIVAL. The engine creates the Stay from a GI; the test does not. ----
 	insertLive(t, p, s, "E1-GI", "GI", guest)
 	process(t, pr, s)
 
@@ -95,11 +74,9 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("after arrival: status=%s effective_checkout_at=%v, want IN_HOUSE/nil", status, effco)
 	}
 
-	// ---- 2. THE GUEST SIGNS IN. A normal, non-grace entitlement. ----
 	boundary1 := time.Now().Add(-4 * time.Hour).Truncate(time.Microsecond)
 	firstEnt := grantEntitlement(t, p, s, stayID, pkgRev, boundary1.Add(-time.Hour))
 
-	// ---- 3. DEPARTURE. The engine flips the Stay and the converter runs inside the SAME transaction. ----
 	insertLiveAt(t, p, s, "E2-GO", "GO", guest, boundary1)
 	process(t, pr, s)
 
@@ -125,19 +102,14 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("after checkout the stay holds %d live entitlements, want exactly 1 (the grace)", n)
 	}
 
-	// ---- 4. THE OLD DEPARTURE CANNOT BE INGESTED TWICE. ----
-	// A reconnect or resync that resends this departure is refused at the door by se_live_identity, so there
-	// is never a second row for the processor to apply. This is where replay protection actually lives.
 	if !redeliver(t, p, s, "E2-GO", "GO", guest) {
 		t.Fatal("the interface accepted the SAME departure identity twice; replay protection is not at ingestion")
 	}
-	// No process() call follows, deliberately: the refusal means no row was created, so there is nothing
-	// pending. Calling the processor here would assert against an empty queue, not against a replay.
+	// No process() call: the refusal created no row.
 	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID); n != 1 {
 		t.Fatalf("after the refused redelivery the stay has %d grace entitlements, want 1", n)
 	}
 
-	// ---- 5. GENUINE REINSTATEMENT. A real GI on a CHECKED_OUT stay, applied by the engine. ----
 	insertLive(t, p, s, "E3-GI", "GI", guest)
 	process(t, pr, s)
 
@@ -151,12 +123,10 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 	if effco != nil {
 		t.Fatalf("reinstatement left the previous episode's boundary at %v", effco)
 	}
-	// THE LINEAGE MOVED TO THE ARRIVAL. This is what makes the old departure unusable as a boundary, and it
-	// is produced by the engine -- which is precisely what the earlier helper-driven version never did.
+	// The lineage pin is what makes the old departure unusable as a boundary.
 	if lastEventAfterGI == nil || (lastEvent != nil && *lastEventAfterGI == *lastEvent) {
 		t.Fatal("reinstatement did not re-pin the stay's application lineage to the arrival event")
 	}
-	// The grace from the closed episode is untouched by the reinstatement itself.
 	var graceStatusAfterGI string
 	var graceEndsAfterGI time.Time
 	if err := p.QueryRow(ctx, `SELECT status, window_ends_at FROM iam_v2.entitlements WHERE id=$1`, grace1).
@@ -167,9 +137,7 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("reinstatement rewrote the old grace deadline: %s -> %s", grace1Ends, graceEndsAfterGI)
 	}
 
-	// ---- 6. THE GUEST AUTHENTICATES AGAIN. ----
-	// A reinstated guest is in house with a package belonging to a closed episode. Signing in supersedes it;
-	// ent_live_stay would refuse a second live row, so this also demonstrates the supersession is real.
+	// Signing in supersedes the closed episode's grace; ent_live_stay refuses a second live row.
 	boundary2 := time.Now().Add(-30 * time.Minute).Truncate(time.Microsecond)
 	if _, err := p.Exec(ctx,
 		`SELECT iam_v2.apply_entitlement_transition($1,'TERMINATED',now(),'SUPERSEDED')`, grace1); err != nil {
@@ -180,7 +148,6 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("after re-authentication the stay holds %d live entitlements, want exactly 1", n)
 	}
 
-	// ---- 7. A LATER GENUINE DEPARTURE. New episode, so a new conversion is allowed. ----
 	insertLiveAt(t, p, s, "E4-GO", "GO", guest, boundary2)
 	process(t, pr, s)
 
@@ -195,7 +162,6 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("the second boundary is %v, want %v", effco, boundary2)
 	}
 
-	// EXACTLY ONE NEW GRACE, for the new episode.
 	if n := countIn(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID); n != 2 {
 		t.Fatalf("the stay has %d grace entitlements across two episodes, want exactly 2", n)
 	}
@@ -211,8 +177,7 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("the stay holds %d live entitlements at the end, want exactly 1", n)
 	}
 
-	// AND THE FIRST GRACE'S RECORD IS UNCHANGED THROUGHOUT. A superseded grace keeps the window it was
-	// given; rewriting it would falsify what that guest was actually entitled to.
+	// A superseded grace keeps its original window.
 	var grace1EndsFinal time.Time
 	if err := p.QueryRow(ctx, `SELECT window_ends_at FROM iam_v2.entitlements WHERE id=$1`, grace1).Scan(&grace1EndsFinal); err != nil {
 		t.Fatal(err)
@@ -222,12 +187,8 @@ func TestIntegration_RealPath_ReinstatementLifecycleEndToEnd(t *testing.T) {
 	}
 }
 
-// A STALE ARRIVAL AFTER A DEPARTURE IS NOT A REINSTATEMENT, AND THE ENGINE DECIDES THAT -- NOT THIS TEST.
-//
-// The difference between a genuine reinstatement and a late duplicate is not visible in the event body: both
-// are GIs for a checked-out stay. It is the inbox identity that separates them. A redelivered event the stay
-// has already applied is a deterministic no-op; a NEW arrival is a new episode. Both paths are driven here
-// through the processor.
+// A reinstatement and a late duplicate are both GIs for a checked-out stay; only the inbox identity
+// separates them.
 func TestIntegration_RealPath_RedeliveredArrivalIsNotASecondReinstatement(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -250,12 +211,10 @@ func TestIntegration_RealPath_RedeliveredArrivalIsNotASecondReinstatement(t *tes
 	insertLiveAt(t, p, s, "F2-GO", "GO", guest, boundary)
 	process(t, pr, s)
 
-	// One genuine reinstatement.
 	insertLive(t, p, s, "F3-GI", "GI", guest)
 	process(t, pr, s)
 	_, episodeAfterFirst, _, _ := currentStay(t, p, stayID)
 
-	// THE SAME ARRIVAL, REDELIVERED. Refused at ingestion, so it can never become a second reinstatement.
 	if !redeliver(t, p, s, "F3-GI", "GI", guest) {
 		t.Fatal("the interface accepted the SAME arrival identity twice")
 	}
@@ -273,12 +232,7 @@ func TestIntegration_RealPath_RedeliveredArrivalIsNotASecondReinstatement(t *tes
 	}
 }
 
-// TWO GUESTS, ONE ROOM, BOTH THROUGH THE ENGINE.
-//
-// The room-reuse independence was previously proven by constructing the second Stay with an INSERT. Here the
-// engine creates both Stays from their own arrivals, so the isolation being asserted is the isolation the
-// production resolver actually provides -- including that it does not match the arriving guest onto the
-// departing guest's reservation just because the room agrees.
+// The resolver must not match an arriving guest onto the departing guest's reservation because the room agrees.
 func TestIntegration_RealPath_RoomReuseCreatesAnIndependentStay(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -309,7 +263,6 @@ func TestIntegration_RealPath_RoomReuseCreatesAnIndependentStay(t *testing.T) {
 		t.Fatalf("guest A received no grace: %v", err)
 	}
 
-	// THE NEXT GUEST ARRIVES IN THE SAME ROOM, under their own reservation. The engine resolves them.
 	insertLive(t, p, s, "G3-GI", "GI", arriving)
 	process(t, pr, s)
 
@@ -322,7 +275,6 @@ func TestIntegration_RealPath_RoomReuseCreatesAnIndependentStay(t *testing.T) {
 		t.Fatal("the arriving guest was resolved onto the departing guest's Stay -- the room was treated as identity")
 	}
 
-	// A's grace is exactly as it was, and still theirs.
 	var endsAfter time.Time
 	var statusAfter, ownerAfter string
 	if err := p.QueryRow(ctx,
@@ -334,7 +286,6 @@ func TestIntegration_RealPath_RoomReuseCreatesAnIndependentStay(t *testing.T) {
 		t.Fatalf("the arrival disturbed A's grace: ends=%s status=%s owner=%s", endsAfter, statusAfter, ownerAfter)
 	}
 
-	// B signs in and holds their own entitlement; both are live, one per Stay.
 	entB := grantEntitlement(t, p, s, stayB, pkgRev, time.Now().Add(-time.Minute))
 	if entB == graceA {
 		t.Fatal("the arriving guest was handed the departing guest's entitlement")

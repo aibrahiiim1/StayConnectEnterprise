@@ -1,11 +1,6 @@
 "use client";
 
-// THE OVERVIEW'S BLOCKS.
-//
-// Each block renders one section of GET /reports/overview and follows one rule: when its section is not
-// available, it says why, in the block's own place, and draws NO figure. A zero that stands in for "could not be
-// read" is the single most misleading thing an operator screen can show, so an unavailable block never reaches
-// the code that formats numbers.
+// A block whose section is unavailable says why and draws no figure, never a zero for "could not be read".
 
 import Link from "next/link";
 import { Cpu, Gauge, HardDrive, Hotel, Info, MemoryStick, Network, Package, Router, Wifi } from "lucide-react";
@@ -24,11 +19,6 @@ import {
   notRecordedLabel, reasonText, resultLabel, serviceState, terminationLabel,
 } from "@/lib/api/dashboard";
 
-// ---------------------------------------------------------------------------------------------------------
-// shared pieces
-// ---------------------------------------------------------------------------------------------------------
-
-/** The one way a block says it has nothing truthful to show. */
 export function Unavailable({ block, className }: { block: Block; className?: string }) {
   return (
     <div
@@ -78,10 +68,6 @@ const rangeWords: Record<OverviewRange, string> = { "24h": "last 24 hours", "7d"
 function points(snap: OverviewSnapshot, ...series: number[][]) {
   return snap.buckets.map((b, i) => ({ label: bucketLabel(b, snap.range), values: series.map((s) => s[i] ?? 0) }));
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// row 3: traffic and concurrency
-// ---------------------------------------------------------------------------------------------------------
 
 export function TrafficCard({ snap }: { snap: OverviewSnapshot | null }) {
   const t = snap?.traffic;
@@ -157,16 +143,11 @@ export function ConcurrencyCard({ snap }: { snap: OverviewSnapshot | null }) {
   );
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// row 4: sign-in outcomes and when guests sign in
-// ---------------------------------------------------------------------------------------------------------
-
 export function SignInOutcomesCard({ snap, rooms = true }: { snap: OverviewSnapshot | null; rooms?: boolean }) {
   const s = snap?.sign_in_outcomes;
   const g = snap?.guests;
   const failed = s ? s.total - s.verified : 0;
-  // ROOM CHECKS ARE A HOSPITALITY FIGURE. A site without Hospitality sees sign-ins by method only, and the card
-  // does not link to a Room sign-in history it has no reason to open.
+  // Room checks are a hospitality figure; sites without Hospitality see methods only.
   return (
     <BlockCard
       title="Sign-in outcomes"
@@ -277,10 +258,6 @@ export function SignInPatternCard({ snap }: { snap: OverviewSnapshot | null }) {
   );
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// row 5: packages and PMS
-// ---------------------------------------------------------------------------------------------------------
-
 export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
   const p = snap?.packages;
   const t = snap?.traffic;
@@ -336,10 +313,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
 
 export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; canCharges: boolean }) {
   const pms = snap?.pms;
-  // THE OVERVIEW SHOWS CONNECTIONS THAT CAN SERVE A GUEST. One that is switched off and has never had a
-  // configuration published is not connected to any PMS: listing it here, under whatever name a setup script
-  // gave it, reads as a second PMS that is failing. It stays fully visible on the PMS connections screen,
-  // grouped as inactive; the overview only counts it.
+  // Only connections that can serve a guest are listed; a switched-off, never-configured one is counted but not shown.
   const inUse = (pms?.interfaces ?? []).filter((i) => i.lifecycle_state === "ACTIVE" || i.published);
   const neverConfigured = (pms?.interfaces.length ?? 0) - inUse.length;
   return (
@@ -432,10 +406,6 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
     </BlockCard>
   );
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// row 6: guest networks
-// ---------------------------------------------------------------------------------------------------------
 
 function Chip({ on, label }: { on: boolean; label: string }) {
   return (
@@ -546,10 +516,6 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
     </Card>
   );
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// row 7: DHCP/DNS and the appliance
-// ---------------------------------------------------------------------------------------------------------
 
 export function DhcpDnsCard({ snap }: { snap: OverviewSnapshot | null }) {
   const d = snap?.dhcp;
@@ -729,10 +695,6 @@ export function ApplianceCard({ snap, licenseHeadline }: { snap: OverviewSnapsho
     </BlockCard>
   );
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// services grid (the page adds the /health dependencies beneath it)
-// ---------------------------------------------------------------------------------------------------------
 
 export function ServicesGrid({ snap }: { snap: OverviewSnapshot | null }) {
   const sv = snap?.services;

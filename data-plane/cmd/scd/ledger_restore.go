@@ -1,17 +1,9 @@
 package main
 
-// THE LEDGER AND A RESTORE (GDPR final mission).
-//
-// A restore loads the backup into a STAGING database first and swaps it in only when it is good. The ledger is checked and
-// applied to that staging database, so by the time the restored data is the live data every erasure the hotel had already
-// completed has been done again and every request it had already closed is closed again. Nothing identifying is ever
-// served from a restored database that has not been through the ledger.
-//
-// ONE trustworthy, complete copy is enough. The primary copy (on the appliance) and the secondary copy (external) are read;
-// those that cannot be reached or verified are simply not used. A copy is trusted only if it is an intact chain AND it reaches
-// everything independent witnesses say the ledger had reached: the ledger inside the backup being restored, the live
-// database, and the head recorded with every backup on the appliance (internal/ledger.Assess). A copy that merely exists, or
-// that was silently cut short, is refused.
+// A restore loads the backup into a STAGING database and swaps it in only when good. The ledger is checked and applied to staging first,
+// so every erasure already completed is redone and nothing identifying is served from a restored database that has not been through the ledger.
+// One trustworthy, complete copy is enough: it is trusted only if an intact chain reaching everything independent witnesses say the ledger
+// had reached (the backup's ledger, the live database, the heads recorded with every backup; internal/ledger.Assess).
 
 import (
 	"bytes"
@@ -29,7 +21,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/ledger"
 )
 
-// execPsql runs SQL (on stdin) against one database in the database container and returns what it printed.
 func execPsql(ctx context.Context, db, sql string) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", pgContainer, "psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1")
 	cmd.Stdin = strings.NewReader(sql)
@@ -48,11 +39,9 @@ type ledgerHeadInfo struct {
 	Hash   string
 }
 
-// psqlLedgerHead reads the ledger head of a database through psql. A database without the ledger (a backup older than the
-// migration) answers Has=false.
+// psqlLedgerHead answers Has=false for a database without the ledger (a backup older than the migration).
 func psqlLedgerHead(ctx context.Context, db string) (ledgerHeadInfo, error) {
-	// Two statements, not one CASE: PostgreSQL resolves every function a statement names when it parses it, so a single
-	// statement naming iam_v2.ledger_head() fails on a backup older than the ledger instead of answering "no ledger".
+	// Two statements, not one CASE: PostgreSQL resolves every function a statement names at parse time, so one naming iam_v2.ledger_head() fails on an older backup.
 	has, err := execPsql(ctx, db, `SELECT to_regprocedure('iam_v2.ledger_head()') IS NOT NULL AND to_regprocedure('iam_v2.ledger_verify()') IS NOT NULL`)
 	if err != nil {
 		return ledgerHeadInfo{}, err
@@ -84,8 +73,7 @@ func psqlLedgerHead(ctx context.Context, db string) (ledgerHeadInfo, error) {
 	return ledgerHeadInfo{Has: true, Intact: ver.OK, Ledger: head.Ledger, Seq: head.Seq, Hash: head.Hash}, nil
 }
 
-// backupLedgerWitnesses are the ledger heads recorded with every backup on the appliance: each says how far the ledger had
-// gone when that backup was taken, so a copy that stops earlier than the most recent one has lost entries.
+// backupLedgerWitnesses are the ledger heads recorded with every backup: a copy stopping earlier than the most recent one has lost entries.
 func backupLedgerWitnesses() []ledger.Witness {
 	var out []ledger.Witness
 	matches, _ := filepath.Glob(filepath.Join(scdBackupDir, "db-*.meta.json"))
@@ -108,8 +96,7 @@ func backupLedgerWitnesses() []ledger.Witness {
 	return out
 }
 
-// restoreLedgerPrepare runs before anything is touched: the live database's own ledger entries are made durable in the files,
-// so a restore can never lose an erasure made since the last reconciliation. The secondary storage need not be reachable.
+// restoreLedgerPrepare runs before anything is touched: the live database's ledger entries are made durable in the files, so a restore cannot lose an erasure made since the last reconciliation.
 func (s *server) restoreLedgerPrepare(ctx context.Context) (string, bool) {
 	rt := &s.ledgerRT
 	if rt.store == nil {
@@ -138,8 +125,7 @@ func (s *server) restoreLedgerPrepare(ctx context.Context) (string, bool) {
 	return fmt.Sprintf("the erasure ledger (%d entries) is safe in both places", st.Local.Entries), true
 }
 
-// restoreLedgerApply verifies the ledger against the staging database and applies it there. good=false stops the restore with
-// nothing replaced.
+// restoreLedgerApply verifies the ledger against staging and applies it there; good=false stops the restore with nothing replaced.
 func (s *server) restoreLedgerApply(ctx context.Context, staging, identityText string) (string, bool) {
 	rt := &s.ledgerRT
 	if rt.store == nil {
@@ -166,8 +152,7 @@ func (s *server) restoreLedgerApply(ctx context.Context, staging, identityText s
 		wit = append(wit, ledger.Witness{Source: "the live database", Ledger: lh.Ledger, Seq: lh.Seq, Hash: lh.Hash})
 	}
 	wit = append(wit, backupLedgerWitnesses()...)
-	// A backup (or database) that has only its own first entry says nothing about another appliance's ledger, and a witness
-	// from a different ledger is dropped when this database holds nothing yet: a replacement appliance restoring the old one's data.
+	// A database with only its own first entry says nothing about another appliance's ledger; a witness from a different ledger is dropped when this database holds nothing yet (a replacement appliance).
 	local := rt.store.ReadLocal()
 	ext := rt.store.ReadExternal(ctx, ident)
 	copies, wit := settleFreshLedgers([]ledger.Copy{local, ext}, wit)
@@ -260,8 +245,7 @@ END $do$`, doc)
 	return "the secondary storage setting of this appliance was kept", true
 }
 
-// ledgerReconcileAfterRestore brings both copies into step with the restored database and returns "" when they are, or a
-// plain statement of what is not (never an error that undoes the restore).
+// ledgerReconcileAfterRestore returns "" when both copies are in step, else a plain statement of what is not (never an error that undoes the restore).
 func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 	s.resetPool()
 	st := s.ledgerReconcile(ctx)
@@ -280,11 +264,8 @@ func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 	}
 }
 
-// settleFreshLedgers sets aside what a brand-new appliance says about a ledger it has never had. A replacement appliance starts
-// with its own ledger holding only its first entry; the ledger of the appliance it replaces is somewhere else, and is the real
-// one. A copy or a witness that holds nothing but a first entry of a DIFFERENT ledger says nothing about erasures, so it is
-// ignored rather than treated as a contradiction. (A first entry cannot hide an erasure.) Only a longer intact ledger can
-// make another one "fresh".
+// settleFreshLedgers ignores a copy or witness holding only the first entry of a DIFFERENT ledger (a replacement appliance's own new ledger):
+// a first entry cannot hide an erasure, and only a longer intact ledger can make another one fresh.
 func settleFreshLedgers(copies []ledger.Copy, wit []ledger.Witness) ([]ledger.Copy, []ledger.Witness) {
 	id, longest := "", 1
 	for _, c := range copies {

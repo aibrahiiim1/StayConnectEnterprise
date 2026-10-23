@@ -1,12 +1,6 @@
-// THE GUESTS AND PMS SCREENS, AFTER THE ONEGATE REDESIGN.
-//
-// The presentation of these screens changed completely; their behaviour was not allowed to. So what is asserted
-// here is the behaviour the redesign had to carry over — and the three things it had to add:
-//
-//   * one-time secrets are the kit's OneTimeReveal ("Shown once"), never a card that can scroll away;
-//   * the heaviest action keeps every guard it had (reason, password, typed REVOKE) and sends the same body;
-//   * a role that cannot use a button never sees it (Active sessions, Guest accounts, Post-stay access);
-//   * raw ids are not the main content (Cross-PMS transfer).
+// Behaviour the redesign had to carry over: one-time secrets use OneTimeReveal, the heaviest action keeps every guard
+// (reason, password, typed REVOKE),
+// roles that cannot use a button never see it, and raw ids are not the main content.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -36,8 +30,6 @@ beforeEach(() => {
 afterEach(() => vi.resetModules());
 
 const pathOf = (raw: unknown) => (typeof raw === "string" ? raw : "");
-
-// ---------------------------------------------------------------------------------------------------- post-stay
 
 const PROFILE = {
   id: "p-1",
@@ -86,7 +78,6 @@ describe("Post-stay access", () => {
     expect(await screen.findByText("New PIN — shown once")).toBeTruthy();
     expect(screen.getByTestId("one-time-value").textContent).toBe("482913");
     expect(screen.getByText(/Shown once\./)).toBeTruthy();
-    // Acknowledging closes it for good: there is no way to show it again.
     await user.click(screen.getByRole("button", { name: "I have given it to the guest" }));
     await waitFor(() => expect(screen.queryByTestId("one-time-value")).toBeNull());
     expect(screen.queryByRole("button", { name: /show pin/i })).toBeNull();
@@ -128,13 +119,10 @@ describe("Post-stay access", () => {
     expect(screen.queryByRole("button", { name: /^Reset PIN/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^End access/ })).toBeNull();
     expect(screen.getByText(/can view this but not change it/i)).toBeTruthy();
-    // Raw ids stay off the table.
     expect(screen.queryByText("stay-uuid-1")).toBeNull();
     expect(screen.queryByText("2026-09-27T10:00:00Z")).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------------------------------- sessions
 
 const SESSION = {
   id: "sess-1", tenant_id: "t", site_id: "s", appliance_id: "a", guest_id: "g",
@@ -169,7 +157,6 @@ describe("Active sessions", () => {
     const { default: Page } = await import("@/app/(app)/sessions/page");
     const user = userEvent.setup();
     render(<Page />);
-    // The title is the menu label, whichever view is selected.
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Active sessions");
     await user.click(await screen.findByRole("button", { name: /disconnect/i }));
     const dialog = await screen.findByRole("dialog");
@@ -179,8 +166,6 @@ describe("Active sessions", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/sessions/sess-1/disconnect", { reason: "admin" }));
   });
 });
-
-// ---------------------------------------------------------------------------------------------------- guest accounts
 
 const ACCOUNT = {
   id: "ga-1", username: "room101", display_name: "Room 101 guest", enabled: true,
@@ -235,8 +220,6 @@ describe("Guest accounts", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------------- transfers
-
 describe("Cross-PMS transfer", () => {
   it("keeps raw network ids and timestamps out of the main content", async () => {
     get.mockImplementation((raw: unknown) => {
@@ -261,12 +244,9 @@ describe("Cross-PMS transfer", () => {
     expect(text).not.toContain("0b5a6c1e-1111-4222-8333-444455556666");
     expect(text).not.toContain("2026-09-21T09:30:00Z");
     expect(text).not.toContain("AMBIGUOUS_ROOM");
-    // A read-only role gets no transfer form at all.
     expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------------------------------- restrictions
 
 describe("Active restrictions", () => {
   it("requires a reason to release, and says releasing does not sign the guest in", async () => {

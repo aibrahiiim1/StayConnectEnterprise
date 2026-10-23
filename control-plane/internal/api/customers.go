@@ -17,10 +17,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// CUSTOMERS AND SITES. A customer is the tenants table (the API calls it a customer); customer_id is the old
-// tenant_id.
-
-// CustomerRow is the customer list/detail shape (§6).
 type CustomerRow struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
@@ -34,7 +30,6 @@ type CustomerRow struct {
 	Attention      int       `json:"attention"`
 }
 
-// SiteRow is the site list shape (§6).
 type SiteRow struct {
 	ID         string  `json:"id"`
 	CustomerID string  `json:"customer_id"`
@@ -49,7 +44,6 @@ type SiteRow struct {
 
 var slugStrip = regexp.MustCompile(`[^a-z0-9]+`)
 
-// slugify turns a display name into a url-safe identifier ("Northwind Sites" -> "northwind-sites").
 func slugify(name string) string {
 	s := strings.Trim(slugStrip.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-"), "-")
 	if len(s) > 48 {
@@ -61,7 +55,6 @@ func slugify(name string) string {
 	return s
 }
 
-// uniqueValue returns base, or base-2, base-3 … the first that exists() rejects.
 func uniqueValue(ctx context.Context, base string, exists func(context.Context, string) (bool, error)) (string, error) {
 	for i := 1; i < 1000; i++ {
 		v := base
@@ -79,12 +72,10 @@ func uniqueValue(ctx context.Context, base string, exists func(context.Context, 
 	return "", errors.New("could not find a free identifier")
 }
 
-// querier is satisfied by *pgxpool.Pool and pgx.Tx.
 type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// createCustomer inserts a customer; the slug is derived from the name when not given.
 func createCustomer(ctx context.Context, q querier, name, slug string) (string, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -112,8 +103,7 @@ func createCustomer(ctx context.Context, q querier, name, slug string) (string, 
 	return id, slug, nil
 }
 
-// createSite inserts a site under customerID; the code is derived from the name when not given. siteType ""
-// is UNSPECIFIED; any other value must be one of SiteTypes.
+// createSite inserts a site; siteType "" is UNSPECIFIED, any other value must be one of SiteTypes.
 func createSite(ctx context.Context, q querier, customerID, name, code, timezone, country, siteType string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -160,7 +150,6 @@ func createSite(ctx context.Context, q querier, customerID, name, code, timezone
 	return id, nil
 }
 
-// customerRows builds customer rows with their counts. customerID "" = all (fleet scope).
 func (b *Base) customerRows(ctx context.Context, customerID, status, text string) ([]CustomerRow, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT t.id::text, t.name, t.slug, t.status, t.created_at,
@@ -409,8 +398,7 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	// Licence rows reference the customer with RESTRICT. With no site left, none can be current (a site
-	// cannot be deleted while it holds a current licence), so these are history of appliances already gone.
+	// Licence rows reference the customer with RESTRICT; with no site left none can be current, so these are history.
 	for _, stmt := range []string{
 		`DELETE FROM licenses WHERE tenant_id=$1 AND status NOT IN ('active','suspended')`,
 		`DELETE FROM tenants WHERE id=$1`,
@@ -425,15 +413,11 @@ func (b *Base) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed")
 		return
 	}
-	// audit_log has no foreign key, so the record outlives the customer. Written only once it is gone.
+	// audit_log has no foreign key, so the record outlives the customer.
 	audit.Op(r.Context(), b.DB, r, "customer.deleted", "customer", id, map[string]any{
 		"_tenant_id": id, "name": name, "slug": slug, "reason": in.Reason})
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// Sites
-// ---------------------------------------------------------------------------------------------------------
 
 func (b *Base) siteRows(ctx context.Context, customerID, siteID string) ([]SiteRow, error) {
 	rows, err := b.DB.Query(ctx, `
@@ -520,7 +504,6 @@ func (b *Base) postSite(w http.ResponseWriter, r *http.Request) {
 	b.writeSite(w, r, http.StatusCreated, id)
 }
 
-// siteCustomer returns the customer a site belongs to, or writes 404.
 func (b *Base) siteCustomer(w http.ResponseWriter, r *http.Request, siteID string) (string, bool) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
@@ -534,9 +517,8 @@ func (b *Base) siteCustomer(w http.ResponseWriter, r *http.Request, siteID strin
 
 // patchSite: PATCH /cloud/v1/sites/{id} {name?, timezone?, country?, site_type?}
 //
-// The site's name and type are signed into the assignment of every appliance placed there. When either
-// changes, each such appliance holding a granting assignment gets a newly signed one (next version) in the
-// same transaction, so the change reaches it and the edit and the documents commit or roll back together.
+// The site's name and type are signed into every placed appliance's assignment; when either changes, each gets a
+// newly signed one in the same transaction.
 func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	customerID, ok := b.siteCustomer(w, r, id)
@@ -615,10 +597,9 @@ func (b *Base) patchSite(w http.ResponseWriter, r *http.Request) {
 	b.writeSite(w, r, http.StatusOK, id)
 }
 
-// reissueSiteAssignmentsTx signs a new assignment, in the SAME state and with the next version, for every
-// appliance placed at the site whose current assignment grants ownership. Appliances with a terminal
-// (clearing) assignment -- retiring or retired -- are never touched: re-granting them would undo a retirement.
-// The appliance rows are locked first so a concurrent move or retire cannot interleave.
+// reissueSiteAssignmentsTx re-signs, in the same state and next version, every placed appliance whose assignment
+// grants ownership. Retiring or retired appliances are never touched: re-granting would undo a retirement.
+// Appliance rows are locked first so a concurrent move or retire cannot interleave.
 func (b *Base) reissueSiteAssignmentsTx(ctx context.Context, tx pgx.Tx, siteID string) ([]map[string]any, error) {
 	rows, err := tx.Query(ctx, `
         SELECT a.id::text, sa.state
@@ -709,11 +690,8 @@ func (b *Base) deleteSite(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "reason is required")
 		return
 	}
-	// A REVOCATION THE APPLIANCE HAS NOT YET RECEIVED LIVES ONLY IN ITS LICENCE ROW. The appliance learns that a
-	// licence was revoked from the revoked-id list of its next licence fetch; deleting the row first would
-	// erase the revocation and leave the licence valid on the box. So the site is not deleted while a licence
-	// issued for it is revoked, not yet delivered, and bound to an appliance that can still fetch (it exists
-	// and is not retired -- a retired identity is refused by the API and has had its authority cleared).
+	// An undelivered revocation lives only in its licence row (the appliance learns of it on its next licence fetch),
+	// so the site is not deleted while a revoked, undelivered licence is bound to an appliance that can still fetch.
 	var apps, current, undelivered int
 	if err := b.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM appliances WHERE site_id=$1),
                                          (SELECT count(*) FROM licenses WHERE site_id=$1 AND status IN ('active','suspended')),

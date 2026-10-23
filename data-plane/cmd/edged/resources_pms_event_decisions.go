@@ -1,22 +1,8 @@
 package main
 
-// DECISIONS ON PMS MESSAGES THAT WAIT FOR REVIEW (audit H-15, Product-Owner decision D-D).
-//
-// A PMS message the engine could not apply sits in MANUAL_REVIEW. Until now nothing could answer one: the
-// dashboard and the PMS activity page said thousands "need a decision" that no screen could take. This surface
-// is that decision, one message at a time:
-//
-//	POST /{eventID}/acknowledge  the message needs no action -- with a reason.
-//	POST /{eventID}/link         the message concerns this stay -- chosen from GET /{eventID}/candidates, the
-//	                             stays it is re-matchable to (same connection; same reservation, or for a
-//	                             message without one, a stay that was in that room when it arrived).
-//	GET/PUT /settings            the automatic expiry setting: OFF by default; when on, a message that arrived
-//	                             after it was switched on and waited the configured days is recorded as expired.
-//
-// Every write needs the password step-up, writes ONE row through a definer (iam_v2.pms_review_decide /
-// pms_review_expiry_settings_set, migration 0123) into an append-only ledger, and is recorded in audit_log with
-// the actor. Neither action changes a stay, an entitlement or the message: a checkout is only ever an APPLIED
-// GO event. Who may decide: site_admin and the IT manager (resource key pms-event-decisions).
+// Decisions on PMS messages in MANUAL_REVIEW: acknowledge, link to a stay, and the automatic-expiry setting.
+// Every write needs password step-up and goes through a definer into an append-only ledger; none changes a stay,
+// an entitlement or the message (a checkout is only ever an applied GO event).
 
 import (
 	"log/slog"
@@ -156,8 +142,6 @@ func reviewDecisionFailure(msg string) (int, string) {
 		return http.StatusInternalServerError, "internal"
 	}
 }
-
-// ---- the expiry setting -------------------------------------------------------------------------------------
 
 const (
 	reviewExpiryDaysMin = 1

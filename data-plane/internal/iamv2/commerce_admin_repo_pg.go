@@ -12,11 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PgCommerceAdminRepository is the Phase-2 Hotel-Admin repository over iam_v2. Constructed only when the
-// Phase-2 admin surface is ON; while dark the engine holds a nil repository.
 type PgCommerceAdminRepository struct{ db *pgxpool.Pool }
 
-// NewPgCommerceAdminRepository builds the admin repository over a pool.
 func NewPgCommerceAdminRepository(db *pgxpool.Pool) *PgCommerceAdminRepository {
 	return &PgCommerceAdminRepository{db: db}
 }
@@ -153,17 +150,7 @@ func (r *PgCommerceAdminRepository) ListPlanRevisions(ctx context.Context, tenan
 	return out, rows.Err()
 }
 
-// GetGraceConfig returns what SetGrace would have to be given to reproduce the stored configuration.
-//
-// THE ROUND TRIP HAS TO CLOSE. The typed grace fields live in COLUMNS and the rest lives in the config
-// jsonb, so a read that returned only config would omit everything typed -- and since the admin UI reads,
-// edits and writes back, the next save would send those fields as absent and publish NULLs over them. An
-// ordinary edit of an unrelated key would silently erase the grace policy.
-//
-// That asymmetry was introduced by moving the WRITE to the typed columns without moving the read, which is
-// the easy half to forget: the write is the change you are making, the read is the one that has always
-// worked. So the typed columns are projected back under the same key names splitGraceConfig accepts, making
-// save -> read -> save idempotent by construction rather than by care.
+// GetGraceConfig projects the typed grace columns back under the keys splitGraceConfig accepts, so save -> read -> save is idempotent; omitting them would publish NULLs over the policy on the next unrelated edit.
 func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error) {
 	var gc GraceConfig
 	var rev *string
@@ -189,22 +176,9 @@ func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID
 		gc.GracePackageRevisionID = *rev
 	}
 	gc.Config = map[string]any{}
-	// The free-form `config` jsonb is deliberately NOT merged into the read.
-	//
-	// Under D32 the only writer of grace policy is the audited publication boundary, and it writes the typed
-	// columns. Nothing can write that jsonb any more, and -- because the table is owner-only -- nothing can
-	// clear it either. Any keys still in it are pre-D32 residue. Returning them would present values that no
-	// longer describe the running policy, that the operator cannot change and cannot delete, alongside the ones
-	// that do: a "grace_minutes: 30" sitting next to grace_duration_seconds, agreeing today and silently
-	// disagreeing after the next publication. Read-only stale state shown as configuration is worse than absent
-	// configuration, because it is indistinguishable from the real thing.
-	//
-	// The column is left in place rather than dropped: it is historical evidence of what a site was configured
-	// with before the cutover, and a migration that deletes it destroys that. It simply is not the answer to
-	// "what is this site's grace policy".
+	// The free-form config jsonb is not merged into the read: grace policy is written only through the typed columns, so any keys left in it are stale and must not be shown as configuration.
 	_ = cfg
-	// Project the typed columns back. Only non-NULL values are surfaced: an absent grace override must read
-	// back as absent, not as a set of zeroes that a later save would publish as a real policy.
+	// Only non-NULL values are surfaced: an absent override must read back as absent, not as zeroes a later save would publish as a policy.
 	if eligibility != nil {
 		gc.Config["eligibility_window_seconds"] = *eligibility
 	}
@@ -273,26 +247,7 @@ func (r *PgCommerceAdminRepository) ListPurchases(ctx context.Context, tenantID,
 	return out, rows.Err()
 }
 
-// reservedCommerceCodes are the catalogue codes no operator publish may ever land on.
-//
-// The first two are the D32 system grace objects, guarded here because the database trigger does not cover
-// them. The last two are the EMERGENCY catalogue, which the trigger DOES cover -- and that was exactly the
-// problem: the trigger refused them with a plain RAISE, the transaction wrapper collapsed it to a repository
-// error, and an operator who typed a reserved code got HTTP 500 "publish failed". A refusal reported as an
-// internal error tells the operator the system is broken when in fact it is working, and it is the shape that
-// gets escalated as an outage. Refusing all four here makes the answer uniform and truthful, and it does so
-// before any row is touched.
-// reservedCommerceCodes is the ONE list of codes that belong to the system rather than to an operator.
-//
-// There are two naming schemes because two provisioning paths created system rows at different times: the Go
-// constants (__system_checkout_grace*) and the SQL bootstrap in migration 0010
-// (__sys_emergency_grace_*__). Both are live, so both are reserved.
-//
-// It is a slice, and every consumer reads it, because the previous arrangement had the publish GUARD
-// checking all four while the plans LISTING hardcoded only two of them in its SQL. The two disagreed, and
-// the half that was wrong was the one an operator actually sees: the Service Plans screen listed
-// __sys_emergency_grace_plan__ as though it were theirs to edit, while publishing onto it was refused.
-// A list that is read in one place cannot drift from itself.
+// reservedCommerceCodes is the one list of system-owned codes that no operator publish may land on, and every consumer must read it (two naming schemes exist: the Go constants and the SQL bootstrap). The guard refuses them with a typed error before any row is touched, instead of a DB trigger error surfacing as HTTP 500.
 var reservedCommerceCodes = []string{
 	systemGraceCode, systemGracePlanCode,
 	"__sys_emergency_grace_pkg__", "__sys_emergency_grace_plan__",
@@ -312,12 +267,7 @@ const reservedCommerceCodeMsg = "reserved system grace code is not operator-publ
 type pgCommerceAdminTx struct{ tx pgx.Tx }
 
 func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
-	// D32: the operator publisher may not reach a SYSTEM package, including by CODE COLLISION.
-	//
-	// UpsertPackage is an upsert on (tenant, site, code). Publishing a package whose code happens to be the
-	// reserved system grace code would land ON the system row and republish it as an operator package -- the
-	// one door left open after the catalogue was hidden and activation was protected. The database's
-	// reserved-code trigger guards only the EMERGENCY catalog codes, so this one is enforced here.
+	// An operator publish may not reach a system package by code collision: UpsertPackage is an upsert on (tenant, site, code) and would republish the system row as an operator package.
 	if reservedCommerceCode(code) {
 		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
 	}
@@ -340,10 +290,7 @@ func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID,
 	return id, err
 }
 
-// CreatePackage is "Add package": a NEW row or a refusal, never a quiet revision of an existing package.
-//
-// ON CONFLICT DO NOTHING rather than a SELECT-then-INSERT, so two operators adding the same code at once get
-// one package and one ErrCodeExists instead of both passing the check and one landing on the other's package.
+// CreatePackage is a new row or ErrCodeExists, never a revision of an existing package; ON CONFLICT DO NOTHING keeps two concurrent adds from landing on each other.
 func (t *pgCommerceAdminTx) CreatePackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
 	if reservedCommerceCode(code) {
 		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
@@ -375,7 +322,6 @@ func (t *pgCommerceAdminTx) PlanRevisionBelongs(ctx context.Context, tenantID, s
 	return ok, err
 }
 
-// packageTypeOr defaults an unstated package type to the kind every authored package has.
 func packageTypeOr(t string) string {
 	if strings.TrimSpace(t) == "" {
 		return "GENERAL"
@@ -383,14 +329,10 @@ func packageTypeOr(t string) string {
 	return strings.TrimSpace(t)
 }
 
-// InsertPackageRevision writes a FREE (price 0 / settlement NOT_REQUIRED), non-PMS immutable revision.
 func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec PackagePublishSpec, packageID string, revNo int) (string, error) {
 	display, _ := json.Marshal(orEmptyObj(spec.Display))
 	duration, _ := json.Marshal(orEmptyObj(spec.DurationPolicy))
-	// A FIXED (or absent) allocation policy is written as SQL NULL, not as {"mode":"FIXED"}. The two mean the
-	// same thing to every reader, and NULL means this revision is byte-identical to one published before the
-	// column existed -- which is what makes "nothing changed for existing packages" checkable rather than
-	// merely intended.
+	// A FIXED or absent allocation policy is stored as SQL NULL so revisions stay byte-identical to those published before the column existed.
 	var alloc *string
 	if len(spec.DataAllocationPolicy) > 0 {
 		if mode, _ := spec.DataAllocationPolicy["mode"].(string); mode != "" && mode != AllocFixed {
@@ -399,8 +341,7 @@ func (t *pgCommerceAdminTx) InsertPackageRevision(ctx context.Context, spec Pack
 			alloc = &s
 		}
 	}
-	// plan_overrides keeps the NULL/absent distinction for the same reason data_allocation_policy does: a
-	// revision that carries no overrides must be byte-identical to one published before anything could set them.
+	// Same NULL-for-absent rule as data_allocation_policy.
 	var overrides *string
 	if len(spec.PlanOverrides) > 0 {
 		b, _ := json.Marshal(spec.PlanOverrides)
@@ -456,13 +397,7 @@ func (t *pgCommerceAdminTx) SetCurrentRevision(ctx context.Context, packageID, r
 }
 
 func (t *pgCommerceAdminTx) SetPackageActive(ctx context.Context, tenantID, siteID, packageID string, active bool) error {
-	// D32: a SYSTEM package's activation is not the operator's to change.
-	//
-	// The operator surface already required a reason and a password re-confirmation for deactivation, but
-	// both are checks that a determined operator simply satisfies -- neither says "this package is not yours".
-	// Deactivating the system grace package would silently disable checkout grace for the whole site while
-	// every screen still looked normal, so the refusal belongs in the write itself rather than in the UI
-	// affordances around it.
+	// A system package's activation is not the operator's to change; the refusal sits in the write because deactivating it would silently disable checkout grace for the site.
 	var isSystem bool
 	if err := t.tx.QueryRow(ctx,
 		`SELECT is_system FROM iam_v2.internet_packages WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
@@ -478,11 +413,8 @@ func (t *pgCommerceAdminTx) SetPackageActive(ctx context.Context, tenantID, site
 	return err
 }
 
-// ---- service plans ----
-
 func (t *pgCommerceAdminTx) UpsertPlan(ctx context.Context, tenantID, siteID, code string) (string, error) {
-	// D32: the derived system grace PLAN is not operator-publishable either. A package is only as trustworthy
-	// as the plan revision it pins, so leaving the plan reachable reopens the same door one level down.
+	// The derived system grace plan is not operator-publishable either: a package is only as trustworthy as the plan revision it pins.
 	if reservedCommerceCode(code) {
 		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
 	}
@@ -495,7 +427,6 @@ func (t *pgCommerceAdminTx) UpsertPlan(ctx context.Context, tenantID, siteID, co
 	return id, err
 }
 
-// CreatePlan is "Add plan": see CreatePackage.
 func (t *pgCommerceAdminTx) CreatePlan(ctx context.Context, tenantID, siteID, code string) (string, error) {
 	if reservedCommerceCode(code) {
 		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
@@ -539,8 +470,6 @@ func (t *pgCommerceAdminTx) SetPlanCurrentRevision(ctx context.Context, planID, 
 	return err
 }
 
-// ---- grace config ----
-
 func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, siteID, packageRevisionID string) (GraceCandidate, error) {
 	var c GraceCandidate
 	var cexp *int
@@ -568,43 +497,13 @@ func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, s
 	return c, nil
 }
 
-// UpsertGraceConfig publishes through the accepted typed contract.
-//
-// iam_v2.site_checkout_grace_config carries p3_controlled_writer_only, and unlike the capability families
-// (stay, auth_context, commerce_intent, ...) this table resolves to NO family: the guard permits a write only
-// from the owner of
-//
-//	iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)
-//
-// so the raw INSERT this replaces could never succeed, whatever the transaction did. Reading grace config is
-// a plain SELECT, which is why the surface looked healthy right up until an operator pressed save.
-//
-// The reconciliation is mechanical once the contract is read as authoritative. The typed grace fields live in
-// COLUMNS and are passed as parameters; whatever else the operator supplied stays in the free-form config
-// jsonb. That split is not a choice -- grace_config_no_dup_policy_keys explicitly forbids the typed keys from
-// also appearing in config, precisely so there is one home for each value and no way for the two to disagree.
-//
-// grace_all_or_none requires the six grace fields to be all-present or all-absent, so a partial specification
-// is rejected here with a deterministic reason rather than being sent to the database to fail as a CHECK.
-// UpsertGraceConfig is RETIRED (D32). It is retained only to satisfy the CommerceAdminTx interface and
-// always refuses.
-//
-// It was the raw path: publish_checkout_grace_config with no actor, no reason code, no optimistic version and
-// no audit row. Every one of those is what makes a change to what departing guests receive attributable and
-// safe under two operators, so leaving a working bypass beside the canonical boundary would mean the
-// guarantees hold only for callers who happened to choose the right door.
-//
-// The live path is iamv2.PublishSystemGracePolicy -> iam_v2.publish_checkout_grace_policy, which also derives
-// the system package the checkout validator will accept. Nothing in the product calls this any more; the
-// refusal exists so that if something ever does, it fails loudly rather than quietly writing an unaudited,
-// unversioned policy.
+// UpsertGraceConfig is retired and always refuses; the audited path is PublishSystemGracePolicy. Kept only to satisfy CommerceAdminTx, and it must not write an unaudited, unversioned policy.
 func (t *pgCommerceAdminTx) UpsertGraceConfig(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) error {
 	return &Error{Code: ErrInvalidInput,
 		Msg: "grace configuration must be published through PublishSystemGracePolicy (D32): the raw writer " +
 			"records no actor, reason or version and derives no validated package"}
 }
 
-// graceFields is the typed half of a grace configuration.
 type graceFields struct {
 	eligibilityWindowSeconds int
 	durationSeconds          *int
@@ -616,16 +515,7 @@ type graceFields struct {
 	rest                     map[string]any
 }
 
-// splitGraceConfig separates the typed grace fields from the free-form remainder.
-//
-// WHICH KEYS ARE TYPED IS NOT A JUDGEMENT CALL. The schema states it: grace_config_no_dup_policy_keys forbids
-// exactly the typed keys from also appearing in the config jsonb, so that list IS the set of fields that live
-// in columns. Everything else is free-form and belongs in config.
-//
-// An earlier version of this function also mapped grace_minutes onto the typed duration, on the reasonable-
-// sounding grounds that it is "the friendlier spelling". It is not in the forbidden list, so it is free-form,
-// and treating it as typed made a config of {"grace_minutes": 30} look like a PARTIAL typed override and get
-// refused by the all-or-none rule below -- a rule doing its job on an input that never should have reached it.
+// splitGraceConfig separates typed grace fields from the free-form remainder. The typed set is exactly the keys grace_config_no_dup_policy_keys forbids in config; mapping others (e.g. grace_minutes) as typed trips the all-or-none rule.
 func splitGraceConfig(config map[string]any) (graceFields, error) {
 	g := graceFields{eligibilityWindowSeconds: 3600, rest: map[string]any{}}
 	typed := map[string]bool{
@@ -684,8 +574,7 @@ func splitGraceConfig(config map[string]any) (graceFields, error) {
 			g.deviceLimit = &iv
 		}
 	}
-	// grace_all_or_none: refuse a partial specification here, with a reason naming the rule, rather than
-	// letting it reach the database and come back as an opaque CHECK violation.
+	// grace_all_or_none: refuse a partial specification here with a named reason rather than as an opaque CHECK violation.
 	set := 0
 	for _, present := range []bool{g.durationSeconds != nil, g.downKbps != nil, g.upKbps != nil,
 		g.dataQuotaBytes != nil, g.deviceLimit != nil, g.deviceLimitPolicy != nil} {
@@ -698,8 +587,7 @@ func splitGraceConfig(config map[string]any) (graceFields, error) {
 			Msg: "grace override must specify all of duration, down_kbps, up_kbps, data_quota_bytes, " +
 				"device_limit and device_limit_policy, or none of them"}
 	}
-	// The only policy the schema permits; defaulted so a caller supplying the other five is not tripped by a
-	// value that has exactly one legal setting.
+	// The only policy the schema permits; defaulted so callers supplying the other five fields are not tripped by it.
 	if set == 6 && *g.deviceLimitPolicy != "REJECT_NEW_DEVICE" {
 		return g, &Error{Code: ErrInvalidInput, Msg: "grace_device_limit_policy must be REJECT_NEW_DEVICE"}
 	}
@@ -712,11 +600,6 @@ func orEmptyObj(m map[string]any) map[string]any {
 	}
 	return m
 }
-
-// ---- system grace provisioning (D32/T0069) --------------------------------------------------------------
-//
-// A narrow transactional surface: create the hidden per-site system package and its first revision, and
-// nothing else. It deliberately cannot reach the grace CONFIG, because policy belongs to Hotel Admin.
 
 func (r *PgCommerceAdminRepository) WithGraceProvisionTx(ctx context.Context, fn func(GraceProvisionTx) error) error {
 	tx, err := r.db.Begin(ctx)
@@ -732,11 +615,7 @@ func (r *PgCommerceAdminRepository) WithGraceProvisionTx(ctx context.Context, fn
 
 type pgGraceProvisionTx struct{ tx pgx.Tx }
 
-// SystemGracePackage finds the site's existing system grace package, if any.
-//
-// Matched on is_system AND the reserved code, not on package_type alone: an operator package that merely
-// carries the CHECKOUT_GRACE type must never be adopted as the system package, which is the same distinction
-// the grace validator enforces.
+// Matched on is_system and the reserved code, not package_type alone: an operator CHECKOUT_GRACE package must never be adopted as the system package.
 func (t *pgGraceProvisionTx) SystemGracePackage(ctx context.Context, tenantID, siteID string) (string, string, error) {
 	var pkgID string
 	var revID *string
@@ -766,8 +645,6 @@ func (t *pgGraceProvisionTx) CreateSystemGracePackage(ctx context.Context, tenan
 	return id, err
 }
 
-// InsertSystemGraceRevision publishes the first CHECKOUT_GRACE revision: free, settlement-not-required, and
-// pinned to an enabled plan revision -- exactly the shape the contract re-validates at every checkout.
 func (t *pgGraceProvisionTx) InsertSystemGraceRevision(ctx context.Context, tenantID, siteID, packageID, planRevisionID string, revNo int, display map[string]any) (string, error) {
 	var id string
 	err := t.tx.QueryRow(ctx, `
@@ -786,21 +663,9 @@ func (t *pgGraceProvisionTx) SetCurrentRevision(ctx context.Context, packageID, 
 	return err
 }
 
-// DefaultPlanRevisionForGrace picks the site's current enabled plan revision to pin.
-//
-// Deterministic (oldest enabled plan by code) rather than "whatever is newest", so provisioning two
-// appliances from the same state produces the same pin instead of depending on publication order.
+// Deterministic (oldest enabled plan by code) so provisioning from the same state yields the same pin.
 func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, tenantID, siteID string) (string, error) {
-	// RESERVED PLANS ARE NOT CANDIDATES, and this is not tidiness.
-	//
-	// The old query was ORDER BY p.code LIMIT 1 over every enabled plan. On a site whose only plans are the
-	// system ones, '__sys_emergency_grace_plan__' sorts first, so provisioning deterministically pinned the
-	// EMERGENCY catalog plan into the normal grace package -- a revision the checkout matcher refuses outright
-	// with PLAN_IS_EMERGENCY_CATALOG. PRE-LIVE was in exactly that state: the package existed, its only
-	// revision could never be selected, and the Checkout Grace page reported no package was available.
-	//
-	// Excluding them restores the documented intermediate state -- a package with no revision yet, waiting for
-	// the operator's first policy -- instead of one carrying a revision that cannot ever be used.
+	// Reserved plans are excluded: otherwise the emergency catalogue plan sorts first and gets pinned, a revision the checkout matcher refuses (PLAN_IS_EMERGENCY_CATALOG).
 	var rev *string
 	err := t.tx.QueryRow(ctx, `
 	    SELECT p.current_revision_id::text
@@ -818,10 +683,7 @@ func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, te
 	return *rev, nil
 }
 
-// GetPackageCurrent reads one package's CURRENT revision in full — including the eligibility rules and grant
-// tiers, which the authoring form must hand back unchanged when it saves.
-//
-// Read-only. It resolves nothing and decides nothing; the revision chain is untouched.
+// GetPackageCurrent reads one package's current revision in full, including eligibility rules and grant tiers, which the authoring form hands back unchanged on save.
 func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error) {
 	var c PackageCurrent
 	var display, duration, alloc, overrides []byte
@@ -849,13 +711,7 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 	if err != nil {
 		return PackageCurrent{}, err
 	}
-	// EVERY jsonb FIELD IS DECODED NUMBER-AWARE, for the reason spelled out on the conditions loop below: this
-	// struct is handed straight back to PublishRevision, whose validators accept json.Number and refuse
-	// float64 so that a non-integer cannot be silently coerced. Plain Unmarshal produces float64 for every
-	// JSON number, which made a stored value fail the gate that had already accepted it — "VALIDITY_WINDOW
-	// needs a positive bounded duration_seconds" for the 86400 sitting in the row. Since nearly every package
-	// carries a VALIDITY_WINDOW duration, nothing that read a package back could republish it: not the
-	// operator's own re-pin, and not the forward publish a client-network replacement performs.
+	// Every jsonb field is decoded number-aware: PublishRevision validators accept json.Number and refuse float64, so plain Unmarshal makes a stored value fail the gate that accepted it.
 	if len(overrides) > 0 {
 		c.PlanOverrides = unmarshalNumberAware(overrides)
 	}
@@ -869,15 +725,7 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		c.DataAllocationPolicy = unmarshalNumberAware(alloc)
 	}
 
-	// THE CONDITIONS COME THROUGH THE SCOPED READER, NOT FROM THE TABLES.
-	//
-	// svc_edged holds INSERT on iam_v2.package_eligibility_rules and iam_v2.package_grant_tiers and no SELECT
-	// on either -- the admin service composes a package, the guest-auth service evaluates it. Reading them
-	// directly here is what returned 500 on the operator's package screen. iam_v2.p2_package_current_conditions
-	// answers the one question Edit needs, for the CURRENT revision of this non-system package in this tenant
-	// and site, and the scoping is inside the function rather than in this argument list.
-	//
-	// packageConditionsSQL is named so a test can assert this path references neither table.
+	// Conditions come through the scoped reader: svc_edged has INSERT but no SELECT on the rules and tiers tables, so reading them directly returns 500.
 	rows, err := r.db.Query(ctx, packageConditionsSQL(), tenantID, siteID, packageID)
 	if err != nil {
 		return PackageCurrent{}, wrapIfDenied(err)
@@ -891,14 +739,7 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		if err := rows.Scan(&kind, &ruleType, &tierOrder, &raw); err != nil {
 			return PackageCurrent{}, wrapIfDenied(err)
 		}
-		// UseNumber, NOT plain Unmarshal. A grant tier's numbers are validated by asInt64, which accepts
-		// json.Number and int and REFUSES float64 on purpose — a bandwidth cap of 5.5 Mbps must not be
-		// silently coerced. Plain Unmarshal produces float64 for every JSON number, so a tier read back
-		// through this reader could never be republished: "grant down_kbps must be a non-negative integer
-		// within bounds" for a value of 5000 that the database had happily stored. That broke republishing
-		// ANY package with a bandwidth override — the operator's own re-pin as much as the automatic forward
-		// publish a client-network replacement performs. Both other decoders of this JSON already set
-		// UseNumber for exactly this reason (commerce_repo_pg.go, edged's decodeJSON); this one was missed.
+		// UseNumber, not plain Unmarshal: tier numbers are validated by asInt64, which refuses float64, so a tier read back could never be republished.
 		val := unmarshalNumberAware(raw)
 		switch kind {
 		case "RULE":
@@ -911,14 +752,11 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 			}
 		}
 	}
-	// pgx reports a denied read when the rows are DRAINED rather than when the statement is sent, so this
-	// return is classified too. Wrapping only the Query error is what made a permission problem surface to
-	// the operator as "no current configuration for this package".
+	// pgx reports a denied read when rows are drained, so this return is classified too.
 	if err := rows.Err(); err != nil {
 		return c, wrapIfDenied(err)
 	}
 	rows.Close()
-	// The live room-charge mappings, so the editor hands them back unchanged on the next publish.
 	mrows, err := r.db.Query(ctx,
 		`SELECT pms_interface_id::text, posting_code, COALESCE(tax_code,''), tax_rate_bp
 		   FROM iam_v2.package_settlement_mappings
@@ -938,19 +776,15 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 	return c, wrapIfDenied(mrows.Err())
 }
 
-// packageConditionsSQL calls the scoped reader. It is a function so commerce_admin_privilege_test.go can
-// assert that loading a package's conditions references neither protected table by name.
+// packageConditionsSQL is a function so a test can assert it references neither protected table.
 func packageConditionsSQL() string {
 	return `SELECT kind, rule_type, tier_order, value
 	          FROM iam_v2.p2_package_current_conditions($1::uuid, $2::uuid, $3::uuid)`
 }
 
-// ErrPackageConditionsUnreadable means this runtime role cannot read a package's eligibility rules or grant
-// tiers. Editing must refuse rather than load a partial configuration it would then republish.
+// ErrPackageConditionsUnreadable means the runtime role cannot read the rules or tiers; editing must refuse rather than republish a partial configuration.
 var ErrPackageConditionsUnreadable = errors.New("iamv2: package conditions are not readable by this role")
 
-// wrapIfDenied turns PostgreSQL's insufficient_privilege (42501) into that condition and leaves every other
-// failure exactly as it was.
 func wrapIfDenied(err error) error {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "42501" {
@@ -959,12 +793,7 @@ func wrapIfDenied(err error) error {
 	return err
 }
 
-// packagesListSQL is the operator package-catalogue query, named so a test can assert what it reads.
-//
-// IT IS A FUNCTION RATHER THAN A LITERAL BECAUSE OF WHAT IT MUST NOT CONTAIN. edged holds no SELECT on
-// iam_v2.package_eligibility_rules or iam_v2.package_grant_tiers; referencing either makes the whole
-// statement fail under the real runtime role, which is how the operator's package screen returned 500 in
-// PRE-LIVE while every superuser test passed. commerce_admin_privilege_test.go enforces that.
+// packagesListSQL is a function so a test can assert the query reads neither package_eligibility_rules nor package_grant_tiers (edged has no SELECT on them).
 func packagesListSQL() string {
 	return `SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
 		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),

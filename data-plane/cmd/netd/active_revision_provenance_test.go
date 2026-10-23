@@ -1,20 +1,7 @@
 package main
 
-// THE ACTIVE REVISION IS ONE THE APPLIANCE ACTUALLY APPLIED, AND THERE IS NO SECOND WAY IN.
-//
-// netd's boot reconcile treats the ACTIVE revision's intent snapshot as the truth about what this appliance is
-// supposed to be forwarding, and rollback rebuilds from it. So "active" has to mean "this configuration was
-// rendered, put on the wire, health-checked and kept" -- not "somebody said so".
-//
-// It did not always mean that. POST /v1/adopt (edged's POST /network/adopt) read the EDITABLE guest_networks
-// rows -- the ones the Hotel Admin UI writes directly, which may hold a draft nobody has applied -- created a
-// revision from them, and marked it active through a requirePending=false variant of markActive. No validation,
-// no apply, no health check, no confirmation window, and not one check that the live Linux network resembled
-// what had just been recorded as live. An unapplied edit could become the appliance's definition of reality at
-// the next reboot.
-//
-// That route is retired and the bypass parameter is gone. This file is what stops either coming back: a flag
-// that decides whether an invariant holds is one a future caller can pass as false.
+// The active revision is one the appliance actually applied, and there is no second way in: boot reconcile and rollback trust the ACTIVE intent snapshot,
+// so "active" must mean rendered, put on the wire, health-checked and kept. This file stops a bypass (adopt route, requirePending=false flag) coming back.
 
 import (
 	"os"
@@ -71,10 +58,7 @@ func TestNoRouteActivatesARevisionWithoutApplyingIt(t *testing.T) {
 	}
 }
 
-// ...AND markActive IS STILL THE ONLY WRITER OF state='active'.
-//
-// If a second writer ever appears, the pending gate stops being the single thing that decides provenance and
-// this whole guarantee becomes a convention instead of a property.
+// ...and markActive is still the only writer of state='active'; a second writer would turn the pending gate into a convention.
 func TestOnlyMarkActiveWritesTheActiveState(t *testing.T) {
 	writers := map[string]int{}
 	for name, src := range netdSources(t) {

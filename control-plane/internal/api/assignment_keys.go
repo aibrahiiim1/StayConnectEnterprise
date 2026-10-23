@@ -10,17 +10,13 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 )
 
-// The lifecycle of the DEDICATED assignment-signing key.
-//
-// Three states, because "stop signing with it" and "stop trusting it" are not the same decision:
+// Assignment-signing key states ("stop signing with it" and "stop trusting it" are different decisions):
 //
 //	active      — may sign new assignments, and verifies existing ones
 //	verify_only — must NOT sign; still verifies documents already issued under it
 //	revoked     — rejected for ALL verification (compromise, or post-migration)
 //
-// Key rotation is a rare, deliberate host operation, so it is a ctrlapi subcommand
-// (`ctrlapi assignment-key verify-only|revoke`), not a console button. The keys are shown read-only under
-// GET /cloud/v1/trust.
+// Rotation is a ctrlapi subcommand (`ctrlapi assignment-key verify-only|revoke`), not a console button.
 
 // RegisterActiveKey records the key ctrlapi is signing with and audits first use.
 func RegisterActiveKey(ctx context.Context, b *Base, pub ed25519.PublicKey, note string) error {
@@ -54,8 +50,7 @@ func resignRegistry(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, re
 	_, _ = rb.Rebuild(ctx, reason)
 }
 
-// KeyToVerifyOnly stops a key signing while KEEPING it trusted for documents already issued under it. Always
-// safe — it cannot strand anyone.
+// KeyToVerifyOnly stops a key signing while keeping it trusted for documents already issued. Always safe.
 func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string) error {
 	if reason == "" {
 		return errors.New("a reason is required")
@@ -75,9 +70,8 @@ func KeyToVerifyOnly(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, k
 	return nil
 }
 
-// KeyRevoke removes ALL trust in a key. GUARDED: refused while any CURRENT assignment is still signed by it
-// (those appliances could no longer verify the document they hold), unless emergency is set for a
-// confirmed key compromise.
+// KeyRevoke removes all trust in a key. Refused while a current assignment is still signed by it (those appliances
+// could no longer verify what they hold), unless emergency is set for a confirmed compromise.
 func KeyRevoke(ctx context.Context, b *Base, regRoot ed25519.PrivateKey, keyID, reason string, emergency bool) (int64, error) {
 	if reason == "" {
 		return 0, errors.New("a reason is required")

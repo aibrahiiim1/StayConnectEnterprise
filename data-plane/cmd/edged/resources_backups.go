@@ -1,25 +1,7 @@
 package main
 
-// BACKUPS, AS AN OPERATOR FEATURE RATHER THAN AN EMPTY VIEWER.
-//
-// WHAT WAS THERE, AND WHY IT WAS EMPTY
-// ------------------------------------
-// The Backups screen listed public.backup_records. That table has never had a row written to it on this
-// appliance -- nothing produces one -- so the screen showed "No backups yet" forever while the appliance was
-// in fact retaining 444 MB of deploy and rollback artefacts under /opt/stayconnect/backups and running a
-// daily retention sweep that already knew its disk pressure, its protected paths and what it had reclaimed.
-// All of that was real, and none of it was reachable from Hotel Admin.
-//
-// So this does not invent a backup subsystem. It surfaces the one that exists, and adds the one thing the
-// appliance genuinely lacked: a database backup an operator can take, download and verify.
-//
-// WHAT IS DELIBERATELY NOT HERE
-// -----------------------------
-// There is no live restore. Restoring a database over a running appliance is destructive and irreversible in
-// the direction that matters, and the mission forbids proving a UI with one. What is offered instead is
-// VERIFICATION: a dump is restored into a disposable scratch database and reported on, which answers the only
-// question an operator actually has about a backup -- "would this work?" -- without betting the site on it.
-// The restore runbook is presented alongside, so the path exists and is explicit.
+// Backups: surfaces the artefacts under /opt/stayconnect/backups and the retention sweep, and lets an
+// operator take, download, verify and restore database backups.
 
 import (
 	"bufio"
@@ -40,22 +22,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// backupRoot is where the appliance already keeps its artefacts; the retention sweep owns the same tree. A var
-// only so the download tests can point it at a temporary directory; nothing in the product assigns it.
+// backupRoot is a var only so tests can point it at a temporary directory.
 var backupRoot = "/opt/stayconnect/backups"
 
-// retentionStatusPath is written by stayconnect-backup-cleanup on every run. It is the appliance's OWN
-// account of its retention posture -- reading it is why this screen can report real numbers instead of
-// plausible ones.
+// retentionStatusPath is written by stayconnect-backup-cleanup on every run.
 const retentionStatusPath = "/opt/stayconnect/backup-retention-status.json"
 
-// dbBackupDir keeps database dumps separate from deploy/rollback artefacts. The retention sweep already
-// carries a keep_db policy for exactly this category; until now nothing ever produced one.
+// dbBackupDir keeps database dumps separate from deploy/rollback artefacts (the sweep has a keep_db policy for it).
 var dbBackupDir = filepath.Join(backupRoot, "db")
 
-// safeArtifact bounds what a caller may name. Artefact names come from a listing WE produced, but a handler
-// that joins a caller-supplied string onto a path is one typo away from serving /etc/shadow, so the name is
-// constrained to a single path element of known shape rather than merely checked for "..".
+// safeArtifact constrains a caller-supplied name to a single path element of known shape (not merely "..").
 var safeArtifact = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 func (s *server) backupsRoutes() http.Handler {
@@ -65,15 +41,12 @@ func (s *server) backupsRoutes() http.Handler {
 	r.Put("/settings", s.backupSettingsSet)
 	r.Get("/artifacts", s.listBackupArtifacts)
 	r.Post("/run", s.runDatabaseBackup)
-	// Download is NOT here any more: it is the backup-download resource (backup_download.go), site_admin and
-	// the IT manager only, behind the password step-up (decision D-B).
+	// Download is a separate resource (backup_download.go).
 	r.Post("/artifacts/{name}/verify", s.verifyBackupArtifact)
-	// THE DESTRUCTIVE ONE. Password step-up and a typed confirmation inside the handler; see
-	// restoreDatabaseBackup. Only a backup that has passed Verify is accepted, enforced again by scd.
+	// Destructive: step-up and typed confirmation in the handler; only a verified backup is accepted, enforced again by scd.
 	r.Post("/artifacts/{name}/restore", s.restoreDatabaseBackup)
 	r.Get("/maintenance", s.backupMaintenance)
 	r.Get("/last-restore", s.lastRestoreResult)
-	// THE ERASURE LEDGER AND THE BACKUP STATUS (ledger_admin.go).
 	r.Get("/ledger", s.ledgerStatusGet)
 	r.Post("/ledger/destination/probe", s.ledgerDestinationProbe)
 	r.Post("/ledger/destination/test", s.ledgerDestinationTest)
@@ -84,11 +57,7 @@ func (s *server) backupsRoutes() http.Handler {
 	return r
 }
 
-// ------------------------------------------------------------------------------- retention and schedule
-
-// Retention and the nightly schedule are SETTINGS (§0C). scd owns the files -- /etc/stayconnect and the
-// systemd drop-in are root's -- so these proxy, and everything that decides whether the change may happen
-// stays here: the RBAC mount, the step-up below, and the audit record.
+// scd owns the root-owned settings files, so this proxies; RBAC, step-up and audit stay here.
 func (s *server) backupSettingsGet(w http.ResponseWriter, r *http.Request) {
 	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/settings", nil)
 	if err != nil || code != http.StatusOK {
@@ -111,8 +80,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	// Step-up: retention decides how far back this appliance can recover, and a schedule that never fires is
-	// indistinguishable from a backup policy that works right up until it is needed.
+	// Step-up: retention decides how far back the appliance can recover.
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
@@ -124,8 +92,7 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if code != http.StatusOK {
-		// The appliance refuses with a reason an operator can act on -- a bound, or the warning/critical
-		// ordering -- so it is passed through rather than flattened into "invalid".
+		// Pass the appliance's actionable reason through rather than flattening it.
 		jsonErr(w, http.StatusBadRequest, "validation", scdDetail(body, nil))
 		return
 	}
@@ -135,14 +102,10 @@ func (s *server) backupSettingsSet(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// ---------------------------------------------------------------------------------------------- health
-
 type backupHealth struct {
-	// Retention is the appliance's own status document, passed through rather than re-derived. A second
-	// opinion computed here could disagree with the sweep that actually deletes things.
+	// Retention is the sweep's own status document, passed through rather than re-derived.
 	Retention map[string]any `json:"retention,omitempty"`
-	// RetentionReadable says whether the document above could be read at all, so the UI can distinguish
-	// "the sweep reports no failures" from "I could not ask".
+	// RetentionReadable distinguishes "no failures reported" from "could not read".
 	RetentionReadable bool   `json:"retention_readable"`
 	RetentionError    string `json:"retention_error,omitempty"`
 
@@ -151,8 +114,6 @@ type backupHealth struct {
 	TimerLastRun  string `json:"timer_last_run,omitempty"`
 	TimerReadable bool   `json:"timer_readable"`
 
-	// DatabaseBackups is the count and newest timestamp of the category an operator most wants and which
-	// this appliance has never had. Reported explicitly so "none yet" is a statement, not an absence.
 	DatabaseBackups int    `json:"database_backups"`
 	NewestDatabase  string `json:"newest_database_backup,omitempty"`
 }
@@ -168,8 +129,7 @@ func (s *server) backupHealth(w http.ResponseWriter, r *http.Request) {
 		out.RetentionReadable = true
 	}
 
-	// systemd is the authority on whether the sweep is actually scheduled. A status document from last week
-	// looks healthy on its own; the timer is what says it will run again.
+	// The timer, not a stale status document, says whether the sweep will run again.
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if b, err := exec.CommandContext(ctx, "systemctl", "show", "stayconnect-backup-cleanup.timer",
@@ -210,29 +170,20 @@ func (s *server) backupHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// ------------------------------------------------------------------------------------------- artefacts
-
 type backupArtifact struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	SizeBytes int64  `json:"size_bytes"`
 	ModTime   string `json:"modified_at"`
-	// Downloadable is false for directories: a deploy rollback set is a tree, and offering a download that
-	// cannot be produced is worse than not offering one.
+	// Downloadable is false for directories (a deploy rollback set is a tree).
 	Downloadable bool `json:"downloadable"`
 
-	// VERIFICATION STATE, READ FROM THE APPLIANCE rather than remembered by the browser.
-	//
-	// Restore eligibility depends on it, so it has to be a fact about the file on disk and not a flag the
-	// screen set after a successful verify. A page reloaded, opened in a second tab, or opened by a different
-	// operator must reach the same answer -- and the answer must go stale the moment the archive changes,
-	// which is what the marker's size/mtime check gives. scd enforces the same rule again before it restores
-	// anything; this is what lets the screen explain WHY the button is unavailable instead of just disabling it.
+	// Verification state is read from the file on disk, not remembered by the browser; it goes stale when the
+	// archive changes. scd enforces the same rule before restoring.
 	VerifiedAt     string `json:"verified_at,omitempty"`
 	VerifiedTables int    `json:"verified_tables,omitempty"`
 
-	// The note beside a backup the one engine made: why it exists, who asked and what it holds. A backup with no note is an
-	// earlier backup (before there was one system); it is listed, restorable if it was verified, and never removed automatically.
+	// The note beside a backup. A backup with no note is an earlier one: listed, restorable if verified, never removed automatically.
 	BackupKind string `json:"backup_kind,omitempty"` // scheduled | manual | pre-change | pre-restore | earlier
 	Reason     string `json:"reason,omitempty"`
 	By         string `json:"by,omitempty"`
@@ -240,7 +191,6 @@ type backupArtifact struct {
 	LedgerSeq  int64  `json:"ledger_seq,omitempty"`
 }
 
-// backupNote is the part of scd's note edged reports. Read-only.
 type backupNote struct {
 	Kind       string `json:"kind"`
 	Reason     string `json:"reason"`
@@ -249,7 +199,6 @@ type backupNote struct {
 	LedgerSeq  int64  `json:"ledger_seq"`
 }
 
-// readBackupNote reads the note of a database backup by name; ok is false for a backup with none.
 func readBackupNote(dir, name string) (backupNote, bool) {
 	base := strings.TrimSuffix(strings.TrimSuffix(name, ".age"), ".sql.gz")
 	b, err := os.ReadFile(filepath.Join(dir, base+".meta.json"))
@@ -263,8 +212,7 @@ func readBackupNote(dir, name string) (backupNote, bool) {
 	return n, true
 }
 
-// verifiedRecord mirrors the marker scd writes beside a verified archive. Read-only here: edged reports
-// verification, it does not confer it.
+// verifiedRecord mirrors the marker scd writes beside a verified archive; edged only reports it.
 type verifiedRecord struct {
 	VerifiedAt time.Time `json:"verified_at"`
 	SizeBytes  int64     `json:"size_bytes"`
@@ -273,21 +221,9 @@ type verifiedRecord struct {
 	SHA256     string    `json:"sha256"`
 }
 
-// readVerification returns the marker only when the archive on disk is, byte for byte, the one that was
-// verified.
-//
-// IT RE-READS THE FILE. Size and modification time are metadata: anybody who can change the file can change
-// them back, so a check built on them is a change NOTICE, not an integrity check. The screen must not show
-// "Verified" for content that no longer matches -- an operator deciding whether to replace a hotel's data
-// should not be reading a claim that only holds while nobody is adversarial or unlucky.
-//
-// A marker with no digest is not verified: it was written before content checks existed and there is no way
-// to know what it vouched for.
-//
-// The cost is honest and bounded. Only artefacts that CLAIM verification are digested -- on the appliance
-// two of seven -- at roughly 250ms per 27 MB archive, on a page an operator opens to answer "could we
-// recover from this?". There is deliberately no cache keyed on size and modification time, because that is
-// the exact signal this replaced.
+// readVerification returns the marker only when the archive on disk is byte for byte the one verified. It
+// re-reads and digests the file: size/mtime can be set back, so they are not an integrity check (do not cache on them).
+// A marker with no digest is not verified.
 func readVerification(dir, name string) (*verifiedRecord, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, name+".verified"))
 	if err != nil {
@@ -317,7 +253,6 @@ func readVerification(dir, name string) (*verifiedRecord, bool) {
 	return &rec, true
 }
 
-// artifactKind names what an artefact IS in the operator's terms, from the naming the appliance already uses.
 func artifactKind(name string, dir bool) string {
 	switch {
 	case strings.HasPrefix(name, "db-"):
@@ -342,8 +277,7 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		// A verification marker is bookkeeping, not an artefact. Listing it would put a second entry beside
-		// every verified backup that an operator could neither download nor restore.
+		// Markers and metadata files are bookkeeping, not artefacts.
 		if strings.HasSuffix(e.Name(), ".verified") || strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".partial") {
 			return
 		}
@@ -384,8 +318,7 @@ func (s *server) listBackupArtifacts(w http.ResponseWriter, r *http.Request) {
 	writeList(w, out)
 }
 
-// resolveArtifact maps a caller-supplied name onto a real file, or refuses. It never joins the raw name onto
-// a directory: the name must match safeArtifact AND the resolved path must still sit inside the backup tree.
+// resolveArtifact maps a caller-supplied name onto a real file: it must match safeArtifact and the resolved path must stay inside the backup tree.
 func resolveArtifact(name string) (string, bool) {
 	if !safeArtifact.MatchString(name) {
 		return "", false
@@ -403,17 +336,12 @@ func resolveArtifact(name string) (string, bool) {
 	return "", false
 }
 
-// ------------------------------------------------------------------------------------- taking a backup
-
 type runBackupReq struct {
 	Password string `json:"password"`
 }
 
-// runDatabaseBackup takes a real pg_dump of the site database and records it.
-//
-// STEP-UP IS REQUIRED even though a backup destroys nothing: the artefact it produces is a complete copy of
-// the site's data, and the download endpoint (backup_download.go) will hand it to whoever may download next. Producing one is
-// therefore a privileged act, and it is attributed.
+// runDatabaseBackup requires step-up even though it destroys nothing: the artefact is a complete copy of the
+// site's data, so producing one is a privileged, attributed act.
 func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	var in runBackupReq
 	if err := decodeJSON(r, &in); err != nil {
@@ -424,37 +352,13 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
-	// NAME THE PATH AND THE REASON. edged runs as the unprivileged `stayconnect` user while
-	// /opt/stayconnect/backups is root-owned, so on an appliance where the database directory has not been
-	// provisioned this fails -- and "the backup directory could not be created" sent the first operator who
-	// hit it looking at disk space. The directory is created by deployment, owned by the service user; if it
-	// is missing, say exactly that.
-	// THE DUMP ITSELF IS PRIVILEGED AND HAPPENS IN scd.
-	//
-	// PostgreSQL runs in a container and there is no pg_dump on the host, so taking a dump means reaching the
-	// Docker socket -- and edged runs as the unprivileged service user precisely so that it cannot. Docker
-	// group membership is effectively root; granting it to the process serving the operator HTTP surface
-	// would hand root to anything that got a foothold here. scd already runs as root and is already the
-	// appliance's privileged helper for certificates, licensing and PMS administration, so a backup takes the
-	// same established route instead of opening a second one.
-	//
-	// Everything that decides WHETHER this may happen stays on this side: the RBAC mount, the password
-	// step-up above, the audit record and the backup ledger below.
-	// NO LEDGER ROW IS WRITTEN, and that is a finding rather than an omission.
-	//
-	// public.backup_records exists and the operator surface used to list it, but NEITHER service role can
-	// write to it: svc_edged holds SELECT only and svc_scd holds nothing at all. Nothing has ever inserted a
-	// row, which is why the screen read "No backups yet" forever. Granting INSERT is a migration, and this
-	// mission does not authorise one.
-	//
-	// So the history is the ARTEFACTS -- which are real, enumerable, and the thing an operator actually
-	// restores from. Adding a second permanently-empty viewer beside the first would have repeated the defect
-	// rather than fixed it.
-	// ONE ENGINE: the same encrypted, verified backup the schedule takes, asked for by a person.
+	// The dump runs in scd: PostgreSQL is in a container, so it needs the Docker socket (effectively root),
+	// which edged deliberately does not have. Authorization, step-up and audit stay here.
+	// No public.backup_records row is written: neither service role can insert into it; the artefacts are the history.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/run",
 		map[string]any{"kind": "manual", "by": protectionActor(sessFrom(r.Context()))})
 	if err == nil && code == http.StatusConflict {
-		// No key holder yet: a backup is always encrypted, so none was taken. Say so plainly.
+		// No key holder yet: backups are always encrypted, so none was taken.
 		detail := scdDetail(body, nil)
 		s.audit(r, "backup.refused", "backup", "", map[string]any{"error": detail})
 		jsonErr(w, http.StatusConflict, "no_key_holder", detail)
@@ -478,13 +382,10 @@ func (s *server) runDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, size := res.Name, res.SizeBytes
-	// The audit log IS the record of who took it and when -- written through the same path as every other
-	// privileged operator action, and readable on the Audit screen.
+	// The audit log is the record of who took it and when.
 	s.audit(r, "backup.created", "backup", name, map[string]any{"size_bytes": size, "kind": "manual", "restorable": res.Restorable})
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "size_bytes": size, "restorable": res.Restorable})
 }
-
-// ------------------------------------------------------------------------------------------ verifying
 
 type verifyResult struct {
 	OK       bool   `json:"ok"`
@@ -493,20 +394,14 @@ type verifyResult struct {
 	Duration string `json:"duration"`
 }
 
-// verifyBackupArtifact answers "would this restore?" WITHOUT restoring anything an operator depends on.
-//
-// The dump is loaded into a throwaway database created for the purpose and dropped immediately afterwards.
-// Nothing about the live site is read, written or locked. This is the whole reason there is no "restore"
-// button here: the question an operator has is whether the backup is good, and that can be answered safely,
-// whereas a live restore cannot be undone by clicking again.
+// verifyBackupArtifact loads the dump into a throwaway database; the live site is not read, written or locked.
 func (s *server) verifyBackupArtifact(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if _, ok := resolveArtifact(name); !ok || !strings.HasPrefix(name, "db-") {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such database backup")
 		return
 	}
-	// AN ENCRYPTED BACKUP (.age, migration 0129) is opened with a backup key holder's key, sent with this
-	// request and passed to scd for it alone. The body is optional: a backup in the clear needs none.
+	// An encrypted (.age) backup is opened with a key holder's key passed to scd for this call only; the body is optional.
 	var in struct {
 		Identity string `json:"identity"`
 	}
@@ -535,7 +430,6 @@ func (s *server) verifyBackupArtifact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// scdDetail turns a privileged-helper failure into one actionable sentence rather than a transport error.
 func scdDetail(body []byte, err error) string {
 	if err != nil {
 		return "the appliance service did not respond: " + err.Error()
@@ -555,15 +449,9 @@ func scdDetail(body []byte, err error) string {
 	return lastLine(string(body))
 }
 
-// ------------------------------------------------------------------------------------------- plumbing
-
-// shellQuote makes a path safe to embed in the one place this file uses a shell -- the dump pipeline, which
-// needs a pipe. Paths here are constructed, never caller-supplied, but a quoting helper that exists is one
-// that gets used when that stops being true.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// lastLine returns the final non-empty line of command output: the part that says what went wrong, without
-// the pages of context that precede it.
+// lastLine returns the final non-empty line of command output.
 func lastLine(s string) string {
 	sc := bufio.NewScanner(strings.NewReader(s))
 	last := ""
@@ -581,18 +469,9 @@ func lastLine(s string) string {
 	return last
 }
 
-// ------------------------------------------------------------------ RESTORE, THE AUTHORISED HALF --------
-
-// restoreDatabaseBackup is the operator-facing door to the one destructive operation in the product.
-//
-// WHAT THIS SIDE IS RESPONSIBLE FOR. Everything about WHO: the permission, the password step-up and the
-// audit record. The mechanics -- safety backup, staging load, rename swap, integrity check, rollback -- are
-// scd's, over its private socket. See cmd/scd/restore.go.
-//
-// THE AUDIT IS WRITTEN FIRST, DELIBERATELY. A restore replaces the database, including the audit table, so a
-// record written afterwards lands in restored data and describes an event that data has never seen. Written
-// first, it is captured by the safety backup scd takes -- which is the copy that would be used if anything
-// went wrong, and therefore the copy that most needs to say what was attempted.
+// restoreDatabaseBackup handles who may restore (permission, step-up, audit); the mechanics are scd's (cmd/scd/restore.go).
+// The audit is written first on purpose: a restore replaces the audit table, so a later record would land in
+// restored data, whereas this one is captured by scd's safety backup.
 func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if _, ok := resolveArtifact(name); !ok || !strings.HasPrefix(name, "db-") {
@@ -602,15 +481,14 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
 		Confirm  string `json:"confirm"`
-		// A backup key holder's key, for an encrypted backup. Passed to scd for this restore only.
+		// Key holder's key for an encrypted backup; passed to scd for this restore only.
 		Identity string `json:"identity"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	// TWO INDEPENDENT CONFIRMATIONS, because one is a click and this is not a click-sized decision. The
-	// password proves who is asking; typing the backup's own name proves they know WHICH backup they chose.
+	// Two confirmations: the password proves who asks; the typed backup name proves which backup.
 	if in.Confirm != name {
 		jsonErr(w, http.StatusBadRequest, "confirm_mismatch",
 			"type the name of the backup you are restoring to confirm")
@@ -624,26 +502,14 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 
 	s.audit(r, "backup.restore_started", "backup", name, map[string]any{"backup": name})
 
-	// THIS CALL STARTS THE RESTORE; IT DOES NOT WAIT FOR IT.
-	//
-	// It used to wait, and on the appliance that produced the worst available outcome: the socket call gave up
-	// after fifteen seconds and this handler told the operator the restore had FAILED, while scd went on and
-	// finished it successfully ten seconds later. Someone reading "failed" about a destructive operation that
-	// is still running is one keystroke away from starting a second one -- and scd's deliberate refusal to
-	// retry destructive steps is worth nothing if the screen invites the human to do the retrying.
-	//
-	// A restore can take 45 minutes; no HTTP client, proxy or browser tab should be load-bearing for that
-	// long. scd answers 202 immediately and records the outcome durably. The screen polls /last-restore, which
-	// already had to survive the edged restart the restore itself performs.
-	//
-	// Consequently there is no restore_succeeded audit entry written from here. There could not be an honest
-	// one: the swap replaces the audit table, so a row written after it either lands in restored data or
-	// describes an outcome this process never saw. The durable record in scd is the outcome; restore_started,
-	// written above and captured by the safety backup, is what the audit trail can truthfully hold.
+	// This call starts the restore and does not wait: a restore can take 45 minutes and a timed-out call would
+	// report "failed" while it still runs, inviting a second one. scd answers 202 and records the outcome durably
+	// (polled via /last-restore, which survives edged's restart). No restore_succeeded audit entry is written
+	// here because the swap replaces the audit table.
 	code, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/backup/restore",
 		map[string]any{"name": name, "identity": in.Identity, "by": protectionActor(sessFrom(r.Context()))})
 	if err == nil && code == http.StatusBadRequest {
-		// The key did not open the backup (or none was given): checked by scd before anything was touched.
+		// The key did not open the backup (or none was given); scd checks before touching anything.
 		s.audit(r, "backup.restore_refused", "backup", name, map[string]any{"detail": scdDetail(body, nil)})
 		jsonErr(w, http.StatusBadRequest, "backup_key", scdDetail(body, nil))
 		return
@@ -662,14 +528,11 @@ func (s *server) restoreDatabaseBackup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, out)
 }
 
-// backupMaintenance reports whether the appliance is currently withholding service, and why.
-//
-// Read by the Backups screen so an operator who reloads mid-restore is told what is happening rather than
-// meeting a wall of failed requests.
+// backupMaintenance reports whether the appliance is withholding service (for example mid-restore).
 func (s *server) backupMaintenance(w http.ResponseWriter, r *http.Request) {
 	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/maintenance", nil)
 	if err != nil || code != http.StatusOK {
-		// scd being unreachable is not proof of maintenance, and claiming it would be its own false alarm.
+		// scd being unreachable is not proof of maintenance.
 		writeJSON(w, http.StatusOK, map[string]any{"active": false, "unknown": true})
 		return
 	}
@@ -681,8 +544,7 @@ func (s *server) backupMaintenance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// lastRestoreResult serves the durable outcome of the most recent restore, which survives the service
-// restarts a restore performs -- including edged's own.
+// lastRestoreResult serves the durable outcome of the last restore, which survives service restarts including edged's.
 func (s *server) lastRestoreResult(w http.ResponseWriter, r *http.Request) {
 	code, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/backup/last-restore", nil)
 	if err != nil || code != http.StatusOK {

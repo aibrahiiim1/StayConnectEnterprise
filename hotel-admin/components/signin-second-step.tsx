@@ -1,11 +1,6 @@
 "use client";
 
-// THE SECOND SIGN-IN STEP (migration 0132, GDPR plan C10, decision D-C10).
-//
-// After the password: the 6-digit code from the operator's authenticator app. The first time, the app is set up
-// here first -- scan the QR code (or type the key), then enter the code it shows -- and the ten recovery codes are
-// shown once, to keep somewhere safe. The QR code is drawn in the browser: the appliance must work without
-// internet access, and the key must never be sent to anybody else to draw it.
+// Draw the TOTP QR code locally so setup works offline and the secret never reaches another service.
 
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
@@ -20,7 +15,6 @@ export type SecondStep = "code" | "enrol";
 type Enrolment = { secret: string; otpauth_uri: string; account: string };
 type CodeResult = { must_change_password?: boolean; recovery_codes?: string[]; recovery_codes_left?: number };
 
-// groupKey shows the key the way people type it: blocks of four.
 export function groupKey(secret: string): string {
   return secret.replace(/(.{4})/g, "$1 ").trim();
 }
@@ -158,8 +152,7 @@ export function SigninSecondStep({ step, onDone, onRestart }: {
       )}
       <Field label={step === "enrol" ? "Code from the app" : "Code"}>
         <Input
-          // The step replaces the password form the operator just submitted, so their focus was inside it: this
-          // keeps it in the one field the step asks for instead of dropping it on the page.
+          // Restore focus to the code field after replacing the password form.
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required

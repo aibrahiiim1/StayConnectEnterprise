@@ -9,8 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// GDPR plan C10 (0052): an administrator resets a colleague's two-step sign-in -- with a reason, audited, their
-// sessions ended, never their own -- and the colleague sets up a new authenticator at the next sign-in.
 func TestAnAdministratorResetsAColleaguesTwoStepSignIn(t *testing.T) {
 	f := newFixture(t)
 	key := make([]byte, 32)
@@ -32,7 +30,7 @@ func TestAnAdministratorResetsAColleaguesTwoStepSignIn(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `UPDATE operator_mfa SET confirmed_at = now() WHERE operator_id = $1`, colleague); err != nil {
 		t.Fatal(err)
 	}
-	// The colleague is also locked out by wrong passwords from two addresses (0056); someone else is locked too.
+	// The colleague is locked out from two addresses; someone else is locked too.
 	f.base.MFA = mfa
 	for _, addr := range []string{"203.0.113.1", "203.0.113.2"} {
 		if _, err := auth.SigninFailed(f.ctx, f.pool, mfa.SigninKey("colleague@central.test", addr), mfa.SigninName("colleague@central.test")); err != nil {

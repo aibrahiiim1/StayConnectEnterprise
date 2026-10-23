@@ -8,18 +8,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// HOTEL ADMIN'S SIGN-IN METHOD SWITCHES ARE ENFORCED HERE, NOT ONLY IN THE PORTAL.
-//
-// The switches (tenants.auth_methods) used to decide only which tabs the portal drew. A method the hotel had
-// turned off was hidden but still worked for anyone who posted its form directly -- a guest account signed
-// in while Hotel Admin showed accounts disabled. The authoritative answer now comes from the same record, read
-// the same way the portal reads it, at the moment a guest tries to sign in.
+// Hotel Admin's sign-in method switches (tenants.auth_methods) are enforced here, not only in the portal: a method turned off was hidden but still worked for a directly posted form.
 const (
 	guestMethodVoucher = "voucher"
-	// guestMethodAccount is staff-created Personal accounts (auth_methods.guest_account).
 	guestMethodAccount = "account"
-	// guestMethodEmailAccount is self-registered Email accounts (auth_methods.email_account): registration,
-	// their sign-in, grace, resend and forgot-password (self_service_handlers.go).
+	// guestMethodEmailAccount covers self-registered Email accounts: registration, sign-in, grace, resend and forgot-password.
 	guestMethodEmailAccount = "email_account"
 	guestMethodPMS          = "pms"
 )
@@ -42,9 +35,7 @@ func methodSwitchOn(cfg *tenantcfg.AuthMethods, method string) bool {
 	return false
 }
 
-// guestMethodSwitches reads the switches with the licence applied, as the portal's listing does. ok=false when
-// the record is unreadable -- callers FAIL CLOSED: the portal cannot draw any tab from it either, and a sign-in
-// method the hotel may have disabled is not something to guess about.
+// guestMethodSwitches reads the switches with the licence applied; ok=false when unreadable, and callers FAIL CLOSED.
 func (s *server) guestMethodSwitches(ctx context.Context) (*tenantcfg.AuthMethods, bool) {
 	load := s.methodSwitches
 	if load == nil {
@@ -59,14 +50,12 @@ func (s *server) guestMethodSwitches(ctx context.Context) (*tenantcfg.AuthMethod
 	return cfg, true
 }
 
-// guestMethodEnabled answers one switch (unreadable = off).
 func (s *server) guestMethodEnabled(ctx context.Context, method string) bool {
 	cfg, ok := s.guestMethodSwitches(ctx)
 	return ok && methodSwitchOn(cfg, method)
 }
 
-// refuseDisabledMethod answers a sign-in for a switched-off method. It is checked before any throttle charge
-// or credential lookup, so a disabled method reveals nothing about any credential.
+// refuseDisabledMethod is checked before any throttle charge or credential lookup, so a disabled method reveals nothing about any credential.
 func (s *server) refuseDisabledMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if s.guestMethodEnabled(r.Context(), method) {
 		return false

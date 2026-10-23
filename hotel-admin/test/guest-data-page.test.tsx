@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 
-// GDPR C3 and C4: find a guest, export their data or erase them -- each with a reason and the password, a refusal
-// that says why in plain words, and the erasure reference to give the guest.
-
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api", async () => {
@@ -46,7 +43,6 @@ function fillDialog(dialog: HTMLElement, typed?: string) {
 describe("Guest data requests", () => {
   it("searches with the typed term", async () => {
     await renderPage();
-    // The search travels in a header, never in the URL (GDPR final check).
     expect(get).toHaveBeenCalledWith("/guest-data-rights/search", { "X-Guest-Data-Search": "guest%40example" });
     expect(screen.getByText("Client account")).toBeTruthy();
   });

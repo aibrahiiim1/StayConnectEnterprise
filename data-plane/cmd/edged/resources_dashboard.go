@@ -1,34 +1,10 @@
 package main
 
-// THE OPERATIONAL SNAPSHOT BEHIND THE DASHBOARD.
-//
-// The dashboard used to be four tiles and a four-field health box, fed by /reports/summary. Between them they
-// answered: how many devices are online, how many sessions started today, how many bytes moved, and is there a
-// licence. A duty manager opening the admin at the start of a shift wants to know what the night looks like —
-// is the PMS connected, did the guest list load, is anybody failing to sign in, are the DHCP pools filling up,
-// are room charges going through, which packages are guests actually on — and not one of those was on the page.
-//
-// So this endpoint assembles that picture in one read, and the rules it follows are worth stating because they
-// are what keeps the figures trustworthy:
-//
-//  1. NOTHING IS INVENTED. Every number traces to a row this service is permitted to read. Where a figure is
-//     genuinely unavailable the section reports `available: false` with a reason, and the UI says so, rather
-//     than substituting a zero that reads as "nothing happened".
-//
-//  2. ONE SECTION FAILING DOES NOT FAIL THE PAGE. Several sections read surfaces that are phase-gated or
-//     privilege-gated, and which of those exist differs per appliance. Each section is therefore independently
-//     fallible: a 500 here would blank a dashboard over, say, a financial table that this deployment does not
-//     use.
-//
-//  3. NO GUEST IS NAMED. This is an aggregate surface. The per-guest screens are separately role-gated and
-//     that is where an operator legitimately looks at one person.
-//
-// A note on what is NOT here: there is no hourly byte series in THIS snapshot. Per-interval traffic lives in
-// iam_v2.accounting_records, which svc_edged has been able to read since migration 0082 (the Usage screen reads
-// it too). The time series built from it is served by /reports/overview (resources_overview.go), which reads the
-// samples with the bounded, index-led query that table needs. What must never be done instead is attributing a
-// session's whole-day total to the hour it happened to start in — that would put a guest's 6 GB evening on the
-// 08:00 column. The hourly chart here is sign-ins, a real per-hour count, and the byte totals are the day's.
+// Operational snapshot behind the dashboard, assembled in one read. Nothing is invented: where a figure is
+// unavailable the section reports `available: false` with a reason rather than a misleading zero. Each section
+// fails independently, since some read phase- or privilege-gated surfaces that differ per appliance. No guest is
+// named. There is no hourly byte series here: attributing a session's whole-day total to its start hour would
+// misplace traffic, so the time series lives in /reports/overview (resources_overview.go).
 
 import (
 	"context"
@@ -37,11 +13,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------------------------------------
-// wire shapes
-// ---------------------------------------------------------------------------------------------------------
-
-// section carries the availability of a block that may legitimately not exist on this appliance.
 type section struct {
 	Available bool   `json:"available"`
 	Reason    string `json:"reason,omitempty"`
@@ -54,12 +25,10 @@ type dashHourBucket struct {
 }
 
 type dashGuests struct {
-	// Devices with a live session right now.
 	DevicesOnline int64 `json:"devices_online"`
-	// Distinct subjects (rooms, accounts, vouchers, guests) with at least one device online. This is the figure
-	// a licence counts and the one a manager means by "how many guests are on".
+	// Distinct subjects with at least one device online: the figure a licence counts.
 	GuestsOnline int64 `json:"guests_online"`
-	// Sessions that STARTED since local midnight. Counted as sign-ins because every session begins with one.
+	// Sessions that started since local midnight, counted as sign-ins.
 	SignInsToday   int64 `json:"sign_ins_today"`
 	DevicesToday   int64 `json:"devices_today"`
 	SignIns7d      int64 `json:"sign_ins_7d"`
@@ -120,24 +89,18 @@ type dashPmsInterface struct {
 
 type dashPms struct {
 	section
-	Interfaces []dashPmsInterface `json:"interfaces"`
-	// EventsToday is the whole feed's activity, which is what tells an operator the connection is doing
-	// something rather than merely being connected.
-	EventsToday   int64 `json:"events_today"`
-	EventsApplied int64 `json:"events_applied_today"`
-	EventsReview  int64 `json:"events_needing_review"`
-	// HistoricalExceptions are outstanding cases that are NOT operational work: a departure the PMS
-	// announced for a stay this appliance never received an arrival for. They cannot be actioned here, they
-	// do not clear on their own, and they do not affect a guest. Counted apart from EventsReview so the
-	// dashboard can say which of the two it is looking at instead of adding them together and calling the
-	// total "waiting for a decision".
+	Interfaces    []dashPmsInterface `json:"interfaces"`
+	EventsToday   int64              `json:"events_today"`
+	EventsApplied int64              `json:"events_applied_today"`
+	EventsReview  int64              `json:"events_needing_review"`
+	// Outstanding cases that are not operational work (e.g. a departure for a stay never received). They cannot be
+	// actioned here; counted apart from EventsReview so the two are never added together.
 	HistoricalExceptions int64 `json:"historical_exceptions"`
 }
 
 type dashPostings struct {
 	section
-	// POSTINGS ARE ROOM CHARGES SENT TO THE PMS. Today's counts by where they got to, plus the two queues an
-	// operator is responsible for draining.
+	// Postings are room charges sent to the PMS: today's counts by state, plus the two queues an operator drains.
 	PostedToday int64 `json:"posted_today"`
 	FailedToday int64 `json:"failed_today"`
 	Pending     int64 `json:"pending"`
@@ -153,8 +116,7 @@ type dashNetwork struct {
 	SubnetCIDR    string `json:"subnet_cidr"`
 	DhcpMode      string `json:"dhcp_mode"`
 	PoolAddresses int64  `json:"pool_addresses"`
-	// Devices with a live session on this network's bridge. This is what the appliance itself knows; the DHCP
-	// lease count is a separate fact owned by Kea and is read on the DHCP screen, not here.
+	// The DHCP lease count is owned by Kea and read on the DHCP screen, not here.
 	DevicesOnline int64 `json:"devices_online"`
 	CaptivePortal bool  `json:"captive_portal_enabled"`
 	Internet      bool  `json:"internet_access_enabled"`
@@ -171,8 +133,7 @@ type dashPackageRow struct {
 
 type dashboardResp struct {
 	GeneratedAt time.Time `json:"generated_at"`
-	// The day boundary every "today" figure below is measured from, so the UI can say which day it means
-	// instead of the operator assuming it is theirs.
+	// Day boundary for every "today" figure, so the UI can say which day it means.
 	DayStart time.Time `json:"day_start"`
 
 	Guests    dashGuests       `json:"guests"`
@@ -186,17 +147,13 @@ type dashboardResp struct {
 	Packages  []dashPackageRow `json:"packages"`
 }
 
-// ---------------------------------------------------------------------------------------------------------
-
 func (s *server) reportsDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
 	out := dashboardResp{GeneratedAt: time.Now().UTC()}
 
-	// The day boundary is the DATABASE's local midnight, because that is the boundary every "today" count below
-	// is computed against. Returning it means the UI never has to guess whether "today" is the browser's day or
-	// the appliance's.
+	// The day boundary is the database's local midnight, which every "today" count is computed against.
 	_ = s.db.QueryRow(ctx, `SELECT date_trunc('day', now())`).Scan(&out.DayStart)
 
 	out.Guests, out.Data, out.Hourly = s.dashSessions(ctx)
@@ -210,14 +167,11 @@ func (s *server) reportsDashboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// dashSessions is the one block that must work: it reads iam_v2.sessions, which this service always has.
 func (s *server) dashSessions(ctx context.Context) (dashGuests, dashData, []dashHourBucket) {
 	var g dashGuests
 	var d dashData
 
-	// ONE PASS over today's sessions plus the live counts. Written as a single row of aggregates rather than six
-	// round trips because the dashboard polls, and six queries per poll against a hypertable-adjacent table is a
-	// cost paid every thirty seconds for no benefit.
+	// One pass of aggregates rather than six round trips, because the dashboard polls.
 	_ = s.db.QueryRow(ctx, `
 		SELECT
 		  count(*) FILTER (WHERE state = 'active'),
@@ -238,9 +192,7 @@ func (s *server) dashSessions(ctx context.Context) (dashGuests, dashData, []dash
 		&d.DownToday, &d.UpToday, &d.Down7d, &d.Up7d)
 	d.TotalToday = d.DownToday + d.UpToday
 
-	// THE HOURLY SHAPE OF THE DAY. generate_series supplies all 24 buckets so an hour with no activity is a
-	// zero-height column rather than a missing one — a chart that silently omits quiet hours misstates the shape
-	// of the night, which is the only thing the chart is for.
+	// generate_series supplies all 24 buckets so a quiet hour is a zero-height column, not a missing one.
 	hourly := make([]dashHourBucket, 0, 24)
 	rows, err := s.db.Query(ctx, `
 		SELECT h::int, COALESCE(c.n, 0)
@@ -289,8 +241,7 @@ func (s *server) dashOccupancy(ctx context.Context) dashOccupancy {
 		 WHERE st.tenant_id = $1 AND st.site_id = $2
 	`, s.tenantID, s.siteID).Scan(&o.InHouse, &o.WithInternet, &o.ArrivalsToday, &o.DeparturesToday, &o.PostingAllowed)
 	if err != nil {
-		// A PMS-less appliance is a normal deployment, not a fault. Saying so is the honest surface; a row of
-		// zeroes would read as "the hotel is empty".
+		// A PMS-less appliance is a normal deployment, not a fault; zeroes would read as "the hotel is empty".
 		o.section = section{Available: false, Reason: "no_pms_stay_data"}
 		return o
 	}
@@ -298,9 +249,6 @@ func (s *server) dashOccupancy(ctx context.Context) dashOccupancy {
 	return o
 }
 
-// dashSignIn summarises the recent room sign-in attempts — the screen's own "is anyone getting in?" question,
-// as a single pass/fail split plus the outcome codes behind it. No guest is named, exactly as on the evidence
-// screen this mirrors.
 func (s *server) dashSignIn(ctx context.Context) dashSignInChecks {
 	c := dashSignInChecks{Window: "24h", Outcomes: []dashOutcomeRow{}}
 	rows, err := s.db.Query(ctx, `
@@ -356,9 +304,7 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 	}
 	rows.Close()
 
-	// The per-interface picture is taken from interfaceHealthRow — the SAME derivation the PMS connection screen
-	// renders. Re-deriving "is it connected" here with a second, simpler rule is how two screens end up
-	// disagreeing about whether guests can sign in, and the operator believes whichever they opened first.
+	// Uses interfaceHealthRow, the same derivation as the PMS connection screen, so the two screens cannot disagree.
 	for _, b := range bases {
 		h, err := s.interfaceHealthRow(ctx, b.id)
 		row := dashPmsInterface{
@@ -389,47 +335,29 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 		  FROM iam_v2.stay_events WHERE tenant_id = $1 AND site_id = $2
 	`, s.tenantID, s.siteID).Scan(&p.EventsToday, &p.EventsApplied)
 
-	// THE REVIEW NUMBER COUNTS DEPARTURES, NOT ROWS.
-	//
-	// It counted rows, for all time, with no grouping — and a departure that cannot be placed is restaged on
-	// every reconnect, so one unresolved checkout became a row per generation. This property was shown
-	// "12 026 messages need attention" for 397 actual cases. Nobody works a list of twelve thousand, so the
-	// warning was read as broken and ignored, which is worse than not having it.
-	//
-	// The count is NOT reduced by hiding anything: pms_reconciliation_cases collapses the copies of one
-	// departure and drops none of them, and the copies are still shown, per case, on the reconciliation
-	// screen. What changed is that the number now says how many decisions are outstanding.
-	// ONLY CASES THAT STILL NEED A DECISION, and the qualifier is the whole point.
-	//
-	// This counted every case the view produced, which was right until dispositions existed and wrong the
-	// moment they did. On the live appliance it read 424 while 423 of those cases were fully answered --
-	// the dashboard demanding decisions about work already done, which is exactly the true-and-ignored
-	// warning the comment above was written against. A case counts here only if it still has an event in
-	// MANUAL_REVIEW that carries no disposition.
+	// Counts departure cases that still need a decision (an event in MANUAL_REVIEW with no disposition), not rows:
+	// an unplaceable departure is restaged on every reconnect. pms_reconciliation_cases collapses the copies without dropping any.
 	if err := s.db.QueryRow(ctx, `
 		SELECT count(*) FROM iam_v2.pms_reconciliation_cases c
 		 WHERE c.tenant_id = $1 AND c.site_id = $2
 		   AND EXISTS (SELECT 1 FROM iam_v2.pms_unanswered_review_events e
 		                WHERE e.id = c.latest_event_id)
 	`, s.tenantID, s.siteID).Scan(&p.EventsReview); err != nil {
-		// Before 0069 the view does not exist. Fall back to the row count rather than reporting zero: a
-		// stale-but-honest number beats a reassuring wrong one.
+		// The view does not exist yet; fall back to the row count rather than a reassuring zero.
 		_ = s.db.QueryRow(ctx, `
 			SELECT count(*) FROM iam_v2.stay_events
 			 WHERE tenant_id = $1 AND site_id = $2 AND processing_status = 'MANUAL_REVIEW'
 		`, s.tenantID, s.siteID).Scan(&p.EventsReview)
 	}
 
-	// The historical exceptions, counted separately and deliberately NOT subtracted from anything: they are
-	// a different kind of thing, not a smaller amount of the same thing.
+	// Historical exceptions are deliberately not subtracted: they are a different kind of thing.
 	_ = s.db.QueryRow(ctx, `
 		SELECT count(*) FROM iam_v2.pms_unanswered_review_events e
 		 WHERE e.tenant_id = $1 AND e.site_id = $2
 		   AND e.event_type = 'GO' AND e.admission_kind = 'LIVE' 
 	`, s.tenantID, s.siteID).Scan(&p.HistoricalExceptions)
 
-	// And EventsReview must then mean OPERATIONAL work only, or the two numbers overlap and the dashboard
-	// reports the same record twice under two different meanings.
+	// EventsReview must mean operational work only, or the two numbers overlap.
 	if p.EventsReview >= p.HistoricalExceptions {
 		p.EventsReview -= p.HistoricalExceptions
 	}
@@ -438,15 +366,12 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 	return p
 }
 
-// dashPostings reads the room-charge surface. It is the most likely block to be absent: the financial tables
-// exist only where that capability was deployed, so an error here is reported as "not in use" rather than
-// propagated.
+// The most likely block to be absent: the financial tables exist only where that capability is deployed, so an
+// error is reported as "not in use" rather than propagated.
 func (s *server) dashPostings(ctx context.Context) dashPostings {
 	var p dashPostings
-	// The execution states are the view's own closed vocabulary: NOT_ATTEMPTED, IN_FLIGHT, UNKNOWN, NOT_SENT,
-	// POSTED, REJECTED. "Today" is measured from created_at because that is the only timestamp the view carries
-	// — it is a derived read model over the posting, attempt and review ledgers and keeps no updated_at — so
-	// these are charges RAISED today and where each has got to, which is the question a night auditor asks.
+	// "Today" is measured from created_at, the only timestamp this derived read model carries (no updated_at), so
+	// these are charges raised today and where each has got to.
 	err := s.db.QueryRow(ctx, `
 		SELECT
 		  count(*) FILTER (WHERE pes.execution_state = 'POSTED'
@@ -470,13 +395,8 @@ func (s *server) dashPostings(ctx context.Context) dashPostings {
 
 func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 	out := []dashNetwork{}
-	// EVERY TEXT COLUMN IS COALESCED, and that is a correctness fix rather than defensive noise.
-	//
-	// public.guest_networks makes bridge_name, subnet_cidr and dhcp_mode NOT NULL on a configured appliance, but
-	// the column definitions themselves are nullable (migration 0002 and the test fixture both leave them so). A
-	// NULL therefore made Scan fail, and the loop below appends only on a nil error -- so the network VANISHED
-	// from the dashboard with no error reported anywhere. A half-configured network is exactly the one an operator
-	// needs to see, so it must render with an empty field rather than not render at all.
+	// Every text column is coalesced: they are nullable in the schema, a NULL made Scan fail, and the loop appends
+	// only on success, so a half-configured network would vanish from the dashboard silently.
 	rows, err := s.db.Query(ctx, `
 		SELECT COALESCE(gn.name,''), COALESCE(gn.bridge_name,''), gn.enabled, gn.vlan_id,
 		       COALESCE(gn.subnet_cidr::text,''), COALESCE(gn.dhcp_mode,''),
@@ -514,11 +434,7 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		 ORDER BY gn.enabled DESC, gn.name
 	`, s.tenantID, s.siteID)
 	if err != nil {
-		// A QUERY ERROR IS NOT AN EMPTY PROPERTY, and conflating the two cost this delivery two debugging
-		// cycles: a missing column and then a missing table each made this return `[]`, which renders as "this
-		// site has no guest networks" -- a confident, wrong answer that nothing in the response contradicts.
-		// The failure is now logged with its cause, so the next time the shape of the schema and the shape of
-		// this query disagree, the server says so instead of quietly reporting an empty estate.
+		// A query error is not an empty property: returning `[]` would read as "this site has no guest networks", so the cause is logged.
 		slog.Warn("dashboard: guest-network section unavailable", "err", err)
 		return out
 	}
@@ -535,14 +451,8 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 	return out
 }
 
-// dashPackages answers "what are guests actually on right now", which the old top_plans_7d card was meant to
-// and could not.
-//
-// THE OLD QUERY WAS DEAD. It read `iam_v2.entitlements e JOIN iam_v2.internet_packages p ON p.id = e.package_id`
-// and selected `p.name`. iam_v2.entitlements has no package_id — it pins a package_revision_id — and
-// iam_v2.internet_packages has no name column; the display name lives in the revision's `display` JSON. So
-// every execution failed, the handler's `if err == nil` swallowed it, and the card has silently shown an empty
-// list since it was written. The join below goes through the revision, which is where the link actually is.
+// Answers "what are guests actually on right now". Entitlements pin a package_revision_id (no package_id) and
+// packages have no name column, so the join goes through the revision's `display` JSON.
 func (s *server) dashPackages(ctx context.Context) []dashPackageRow {
 	out := []dashPackageRow{}
 	rows, err := s.db.Query(ctx, `

@@ -1,11 +1,7 @@
 package main
 
-// THE LIST FILTERS AND THE EFFECTIVE STATE.
-//
-// Nothing writes REDEMPTION_EXPIRED: expiry is enforced at sign-in from the window columns. So a screen that
-// filtered on the stored state for "expired" matched nothing, forever, while cards past their valid-until
-// sat under "not used yet". The effective state is computed from the authenticator's own [from, until) rule;
-// these pin the parts written in Go -- the refusals, and the SQL's agreement with voucherRedeemable.
+// List filters and the effective state: nothing writes REDEMPTION_EXPIRED, so a stored-state filter for expired would match nothing. Pins the Go parts:
+// the refusals, and the SQL agreement with voucherRedeemable.
 
 import (
 	"net/http"
@@ -45,8 +41,7 @@ func TestTheListFiltersAreRefusedRatherThanIgnored(t *testing.T) {
 	}
 }
 
-// A bad filter is refused BEFORE the database is touched: the handler below has no pool at all, so reaching
-// a query would panic rather than answer 400.
+// A bad filter is refused BEFORE the database is touched: the handler has no pool, so reaching a query would panic.
 func TestABadFilterNeverReachesTheDatabase(t *testing.T) {
 	s := &server{}
 	for _, h := range []http.HandlerFunc{s.listVouchers, s.voucherSummary} {
@@ -63,9 +58,7 @@ func TestABadFilterNeverReachesTheDatabase(t *testing.T) {
 	}
 }
 
-// The SQL is the authenticator's rule, written once. [from, until): until is EXCLUSIVE (expired at the
-// instant it arrives) and from is INCLUSIVE (valid at the instant it arrives) -- the same comparisons as
-// voucherRedeemable. If one of them drifts, a card shows "available" that sign-in refuses, or the reverse.
+// The SQL is the authenticator rule, written once: until is EXCLUSIVE and from INCLUSIVE, as in voucherRedeemable; if one drifts a card shows available that sign-in refuses.
 func TestTheEffectiveStateSQLIsTheAuthenticatorsWindowRule(t *testing.T) {
 	sql := voucherEffectiveStateSQL
 	for _, want := range []string{

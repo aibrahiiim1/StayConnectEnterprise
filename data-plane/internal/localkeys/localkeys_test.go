@@ -11,18 +11,15 @@ import (
 
 func TestKeyBootstrapAndRuntimeLoad(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "sub", "throttle.key") // parent dir created by bootstrap
-	// bootstrap creates one key
+	p := filepath.Join(dir, "sub", "throttle.key")
 	k1, err := CreateKeyIfAbsent(p)
 	if err != nil || len(k1) < MinKeyLen {
 		t.Fatalf("bootstrap: len=%d err=%v", len(k1), err)
 	}
-	// repeated bootstrap returns the SAME key (never overwrites)
 	k2, err := CreateKeyIfAbsent(p)
 	if err != nil || !bytes.Equal(k1, k2) {
 		t.Fatal("repeated bootstrap must return the same key")
 	}
-	// runtime load-only returns the same key
 	k3, err := LoadExistingKey(p)
 	if err != nil || !bytes.Equal(k1, k3) {
 		t.Fatalf("runtime load must return the bootstrapped key: %v", err)
@@ -185,15 +182,12 @@ func TestValidateOTPGenerationsFailClosed(t *testing.T) {
 	if err := ValidateOTPGenerations(keys, 2, []int{1, 2}); err != nil {
 		t.Fatalf("valid config should pass: %v", err)
 	}
-	// active generation with no key -> refuse
 	if err := ValidateOTPGenerations(keys, 3, nil); err == nil {
 		t.Fatal("missing active-generation key must fail closed")
 	}
-	// a referenced (unexpired-OTP) generation with no key -> refuse
 	if err := ValidateOTPGenerations(keys, 2, []int{1, 9}); err == nil {
 		t.Fatal("missing referenced-generation key must fail closed")
 	}
-	// no keys at all -> refuse
 	if err := ValidateOTPGenerations(map[int][]byte{}, 1, nil); err == nil {
 		t.Fatal("no key material must fail closed")
 	}

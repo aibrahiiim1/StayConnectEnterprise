@@ -1,31 +1,13 @@
 package social
 
-// Minimal, dependency-free JWT support for the OIDC providers (Google,
-// Microsoft, Apple): verify an RS256 id_token against the issuer's published
-// JWKS, and sign the ES256 client-secret JWT Apple demands in place of a
-// static secret.
+// Minimal JWT support for the OIDC providers: verify an RS256 id_token against the issuer's JWKS and sign
+// Apple's ES256 client-secret JWT. Hand-rolled and deliberately narrow: RS256 is the only accepted alg and
+// the kid must name a published key, so alg=none, alg confusion (HS256 verified with the RSA public key)
+// and a missing kid falling through to "any key" cannot happen.
 //
-// Why hand-rolled rather than a JWT library:
-//   - The data plane carries no JWT dependency today, and the surface we need
-//     is tiny: one algorithm to verify (RS256 — the only one Google, Microsoft
-//     and Apple sign id_tokens with) and one to sign (ES256, Apple only).
-//   - A narrow verifier is easier to reason about than a general one. The
-//     classic JWT failures — alg=none, alg confusion (an HS256 token
-//     "verified" with the RSA public key as the HMAC secret), a missing kid
-//     falling through to "any key" — cannot happen here, because RS256 is the
-//     only accepted alg and the kid must name a key the issuer published.
-//
-// THE NONCE IS SENT AND CHECKED (attempt.go). Every id_token here arrives on
-// the server-to-server token response, so the nonce is not what stops a
-// token being injected through the browser, as it is in the implicit and
-// hybrid flows. What it adds is a binding from the provider's ANSWER to the
-// one attempt scd started: `state` proves the browser came back to the device
-// that left, the PKCE verifier (Google, Microsoft) proves the code is redeemed
-// by the party that asked for it, and the nonce proves the id_token was
-// minted for this attempt and no other. The three are generated per attempt
-// and kept on the same single-use social_oauth_states row (device IP/MAC,
-// 10-minute expiry, consumed once). Facebook issues no id_token on this flow
-// and keeps `state` plus appsecret_proof.
+// The nonce is still checked (attempt.go): ids arrive over the server-to-server token response, so it is
+// not an injection defence here but a binding of the id_token to the one attempt scd started, alongside
+// `state` and the PKCE verifier, all kept on the single-use social_oauth_states row.
 
 import (
 	"context"
@@ -48,26 +30,19 @@ import (
 	"time"
 )
 
-// clockSkew is the leeway allowed on exp / nbf / iat. The appliance keeps NTP
-// time, but a guest waiting on a slow consent screen should not fail on a few
-// seconds of drift between us and the IdP.
+// clockSkew is the leeway on exp / nbf / iat, so a slow consent screen does not fail on a few seconds of drift.
 const clockSkew = 2 * time.Minute
 
-// jwksTTL bounds how long a fetched key set is trusted before a refetch.
-// Unknown kids also force a refetch (rate-limited by jwksMinRefetch), which
-// is how key rotation at the IdP is picked up without waiting out the TTL.
+// An unknown kid forces a refetch (rate-limited by jwksMinRefetch), which picks up IdP key rotation.
 const (
 	jwksTTL        = 6 * time.Hour
 	jwksMinRefetch = 1 * time.Minute
 )
 
-// errIDToken is wrapped by every id_token verification failure so callers
-// and tests can tell "the IdP sent us a token we refuse" from transport
-// errors.
+// errIDToken is wrapped by every verification failure, distinguishing a refused token from a transport error.
 var errIDToken = errors.New("id_token rejected")
 
-// idClaims is the decoded payload of a verified id_token. Standard claims are
-// typed; everything provider-specific stays in raw for the adapter to read.
+// idClaims types the standard claims; provider-specific ones stay in raw.
 type idClaims struct {
 	Iss string
 	Sub string
@@ -81,8 +56,7 @@ func (c *idClaims) str(name string) string {
 	return s
 }
 
-// boolish reads a claim that providers encode as either a JSON bool or the
-// string "true"/"false" (Apple does both, depending on the account).
+// boolish reads a claim encoded as a JSON bool or the string "true"/"false" (Apple does both).
 func (c *idClaims) boolish(name string) (val, present bool) {
 	switch v := c.raw[name].(type) {
 	case bool:
@@ -93,7 +67,6 @@ func (c *idClaims) boolish(name string) (val, present bool) {
 	return false, false
 }
 
-// jwksCache fetches and caches one issuer's JSON Web Key Set.
 type jwksCache struct {
 	url    string
 	client func() *http.Client
@@ -107,8 +80,6 @@ func newJWKSCache(url string, client func() *http.Client) *jwksCache {
 	return &jwksCache{url: url, client: client}
 }
 
-// key returns the RSA key for kid, refetching the set when it is stale or the
-// kid is unknown (the IdP rotated its keys).
 func (j *jwksCache) key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -119,9 +90,7 @@ func (j *jwksCache) key(ctx context.Context, kid string) (*rsa.PublicKey, error)
 	if j.keys == nil || now.Sub(j.fetchedAt) >= jwksMinRefetch {
 		keys, err := fetchJWKS(ctx, j.client(), j.url)
 		if err != nil {
-			// A failed refresh keeps serving the last good set: a transient
-			// outage of the key endpoint must not reject tokens signed by a
-			// key we already know.
+			// A failed refresh keeps serving the last good set so a transient key-endpoint outage does not reject known keys.
 			if k, ok := j.keys[kid]; ok {
 				return k, nil
 			}
@@ -163,9 +132,7 @@ func fetchJWKS(ctx context.Context, hc *http.Client, url string) (map[string]*rs
 	}
 	out := map[string]*rsa.PublicKey{}
 	for _, k := range set.Keys {
-		// Only RSA signing keys are usable for RS256; anything else in the
-		// set (encryption keys, EC keys) is skipped rather than failing the
-		// whole set.
+		// Skip non-RSA and non-signing keys rather than failing the whole set.
 		if k.Kty != "RSA" || (k.Use != "" && k.Use != "sig") || k.Kid == "" {
 			continue
 		}
@@ -190,10 +157,8 @@ func fetchJWKS(ctx context.Context, hc *http.Client, url string) (map[string]*rs
 	return out, nil
 }
 
-// verifyIDToken checks an RS256 id_token's signature against the issuer's
-// key set and its time and audience claims. Issuer checking is left to the
-// caller because it is provider-specific (Microsoft's multi-tenant issuer
-// embeds the tenant id from the token itself).
+// verifyIDToken checks signature, time and audience; the issuer is left to the caller because it is
+// provider-specific (Microsoft's multi-tenant issuer embeds the token's own tenant id).
 func verifyIDToken(ctx context.Context, raw string, keys *jwksCache, audience string, now time.Time) (*idClaims, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
@@ -296,9 +261,7 @@ func numericDate(v any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// signES256 produces a compact JWS over header+claims with an EC P-256 key.
-// JWS encodes the ECDSA signature as the fixed-width concatenation r||s
-// (RFC 7518 §3.4), not the ASN.1 DER that crypto/ecdsa's SignASN1 emits.
+// signES256 encodes the signature as fixed-width r||s (RFC 7518), not the ASN.1 DER that SignASN1 emits.
 func signES256(key *ecdsa.PrivateKey, header, claims map[string]any) (string, error) {
 	hb, err := json.Marshal(header)
 	if err != nil {
@@ -320,12 +283,8 @@ func signES256(key *ecdsa.PrivateKey, header, claims map[string]any) (string, er
 	return signing + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// ParseP256PrivateKey reads the PEM private key Apple issues for Sign in with
-// Apple (the downloaded AuthKey_XXXXXXXXXX.p8: a PKCS#8 "PRIVATE KEY" block
-// holding an EC P-256 key). SEC 1 "EC PRIVATE KEY" is accepted too, for keys
-// that were converted along the way. Exported so the edged configuration API
-// can refuse a key that will never sign, at save time rather than at a
-// guest's first sign-in.
+// ParseP256PrivateKey reads Apple's .p8 (PKCS#8 EC P-256; SEC 1 also accepted). Exported so edged can
+// refuse an unusable key at save time.
 func ParseP256PrivateKey(pemText string) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(strings.TrimSpace(pemText)))
 	if block == nil {

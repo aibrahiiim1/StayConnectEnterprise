@@ -1,13 +1,7 @@
 "use client";
 
-// Route shell for the voucher screen. edged enforces the real gate on every request; these three flags only
-// decide which controls are offered, and a client that ignored them would still be refused by RBAC, by the
-// password step-up and by the mandatory reason.
-//
-// THREE FLAGS, NOT ONE, because the screen covers three different powers: printing and cancelling cards,
-// recovering a code in the clear, and choosing what a code looks like. A role can hold any combination —
-// the property's IT manager sets the format and may not read a code; the desk prints and reads and does not
-// set the format.
+// The flags only decide which controls are offered; edged enforces the real gate (RBAC, password step-up, reason).
+// Issue, reveal-code and format are separate powers a role can hold in any combination.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -27,11 +21,9 @@ export default function VouchersPage() {
     <VouchersView
       canIssue={roles === null ? false : canWrite("vouchers", r)}
       canRevealCodes={roles === null ? false : canWrite("voucher-codes", r)}
-      // READ and WRITE are separate here: the desk roles see the format and cannot change it, and
-      // payments_operator has neither -- so the panel must not even be requested for that role.
+      // payments_operator has no read access, so the panel must not even be requested for it.
       canReadFormat={roles === null ? false : canRead("voucher-code-settings", r)}
       canEditFormat={roles === null ? false : canWrite("voucher-code-settings", r)}
-      // Only for the hotel name printed on voucher cards; the card prints without it.
       canReadBranding={roles === null ? false : canRead("portal-branding", r)}
       readOnly={roles !== null && !canWrite("vouchers", r) && !canWrite("voucher-codes", r)}
     />

@@ -1,12 +1,6 @@
 package main
 
-// THE PAGES AFTER SIGN-IN: THE STATUS PAGE, THE HOTEL'S LOOK, AND NO RAW ANSWERS IN A GUEST'S BROWSER.
-//
-// A guest who tapped "Status" used to be shown scd's JSON, and one whose social sign-in could not start was
-// shown {"error":"bad ip"}. These pin the fix without moving the contract underneath it: a browser navigating
-// gets a branded page in its language, and a script -- the online page's own fetch among them -- gets exactly
-// the bytes it always got. They also pin that the hotel's custom CSS reaches every page after sign-in through
-// the same sanitiser, the same layer and under the same guard as the sign-in page.
+// The pages after sign-in: a browser navigation gets a branded page in its language, a script gets exactly the bytes it always got, and the hotel's custom CSS reaches every page through the same sanitiser, layer and guard as the sign-in page.
 
 import (
 	"context"
@@ -22,8 +16,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
-// statusHandler is a portald handler whose scd answers the branding and session-status lookups. A nil status
-// body makes scd unreachable for the status call only (the connection is closed without an answer).
+// statusHandler's scd answers branding and status lookups; a nil status body makes scd unreachable for the status call only.
 func statusHandler(t *testing.T, design map[string]any, status string, code int) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,10 +54,8 @@ func statusHandler(t *testing.T, design map[string]any, status string, code int)
 	}
 }
 
-// squash drops all whitespace, so a fragment can be found in a compacted stylesheet.
 func squash(s string) string { return strings.Join(strings.Fields(s), "") }
 
-// esc is a dictionary entry as it appears in the page's text ("You're" is "You&#39;re").
 func esc(s string) string { return template.HTMLEscapeString(s) }
 
 const browserAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
@@ -80,7 +71,6 @@ func serve(h *handler, method, path string, header map[string]string) *httptest.
 	return w
 }
 
-// The raw shapes a guest must never read: scd's JSON, and the plain errors this service used to write.
 var rawAnswer = regexp.MustCompile(`"session_id"|"active"|"time_mode"|\{"error"|scd unreachable|bad ip|lookup failed`)
 
 const scdAggregate = `{"ip":"10.77.0.42","session_id":"sess-9","active":true,"time_mode":"AGGREGATE_ONLINE_TIME",` +
@@ -89,8 +79,7 @@ const scdAggregate = `{"ip":"10.77.0.42","session_id":"sess-9","active":true,"ti
 func TestStatusNavigatedIsABrandedPageAndFetchedIsTheSameJSON(t *testing.T) {
 	h := statusHandler(t, shotsDesign("classic"), scdAggregate, 200)
 
-	// A SCRIPT: the online page's own fetch sends Accept: application/json; a bare fetch sends */*. Both get
-	// scd's answer byte for byte, as before.
+	// A script (Accept: application/json or */*) gets scd's answer byte for byte.
 	for _, accept := range []string{"application/json", "*/*", ""} {
 		w := serve(h, http.MethodGet, "/status", map[string]string{"Accept": accept})
 		if w.Code != 200 || w.Body.String() != scdAggregate {
@@ -101,7 +90,6 @@ func TestStatusNavigatedIsABrandedPageAndFetchedIsTheSameJSON(t *testing.T) {
 		}
 	}
 
-	// A BROWSER: a branded page, in words, with the online page's actions.
 	w := serve(h, http.MethodGet, "/status?s=sess-9&t=8100", map[string]string{"Accept": browserAccept, "Accept-Language": "en"})
 	page := w.Body.String()
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
@@ -143,8 +131,7 @@ func TestStatusPageIsTranslatedAndMirrored(t *testing.T) {
 	}
 }
 
-// An ordinary package: scd says only that the device is online. The page says that and invents nothing -- no
-// time it was not given.
+// An ordinary package: the page says the device is online and invents no time it was not given.
 func TestStatusPageForAnOrdinaryPackageClaimsNoTime(t *testing.T) {
 	h := statusHandler(t, map[string]any{}, `{"ip":"10.77.0.42","session_id":"sess-1","active":true}`, 200)
 	page := serve(h, http.MethodGet, "/status", map[string]string{"Accept": browserAccept}).Body.String()
@@ -166,7 +153,6 @@ func TestStatusNavigatedWhenNotOnlineGoesToSignIn(t *testing.T) {
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
 		t.Errorf("got %d to %q, want 303 to the sign-in page", w.Code, w.Header().Get("Location"))
 	}
-	// The script still reads active:false as it always did.
 	w = serve(h, http.MethodGet, "/status", map[string]string{"Accept": "application/json"})
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"active":false`) {
 		t.Errorf("the JSON answer changed: %d %s", w.Code, w.Body.String())
@@ -192,12 +178,10 @@ func TestStatusWhenTheApplianceCannotAnswerIsAFriendlyPage(t *testing.T) {
 	if !strings.Contains(page, `role="alert"`) || !strings.Contains(page, `href="/success?s=sess-1"`) {
 		t.Error("the message is not announced, or the way back is missing")
 	}
-	// And a script still gets the plain answer it always got.
 	w = serve(h, http.MethodGet, "/status", map[string]string{"Accept": "application/json"})
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "scd unreachable") {
 		t.Errorf("the script's answer changed: %d %q", w.Code, w.Body.String())
 	}
-	// scd answering with an error is also words, never its body.
 	h = statusHandler(t, map[string]any{}, `{"error":"lookup failed"}`, 500)
 	page = serve(h, http.MethodGet, "/status", map[string]string{"Accept": browserAccept}).Body.String()
 	if rawAnswer.MatchString(page) || !strings.Contains(page, builtinStrings["en"]["err.service"]) {
@@ -227,7 +211,6 @@ func TestWantsHTMLTellsANavigationFromAScript(t *testing.T) {
 	}
 }
 
-// Social sign-in is started by a LINK, so its refusals are pages a browser lands on.
 func TestSocialStartRefusalsAreFriendlyPagesForABrowser(t *testing.T) {
 	h := statusHandler(t, map[string]any{}, `{}`, 200)
 	h.arpCache = func(net.IP) (net.HardwareAddr, bool) { return nil, false }
@@ -252,7 +235,7 @@ func TestSocialStartRefusalsAreFriendlyPagesForABrowser(t *testing.T) {
 	}
 }
 
-// THE HOTEL'S CSS ON EVERY PAGE AFTER SIGN-IN -- sanitised, layered, guarded, nonced.
+// The hotel's CSS on every page after sign-in: sanitised, layered, guarded, nonced.
 func TestHotelCSSReachesEveryPageAfterSignIn(t *testing.T) {
 	design := shotsDesign("classic")
 	design["custom_css"] = ".page-title { color: #0a5c4a !important; letter-spacing: 0.01em; }\n" +
@@ -289,14 +272,12 @@ func TestHotelCSSReachesEveryPageAfterSignIn(t *testing.T) {
 		if !strings.Contains(sheet, "color:#0a5c4a") && !strings.Contains(sheet, "color: #0a5c4a") {
 			t.Errorf("%s: the hotel's own rule is missing from its sheet: %s", name, sheet)
 		}
-		// The same sanitiser as the sign-in page: no !important, no @import, no script URL.
 		for _, bad := range []string{"important", "@import", "evil.example", "javascript:"} {
 			if strings.Contains(strings.ToLower(sheet), bad) {
 				t.Errorf("%s: %q survived into the hotel sheet", name, bad)
 			}
 		}
-		// The cascade: portal layers, then the hotel's layer, then the unlayered guard over this page's controls.
-		// Compared without whitespace: the production parse compacts the stylesheets.
+		// The cascade: portal layers, then the hotel's layer, then the unlayered guard; compared without whitespace.
 		squashed := squash(html)
 		last := -1
 		for _, frag := range []string{`@layer sc-base, sc-template, hotel;`, `@layer sc-template {`,
@@ -317,11 +298,9 @@ func TestHotelCSSReachesEveryPageAfterSignIn(t *testing.T) {
 				t.Errorf("%s: the guard does not cover %s", name, control)
 			}
 		}
-		// A browser without layers still gets base, template, hotel, guard in that order.
 		if !strings.Contains(squashed, `['sc-base','sc-templates','sc-hotel']`) {
 			t.Errorf("%s: the no-layers fallback does not unwrap the hotel sheet", name)
 		}
-		// The extras block stays on the sign-in page.
 		if strings.Contains(html, "hotel-extra") {
 			t.Errorf("%s: the hotel's custom HTML appears after sign-in", name)
 		}
@@ -338,8 +317,7 @@ func TestNoHotelCSSMeansNoHotelSheet(t *testing.T) {
 	}
 }
 
-// THE OVERRIDE BUDGET. edged refuses a language with more than MaxTranslationKeys overrides, so a hotel that
-// adds a language of its own can only translate the whole portal if the portal ships no more keys than that.
+// edged refuses a language with more than MaxTranslationKeys overrides, so the portal must ship no more keys than that.
 func TestTheDictionaryFitsTheHotelsOverrideLimit(t *testing.T) {
 	if n := len(builtinStrings["en"]); n > portaldesign.MaxTranslationKeys {
 		t.Errorf("the portal ships %d keys; a hotel can override at most %d per language", n, portaldesign.MaxTranslationKeys)

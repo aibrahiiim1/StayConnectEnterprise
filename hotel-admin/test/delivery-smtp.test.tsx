@@ -1,13 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-// DELIVERY: the site's own mail server, and operating a sender like a product (contract §7).
-//
-// Pinned here: an SMTP sender posts kind "smtp" with the relay settings in `extra` and the password as the
-// write-only `api_key`; the port may be left blank for the server to fill from the security mode; the test
-// action calls the test route with the typed address and shows the outcome in the service's own words; and the
-// Health column reads the last delivery and the last error off the row.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -28,7 +21,6 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-// A site licensed for every code channel, so every service is offered.
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
@@ -68,8 +60,7 @@ describe("the page", () => {
     routes([]);
     render(<NotificationsPage />);
     expect(await screen.findByRole("heading", { name: "Delivery" })).toBeInTheDocument();
-    // The button follows the operator's role, which loads after the heading: wait for it (a CI runner lost
-    // this race on 2026-10-16).
+    // The button follows the operator's role, which loads after the heading: wait for it.
     fireEvent.click(await screen.findByRole("button", { name: /Add sender/ }));
     const dialog = await screen.findByRole("dialog");
     const service = within(dialog).getByLabelText("Service") as HTMLSelectElement;
@@ -84,7 +75,6 @@ describe("the page", () => {
     expect(screen.getByText(/Last error: 401 Unauthorized: invalid API key at 3h ago/)).toBeInTheDocument();
     expect(screen.getByText("Sending")).toBeInTheDocument();
     expect(screen.getByText("Failing")).toBeInTheDocument();
-    // The relay is named in the Service column.
     expect(screen.getByText("smtp.example.com:587")).toBeInTheDocument();
   });
 });
@@ -97,12 +87,10 @@ describe("an SMTP sender", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Add sender/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Service"), { target: { value: "smtp" } });
-    // The SMTP fields appear; the SendGrid-style "API user" does not.
     expect(within(dialog).queryByLabelText(/API user/)).toBeNull();
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "Site relay" } });
     fireEvent.change(within(dialog).getByLabelText(/Mail server/), { target: { value: " smtp.example.com " } });
     fireEvent.change(within(dialog).getByLabelText(/^Security/), { target: { value: "tls" } });
-    // The port is left blank: the server fills 465 from the security mode, and the hint says so.
     expect(within(dialog).getByText(/Leave blank for the usual port for the security chosen \(465\)/)).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/^Username/), { target: { value: "codes@example.com" } });
     const pw = within(dialog).getByLabelText(/^Password/) as HTMLInputElement;
@@ -166,14 +154,12 @@ describe("Send a test message", () => {
     const dialog = await screen.findByRole("dialog");
     const to = within(dialog).getByLabelText(/Send to \(email address\)/) as HTMLInputElement;
     expect(to.type).toBe("email");
-    // Nothing to send to, nothing to click.
     expect((within(dialog).getByRole("button", { name: /Send test/ }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(to, { target: { value: "me@example.com" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Send test/ }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/notification-providers/p1/test", { to: "me@example.com" }));
     expect(await within(dialog).findByText("Delivered")).toBeInTheDocument();
     expect(within(dialog).getByText(/sent through Your own mail server \(SMTP\)/)).toBeInTheDocument();
-    // The row is re-read so the Health column reflects the recorded outcome.
     expect(get.mock.calls.filter((c) => c[0] === "/notification-providers").length).toBeGreaterThanOrEqual(2);
 
     post.mockResolvedValueOnce({ ok: false, error: "smtp_auth", message: "535 5.7.8 Authentication credentials invalid" });

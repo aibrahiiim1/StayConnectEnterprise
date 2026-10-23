@@ -16,35 +16,21 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
-// ApplianceMTLSRouter builds the appliance API served over the mutual-TLS
-// listener. Every request carries BOTH a verified client certificate
-// (transport identity, checked by the TLS layer + this router) AND a signed
-// request JWT (application identity, RequireAppliance) — defence in depth. The
-// two identities MUST agree: the cert's bound appliance_id must equal the JWT
-// issuer, and the client cert must not be revoked.
-//
-// ptls may be nil (tests): the portal-TLS routes are then absent.
+// ApplianceMTLSRouter builds the appliance API on the mutual-TLS listener. Requests carry both a verified client
+// certificate and a signed request JWT, which must agree on the appliance id. ptls may be nil (tests).
 func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *applianceauth.ReplayCache, lic *licensing.Service, ca *pki.CA, assignKey, regRoot ed25519.PrivateKey, ptls *portaltls.Service) http.Handler {
 	r := chi.NewRouter()
 
-	// ---- CERTIFICATE-ONLY channel ----
-	// GET /v1/appliance/assignment authenticates SOLELY from the verified client
-	// certificate: URI-SAN appliance_id → exact certificate serial → exact
-	// certificate fingerprint → Central appliance record (strictMTLSSelf). It does
-	// NOT run RequireAppliance, so no appliance JWT or bearer
-	// token is required or consulted — the mTLS listener has already verified the
-	// certificate chain against the CA. GET-only, read-only, rate-limited, audited.
+	// The assignment fetch authenticates solely from the verified client certificate (strictMTLSSelf); it
+	// deliberately skips RequireAppliance, so no JWT is required or consulted.
 	if assignKey != nil {
 		assignBase := &AssignmentBase{Base: &Base{DB: db, Redis: rdb}, SignKey: assignKey}
 		r.With(RateLimit(rdb, "assignment-fetch", 30, time.Minute)).
 			Get("/v1/appliance/assignment", assignBase.StrictApplianceAssignmentHandler)
 	}
 
-	// ---- JWT + cert-binding channel (defence in depth) for everything else ----
-	// These endpoints carry BOTH a verified client certificate AND a signed request
-	// JWT whose issuer must equal the cert's bound appliance_id.
+	// Everything else needs the certificate and a JWT whose issuer equals the certificate's appliance id.
 	r.Group(func(r chi.Router) {
-		// Per client address, before authentication (see the :443 router).
 		r.Use(RateLimit(rdb, "appliance-mtls", 240, time.Minute))
 		r.Use(auth.RequireAppliance(db, replay))
 		r.Use(mtlsCertBinding(db))
@@ -57,9 +43,7 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 			r.Get("/v1/appliance/license", licBase.ApplianceLicenseHandler)
 		}
 		if assignKey != nil {
-			// Signed terminal-adoption acknowledgment (Phase-1 completion). The ack
-			// payload is itself signed by the appliance identity key; the JWT here is
-			// belt-and-braces on the POST.
+			// The ack payload is itself signed by the appliance identity key.
 			ackBase := &Base{DB: db, Redis: rdb, AssignKey: assignKey}
 			r.With(RateLimit(rdb, "assignment-ack", 10, time.Minute)).
 				Post("/v1/appliance/assignment/ack", ackBase.AckHandler)
@@ -75,9 +59,7 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 			r.Get("/v1/appliance/certificate", certBase.FetchCertificate)
 		}
 		if ptls != nil {
-			// Portal hostname and certificate lifecycle (contract §7). The appliance syncs every few minutes and
-			// orders a handful of certificates a year; the limits leave room for retries and nothing more. The
-			// daily order cap is enforced per appliance inside portaltls.
+			// The limits leave room for retries only; the daily order cap is enforced per appliance inside portaltls.
 			pt := &PortalTLSBase{Svc: ptls}
 			r.With(RateLimit(rdb, "portal-tls-sync", 30, time.Minute)).
 				Post("/v1/appliance/portal-tls/sync", pt.Sync)
@@ -90,9 +72,8 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *appliancea
 	return r
 }
 
-// mtlsCertBinding enforces that the verified client certificate matches the
-// signed-JWT appliance identity, and that the certificate is not revoked.
-// Runs AFTER RequireAppliance (so the JWT ident is in context).
+// mtlsCertBinding requires the client certificate to match the JWT appliance identity and not be revoked.
+// It runs after RequireAppliance.
 func mtlsCertBinding(db *pgxpool.Pool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,9 +93,8 @@ func mtlsCertBinding(db *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 			fpr := pki.FingerprintHex(cert)
-			// The certificate must be one Central issued to THIS appliance and still in service: the current one,
-			// or one superseded by a rotation within SupersededOverlap. A CA-valid certificate that was superseded
-			// long ago, revoked, or never recorded is refused -- before, only an explicit revocation row was.
+			// Must be the current certificate or one superseded within SupersededOverlap; a CA-valid but old,
+			// revoked or unrecorded certificate is refused.
 			var usable bool
 			if err := db.QueryRow(r.Context(), `
                 SELECT EXISTS (SELECT 1 FROM appliance_certificates c

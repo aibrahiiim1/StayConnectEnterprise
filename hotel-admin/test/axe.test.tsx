@@ -2,12 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import axe from "axe-core";
 
-// AUTOMATED ACCESSIBILITY CHECKS (axe-core) on the shared pieces every screen is built from, and on the screens
-// the component tests already render. They fail on any WCAG 2.0-2.2 A/AA violation axe can see in jsdom.
-//
-// Only `color-contrast` is switched off: jsdom does no layout and no cascade, so axe cannot compute a colour and
-// would report nothing or noise. Contrast is pinned by test/muted-text-contrast.test.ts instead. Best-practice
-// rules (landmarks, a page <h1>) are outside the tags below because these are fragments, not whole pages.
+// axe-core checks (WCAG 2.0-2.2 A/AA) on shared pieces and rendered screens. `color-contrast` is off (jsdom has no
+// cascade);
+// contrast is pinned by test/muted-text-contrast.test.ts.
 
 const get = vi.fn();
 const put = vi.fn();
@@ -216,7 +213,6 @@ describe("axe: a settings card", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Change" }));
     });
-    // Focus moved into the form (2.4.3).
     expect(document.activeElement).toBe(screen.getByLabelText("Hotel stay data (days)"));
     await expectNoViolations(container);
   });

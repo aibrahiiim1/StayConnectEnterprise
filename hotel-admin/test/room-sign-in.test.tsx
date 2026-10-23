@@ -1,15 +1,8 @@
-// HOTEL → ROOM SIGN-IN: what a guest types besides the room number.
-//
-// Pinned here: the screen offers exactly the modes edged accepts (data-plane/cmd/edged/resources_site.go,
-// pmsSignInModes) and no invented combination, a choice saves as a merge of the "pms" key without touching the
-// on/off switch, a stored legacy "either" is explained rather than silently migrated, and a read-only role is
-// offered no control. Sign-in methods keeps only the switch and a link here.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-// A site licensed for every module (the scenarios below are a hotel with every module).
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
@@ -70,7 +63,6 @@ describe("Hotel → Room sign-in", () => {
     for (const label of SUPPORTED) expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.getByText(/the guest types their room number and the surname on the reservation/i)).toBeInTheDocument();
     expect(radios[0]).toBeChecked();
-    // "either" is never offered as a new choice.
     expect(radios.some((r) => (r as HTMLInputElement).value === "either")).toBe(false);
   });
 
@@ -140,8 +132,7 @@ describe("Client access → Sign-in methods keeps only the Room sign-in switch",
   });
 });
 
-// THE READINESS WARNING READS edged's REAL RESPONSE SHAPE. GET /pms-interfaces answers { interfaces: [...] }; the
-// check once read `.data`, saw no interface, and told the operator a healthy, connected PMS was "not working".
+// Read the interfaces field; using .data would misreport a healthy PMS as unavailable.
 describe("Room sign-in readiness reads edged's /pms-interfaces shape", () => {
   const IFACE = { id: "ddff5d07-f588-4f1f-8133-a0f393524476", display_label: "Protel", lifecycle_state: "ACTIVE" };
   function readiness(ready: boolean) {

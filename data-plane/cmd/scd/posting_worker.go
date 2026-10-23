@@ -1,19 +1,14 @@
 package main
 
-// THE ROOM-CHARGE FINANCIAL EXECUTION PATH (decision D45).
+// Room-charge financial execution path: scd claims a queued posting per lane (PMS interface), re-verifies
+// pinned evidence, allocates the P#, builds the PS, records the attempt with the SHA-256 of those exact
+// bytes, then hands it to pmsd (sole owner of the FIAS connection, carries bytes verbatim). PA=OK settles and
+// grants, any other PA fails, anything inconclusive is UNKNOWN for audited manual review; nothing retries an UNKNOWN.
 //
-// scd hosts the posting engine: it claims a queued room-charge posting one lane (PMS interface) at a time,
-// re-verifies the pinned evidence, allocates the P#, builds the PS, records the attempt with the SHA-256 of
-// those exact bytes, and only then hands the command to pmsd -- which owns the property's single FIAS
-// connection and carries the bytes verbatim. The PA comes back here, and the engine and the database decide:
-// PA=OK settles and grants, any other PA fails, anything inconclusive is UNKNOWN and goes to audited manual
-// review. Nothing here, and nothing in pmsd, retries an UNKNOWN.
-//
-// It runs as its own login (svc_posting, member of sc_posting_runtime only; SCD_POSTING_DB_URL), separate
-// from scd's guest-authority pool, and only when the outbox worker is deployed
-// (STAYCONNECT_PHASE4_MASTER + STAYCONNECT_PHASE4_OUTBOX_WORKER). Real transmission additionally needs
-// STAYCONNECT_PHASE4_PMS_TRANSMIT on scd AND on pmsd; without it the engine's DARK guard refuses every PS and
-// releases the claim, and no P# is consumed.
+// Runs as its own login (svc_posting, SCD_POSTING_DB_URL), separate from the guest-authority pool, only when
+// the outbox worker is deployed (STAYCONNECT_PHASE4_MASTER + _OUTBOX_WORKER). Real transmission also needs
+// STAYCONNECT_PHASE4_PMS_TRANSMIT on scd and pmsd; otherwise the DARK guard refuses every PS and releases the
+// claim without consuming a P#.
 
 import (
 	"context"
@@ -27,7 +22,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/posting"
 )
 
-// EnvPostingDSN is the posting worker's own database login.
 const EnvPostingDSN = "SCD_POSTING_DB_URL"
 
 type postingWorker struct {
@@ -66,8 +60,8 @@ func (s *server) initPostingWorker(ctx context.Context) *postingWorker {
 	return &postingWorker{engine: eng, pool: pool}
 }
 
-// postingLoop drives the lanes. Orphaned attempts are recovered first (and every minute), so an attempt a
-// previous process left SENDING is concluded UNKNOWN before anything new is claimed on its lane.
+// postingLoop drives the lanes. Orphaned attempts are recovered first (and every minute): one left SENDING is
+// concluded UNKNOWN before anything new is claimed on its lane.
 func (s *server) postingLoop(ctx context.Context, w *postingWorker) {
 	if w == nil {
 		return

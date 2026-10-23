@@ -1,21 +1,8 @@
 package main
 
-// THE TOPOLOGY FIELDS ARE IMMUTABLE, AND SAYING SO IS PART OF BEING IMMUTABLE.
-//
-// THE DEFECT THESE PIN. guestNetworkInput accepts network_type, parent_interface and vlan_id. The UPDATE
-// statement in updateGuestNetwork names none of them. The handler answered 200 {"status":"updated"}. So a
-// client that PUT {"vlan_id": 30} against a VLAN-20 network was told its change had been applied, and
-// nothing anywhere had changed -- no 400, no "immutable" code, nothing in the audit detail.
-//
-// And a client that worked around it by editing the row directly would fare no better: the apply diff is
-// keyed on bridge_name, bridge_name is computed once at create, so the existing bridge is found present,
-// createNetwork is never called, the VLAN sub-interface for the new id is never made -- while the rendered
-// netplan and nft DESCRIBE the new id and the nft fingerprint reports "converged" against a kernel whose
-// bridge carries the wrong tag.
-//
-// The rule is therefore: refuse a CHANGE, accept an unchanged echo. The second half matters as much as the
-// first -- a client that GETs the object, edits one setting and PUTs the whole thing back is doing nothing
-// wrong, and the previous UI omitted the fields only by convention.
+// Topology fields (network_type, parent_interface, vlan_id) are immutable: a silently ignored change would leave the
+// kernel bridge on the old VLAN tag while the rendered config and fingerprint claim the new one. Refuse a change,
+// but accept an unchanged echo, since a client may PUT back the whole object it fetched.
 
 import (
 	"strings"
@@ -25,19 +12,16 @@ import (
 func vlan(n int) *int { return &n }
 
 func TestAnUnchangedTopologyEchoIsAccepted(t *testing.T) {
-	// A tagged network echoed back exactly as stored.
 	if msg := immutableTopologyChange(
 		guestNetworkInput{NetworkType: "vlan", ParentInterface: "ens192", VLANID: vlan(20)},
 		"vlan", "ens192", vlan(20)); msg != "" {
 		t.Errorf("an unchanged echo was refused: %s", msg)
 	}
-	// An untagged network echoed back exactly as stored, vlan_id absent.
 	if msg := immutableTopologyChange(
 		guestNetworkInput{NetworkType: "untagged", ParentInterface: "ens192"},
 		"untagged", "ens192", nil); msg != "" {
 		t.Errorf("an unchanged echo was refused: %s", msg)
 	}
-	// The fields omitted entirely, which is what the UI sends.
 	if msg := immutableTopologyChange(guestNetworkInput{}, "vlan", "ens192", vlan(20)); msg != "" {
 		t.Errorf("omitting the topology fields was refused: %s", msg)
 	}
@@ -65,9 +49,7 @@ func TestSettingAVLANIDOnAnUntaggedNetworkIsRefused(t *testing.T) {
 	}
 }
 
-// The precise question the closure mission asked: is untagged -> tagged conversion a product change, or is
-// delete+recreate the intentional lifecycle? The code, the UI prose and this refusal all now say the same
-// thing, in the same words, and the message names the sequence.
+// Untagged -> tagged is not converted in place; the refusal names the supported delete+recreate sequence.
 func TestConvertingUntaggedToTaggedIsRefusedAndNamesTheSupportedPath(t *testing.T) {
 	msg := immutableTopologyChange(
 		guestNetworkInput{NetworkType: "vlan", VLANID: vlan(40)}, "untagged", "ens192", nil)
@@ -105,8 +87,7 @@ func TestConvertingTaggedToUntaggedIsRefused(t *testing.T) {
 	}
 }
 
-// The refusal is about topology only. Everything else on the object stays editable, which is the whole
-// reason the endpoint exists.
+// The guard covers topology only; everything else stays editable.
 func TestOrdinarySettingsAreNotAffectedByTheTopologyGuard(t *testing.T) {
 	yes := true
 	in := guestNetworkInput{
@@ -121,7 +102,6 @@ func TestOrdinarySettingsAreNotAffectedByTheTopologyGuard(t *testing.T) {
 		CaptiveEnabled:  &yes,
 		InternetEnabled: &yes,
 		NATEnabled:      &yes,
-		// and the topology echoed unchanged
 		NetworkType:     "vlan",
 		ParentInterface: "ens192",
 		VLANID:          vlan(20),

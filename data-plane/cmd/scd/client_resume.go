@@ -1,26 +1,10 @@
 package main
 
-// THE REMEMBERED DEVICE ("Welcome back"): contract docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3.
-//
-// After a Client proves a factor on a device (a code, or an identity provider), scd issues a device-bound
-// resume credential: 256 random bits, stored only as a keyed HMAC in iam_v2.principal_device_credentials,
-// bound to (tenant, site, principal, device). The plaintext lives in the portal's HttpOnly cookie and nowhere
-// else. On the next reconnection from THAT device the credential replaces the code: it mints an ordinary auth
-// context for the Client (method OTP or SOCIAL as originally proven) and everything after -- join, package,
-// purchase, activation -- runs unchanged.
-//
-// What makes it safe to skip the code:
-//   * it is usable only from the device it was issued to -- the MAC is resolved from the kernel neighbour
-//     table on every use, the same server-derived identity every sign-in path uses; a cookie presented from
-//     another device is refused AND revoked;
-//   * it exists only because a factor WAS verified on this device; knowing an email is never enough;
-//   * it expires after the site's Remember-devices setting (default 30 days; 0 disables the feature);
-//   * it is revoked by sign-out, by expiry, by a mismatch, and all of a Client's by an operator disconnect;
-//   * guesses are bounded by the recovery-code limiter (5 per device per 10 minutes) and the token carries
-//     256 bits anyway.
-//
-// It never decides eligibility: the Client's STORED factors decide the group at resume time exactly as a fresh
-// code would, and the entitlement/quota logic sees an ordinary auth context.
+// The remembered device ("Welcome back"; docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md 2.3): after a factor is proven on a device,
+// scd issues a 256-bit device-bound resume credential stored only as a keyed HMAC; the plaintext lives in the portal's HttpOnly cookie.
+// Skipping the code is safe because it works only from the issuing device (MAC resolved from the kernel neighbour table; a mismatch refuses AND revokes),
+// exists only after a verified factor, expires per the site's Remember-devices setting (0 disables), and is revoked by sign-out, expiry, mismatch or operator disconnect.
+// It never decides eligibility: stored factors decide the group at resume time as a fresh code would.
 
 import (
 	"context"
@@ -44,15 +28,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// The same appliance-local key as open selection's resume tokens, under its own domain string, so neither
-// credential family can ever be presented as the other.
+// Same key as open selection's resume tokens under its own domain string, so neither credential family can be presented as the other.
 const (
 	clientResumeKeyFile = "anonymous_access.key"
 	clientResumeDomain  = "onegate-client-resume:v1"
 	clientResumeKeyID   = "client-resume-1"
 )
 
-// initClientResume loads the key. Without it devices are simply not remembered; nothing else is affected.
 func (s *server) initClientResume(secretsDir string) {
 	key, err := localkeys.LoadExistingKey(filepath.Join(secretsDir, clientResumeKeyFile))
 	if err != nil {
@@ -77,7 +59,6 @@ func newClientResumeToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// rememberDeviceDays reads the site setting (0 = the feature is off).
 func (s *server) rememberDeviceDays(ctx context.Context) int {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -92,9 +73,7 @@ func (s *server) rememberDeviceDays(ctx context.Context) int {
 	return cfg.RememberDeviceDays()
 }
 
-// issueResumeCredential is called after a verified OTP / SOCIAL allow. It returns the plaintext token for the
-// portal cookie, or "" when devices are not remembered here. A previous credential for the same
-// (principal, device) is revoked so one device holds one live credential.
+// issueResumeCredential returns the plaintext token for the portal cookie, or "" when devices are not remembered; it revokes the previous credential so one device holds one.
 func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceID string, method iamv2.Method, credential string) string {
 	if len(s.resumeKey) < 32 || s.db == nil || principalID == "" || deviceID == "" {
 		return ""
@@ -121,8 +100,7 @@ func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceI
 		slog.Warn("remembered device: revoke previous failed", "err", err)
 		return ""
 	}
-	// The credential the device proved (EMAIL_OTP, SOCIAL_GOOGLE, ...) travels with the remembered device, so a
-	// resumed sign-in is reported to the operator as what it originally was.
+	// The proven credential travels with the remembered device so a resumed sign-in reports as what it originally was.
 	var cred *string
 	if c := iamv2.NormalizeCredential(credential); c != "" {
 		cred = &c
@@ -142,14 +120,12 @@ func (s *server) issueResumeCredential(ctx context.Context, principalID, deviceI
 
 type resumeRow struct {
 	id, principalID, deviceID, method, deviceMAC string
-	// credential is what the device proved when it was remembered (EMAIL_OTP, SOCIAL_GOOGLE, ...); "" for a
-	// credential issued before it was recorded.
+	// credential is what the device proved when remembered; "" if issued before it was recorded.
 	credential string
 }
 
 var errResumeUnknown = errors.New("resume credential unknown")
 
-// lookupResume finds a live credential. The device's MAC comes with it so the caller can enforce the binding.
 func (s *server) lookupResume(ctx context.Context, token string) (resumeRow, error) {
 	var r resumeRow
 	err := s.db.QueryRow(ctx, `SELECT c.id::text, c.guest_principal_id::text, c.device_id::text, c.method, d.mac::text, COALESCE(c.credential,'')
@@ -167,8 +143,7 @@ func (s *server) revokeResumeByID(ctx context.Context, id string) {
 	_, _ = s.db.Exec(ctx, `UPDATE iam_v2.principal_device_credentials SET revoked_at = now() WHERE id=$1::uuid AND revoked_at IS NULL`, id)
 }
 
-// resumeMethodOffered reports whether the method family the credential was issued under is still switched on
-// and licensed here. A site that turned its code methods off does not keep letting remembered devices in.
+// resumeMethodOffered: a site that turned its code methods off must not keep letting remembered devices in.
 func (s *server) resumeMethodOffered(ctx context.Context, method string) bool {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -195,7 +170,6 @@ func (s *server) resumeMethodOffered(ctx context.Context, method string) bool {
 	return false
 }
 
-// principalIdentityLabel masks the factor the method proved, for the Welcome-back line.
 func (s *server) principalIdentityLabel(ctx context.Context, principalID, method string) string {
 	rows, err := s.db.Query(ctx, `SELECT factor_type, factor_issuer, factor_value_norm, COALESCE(attrs,'{}'::jsonb)::text
 	      FROM iam_v2.guest_principal_identities WHERE tenant_id=$1 AND guest_principal_id=$2::uuid ORDER BY verified_at, id`,
@@ -248,8 +222,7 @@ type resumeReq struct {
 	ResumeToken string `json:"resume_token"`
 }
 
-// resumeBinding resolves and binds a credential to the calling device. On a MAC mismatch the credential is
-// revoked: a cookie that turned up on another device is not a credential any more.
+// resumeBinding binds a credential to the calling device; on a MAC mismatch it is revoked.
 func (s *server) resumeBinding(w http.ResponseWriter, r *http.Request) (resumeReq, resumeRow, net.IP, bool) {
 	var req resumeReq
 	if len(s.resumeKey) < 32 || s.db == nil {

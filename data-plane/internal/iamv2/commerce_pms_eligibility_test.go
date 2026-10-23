@@ -1,10 +1,7 @@
 package iamv2
 
-// PMS ELIGIBILITY. Phase 2 recognised these seven rule types and refused to evaluate them, because there was
-// no authoritative Stay data and a permissive guess hands out access nobody authorised. Phase 3 supplies that
-// data — so the rules now decide real offers, and the interesting cases are the ones where the evidence is
-// PRESENT BUT DOES NOT SAY: a VIP flag the PMS never set, a departure date that never arrived, a room type
-// left blank. Treating any of those as "no constraint" is how a suite rate reaches an unqualified guest.
+// The key cases are evidence present but silent (a VIP flag never set, no departure date, a blank room type):
+// treating any of those as "no constraint" would give a suite rate to an unqualified guest.
 
 import (
 	"testing"
@@ -65,9 +62,8 @@ func TestPMSRulesEvaluateAgainstStayEvidence(t *testing.T) {
 	}
 }
 
-// EVIDENCE THAT DOES NOT SAY. Each of these has a Stay, so the rule is answerable in principle — but the
-// specific fact it tests is absent. Every one must fail closed, including {is_vip:false}, which is the
-// tempting one: "not marked VIP" and "we do not know" are different, and only the first should satisfy it.
+// Each case has a Stay but lacks the fact tested and must fail closed, including {is_vip:false}: "not marked
+// VIP" and "we do not know" differ.
 func TestPMSRulesFailClosedOnUnstatedEvidence(t *testing.T) {
 	cases := []struct {
 		name string
@@ -104,9 +100,7 @@ func TestPMSRulesFailClosedOnUnstatedEvidence(t *testing.T) {
 	}
 }
 
-// A subject with NO Stay evidence — a voucher, an account, an OTP guest — can never match a PMS rule. This is
-// the Phase-2 behaviour, preserved exactly: those guests have no Stay, so a room-type rule is not "true for
-// everyone", it is unanswerable.
+// A subject with no Stay evidence (voucher, account, OTP guest) never matches a PMS rule: it is unanswerable, not "true for everyone".
 func TestPMSRulesNeverMatchWithoutStayEvidence(t *testing.T) {
 	nonPMS := EligibilitySubject{Now: time.Now(), AuthMethod: MethodVoucher, Kind: SubjectKind("VOUCHER")}
 	for _, r := range []EligibilityRule{
@@ -122,8 +116,7 @@ func TestPMSRulesNeverMatchWithoutStayEvidence(t *testing.T) {
 	}
 }
 
-// Evidence with no authoritative VERSION cannot be reproduced later, so a decision made on it could never be
-// re-justified. That is not a decision worth making.
+// Evidence with no authoritative version cannot be reproduced later, so no decision is made on it.
 func TestPMSRulesRequireVersionedEvidence(t *testing.T) {
 	e := stayBase()
 	e.EvidenceVersion = 0
@@ -133,8 +126,7 @@ func TestPMSRulesRequireVersionedEvidence(t *testing.T) {
 	}
 }
 
-// Malformed rules fail closed rather than widening the offer. A typo in a published rule must not quietly
-// mean "no constraint".
+// Malformed rules fail closed; a typo must not mean "no constraint".
 func TestMalformedPMSRulesFailClosed(t *testing.T) {
 	for _, r := range []EligibilityRule{
 		{RuleStayStatus, map[string]any{"statuses": []any{}}},
@@ -150,8 +142,7 @@ func TestMalformedPMSRulesFailClosed(t *testing.T) {
 	}
 }
 
-// Publication validates the same shapes, so an operator sees the error while they are looking at the form
-// rather than a guest silently failing to qualify months later.
+// Publication validates the same shapes, so the operator sees the error at the form.
 func TestPMSRulePublicationValidation(t *testing.T) {
 	good := []EligibilityRule{
 		{RuleStayStatus, map[string]any{"statuses": []any{"IN_HOUSE"}}},

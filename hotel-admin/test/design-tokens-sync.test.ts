@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// THE TWO CONSOLES ARE ONE FAMILY BECAUSE THEY READ ONE PALETTE. app/tokens.css is a generated copy of
-// design-system/tokens.css; if somebody edits the copy, or the source without re-running the sync, this fails.
+// app/tokens.css is a generated copy of design-system/tokens.css; this fails if either is edited without re-running the
+// sync.
 const ROOT = join(__dirname, "..");
 const REPO = join(ROOT, "..");
 
@@ -55,7 +55,6 @@ describe("OneGate design tokens", () => {
         const r = ratio(lum(hsl(b, fg)), lum(hsl(b, bg)));
         expect(r, `${theme}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
-      // A control boundary must be visible: 3:1 against the card it sits on.
       expect(ratio(lum(hsl(b, "input")), lum(hsl(b, "card"))), `${theme}: input edge`).toBeGreaterThanOrEqual(3);
     }
   });

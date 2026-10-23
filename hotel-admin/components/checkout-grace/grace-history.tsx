@@ -1,7 +1,6 @@
 "use client";
 
-// The append-only publication record, as a timeline. Nothing here hides or deletes a version: older versions are
-// only collapsed behind "Show more", and each one opens in a sheet with the exact terms it put in force.
+// Publication history is append-only; Show more only collapses older versions.
 
 import * as React from "react";
 import { History } from "lucide-react";

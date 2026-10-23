@@ -1,18 +1,7 @@
 package main
 
-// THE EMAIL ACCOUNT, IN EVERY SHIPPED LANGUAGE (account_handlers.go,
-// docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md).
-//
-// The Email panel's three states (sign in, create an account, forgot password), the refusals the account routes
-// compose, the pages a link in an email opens, and the page a client whose address is not verified in time
-// reads. {n} is a number of seconds and {date} a moment, rendered by each page in the device's own clock; each
-// language places them where its grammar wants them. These join builtinStrings at start-up like pageStrings,
-// so there is still one dictionary: the page renders it, /api/languages serves it, and Hotel Admin
-// (portal-branding/strings.ts) offers every key for override.
-//
-// "1 More Hour" is the Product Owner's wording for the grace button; it stays a fixed hour in every language
-// even though the site may configure a different length, because the client is asked for the decision, not
-// for arithmetic.
+// Email account words in every shipped language (account_handlers.go). {n} is seconds and {date} a moment, rendered in the device's own clock.
+// "1 More Hour" is a fixed hour in every language even if the site configures another length.
 var accountStrings = map[string]map[string]string{
 	"en": {
 		"acct.forgot.link":      "Forgot password?",
@@ -280,7 +269,7 @@ var accountStrings = map[string]map[string]string{
 	},
 }
 
-// The account words join the one dictionary at start-up; a key defined twice is refused loudly, as for pageStrings.
+// A key defined twice is refused loudly.
 func init() {
 	for code, words := range accountStrings {
 		dst := builtinStrings[code]

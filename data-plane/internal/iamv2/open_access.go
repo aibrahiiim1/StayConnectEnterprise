@@ -1,22 +1,12 @@
 package iamv2
 
-// OPEN PACKAGE SELECTION: a client who chooses a package without signing in.
+// Open package selection: a client chooses a package without signing in. The entitlement subject is a
+// server-generated opaque anonymous subject, never a MAC (a MAC identifies a Device only).
 //
-// THE SUBJECT IS NOT THE DEVICE. A MAC identifies a Device only (Phase-0 contract). The entitlement subject of
-// open selection is a server-generated opaque ANONYMOUS ACCESS SUBJECT (iam_v2.anonymous_access_subjects,
-// migration 0095) -- not a guest principal, which keeps its meaning of a verified identity, and never a MAC.
-//
-// HOW A CLIENT COMES BACK. In this order:
-//
-//  1. The device that acquired a live anonymous entitlement rejoins it (purchase -> auth context -> device):
-//     no credential needed, and no new subject is minted, so quota and package limits continue.
-//  2. A resume token (HttpOnly portal cookie, bound to the device it was issued to -- resumeSecret) or a
-//     recovery code (shown to the client, for when a captive mini-browser drops cookies or the client uses
-//     another device) resolves to its subject.
-//  3. Otherwise a new subject is minted with a fresh resume token and recovery code, returned ONCE.
-//
-// Only keyed HMACs of the token and code are stored. Free-package limits for anonymous subjects are evaluated
-// against the device's history (HasPriorPurchase), so a new subject never resets them.
+// A client comes back in this order: (1) the device with a live anonymous entitlement rejoins it, minting no
+// new subject; (2) a resume token or recovery code resolves to its subject; (3) otherwise a new subject is
+// minted and its token and code returned once. Only keyed HMACs are stored. Free-package limits are evaluated
+// against the device's history, so a new subject never resets them.
 
 import (
 	"context"
@@ -34,13 +24,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// OpenAccess issues OPEN auth contexts.
 type OpenAccess struct {
-	DB    *pgxpool.Pool
-	Key   []byte // HMAC key for resume tokens and recovery codes (anonymous_access.key)
-	KeyID string
-	Now   func() time.Time
-	// CredentialLifetime bounds how long a resume token / recovery code can bring a client back.
+	DB                 *pgxpool.Pool
+	Key                []byte // HMAC key for resume tokens and recovery codes (anonymous_access.key)
+	KeyID              string
+	Now                func() time.Time
 	CredentialLifetime time.Duration
 	ContextTTL         time.Duration
 }
@@ -52,7 +40,7 @@ type OpenRequest struct {
 	ResumeToken, RecoveryCode     string
 }
 
-// OpenResult is what the portal needs. NewResumeToken / NewRecoveryCode are set only when a subject was minted.
+// NewResumeToken and NewRecoveryCode are set only when a subject was minted.
 type OpenResult struct {
 	AuthContextID     string
 	DeviceID          string
@@ -63,7 +51,7 @@ type OpenResult struct {
 	Resumed           bool
 }
 
-// ErrOpenRecoveryUnknown is returned when a supplied recovery code resolves to nothing (the caller rate-limits).
+// ErrOpenRecoveryUnknown: the caller rate-limits these.
 var ErrOpenRecoveryUnknown = errors.New("open access: recovery code not recognised")
 
 func (o *OpenAccess) now() time.Time {
@@ -79,7 +67,7 @@ func (o *OpenAccess) mac(kind, secret string) []byte {
 	return h.Sum(nil)
 }
 
-// recoveryAlphabet has no ambiguous characters (no 0/O, 1/I/L).
+// recoveryAlphabet omits ambiguous characters (0/O, 1/I/L).
 const recoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 func newRecoveryCode() (string, error) {
@@ -97,7 +85,6 @@ func newRecoveryCode() (string, error) {
 	return string(out), nil
 }
 
-// NormalizeRecoveryCode upper-cases and strips separators so "abcde fghjk" and "ABCDE-FGHJK" match.
 func NormalizeRecoveryCode(s string) string {
 	s = strings.ToUpper(strings.TrimSpace(s))
 	s = strings.NewReplacer(" ", "", "-", "").Replace(s)
@@ -107,14 +94,9 @@ func NormalizeRecoveryCode(s string) string {
 	return s[:5] + "-" + s[5:]
 }
 
-// resumeSecret is what a resume token is keyed by: the token AND the device it was issued to (audit P-12).
-//
-// THE COOKIE IS NOT A BEARER CREDENTIAL. The resume token lives in the og_resume portal cookie, which on the HTTP
-// fallback travels in clear text; keyed by the token alone, anyone who copied it could resume the client's
-// anonymous subject from another device. Keyed with the device's MAC -- which portald takes from the kernel
-// neighbour table, never from the browser -- the same token presented from any other device resolves to nothing.
-// A client on another device uses the recovery code, which is exactly what it is for. No schema change: the
-// stored value is still one keyed HMAC.
+// resumeSecret keys a resume token by the token AND the device. The og_resume cookie travels in clear text on
+// the HTTP fallback, so keyed by the token alone, a copied cookie would resume the subject from another
+// device. The MAC comes from the kernel neighbour table, never the browser; another device uses the recovery code.
 func resumeSecret(token, mac string) string {
 	return token + "\x00device:" + strings.ToLower(strings.TrimSpace(mac))
 }
@@ -127,7 +109,6 @@ func newResumeToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// Begin issues an OPEN auth context for this device, resuming or minting its anonymous subject.
 func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, error) {
 	if len(o.Key) < 32 || req.TenantID == "" || req.SiteID == "" || req.MAC == "" || req.GuestNetworkID == "" {
 		return OpenResult{}, errors.New("open access: not configured")
@@ -150,7 +131,6 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
 		return res, err
 	}
-	// 1. The device, and where it was seen.
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.devices (tenant_id, site_id, appliance_id, mac, first_seen, last_seen, last_ip)
 		 VALUES ($1,$2,nullif($3,'')::uuid,$4::macaddr,$6,$6,nullif($5,'')::inet)
@@ -167,7 +147,6 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 		req.TenantID, req.SiteID, res.DeviceID, req.GuestNetworkID, now); err != nil {
 		return res, err
 	}
-	// 2. The device's own live anonymous access, through the acquisition chain.
 	var liveEnt, liveSubj *string
 	err = tx.QueryRow(ctx, `
 		SELECT e.id::text, e.anonymous_subject_id::text
@@ -183,7 +162,6 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 	if liveSubj != nil {
 		res.SubjectID, res.LiveEntitlementID, res.Resumed = *liveSubj, *liveEnt, true
 	}
-	// 3. A resume token or recovery code.
 	resolve := func(kind, secret string) (string, error) {
 		var subj string
 		err := tx.QueryRow(ctx, `
@@ -230,7 +208,6 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 			}
 		}
 	} else {
-		// 4. A new opaque subject, with credentials returned once.
 		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.anonymous_access_subjects (tenant_id, site_id) VALUES ($1,$2) RETURNING id::text`,
 			req.TenantID, req.SiteID).Scan(&res.SubjectID); err != nil {
 			return res, err
@@ -252,7 +229,6 @@ func (o *OpenAccess) Begin(ctx context.Context, req OpenRequest) (OpenResult, er
 		}
 		res.NewResumeToken, res.NewRecoveryCode = tok, code
 	}
-	// 5. The OPEN auth context.
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts
 		(tenant_id, site_id, method, anonymous_subject_id, device_id, guest_network_id, expires_at, credential)
 		VALUES ($1,$2,'OPEN',$3::uuid,$4::uuid,$5::uuid,$6,$7) RETURNING id::text`,

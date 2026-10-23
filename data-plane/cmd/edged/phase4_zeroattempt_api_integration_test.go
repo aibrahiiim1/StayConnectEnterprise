@@ -1,11 +1,7 @@
 //go:build integration && phase4
 
-// PHASE-4 TEST OWNERSHIP. The `phase4` tag is not decoration: these tests need the Phase-4 schema
-// (migrations 0011-0026), and the PHASE-3 regression gate builds a database that stops at 0010. With
-// only the `integration` tag they compiled into the Phase-3 gate's ./cmd/edged/ package and failed
-// against a schema in which `financial_base_currency` and `p4_declare_financial_recovery` cannot exist
-// -- a false failure that says nothing about Phase 3 and hides anything that would say something.
-// The tag is what makes the schema requirement structural rather than a naming convention.
+// The phase4 tag is needed: the Phase-3 regression gate builds a schema without the Phase-4 objects, so
+// without it these tests compile into that gate and fail falsely.
 
 package main
 
@@ -20,32 +16,23 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// THE ZERO-ATTEMPT OPERATOR PATH, at the API.
-//
-// The database function was delivered and proven in the previous milestone. What was missing is the part
-// that only exists here: that a real operator, with a real session, in the right scope, can reach it — and
-// that nobody else can. A safe path nobody can walk is not a path.
-//
-// Everything below uses the EXISTING financial-review authorization model: tenant+site scope, the actor
-// taken from the session, a password step-up, and the same bounded, screened reason/evidence contract every
-// other financial decision uses.
+// The zero-attempt operator path at the API uses the existing financial-review authorization model: tenant+site
+// scope, actor from the session, password step-up, and the same bounded, screened reason/evidence contract.
 
-// seedZeroAttemptHold builds the exact state: a posting held by recovery, never transmitted, with its hold
-// reconciled as CONFIRMED_NOT_COMPLETED. It returns the posting id.
+// seedZeroAttemptHold builds a posting held by recovery, never transmitted, with its hold reconciled as
+// CONFIRMED_NOT_COMPLETED, and returns its id.
 func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 	t.Helper()
 	ctx := context.Background()
 
-	// Built directly rather than by reusing seedReviewablePosting, which transmits once. posting_attempts is
-	// append-only and correctly refuses a DELETE, so a fixture that created an attempt could not un-create
-	// it -- and a posting WITH an attempt is the ordinary review path, not the case under test.
+	// Not seedReviewablePosting: it transmits once, and posting_attempts is append-only so an attempt cannot be undone.
 	q := func(dst *string, sql string, args ...any) {
 		t.Helper()
 		if err := f.pool.QueryRow(ctx, sql, args...).Scan(dst); err != nil {
 			t.Fatalf("seed zero-attempt posting: %v", err)
 		}
 	}
-	// qc is q inside the controlled operation a guarded table demands on the full appliance schema.
+	// qc is q inside the controlled operation a guarded table demands.
 	qc := func(family string, dst *string, sql string, args ...any) {
 		t.Helper()
 		if err := controlled(ctx, f.pool, []string{family}, func(tx pgx.Tx) error {
@@ -74,8 +61,7 @@ func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 		f.tenant, f.site, ifaceID, revID); err != nil {
 		t.Fatal(err)
 	}
-	// posting_allowed is computed by the database (IN_HOUSE + a reservation => postable). The posting targets
-	// the reservation (Amendment A1), so its g_number is this stay's reservation number.
+	// posting_allowed is computed by the database; the posting targets the reservation, so its g_number is the stay's.
 	reservation = "R" + fmt.Sprintf("%d", time.Now().UnixNano())
 	qc("stay", &stayID, `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status)
@@ -132,9 +118,8 @@ func (f *apiFixture) seedZeroAttemptHold(t *testing.T, reconciled bool) string {
 		RETURNING id::text`, f.tenant, f.site, epoch, outboxID).Scan(&holdID); err != nil {
 		t.Fatalf("seed hold: %v", err)
 	}
-	// An unreconciled hold is left exactly as recovery leaves it. The resolution ledger is append-only --
-	// p4_resolve_recovery_hold refuses to revise a conclusion about money in place -- so the unreconciled
-	// case has to be SEEDED unreconciled rather than produced by undoing a resolution.
+	// The resolution ledger is append-only (p4_resolve_recovery_hold will not revise a conclusion), so the
+	// unreconciled case must be seeded unreconciled.
 	if reconciled {
 		if _, err := f.pool.Exec(ctx, `SELECT iam_v2.p4_resolve_recovery_hold($1::uuid,$2,$3::uuid,$4)`,
 			holdID, "CONFIRMED_NOT_COMPLETED", f.operator,
@@ -202,7 +187,7 @@ func TestIntegrationZeroAttemptAPI_AuthorizationNeedsStepUpEvidenceAndScope(t *t
 	}); code != 401 {
 		t.Fatalf("an authorization without step-up returned %d", code)
 	}
-	// no evidence — the whole decision rests on somebody having looked
+	// no evidence
 	if code, _ := f.do(t, "POST", path, map[string]any{
 		"reason":   "folio checked; nothing was posted, so the charge must still go out",
 		"password": f.password,
@@ -228,7 +213,7 @@ func TestIntegrationZeroAttemptAPI_AuthorizationNeedsStepUpEvidenceAndScope(t *t
 	}
 }
 
-// Same tenant, different site. This is the isolation a fresh-tenant-per-fixture test cannot see.
+// Same tenant, different site: isolation a fresh-tenant-per-fixture test cannot see.
 func TestIntegrationZeroAttemptAPI_AnotherSiteOfTheSameTenantCannotAuthorize(t *testing.T) {
 	a := newAPI(t, "payments_operator")
 	b := newAPIIn(t, a.tenant, "payments_operator")
@@ -259,8 +244,7 @@ func TestIntegrationZeroAttemptAPI_AnotherSiteOfTheSameTenantCannotAuthorize(t *
 	}
 }
 
-// The whole point, end to end: the operator authorizes, NOTHING is transmitted, exactly one authorization
-// exists, and a second attempt to authorize is refused.
+// End to end: the operator authorizes, nothing is transmitted, exactly one authorization exists, and a second is refused.
 func TestIntegrationZeroAttemptAPI_AuthorizesExactlyOnceAndTransmitsNothing(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	postingID := f.seedZeroAttemptHold(t, true)
@@ -299,7 +283,7 @@ func TestIntegrationZeroAttemptAPI_AuthorizesExactlyOnceAndTransmitsNothing(t *t
 		t.Fatalf("expected exactly one audited decision, got %d", n)
 	}
 
-	// EXACTLY ONE. A second authorization is refused, because the posting is no longer held.
+	// A second authorization is refused: the posting is no longer held.
 	if code, _ := f.do(t, "POST", path, req); code == 200 {
 		t.Fatal("a second authorization was accepted; the path is not one-time")
 	}
@@ -321,8 +305,7 @@ func TestIntegrationZeroAttemptAPI_AuthorizesExactlyOnceAndTransmitsNothing(t *t
 func TestIntegrationZeroAttemptAPI_AnUnreconciledPostingIsRefused(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	postingID := f.seedZeroAttemptHold(t, false)
-	// It IS listed -- an operator must be able to see the item -- but not as eligible, and the reason is
-	// visible rather than something they discover by being refused.
+	// Listed so the operator can see it, but not as eligible, with the reason visible.
 	_, qbody := f.do(t, "GET", "/financial-ops/recovery/zero-attempt", nil)
 	var listed map[string]any
 	for _, r := range rowsOf(qbody["queue"]) {
@@ -367,8 +350,7 @@ func (f *apiFixture) scanStr(t *testing.T, sql string, args ...any) string {
 	return v
 }
 
-// rowsOf reads a JSON array of objects defensively. A nil here means "the queue was empty", which is a
-// legitimate answer and not a reason to panic in the middle of an assertion about something else.
+// rowsOf reads a JSON array of objects defensively; nil means an empty queue, not a panic.
 func rowsOf(v any) []map[string]any {
 	arr, ok := v.([]any)
 	if !ok {
@@ -383,9 +365,8 @@ func rowsOf(v any) []map[string]any {
 	return out
 }
 
-// restart rebuilds the server the way a process restart does: a fresh router and a fresh in-memory session
-// store -- so the previous session is gone -- over the same database. Nothing about an audited financial
-// authorization may depend on process memory, and nothing may be re-sent because a process came back.
+// restart rebuilds the router and in-memory session store over the same database: an audited financial
+// authorization must not depend on process memory, and nothing may be re-sent because a process came back.
 func (f *apiFixture) restart(t *testing.T, roles ...string) *apiFixture {
 	t.Helper()
 	f.srv.Close()
@@ -405,10 +386,8 @@ func (f *apiFixture) restart(t *testing.T, roles ...string) *apiFixture {
 	return n
 }
 
-// The other half of "end to end": what the authorization is FOR. A zero-attempt restore leaves a site unable
-// to leave recovery -- the item can never be reconciled away, because the ordinary review queue cannot see
-// it. These are the two states either side of that: refused while anything is undecided, releasable once the
-// operator has decided, and unchanged by a restart in between.
+// A zero-attempt restore leaves a site unable to leave recovery because the ordinary review queue cannot see the
+// item: release is refused while anything is undecided, allowed once decided, and unchanged by a restart.
 func TestIntegrationZeroAttemptAPI_SurvivesRestartAndUnblocksRelease(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	postingID := f.seedZeroAttemptHold(t, true)
@@ -423,7 +402,6 @@ func TestIntegrationZeroAttemptAPI_SurvivesRestartAndUnblocksRelease(t *testing.
 		t.Fatalf("authorize: %d", code)
 	}
 
-	// ---- restart
 	g := f.restart(t, "payments_operator")
 
 	// the authorization is where it belongs -- in the database -- and the restart transmitted nothing
@@ -447,10 +425,7 @@ func TestIntegrationZeroAttemptAPI_SurvivesRestartAndUnblocksRelease(t *testing.
 		}
 	}
 
-	// ---- and recovery can now be released, which is the point of the whole path.
-	// Declaring recovery holds every rail, so the settlement behind this posting is held too and an operator
-	// reconciles it like any other. That is ordinary recovery work; what the authorization changed is the one
-	// item no surface could previously decide.
+	// Declaring recovery holds every rail, so the settlement behind this posting is held too and is reconciled like any other.
 	_, hbody := g.do(t, "GET", "/financial-ops/recovery/holds", nil)
 	for _, h := range rowsOf(hbody["holds"]) {
 		if h["work_kind"] == "POSTING_OUTBOX" {
@@ -481,8 +456,7 @@ func TestIntegrationZeroAttemptAPI_SurvivesRestartAndUnblocksRelease(t *testing.
 	}
 }
 
-// The negative either side of it: while the zero-attempt item is undecided, recovery does not release. This
-// is what makes the authorization necessary rather than merely available.
+// While the zero-attempt item is undecided, recovery does not release.
 func TestIntegrationZeroAttemptAPI_AnUndecidedItemHoldsRecoveryShut(t *testing.T) {
 	f := newAPI(t, "payments_operator")
 	f.seedZeroAttemptHold(t, false)

@@ -1,13 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-// CLIENT GROUPS (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §3, §9).
-//
-// Pinned here: the list reads the groups and says what each one matches in one line; creating a group posts
-// the wire shape edged expects (a domain list, lower-cased, with the subdomain switch, and the optional
-// reason); the server's validation message reaches the operator in the dialog they are looking at; and a group
-// that a package still names as its audience is NOT deleted, with the server's own words saying which packages.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -98,7 +91,6 @@ describe("creating a group", () => {
 
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "Employees" } });
     fireEvent.change(within(dialog).getByLabelText(/^Priority/), { target: { value: "10" } });
-    // The first rule is a verified-email-domain rule, with its assurance level said beside it.
     expect((screen.getByTestId("group-rule-type-0") as HTMLSelectElement).value).toBe("EMAIL_DOMAIN");
     expect(within(dialog).getByText(/Anyone who can receive mail at the domain qualifies/)).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "Company.com\ncompany.ae, company.com" } });
@@ -139,7 +131,6 @@ describe("creating a group", () => {
     fireEvent.change(screen.getByTestId("group-rule-list-0"), { target: { value: "not a domain" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
     expect(await within(dialog).findByText(/rule 1: "not a domain" is not a domain name/)).toBeInTheDocument();
-    // The dialog stays open with the operator's input, so it can be corrected rather than retyped.
     expect((within(dialog).getByLabelText(/^Name/) as HTMLInputElement).value).toBe("X");
   });
 
@@ -149,7 +140,6 @@ describe("creating a group", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Add group/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "X" } });
-    // The textarea is required, so the browser refuses first; the form's own check is what the message says.
     (screen.getByTestId("group-rule-list-0") as HTMLTextAreaElement).removeAttribute("required");
     fireEvent.click(within(dialog).getByRole("button", { name: /Create group/ }));
     expect(await within(dialog).findByText(/Rule 1: enter at least one domain/)).toBeInTheDocument();
@@ -172,7 +162,6 @@ describe("deleting a group", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /^Delete\b/ }));
     expect(await within(dialog).findByText(/this group is the audience of: PARTNERWIFI, PARTNERPLUS\. Change those packages first\./)).toBeInTheDocument();
     expect(del).toHaveBeenCalledWith("/client-groups/g-par", { reason: "ended" });
-    // Still listed: nothing was deleted.
     expect(screen.getByText("Partners")).toBeInTheDocument();
   });
 
@@ -197,7 +186,6 @@ describe("history", () => {
     ]);
     render(<ClientGroupsPage />);
     await screen.findByText("Partners");
-    // A Radix tab activates on mouse-down, not click.
     fireEvent.mouseDown(screen.getByRole("tab", { name: "History" }), { button: 0 });
     expect(await screen.findByText("Added company.ae")).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/client-groups/changes");

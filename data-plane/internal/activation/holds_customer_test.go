@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// holds_customer_id is optional. An appliance that predates it signed exactly the eleven original fields; its
-// request must still verify, so an empty value must leave the signed bytes unchanged.
+// holds_customer_id is optional: a request from an appliance that predates it must still verify, so an empty value leaves the signed bytes unchanged.
 func TestHoldsCustomerOmittedKeepsLegacySignedBytes(t *testing.T) {
 	r, _ := newReq(t)
 	legacy, _ := json.Marshal(struct {
@@ -52,7 +51,6 @@ func TestHoldsCustomerIsCoveredBySignature(t *testing.T) {
 			t.Fatalf("holds_customer_id changed to %q and the request still verified", v)
 		}
 	}
-	// Round trip through the file the operator carries.
 	b, _ := json.Marshal(r)
 	var back Request
 	if err := json.Unmarshal(b, &back); err != nil || back.HoldsCustomerID != "cust-a" || !VerifyRequest(&back) {

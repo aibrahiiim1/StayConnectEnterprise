@@ -54,13 +54,10 @@ func errMsg(seq uint32, code int32) []byte {
 	return putNlmsg(nlmsgError, 0, seq, p)
 }
 
-// A guest's masqueraded download: original source is the guest, the reply is addressed to the WAN address. It is
-// selected by the guest address and by nothing else.
 func TestDumpParseSelectsOnlyTheGuestsFlows(t *testing.T) {
 	var dgram []byte
 	dgram = append(dgram, ctMsg(1, "10.20.0.50", "93.184.216.34", "93.184.216.34", "172.21.60.25", false)...)
 	dgram = append(dgram, ctMsg(1, "10.20.0.51", "93.184.216.34", "93.184.216.34", "172.21.60.25", true)...)
-	// captive DNAT: the guest's port 80 rewritten to the gateway's portal port
 	dgram = append(dgram, ctMsg(1, "10.20.0.50", "1.2.3.4", "10.20.0.1", "10.20.0.50", false)...)
 	dgram = append(dgram, doneMsg(1)...)
 
@@ -86,7 +83,6 @@ func TestDumpParseSelectsOnlyTheGuestsFlows(t *testing.T) {
 	}
 }
 
-// The delete names exactly the dumped entry: its original tuple byte-for-byte, and its zone when it has one.
 func TestDeleteRequestCarriesTheOriginalTupleAndZone(t *testing.T) {
 	r := parseMessages(ctMsg(1, "10.20.0.51", "8.8.8.8", "8.8.8.8", "172.21.60.25", true))
 	if len(r.entries) != 1 {
@@ -114,8 +110,7 @@ func TestDeleteRequestCarriesTheOriginalTupleAndZone(t *testing.T) {
 	if err != nil || len(attrs) != 2 || attrs[0].typ != ctaTupleOrig || attrs[1].typ != ctaZone {
 		t.Fatalf("delete attributes: %+v err=%v", attrs, err)
 	}
-	// An empty tuple would turn the delete into a FLUSH of the whole table: the request must never be built
-	// from an entry that was not parsed.
+	// An empty tuple would turn the delete into a flush of the whole table.
 	if _, ok := parseEntry(nfgen()); ok {
 		t.Fatal("an entry with no original tuple was accepted")
 	}
@@ -161,7 +156,6 @@ func TestToolSummaryParsing(t *testing.T) {
 	}
 }
 
-// netlink failing falls back to the tool, and "nothing matched" from the tool (exit 1, 0 deleted) is a success.
 func TestFallbackToToolAndNothingMatchedIsSuccess(t *testing.T) {
 	var calls []string
 	s := &System{

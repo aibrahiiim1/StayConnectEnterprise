@@ -1,21 +1,8 @@
-// Grace Period (the post-checkout access grace) — types, unit conversions and the plain-language rules the Hotel Admin screen is built from.
-//
-// Everything here is pure so it can be tested without rendering. The server (edged `/checkout-grace`) stays the
-// authority: the bounds below mirror data-plane/internal/iamv2/grace_policy_publish.go and the `grace_bounds`
-// CHECK, and they only ever NARROW what the page lets an operator send, never widen it.
-//
-// WHAT THE FIELDS MEAN (authoritative product semantics, unchanged by this screen):
-//   * Who qualifies: a stay that holds ACTIVE, valid internet access at the moment of checkout — whatever it
-//     was (free, paid, included with the room). No active access at checkout ⇒ no grace. One grace per stay.
-//   * grace_duration_seconds: how long the grace lasts, measured on the clock from checkout (validity window),
-//     not online time.
-//   * grace_down_kbps / grace_up_kbps / grace_data_quota_bytes: the speed cap and the data allowance.
-//   * REJECT_NEW_DEVICE (the only supported device policy): devices already connected at checkout keep access —
-//     all of them, even above the device limit — and a device that was not connected at checkout is refused
-//     for the whole grace. The device limit never admits a new device; it is recorded for reporting.
-//   * eligibility_window_seconds: how long after checkout the stay still counts for stay-based package rules.
-//     It never removes grace from a guest who qualifies.
-//   * Publishing derives a free, system grace package from these terms; the operator never picks one.
+// Grace Period types and pure helpers. Bounds mirror data-plane/internal/iamv2/grace_policy_publish.go and only narrow
+// what the page sends.
+// Grace requires ACTIVE internet access at checkout; REJECT_NEW_DEVICE keeps devices connected at checkout (even above
+// the limit)
+// and refuses new ones for the whole grace. eligibility_window_seconds never removes grace from a qualifying guest.
 
 export type GraceSource = "PUBLISHED" | "EMERGENCY_FALLBACK";
 
@@ -62,8 +49,6 @@ export type GraceHistoryItem = {
 
 export type GraceHistoryResp = { data?: GraceHistoryItem[]; available?: boolean };
 
-// ---------------------------------------------------------------- bounds (server-mirrored)
-
 export const BOUNDS = {
   durationSeconds: { min: 60, max: 604800 },
   eligibilitySeconds: { min: 60, max: 604800 },
@@ -74,8 +59,6 @@ export const BOUNDS = {
 
 export const MB = 1024 * 1024;
 const GB = 1024 * MB;
-
-// ---------------------------------------------------------------- formatting
 
 function trim1(n: number): string {
   const s = n.toFixed(1);
@@ -125,8 +108,6 @@ export function fmtDurationLong(seconds: number): string {
   return out.join(" ");
 }
 
-// ---------------------------------------------------------------- device policies
-
 export const DEVICE_POLICY_TEXT: Record<string, { title: string; description: string }> = {
   REJECT_NEW_DEVICE: {
     title: "Keep connected devices, refuse new ones",
@@ -146,15 +127,14 @@ function humanise(code: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
 }
 
-/** The devices fact in one line: limit first, then what the policy does. A limit of 0 (the built-in fallback)
- *  means "no extra devices", never "unlimited". */
+/**
+ * Limit first, then what the policy does. A limit of 0 (built-in fallback) means "no extra devices", never "unlimited".
+ */
 export function devicesSummary(limit: number | undefined, policy: string | undefined): string {
   const lim =
     limit === undefined ? "—" : limit <= 0 ? "No extra devices" : `Up to ${limit} device${limit === 1 ? "" : "s"}`;
   return `${lim} · ${devicePolicyTitle(policy).toLowerCase()}`;
 }
-
-// ---------------------------------------------------------------- the sentence an operator reads
 
 /** "What a departing guest receives", derived only from the fields. */
 export function guestReceivesSentence(t: GraceTerms): string {
@@ -183,8 +163,6 @@ export function termsFromEffective(e: EffectiveGrace): GraceTerms {
     eligibility_window_seconds: e.eligibility_window_seconds,
   };
 }
-
-// ---------------------------------------------------------------- diffs
 
 export const TERM_FIELDS: { key: keyof GraceTerms; label: string; fmt: (v: any) => string }[] = [
   { key: "grace_duration_seconds", label: "Grace time", fmt: fmtDuration },
@@ -222,8 +200,6 @@ export function changedTerms(prev: GraceTerms | null | undefined, next: GraceTer
   return compareTerms(prev, next).filter((c) => c.changed);
 }
 
-// ---------------------------------------------------------------- reason codes
-
 /** What the server accepts: `^[A-Z][A-Z0-9_]{0,63}$` (resources_commerce.go graceReasonCode). */
 export const REASON_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
@@ -238,8 +214,8 @@ export const REASON_CHOICES: { code: string; label: string }[] = [
 export const OTHER_REASON = "__OTHER__";
 
 /**
- * Turn anything typed into a code the server will accept, or "" if nothing usable is left.
- * "late checkout" → "LATE_CHECKOUT"; "  2nd-try!" → "ND_TRY"; "Über café" → "UBER_CAFE".
+ * Turns typed text into a code the server accepts, or "" if nothing usable is left ("late checkout" ->
+ * "LATE_CHECKOUT").
  */
 export function normaliseReasonCode(input: string): string {
   let s = (input ?? "")
@@ -262,8 +238,6 @@ export function reasonLabel(code: string): string {
   if (!code) return "No reason recorded";
   return REASON_CHOICES.find((r) => r.code === code)?.label ?? humanise(code);
 }
-
-// ---------------------------------------------------------------- the editable draft
 
 export type DurationUnit = "min" | "h" | "d";
 export const UNIT_SECONDS: Record<DurationUnit, number> = { min: 60, h: 3600, d: 86400 };
@@ -350,8 +324,6 @@ export function validateDraft(d: GraceDraft, supportedPolicies: string[]): Parti
   return e;
 }
 
-// ---------------------------------------------------------------- publish failures in plain words
-
 export type PublishFailure = { conflict: boolean; message: string; field?: "password" | "reason" };
 
 /** Maps edged's bounded failure codes (putCheckoutGraceConfig / graceFailureStatus) to operator sentences. */
@@ -408,8 +380,6 @@ export function describePublishFailure(e: any): PublishFailure {
   return { conflict: false, message: serverMsg ? `The policy was refused: ${serverMsg}` : "The policy was refused." };
 }
 
-// ---------------------------------------------------------------- what needs the operator's attention
-
 export type GraceWarning = {
   id: string;
   tone: "warning" | "danger" | "info" | "neutral";
@@ -419,10 +389,7 @@ export type GraceWarning = {
   href?: string;
 };
 
-/**
- * Configuration problems, derived only from what the appliance reports. Nothing here is guessed: each warning
- * names the fact it came from.
- */
+/** Configuration problems derived only from what the appliance reports; each names its source fact. */
 export function graceWarnings(
   state: GraceState,
   history: GraceHistoryItem[],

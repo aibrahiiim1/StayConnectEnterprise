@@ -9,7 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// B-11: a reassignment while netd runs is adopted, and plans for the NEW scope are accepted without a restart.
 func TestScopeChangeIsAdoptedWithoutARestart(t *testing.T) {
 	p := liveWriter(newFakeTC())
 	next := liveMode()
@@ -37,8 +36,6 @@ func TestScopeChangeIsAdoptedWithoutARestart(t *testing.T) {
 	}
 }
 
-// Going live at runtime needs what going live at start needs. Without an authenticated producer, or with the
-// writer boundary missing, the appliance stays dark.
 func TestScopeWatchGoingLiveRequiresProducerAndBoundary(t *testing.T) {
 	dark := &phase3Shaping{shp: newFakeTC()}
 	w := scopeWatch{p: dark, load: func(context.Context) (phase3Mode, error) { return liveMode(), nil }}
@@ -54,7 +51,6 @@ func TestScopeWatchGoingLiveRequiresProducerAndBoundary(t *testing.T) {
 	if !w.check(context.Background()) || !dark.mode.Active {
 		t.Fatal("a complete configuration did not go live")
 	}
-	// An unreadable configuration keeps the scope in force.
 	w.load = func(context.Context) (phase3Mode, error) { return phase3Mode{}, errors.New("flags unreadable") }
 	if w.check(context.Background()) || !dark.mode.Active {
 		t.Fatal("an unreadable configuration changed the scope")

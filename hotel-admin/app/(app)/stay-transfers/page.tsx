@@ -1,8 +1,5 @@
 "use client";
 
-// Route shell for the Phase-5 (DARK) cross-PMS transfer screen. edged enforces the real gate on every
-// request; canAct only decides whether the controls are offered.
-
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";

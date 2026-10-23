@@ -1,26 +1,7 @@
 "use client";
 
-// THE POST-STAY IDENTITY SCREEN (Phase 5, DARK).
-//
-// Two actions, and the screen's main job is to keep them from looking like variants of each other:
-//
-//   RESET   rotates the credential of an ACTIVE profile. The guest keeps their post-stay access; only the
-//           secret changes. This is the answer to "I lost the PIN" — including the case where the guest
-//           never received it, because the plaintext exists once and is gone.
-//   REVOKE  ENDS post-stay access for that stay episode. It cannot be undone, and the episode gets no
-//           replacement profile. The next post-stay identity for that guest exists only after a new stay.
-//
-// A screen that showed these as two buttons of equal weight would invite an operator to reach for the wrong
-// one, so revoke is styled as the destructive action it is, states its consequence in the confirmation, and
-// requires the operator to type the word REVOKE alongside their password.
-//
-// There is no "show PIN" control anywhere here, and its absence is deliberate: the appliance does not store
-// the plaintext and cannot produce it. The only thing that ever returns one is a reset, once, in that
-// response — which is why the reveal is the kit's OneTimeReveal and cannot be reopened.
-//
-// THE ROLE DECIDES WHETHER THE BUTTONS EXIST, not whether they are greyed out. A read-only operator sees the
-// list and a one-line notice; edged refuses the action anyway, so a disabled button was only ever a promise
-// the screen could not keep.
+// Reset rotates the PIN without ending access; revoke ends access for this stay episode irreversibly.
+// Plaintext PINs are never stored, so a reset response can reveal its new PIN only once.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, KeyRound, ShieldOff } from "lucide-react";
@@ -60,7 +41,6 @@ type Profile = {
 
 type Revealed = { profileId: string; pin: string; validUntil: string };
 
-// The stay's lifecycle, in the words Stays uses. The wire value is kept for anything this table was not taught.
 const STAY_WORDS: Record<string, string> = {
   IN_HOUSE: "In house",
   RESERVED: "Arriving",
@@ -75,13 +55,11 @@ type StateWords = { label: string; tone: "ok" | "warn" | "err" | "default"; hint
 function stateOf(row: Profile): StateWords {
   if (row.status === "REVOKED") return { label: "Ended", tone: "default", hint: "Access ended for this stay" };
   if (row.authenticable) return { label: "Active", tone: "ok" };
-  // ACTIVE but not authenticable: expired, or the stay moved to a new episode. Saying which matters here —
-  // this is the operator's screen, and the guest sees nothing either way.
+  // Explain why an active profile cannot authenticate; guests receive no such distinction.
   return { label: "Active, not usable", tone: "warn", hint: "Expired, or the stay moved on" };
 }
 
-/** `rolesKnown` is false while the route shell is still reading the operator's roles, so the read-only notice
- *  does not flash at an operator who can act. */
+/** Wait for role loading before showing a read-only notice. */
 export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; rolesKnown?: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<Profile[] | null>(null);
@@ -92,7 +70,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
   const [password, setPassword] = useState("");
   const [reason, setReason] = useState("");
   const [confirmWord, setConfirmWord] = useState("");
-  // A reset changes the PIN only. Restarting the validity is a separate, explicit choice (audit H-17).
+  // Reset changes only the PIN; extending validity requires a separate choice.
   const [extendValidity, setExtendValidity] = useState(false);
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [detail, setDetail] = useState<Profile | null>(null);
@@ -106,7 +84,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       })
       .catch((e) => {
         setError(String(e?.message ?? e));
-        // Keep the last good list: an error banner above real rows is honest, an empty table is not.
+        // Keep the last good list when refresh fails.
         setRows((prev) => prev ?? []);
       });
   }, []);
@@ -121,8 +99,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
     setConfirmWord("");
   };
 
-  // Revoke additionally requires the word, because a password prompt alone is muscle memory by the third
-  // time an operator sees it and this action has no undo.
+  // Require a typed confirmation because revocation cannot be undone.
   const canSubmit = useMemo(() => {
     if (!dialog) return false;
     if (password.length === 0 || reason.trim().length < 4) return false;
@@ -283,8 +260,6 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         )}
       </Card>
 
-
-      {/* ------------------------------------------------------------------ details */}
       <DetailDialog
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
@@ -319,7 +294,6 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         )}
       </DetailDialog>
 
-      {/* ------------------------------------------------------------------ reset / end access */}
       <DialogForm
         open={dialog !== null}
         onOpenChange={(v) => { if (!v) closeDialog(); }}
@@ -385,7 +359,6 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         </Field>
       </DialogForm>
 
-      {/* ------------------------------------------------------------------ the one-time PIN */}
       <OneTimeReveal
         open={revealed !== null}
         title="New PIN — shown once"

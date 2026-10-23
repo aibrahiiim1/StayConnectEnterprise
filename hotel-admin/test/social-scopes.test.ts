@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 
-// GDPR plan C9 (D-C9): Hotel Admin warns, and does not refuse, when a hotel asks a sign-in provider for more than
-// the guest's name and email.
 describe("social sign-in scopes", () => {
   it("does not warn about the defaults or about name and email", () => {
     for (const [p, s] of Object.entries(DEFAULT_SCOPES)) expect(extraScopes(p, s)).toEqual([]);

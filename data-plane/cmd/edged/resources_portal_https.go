@@ -1,21 +1,7 @@
 package main
 
-// PORTAL HTTPS — the Client Portal's own address, its hostnames and its certificates
-// (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §2.1, §3.1, §4, §8).
-//
-// What this surface OWNS is small: the two operator settings in public.portal_https_settings (the portal
-// address and the hotel portal domain), each change recorded in portal_https_settings_changes. Everything
-// else it shows -- the OneGate hostname, the hotel domain's verification state, which hostname is canonical,
-// whether HTTPS is active or the approved HTTP fallback is in force, the certificates -- is what scd last
-// learnt from Central and installed. edged reads that (public.portal_tls_state, public.portal_certificates)
-// and never writes it; it asks scd to re-sync or renew over scd's local socket.
-//
-// Permissions: resource key "portal-https". READ is portal_https.read; WRITE is portal_https.manage. The three
-// changes that move the portal or its certificates -- the address, the hotel domain, Renew now -- additionally
-// require the operator's password (step-up), the same re-authentication every sensitive setting uses here.
-//
-// No key material is ever read or returned: the private keys are files under /etc/stayconnect/portal-tls that
-// edged cannot read, and the certificate rows carry metadata only.
+// Portal HTTPS: edged owns only portal_https_settings; TLS state and certificates are scd's, read-only here.
+// Private keys are never read or returned.
 
 import (
 	"context"
@@ -33,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The scd and netd endpoints this surface depends on. Named once so a test and a reader find them together.
 const (
 	scdPortalTLSKick  = "/v1/portal/tls/kick"  // POST, no body -> 202: re-sync with Central now
 	scdPortalTLSRenew = "/v1/portal/tls/renew" // POST, no body -> 202: order new certificates now
@@ -41,11 +26,8 @@ const (
 	netdPortalIPCheck = "/v1/portal-ip/validate"
 )
 
-// portalHistoryLimit bounds the change history the page shows. Presentation only.
 const portalHistoryLimit = 50
 
-// portalCheckWait is how long POST /check waits for scd to finish the re-sync it was asked for before
-// answering with whatever state is current. A sync is one or two HTTPS round trips to Central.
 const portalCheckWait = 5 * time.Second
 
 type portalHTTPSSettings struct {
@@ -53,8 +35,7 @@ type portalHTTPSSettings struct {
 	CustomDomain *string   `json:"custom_domain"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	UpdatedBy    string    `json:"updated_by"`
-	// Configured is false only when migration 0116 could not choose a default because every candidate overlapped
-	// a guest network: the site must choose a portal address before HTTPS can work.
+	// Configured is false when no default portal address could be chosen without overlapping a guest network.
 	Configured bool `json:"configured"`
 }
 
@@ -134,10 +115,6 @@ func (s *server) portalHTTPSRoutes() http.Handler {
 	return r
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// validation (pure)
-// ---------------------------------------------------------------------------------------------------------
-
 var rfc1918 = []*net.IPNet{
 	mustCIDR("10.0.0.0/8"), mustCIDR("172.16.0.0/12"), mustCIDR("192.168.0.0/16"),
 }
@@ -150,9 +127,7 @@ func mustCIDR(s string) *net.IPNet {
 	return n
 }
 
-// validatePortalIP is the save-time half of the portal_https_settings CHECK: one private (RFC 1918) IPv4
-// address, written without a prefix (or as /32). It returns the canonical dotted form, or an operator-readable
-// reason. Whether the address collides with anything on this appliance is netd's question, asked next.
+// validatePortalIP requires one private (RFC 1918) IPv4 address, bare or /32, and returns its canonical form.
 func validatePortalIP(raw string) (string, string) {
 	v := strings.TrimSpace(raw)
 	v = strings.TrimSuffix(v, "/32")
@@ -184,14 +159,11 @@ func validatePortalIP(raw string) (string, string) {
 // The DB CHECK on portal_https_settings.custom_domain, verbatim.
 var portalDomainRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 
-// normalisePortalDomain lowercases, trims and drops one trailing dot.
 func normalisePortalDomain(raw string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 }
 
-// validatePortalDomain applies the same rules as the database CHECK, plus the contract's "a subdomain, never
-// an apex" (§2) in the only form edged can check without a public-suffix list: at least three labels. Central
-// re-checks the name against the public suffix list and refuses an apex there.
+// validatePortalDomain mirrors the DB CHECK and requires a subdomain (three or more labels); Central rejects apex names via the public suffix list.
 func validatePortalDomain(fqdn string) string {
 	if fqdn == "" {
 		return "enter the hotel portal domain, for example wifi.yourhotel.com"
@@ -207,10 +179,6 @@ func validatePortalDomain(fqdn string) string {
 	}
 	return ""
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// reads
-// ---------------------------------------------------------------------------------------------------------
 
 func (s *server) loadPortalHTTPSSettings(ctx context.Context) (portalHTTPSSettings, error) {
 	var st portalHTTPSSettings
@@ -305,9 +273,7 @@ func (s *server) loadPortalHistory(ctx context.Context) ([]portalSettingsChange,
 	return out, rows.Err()
 }
 
-// portalHostnames are the hostnames a client could reach the portal by, as scd last established them: the
-// OneGate hostname and, once one is registered and not removed, the hotel portal domain. They are what a
-// social provider's callback can be registered on.
+// portalHostnames are the hostnames the portal is reachable by: the OneGate hostname and the registered hotel domain.
 func portalHostnames(st portalTLSState) []portalCallbackURL {
 	out := []portalCallbackURL{}
 	if h := strings.ToLower(strings.TrimSpace(st.OneGateHostname)); h != "" {
@@ -355,11 +321,6 @@ func (s *server) portalHTTPSGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// writes
-// ---------------------------------------------------------------------------------------------------------
-
-// portalStepUp re-authenticates the operator and returns the name the change is recorded under.
 func (s *server) portalStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
@@ -373,7 +334,6 @@ func (s *server) portalStepUp(w http.ResponseWriter, r *http.Request, password s
 	return actor, true
 }
 
-// sourceIPOrNil is the caller's address when it is one the inet column accepts.
 func sourceIPOrNil(r *http.Request) any {
 	if ip := net.ParseIP(clientIP(r)); ip != nil {
 		return ip.String()
@@ -386,9 +346,7 @@ type portalIPIssue struct {
 	Message string `json:"message"`
 }
 
-// validatePortalIPWithNetd asks netd whether the address collides with anything on this appliance (a guest
-// subnet, the WAN or management subnet, a Docker bridge). It FAILS CLOSED: an unreachable or unreadable netd
-// is a refusal, never an approval -- an address nobody checked must not be saved.
+// validatePortalIPWithNetd asks netd about collisions (guest subnet, WAN/management, Docker bridge); unreachable netd refuses.
 func (s *server) validatePortalIPWithNetd(ctx context.Context, ip string) (bool, []portalIPIssue, string) {
 	if s.netd == nil {
 		return false, nil, "the network service is unavailable, so the address could not be checked"
@@ -454,8 +412,7 @@ func (s *server) portalHTTPSPutAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "portal_https.address_changed", "portal_https_settings", "portal_ip",
 		map[string]any{"old": old, "new": ip})
-	// A portal address change is a NETWORK change (contract §2.1): netd puts it on ogportal0 and re-renders the
-	// guest-side rules only through validate -> apply -> confirm, which the Client networks screen drives.
+	// A portal address change is a network change: netd applies it through validate -> apply -> confirm.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"portal_ip": ip, "changed": true, "apply_required": true, "apply_href": "/network",
 		"message": "Saved. Apply the network configuration to start answering on the new address.",
@@ -533,10 +490,8 @@ func (s *server) portalDomainChange(w http.ResponseWriter, r *http.Request, acto
 
 var errPortalNotConfigured = errors.New("portal_https_settings has no row")
 
-// savePortalSetting writes one field and its history row in ONE transaction, so the setting and its record can
-// never disagree. It returns the previous value and whether anything changed (saving the same value is not a
-// change and records nothing). A missing settings row is created only by a portal_ip write: a domain needs an
-// address to point at.
+// savePortalSetting writes the field and its history row in one transaction; a same-value save records nothing.
+// Only a portal_ip write may create the settings row (a domain needs an address).
 func (s *server) savePortalSetting(ctx context.Context, r *http.Request, actor, field string, value *string) (*string, bool, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -582,8 +537,7 @@ func (s *server) savePortalSetting(ctx context.Context, r *http.Request, actor, 
 	return old, true, tx.Commit(ctx)
 }
 
-// kickPortalTLS asks scd to re-sync with Central now. Best-effort: scd re-syncs on its own cycle anyway, so a
-// refused kick delays the change, it does not lose it.
+// kickPortalTLS is best-effort: scd re-syncs on its own cycle.
 func (s *server) kickPortalTLS(ctx context.Context) bool {
 	if s.scd == nil {
 		return false
@@ -598,8 +552,7 @@ func (s *server) kickPortalTLS(ctx context.Context) bool {
 	return true
 }
 
-// portalHTTPSCheckNow re-syncs with Central and answers with the state that follows, waiting a few seconds for
-// scd to record the sync. Nothing is changed by it, so it needs manage but not step-up.
+// portalHTTPSCheckNow re-syncs and returns the resulting state; it changes nothing, so no step-up.
 func (s *server) portalHTTPSCheckNow(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), portalCheckWait+5*time.Second)
 	defer cancel()
@@ -622,8 +575,7 @@ func (s *server) portalHTTPSCheckNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"refreshed": refreshed, "portal": doc})
 }
 
-// waitPortalSync polls the persisted tls-state until scd records a sync newer than `since`, or the wait ends.
-// It reads the database row rather than scd's in-memory answer because the row is what the page shows.
+// waitPortalSync reads the DB row, not scd's memory, because the row is what the page shows.
 func (s *server) waitPortalSync(ctx context.Context, since time.Time, max time.Duration) bool {
 	deadline := time.Now().Add(max)
 	for {

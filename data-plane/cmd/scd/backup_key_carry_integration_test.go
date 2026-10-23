@@ -11,9 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// A restore keeps the live key-holder register (backup_key_carry.go): the "backup" state is rebuilt inside one
-// transaction -- a removed holder active again, a holder the live register never had -- and the carry puts the
-// live state back. Rolled back at the end, so the shared test database is untouched.
+// Rebuilds an older backup's holder state in one rolled-back transaction and checks the carry restores the live state.
 func TestIntegrationBackupKeyRegisterSurvivesARestore(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {
@@ -50,13 +48,11 @@ func TestIntegrationBackupKeyRegisterSurvivesARestore(t *testing.T) {
 	kept = holder("General Manager", key("q"), "ACTIVE")
 	departed = holder("Former IT manager", key("p"), "REMOVED")
 
-	// The live register, as the restore reads it.
 	var snap string
 	if err := tx.QueryRow(ctx, keyRegisterCaptureSQL).Scan(&snap); err != nil || snap == "" {
 		t.Fatalf("capture: %q %v", snap, err)
 	}
 
-	// What an older backup would hold: the departed holder still active, and a holder unknown to the live register.
 	if _, err := tx.Exec(ctx, `UPDATE public.backup_key_holders SET status='ACTIVE', removed_at=NULL, removed_by=NULL, remove_reason=NULL WHERE id=$1`, departed); err != nil {
 		t.Fatal(err)
 	}

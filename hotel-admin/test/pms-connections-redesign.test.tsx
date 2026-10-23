@@ -2,17 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// THE PMS CONNECTIONS SCREEN, AS AN OPERATOR MEETS IT — and, above all, WHAT IT SENDS.
-//
-//   * Adding a Protel connection produces exactly the two requests the screen has always produced, and nothing
-//     else: no provider_config, no credential, no publish and no activation.
-//   * Adding a web-API provider sends its settings as provider_config and its credential as a structured secret,
-//     with the operator's password, and still neither publishes nor activates.
-//   * A connection that was created and never configured is kept apart from the live ones.
-//   * The verification badge says exactly how far a provider has been proven.
-//   * "Test connection" is never offered for a socket link.
-//   * No internal or development vocabulary reaches the operator.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
@@ -63,7 +52,7 @@ const REST_PROVIDER = {
 const PROTEL_PROVIDER = {
   kind: "protel-fias", label: "Protel (FIAS)", vendor: "Protel", integration: "FIAS interface", transport: "SOCKET",
   verification: "LIVE_PROVIDER_VERIFIED", credential: { mode: "NONE", fields: [] },
-  // Even if a catalogue ever claimed it, a socket link must not get a "test connection" button.
+  // Socket links cannot support a test-connection action even if catalog metadata claims otherwise.
   capabilities: { full_resync: true, test_connection: true },
 };
 
@@ -120,12 +109,10 @@ describe("adding a connection", () => {
     await renderPage();
     const dialog = await openWizard();
 
-    // Only one provider without a catalogue, and it is already chosen.
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
     await userEvent.type(within(dialog).getByLabelText(/^Name/), "Front office");
     await userEvent.type(within(dialog).getByLabelText(/PMS address and port/), "10.0.0.5:5010");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
-    // No credential step for a link that needs none, and no password asked for.
     expect(within(dialog).queryByLabelText(/Confirm your password/)).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
 
@@ -139,7 +126,6 @@ describe("adding a connection", () => {
       heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000, feed_freshness_ms: 120000, complete_sync_ms: 600000,
       read_only: true,
     });
-    // It stops at a draft. Publishing and activating are the operator's next, separate, confirmed steps.
     expect(await within(dialog).findByRole("button", { name: "Publish and activate" })).toBeTruthy();
     expect(post.mock.calls.some(([p]) => /publish|lifecycle|secret/.test(String(p)))).toBe(false);
   });
@@ -159,21 +145,18 @@ describe("adding a connection", () => {
     await userEvent.type(within(dialog).getByLabelText(/API address/), "not a url");
     await userEvent.type(within(dialog).getByLabelText(/Property code/), "BER");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
-    // The shape check stops a malformed address before anything is sent.
     expect(await within(dialog).findByText(/Enter a full web address/)).toBeTruthy();
     expect(post).not.toHaveBeenCalled();
     await userEvent.clear(within(dialog).getByLabelText(/API address/));
     await userEvent.type(within(dialog).getByLabelText(/API address/), "https://api.example.test");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
 
-    // Credentials: the secret is masked, the client id is not.
     const secretField = within(dialog).getByLabelText(/Client secret/) as HTMLInputElement;
     expect(secretField.type).toBe("password");
     await userEvent.type(within(dialog).getByLabelText(/Client ID/), "sc-client");
     await userEvent.type(secretField, "s3cr3t");
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
 
-    // The review never repeats the secret.
     expect(dialog.textContent).not.toContain("s3cr3t");
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "operator-pw");
     await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
@@ -208,7 +191,6 @@ describe("adding a connection", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Next" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Create connection" }));
 
-    // The refusal is in words, and says what did and did not happen.
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toMatch(/connection was created, but its configuration was not saved/i);
     expect(alert.textContent).toMatch(/not a recognised time zone/i);
@@ -238,7 +220,6 @@ describe("the overview", () => {
     await renderPage();
     await screen.findByText("Main PMS");
 
-    // Folded away by default, and never rendered as a connection card.
     expect(screen.queryByText("Test link")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Manage" })).toHaveLength(1);
     const toggle = screen.getByRole("button", { name: /Inactive \/ not configured/ });
@@ -270,7 +251,6 @@ describe("the overview", () => {
     expect(await screen.findByText("Working")).toBeTruthy();
     expect(screen.getAllByText("41").length).toBeGreaterThan(0);
     expect(screen.getAllByText("1m ago").length).toBeGreaterThan(0);
-    // The guest network that uses the connection is named on its card.
     expect(screen.getByText("Guest Wi-Fi")).toBeTruthy();
   });
 });
@@ -304,7 +284,7 @@ describe("the connection sheet", () => {
     expect(post.mock.calls[0]).toEqual(["/pms-interfaces/i2/test-connection", { password: "pw" }]);
     expect(await screen.findByText(/The test failed while signing in to the provider/)).toBeTruthy();
     expect(screen.getByText(/rejected the client credentials/)).toBeTruthy();
-    // A provider with a key gets a Credentials tab; the credential itself is never shown or fetched.
+    // Never fetch or display the stored credential.
     expect(screen.getByRole("tab", { name: "Credentials" })).toBeTruthy();
     for (const [p] of get.mock.calls) expect(String(p)).not.toMatch(/secret/);
   });
@@ -317,7 +297,6 @@ describe("the connection sheet", () => {
     await userEvent.click(await screen.findByRole("tab", { name: "Actions" }));
     await userEvent.click(await screen.findByRole("button", { name: "Activate" }));
     const dialog = await screen.findByRole("dialog", { name: /Activate this connection/ });
-    // Room charge is the one thing the appliance sends to the PMS, and only when approved (audit H-9).
     expect(dialog.textContent).toMatch(/Nothing is sent to the PMS except approved room charges/);
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
     await userEvent.click(within(dialog).getByRole("button", { name: "Activate" }));
@@ -369,17 +348,13 @@ describe("operator wording", () => {
       texts.push(baseElement.textContent ?? "");
     }
     for (const t of texts) {
-      // Match case-sensitively for the enum shape, case-insensitively for the words.
       expect(t.match(/\b[A-Z]{2,}_[A-Z_]{2,}\b/)).toBeNull();
       expect(t.match(/\bphase\b|phase-\d|controlled validation|\(no PMS\)|iam_v2|\bT0\d{3}\b/i)).toBeNull();
     }
   });
 });
 
-// EDITING A SAVED WEB-API CONNECTION STARTS FROM WHAT WAS SAVED. edged stores a REST provider's settings under
-// config.provider (pmsprovider.RESTConfig.StoredConfig); `provider_config` is only the request field. Reading
-// the request name started every Mews/Apaleo/OPERA edit from defaults and blanks -- dropping required property
-// ids and silently resetting optional scoping. The revision below has the exact shape StoredConfig writes.
+// REST settings are stored under config.provider; provider_config is only the request field.
 describe("editing a saved web-API connection", () => {
   const storedRevision = {
     source_timezone: "Europe/Berlin",

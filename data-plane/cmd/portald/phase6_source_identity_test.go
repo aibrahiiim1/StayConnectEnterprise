@@ -12,33 +12,18 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// THE PUBLIC PORTAL'S SOURCE-IDENTITY BOUNDARY.
-//
-// On this appliance a guest reaches the portal DIRECTLY through nftables DNAT, which preserves the original
-// source address. There is no reverse proxy, so X-Forwarded-For, X-Real-IP and True-Client-IP arrive entirely
-// under the guest's control.
-//
-// That matters far more here than it would on an ordinary web service, because the source address is not
-// merely logged: clientIP() feeds it into neighbour/ARP resolution to derive a DEVICE, and the device derives
-// the ENTITLEMENT. The Phase-6 surface deliberately takes no subject parameter so that identity comes from
-// the connection -- and a middleware that rewrites RemoteAddr from a header hands the parameter straight
-// back, letting one guest name another guest's address and operate on their devices.
-//
-// chi's middleware.RealIP does exactly that rewrite. It was installed globally on this router and has been
-// removed. These tests are the standing proof.
+// Guests reach the portal directly through nftables DNAT with no reverse proxy, so forwarding headers are
+// entirely guest-controlled, and clientIP() derives the device and therefore the entitlement. chi's
+// middleware.RealIP would rewrite RemoteAddr from them, so it must not be installed.
 
 const (
-	callerAddr = "10.90.0.11:41000" // caller A: the real peer
-	victimIP   = "10.90.0.22"       // victim B: a different guest, whose identity must be unreachable
+	callerAddr = "10.90.0.11:41000"
+	victimIP   = "10.90.0.22"
 )
 
-// spoofHeaders is every header a guest could try. Each one is a real product's idea of "the client's true
-// address", which is precisely why a middleware might honour it.
 var spoofHeaders = []string{"X-Forwarded-For", "X-Real-IP", "True-Client-IP", "X-Client-IP", "Forwarded"}
 
-// observedIP runs one request through the REAL middleware stack this service installs and reports what
-// clientIP() would resolve. It builds the stack from routes()'s own list rather than restating it, so the
-// test follows the service if the stack changes.
+// observedIP reports what clientIP() resolves through the given middleware stack.
 func observedIP(t *testing.T, install func(chi.Router), remote string, headers map[string]string) net.IP {
 	t.Helper()
 	var got net.IP
@@ -55,16 +40,12 @@ func observedIP(t *testing.T, install func(chi.Router), remote string, headers m
 	return got
 }
 
-// realStack is the middleware this service actually installs, in order, minus the logger (which only writes
-// to stderr during tests). RealIP is absent here because it is absent in routes(); if somebody re-adds it
-// there and not here, the guard test below fails.
+// realStack mirrors routes() minus the logger; RealIP is absent in both.
 func realStack(r chi.Router) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 }
 
-// NO SPOOF HEADER MAY MOVE THE DERIVED SOURCE. This is the test that would have failed before RealIP was
-// removed.
 func TestSourceIdentityIgnoresEverySpoofHeader(t *testing.T) {
 	want := net.ParseIP("10.90.0.11")
 	for _, h := range spoofHeaders {
@@ -83,7 +64,6 @@ func TestSourceIdentityIgnoresEverySpoofHeader(t *testing.T) {
 	}
 }
 
-// Several headers at once, including the multi-hop XFF form a proxy chain would produce.
 func TestSourceIdentityIgnoresCombinedAndChainedSpoofs(t *testing.T) {
 	got := observedIP(t, realStack, callerAddr, map[string]string{
 		"X-Forwarded-For": victimIP + ", 203.0.113.9, 198.51.100.4",
@@ -96,8 +76,7 @@ func TestSourceIdentityIgnoresCombinedAndChainedSpoofs(t *testing.T) {
 	}
 }
 
-// The genuine direct source must keep working, or the test above would pass for a resolver that returns
-// nothing at all.
+// The real source must keep working, or the tests above would pass for a resolver returning nothing.
 func TestSourceIdentityResolvesTheRealPeer(t *testing.T) {
 	got := observedIP(t, realStack, callerAddr, nil)
 	if got == nil || got.String() != "10.90.0.11" {
@@ -107,18 +86,13 @@ func TestSourceIdentityResolvesTheRealPeer(t *testing.T) {
 	if other == nil || other.String() != victimIP {
 		t.Fatalf("a different real peer did not resolve to itself: %v", other)
 	}
-	// ...and the two are genuinely different, so "caller A is not victim B" is a real distinction rather
-	// than an artifact of both resolving to the same thing.
 	if got.Equal(other) {
 		t.Fatal("caller A and victim B resolved to the same address; the fixtures are not distinct")
 	}
 }
 
-// THE REGRESSION GUARD. RealIP is what made the spoof work, so its absence is asserted directly against the
-// service's own router construction -- not against a copy of the middleware list.
 func TestRealIPMiddlewareIsNotInstalled(t *testing.T) {
-	// Demonstrate that RealIP WOULD have moved the identity, so this test is grounded in the actual
-	// behaviour rather than in a claim about it.
+	// Control case: RealIP would have moved the identity.
 	withRealIP := func(r chi.Router) {
 		r.Use(middleware.RequestID)
 		r.Use(middleware.RealIP)
@@ -130,15 +104,13 @@ func TestRealIPMiddlewareIsNotInstalled(t *testing.T) {
 			"if chi changed, this test needs revisiting rather than deleting", spoofed)
 	}
 
-	// Now the real service: the same request must resolve the real peer.
 	if got := observedIP(t, realStack, callerAddr, map[string]string{"X-Real-IP": victimIP}); got.String() != "10.90.0.11" {
 		t.Fatalf("the service stack honoured X-Real-IP: %v", got)
 	}
 }
 
-// The source file itself must not reintroduce it. A grep is a blunt instrument, and it is the right one here:
-// the failure mode is somebody adding one line back, and no behavioural test of the assembled router can run
-// without a full handler.
+// A source scan is the right tool: the failure is one line added back, and the assembled router cannot be
+// tested without a full handler.
 func TestRouterSourceDoesNotReferenceRealIP(t *testing.T) {
 	src, err := readSourceFile("main.go")
 	if err != nil {
@@ -147,7 +119,7 @@ func TestRouterSourceDoesNotReferenceRealIP(t *testing.T) {
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") {
-			continue // the explanatory note naming it is the point, not a violation
+			continue // a comment naming it is not a violation
 		}
 		if strings.Contains(trimmed, "middleware.RealIP") {
 			t.Fatalf("middleware.RealIP is installed again: %q\n"+
@@ -157,7 +129,6 @@ func TestRouterSourceDoesNotReferenceRealIP(t *testing.T) {
 	}
 }
 
-// readSourceFile reads a file from this package's directory.
 func readSourceFile(name string) (string, error) {
 	b, err := os.ReadFile(name)
 	return string(b), err

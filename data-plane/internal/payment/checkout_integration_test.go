@@ -18,8 +18,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// scriptedHosted is a HostedCheckoutProvider whose answers the test controls. It records every call so a test
-// can prove a status query never creates anything.
+// scriptedHosted answers as the test directs and records every call, so a test can prove a status query never creates
+// anything.
 type scriptedHosted struct {
 	mu        sync.Mutex
 	createErr error
@@ -28,7 +28,7 @@ type scriptedHosted struct {
 	creates   int
 	queries   int
 	lastRef   string
-	last      CheckoutRequest // the last checkout asked for: presentment currency and amount
+	last      CheckoutRequest
 }
 
 func (p *scriptedHosted) Name() string { return "stripe" }
@@ -80,8 +80,6 @@ func testKey(t *testing.T) PaymentKey {
 	return k
 }
 
-// cardFixture seeds a REQUIRED card-payment settlement whose default account is a configured Stripe TEST
-// account with sealed credentials.
 func cardFixture(t *testing.T, mode Mode) (scope, *CheckoutEngine, *scriptedHosted, *pgxpool.Pool) {
 	t.Helper()
 	admin := pool(t)
@@ -116,14 +114,12 @@ func TestCheckoutCapturedGrantsExactlyOnce(t *testing.T) {
 	if err != nil || !strings.HasPrefix(st.RedirectURL, "https://") {
 		t.Fatalf("start: %+v %v", st, err)
 	}
-	// The browser returning "success" proves nothing: while the provider says OPEN, nothing is granted.
 	r, _ := e.Reconcile(ctx, s.tenant, s.site, st.TransactionID)
 	if r.EntitlementID != "" || r.TransactionStatus != "PENDING" {
 		t.Fatalf("an open checkout must grant nothing: %+v", r)
 	}
-	// The provider now says captured, at the pinned amount.
 	prov.status = StatusResult{State: CheckoutCaptured, ProviderTxnRef: "pi_1", AmountMinor: s.amount, Currency: "usd"}
-	for i := 0; i < 3; i++ { // the return URL and the reconciler may both ask, any number of times
+	for i := 0; i < 3; i++ {
 		r, err = e.Reconcile(ctx, s.tenant, s.site, st.TransactionID)
 		if err != nil {
 			t.Fatalf("reconcile %d: %v", i, err)
@@ -138,7 +134,6 @@ func TestCheckoutCapturedGrantsExactlyOnce(t *testing.T) {
 	if prov.creates != 1 {
 		t.Fatalf("a checkout is created once, got %d", prov.creates)
 	}
-	// A second start for the same settlement is refused: it is no longer REQUIRED.
 	if _, err := e.StartCheckout(ctx, s.tenant, s.site, s.settlement, "WiFi", "http://p/r", "http://p/c"); err == nil {
 		t.Fatal("a settled card payment must not start another checkout")
 	}
@@ -186,7 +181,6 @@ func TestCheckoutAmbiguousIsResolvedByQueryNeverByRecreating(t *testing.T) {
 	if !errors.Is(err, ErrCheckoutAmbiguous) {
 		t.Fatalf("want ambiguous, got %v", err)
 	}
-	// The provider did create it and the client paid: the reconciler finds it by client reference.
 	prov.createErr = nil
 	prov.status = StatusResult{State: CheckoutCaptured, ProviderTxnRef: "pi_3", AmountMinor: s.amount, Currency: "USD"}
 	r, err := e.Reconcile(ctx, s.tenant, s.site, st.TransactionID)
@@ -290,7 +284,6 @@ func TestSealedCredentialsAreBoundToTheirOwner(t *testing.T) {
 	}
 }
 
-// guarded runs one statement inside a controlled-writer scope, as production code does.
 func guarded(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) string {
 	t.Helper()
 	ctx := context.Background()
@@ -312,8 +305,6 @@ func guarded(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) str
 	return id
 }
 
-// seedCardChain builds, on the FULL appliance schema, a priced Card-payment package, an ACCOUNT subject, a
-// quote, an AWAITING_SETTLEMENT purchase and its REQUIRED ONLINE_PAYMENT settlement.
 func seedCardChain(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	ctx := context.Background()
@@ -362,9 +353,8 @@ func seedCardChain(t *testing.T, p *pgxpool.Pool) scope {
 	return s
 }
 
-// AN ACCOUNT CHANGE AND ITS CREDENTIAL ROTATION COMMIT TOGETHER. A second account saved as the new default,
-// whose credentials cannot be sealed, must leave nothing behind: not the new account, and not the demotion of the
-// working default (automated review finding on PR #202).
+// An account change and its credential rotation commit together: a failed seal must leave neither the new account nor
+// the demotion of the working default.
 func TestSaveAccountIsAtomicWithItsCredentials(t *testing.T) {
 	_, _, _, admin := cardFixture(t, ModeTest)
 	s := seedCardChain(t, admin)

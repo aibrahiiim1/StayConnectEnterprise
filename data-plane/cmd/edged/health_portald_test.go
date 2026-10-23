@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// A loopback probe measures the listener it probes: a redirect elsewhere is that listener's answer, not a
-// destination to follow (the HTTPS portal's 302 to its canonical hostname was followed off-box and reported the
-// portal degraded).
+// A redirect is the probed listener's answer, not a destination to follow.
 func TestTCPGet_DoesNotFollowRedirects(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://portal.invalid/", http.StatusFound)
@@ -22,8 +20,7 @@ func TestTCPGet_DoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
-// The HTTPS listener check verifies the served certificate the way a client does: a certificate no system root
-// vouches for is a failure, not a pass.
+// A certificate no system root vouches for is a failure.
 func TestTLSListenerGet_VerifiesTheCertificate(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()

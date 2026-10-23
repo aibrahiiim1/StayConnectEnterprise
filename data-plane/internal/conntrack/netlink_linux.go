@@ -11,10 +11,8 @@ import (
 	"time"
 )
 
-// netlinkFlush dumps the IPv4 conntrack table once and deletes every entry naming one of ips.
-//
-// It runs in the network namespace of the calling thread, which is what lets the netns test script drive it with
-// `ip netns exec <router> netd flows-end ...` against a disposable router namespace.
+// netlinkFlush deletes every IPv4 conntrack entry naming one of ips. It acts in the calling thread's network
+// namespace, which the netns test script relies on.
 func netlinkFlush(ctx context.Context, ips []net.IP) (int, error) {
 	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, syscall.NETLINK_NETFILTER)
 	if err != nil {
@@ -24,7 +22,7 @@ func netlinkFlush(ctx context.Context, ips []net.IP) (int, error) {
 	if err := syscall.Bind(fd, &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}); err != nil {
 		return 0, fmt.Errorf("netlink bind: %w", err)
 	}
-	// A bounded receive, so a kernel that never answers cannot hang a teardown pass.
+	// Bounded receive so an unresponsive kernel cannot hang a teardown pass.
 	deadline := 5 * time.Second
 	if d, ok := ctx.Deadline(); ok {
 		if rem := time.Until(d); rem > 0 && rem < deadline {
@@ -73,7 +71,6 @@ func netlinkFlush(ctx context.Context, ips []net.IP) (int, error) {
 			}
 			continue
 		}
-		// One ACK (or error) per request.
 		for {
 			n, _, err := syscall.Recvfrom(fd, buf, 0)
 			if err != nil {
@@ -90,7 +87,6 @@ func netlinkFlush(ctx context.Context, ips []net.IP) (int, error) {
 			case r.err == nil:
 				deleted++
 			case errors.Is(r.err, enoent):
-				// already gone
 			default:
 				if firstErr == nil {
 					firstErr = fmt.Errorf("conntrack delete: %w", r.err)

@@ -1,6 +1,5 @@
-// A list of readiness codes as sentences. Shared by Payment methods and Hotel → Room charge so the same code
-// reads the same way on both. An unknown code is rendered as the code itself, in a <code> element — the server
-// may learn a reason before this console learns its wording, and the operator must still see it.
+// Readiness codes as sentences, shared with Room charge. An unknown code renders as itself, since the server
+// may learn a reason before this console learns its wording.
 
 import { codeWords } from "@/lib/payment-admin";
 import { cn } from "@/lib/utils";

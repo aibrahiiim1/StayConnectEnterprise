@@ -1,25 +1,7 @@
 "use client";
 
-// GUEST SIGN-IN CHECKS — did the room number a guest typed match the guest list, and if not, why not.
-//
-// The screen was titled "Resolution evidence" and consisted of a column of uuids under the heading "Guest
-// network", a column of SHOUTING_ENUM outcome codes, and a yes/no. An operator could not say what it was for,
-// what a "resolution" was, or what the ids belonged to — which is exactly the feedback that produced this
-// rewrite.
-//
-// Two changes, and the second one is the point:
-//
-//   * THE NETWORK HAS A NAME. edged now returns the guest network's name alongside its id. This matters more
-//     than it sounds: the single most useful thing this page can show is "every failure is on one network",
-//     and with a column of uuids that pattern was invisible because every row looked equally opaque.
-//
-//   * THE OUTCOMES ARE EXPLAINED. Each code now carries what it means and what to do about it, because
-//     "AMBIGUOUS_ROOM" is a conclusion the system reached, not an instruction anyone can act on.
-//
-// WHAT IS STILL ABSENT, DELIBERATELY: no guest, room number or reservation appears anywhere on this page. A
-// list of who tried to sign in and failed would be a way for any read-only admin session to enumerate who is
-// staying at the property, which is precisely what the guest-facing uniform failure message exists to prevent.
-// The per-guest view is a separate, role-gated screen. That is a constraint on this page, not an oversight.
+// Privacy invariant: no guest, room number or reservation appears on this page. A list of failed sign-ins would let
+// any read-only admin session enumerate who is staying at the property; the per-guest view is a separate, role-gated screen.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -39,10 +21,7 @@ import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
 import { ShieldCheck } from "lucide-react";
 
-// EVERY OUTCOME, IN WORDS, WITH THE ACTION IT IMPLIES.
-//
-// An unknown code falls through to a de-underscored version rather than being hidden — a connector producing an
-// outcome this table has not been taught must still be countable.
+// An unknown code falls through to a de-underscored label rather than being hidden, so it is still countable.
 const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; tone: "ok" | "warn" | "err" }> = {
   VERIFIED: {
     label: "Verified",
@@ -114,7 +93,7 @@ const outcome = (code: string) =>
 
 type ResolutionsResp = PagedFields & {
   data?: PmsResolution[];
-  /** The server's summary of the most recent `window` checks: what is happening now, not a year of history. */
+  /** Summary of the most recent `window` checks. */
   summary?: {
     window?: number;
     total?: number;
@@ -128,9 +107,7 @@ type ResolutionsResp = PagedFields & {
 export default function PMSResolutionsPage() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  // THE TABLE PAGES THROUGH EVERY CHECK, on the server; it used to stop at the newest 200. The breakdown above
-  // it still describes the most recent checks, counted by the server, because the question it answers is what
-  // is failing now.
+  // The table pages through every check; the breakdown covers only the most recent, since it answers what is failing now.
   const list = useServerPage<ResolutionsResp>({ path: "/pms-resolutions" });
   const { resp, current, err, loading: refreshing } = list;
   const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
@@ -140,8 +117,6 @@ export default function PMSResolutionsPage() {
   const summary = useMemo(() => {
     const s = resp?.summary;
     if (!s) return null;
-    // Grouped by NAME where there is one, so the per-network breakdown is readable. Networks that have been
-    // deleted since a check ran keep their id, which is the honest label for a network that no longer exists.
     return {
       window: s.window ?? 0,
       total: s.total ?? 0,
@@ -156,9 +131,7 @@ export default function PMSResolutionsPage() {
     };
   }, [resp]);
 
-  // THE PATTERN WORTH SURFACING. One network failing while the others succeed is a routing problem, and it is the
-  // single most common cause of "the Wi-Fi doesn't work in the annexe" — so it is called out rather than left to
-  // be spotted in the table.
+  // One network failing while others succeed is a routing problem, so call it out.
   const suspectNetwork = useMemo(() => {
     if (!summary || summary.networks.length < 2) return null;
     const bad = summary.networks.filter(([, n]) => n.total >= 3 && n.verified === 0);
@@ -335,18 +308,7 @@ export default function PMSResolutionsPage() {
             />
           ) : (
             <Table>
-              {/*
-                THE TABLE CARRIES NO PROSE, and that is deliberate twice over.
-
-                Repeating the same explanatory sentence on two hundred rows is noise — the meaning belongs to the
-                OUTCOME, not to each occurrence of it, so it lives once in the breakdown card above.
-
-                It also keeps a hard guarantee easy to verify: every cell in this table is a timestamp, a network
-                name or an outcome label. A test asserts that the rendered table contains no "room",
-                "reservation", "stay" or "folio" text at all, which is a check that only works if the table holds
-                nothing but those three kinds of value. Explanatory copy using the word "room" generically would
-                defeat it, and the guarantee is worth more than the convenience.
-              */}
+              {/* No prose here: a test asserts the table contains no "room", "reservation", "stay" or "folio" text. */}
               <THead>
                 <TR>
                   <TH>When</TH>
@@ -366,8 +328,6 @@ export default function PMSResolutionsPage() {
                         {r.guest_network_name ? (
                           <span className="text-sm">{r.guest_network_name}</span>
                         ) : (
-                          // The id is shown only when there is no name to show — a network deleted since the
-                          // check ran. It is a chip rather than raw text so it is clearly an identifier.
                           <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                             Network no longer configured
                             <MonoId value={r.guest_network_id} title="Client network" />

@@ -7,12 +7,7 @@ import type { Whoami } from "@/lib/api";
 
 type Route = { method?: string; match: RegExp | string; status?: number; body: unknown | ((n: number) => { status?: number; body: unknown }) };
 
-/**
- * Replaces global fetch with a tiny router over the /api/* paths lib/api.ts calls. Each call is recorded so a
- * test can assert exactly what was sent. Unmatched requests answer 404 so a missing route fails loudly. A route
- * whose body is a function is called with how many times it has matched, so it can answer differently on a
- * retry (a step-up demand, then success).
- */
+/** Unmatched requests return 404; function responses receive a hit count for retry scenarios. */
 export function mockFetch(routes: Route[]) {
   const calls: { method: string; url: string; body: unknown }[] = [];
   const hits = new Map<Route, number>();
@@ -72,7 +67,6 @@ export const TENANT_ME: Whoami = {
   customer_name: "Semantics",
 };
 
-/** Renders a screen the way the app shell does: signed in, with toasts and the password dialog. */
 export function renderAs(me: Whoami, ui: React.ReactNode) {
   return render(
     <SessionProvider me={me}>

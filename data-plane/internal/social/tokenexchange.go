@@ -1,13 +1,7 @@
 package social
 
-// Shared authorization-code → token exchange for every real provider (Google,
-// Microsoft, Apple, Facebook): plain RFC 6749, plus the PKCE code_verifier
-// for the providers that bind an attempt with one.
-//
-// The form carries the client secret, so neither the form nor the request is
-// ever put into an error or a log line; only the IdP's own error code and
-// description are surfaced, which is what an operator needs to debug an
-// invalid_client or invalid_grant.
+// Shared authorization-code token exchange. The form carries the client secret, so neither it nor the
+// request is ever put into an error or log; only the IdP's own error code and description are surfaced.
 
 import (
 	"context"
@@ -40,8 +34,7 @@ func postTokenForm(ctx context.Context, hc *http.Client, provider, tokenURL stri
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusOK {
-		// RFC 6749 {error, error_description} (Microsoft, Apple) or the Graph
-		// API's nested {error:{message,type,code}} (Facebook).
+		// Either RFC 6749 {error, error_description} or Facebook's nested {error:{message,type,code}}.
 		var flat struct {
 			Error       any    `json:"error"`
 			Description string `json:"error_description"`
@@ -67,10 +60,8 @@ func postTokenForm(ctx context.Context, hc *http.Client, provider, tokenURL stri
 	return &tk, nil
 }
 
-// looksLikeEmail is a deliberately loose shape check (one @, a dot in the
-// domain, no spaces). It decides only whether a claim is an email ADDRESS at
-// all — e.g. Microsoft's preferred_username can be a phone number — never
-// whether it is verified.
+// looksLikeEmail is a deliberately loose shape check (e.g. preferred_username can be a phone number); it
+// never decides whether an address is verified.
 func looksLikeEmail(s string) bool {
 	at := strings.IndexByte(s, '@')
 	if at <= 0 || at != strings.LastIndexByte(s, '@') || strings.ContainsAny(s, " \t\r\n") {

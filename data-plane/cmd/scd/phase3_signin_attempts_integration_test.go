@@ -2,15 +2,8 @@
 
 package main
 
-// GUEST SIGN-IN ATTEMPTS, end to end, against a real PostgreSQL.
-//
-// These are the proofs the Product Owner asked for, and they are written against the handlers scd actually
-// serves rather than against the pieces underneath. What the pieces cannot show is the thing that matters
-// here: that a refusal which used to leave nothing behind now leaves exactly one row, carrying the reason an
-// operator needs and the comparison that settles the conversation at the desk.
-//
-// NO REAL GUEST DATA APPEARS ANYWHERE IN THIS FILE. Every name, room and reservation identifier is invented
-// fixture data.
+// Guest sign-in attempts through scd's real handlers: every refusal leaves exactly one row with its reason
+// and comparison. No real guest data; all names, rooms and reservations are invented.
 
 import (
 	"bytes"
@@ -24,12 +17,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 )
 
-// testSealingKeyID and withSealingKey give the fixture the appliance-local key scd would load at startup.
-//
-// The production loader reads a 0600 file that a disposable test database has no reason to carry, and the
-// daemon deliberately keeps running without it — so a fixture that did nothing here would record every
-// attempt with its sensitive half NULL and the encryption proofs would silently assert nothing. Installing a
-// known key makes the round trip, the ciphertext inspection and the owner binding real.
+// testSealingKeyID and withSealingKey install a known key; without one the daemon records attempts with a
+// NULL sensitive half and the encryption proofs would silently assert nothing.
 const testSealingKeyID = "0a5c1e00-0000-4000-8000-0000000000d2"
 
 func withSealingKey(t *testing.T, f *authFixture) {
@@ -39,7 +28,6 @@ func withSealingKey(t *testing.T, f *authFixture) {
 	f.p3.attempts = signinattempt.NewStore(f.pool, kr, testSealingKeyID)
 }
 
-// attemptRow is what the test reads back out of the table.
 type attemptRow struct {
 	ID            string
 	Result        string
@@ -88,8 +76,7 @@ func attemptCount(t *testing.T, f *authFixture) int {
 	return n
 }
 
-// seedGivenName gives the fixture's stay a MULTI-WORD given name in one field, which is how a PMS sending
-// "FAMILY NAME, FULL GIVEN NAME" is mirrored.
+// seedGivenName gives the stay a multi-word given name in one field, as a PMS "FAMILY, FULL GIVEN NAME" is mirrored.
 func seedGivenName(t *testing.T, f *authFixture, given string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -99,7 +86,7 @@ func seedGivenName(t *testing.T, f *authFixture, given string) {
 	}
 }
 
-// soleOccupant moves the fixture's SECOND stay off room 412, leaving exactly one eligible stay on it.
+// soleOccupant moves the second stay off room 412, leaving one eligible stay.
 func soleOccupant(t *testing.T, f *authFixture) {
 	t.Helper()
 	if _, err := controlledExec(context.Background(), f.pool, "stay",
@@ -109,10 +96,8 @@ func soleOccupant(t *testing.T, f *authFixture) {
 	}
 }
 
-// THE MULTI-WORD GIVEN NAME. The Product Owner confirmed the contract: the COMPLETE stored field
-// authenticates, and individual words inside it do not. Both halves are asserted, because the second is the
-// one that looks like a bug to somebody reading the code later and is in fact the security property —
-// accepting one word would admit anyone who guessed a common first name for a room.
+// The complete stored given name authenticates; individual words do not (a security property: one word
+// would admit anyone who guessed a common first name).
 func TestIntegration_SignInAttempts_TheCompleteGivenNameAuthenticatesAndItsWordsDoNot(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -138,8 +123,7 @@ func TestIntegration_SignInAttempts_TheCompleteGivenNameAuthenticatesAndItsWords
 	}
 }
 
-// The family name and the reservation number are the other two accepted values, and the record says WHICH
-// one admitted the guest — an operator who cannot tell them apart cannot explain the next failure.
+// The record says which accepted value (family name, reservation number) admitted the guest.
 func TestIntegration_SignInAttempts_FamilyNameAndReservationNumberEachAuthenticate(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -159,12 +143,8 @@ func TestIntegration_SignInAttempts_FamilyNameAndReservationNumberEachAuthentica
 	}
 }
 
-// THE THREE REFUSALS THAT USED TO BE ONE.
-//
-// A wrong value on a real room, a room the mirror does not hold, and a room whose stay is no longer eligible
-// produced the identical empty answer and the identical recorded outcome. They are three different
-// conversations at the desk and they are now three different recorded results — while remaining, deliberately,
-// one single answer to the guest.
+// A wrong value, a room the mirror does not hold and an ineligible stay are three recorded results but one
+// answer to the guest.
 func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistinct(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -197,10 +177,8 @@ func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistin
 		t.Fatal("the record claims an absent room was found")
 	}
 
-	// Check the stays out. The room still exists in the mirror; no stay on it may authenticate.
 	if _, err := controlledExec(ctx, f.pool, "stay",
-		// posting_allowed=false as internal/checkout writes it: the posting_only_in_house CHECK runs before
-		// the AFTER trigger that recomputes the flag.
+		// posting_allowed=false as internal/checkout writes it: the CHECK runs before the AFTER trigger.
 		`UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 		  WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site); err != nil {
 		t.Fatalf("check the stays out: %v", err)
@@ -214,8 +192,7 @@ func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistin
 		t.Fatalf("a checked-out stay recorded %s, want STAY_NOT_ELIGIBLE", ineligible.Result)
 	}
 
-	// ...AND ALL THREE LOOK IDENTICAL TO THE GUEST. The distinction is the operator's; giving it to the guest
-	// would let anyone in the lobby enumerate which rooms are occupied and which have departed.
+	// All three look identical to the guest, or the lobby could enumerate occupied and departed rooms.
 	for _, r := range []signinattempt.Result{
 		signinattempt.CredentialMismatch, signinattempt.RoomNotInMirror, signinattempt.StayNotEligible,
 	} {
@@ -225,23 +202,19 @@ func TestIntegration_SignInAttempts_MismatchAbsentRoomAndIneligibleStayAreDistin
 	}
 }
 
-// A ROOM'S HISTORY NEVER HIDES ITS CURRENT GUEST. The room probe reads a bounded window of stays; a busy room
-// accumulates checked-out stays for years, and a window filled by them used to leave the in-house stay outside
-// it, so the guest was refused as not eligible. Found on PRE-LIVE: one in-house stay behind 34 departed ones.
+// A room's history never hides its current guest: the probe reads a bounded window of stays, which departed
+// stays must not fill.
 func TestIntegration_SignInAttempts_RoomHistoryNeverHidesTheInHouseStay(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
-	// Compact the (disposable) table first, so rows land in the order they are written rather than in whatever
-	// space earlier tests freed.
+	// Compact the table first so rows land in write order rather than in space earlier tests freed.
 	if _, err := f.pool.Exec(ctx, `VACUUM FULL iam_v2.stays`); err != nil {
 		t.Fatalf("compact stays: %v", err)
 	}
-	// A fresh room: twenty departed stays and then the current one, written in that order by one statement and
-	// with ids and reservation numbers that sort after the history, so the scan meets the history first whichever
-	// plan reads it -- the shape a room has after years of turnover. The current stay carries the fixture's own
-	// occupancy evidence.
+	// Twenty departed stays then the current one, ids and reservations sorting after the history, so any
+	// plan meets the history first.
 	if _, err := controlledExec(ctx, f.pool, "stay", `
 		INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,
 		                         normalized_room_number,status,posting_allowed,effective_checkout_at,lifecycle_version,
@@ -264,7 +237,7 @@ func TestIntegration_SignInAttempts_RoomHistoryNeverHidesTheInHouseStay(t *testi
 		 WHERE tenant_id=$1 AND site_id=$2 AND normalized_room_number='777'`, f.tenant, f.site); err != nil {
 		t.Fatalf("seed the room's guests: %v", err)
 	}
-	// The hazard is real in this database: an unordered window of 16 holds none of the current stay.
+	// An unordered window of 16 would hold none of the current stay.
 	inWindow := -1
 	if err := f.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='IN_HOUSE') FROM (SELECT status FROM iam_v2.stays
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND normalized_room_number='777' LIMIT 16) w`,
@@ -289,8 +262,7 @@ func deref(p *int) int {
 	return *p
 }
 
-// EVERY DELIBERATE SUBMISSION LEAVES EXACTLY ONE ROW, including the ones that fail before a resolver, a stay
-// or even a network exists. Those are precisely the attempts that used to vanish.
+// Every deliberate submission leaves exactly one row, including those failing before a resolver or network exists.
 func TestIntegration_SignInAttempts_EverySubmissionLeavesExactlyOneRecord(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -326,9 +298,7 @@ func TestIntegration_SignInAttempts_EverySubmissionLeavesExactlyOneRecord(t *tes
 	}
 }
 
-// A SUCCESSFUL SIGN-IN IS ONE ROW, NOT TWO. Identity is proved in one call and access granted in the next;
-// they are two halves of ONE deliberate submission, so the grant completes the row the resolve wrote rather
-// than starting its own. Double-counting here would make "how many guests failed today" unanswerable.
+// A successful sign-in is one row: the grant completes the row the resolve wrote.
 func TestIntegration_SignInAttempts_AGrantCompletesTheRecordItDoesNotDuplicateIt(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -358,8 +328,7 @@ func TestIntegration_SignInAttempts_AGrantCompletesTheRecordItDoesNotDuplicateIt
 	}
 }
 
-// THE CORRELATION ID ties a guest's report to the row, on success and on failure alike, and it is the id the
-// portal minted for that submission rather than something invented server-side.
+// The correlation id is the one the portal minted, on success and failure alike.
 func TestIntegration_SignInAttempts_CorrelationIdsAreUsableOnSuccessAndFailure(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -376,16 +345,14 @@ func TestIntegration_SignInAttempts_CorrelationIdsAreUsableOnSuccessAndFailure(t
 	}
 }
 
-// THE SEALED HALF ROUND-TRIPS THROUGH THE DATABASE, and the ciphertext on disk carries none of it in clear.
+// The sealed half round-trips and the ciphertext on disk carries none of it in clear.
 func TestIntegration_SignInAttempts_CredentialsAreEncryptedAtRestAndRoundTrip(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	withSealingKey(t, f)
 	ctx := context.Background()
 	seedGivenName(t, f, "MARIA DEL CARMEN")
-	// The fixture deliberately puts TWO stays on room 412 so that ambiguity can be exercised elsewhere. This
-	// test is about the ordinary case, where the room has one stay and there is therefore no question about
-	// whose values would have been accepted, so the second one is moved out of the way.
+	// Move the second stay away so only one stay's values could have been accepted.
 	soleOccupant(t, f)
 
 	post(t, f.p3.resolveHandler, f.verifyBody("412", "  Nottheguest ", f.reqID(t, 1)))
@@ -394,7 +361,7 @@ func TestIntegration_SignInAttempts_CredentialsAreEncryptedAtRestAndRoundTrip(t 
 		t.Fatal("nothing was sealed; the comparison panel would be empty")
 	}
 
-	// (1) the bytes on disk contain neither what was typed nor what would have been accepted.
+	// (1) the bytes on disk contain neither what was typed nor what would have been accepted
 	var raw []byte
 	if err := f.pool.QueryRow(ctx,
 		`SELECT sensitive_ciphertext FROM iam_v2.sign_in_attempts WHERE id=$1::uuid`, a.ID).Scan(&raw); err != nil {
@@ -406,7 +373,7 @@ func TestIntegration_SignInAttempts_CredentialsAreEncryptedAtRestAndRoundTrip(t 
 		}
 	}
 
-	// (2) it opens, and it carries both what the guest typed and what the property would have accepted.
+	// (2) it opens and carries both typed and accepted values
 	s, ok, err := f.p3.attempts.OpenSensitive(ctx, f.tenant, f.site, a.ID)
 	if err != nil || !ok {
 		t.Fatalf("the sealed half did not open: %v (ok=%v)", err, ok)
@@ -421,7 +388,7 @@ func TestIntegration_SignInAttempts_CredentialsAreEncryptedAtRestAndRoundTrip(t 
 		t.Fatalf("the accepted values are wrong: %+v", s)
 	}
 
-	// (3) an id from another site does not open, and does not error differently from an id that never existed.
+	// (3) an id from another site does not open, and errors no differently from one that never existed
 	other := newAuthFixture(t)
 	withSealingKey(t, other)
 	if _, ok, err := f.p3.attempts.OpenSensitive(ctx, other.tenant, other.site, a.ID); err != nil || ok {
@@ -429,8 +396,7 @@ func TestIntegration_SignInAttempts_CredentialsAreEncryptedAtRestAndRoundTrip(t 
 	}
 }
 
-// NO EXPECTED VALUES ARE INVENTED when the mirror holds no stay for the room. The panel must be able to say
-// "there is nothing here" rather than show blanks that read as withheld data.
+// No expected values are invented when the mirror holds no stay for the room.
 func TestIntegration_SignInAttempts_AnAbsentRoomRecordsNoAcceptedValues(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -450,8 +416,7 @@ func TestIntegration_SignInAttempts_AnAbsentRoomRecordsNoAcceptedValues(t *testi
 	}
 }
 
-// PMS OFFLINE: a guest whose stay is in the local mirror still signs in, and the record carries the mirror's
-// age so an operator can see how far behind the roster was.
+// PMS offline: a guest in the local mirror still signs in, and the record carries the mirror's age.
 func TestIntegration_SignInAttempts_OfflineSignInIsRecordedWithTheMirrorAge(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -475,13 +440,11 @@ func TestIntegration_SignInAttempts_OfflineSignInIsRecordedWithTheMirrorAge(t *t
 	}
 }
 
-// A MIRROR THAT CAN AUTHORISE NOBODY is recorded as the site-wide condition it is, and answers the guest
-// TECHNICALLY — not "check your details", which for this guest would be advice that cannot help.
+// A mirror that can authorise nobody is a site-wide condition and answers the guest TECHNICALLY.
 func TestIntegration_SignInAttempts_AMirrorThatCannotAuthoriseIsTechnical(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 
-	// Never synchronised: there is no published roster to answer from, for anybody.
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
 		SET transport_status='DISCONNECTED', sync_status='RESYNC_REQUIRED', continuity_status='CONTINUOUS',
 		    last_complete_sync_at=NULL, updated_at=now() WHERE tenant_id=$1`, f.tenant); err != nil {
@@ -502,8 +465,7 @@ func TestIntegration_SignInAttempts_AMirrorThatCannotAuthoriseIsTechnical(t *tes
 	}
 }
 
-// AN ORDINARY MISMATCH IS NEVER TECHNICAL. The mirror image of the test above, and the Product Owner's rule
-// stated directly at the wire.
+// An ordinary mismatch is never TECHNICAL.
 func TestIntegration_SignInAttempts_AnOrdinaryMismatchIsClassifiedAsCredential(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -519,23 +481,20 @@ func TestIntegration_SignInAttempts_AnOrdinaryMismatchIsClassifiedAsCredential(t
 	}
 }
 
-// THE THIRTY-DAY BOUNDARY, asserted on both sides of it, and asserted to touch nothing else.
-//
-// A retention sweep that reached into stays, guests, entitlements, sessions or the general audit log would be
-// destroying evidence rather than expiring it, so the counts around it are part of the test.
+// The thirty-day retention boundary, asserted on both sides; the sweep must touch no stays, guests,
+// entitlements, sessions or audit log.
 func TestIntegration_SignInAttempts_PurgeRemovesOnlyExpiredAttempts(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
-	// One successful sign-in, so there are stays, entitlements and sessions for the sweep to leave alone.
+	// One successful sign-in gives the sweep stays, entitlements and sessions to leave alone.
 	_, res := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", f.reqID(t, 1)))
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("setup: %+v", res)
 	}
 	postGrant(t, f, res.AuthContextID, res.Offers[0].PackageRevisionID)
 
-	// Three attempts placed either side of the boundary, to the minute.
 	type placed struct {
 		name string
 		age  time.Duration
@@ -596,9 +555,7 @@ func TestIntegration_SignInAttempts_PurgeRemovesOnlyExpiredAttempts(t *testing.T
 	}
 }
 
-// NOTHING OUTSIDE THIS TENANT AND SITE IS RECORDED OR READABLE. The confinement is asserted at the record,
-// not only at the response: an attempt in one site must be invisible from another even to a caller holding
-// its id.
+// Nothing outside this tenant and site is recorded or readable, even to a caller holding an attempt id.
 func TestIntegration_SignInAttempts_AreConfinedToTheirTenantAndSite(t *testing.T) {
 	f := newAuthFixture(t)
 	other := newAuthFixture(t)
@@ -618,17 +575,12 @@ func TestIntegration_SignInAttempts_AreConfinedToTheirTenantAndSite(t *testing.T
 	}
 }
 
-// WITH MORE THAN ONE STAY ON THE ROOM, NO EXPECTED VALUES ARE SHOWN.
-//
-// The panel exists to say "you typed X, we would have accepted Y". When two guests share a room there is no
-// single Y, and printing one of them would put a name on the operator's screen that the guest never had to
-// match — a confident, wrong answer, which is worse than the honest absence.
+// With more than one stay on the room no expected values are shown; printing one would be a confident, wrong answer.
 func TestIntegration_SignInAttempts_AmbiguousRoomShowsNoExpectedValues(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	withSealingKey(t, f)
 
-	// The fixture seeds two IN_HOUSE stays on room 412, and "Shared" is a surname both carry.
 	_, res := post(t, f.p3.resolveHandler, f.verifyBody("412", "Shared", f.reqID(t, 1)))
 	if res.Outcome == outcomeVerified {
 		t.Fatal("an ambiguous match verified")
@@ -649,15 +601,9 @@ func TestIntegration_SignInAttempts_AmbiguousRoomShowsNoExpectedValues(t *testin
 	}
 }
 
-// RAW CREDENTIALS NEVER REACH A LOG, A JOURNAL OR CI OUTPUT.
-//
-// This is the property that is easiest to lose and hardest to notice: one helpful "reason" string carrying
-// the submitted value, and every appliance journal, every `journalctl` an engineer pastes into a ticket and
-// every CI transcript becomes a copy of the guest data the sealed column exists to protect. Recording it
-// encrypted and then printing it is worse than not recording it at all, because it looks solved.
-//
-// The whole default logger is captured for the duration of a complete sign-in — a wrong value, a correct
-// one, and a grant — and every byte it produced is searched.
+// Raw credentials never reach a log: one "reason" string carrying the submitted value would copy guest data
+// into every journal and CI transcript. The whole default logger is captured across a complete sign-in
+// (wrong value, correct value, grant) and every byte is searched.
 func TestIntegration_SignInAttempts_NoCredentialValueIsEverLogged(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -683,16 +629,16 @@ func TestIntegration_SignInAttempts_NoCredentialValueIsEverLogged(t *testing.T) 
 		t.Fatal("nothing was logged at all, so this test would pass for the wrong reason")
 	}
 	for _, secret := range []string{
-		"nottheguest",      // what the guest typed and got wrong
-		"maria del carmen", // what they typed and got right, and the accepted given name
-		"okonkwo",          // the accepted family name
-		"res-4001",         // the accepted reservation identifier
+		"nottheguest",
+		"maria del carmen",
+		"okonkwo",
+		"res-4001",
 	} {
 		if strings.Contains(logged, secret) {
 			t.Errorf("a credential value reached the log: %q", secret)
 		}
 	}
-	// The log SHOULD still be useful: the structured result is what an operator greps for.
+	// The log must stay useful: operators grep the structured result.
 	if !strings.Contains(logged, "credential_mismatch") {
 		t.Error("the log carries no structured result, so it is neither safe nor useful")
 	}

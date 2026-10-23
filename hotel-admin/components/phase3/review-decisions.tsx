@@ -1,21 +1,7 @@
 "use client";
 
-// DECIDING A PMS MESSAGE THAT WAITS FOR REVIEW (audit H-15, decision D-D).
-//
-// A message the appliance could not apply sits in "Needs a decision". Two answers exist, one message at a time,
-// for the site admin and the IT manager, each under the operator's password and with a reason:
-//
-//   Acknowledge     the message needs no action. It stops counting as waiting.
-//   Link to a stay  the message is about this stay -- chosen from the stays it can still be matched to (same
-//                   PMS connection; the same reservation, or for a message without one, a stay that was in that
-//                   room when it arrived).
-//
-// Neither changes the stay, its internet access or the message itself: a check-out still only happens when
-// the PMS sends one the appliance can apply. Both are recorded, with who decided and why.
-//
-// And the automatic expiry setting: off by default. When switched on, a message that arrives AFTER that moment
-// and waits longer than the chosen number of days is recorded as expired. Messages already waiting are never
-// touched by it.
+// Review decisions require password and reason; they never change a stay or its access directly.
+// Automatic expiry applies only to messages received after the setting is enabled.
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -47,7 +33,6 @@ type Candidate = {
   departure?: string | null;
 };
 
-/** The two actions for one waiting message. */
 export function ReviewDecisionActions({ eventId, onDecided }: { eventId: string; onDecided: () => void }) {
   const toast = useToast();
   const [mode, setMode] = useState<"" | "ack" | "link">("");
@@ -154,7 +139,6 @@ type ExpirySetting = {
   bounds?: { min_days: number; max_days: number };
 };
 
-/** The automatic expiry setting, for the roles that may decide review messages. */
 export function ReviewExpirySettingCard() {
   const toast = useToast();
   const [s, setS] = useState<ExpirySetting | null>(null);

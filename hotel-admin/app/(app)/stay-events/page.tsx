@@ -1,20 +1,6 @@
 "use client";
 
-// PMS ACTIVITY — what the property management system has told this appliance.
-//
-// The screen used to have a column headed "Identity" whose contents were a connector-generated token along the
-// lines of `PROTEL:GI:8831:2026-09-09T18:22:04Z`. Asked what this page showed, an operator could not say: the
-// identity column identified nothing they recognised, "Type" was a protocol verb, "Reason" was a bounded code,
-// and the default filter was MANUAL_REVIEW — so the page usually opened empty with no explanation of what it
-// would have contained.
-//
-// The page's real job is one question, asked at the front desk several times a night: "I just checked that guest
-// in — has the Wi-Fi system seen it yet?" So each row now leads with the ROOM the message is about, the event is
-// described in words rather than as a protocol verb, and the PMS's own identifier is kept as secondary detail for
-// the one case it is needed — quoting a specific message to the PMS vendor.
-//
-// A row with no room is the meaningful case rather than a rendering gap: it means the appliance received a message
-// it could not match to a stay, which is usually exactly why it is still waiting.
+// A row with no room is meaningful, not a gap: the message could not be matched to a stay.
 
 import { useEffect, useMemo, useState } from "react";
 import type { StayEvent } from "@/lib/api";
@@ -40,8 +26,6 @@ import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { DECISION_WORDS, ReviewDecisionActions, ReviewExpirySettingCard } from "@/components/phase3/review-decisions";
 
-// THE STATUS, IN CONSEQUENCES. Each one says what it means for the guest list, because that is what an operator
-// is deciding about. The raw token stays available on the detail panel.
 const STATUS_WORDS: Record<string, { label: string; tone: "ok" | "warn" | "err" | "default" | "info"; meaning: string }> = {
   APPLIED: {
     label: "Applied", tone: "ok",
@@ -69,16 +53,12 @@ const STATUS_WORDS: Record<string, { label: string; tone: "ok" | "warn" | "err" 
   },
 };
 
-// Reason codes with their own sentence. Others are shown as their code in plain letters.
 const REVIEW_CODE_WORDS: Record<string, string> = {
-  // GDPR audit B2 (migration 0139): still waiting long after it arrived, so it will not be applied; its guest
-  // details were removed when the retention period or an erasure request ended.
   RETENTION_GIVEN_UP: "Given up: never processed, guest details removed",
 };
 const reviewCodeWords = (c: string) => REVIEW_CODE_WORDS[c] ?? c.replace(/_/g, " ").toLowerCase();
 
-// Protocol verbs, in hotel words. An unknown type falls through to its raw value rather than being hidden: a
-// connector sending something this table has not been taught must still be visible.
+// Unknown types fall through to their raw value so nothing a connector sends is hidden.
 const TYPE_WORDS: Record<string, string> = {
   GUEST_IN: "Check-in",
   GI: "Check-in",
@@ -122,21 +102,14 @@ type StayEventsResp = PagedFields & {
 };
 
 export default function StayEventsPage() {
-  // OPENS ON EVERYTHING, not on the review queue.
-  //
-  // The default was MANUAL_REVIEW, so the normal and healthy state of this screen was an empty table reading
-  // "Nothing to review" — which an operator checking whether the feed is alive reads as "the feed is dead".
-  // The review queue is still one click away and is called out above the table when it is non-empty.
+  // Defaults to everything, not the review queue: an empty "Nothing to review" table reads as a dead feed.
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<StayEvent | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  // PAGED AND SEARCHED ON THE SERVER. The list used to be the newest 200 messages, searched and counted in the
-  // browser -- on a busy feed, the last few minutes. The search (a room, a reservation, a guest's name) goes in a
-  // header, never the URL, because edged logs request lines. A new filter or search starts at the first page.
-  // "Needs a decision" is the messages in review that carry NO decision yet (audit H-15) -- not every message
-  // ever placed in review, which counted thousands already answered.
+  // The search term goes in a header, never the URL, because it can be a guest's name and edged logs request lines.
+  // "Needs a decision" means in review with no decision yet, not every message ever placed in review.
   const path = status === "UNDECIDED"
     ? "/pms-events?undecided=true"
     : status ? "/pms-events?processing_status=" + encodeURIComponent(status) : "/pms-events";
@@ -149,12 +122,10 @@ export default function StayEventsPage() {
   );
   const list = useServerPage<StayEventsResp>({ path, headers });
   const { resp, current, err, loading: refreshing } = list;
-  // A new question shows the skeleton, not the previous question's rows; a failed first load, an empty list.
   const rows = current && resp ? resp.data ?? [] : err && !resp ? [] : null;
   useEffect(() => { if (current && resp) setUpdatedAt(Date.now()); }, [current, resp]);
 
-  // THE TILES COUNT EVERY MESSAGE, from the server, whatever the filter: they answer "is the feed alive and is
-  // anything waiting", which a count of the page on screen cannot.
+  // Tiles are server counts over every message, regardless of the filter.
   const sum = resp?.summary;
   const counts = {
     applied: sum?.applied ?? 0,
@@ -310,7 +281,6 @@ export default function StayEventsPage() {
                     tone: "default" as const,
                     meaning: "",
                   };
-                  // A review message with a decision no longer "needs" one.
                   const st = e.processing_status === "MANUAL_REVIEW" && e.decided
                     ? { ...base, label: DECISION_WORDS[e.decision ?? ""] ?? "Decided", tone: "default" as const }
                     : base;
@@ -421,8 +391,6 @@ export default function StayEventsPage() {
                 {
                   label: "PMS message id",
                   span: true,
-                  // Kept, and kept here rather than in the table: this is the string to quote when raising a
-                  // message with the PMS vendor, and it is useful for nothing else.
                   value: detail.external_event_identity
                     ? <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />
                     : "Not shown to your role",

@@ -57,7 +57,6 @@ type Trust = {
   registry?: { version?: number; issued_at?: string } | null;
 };
 
-/** Read-only: the chain of trust between Central and the appliances. Nothing here can be changed from the console. */
 export default function TrustPage() {
   const [t, setT] = useState<Trust | null>(null);
   const [err, setErr] = useState<unknown>(null);

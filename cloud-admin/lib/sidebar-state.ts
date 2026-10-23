@@ -2,37 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-/**
- * The operator's sidebar width preference: remembered, and applied BEFORE the first paint.
- *
- * WHY THE ATTRIBUTE EXISTS AND THE STATE IS NOT ENOUGH.
- *
- * React state cannot decide the sidebar's width without a visible jump. The server renders this app's shell
- * with no access to localStorage, so a state-driven width is necessarily "expanded" in the server HTML; a
- * collapsed operator would then see a 16rem rail snap to 3.5rem on hydration, every single navigation. The
- * width therefore comes from a CSS custom property keyed off a `data-sidebar` attribute that a tiny script
- * stamps onto <html> before paint -- the same technique next-themes already uses in this app for the theme,
- * and the reason <html> already carries suppressHydrationWarning.
- *
- * React state still exists, because the LABELS, TOOLTIPS and ARIA have to change too, and those are not
- * expressible in CSS. It is seeded from the attribute rather than from storage, so the value React renders is
- * by construction the value already on screen.
- *
- * The default is EXPANDED: an operator who has never chosen sees the full navigation, which is the mode where
- * the labels are readable. Nothing about this preference is per-site or per-role, so it is a plain
- * device-local setting and belongs in localStorage.
- */
+/** Set width before paint to avoid hydration jumps; React reads the device-local attribute for labels and ARIA. */
 export const SIDEBAR_STORAGE_KEY = "onegate-central-sidebar";
 
-/** The attribute value that means collapsed. Its ABSENCE means expanded, so the default needs no write. */
+/** Absence means expanded, so the default needs no stored value. */
 const COLLAPSED = "collapsed";
 
-/**
- * The pre-paint script, as source. Injected by the root layout with dangerouslySetInnerHTML.
- *
- * It is wrapped in try/catch because localStorage throws outright in a browser with site data blocked, and a
- * navigation shell that fails to render at all is a far worse outcome than one that renders expanded.
- */
+/** localStorage can throw when site data is blocked; the shell still renders expanded. */
 export const SIDEBAR_INIT_SCRIPT = `(function(){try{
 if(localStorage.getItem(${JSON.stringify(SIDEBAR_STORAGE_KEY)})===${JSON.stringify(COLLAPSED)}){
 document.documentElement.setAttribute("data-sidebar",${JSON.stringify(COLLAPSED)});}
@@ -50,15 +26,12 @@ export function useSidebarCollapsed(): {
 } {
   const [collapsed, setState] = useState<boolean>(readAttribute);
 
-  // The attribute is the source of truth for what is ON SCREEN, so re-read it once after mount. During server
-  // rendering readAttribute() answered false; if the script had in fact stamped "collapsed", this corrects
-  // React's copy without ever having rendered a different width (the width was CSS all along).
+  // The pre-paint attribute is the visible state; hydrate React from it after mount.
   useEffect(() => {
     setState(readAttribute());
   }, []);
 
-  // A second tab is still the same operator on the same device. Following the change keeps the two windows
-  // from disagreeing about a preference that is explicitly device-local.
+  // Keep tabs on the same device in sync.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== SIDEBAR_STORAGE_KEY) return;
@@ -78,11 +51,11 @@ export function useSidebarCollapsed(): {
       else document.documentElement.removeAttribute("data-sidebar");
     }
     try {
-      // Only the non-default is stored. An operator who expands is back at the default and leaves no residue.
+      // Store only the non-default choice.
       if (next) window.localStorage.setItem(SIDEBAR_STORAGE_KEY, COLLAPSED);
       else window.localStorage.removeItem(SIDEBAR_STORAGE_KEY);
     } catch {
-      // Storage denied: the choice still applies to this page, it simply will not outlive it.
+      // Apply the choice for this page even when storage is denied.
     }
   }, []);
 

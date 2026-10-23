@@ -1,15 +1,8 @@
 package payment
 
-// A MARKER THAT CANNOT BE READ IS NOT A MARKER THAT IS NOT THERE.
-//
-// ReadRestoreMarker returned (0, false) for every failure -- not found, permission denied, malformed -- and
-// the comment justifying it said absence only ever causes more holding. That is false at generation zero,
-// which is where every appliance starts, and the consequence was measured on PRE-LIVE: a real supported
-// restore, with the marker advanced to 1 but written 0600 root-owned, reported outcome=UNCHANGED to a
-// database restored from a generation-0 dump. No hold, no record, every layer behaving as written.
-//
-// These tests pin the distinction. The permission case is Linux-only in effect -- running as root defeats
-// it -- so it is skipped rather than asserted falsely when it cannot be produced.
+// A marker that cannot be read is not a marker that is not there: ReadRestoreMarker must return an error for an
+// unreadable or malformed marker, not (0, false). The permission case is skipped when running as root, which defeats
+// it.
 
 import (
 	"os"
@@ -42,7 +35,6 @@ func TestAMarkerThatExistsIsReadWithItsGeneration(t *testing.T) {
 	}
 }
 
-// THE CASE THAT WAS SILENTLY WRONG.
 func TestAnUnreadableMarkerIsAnErrorAndNotAbsence(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file-mode permissions are not enforced the same way here")
@@ -64,7 +56,7 @@ func TestAnUnreadableMarkerIsAnErrorAndNotAbsence(t *testing.T) {
 	if present || gen != 0 {
 		t.Errorf("an unreadable marker must not also claim a generation: present=%v gen=%d", present, gen)
 	}
-	// The message has to name the file, because the operator's fix is a chmod on a specific path.
+	// The message must name the file, because the operator's fix is a chmod on that path.
 	if !strings.Contains(err.Error(), p) {
 		t.Errorf("the error does not name the marker path: %v", err)
 	}
@@ -87,10 +79,8 @@ func TestAMalformedMarkerIsAnErrorAndNotAbsence(t *testing.T) {
 	}
 }
 
-// AND THE MODE THE RESTORE TOOL WRITES, asserted against the tool itself.
-//
-// The Go half can only refuse to guess; what made the detector blind was a chmod in a shell script. This
-// reads that script, so the two cannot drift apart again.
+// The restore tool must write the marker with a mode edged can read; asserted against the shell script itself so the
+// two cannot drift.
 func TestTheRestoreToolWritesAMarkerItsReaderCanRead(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "scripts", "stayconnect-financial-restore.sh"))
 	if err != nil {

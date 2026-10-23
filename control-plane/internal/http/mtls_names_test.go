@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// The mTLS certificate's names used to be the literal "150.0.0.252". That made the appliance-facing
-// endpoint un-moveable in the way that actually matters: configuration could name any FQDN, and TLS would
-// still reject it. These pin the derivation, because getting it wrong breaks every appliance's transport at
-// once and looks like a network fault rather than a configuration one.
 func TestMTLSServerNamesComeFromConfiguration(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -18,10 +14,9 @@ func TestMTLSServerNamesComeFromConfiguration(t *testing.T) {
 		wantNot []string
 	}{
 		{
-			name: "the configured appliance endpoint, plus loopback",
-			base: "https://sc-central.echofusion.com",
-			want: []string{"sc-central.echofusion.com", "127.0.0.1"},
-			// Nothing from any particular lab may survive in the certificate by default.
+			name:    "the configured appliance endpoint, plus loopback",
+			base:    "https://sc-central.echofusion.com",
+			want:    []string{"sc-central.echofusion.com", "127.0.0.1"},
 			wantNot: []string{"150.0.0.252"},
 		},
 		{
@@ -37,7 +32,6 @@ func TestMTLSServerNamesComeFromConfiguration(t *testing.T) {
 			want:  []string{"sc-central.echofusion.com", "150.0.0.252", "old-central.example.com", "127.0.0.1"},
 		},
 		{
-			// Unconfigured, the listener still has to serve its own health check.
 			name: "no endpoint configured at all still yields loopback",
 			base: "",
 			want: []string{"127.0.0.1"},
@@ -59,7 +53,6 @@ func TestMTLSServerNamesComeFromConfiguration(t *testing.T) {
 					t.Fatalf("certificate must NOT be issued for %q; got [%s]", w, joined)
 				}
 			}
-			// A duplicated SAN is not fatal but signals the dedupe broke.
 			seen := map[string]bool{}
 			for _, n := range got {
 				if seen[n] {

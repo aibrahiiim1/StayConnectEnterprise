@@ -11,15 +11,9 @@ import (
 	"testing"
 )
 
-// gatepIamV2TableGrants derives, from the Gate-P SQL itself, the TABLE-level privileges on iam_v2 relations
-// that Gate-P leaves each svc_* runtime role holding: deploy/gatep/gatep-grants.sql is read in order,
-// following its `\ir` includes exactly as psql does, and every static `GRANT <privs> ON [TABLE] iam_v2.<rel>
-// TO svc_*` / `REVOKE ... FROM svc_*` is replayed onto an initially empty set (the file's preamble revokes
-// every iam_v2 privilege from the runtime roles before re-granting, so empty is the correct start).
-//
-// Column-level grants (`SELECT (a, b) ON ...`) are not table grants and information_schema.role_table_grants
-// does not report them, so they are skipped; FUNCTION/SEQUENCE/SCHEMA grants are out of scope here.
-// Keys are "grantee|table|PRIVILEGE", the shape the test compares against role_table_grants.
+// gatepIamV2TableGrants replays deploy/gatep/gatep-grants.sql (following `\ir` as psql does) from an empty set,
+// since its preamble revokes everything first. Column-level grants are skipped: role_table_grants
+// does not report them. Keys are "grantee|table|PRIVILEGE".
 func gatepIamV2TableGrants(t *testing.T) map[string]bool {
 	t.Helper()
 	_, self, _, ok := runtime.Caller(0)

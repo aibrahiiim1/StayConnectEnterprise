@@ -1,30 +1,11 @@
 package pms
 
-// Apaleo Connector API provider (phase 11).
-//
-// Apaleo is REST like Mews but authenticates with OAuth 2.0
-// client-credentials — we POST client_id + client_secret to an identity
-// endpoint and cache the resulting access_token until shortly before
-// expiry. Every API call then carries `Authorization: Bearer <token>`.
-//
-// Validation flow:
-//   1. Resolve the room number to an Apaleo unit ID (cached map, same
-//      pattern as Mews).
-//   2. GET /booking/v1/reservations?propertyId=X&timeFilter=OverlappingStay
-//      &from=now&to=now&unitIds=<id>&expand=primaryGuest
-//      — Apaleo inlines the primary guest by default so we don't need a
-//      second round-trip.
-//   3. Match the inlined guest against the query using the shared
-//      MatchesQuery helper.
-//
-// Config mapping (pms_providers columns → Apaleo concepts):
-//   base_url              → API host (default https://api.apaleo.com)
-//   api_key               → client_secret
-//   extra.client_id       → client_id
-//   extra.identity_url    → override for tests (default https://identity.apaleo.com)
-//   extra.scopes          → space-separated scopes (default "reservations.read
-//                                                         inventory.read")
-//   property_id           → Apaleo property code (3-letter uppercase, e.g. "HTL")
+// Apaleo Connector API provider. REST like Mews but OAuth 2.0 client-credentials: the access_token is cached until
+// shortly before expiry. Validation resolves the room to a unit id (cached), lists overlapping reservations with
+// expand=primaryGuest (the guest is inlined, no second round-trip) and matches via MatchesQuery.
+// Config: base_url (default https://api.apaleo.com), api_key = client_secret, extra.client_id, extra.identity_url
+// (tests; default https://identity.apaleo.com), extra.scopes (default "reservations.read inventory.read"), property_id
+// = Apaleo property code (3 uppercase letters).
 
 import (
 	"context"
@@ -47,8 +28,7 @@ const (
 	apaleoUnitRefreshEvery    = 15 * time.Minute
 	apaleoRequestTimeout      = 10 * time.Second
 	apaleoUnitPageSize        = 100
-	// Refresh the access token this much before its advertised expiry so
-	// a concurrent request never hits a 401.
+	// Refresh the token early so a concurrent request never hits a 401.
 	apaleoTokenSkew = 60 * time.Second
 )
 
@@ -66,7 +46,7 @@ type Apaleo struct {
 	httpClient *http.Client
 
 	mu          sync.RWMutex
-	units       map[string]string // room number → unit id
+	units       map[string]string
 	token       string
 	tokenExpiry time.Time
 	lastRefresh time.Time
@@ -100,7 +80,6 @@ func (a *Apaleo) Configure(cfg ProviderConfig) error {
 	a.clientSecret = cfg.Connection.APIKey
 	a.propertyID = cfg.Connection.PropertyID
 
-	// Pull optional Apaleo-specific knobs out of Extra.
 	a.clientID, _ = cfg.Connection.Extra["client_id"].(string)
 	if v, ok := cfg.Connection.Extra["identity_url"].(string); ok && v != "" {
 		a.identityURL = strings.TrimRight(v, "/")
@@ -128,8 +107,6 @@ func (a *Apaleo) Health() Health {
 	h.CacheSize = len(a.units)
 	return h
 }
-
-// ----- lifecycle -----
 
 func (a *Apaleo) Start(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
@@ -180,8 +157,6 @@ func (a *Apaleo) setStatus(status, errMsg string) {
 	}
 }
 
-// ----- token cache -----
-
 type apaleoTokenResp struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
@@ -218,8 +193,7 @@ func (a *Apaleo) getToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		// Apaleo identity errors follow the OAuth2 error shape
-		// {error, error_description}; surface the description verbatim.
+		// Identity errors follow the OAuth2 shape {error, error_description}; surface the description verbatim.
 		var e struct {
 			Error       string `json:"error"`
 			Description string `json:"error_description"`
@@ -247,8 +221,6 @@ func (a *Apaleo) getToken(ctx context.Context) (string, error) {
 	return tk.AccessToken, nil
 }
 
-// ----- unit / reservation fetches -----
-
 type apaleoUnit struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -260,9 +232,7 @@ type apaleoUnitsResp struct {
 
 func (a *Apaleo) refreshUnits(ctx context.Context) error {
 	next := make(map[string]string, 64)
-	// Apaleo paginates with pageNumber starting at 1. Stop when we get
-	// fewer than pageSize rows (or run past a safety cap to avoid an
-	// infinite loop on a broken server).
+	// Apaleo paginates from pageNumber 1; stop on a short page or a safety cap against a broken server.
 	for page := 1; page <= 50; page++ {
 		q := url.Values{}
 		q.Set("propertyId", a.propertyID)
@@ -326,8 +296,6 @@ func (a *Apaleo) fetchReservations(ctx context.Context, unitID string) (*apaleoR
 	return &out, nil
 }
 
-// ----- ValidateGuest -----
-
 func (a *Apaleo) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	norm := a.cfg.Normalization
 	queryRoom := NormalizeRoom(ApplyRoomFormat(norm.RoomFormat, q.RoomNumber))
@@ -364,8 +332,7 @@ func (a *Apaleo) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	for _, r := range resv.Reservations {
 		rFirst := ApplyNameNormalization(norm, r.PrimaryGuest.FirstName)
 		rLast := ApplyNameNormalization(norm, r.PrimaryGuest.LastName)
-		// Apaleo's bookingId is the human-facing identifier on receipts,
-		// so we match reservation_number against that (not the internal id).
+		// bookingId is the human-facing id on receipts, so reservation_number matches it (not the internal id).
 		rResNum := ApplyReservationCase(norm, r.BookingID)
 		if !MatchesQuery(q.Mode, qFirst, qLast, qRes, rFirst, rLast, rResNum) {
 			continue
@@ -386,8 +353,6 @@ func (a *Apaleo) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	return nil, ErrNotFound
 }
 
-// ----- Cacher + Tester -----
-
 func (a *Apaleo) CacheSnapshot(limit int) []Reservation {
 	if limit <= 0 {
 		limit = 200
@@ -404,8 +369,7 @@ func (a *Apaleo) CacheSnapshot(limit int) []Reservation {
 	return out
 }
 
-// TestConnection proves the full auth loop — we fetch a token AND make one
-// authenticated call (units page 1, smallest possible response).
+// TestConnection proves the full auth loop: a token plus one small authenticated call.
 func (a *Apaleo) TestConnection(ctx context.Context) error {
 	if _, err := a.getToken(ctx); err != nil {
 		return err
@@ -417,10 +381,7 @@ func (a *Apaleo) TestConnection(ctx context.Context) error {
 	return a.doGET(ctx, "/inventory/v1/units?"+q.Encode(), &out)
 }
 
-// ----- HTTP helper -----
-
-// doGET wraps the bearer-token fetch + API call. Same chokepoint rule as
-// Mews's doPOST: auth header, error shape, response decode all live here.
+// doGET is the chokepoint for auth header, error shape and response decode (like Mews's doPOST).
 func (a *Apaleo) doGET(ctx context.Context, path string, out any) error {
 	tok, err := a.getToken(ctx)
 	if err != nil {
@@ -439,9 +400,7 @@ func (a *Apaleo) doGET(ctx context.Context, path string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Token got invalidated mid-flight (credential rotation) — drop
-		// the cache and bubble up; the caller can retry which triggers
-		// a fresh token fetch on the next call.
+		// A token invalidated mid-flight (credential rotation) drops the cache; the next call fetches a fresh one.
 		a.mu.Lock()
 		a.token = ""
 		a.tokenExpiry = time.Time{}

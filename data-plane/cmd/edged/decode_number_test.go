@@ -7,18 +7,8 @@ import (
 	"testing"
 )
 
-// A grant tier published over HTTP must reach the domain as an INTEGER.
-//
-// This is the regression for a defect that shipped invisibly: decodeJSON did not call UseNumber, so numbers
-// inside a map[string]any body arrived as float64, while the commerce validators accept only
-// json.Number/int/int64 (they reject anything containing "." or an exponent, so a bandwidth cap can never
-// arrive as 2047.9999999). The result was that EVERY numeric grant override sent to
-// POST /edge/v1/commercial-packages was rejected as "invalid_grant_tier" -- publishing a package with a
-// bandwidth or quota override was impossible through the API.
-//
-// The existing commerce tests could not catch it: they construct json.Number values in Go and call the admin
-// layer directly, so they exercised a type the HTTP surface was incapable of producing. This test therefore
-// asserts at the decoder, which is where the two halves actually meet.
+// decodeJSON must use UseNumber: the commerce validators accept only json.Number/int/int64, so float64 grant
+// values would reject every numeric override as invalid_grant_tier.
 func TestDecodeJSONPreservesIntegersInFreeFormMaps(t *testing.T) {
 	body := `{"grant_tiers":[{"order":10,"grant":{"down_kbps":2048,"up_kbps":1024}}]}`
 	var dst struct {
@@ -41,7 +31,6 @@ func TestDecodeJSONPreservesIntegersInFreeFormMaps(t *testing.T) {
 		}
 		n, ok := v.(json.Number)
 		if !ok {
-			// The exact failure that shipped: float64 here means the domain rejects the tier.
 			t.Fatalf("%s decoded as %T, not json.Number -- the commerce validators reject it and the package cannot be published over HTTP", key, v)
 		}
 		if strings.ContainsAny(n.String(), ".eE") {

@@ -9,20 +9,11 @@ import (
 	"testing"
 )
 
-// LOCAL-FIRST, ASSERTED STRUCTURALLY.
-//
-// The integration test proves the flow WORKS with Central unreachable. That is a behavioural proof and it is
-// the important one, but it has a blind spot: a dependency that is merely optional, cached, or tried on a
-// background timer would not show up in a run that completes in under a second. This asserts the stronger,
-// static property -- the Phase-6 code cannot reach the Control Plane, because nothing in its import graph
-// knows how to.
-//
-// The device self-service package is held to the strictest form of that rule: it may not import ANY network
-// package at all. It speaks to a local connection pool and to nothing else, and if that ever changes it will
-// change here first.
+// Local-first asserted structurally: the device self-service code cannot reach the Control Plane because
+// nothing in its import graph can (a behavioural run misses optional, cached or background-timer dependencies).
+// The deviceselfservice package may import no network package at all.
 
-// centralFacing lists the import paths that mean "this talks to something off the appliance". They are the
-// packages scd itself uses for exactly that, so the list is not hypothetical.
+// centralFacing lists the import paths that mean talking to something off the appliance.
 var centralFacing = []string{
 	"internal/assignment", "internal/applianceauth", "internal/appliancecert",
 }
@@ -40,7 +31,6 @@ func importsOf(t *testing.T, path string) []string {
 	return out
 }
 
-// The Phase-6 surfaces, in all three services, import nothing that reaches the Control Plane.
 func TestPhase6SurfacesImportNothingCentralFacing(t *testing.T) {
 	files := []string{
 		"phase6_device.go",
@@ -61,7 +51,6 @@ func TestPhase6SurfacesImportNothingCentralFacing(t *testing.T) {
 	}
 }
 
-// THE DURABLE CORE TALKS TO THE LOCAL DATABASE AND TO NOTHING ELSE. No net, no http, no client of any kind.
 func TestDeviceSelfServicePackageHasNoNetworkDependencyAtAll(t *testing.T) {
 	dir := filepath.Join("..", "..", "internal", "deviceselfservice")
 	entries, err := os.ReadDir(dir)
@@ -90,8 +79,6 @@ func TestDeviceSelfServicePackageHasNoNetworkDependencyAtAll(t *testing.T) {
 	}
 }
 
-// The per-appliance setting is read from the LOCAL database on the request path -- not from a cache
-// populated by Central, and not from a config file Central writes.
 func TestTheSettingIsReadFromTheLocalDatabaseOnEveryRequest(t *testing.T) {
 	src, err := os.ReadFile("phase6_device.go")
 	if err != nil {
@@ -101,8 +88,7 @@ func TestTheSettingIsReadFromTheLocalDatabaseOnEveryRequest(t *testing.T) {
 	if !strings.Contains(body, "p.svc.EnabledForAppliance(ctx") {
 		t.Fatal("the request path does not read the setting")
 	}
-	// A cached copy would be the natural "optimisation" that quietly reintroduces a Central dependency, so
-	// its absence is asserted rather than assumed.
+	// A cached copy would quietly reintroduce a Central dependency.
 	for _, cached := range []string{"cachedSetting", "settingCache", "lastKnownSetting"} {
 		if strings.Contains(body, cached) {
 			t.Fatalf("the setting is served from %s rather than the local database", cached)

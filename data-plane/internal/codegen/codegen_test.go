@@ -1,18 +1,11 @@
 package codegen
 
-// This package had no test file at all, which is how it came to be the configurable voucher generator that
-// generated no vouchers: nothing pinned its behaviour, so nothing noticed when the voucher path stopped
-// calling it. These tests pin the properties the voucher code format depends on -- the two modes the
-// Product-Owner requirement names, the eight-character ceiling as it is used, the always-excluded
-// characters, and the two refusals that keep a short code from being quietly unsafe.
-
 import (
 	"strings"
 	"testing"
 )
 
-// The appliance lookup normaliser folds I/L to 1 and O to 0 and drops U, so a code containing any of them
-// could never be redeemed. That is the reason the exclusion is unconditional rather than an option.
+// The lookup normaliser folds I/L/O and drops U, so such a code could never be redeemed; hence the exclusion is unconditional.
 func TestAlwaysExcludedCharactersAreNeverGenerated(t *testing.T) {
 	for _, mode := range []string{ModeNumbers, ModeLetters, ModeAlnum, ModeComplex} {
 		for _, excl := range []bool{false, true} {
@@ -30,7 +23,6 @@ func TestAlwaysExcludedCharactersAreNeverGenerated(t *testing.T) {
 	}
 }
 
-// The two modes the requirement names, with the exclusion the voucher path always applies.
 func TestVoucherModesProduceTheExpectedAlphabets(t *testing.T) {
 	if got, want := Alphabet(ModeNumbers, true), "2346789"; got != want {
 		t.Errorf("numbers alphabet = %q, want %q (0, 1 and 5 are the ambiguous digits)", got, want)
@@ -72,8 +64,7 @@ func TestGeneratedCodesHonourLengthAndAlphabet(t *testing.T) {
 	}
 }
 
-// A batch is internally unique. The voucher path relies on this rather than on UNIQUE (code_hmac), because
-// a collision caught at INSERT surfaces after part of the batch has already committed.
+// A batch must be unique in itself: a UNIQUE (code_hmac) collision at INSERT surfaces after part of the batch committed.
 func TestBatchIsInternallyUnique(t *testing.T) {
 	codes, err := GenerateN(500, Options{Length: 8, Mode: ModeAlnum, ExcludeAmbiguous: true})
 	if err != nil {
@@ -88,8 +79,7 @@ func TestBatchIsInternallyUnique(t *testing.T) {
 	}
 }
 
-// The code-space guard. Digits-only at six characters is 7^6 = 117 649, so a quarter of it is 29 412: a
-// batch of 500 is fine and a batch of 100 000 must be refused rather than generated at low entropy.
+// Digits-only at six characters is 7^6 = 117 649; a quarter is 29 412, so 500 is fine and 100 000 is refused.
 func TestCodeSpaceGuardRefusesABatchTooLargeForItsAlphabet(t *testing.T) {
 	if _, err := GenerateN(500, Options{Length: 6, Mode: ModeNumbers, ExcludeAmbiguous: true}); err != nil {
 		t.Fatalf("500 six-digit codes should be allowed: %v", err)
@@ -103,7 +93,6 @@ func TestUnknownModeIsRefusedRatherThanDefaulted(t *testing.T) {
 	if _, err := GenerateN(1, Options{Length: 8, Mode: "hexadecimal"}); err == nil {
 		t.Fatal("an unknown char_mode was accepted")
 	}
-	// The empty mode IS defaulted, deliberately, and the voucher path never sends one.
 	if _, err := GenerateN(1, Options{Length: 8, Mode: ""}); err != nil {
 		t.Fatalf("the empty mode should default to alnum: %v", err)
 	}
@@ -118,8 +107,6 @@ func TestLengthOutsideTheBoundsIsRefused(t *testing.T) {
 	}
 }
 
-// Normalize is what makes a generated code equal to what the guest types, so it must be a no-op on
-// everything this package produces.
 func TestNormalizeIsIdentityOnGeneratedCodes(t *testing.T) {
 	codes, err := GenerateN(50, Options{Length: 8, Mode: ModeAlnum, ExcludeAmbiguous: true})
 	if err != nil {
@@ -145,8 +132,7 @@ func TestNormalizeStripsWhatAGuestTypes(t *testing.T) {
 }
 
 func TestPrefixIsBoundedAndUppercased(t *testing.T) {
-	// "vp", not "vip": uppercasing "vip" yields an I, which the prefix rule excludes for exactly the reason
-	// the alphabet does. That is the rule working, and the last assertion below pins it.
+	// "vp", not "vip": uppercasing "vip" yields an excluded I.
 	codes, err := GenerateN(1, Options{Length: 6, Mode: ModeNumbers, Prefix: "vp", ExcludeAmbiguous: true})
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +143,6 @@ func TestPrefixIsBoundedAndUppercased(t *testing.T) {
 	if _, err := GenerateN(1, Options{Length: 6, Mode: ModeNumbers, Prefix: strings.Repeat("A", MaxPrefix+1)}); err == nil {
 		t.Fatal("an over-long prefix was accepted")
 	}
-	// A prefix may not contain a character the normaliser folds, for the same reason the alphabet may not.
 	if _, err := GenerateN(1, Options{Length: 6, Mode: ModeNumbers, Prefix: "IOU"}); err == nil {
 		t.Fatal("a prefix containing I, O or U was accepted")
 	}

@@ -2,13 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// THE VOUCHER SCREEN — what an operator sees and what it sends.
-//
-// Every assertion here is about a defect the Product Owner reported or a security property the redesign had
-// to keep: step-up dialogs that rendered off-screen after a 200-row table, an "expired" filter that could
-// never match, a batch export labelled with the wrong number, a code format that saved on a dropdown change,
-// raw ISO timestamps, and a raw UUID box when the package list failed.
-
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -60,8 +53,7 @@ function row(id: string, last4: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-// No effective_state on the expired / future rows on purpose: the screen must derive it from the window
-// when the server does not send it, with the same rule the authenticator uses.
+// Missing effective_state must be derived from the validity window, matching the authenticator.
 const ROWS = [
   row("a0000000-0000-4000-8000-000000000001", "AV11", { effective_state: "available" }),
   row("a0000000-0000-4000-8000-000000000002", "EX22", { redemption_valid_until: iso(now - DAY) }),
@@ -135,7 +127,6 @@ describe("effective status — what a card IS, not what the row says", () => {
     expect(effectiveStatus({ state: "UNUSED", redemption_valid_from: iso(now + DAY), redemption_valid_until: null })).toBe("not_yet_valid");
     expect(effectiveStatus({ state: "UNUSED", redemption_valid_from: iso(now - DAY), redemption_valid_until: iso(now + DAY) })).toBe("available");
     expect(effectiveStatus({ state: "REDEMPTION_EXPIRED", redemption_valid_from: null, redemption_valid_until: null })).toBe("expired");
-    // The server's own answer wins when it is present.
     expect(effectiveStatus({ state: "UNUSED", redemption_valid_from: null, redemption_valid_until: null, effective_state: "expired" })).toBe("expired");
     expect(canCancel("expired")).toBe(false);
     expect(canCancel("redeemed")).toBe(false);
@@ -169,7 +160,6 @@ describe("effective status — what a card IS, not what the row says", () => {
 
     await user.click(expiredChip);
     await waitFor(() => expect(get.mock.calls.some((c) => String(c[0]).startsWith("/vouchers/?") && String(c[0]).includes("effective=expired"))).toBe(true));
-    // The filter never asks for the stored state nothing writes.
     expect(get.mock.calls.some((c) => String(c[0]).includes("state=REDEMPTION_EXPIRED"))).toBe(false);
   });
 
@@ -211,7 +201,7 @@ describe("step-up dialogs are real modals", () => {
     await user.click(await screen.findByText("•••• EX22"));
     let sheet = await screen.findByRole("dialog", { name: /EX22/ });
     expect((within(sheet).getByRole("button", { name: /Cancel card/ }) as HTMLButtonElement).disabled).toBe(true);
-    // One Escape closes the sheet: its first focusable element must not be a tooltip that swallows it.
+    // A timestamp tooltip must not swallow the sheet's first Escape.
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /EX22/ })).toBeNull());
 
@@ -263,7 +253,6 @@ describe("issuing vouchers", () => {
     await user.click(await screen.findByRole("button", { name: /Issue vouchers/ }));
     const dlg = await screen.findByRole("dialog", { name: "Issue vouchers" });
 
-    // Price is written from minor units with its currency.
     expect(within(dlg).getByText(/15\.00/)).toBeTruthy();
     await user.click(within(dlg).getByText("One day"));
     await user.click(within(dlg).getByRole("button", { name: "Next" }));
@@ -279,7 +268,6 @@ describe("issuing vouchers", () => {
     await user.type(within(dlg).getByLabelText(/Note/), "Conference desk");
     await user.click(within(dlg).getByRole("button", { name: "Review" }));
 
-    // ISSUING IS A STEP-UP (audit O-21): nothing is sent until the operator's password is given.
     expect(within(dlg).getByRole("button", { name: "Issue 25 vouchers" })).toBeDisabled();
     await user.type(within(dlg).getByLabelText(/Confirm your password/), "pw-op");
 
@@ -300,7 +288,6 @@ describe("issuing vouchers", () => {
 
     const codes = await screen.findAllByTestId("held-code");
     expect(codes.map((c) => c.textContent)).toEqual(["48273962", "K7PX4R9M"]);
-    // The result title agrees with its count (live verification found "1 vouchers issued").
     expect(screen.getByRole("dialog", { name: "25 vouchers issued" })).toBeTruthy();
     expect(screen.getByText(/not be shown again/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Copy all/ })).toBeTruthy();

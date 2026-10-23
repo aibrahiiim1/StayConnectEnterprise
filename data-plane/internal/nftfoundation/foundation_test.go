@@ -1,18 +1,7 @@
 package nftfoundation
 
-// TESTS FOR THE SURGICAL LIVE-DARK FOUNDATION.
-//
-// The property under test is not "the set gets created". It is:
-//
-//	INSTALLING THE PHASE-3 FOUNDATION ON A LIVE APPLIANCE DOES NOT DISCONNECT A SINGLE GUEST.
-//
-// So the fake ruleset is a POPULATED one — legacy `auth_ipv4` with real guests in it — and every test asserts
-// that those elements are exactly as they were afterwards, that nothing flushed or recreated the table, and
-// that the Phase-3 set arrives empty. The rollback tests assert the same thing in reverse.
-//
-// These are COMMAND-LEVEL tests against a modelled ruleset: no nft binary runs. The real kernel behaviour they
-// stand in for — that these exact commands are accepted, that the transaction is atomic, that legacy elements
-// genuinely survive — is proven separately by the disposable-namespace suite in internal/kerneltest.
+// Installing the phase-3 foundation on a populated live ruleset must not disturb a single legacy guest.
+// The nft binary is faked here; kernel behaviour is covered by internal/kerneltest.
 
 import (
 	"context"
@@ -21,10 +10,8 @@ import (
 	"testing"
 )
 
-// fakeRuleset is a small model of `table inet stayconnect`: which sets exist, what is in them, and the rules
-// of the two chains this operation touches, each with a handle.
 type fakeRuleset struct {
-	sets     map[string][]string // set name -> element keys, as `nft -j list set` would report them
+	sets     map[string][]string
 	forward  []rule
 	captive  []rule
 	nextH    int
@@ -40,7 +27,6 @@ type rule struct {
 
 func newFakeRuleset() *fakeRuleset {
 	f := &fakeRuleset{sets: map[string][]string{}, nextH: 10}
-	// A live LEGACY ruleset: the authorization set exists, has guests in it, and the captive rules exclude it.
 	f.sets[legacySet] = []string{"br-guest|10.20.0.14", "br-guest|10.20.0.7", "br-lan|10.0.0.31"}
 	f.forward = []rule{
 		{f.h(), `ct state established,related accept`},
@@ -73,8 +59,6 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// run models nft closely enough for the properties under test: a `-a list` renders the table with handles, a
-// `-j list set` renders a set, and a command buffer is applied ALL-OR-NOTHING.
 func (f *fakeRuleset) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	joined := strings.Join(args, " ")
 	f.cmds = append(f.cmds, joined)
@@ -102,7 +86,6 @@ func (f *fakeRuleset) run(ctx context.Context, name string, args ...string) ([]b
 	return nil, f.apply(joined)
 }
 
-// apply executes a command buffer as ONE transaction: it is validated in full, then committed in full.
 func (f *fakeRuleset) apply(buf string) error {
 	type change func()
 	var staged []change
@@ -151,8 +134,6 @@ func (f *fakeRuleset) apply(buf string) error {
 	return nil
 }
 
-// splitCommands splits a command buffer on the semicolons that separate COMMANDS, ignoring the ones inside a
-// set definition's braces. Real nft parses the buffer properly; the fake only has to be right about this.
 func splitCommands(buf string) []string {
 	var out []string
 	depth, start := 0, 0
@@ -240,9 +221,6 @@ func newTestFoundation() (*Foundation, *fakeRuleset) {
 	return &Foundation{NftPath: "nft", Run: rs.run}, rs
 }
 
-// ---- the central property ---------------------------------------------------
-
-// Installing on a LIVE, POPULATED ruleset leaves every legacy authorization exactly where it was.
 func TestInstallPreservesEveryLegacyAuthorization(t *testing.T) {
 	f, rs := newTestFoundation()
 	before := append([]string(nil), rs.sets[legacySet]...)
@@ -262,14 +240,12 @@ func TestInstallPreservesEveryLegacyAuthorization(t *testing.T) {
 			t.Fatalf("legacy element %d changed: %s -> %s", i, before[i], rs.sets[legacySet][i])
 		}
 	}
-	// and the report carries the evidence an operator has to keep
 	if len(rep.LegacyBefore) != 3 || len(rep.LegacyAfter) != 3 {
 		t.Fatalf("the report does not record legacy parity: %+v", rep)
 	}
 }
 
-// NOTHING IS FLUSHED. This is the failure the whole operation exists to avoid: a `delete table` or a `flush`
-// would take every legacy guest offline in one instant.
+// Nothing is flushed: a `delete table` or `flush` would take every legacy guest offline.
 func TestInstallNeverFlushesOrRecreatesTheTable(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Install(context.Background()); err != nil {
@@ -284,8 +260,7 @@ func TestInstallNeverFlushesOrRecreatesTheTable(t *testing.T) {
 	}
 }
 
-// The Phase-3 set arrives EMPTY, and the rules that reference it therefore cannot match. This is what makes it
-// safe to install while dark.
+// The phase-3 set arrives empty, so installing while dark authorizes nobody.
 func TestInstallLeavesThePhase3SetEmpty(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Install(context.Background()); err != nil {
@@ -300,8 +275,7 @@ func TestInstallLeavesThePhase3SetEmpty(t *testing.T) {
 	}
 }
 
-// The forward accept rule and BOTH captive exclusions are installed. A missing captive exclusion is the subtle
-// one: the guest would have internet and still see the portal on every page.
+// A missing captive exclusion leaves the guest with internet but still seeing the portal.
 func TestInstallAddsTheForwardRuleAndBothCaptiveExclusions(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Install(context.Background()); err != nil {
@@ -329,8 +303,6 @@ func TestInstallAddsTheForwardRuleAndBothCaptiveExclusions(t *testing.T) {
 	}
 }
 
-// SAFE TO RUN TWICE. A second install must change nothing — not add a second forward rule, not rewrite a
-// captive rule that already excludes Phase 3.
 func TestInstallIsIdempotent(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Install(context.Background()); err != nil {
@@ -359,7 +331,6 @@ func TestInstallIsIdempotent(t *testing.T) {
 	}
 }
 
-// ROLLBACK removes only the foundation, and legacy authorization is untouched.
 func TestRollbackRemovesOnlyThePhase3Foundation(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Install(context.Background()); err != nil {
@@ -400,8 +371,6 @@ func TestRollbackRemovesOnlyThePhase3Foundation(t *testing.T) {
 	}
 }
 
-// Rolling back when nothing is installed is a no-op, not an error: an operator re-running it after a failed
-// deployment must not be told the ruleset is broken.
 func TestRollbackOnACleanRulesetIsANoOp(t *testing.T) {
 	f, rs := newTestFoundation()
 	rep, err := f.Rollback(context.Background())
@@ -416,8 +385,6 @@ func TestRollbackOnACleanRulesetIsANoOp(t *testing.T) {
 	}
 }
 
-// A REFUSED TRANSACTION changes nothing. nft commits a command buffer atomically, so a partial foundation is
-// not a state that has to be recovered from — but the operation must still report it rather than claim success.
 func TestARefusedTransactionLeavesTheRulesetUntouched(t *testing.T) {
 	f, rs := newTestFoundation()
 	rs.failNext = errors.New("exit status 1")
@@ -433,11 +400,8 @@ func TestARefusedTransactionLeavesTheRulesetUntouched(t *testing.T) {
 	}
 }
 
-// VERIFICATION FAILURE ROLLS BACK. If the Phase-3 set turns out not to be empty after an install that
-// authorizes nobody, something else is writing it and the dark guarantee no longer holds.
 func TestVerificationFailureRollsItselfBack(t *testing.T) {
 	f, rs := newTestFoundation()
-	// Model an install after which the set is somehow populated.
 	orig := rs.run
 	f.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		out, err := orig(ctx, name, args...)
@@ -454,8 +418,7 @@ func TestVerificationFailureRollsItselfBack(t *testing.T) {
 	}
 }
 
-// A ruleset with no stayconnect table is REFUSED, not created. A table conjured here would not be the
-// generated one, and the next legitimate render would delete it along with anything installed into it.
+// A ruleset with no stayconnect table is refused: a conjured table would be deleted by the next render.
 func TestInstallRefusesWhenTheTableIsAbsent(t *testing.T) {
 	f, rs := newTestFoundation()
 	rs.noTable = true
@@ -464,7 +427,6 @@ func TestInstallRefusesWhenTheTableIsAbsent(t *testing.T) {
 	}
 }
 
-// Inspect is READ-ONLY. An operator has to be able to run it on a live appliance to decide whether to proceed.
 func TestInspectMutatesNothing(t *testing.T) {
 	f, rs := newTestFoundation()
 	if _, err := f.Inspect(context.Background()); err != nil {
@@ -477,16 +439,8 @@ func TestInspectMutatesNothing(t *testing.T) {
 	}
 }
 
-// ---- THE RENDER MARKER MUST NOT SURVIVE A STRUCTURAL CHANGE MADE HERE ------------------------------------
-//
-// netd reconciles by comparing the fingerprint in the live table against the one it renders, and does NOTHING
-// when they match. That is what makes a routine restart non-destructive. It also means this tool must never
-// leave the marker claiming "the structure is the current render" after changing the structure: netd would
-// then skip the reconciliation that would put it back.
-//
-// The concrete case is rollback on a CONVERGED appliance — the phase-3 set is removed while the marker still
-// says the table is current, so without invalidation netd leaves the appliance without the Phase-3 structure
-// indefinitely, which is the Increment-9 blocker arriving by a different road.
+// netd does nothing when the live fingerprint matches its render, so this tool must invalidate the marker after any
+// structural change; otherwise rollback on a converged appliance is never repaired.
 
 func markedRuleset() *fakeRuleset {
 	f := newFakeRuleset()
@@ -495,9 +449,6 @@ func markedRuleset() *fakeRuleset {
 }
 
 func TestRollbackInvalidatesTheRenderMarker(t *testing.T) {
-	// A CONVERGED appliance: the phase-3 structure is present AND the marker is present, because netd's own
-	// renderer emitted both. Install is used to build the structure and then the marker is restored, since a
-	// converged appliance is exactly the state netd leaves behind after rendering.
 	f := newFakeRuleset()
 	fo := &Foundation{NftPath: "nft", Run: f.run}
 	if _, err := fo.Install(context.Background()); err != nil {
@@ -520,14 +471,13 @@ func TestRollbackInvalidatesTheRenderMarker(t *testing.T) {
 	if _, ok := f.sets["sc_render_fp"]; ok {
 		t.Fatal("the marker set still exists after a structural rollback")
 	}
-	// and legacy authorization is still untouched, which is the standing property of this operation
 	if len(f.sets[legacySet]) != 3 {
 		t.Fatalf("legacy authorization changed: %v", f.sets[legacySet])
 	}
 }
 
 func TestInstallInvalidatesTheRenderMarkerWhenItChangesStructure(t *testing.T) {
-	f := markedRuleset() // marker present, phase-3 structure absent (hand-edited table)
+	f := markedRuleset()
 	fo := &Foundation{NftPath: "nft", Run: f.run}
 
 	if _, err := fo.Install(context.Background()); err != nil {
@@ -539,16 +489,13 @@ func TestInstallInvalidatesTheRenderMarkerWhenItChangesStructure(t *testing.T) {
 	}
 }
 
-// A NO-OP MUST NOT TOUCH THE MARKER. On a converged appliance the marker is TRUE — the renderer itself emits
-// the Phase-3 structure — so an install that finds nothing to do must leave it exactly where it is. Dropping
-// it would force a pointless full-table replacement on the next restart.
+// A no-op install leaves the marker untouched; dropping it would force a pointless full-table replacement.
 func TestAlreadyInstalledLeavesTheRenderMarkerAlone(t *testing.T) {
 	f := markedRuleset()
 	fo := &Foundation{NftPath: "nft", Run: f.run}
 	if _, err := fo.Install(context.Background()); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
-	// re-mark, as a real converged appliance would be after netd rendered
 	f.sets["sc_render_fp"] = nil
 	f.cmds = nil
 
@@ -569,10 +516,10 @@ func TestAlreadyInstalledLeavesTheRenderMarkerAlone(t *testing.T) {
 	}
 }
 
-// An UNMARKED table (a pre-fingerprint appliance) has no marker to invalidate, and the tool must not invent a
-// delete for a set that is not there — that would abort the whole transaction.
+// An unmarked table has no marker to invalidate, and no delete may be emitted for a set that is absent (it aborts the
+// transaction).
 func TestUnmarkedRulesetIssuesNoMarkerDelete(t *testing.T) {
-	f := newFakeRuleset() // no marker
+	f := newFakeRuleset()
 	fo := &Foundation{NftPath: "nft", Run: f.run}
 	if _, err := fo.Install(context.Background()); err != nil {
 		t.Fatalf("install: %v", err)

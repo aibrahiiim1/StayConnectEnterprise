@@ -1,13 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// Browser-level E2E for the PMS INTERFACE admin surface. edged is fully mocked at the network layer — no real
-// backend, no database, no production data, no PMS. The Next server under test runs with
-// NEXT_PUBLIC_PHASE3_ADMIN=1, a TEST-only flag-ON profile that is never the deployed dark bundle.
-//
-// What a browser proves that jsdom cannot: the pages actually render and are operable end to end, the forms
-// submit what the network sees, and every control has an accessible name in a real accessibility tree.
-
 type Mutations = { method: string; path: string; body: any }[];
 
 const IFACE = {
@@ -27,7 +20,6 @@ const REVISIONS = [
   {
     id: "r2", revision_no: 2, source_timezone: "Europe/Berlin", posting_target_model: "UNSET",
     normalization_version: 1, published: false,
-    // as edged returns it: already redacted, so a browser test cannot accidentally assert on a real secret
     config: { host: "pms.local", port: 5011, password: "[redacted]" },
   },
   {
@@ -128,7 +120,6 @@ async function installBackend(
       return route.fulfill(json(200, { conflicts: opts.conflicts ?? [] }));
     }
     if (path.startsWith("/pms-resolutions")) {
-      // edged pages the table and summarises the recent window; the mock answers the same shape.
       const rs = (opts.resolutions ?? []) as { guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string }[];
       const outcomes = new Map<string, number>();
       const networks = new Map<string, { total: number; verified: number }>();
@@ -153,7 +144,6 @@ async function installBackend(
   await installCapabilities(page); // a fully licensed hotel appliance (e2e/capabilities.ts)
 }
 
-// Opens the connection's side sheet from its card, then (optionally) one of its tabs.
 async function openSheet(page: Page, tab?: string) {
   await page.getByRole("button", { name: "Manage" }).click();
   if (tab) await page.getByRole("tab", { name: tab }).click();
@@ -168,7 +158,6 @@ test("the connections page shows what is running, how it is doing, and how far b
   await expect(page.getByText("Main PMS")).toBeVisible();
   await openSheet(page);
 
-  // The dimensions are stated SEPARATELY, in operator words, rather than collapsed into one "degraded".
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("The checks room sign-in depends on")).toBeVisible();
   await expect(sheet.getByText("Connected", { exact: true }).first()).toBeVisible();
@@ -176,7 +165,6 @@ test("the connections page shows what is running, how it is doing, and how far b
   await expect(sheet.getByText("Up to date", { exact: true })).toBeVisible();
   await expect(sheet.getByText("Guests in house").first()).toBeVisible();
   await expect(sheet.getByText("12", { exact: true }).first()).toBeVisible();
-  // the backlog's AGE, which is what distinguishes a busy morning from a stuck processor
   await expect(sheet.getByText(/^Oldest waiting message arrived/)).toBeVisible();
 });
 
@@ -186,8 +174,7 @@ test("the published revision is the one the interface points at, not the newest"
   await page.goto("/pms-interfaces");
   await openSheet(page, "Configuration");
 
-  // THE LIVE SECTION IS WHAT IS IN FORCE. Version 1 is in use even though version 2 is newer; version 2 is a
-  // draft that can be put live, never labelled as in use.
+  // A newer draft must not be labelled as the live revision.
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByRole("heading", { name: "Live configuration" })).toBeVisible();
   await expect(sheet.getByText("Version 1", { exact: true })).toBeVisible();
@@ -226,13 +213,10 @@ test("a concurrent publication is shown as a refusal, not as success", async ({ 
   await confirm.getByRole("button", { name: "Put live" }).click();
 
   await expect(page.getByRole("alert").filter({ hasText: /published a different revision/ })).toBeVisible();
-  // the form stays open so the operator can reload and decide, rather than closing as if it had worked
   await expect(confirm.getByRole("button", { name: "Put live" })).toBeVisible();
 });
 
-// THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so no credential surface may be presented. The Protel FIAS link
-// carries no transport authentication; a Credentials tab exists only for a provider that signs in with a key,
-// and nothing on this page ever asks the server for a credential.
+// Protel FIAS has no transport credential, so no credential controls or reads are appropriate.
 test("no credential surface is presented, and no credential is ever fetched", async ({ page }) => {
   const mutations: Mutations = [];
   const gets: string[] = [];
@@ -258,7 +242,6 @@ test("adding a Protel connection sends exactly the create and draft requests, an
 
   await page.getByRole("button", { name: /add connection/i }).click();
   const wizard = page.getByRole("dialog", { name: /Add a PMS connection/ });
-  // Without a provider catalogue only Protel is offered, and it is already chosen.
   await expect(wizard.getByText(/Only Protel is offered/)).toBeVisible();
   await wizard.getByRole("button", { name: "Next" }).click();
   await wizard.getByLabel(/^Name/).fill("Front office");
@@ -294,7 +277,6 @@ test("routing names the guest networks that are mapped to nothing", async ({ pag
 
   await expect(page.getByText("Guest VLAN 10")).toBeVisible();
   await expect(page.getByText("Main PMS")).toBeVisible();
-  // the point of the page: an absence is invisible in a list of what exists
   await expect(page.getByText("Conference VLAN 20")).toBeVisible();
   await expect(page.getByText(/will not be recognised/)).toBeVisible();
 });
@@ -333,8 +315,7 @@ test("resolution evidence summarises outcomes and names no guest", async ({ page
   await expect(page.getByText(/1 of 3 verified|33% of attempts/)).toBeVisible();
   await expect(page.getByText(/ambiguous discriminator required/i).first()).toBeVisible();
   await expect(page.getByText("2", { exact: true }).first()).toBeVisible();
-  // the table carries outcomes and networks only — a list naming rooms would be a way to enumerate who is
-  // staying at the property, which is exactly what the guest-facing uniform failure exists to prevent
+  // Omit rooms from outcome lists to prevent enumeration of occupied rooms.
   const table = await page.locator("table").innerHTML();
   for (const forbidden of ["room", "reservation", "stay_id", "folio"]) {
     expect(table.toLowerCase()).not.toContain(forbidden);
@@ -356,17 +337,13 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
 
   for (const path of ["/pms-interfaces", "/pms-routing", "/pms-source-conflicts", "/pms-resolutions"]) {
     await page.goto(path);
-    // exactly one h1: a screen-reader user navigating by heading needs one place the page starts
     await expect(page.locator("h1")).toHaveCount(1);
-    // every interactive control has an accessible name — an unnamed button is a button nobody can be told
-    // to press
     for (const b of await page.getByRole("button").all()) {
       const name = ((await b.getAttribute("aria-label")) ?? (await b.innerText())).trim();
       expect(name.length, `unnamed button on ${path}`).toBeGreaterThan(0);
     }
   }
 
-  // the forms specifically: every input is reachable by its label, which is what a screen reader announces
   await page.goto("/pms-interfaces");
   await openSheet(page, "History");
   await page.getByRole("button", { name: "Put version 2 live" }).click();
@@ -374,9 +351,7 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
   await expect(confirm.getByLabel("Reason")).toBeVisible();
   await expect(confirm.getByLabel("Confirm your password")).toBeVisible();
 
-  // Errors are ANNOUNCED, not merely coloured. Refusing the publication and then finding the message in a
-  // live region is the check that matters — a red paragraph with no role is invisible to a screen reader,
-  // and this page's whole job is telling an operator that something was refused.
+  // Announce refusals in a live region so screen readers receive them.
   await page.unrouteAll({ behavior: "ignoreErrors" });
   const mutations2: Mutations = [];
   await installBackend(page, { mutations: mutations2, publishStatus: 409 });

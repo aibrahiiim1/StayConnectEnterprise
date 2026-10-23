@@ -1,16 +1,7 @@
 package iamv2
 
-// A VOUCHER GRANTS WHAT IT WAS PRINTED FOR.
-//
-// iam_v2.vouchers.package_revision_id has been NOT NULL and pinned at issuance since mg3, and the issuance
-// path's comment says why: republishing a package must not retroactively change what an already-printed
-// card is worth. The operator screen says the same thing in so many words. NOTHING READ IT BACK -- the auth
-// context carries voucher_id and no package pin, so the offer path had nothing to narrow itself with, and at
-// a property with two voucher-eligible free tiers a card printed for the lower one could be redeemed
-// against the higher.
-//
-// Migration 0088 makes the refusal an invariant in the grant kernel, where no caller can route around it.
-// These tests cover the layer above: a guest is never OFFERED the choice the kernel would refuse.
+// A voucher grants only the package revision pinned at issuance. The grant kernel enforces this; these tests
+// cover the layer above, which must never offer a package the kernel would refuse.
 
 import (
 	"context"
@@ -18,9 +9,7 @@ import (
 	"testing"
 )
 
-// pinTx implements only the one read the gate uses. Every other method is inherited from the embedded nil
-// interface and would panic if the gate reached for it -- which is the point: the gate must decide a voucher
-// subject from the pin alone, without touching prices, rules or tiers for a package the card cannot grant.
+// pinTx implements only the pin read; any other method panics, so the gate must decide from the pin alone.
 type pinTx struct {
 	CommerceTx
 	pinned string
@@ -67,9 +56,7 @@ func TestAVoucherIsOnlyOfferedThePackageItWasPrintedFor(t *testing.T) {
 	}
 }
 
-// A READ FAILURE IS NOT AN OFFER. If the pin cannot be read the gate must refuse and propagate, not fall
-// through to "eligible" -- the whole failure this closes is a voucher being offered a package it was not
-// printed for, and a swallowed error is the most likely way to reintroduce it.
+// A pin read failure must refuse and propagate, never fall through to "eligible".
 func TestAnUnreadablePinRefusesRatherThanOffers(t *testing.T) {
 	e := &CommerceEngine{}
 	boom := errors.New("connection reset")
@@ -84,17 +71,14 @@ func TestAnUnreadablePinRefusesRatherThanOffers(t *testing.T) {
 	}
 }
 
-// NON-VOUCHER SUBJECTS ARE UNTOUCHED, and the gate must not even ask. An account or a guest principal has
-// no printed card and no pin; a lookup for them would be a query with no question behind it, and one that
-// returned "" would silently make every package ineligible for them.
+// Non-voucher subjects must not trigger a pin lookup: it would return "" and make every package ineligible for them.
 func TestNonVoucherSubjectsAreNotNarrowedAndAreNotQueried(t *testing.T) {
 	e := &CommerceEngine{}
 	req := PackageListRequest{TenantID: "t", SiteID: "s"}
 	for _, ac := range []AuthContextRow{
 		{Subject: CommerceSubject{Kind: SubjectAccount, AccountID: "a1"}},
 		{Subject: CommerceSubject{Kind: SubjectPrincipal, PrincipalID: "p1"}},
-		// A voucher KIND with no id is a malformed subject rather than a voucher; the remaining gates and
-		// the kernel both refuse it, and this gate must not invent a lookup for an empty id.
+		// A voucher kind with no id is malformed; the gate must not look up an empty id.
 		{Subject: CommerceSubject{Kind: SubjectVoucher}},
 	} {
 		tx := &pinTx{pinned: "rev-Z"}

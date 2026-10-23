@@ -1,6 +1,4 @@
-// Package portaltlstest is a throw-away certificate authority for tests of the portal HTTPS lifecycle: a root, an
-// intermediate under it, and leaves issued for an appliance CSR exactly as Let's Encrypt would issue them (leaf +
-// intermediate in the chain, the root NOT in it). It is test support and is imported only from _test files.
+// Package portaltlstest is a test-only CA issuing chains like Let's Encrypt (leaf + intermediate, root not included).
 package portaltlstest
 
 import (
@@ -15,7 +13,6 @@ import (
 	"time"
 )
 
-// CA is a two-level test authority.
 type CA struct {
 	Root     *x509.Certificate
 	RootKey  *ecdsa.PrivateKey
@@ -24,7 +21,6 @@ type CA struct {
 	serial   int64
 }
 
-// New builds a root and an intermediate valid from a year before to ten years after now.
 func New(now time.Time) (*CA, error) {
 	ca := &CA{serial: 100}
 	var err error
@@ -60,20 +56,16 @@ func New(now time.Time) (*CA, error) {
 	return ca, nil
 }
 
-// Pool is a pool holding only the root.
 func (ca *CA) Pool() *x509.CertPool {
 	p := x509.NewCertPool()
 	p.AddCert(ca.Root)
 	return p
 }
 
-// RootPEM is the root as PEM.
 func (ca *CA) RootPEM() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Root.Raw})
 }
 
-// IssueForCSR issues a leaf for the CSR's DNS names and public key, valid [notBefore, notAfter), and returns
-// the fullchain PEM (leaf, then intermediate).
 func (ca *CA) IssueForCSR(csrPEM []byte, notBefore, notAfter time.Time) ([]byte, error) {
 	blk, _ := pem.Decode(csrPEM)
 	if blk == nil || blk.Type != "CERTIFICATE REQUEST" {
@@ -89,7 +81,7 @@ func (ca *CA) IssueForCSR(csrPEM []byte, notBefore, notAfter time.Time) ([]byte,
 	return ca.Issue(csr.DNSNames, csr.PublicKey, notBefore, notAfter)
 }
 
-// Issue issues a leaf for names and pub (any key, so tests can issue for the WRONG key on purpose).
+// Issue accepts any key so tests can issue for the wrong key on purpose.
 func (ca *CA) Issue(names []string, pub any, notBefore, notAfter time.Time) ([]byte, error) {
 	ca.serial++
 	lt := &x509.Certificate{

@@ -30,41 +30,35 @@ type Deps struct {
 	Redis         *redis.Client
 	Metrics       *metrics.Registry
 	Licensing     *licensing.Service         // nil when no vendor key is configured
-	CA            *pki.CA                    // appliance certificate authority; nil disables PKI routes
+	CA            *pki.CA                    // nil disables PKI routes
 	ReplayCache   *applianceauth.ReplayCache // shared jti replay cache (both transports)
-	AssignKey     ed25519.PrivateKey         // dedicated key for signing appliance assignments
-	VendorKeyPath string                     // vendor signing key file (offline packages)
-	CABundlePath  string                     // CA bundle handed to appliances in offline packages
-	ApplianceBase string                     // CTRLAPI_APPLIANCE_BASE, written into activation packages
+	AssignKey     ed25519.PrivateKey
+	VendorKeyPath string
+	CABundlePath  string
+	ApplianceBase string // CTRLAPI_APPLIANCE_BASE
 	Version       string
-	AllowOrigins  []string           // CORS allowlist for the console in development
-	CookieSecure  bool               // set true behind HTTPS
-	PortalTLS     *portaltls.Service // portal hostnames and certificates; nil leaves /cloud/v1/portal-tls unavailable
-	MFA           *auth.MFA          // console two-step sign-in (0052); nil refuses every sign-in
+	AllowOrigins  []string
+	CookieSecure  bool
+	PortalTLS     *portaltls.Service // nil leaves /cloud/v1/portal-tls unavailable
+	MFA           *auth.MFA          // nil refuses every sign-in
 
 	rateCounter api.RateCounter // tests only; production counts in Redis
 }
 
 // Per-client-address limits, per minute.
 const (
-	loginPerMinute    = 20
-	reauthPerMinute   = 20
-	registerPerMinute = 30
-	// appliancePerMinute bounds the signed appliance routes (hello, licence, CSR, certificate, offline
-	// reconcile) per client address.
+	loginPerMinute     = 20
+	reauthPerMinute    = 20
+	registerPerMinute  = 30
 	appliancePerMinute = 240
 )
 
-// NewRouter serves exactly the §6 contract: /v1/auth/*, the appliance endpoints under /v1/appliance* and
-// /v1/appliances/register, and the operator API under /cloud/v1. Plus /healthz, /readyz and a
-// loopback-only /metrics.
 func NewRouter(d Deps) http.Handler {
 	store := &auth.SessionStore{R: d.Redis}
 	repo := &auth.Repo{DB: d.DB}
 	adeps := authDeps{Repo: repo, Store: store, Secure: d.CookieSecure, DB: d.DB,
 		Failures: ratebudget.New(5, 300, time.Minute), MFA: d.MFA}
-	// Every authenticated request re-reads the operator (session_policy.go). Only a router built without a
-	// database (unit tests of the unauthenticated limits) runs without it.
+	// Every authenticated request re-reads the operator; only a DB-less router (unit tests) runs without it.
 	var checker auth.SessionChecker
 	if d.DB != nil {
 		checker = auth.DBSessionChecker{DB: d.DB}
@@ -78,8 +72,7 @@ func NewRouter(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	// No middleware.RealIP: it believes any client's X-Forwarded-For. clientip.From decides per request and
-	// trusts forwarding headers only from the loopback proxy.
+	// No middleware.RealIP: it trusts any client's X-Forwarded-For; clientip.From trusts only the loopback proxy.
 	r.Use(traceIDHeader)
 	r.Use(requestLog)
 	r.Use(middleware.Recoverer)
@@ -96,8 +89,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Method("GET", "/metrics", loopbackOnly(d.Metrics.Handler()))
 	}
 
-	// Every limit is keyed on the server-derived client address (clientip), never on a header a direct
-	// client controls.
+	// Limits are keyed on the server-derived client address, never a client-controlled header.
 	var counter api.RateCounter = d.rateCounter
 	if counter == nil && d.Redis != nil {
 		counter = api.RedisRateCounter(d.Redis)
@@ -107,10 +99,8 @@ func NewRouter(d Deps) http.Handler {
 	}
 
 	r.Route("/v1", func(r chi.Router) {
-		// Operator authentication. Password re-entry is limited BEFORE the session check, so the limit also
-		// holds for guesses made without a valid session.
+		// Password re-entry is limited before the session check, so guesses without a session are limited too.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
-		// The second step (0052): set up the authenticator, or enter its code. Same limit as the password.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login/enrol", adeps.loginEnrol)
 		r.With(limit("login", loginPerMinute)).Post("/auth/login/code", adeps.loginCode)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/mfa", adeps.mfaStatus)
@@ -119,18 +109,13 @@ func NewRouter(d Deps) http.Handler {
 		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store, checker)).Post("/auth/reauth", adeps.reauth)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/whoami", adeps.whoami)
 
-		// Appliance: TOKEN-LESS registration. The appliance self-signs with its locally generated identity
-		// key and appears as WAITING.
+		// Token-less registration: the appliance self-signs and appears as WAITING.
 		r.With(limit("register", registerPerMinute)).
 			Post("/appliances/register", identityBase.RegisterHandler)
 
-		// Appliance: signed request JWT (and, on the mTLS listener, a client certificate as well). The
-		// assignment channel (/appliance/assignment, /ack, /assignment-registry) is mTLS-only and is served
-		// by api.ApplianceMTLSRouter, never here.
+		// Signed request JWT. The assignment channel is mTLS-only (api.ApplianceMTLSRouter), never here.
 		r.Group(func(r chi.Router) {
-			// Limited BEFORE authentication, so unauthenticated callers cannot use these routes to make Central
-			// look up appliances and write audit rows as fast as they can send. A healthy appliance calls a few
-			// times a minute; the limit leaves room for several appliances behind one address.
+			// Limited before authentication so unauthenticated callers cannot force lookups and audit writes.
 			r.Use(limit("appliance", appliancePerMinute))
 			r.Use(auth.RequireAppliance(d.DB, replayCache))
 			r.Get("/appliance/hello", identityBase.HelloHandler)
@@ -161,8 +146,7 @@ func NewRouter(d Deps) http.Handler {
 	return r
 }
 
-// loopbackOnly refuses anything that did not come straight from this host: /metrics is for a local
-// scraper, never for the internet, and a request relayed by the local proxy carries forwarding headers.
+// loopbackOnly refuses anything not straight from this host; a request relayed by the local proxy carries forwarding headers.
 func loopbackOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !clientip.IsLoopback(clientip.Peer(r)) || clientip.Proxied(r) {
@@ -197,9 +181,7 @@ func readyz(d Deps) http.HandlerFunc {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not-ready", "redis": "unreachable"})
 			return
 		}
-		// signin says whether console sign-in can work: without the two-step sign-in key every sign-in is refused
-		// (auth_mfa_handlers.go), while appliances are served normally. central-deploy.sh's smoke test requires
-		// "available", so a release that comes up without the key is rolled back.
+		// Without the two-step key every console sign-in is refused; central-deploy.sh's smoke test requires "available".
 		signin := "available"
 		if d.MFA == nil {
 			signin = "unavailable"
@@ -208,8 +190,6 @@ func readyz(d Deps) http.HandlerFunc {
 	}
 }
 
-// traceIDHeader mirrors chi's request-id into the X-Trace-Id response header
-// so clients can echo it when reporting issues.
 func traceIDHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tid := middleware.GetReqID(r.Context()); tid != "" {
@@ -219,11 +199,8 @@ func traceIDHeader(next http.Handler) http.Handler {
 	})
 }
 
-// sameOriginWrites refuses a state-changing console request whose Origin is neither an allowed admin origin
-// nor this host. SameSite=Lax keeps the cookie off cross-SITE requests, but not off a request from a sibling
-// subdomain of the same site, which a browser treats as same-site; this closes that. Requests without an
-// Origin header (curl, server-to-server) are not browser cross-origin requests and pass. Appliance routes
-// carry no cookie and are untouched.
+// sameOriginWrites refuses a state-changing console request whose Origin is neither allowed nor this host.
+// SameSite=Lax does not stop a sibling subdomain of the same site. Requests without an Origin pass.
 func sameOriginWrites(origins []string) func(http.Handler) http.Handler {
 	allow := map[string]bool{}
 	for _, o := range origins {

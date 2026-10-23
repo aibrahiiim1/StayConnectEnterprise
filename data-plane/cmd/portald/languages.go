@@ -5,25 +5,14 @@ import (
 	"net/http"
 )
 
-// THE WORDS THE PORTAL SPEAKS, AS DATA.
-//
-// These used to live inside the landing template as a JavaScript object literal, which made them invisible to
-// everything except the guest's browser. Hotel Admin therefore had no way to SHOW an operator what the portal
-// actually says in Italian: it could only offer an empty field with the English text as a placeholder, so
-// picking Italiano looked like it had done nothing. Duplicating the six dictionaries into the admin would
-// have fixed the symptom and created two sources of truth for fifty-one strings in six languages.
-//
-// So they are Go data now. The template renders them, and /api/languages serves them, from this one map.
-// There is no second copy to keep in step.
+// The words the portal speaks, as Go data: the template renders them and /api/languages serves them from this one map, so Hotel Admin shows the real wording without a second copy.
 
-// portalLanguage is one language the portal ships complete wording for.
 type portalLanguage struct {
 	Code  string `json:"code"`
-	Label string `json:"label"`         // the language's own name for itself
-	RTL   bool   `json:"rtl,omitempty"` // Arabic reads right to left
+	Label string `json:"label"`
+	RTL   bool   `json:"rtl,omitempty"`
 }
 
-// portalLanguages is the offered set, in the order the selector shows them.
 var portalLanguages = []portalLanguage{
 	{Code: "en", Label: "English"},
 	{Code: "ar", Label: "العربية", RTL: true},
@@ -33,7 +22,7 @@ var portalLanguages = []portalLanguage{
 	{Code: "ru", Label: "Русский"},
 }
 
-// builtinStrings is code -> key -> wording. Every language carries every key; a test asserts it.
+// builtinStrings is code -> key -> wording; every language carries every key (a test asserts it).
 var builtinStrings = map[string]map[string]string{
 	"en": {
 		"account.pass":           "Password",
@@ -361,12 +350,7 @@ var builtinStrings = map[string]map[string]string{
 	},
 }
 
-// languages serves the shipped wording.
-//
-// One source, two consumers: the landing page renders this map, and Hotel Admin fetches it (through edged)
-// to show an operator the actual Italian a guest will read. The alternative -- a copy of six dictionaries in
-// the admin -- is 306 strings maintained twice, and the drift would show up as an operator confidently
-// editing wording nobody sees.
+// languages serves the shipped wording to Hotel Admin through edged, so it shows an operator the actual text a guest reads.
 func (h *handler) languages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")

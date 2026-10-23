@@ -14,12 +14,9 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 )
 
-// LICENCES, one appliance at a time. Every change is a NEW signed document with the next licence_version;
-// the current one is never edited. Licence operations never touch the appliance lifecycle (F4): an appliance
-// whose licence is suspended or revoked keeps its identity and keeps talking to Central, which is how it
-// receives the suspension and the revocation list.
+// Every licence change is a new signed document with the next licence_version. Licence operations never touch the
+// appliance lifecycle: a suspended or revoked appliance keeps talking to Central, which is how it learns of it.
 
-// LicensesBase serves the appliance's licence fetch.
 type LicensesBase struct {
 	*Base
 	Svc *licensing.Service
@@ -28,9 +25,8 @@ type LicensesBase struct {
 // licenseTerms is the licence block of activate and of Set licence.
 type licenseTerms struct {
 	MaxConcurrentOnlineGuests int `json:"max_concurrent_online_guests"`
-	// UnlimitedOnlineGuests must be sent, with max_concurrent_online_guests 0 or omitted, to issue a licence
-	// with NO concurrent cap. An omitted or zero cap used to mean "unlimited" silently; now it is refused, so
-	// an unlimited licence is always a deliberate choice.
+	// UnlimitedOnlineGuests must be sent (with the cap 0 or omitted) to issue a licence with no concurrent cap;
+	// an omitted or zero cap alone is refused, so unlimited is always deliberate.
 	UnlimitedOnlineGuests bool       `json:"unlimited_online_guests"`
 	ValidUntil            *time.Time `json:"valid_until"`
 	ValidDays             int        `json:"valid_days"`
@@ -110,8 +106,7 @@ func (b *Base) setLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	// Lock the appliance and re-check inside the transaction that issues: a retirement or a move that commits
-	// between the check above and the issue must not be followed by a fresh licence for a retiring box.
+	// Re-check under lock: a retirement or move committed since the check above must not be followed by a fresh licence.
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		failInternal(w, r, "licence not issued", err)
@@ -223,10 +218,8 @@ func (b *Base) licenseAction(action string) http.HandlerFunc {
 	}
 }
 
-// ApplianceLicenseHandler serves GET /v1/appliance/license (appliance-JWT). Returns the signed envelope of
-// the appliance's CURRENT licence (active or suspended) plus the ids of its revoked licences, so a revocation
-// takes effect even before a replacement is issued. A successful fetch counts as a cloud validation on the
-// edge side. The wire format is unchanged.
+// ApplianceLicenseHandler returns the signed envelope of the current licence plus the ids of revoked licences, so a
+// revocation takes effect before a replacement is issued.
 func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
 	if ident == nil {
@@ -243,8 +236,7 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
 		return
 	}
-	// The revocation list is part of the answer: an empty list because the query failed would read as "nothing
-	// revoked" on the appliance. Fail instead; the appliance keeps its last verified state and retries.
+	// Fail rather than send an empty list after a failed query, which the appliance would read as "nothing revoked".
 	var revoked []string
 	rows, err := b.DB.Query(ctx, `
         SELECT l.id FROM licenses l
@@ -277,9 +269,7 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 	}); err != nil || len(revoked) == 0 {
 		return
 	}
-	// The revocations reached the appliance over its authenticated channel, and the appliance keeps every
-	// revocation it is told about (license.Store.AddRevocation). From here on the licence row is no longer
-	// what holds the revocation, so deleting the site it was issued for cannot undo it (deleteSite).
+	// The appliance now keeps these revocations (license.Store.AddRevocation), so deleting the site cannot undo them (deleteSite).
 	_, _ = b.DB.Exec(ctx, `UPDATE licenses SET revocation_delivered_at = now()
          WHERE $1::uuid = ANY(appliance_ids) AND status = 'revoked' AND id::text = ANY($2) AND revocation_delivered_at IS NULL`,
 		ident.ApplianceID, revoked)

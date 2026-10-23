@@ -1,15 +1,8 @@
-// scd-enroll-test is a standalone helper used by the phase5 smoke script.
-// It runs the identity resolve + signed /hello loop without touching
-// nft/tc/postgres, so it can run side-by-side with a live scd for tests.
+// scd-enroll-test is a standalone helper for the phase5 smoke script: it runs the identity resolve + signed /hello
+// loop without touching nft/tc/postgres, so it can run beside a live scd.
 //
-// Env vars:
-//
-//	SCD_IDENTITY_DIR   (required)
-//	SCD_CTRLAPI_BASE   (required)
-//
-// A factory-clean identity dir is registered token-less (POST /v1/appliances/register).
-//
-// Exits 0 on success; prints the resolved identity + hello response to stdout.
+// Env (both required): SCD_IDENTITY_DIR, SCD_CTRLAPI_BASE. A factory-clean identity dir is registered token-less.
+// Exits 0 on success; prints the resolved identity and hello response.
 package main
 
 import (
@@ -37,15 +30,13 @@ func main() {
 		fatal("SCD_IDENTITY_DIR and SCD_CTRLAPI_BASE are required")
 	}
 
-	// --replay: sign one JWT, call /hello twice, print the two status codes.
-	// Used by the smoke script to exercise the replay cache.
+	// --replay: sign one JWT, call /hello twice, print both status codes (exercises the replay cache).
 	replay := len(os.Args) > 1 && os.Args[1] == "--replay"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Token-less registration (enrollment tokens no longer exist): reuse a registered identity, otherwise
-	// register this keypair with Central.
+	// Reuse a registered identity, otherwise register this keypair with Central token-less.
 	store := &identity.Store{Dir: dir}
 	ident, err := store.Register(ctx, base, nil)
 	if err != nil {

@@ -1,11 +1,7 @@
 "use client";
 
-// THE ERASURE LEDGER (GDPR final mission).
-//
-// Every erasure is written to the appliance AND to a secondary storage the hotel sets up, before it is reported as done. The
-// secondary storage is required: until it is set up and verified, erasure requests are refused (nothing else is affected, and
-// guest internet access never is). This card sets it up, shows whether both copies are in step, and recovers from the secondary
-// storage when the appliance's own copy is behind or gone. The ledger does not depend on the scheduled-backup setting.
+// Every erasure is written to the appliance and to a required secondary storage before it is reported done;
+// until that is verified, erasure requests are refused (guest internet access is never affected).
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";

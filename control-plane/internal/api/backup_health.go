@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Where the Central host's backup facts live. Variables so a test can point them at a temporary directory.
+// Variables so a test can point them at a temporary directory.
 var (
 	backupRetentionStatusPath = "/opt/stayconnect/backup-retention-status.json" // stayconnect-backup-cleanup
 	backupPinsPath            = "/etc/stayconnect/backup-retention.pins"
@@ -30,7 +30,6 @@ type dbBackupRun struct {
 	LastFile      string     `json:"last_file"`
 }
 
-// DBBackupHealth answers the one question the page exists for: is there a recent, good database backup?
 type DBBackupHealth struct {
 	NewestFile    *string    `json:"newest_file"`
 	NewestAt      *time.Time `json:"newest_at"`
@@ -43,9 +42,8 @@ type DBBackupHealth struct {
 	Problem       *string    `json:"problem"`
 }
 
-// dbBackupHealth reads the dump directory itself -- the newest finished dump is a fact on disk, not something
-// a status file says -- and the last-run record, and decides. A failing daily dump used to be invisible: the
-// cleanup status kept reporting a fresh last_run, and the page never showed when the newest dump was taken.
+// dbBackupHealth reads the dump directory itself (the newest finished dump is a fact on disk, not a status
+// file's claim) plus the last-run record, and decides.
 func dbBackupHealth(now time.Time) DBBackupHealth {
 	var h DBBackupHealth
 	if raw, err := os.ReadFile(dbBackupStatusPath); err == nil {
@@ -94,10 +92,8 @@ func dbBackupHealth(now time.Time) DBBackupHealth {
 	return h
 }
 
-// BackupHealthHandler exposes the Central host's backup health: the database backups (newest dump, the last
-// run and whether it failed) and the backup/rollback retention status written by stayconnect-backup-cleanup
-// (last cleanup, retained/pinned/protected/delete-candidate artifacts, disk usage, cleanup failures, whether a
-// valid rollback path exists). Read-only, platform view.
+// BackupHealthHandler exposes the database backup health and the retention status written by
+// stayconnect-backup-cleanup. Read-only, platform view.
 func (b *Base) BackupHealthHandler(w http.ResponseWriter, r *http.Request) {
 	db := dbBackupHealth(time.Now())
 	raw, err := os.ReadFile(backupRetentionStatusPath)
@@ -114,7 +110,6 @@ func (b *Base) BackupHealthHandler(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "status parse failed")
 		return
 	}
-	// Operator-pinned artifacts (paths that cleanup must always keep).
 	pins := []string{}
 	if pf, err := os.ReadFile(backupPinsPath); err == nil {
 		for _, ln := range strings.Split(string(pf), "\n") {

@@ -12,25 +12,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Engine is the Posting domain core: creation under the fail-closed gate, and execution through the
-// per-interface outbox lanes.
+// Engine creates postings under the fail-closed gate and executes them through per-interface outbox lanes.
 //
-// THE CONSTRUCTION BOUNDARY, in its final form. Three attempts were needed, and the first two were each
-// narrower than the hole:
-//
-//	private fields          stopped a caller MUTATING an engine it was handed — but not building its own
-//	NewProductionEngine     removed the Config/Transport arguments — but still took an injectable getenv,
-//	                        and NewDarkGuard was still exported with both
-//	this                    NO exported function in this package accepts a Config or a Transport at all
-//
-// The package's exported financial surface is now: NewProductionEngine(repo). That is the whole of it.
-//
-//	config     comes from the environment, through the same fail-closed loader everything else uses
-//	transport  comes from the internal factory below, which in this milestone returns nothing at all
-//
-// The deterministic seam the tests need lives in export_test.go, which the Go toolchain compiles ONLY when
-// building this package's own tests. Production code cannot reference it — not by discipline, not by
-// review, but because it does not exist in a production build.
+// Construction boundary: no exported function accepts a Config or a Transport. NewProductionEngine(repo) is the
+// whole exported financial surface; config comes from the environment and the transport from the internal
+// factory. The test seam lives in export_test.go, so production code cannot reference it.
 type Engine struct {
 	cfg       Config
 	repo      *Repo
@@ -38,22 +24,13 @@ type Engine struct {
 	gate      Gate
 }
 
-// newEngine is the single internal constructor. Every path into an Engine goes through it, and it always
-// wraps the transport in the DARK guard.
+// newEngine is the single constructor and always wraps the transport in the DARK guard.
 func newEngine(cfg Config, repo *Repo, inner Transport) *Engine {
 	return &Engine{cfg: cfg, repo: repo, transport: newDarkGuard(cfg, inner)}
 }
 
-// NewProductionEngine is the ONLY exported way to obtain a financial engine, and it takes NOTHING that
-// could change its financial posture.
-//
-// It reads the flag posture from the real process environment — not from an injected reader — and obtains
-// its transport from productionTransport. A service that wants a transmitting engine therefore has to
-// change the DEPLOYMENT's environment and this package's factory: two separate, reviewable acts in two
-// different places, neither of which is reachable by writing Go at a call site.
-//
-// The getenv seam that used to be here was a hole, not a convenience: a production caller could hand the
-// fail-closed loader any environment it liked. Tests drive the loader through export_test.go instead.
+// NewProductionEngine reads flags from the real process environment, never an injected reader (that would let a
+// caller choose its own posture), so enabling transmission needs both a deployment change and a factory change.
 func NewProductionEngine(repo *Repo) (*Engine, error) {
 	cfg, err := LoadConfigFromEnv(os.Getenv)
 	if err != nil {
@@ -66,13 +43,8 @@ func NewProductionEngine(repo *Repo) (*Engine, error) {
 	return newEngine(cfg, repo, inner), nil
 }
 
-// productionTransport returns the real financial transport for this build.
-//
-// THE TRANSPORT IS THE HAND-OFF TO pmsd (decision D45). The property's PMS accepts one FIAS connection and
-// pmsd owns it, so a room charge is carried there as an immutable, authorised command and pmsd returns the
-// matched PA (handoff_transport.go, internal/postinghandoff, internal/pmsd/financial_relay.go). It is
-// constructed only when transmission is ON; while DARK the inner transport is nil, DarkGuard refuses before
-// it would be reached, and no hand-off client exists at all. It stays behind the same guard, and nowhere else.
+// productionTransport is the hand-off to pmsd, which owns the single FIAS connection (handoff_transport.go,
+// internal/pmsd/financial_relay.go). It exists only when transmission is ON; while DARK it is nil and DarkGuard refuses first.
 func productionTransport(cfg Config) (Transport, error) {
 	if !cfg.TransmitOn() {
 		return nil, nil
@@ -80,12 +52,9 @@ func productionTransport(cfg Config) (Transport, error) {
 	return newHandoffTransport(), nil
 }
 
-// Config returns a COPY of the flag state. Config is a value type, so a caller can read the posture and
-// cannot mutate the engine's.
 func (e *Engine) Config() Config { return e.cfg }
 
-// TransportRefusals reports how many financial transmissions the guard has refused. It exists so a test
-// can assert the worker really tried and was stopped, rather than inferring darkness from empty tables.
+// TransportRefusals lets a test assert the worker tried and was stopped, rather than inferring darkness from empty tables.
 func (e *Engine) TransportRefusals() int {
 	if g, ok := e.transport.(*DarkGuard); ok {
 		return g.Refusals()
@@ -93,8 +62,6 @@ func (e *Engine) TransportRefusals() int {
 	return 0
 }
 
-// LastRefusedBody returns the last PS body the guard refused, so a test can assert a COMPLETE financial
-// record was built and stopped at the wire.
 func (e *Engine) LastRefusedBody() string {
 	if g, ok := e.transport.(*DarkGuard); ok {
 		return g.LastRefusedBody()
@@ -102,18 +69,8 @@ func (e *Engine) LastRefusedBody() string {
 	return ""
 }
 
-// CreatePosting runs the fail-closed gate and, only if it passes, durably creates the posting and queues it.
-//
-// The ordering is the guarantee this whole milestone rests on, so it is worth being explicit about what a
-// refusal costs. When the gate refuses:
-//
-//	no posting row exists          — the transaction is rolled back
-//	no outbox row exists           — same transaction
-//	NO P# was consumed             — P# is allocated at TRANSMISSION time, not here, so a refused
-//	                                 creation cannot burn a protocol reference even in principle
-//	no financial wire bytes exist  — nothing has reached a Transport
-//
-// It returns the new posting id.
+// CreatePosting runs the fail-closed gate first. A refusal rolls back the posting and outbox rows, consumes no
+// P# (allocated at transmission time) and produces no wire bytes.
 func (e *Engine) CreatePosting(ctx context.Context, p Pinned) (string, error) {
 	if !e.cfg.PostingOn() {
 		return "", fail(ErrConfig, "the phase-4 posting domain is disabled")
@@ -141,7 +98,6 @@ func (e *Engine) CreatePosting(ctx context.Context, p Pinned) (string, error) {
 	return id, nil
 }
 
-// Outcome is what one lane step did.
 type Outcome struct {
 	Claimed   bool
 	PostingID string
@@ -154,15 +110,11 @@ type Outcome struct {
 	RefusedFor    Code
 }
 
-// RunOnce executes at most ONE queued posting for ONE PMS interface.
+// RunOnce executes at most one queued posting for one PMS interface. A lane is (tenant, site, interface): it
+// claims only its own rows and takes no lock another lane wants.
 //
-// Lane discipline: a lane is (tenant, site, interface). It claims only its own rows, it takes no lock any
-// other lane wants, and a lane that is failing or slow has no way to hold up another interface's money.
-//
-// DARK ordering, stated precisely because it is the no-egress proof: the DARK check happens AFTER the row
-// is claimed and the evidence re-verified, and BEFORE the P# is allocated. So a DARK worker that is
-// genuinely running, genuinely finds queued work and genuinely re-validates it still consumes no protocol
-// reference, writes no attempt and produces no bytes — and the claim is released so the work is not lost.
+// The DARK check runs after the claim and evidence re-verification but before the P# is allocated, so a DARK
+// worker consumes no P#, writes no attempt, produces no bytes, and releases the claim.
 func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID string) (Outcome, error) {
 	var out Outcome
 	if !e.cfg.OutboxOn() {
@@ -183,24 +135,17 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 	}
 	out.Claimed, out.PostingID, out.AttemptNo = true, claim.PostingID, claim.AttemptNo
 
-	// Lock the pinned stay for the rest of this transaction, so a room move cannot land between reading the
-	// reservation's room below and committing the attempt that carries it. (pmsd re-checks again at the
-	// moment of writing; see Phase-0 Amendment A1, contract section 9a rule 7.)
+	// Lock the stay so a room move cannot land between reading the room and committing the attempt (pmsd re-checks at write time).
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.p4_lock_posting_stay($1)`, claim.PostingID); err != nil {
 		return e.decline(ctx, tx, &out, claim, classify(err))
 	}
-	// Re-verify the PINNED evidence. This is not re-resolution: every identifier comes from the durable
-	// posting row, and the check is that those exact objects are still in a state that authorizes the
-	// charge. A stay that checked out between authorization and transmission stops the charge here.
+	// Re-verify the pinned evidence (not re-resolution): a stay that checked out since authorization stops here.
 	snap, err := LoadSnapshot(ctx, tx, claim.Pinned)
 	if err != nil {
 		return e.decline(ctx, tx, &out, claim, err)
 	}
-	// G# IS STABLE, RN IS MUTABLE. The reservation is the posting's pin (claim.Pinned.GNumber, from
-	// pms_postings.g_number) and is verified against the stay by the gate; the room is the reservation's
-	// CURRENT room, read now. A room move before this point re-targets the room -- never the reservation -- and
-	// does not fail the purchase. A reviewed retry is built the same way: its new attempt carries the room as
-	// it is now, and every earlier attempt keeps, immutably, the room it actually carried.
+	// G# is stable, RN is mutable: the reservation is the pin, the room is read now. A room move re-targets the room
+	// and does not fail the purchase; earlier attempts keep, immutably, the room they carried.
 	claim.Pinned.RN = snap.StayRoomNumber
 	if err := e.gate.CheckFor(PurposeExecute, claim.Pinned, snap); err != nil {
 		if reason := presendAbortReason(err); reason != "" {
@@ -209,16 +154,13 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 		return e.decline(ctx, tx, &out, claim, err)
 	}
 
-	// ---- the DARK boundary --------------------------------------------------------------------------
 	if e.cfg.Dark() {
-		// Build a complete, valid PS anyway and offer it to the guard, so the refusal is evidence that a
-		// real financial record was constructed and stopped AT THE WIRE rather than never reached. The
-		// placeholder P# below is a local value: no P# is allocated, so nothing durable is consumed.
+		// Offer a complete PS to the guard so the refusal proves it was stopped at the wire; the placeholder P# is local.
 		body, _ := BuildPS(PSRequest{RN: claim.Pinned.RN, GNumber: claim.Pinned.GNumber,
 			AmountMinor: claim.Pinned.AmountMinor, PostingCode: claim.Pinned.PostingCode, PNumber: 1})
 		_, terr := e.transport.SendPS(ctx, interfaceID, 1, body)
 		if terr == nil {
-			// A transport that accepted a send while DARK is a defect, not a success. Refuse loudly.
+			// A send accepted while DARK is a defect; refuse loudly.
 			return out, fail(ErrDarkNoEgress, "the financial transport transmitted while DARK")
 		}
 		if err := e.repo.ReleaseClaim(ctx, tx, claim.OutboxID); err != nil {
@@ -231,7 +173,6 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 		return out, nil
 	}
 
-	// ---- transmission -------------------------------------------------------------------------------
 	pn, err := e.repo.AllocatePNumber(ctx, tx, tenantID, siteID, interfaceID)
 	if err != nil {
 		return out, err
@@ -242,23 +183,20 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 	if err != nil {
 		return e.decline(ctx, tx, &out, claim, err)
 	}
-	// The attempt records the SHA-256 of the exact bytes it authorises. pmsd carries a command only when the
-	// database confirms a SENDING attempt with this interface, P# and hash (p4_posting_command_authorised), so
-	// no byte sequence the financial path did not durably authorise can ever be written to the PMS.
+	// The attempt records the SHA-256 of the exact bytes; pmsd carries only a command the database confirms
+	// (p4_posting_command_authorised), so no un-authorised byte sequence can reach the PMS.
 	attemptID, err := e.repo.InsertAttempt(ctx, tx, claim.Pinned, claim.PostingID, claim.AttemptNo, pn, psHash(body))
 	if err != nil {
 		return out, err
 	}
-	// The attempt must be durable BEFORE the bytes go out. If this process dies mid-send, the recovering
-	// process has to find an attempt it cannot explain rather than no evidence that anything happened.
+	// Commit before the bytes go out so a crash mid-send leaves evidence for recovery.
 	if err := tx.Commit(ctx); err != nil {
 		return out, fail(ErrRepo, "could not commit the attempt before transmission")
 	}
 
 	pa, sendErr := e.transport.SendPS(ctx, interfaceID, pn, body)
-	// The core verifies correlation itself rather than trusting the transport to have done it. An answer
-	// carrying another P# is not this attempt's answer -- it must never ACK it, and because the PS was
-	// genuinely transmitted the honest outcome is UNKNOWN, not a failure and certainly not a success.
+	// Verify correlation here rather than trust the transport: a PA with another P# never ACKs this attempt, and
+	// since the PS was transmitted the outcome is UNKNOWN.
 	if sendErr == nil && pa != nil && pa.PNumber != pn {
 		pa, sendErr = nil, fail(ErrPAWrongPNumber,
 			"the PA answers a different protocol-attempt reference; this attempt is unresolved")
@@ -266,12 +204,9 @@ func (e *Engine) RunOnce(ctx context.Context, tenantID, siteID, interfaceID stri
 	return e.settle(ctx, claim, attemptID, out, pa, sendErr)
 }
 
-// RecoverOrphanedAttempts closes every attempt the worker left SENDING -- the process stopped after the
-// attempt became durable and before its outcome was recorded. Such a PS may or may not have reached the PMS,
-// so each becomes UNKNOWN: outbox HELD_RECOVERY, settlement MANUAL_REVIEW, and nothing resends it.
-//
-// It only touches attempts older than olderThan, which is never less than AnswerDeadline plus a minute --
-// longer than any in-process send can last -- so a send still in progress is never judged.
+// RecoverOrphanedAttempts turns attempts left SENDING by a stopped process into UNKNOWN (outbox HELD_RECOVERY,
+// settlement MANUAL_REVIEW); nothing resends them. olderThan is at least AnswerDeadline plus a minute so an
+// in-progress send is never judged.
 func (e *Engine) RecoverOrphanedAttempts(ctx context.Context, tenantID, siteID string, olderThan time.Duration) (int, error) {
 	if olderThan < AnswerDeadline+time.Minute {
 		olderThan = AnswerDeadline + time.Minute
@@ -319,17 +254,14 @@ SELECT a.id::text, a.internal_posting_id::text, a.pms_interface_id::text, o.id::
 	return n, nil
 }
 
-// psHash is the command identity recorded on the attempt: lowercase hex SHA-256 of the exact PS body, the
-// same value internal/postinghandoff.BodyHash computes on the wire.
+// psHash must equal internal/postinghandoff.BodyHash for the same body.
 func psHash(body string) string {
 	s := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(s[:])
 }
 
-// presendAbortReason names the pre-send revalidation failures that END the charge as definitely not posted
-// (contract section 9a rule 7): the reservation is no longer in house, the stay is blocked, the reservation
-// does not match, its current room cannot be resolved, or the PMS data is stale. Anything else (interface
-// lifecycle, onboarding, currency) only declines, leaving the work queued for an operator to resolve.
+// presendAbortReason names the pre-send failures that end the charge as definitely not posted; anything else
+// (interface lifecycle, onboarding, currency) only declines and leaves the work queued.
 func presendAbortReason(err error) string {
 	switch CodeOf(err) {
 	case ErrStayNotInHouse:
@@ -346,9 +278,8 @@ func presendAbortReason(err error) string {
 	return ""
 }
 
-// abortBeforeSend ends a charge that provably never reached the PMS: its settlement FAILS (so the purchase
-// fails and nothing is granted), the outbox row is DONE and the reason is recorded. A charge with any attempt
-// that may have been transmitted is never aborted here: it goes back to manual review instead.
+// abortBeforeSend ends a charge that provably never reached the PMS (settlement fails, nothing is granted). A
+// charge with any possibly-transmitted attempt goes back to manual review instead.
 func (e *Engine) abortBeforeSend(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Claim, reason string, cause error) (Outcome, error) {
 	var mayHaveSent int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.posting_attempts
@@ -375,7 +306,6 @@ func (e *Engine) abortBeforeSend(ctx context.Context, tx pgx.Tx, out *Outcome, c
 	return *out, nil
 }
 
-// decline releases the claim and records why, without consuming a P# or writing an attempt.
 func (e *Engine) decline(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Claim, cause error) (Outcome, error) {
 	if rerr := e.repo.ReleaseClaim(ctx, tx, claim.OutboxID); rerr != nil {
 		return *out, rerr
@@ -387,19 +317,13 @@ func (e *Engine) decline(ctx context.Context, tx pgx.Tx, out *Outcome, claim *Cl
 	return *out, cause
 }
 
-// settle applies the one terminal outcome the attempt reached, in its own transaction.
+// settle applies the attempt's terminal outcome (the UNKNOWN contract):
 //
-// The three-way split IS the UNKNOWN contract:
-//
-//	answered, meaning confirmed  -> ACKED, with the AS the PMS gave; outbox DONE. OK means posted; a non-OK
-//	                                status means "not posted" ONLY when the vendor has confirmed that code for
-//	                                this interface (iam_v2.p4_answer_effect); otherwise the answer is UNKNOWN
-//	provably not transmitted     -> NOT_SENT, with pmsd's reason; the outbox goes back to QUEUED and a NEW
-//	                                attempt (fresh room, same G#) is fine, because nothing was sent
-//	transmitted, no matched PA   -> UNKNOWN; the outbox is parked in HELD_RECOVERY and NOTHING retries it.
-//	                                No timer, no backoff, no second P#, no restart path. It leaves that
-//	                                state only through an audited CONFIRM_NOT_POSTED_RETRY, which the
-//	                                database itself requires before an attempt 2 may exist at all.
+//	answered, confirmed     -> ACKED; a non-OK status means "not posted" only if the vendor confirmed that code
+//	                           for this interface (iam_v2.p4_answer_effect), otherwise UNKNOWN
+//	provably not sent       -> NOT_SENT; outbox QUEUED, a new attempt is fine
+//	sent, no matched PA     -> UNKNOWN; HELD_RECOVERY and nothing retries it (no timer, backoff or second P#)
+//	                           until an audited CONFIRM_NOT_POSTED_RETRY, which the database requires for attempt 2
 func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out Outcome, pa *PA, sendErr error) (Outcome, error) {
 	tx, err := e.repo.pool.Begin(ctx)
 	if err != nil {
@@ -410,8 +334,7 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 	var outcome, as, outboxState, event, reason string
 	switch {
 	case sendErr == nil && pa != nil && e.answerEffect(ctx, claim.Pinned.PMSInterfaceID, pa.AS) == "UNPROVEN":
-		// A PA was matched, but its status is not one the vendor has confirmed means "not posted" on this
-		// interface. Its posting effect cannot be proven, so it is UNKNOWN: manual review, never a retry.
+		// Matched PA whose status is not vendor-confirmed: effect unproven, so UNKNOWN (manual review, never retry).
 		outcome, as = "UNKNOWN", pa.AS
 		outboxState, event = "HELD_RECOVERY", "UNKNOWN_UNCONFIRMED_ANSWER"
 		out.Result, out.ASStatus = "UNKNOWN", pa.AS
@@ -429,8 +352,7 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 		reason = notSentReason(sendErr)
 		out.Result, out.RefusedFor, out.NotSentReason = "NOT_SENT", CodeOf(sendErr), reason
 	default:
-		// Everything else — a timeout, a torn connection after the write, an unparseable or unmatched
-		// answer. The PS may have been applied. Assuming either way would be inventing a financial fact.
+		// Timeout, torn connection after the write, unparseable or unmatched answer: the PS may have been applied.
 		outcome, outboxState, event = "UNKNOWN", "HELD_RECOVERY", "UNKNOWN_NO_CONCLUSIVE_PA"
 		out.Result = "UNKNOWN"
 		if sendErr != nil {
@@ -454,9 +376,8 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 	if err := tx.Commit(ctx); err != nil {
 		return out, fail(ErrRepo, "could not commit the settlement")
 	}
-	// THE SETTLEMENT FOLLOWS THE PMS (migration 0097): PA=OK settles the purchase's settlement and grants the
-	// entitlement; any other PA fails it; UNKNOWN sends it to manual review. Applied after the attempt is
-	// durable, and idempotent, so a crash between the two is repaired by the next pass (ApplySettlementOutcomes).
+	// Settlement follows the PMS: PA=OK grants, any other PA fails, UNKNOWN goes to manual review. Idempotent, so a
+	// crash before this is repaired by ApplySettlementOutcomes.
 	if outcome == "ACKED" || outcome == "UNKNOWN" {
 		if _, err := e.repo.pool.Exec(ctx, `SELECT iam_v2.p4_posting_settlement_outcome($1)`, claim.PostingID); err != nil {
 			return out, classify(err)
@@ -469,9 +390,7 @@ func (e *Engine) settle(ctx context.Context, claim *Claim, attemptID string, out
 	return out, nil
 }
 
-// answerEffect asks the database what a PA status means on this interface: POSTED, a NOT_POSTED_* effect, or
-// UNPROVEN. Only a vendor-confirmed code can mean "not posted"; any doubt, including a failed lookup, is
-// UNPROVEN, which the settlement treats as UNKNOWN.
+// answerEffect returns POSTED, a NOT_POSTED_* effect or UNPROVEN; any doubt, including a failed lookup, is UNPROVEN (treated as UNKNOWN).
 func (e *Engine) answerEffect(ctx context.Context, interfaceID, as string) string {
 	var eff string
 	if err := e.repo.pool.QueryRow(ctx, `SELECT iam_v2.p4_answer_effect($1, $2)`, interfaceID, as).Scan(&eff); err != nil {
@@ -480,7 +399,6 @@ func (e *Engine) answerEffect(ctx context.Context, interfaceID, as string) strin
 	return eff
 }
 
-// notSentReason extracts pmsd's bounded reason from a not-transmitted refusal, or "" when there is none.
 func notSentReason(err error) string {
 	var r interface{ NotSentReason() string }
 	if errors.As(err, &r) {
@@ -489,12 +407,9 @@ func notSentReason(err error) string {
 	return ""
 }
 
-// Requeue is the ONLY path out of UNKNOWN, and it is not a retry mechanism.
-//
-// It does not decide anything: it requires that an audited CONFIRM_NOT_POSTED_RETRY has ALREADY been
-// recorded through iam_v2.record_posting_review_action, and the database refuses the resulting attempt
-// unless that decision authorized exactly that attempt number. If a caller invokes this without a decision,
-// the requeued work simply fails the retry gate and lands back in HELD_RECOVERY.
+// Requeue is the only path out of UNKNOWN and decides nothing: it needs an audited CONFIRM_NOT_POSTED_RETRY
+// already recorded via iam_v2.record_posting_review_action, and the database refuses an attempt that decision
+// did not authorize.
 func (e *Engine) Requeue(ctx context.Context, postingID string) error {
 	if !e.cfg.ReviewOn() {
 		return fail(ErrConfig, "the phase-4 financial review surface is disabled")
@@ -517,8 +432,7 @@ UPDATE iam_v2.posting_outbox o
 	return nil
 }
 
-// ApplySettlementOutcomes re-applies the settlement effect of every concluded CHARGE posting whose settlement
-// has not caught up (a crash between recording the PA and moving the settlement). Idempotent.
+// ApplySettlementOutcomes repairs a crash between recording the PA and moving the settlement. Idempotent.
 func (e *Engine) ApplySettlementOutcomes(ctx context.Context, tenantID, siteID string) error {
 	rows, err := e.repo.pool.Query(ctx, `
 SELECT p.id::text FROM iam_v2.pms_postings p

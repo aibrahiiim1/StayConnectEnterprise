@@ -11,26 +11,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// ---- BOOT RECONCILIATION MUST USE THE CONFIRMED ACTIVE REVISION -------------------------------------------
-//
-// THE FAILURE THIS PREVENTS. netd used to reconcile on boot from `LoadIntent`, which reads the live
-// `guest_networks` rows — the ones the Hotel-Admin UI edits directly. Those edits are DRAFTS: they become the
-// appliance's configuration only when an operator Applies them and then Confirms inside the watchdog window,
-// which is the entire point of the validate → apply → pending_confirmation → active pipeline and of the
-// automatic rollback when confirmation never arrives.
-//
-// Reconciling from those rows on boot would bypass all of it. Two concrete consequences:
-//
-//	an operator edits a VLAN, is called away, and never applies it — the edit takes effect at the next reboot,
-//	with no apply record, no health check, no confirmation and no watchdog;
-//	a change that was ROLLED BACK precisely because it broke connectivity comes back by itself the next time
-//	the appliance restarts, because the draft rows were never reverted.
-//
-// The revision row already stores the exact intent it was applied with. That snapshot is immutable, and it is
-// what "the active network configuration" means.
+// Boot reconciliation must use the confirmed active revision's immutable intent snapshot, never the live
+// guest_networks rows: those are unapplied drafts, and reconciling from them would apply an unconfirmed edit
+// at reboot, or resurrect a rolled-back change, bypassing apply, health check, confirmation and watchdog.
 
-// draftIntent is what an operator has typed into Hotel-Admin but never applied: a different bridge, subnet and
-// gateway from the confirmed one, so a render from it is unmistakable.
+// draftIntent is an unapplied Hotel-Admin edit, rendering differently from the confirmed one.
 func draftIntent() []netcfg.GuestNetwork {
 	n := testIntent()
 	n[0].Name, n[0].BridgeName = "unapplied-draft", "br-draft"
@@ -38,7 +23,7 @@ func draftIntent() []netcfg.GuestNetwork {
 	return n
 }
 
-// confirmedIntent is the revision that was applied AND confirmed — i.e. what the appliance actually runs.
+// confirmedIntent is the applied and confirmed revision.
 func confirmedIntent() []netcfg.GuestNetwork { return testIntent() }
 
 type fakeRevisions struct {
@@ -49,7 +34,7 @@ type fakeRevisions struct {
 	prev    []netcfg.GuestNetwork
 	prevErr error
 	events  []string
-	bundle_ string // the previous revision's stored bundle DIRECTORY — nothing in it may ever be executed
+	bundle_ string // previous revision's stored bundle directory; nothing in it may be executed
 }
 
 func (r *fakeRevisions) active(context.Context) (string, string, []netcfg.GuestNetwork, error) {
@@ -73,14 +58,12 @@ func newLifecycleApplier(t *testing.T, k *fakeKernel, rev *fakeRevisions) *appli
 	return a
 }
 
-// THE CENTRAL CASE: an unapplied draft exists, the appliance reboots, and the runtime must still be the
-// confirmed revision.
+// With an unapplied draft present, a reboot must still produce the confirmed revision.
 func TestBootReconcile_UnappliedDraftDoesNotBecomeTheRuntime(t *testing.T) {
-	k := newFakeKernel(t) // a reboot: no table at all
+	k := newFakeKernel(t) // a reboot: no table
 	rev := &fakeRevisions{id: "rev-confirmed", intent: confirmedIntent()}
 	a := newLifecycleApplier(t, k, rev)
 
-	// the operator's unapplied edit is live in guest_networks, and must be irrelevant here
 	draftFP := netcfg.RenderFingerprint(draftIntent(), a.topo)
 	confirmedFP := netcfg.RenderFingerprint(confirmedIntent(), a.topo)
 	if draftFP == confirmedFP {
@@ -100,7 +83,7 @@ func TestBootReconcile_UnappliedDraftDoesNotBecomeTheRuntime(t *testing.T) {
 	}
 }
 
-// REPEATED restarts keep the confirmed revision, and the second one is a no-op.
+// Repeated restarts keep the confirmed revision as a no-op.
 func TestBootReconcile_RepeatedRestartsStayOnTheConfirmedRevision(t *testing.T) {
 	k := newFakeKernel(t)
 	rev := &fakeRevisions{id: "rev-confirmed", intent: confirmedIntent()}
@@ -120,9 +103,7 @@ func TestBootReconcile_RepeatedRestartsStayOnTheConfirmedRevision(t *testing.T) 
 	}
 }
 
-// ONLY AN EXPLICIT SUCCESSFUL APPLY/CONFIRM CHANGES THE ACTIVE NETWORK. Modelled as the revision store now
-// returning a NEW confirmed revision — which is the only thing that happens in the database when an operator
-// applies and confirms.
+// Only a confirmed apply (a new confirmed revision in the store) changes the active network.
 func TestBootReconcile_OnlyAConfirmedApplyChangesTheActiveNetwork(t *testing.T) {
 	k := newFakeKernel(t)
 	rev := &fakeRevisions{id: "rev-1", intent: confirmedIntent()}
@@ -131,7 +112,6 @@ func TestBootReconcile_OnlyAConfirmedApplyChangesTheActiveNetwork(t *testing.T) 
 	a.ReconcileActiveOnBoot(context.Background())
 	first := k.fp
 
-	// the operator edits Hotel-Admin repeatedly and reboots repeatedly: nothing changes
 	for i := 0; i < 2; i++ {
 		a.ReconcileActiveOnBoot(context.Background())
 		if k.fp != first {
@@ -139,7 +119,6 @@ func TestBootReconcile_OnlyAConfirmedApplyChangesTheActiveNetwork(t *testing.T) 
 		}
 	}
 
-	// now an apply IS confirmed: a new active revision, carrying the intent that was applied
 	rev.id, rev.intent = "rev-2", draftIntent()
 	k.reset()
 	a.ReconcileActiveOnBoot(context.Background())
@@ -153,8 +132,7 @@ func TestBootReconcile_OnlyAConfirmedApplyChangesTheActiveNetwork(t *testing.T) 
 	}
 }
 
-// A revision whose intent snapshot cannot be read must leave the live ruleset alone rather than fall back to
-// the mutable rows — falling back is the defect, not the recovery.
+// An unreadable intent snapshot must leave the live ruleset alone, not fall back to the mutable rows.
 func TestBootReconcile_UnreadableSnapshotLeavesTheLiveRulesetAlone(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.5")
@@ -178,8 +156,7 @@ func TestBootReconcile_UnreadableSnapshotLeavesTheLiveRulesetAlone(t *testing.T)
 	}
 }
 
-// AN APPLIANCE THAT HAS NEVER CONFIRMED A REVISION has no network configuration to reconstruct. It must do
-// nothing quietly — not fail, and certainly not adopt the draft rows.
+// An appliance that never confirmed a revision does nothing quietly and does not adopt the draft rows.
 func TestBootReconcile_NoConfirmedRevisionDoesNothing(t *testing.T) {
 	k := newFakeKernel(t)
 	rev := &fakeRevisions{err: ErrNoConfirmedActiveRevision}
@@ -197,14 +174,8 @@ func TestBootReconcile_NoConfirmedRevisionDoesNothing(t *testing.T) {
 	}
 }
 
-// ---- ROLLBACK MUST NEVER FALL BACK TO THE STORED RULESET FILE ---------------------------------------------
-//
-// THE FAILURE THIS PREVENTS. Rollback used to drop back to `nft -f <prevBundle>/stayconnect.nft` whenever the
-// safe path could not be completed — so the worst moment (a failed apply, on a live appliance, with the
-// operator already in trouble) was the one moment the code chose to execute a full-table replacement rendered
-// by some earlier binary. That file begins with `delete table inet stayconnect`: it deletes every
-// authorization set and every structure the current software requires. It is the exact artifact that caused
-// the Live Increment-9 blocker.
+// Rollback must never fall back to `nft -f <prevBundle>/stayconnect.nft`: that earlier-binary file begins with
+// `delete table inet stayconnect` and would delete every authorization set and structure the current software needs.
 
 func rollbackHarness(t *testing.T, rev *fakeRevisions) (*applier, *fakeKernel) {
 	t.Helper()
@@ -212,8 +183,7 @@ func rollbackHarness(t *testing.T, rev *fakeRevisions) (*applier, *fakeKernel) {
 	k.legacyJulyTable("br-g90|10.20.0.9")
 	a := newLifecycleApplier(t, k, rev)
 	a.legacyBridge = "br-lan"
-	// A previous bundle DIRECTORY exists — that is the realistic case, and it is precisely the case in which
-	// the old code would have executed the stored stayconnect.nft inside it.
+	// A previous bundle directory with a stored stayconnect.nft exists.
 	dir := t.TempDir()
 	if err := os.WriteFile(dir+"/stayconnect.nft", []byte(
 		"table inet stayconnect\ndelete table inet stayconnect\ntable inet stayconnect {\n}\n"), 0o600); err != nil {
@@ -222,9 +192,7 @@ func rollbackHarness(t *testing.T, rev *fakeRevisions) (*applier, *fakeKernel) {
 	rev.bundle_ = dir
 	a.prevBundleFn = func(context.Context, string) (string, error) { return dir, nil }
 	a.markRolledFn = func(context.Context, string, string) error { return nil }
-	// Rollback now re-reads the revision's state on EVERY branch, not only the factory-clean one, so that a
-	// confirmation landing in the gap cannot be rolled back on top of. These cases are about a revision that is
-	// still awaiting confirmation, which is what a rollback is for.
+	// Rollback re-reads the revision's state on every branch; these cases are for a revision still awaiting confirmation.
 	a.revStateFn = func(context.Context, string) (string, error) { return "pending_confirmation", nil }
 	a.netplanFile = dir + "/50-stayconnect-guest.yaml"
 	a.unboundFrag = dir + "/stayconnect-guest.conf"
@@ -266,7 +234,6 @@ func TestRollback_NeverExecutesAStoredRulesetFile(t *testing.T) {
 	}
 }
 
-// When the safe path CAN be completed, rollback really does restore the previous revision's structure.
 func TestRollback_RendersThePreviousConfirmedIntent(t *testing.T) {
 	rev := &fakeRevisions{prev: confirmedIntent()}
 	a, k := rollbackHarness(t, rev)
@@ -286,16 +253,15 @@ func TestRollback_RendersThePreviousConfirmedIntent(t *testing.T) {
 	}
 }
 
-// A rollback whose safe reconciliation FAILS mid-way must also refuse the legacy path, not "recover" into it.
+// A failed safe reconciliation must not degrade into the legacy path.
 func TestRollback_AFailedSafeReconciliationDoesNotDegradeToTheLegacyPath(t *testing.T) {
 	rev := &fakeRevisions{prev: confirmedIntent()}
 	a, k := rollbackHarness(t, rev)
-	k.failNftF = true // the safe converge cannot complete
+	k.failNftF = true
 
 	a.rollback(context.Background(), "failed-rev", "health check failed")
 
-	// The safe path legitimately writes and attempts its OWN render (current-stayconnect.nft) and that
-	// attempt failed. What must not happen is the fallback: executing the previous bundle's stored file.
+	// The safe path attempts its own render (current-stayconnect.nft); only executing the previous bundle's file is forbidden.
 	for _, c := range k.cmds {
 		if strings.Contains(c, rev.bundle_) {
 			t.Fatalf("a failed safe reconciliation degraded into the stored-file path: %s", c)
@@ -307,14 +273,11 @@ func TestRollback_AFailedSafeReconciliationDoesNotDegradeToTheLegacyPath(t *test
 	}
 }
 
-// A ROLLBACK BRINGS BACK WHAT THE FAILED APPLY TOOK AWAY. A revision that deleted or replaced a network
-// destroyed that network's bridge; rolling back used to destroy only what the failed apply ADDED, so the old
-// network stayed down until the next boot. The previous confirmed intent names br-g90, it is not live here,
-// and the rollback must rebuild it (and say so).
+// A rollback rebuilds a bridge the failed apply destroyed (the previous intent names br-g90, not live here) and says so.
 func TestRollback_RebuildsABridgeTheFailedApplyRemoved(t *testing.T) {
 	rev := &fakeRevisions{prev: confirmedIntent()}
 	a, k := rollbackHarness(t, rev)
-	a.liveBridgesFn = func() map[string]bool { return map[string]bool{} } // br-g90 was destroyed by the failed apply
+	a.liveBridgesFn = func() map[string]bool { return map[string]bool{} }
 
 	a.rollback(context.Background(), "failed-rev", "confirmation expired")
 
@@ -333,7 +296,7 @@ func TestRollback_RebuildsABridgeTheFailedApplyRemoved(t *testing.T) {
 	}
 }
 
-// ...and a bridge that is already live is left exactly as it is.
+// A bridge that is already live is left alone.
 func TestRollback_LeavesALiveBridgeAlone(t *testing.T) {
 	rev := &fakeRevisions{prev: confirmedIntent()}
 	a, k := rollbackHarness(t, rev)
@@ -351,9 +314,8 @@ func TestRollback_LeavesALiveBridgeAlone(t *testing.T) {
 	}
 }
 
-// THE GUEST RESOLVER IS REBUILT FROM THE CURRENT RENDERER ON BOOT, not replayed from the stored bundle: an
-// upgraded appliance gains the current resolver configuration (the DNS abuse limits, for one) on its next start
-// rather than at its next network change, and the bundle is updated to say the same.
+// The guest resolver fragment is rebuilt from the current renderer on boot, not replayed from the stored bundle,
+// so an upgrade takes effect at the next start.
 func TestBootReconcile_RendersTheResolverFragmentFromTheCurrentRenderer(t *testing.T) {
 	k := newFakeKernel(t)
 	dir := t.TempDir()

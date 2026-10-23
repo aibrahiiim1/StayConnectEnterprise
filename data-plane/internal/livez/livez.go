@@ -1,8 +1,5 @@
-// Package livez is a filesystem liveness heartbeat for loop-based daemons that
-// have no socket to probe (notably acctd). The daemon calls Touch(name) each
-// iteration of its work loop; the edged health supervisor calls Age(name) to
-// verify the loop is actually PROGRESSING — an accounting daemon can be
-// systemd-"active" while its loop is wedged, and process-running is not health.
+// Package livez is a filesystem heartbeat for loop-based daemons with no socket to probe (e.g. acctd): the loop
+// calls Touch each iteration and the edged supervisor calls Age, since systemd-active does not mean the loop progresses.
 package livez
 
 import (
@@ -13,27 +10,20 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
 )
 
-// Dir is shared with the startupbackoff trackers (tmpfs; reset on reboot).
 const Dir = "/run/stayconnect/health"
 
 func path(name string) string { return filepath.Join(Dir, name+".alive") }
 
-// Touch stamps the service's liveness file with the current time.
-//
-// Written as a fresh file renamed into place (internal/healthdir), never by Chtimes or OpenFile on the existing
-// name: both follow a symlink, and the directory is shared with every service account (audit B-3).
+// Touch stamps the liveness file. It writes a fresh file renamed into place (internal/healthdir), never
+// Chtimes/OpenFile on the existing name: both follow symlinks and the directory is shared with every service account.
 func Touch(name string) {
 	_ = healthdir.WriteFile(Dir, name+".alive", nil)
 }
 
-// Report publishes a loop's DEGRADED state alongside its heartbeat. An empty reason means healthy.
-//
-// Liveness alone is not health: an accounting loop can tick perfectly on time while every observation it
-// makes is refused, or while it cannot read the counters at all. Both look identical to Age() — the loop is
-// progressing — and both silently lose usage. The reason has to travel with the heartbeat or nobody sees it.
+// Report publishes a loop's degraded state beside its heartbeat (empty reason = healthy); Age alone cannot see a
+// loop that ticks while every observation is refused.
 func Report(name, reason string) {
-	// Written whole each time, including the empty (healthy) case: a stale reason left behind after recovery
-	// would have an operator chasing a problem that is over. Never through a symlink (internal/healthdir).
+	// Written whole every time, including the healthy case, so a stale reason never outlives recovery; never through a symlink.
 	_ = healthdir.WriteFile(Dir, name+".status", []byte(reason))
 }
 
@@ -48,7 +38,6 @@ func Status(name string) (string, bool) {
 
 func statusPath(name string) string { return filepath.Join(Dir, name+".status") }
 
-// Age returns how long ago the service last beat, and whether a heartbeat exists.
 func Age(name string) (time.Duration, bool) {
 	fi, err := os.Stat(path(name))
 	if err != nil {

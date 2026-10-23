@@ -17,10 +17,8 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// initModules builds the deployment ceiling and the module resolver. scd hosts the resolver because it holds
-// the licence; edged and portald ask scd (GET /v1/modules) rather than re-deriving anything.
-//
-// An incoherent deployment flag set is a startup failure, exactly as each underlying configuration already is.
+// initModules builds the deployment ceiling and module resolver. scd hosts it because it holds the licence; edged and
+// portald ask scd (GET /v1/modules). An incoherent flag set is a startup failure.
 func (s *server) initModules() error {
 	c, err := deployment.Load(os.Getenv)
 	if err != nil {
@@ -40,8 +38,7 @@ func (s *server) initModules() error {
 	return nil
 }
 
-// identitySwitches maps the Sign-in methods switches onto the identity modules: that screen stays the single
-// local source for SMS, WhatsApp, email and social sign-in.
+// identitySwitches maps the Sign-in methods switches onto the identity modules; that screen stays the single local source.
 func (s *server) identitySwitches(ctx context.Context, tenantID string) (map[string]bool, error) {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -84,7 +81,6 @@ func (s *server) moduleSnapshot(ctx context.Context) modules.Snapshot {
 	return s.modules.Resolve(cctx, s.tenID, s.siteID)
 }
 
-// moduleEffective reports whether module id may execute now.
 func (s *server) moduleEffective(ctx context.Context, id string) bool {
 	return s.moduleSnapshot(ctx).Effective(id)
 }
@@ -124,14 +120,10 @@ func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
 		Card:       snap.Effective(lic.ModuleCardPayment),
 		RoomCharge: snap.Effective(lic.ModuleRoomCharge),
 	}
-	// The client pays in the package currency. A package is offered by card only in the default account's
-	// currency or, when that account is provider-converts and its provider converts, in a currency the
-	// provider presents (iamv2.SiteMethods.CardApplicable). The payment gate would otherwise refuse it one step
-	// later (PAYMENT_ACCOUNT_CURRENCY), after the client had already chosen.
+	// A package is offered by card only in the default account's currency or, for a provider-converts account, a currency its
+	// provider presents (iamv2.SiteMethods.CardApplicable); otherwise the payment gate would refuse it after the client chose.
 	if m.Card && s.db != nil {
-		// The DEFAULT active account is the one a checkout uses (p4_resolve_payment_account_v2): its currency,
-		// and -- when it is marked provider-converts and its provider can -- the presentment currencies the
-		// provider converts from (contract §9, migration 0112).
+		// The default active account is the one a checkout uses: its currency and, if provider-converts, the presentment currencies its provider converts from.
 		var provider, settles string
 		var converts bool
 		if err := s.db.QueryRow(ctx, `SELECT a.provider, upper(trim(COALESCE(a.currency,''))),
@@ -156,13 +148,11 @@ func (s *server) siteAcquisitionMethods(ctx context.Context) iamv2.SiteMethods {
 	return m
 }
 
-// registerModuleProbes gives the resolver the readiness and history answers only their owners can give.
 func (s *server) registerModuleProbes() {
 	if s.modules == nil {
 		return
 	}
-	// Hospitality records: a site that ran a PMS keeps its stays, activity and reconciliation reachable after
-	// the licence stops covering Hospitality (history only; day-to-day screens need the licence).
+	// Hospitality records: a site that ran a PMS keeps its stays and history reachable after the licence stops covering Hospitality.
 	s.modules.SetRecordsProbe(lic.ModuleHospitality, s.hospitalityHasRecords)
 	s.modules.SetProbe(lic.ModuleCardPayment, s.cardReadiness)
 	s.modules.SetRecordsProbe(lic.ModuleCardPayment, s.cardHasRecords)
@@ -170,7 +160,6 @@ func (s *server) registerModuleProbes() {
 	s.modules.SetRecordsProbe(lic.ModuleRoomCharge, s.roomChargeHasRecords)
 }
 
-// hospitalityHasRecords reports whether the site holds any PMS interface or stay.
 func (s *server) hospitalityHasRecords(ctx context.Context, tenantID, siteID string) bool {
 	if s.db == nil {
 		return false
@@ -181,9 +170,8 @@ func (s *server) hospitalityHasRecords(ctx context.Context, tenantID, siteID str
 	return has
 }
 
-// roomChargeReadiness: room charge can execute only when real posting is within the deployment ceiling (a
-// separate Product-Owner authorisation) and at least one PMS interface is financially onboarded. Per-stay and
-// per-package applicability is decided when offers are computed (phase3_paid.go).
+// roomChargeReadiness: room charge can execute only when real posting is within the deployment ceiling and at least one PMS
+// interface is financially onboarded. Per-stay applicability is decided when offers are computed (phase3_paid.go).
 func (s *server) roomChargeReadiness(ctx context.Context, tenantID, siteID string) (bool, []string) {
 	if !s.ceiling.Available(deployment.CapRoomChargeTransmit) {
 		return false, []string{"PMS_POSTING_NOT_AUTHORISED"}

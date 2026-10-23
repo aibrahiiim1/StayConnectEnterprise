@@ -8,16 +8,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
 )
 
-// The reconciliation engine lives in internal/nftconverge so that the REAL-KERNEL suite can drive the same code
-// against real nft in a disposable namespace. A copy of it here would be a copy the kernel gate does not test —
-// and this mechanism's whole claim is about what the kernel actually ends up holding.
-//
-// See internal/nftconverge for why the stored bundle is not the source of truth, and why a steady-state restart
-// must issue no nft command at all.
+// The reconciliation engine lives in internal/nftconverge so the real-kernel suite tests the same code; see it
+// for why the stored bundle is not the source of truth and why a steady-state restart issues no nft command.
 
 type nftConvergeOutcome = nftconverge.Outcome
 
-// applierRunner adapts the applier's command seams to the engine.
 type applierRunner struct{ a *applier }
 
 func (r applierRunner) Run(ctx context.Context, name string, args ...string) error {
@@ -32,15 +27,14 @@ func (a *applier) nftEngine() *nftconverge.Engine {
 	return &nftconverge.Engine{Topo: a.renderTopo(), Dir: a.generatedDir, NftPath: a.nftPath, R: applierRunner{a}}
 }
 
-// ensureNftStructure makes the live ruleset match what this binary renders for the given intent, and returns
-// whether anything had to change.
+// ensureNftStructure makes the live ruleset match the rendered intent and reports whether anything changed.
 func (a *applier) ensureNftStructure(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (nftConvergeOutcome, error) {
 	a.nftMu.Lock()
 	defer a.nftMu.Unlock()
 	return a.ensureNftStructureLocked(ctx, intent, trigger)
 }
 
-// ensureNftStructureLocked is ensureNftStructure for a caller that already holds a.nftMu.
+// ensureNftStructureLocked requires a.nftMu to be held.
 func (a *applier) ensureNftStructureLocked(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (nftConvergeOutcome, error) {
 	if a.dryRun {
 		return nftConvergeOutcome{Trigger: trigger, DesiredFP: netcfg.RenderFingerprint(intent, a.renderTopo())}, nil

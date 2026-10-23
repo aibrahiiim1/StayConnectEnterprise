@@ -142,8 +142,6 @@ func TestAppleClientSecretJWT(t *testing.T) {
 	if iat != fixedNow.Unix() || exp <= iat || exp-iat > int64((183*24*time.Hour).Seconds()) {
 		t.Errorf("iat/exp not sensible: iat=%d exp=%d", iat, exp)
 	}
-	// The signature verifies with the public half of the .p8 key, in the JWS
-	// r||s encoding.
 	sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
 	if len(sig) != 64 {
 		t.Fatalf("ES256 signature must be 64 bytes, got %d", len(sig))
@@ -215,7 +213,6 @@ func TestAppleRejectsBadTokens(t *testing.T) {
 		"wrong issuer": func() string {
 			return signRS256(t, key, testKid, appleClaims(map[string]any{"iss": "https://evil.example"}))
 		},
-		// A perfectly signed token minted for ANOTHER sign-in attempt.
 		"nonce of another attempt": func() string {
 			return signRS256(t, key, testKid, appleClaims(map[string]any{"nonce": "someone-elses-nonce"}))
 		},

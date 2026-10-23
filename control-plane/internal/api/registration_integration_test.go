@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// X-1: a waiting appliance's identity key can be replaced only from the SAME hardware. Knowing the serial is
-// not enough; a refusal raises one security alert (repeats fold into it) and every attempt is audited.
+// A waiting appliance's identity key can be replaced only from the same hardware; a refusal raises one alert
+// (repeats fold into it) and every attempt is audited.
 func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
 	f := newFixture(t)
 	first := newBox("SC-TEST-0001", "hwf-genuine")
@@ -16,14 +16,12 @@ func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
 	}
 	id := decode(t, rec)["appliance_id"].(string)
 
-	// An attacker who knows the serial but not the hardware.
 	for i := 0; i < 3; i++ {
 		rec = f.register(newBox("SC-TEST-0001", "hwf-attacker"))
 		if rec.Code != http.StatusForbidden || decode(t, rec)["error"] != "identity_replacement_refused" {
 			t.Fatalf("replacement from other hardware must be refused, got %d %s", rec.Code, rec.Body.String())
 		}
 	}
-	// No fingerprint at all is refused too.
 	if rec = f.register(newBox("SC-TEST-0001", "")); rec.Code != http.StatusForbidden {
 		t.Fatalf("replacement without a fingerprint must be refused, got %d", rec.Code)
 	}
@@ -40,7 +38,6 @@ func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
 		t.Fatalf("every refused replacement must be audited, got %d", n)
 	}
 
-	// The genuine box after a factory reset: same serial, same hardware, new key.
 	reset := newBox("SC-TEST-0001", "hwf-genuine")
 	rec = f.register(reset)
 	if rec.Code != http.StatusOK || decode(t, rec)["appliance_id"] != id {
@@ -52,14 +49,12 @@ func TestWaitingIdentityReplacementRequiresSameHardware(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM audit_log WHERE action='appliance.identity_replaced' AND target_id=$1`, id); n != 1 {
 		t.Fatalf("an accepted replacement must be audited, got %d", n)
 	}
-	// The replaced key is dead for good.
 	if rec = f.register(first); rec.Code != http.StatusForbidden || decode(t, rec)["error"] != "identity_retired" {
 		t.Fatalf("the replaced key must never register again, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 
-// X-2: a retired appliance that re-registers after a factory reset is a NEW appliance row. The old row keeps
-// its customer, licence history, alerts and audit trail; none of it moves to the new row.
+// A retired appliance that re-registers after a factory reset is a new row; the old row keeps its history.
 func TestRetiredApplianceReRegistersAsNewRow(t *testing.T) {
 	f := newFixture(t)
 	cust, site := f.customerSite("First Hotel")
@@ -71,7 +66,6 @@ func TestRetiredApplianceReRegistersAsNewRow(t *testing.T) {
         VALUES ($1,'SC-TEST-0002','wan_mac_mismatch','{}')`, oldID); err != nil {
 		t.Fatal(err)
 	}
-	// Emergency retirement: the row is retired at once.
 	rec = f.operatorCall(f.base.retire, http.MethodPost, oldID, map[string]any{
 		"reason": "returned", "emergency": true, "confirm_serial": "SC-TEST-0002"})
 	if rec.Code != http.StatusOK {
@@ -109,7 +103,6 @@ func TestRetiredApplianceReRegistersAsNewRow(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM retired_appliance_identities WHERE public_key=$1`, old.pubB64); n != 1 {
 		t.Fatal("the retired identity key must be remembered")
 	}
-	// The detail view of the new appliance shows none of the old life.
 	rec = f.operatorCall(f.base.getAppliance, http.MethodGet, newID, nil)
 	d := decode(t, rec)
 	if lics := d["licenses"].([]any); len(lics) != 0 {
@@ -120,13 +113,11 @@ func TestRetiredApplianceReRegistersAsNewRow(t *testing.T) {
 			t.Fatalf("the new appliance's page shows the previous life's event %v", a)
 		}
 	}
-	// Only one LIVE row per serial.
 	if rec = f.register(newBox("SC-TEST-0002", "hwf-other")); rec.Code != http.StatusForbidden {
 		t.Fatalf("a third identity from other hardware must still be refused, got %d", rec.Code)
 	}
 }
 
-// X-10: registration attempts against an activated serial fold into one open alert instead of one per call.
 func TestHardwareReusedAlertIsBounded(t *testing.T) {
 	f := newFixture(t)
 	cust, site := f.customerSite("Bounded")
@@ -146,7 +137,6 @@ func TestHardwareReusedAlertIsBounded(t *testing.T) {
 	}
 }
 
-// P4: a captured registration request cannot be replayed.
 func TestRegistrationReplayIsRefused(t *testing.T) {
 	f := newFixture(t)
 	bx := newBox("SC-TEST-0004", "hwf-4")

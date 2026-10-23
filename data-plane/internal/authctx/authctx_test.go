@@ -2,8 +2,6 @@ package authctx
 
 import "testing"
 
-// TestValidPinUUID proves pin/presenter validation happens in Go BEFORE any SQL: a malformed, whitespace-only,
-// overlong, or nil UUID is rejected; only a canonical non-nil UUID passes.
 func TestValidPinUUID(t *testing.T) {
 	valid := []string{
 		"11111111-1111-1111-1111-111111111111",
@@ -35,8 +33,6 @@ func TestValidPinUUID(t *testing.T) {
 	}
 }
 
-// TestGrantValidRejectsMalformed proves a grant with any malformed/whitespace/overlong/nil id is invalid
-// (so IssuePMS/IssuePMSTx return ErrGrantIncomplete before touching the DB), and a fully-valid grant passes.
 func TestGrantValidRejectsMalformed(t *testing.T) {
 	good := PMSGrant{
 		Tenant: "11111111-1111-1111-1111-111111111111", Site: "22222222-2222-2222-2222-222222222222",
@@ -64,8 +60,6 @@ func TestGrantValidRejectsMalformed(t *testing.T) {
 	}
 }
 
-// TestPresenterValidRejectsMalformed proves presenter validation is uniform (a malformed presenter is rejected
-// before SQL, yielding ErrContextInvalid rather than a raw cast error).
 func TestPresenterValidRejectsMalformed(t *testing.T) {
 	good := Presenter{
 		Tenant: "11111111-1111-1111-1111-111111111111", Site: "22222222-2222-2222-2222-222222222222",

@@ -1,11 +1,6 @@
 "use client";
 
-// BATCHES — one row per print run, counted by the server over the WHOLE batch.
-//
-// The previous screen built its batch list from whichever page of cards happened to be loaded, labelled each
-// with "N cards in view", and then exported the entire batch. So the number next to the button was not the
-// number the button acted on, and a batch beyond the loaded page did not appear at all. These counts come
-// from the server's aggregate, and the export dialog states exactly how many codes it will recover.
+// Server aggregates count the whole batch, matching the number of codes exported.
 
 import * as React from "react";
 import { Ban, Download, Layers, List } from "lucide-react";
@@ -43,12 +38,11 @@ export function BatchesTab({
   focusBatch,
 }: {
   canRevealCodes: boolean;
-  /** Cancelling the unused cards of a batch is a vouchers WRITE (step-up and a reason on the server). */
+  /** Batch cancellation requires step-up and a server-recorded reason. */
   canCancel?: boolean;
   reloadKey: number;
   onViewCards: (batchId: string) => void;
   hotelName?: string;
-  /** A batch to open straight away (from a card's "Batch" link). */
   focusBatch?: { id: string } | null;
 }) {
   const [data, setData] = React.useState<VoucherBatchesResp | null>(null);
@@ -69,7 +63,7 @@ export function BatchesTab({
 
   React.useEffect(load, [load, reloadKey]);
 
-  // Opening a specific batch fetches that batch by id, so it opens even when it is not on this page.
+  // Fetch by ID so a linked batch opens even when it is outside the current page.
   React.useEffect(() => {
     if (!focusBatch) return;
     api
@@ -189,8 +183,7 @@ function BatchSheet({
     <Sheet open={batch !== null} onOpenChange={onOpenChange}>
       <SheetContent
         width="lg"
-        // Focus the panel itself, not its first focusable element: that is a timestamp with a tooltip, which
-        // would open on arrival and swallow the first Escape.
+        // Focus the panel; the first timestamp's tooltip would swallow Escape.
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           (e.currentTarget as HTMLElement).focus();
@@ -228,9 +221,7 @@ function BatchDetail({
   hotelName?: string;
 }) {
   const toast = useToast();
-  // CANCELLING A BATCH: every card not used yet stops working, at once and for good. Cards already used keep
-  // the access they granted -- ending that is an action on the client's access, not on the card. Republishing
-  // or deactivating the package never does this; only this explicit, recorded action does.
+  // Cancellation stops unused cards; redeemed cards retain access until their entitlement ends.
   const [cancelling, setCancelling] = React.useState(false);
   const [cancelErr, setCancelErr] = React.useState<unknown>(null);
 
@@ -257,7 +248,7 @@ function BatchDetail({
   const [scope, setScope] = React.useState<"all" | "unused">("all");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<unknown>(null);
-  // Exported codes live in this component only; closing the sheet unmounts it and drops them.
+  // Keep exported codes in component memory so closing the sheet drops them.
   const [exported, setExported] = React.useState<ExportedBatch | null>(null);
 
   const planned = scope === "unused" ? batch.unused : batch.count;

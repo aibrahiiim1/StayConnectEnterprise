@@ -14,18 +14,14 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// ---- a modelled portal interface ---------------------------------------------------------------------------
-//
-// The portal interface is kernel state netd creates, re-addresses and deletes through `ip`. The model below
-// applies exactly those commands, so a test can state what exists, run netd, and read back both what netd
-// EXECUTED and what the interface ended up carrying.
+// Modelled portal interface: applies exactly the `ip` commands netd issues, so tests read back what netd executed and what the interface carries.
 
 type fakePortalNet struct {
 	exists bool
 	up     bool
 	addrs  []string
 	cmds   []string
-	fail   string // a command prefix that fails
+	fail   string
 }
 
 func (p *fakePortalNet) run(_ context.Context, name string, args ...string) error {
@@ -72,7 +68,6 @@ func (p *fakePortalNet) mutations() []string {
 	return out
 }
 
-// portalApplier wires the portal model into a test applier; nft goes to the simulated kernel as everywhere else.
 func portalApplier(t *testing.T, k *fakeKernel, pn *fakePortalNet) *applier {
 	t.Helper()
 	a := newTestApplier(t, k)
@@ -100,8 +95,6 @@ func portalApplier(t *testing.T, k *fakeKernel, pn *fakePortalNet) *applier {
 	return a
 }
 
-// ---- the dummy interface ------------------------------------------------------------------------------------
-
 func TestPortalIface_CreatedAddressedAndUp(t *testing.T) {
 	pn := &fakePortalNet{}
 	a := portalApplier(t, newFakeKernel(t), pn)
@@ -123,7 +116,7 @@ func TestPortalIface_CreatedAddressedAndUp(t *testing.T) {
 }
 
 func TestPortalIface_SteadyStateExecutesNothing(t *testing.T) {
-	// The periodic refresh runs every 15 s. On a correct appliance it must not issue a single command.
+	// The 15 s refresh must issue no command on a correct appliance.
 	pn := &fakePortalNet{exists: true, up: true, addrs: []string{"10.255.255.1/32"}}
 	a := portalApplier(t, newFakeKernel(t), pn)
 	changed, err := a.ensurePortalIface(context.Background(), "10.255.255.1")
@@ -141,7 +134,7 @@ func TestPortalIface_ChangedAddressReplacesTheOldOne(t *testing.T) {
 	if strings.Join(pn.addrs, ",") != "10.254.254.1/32" {
 		t.Fatalf("the interface carries %v; the old address must be gone and only the new one present", pn.addrs)
 	}
-	// The old address goes FIRST: there is never a moment carrying both.
+	// The old address goes first: never both at once.
 	m := pn.mutations()
 	if len(m) != 2 || !strings.HasPrefix(m[0], "ip addr del 10.255.255.1/32") || !strings.HasPrefix(m[1], "ip addr replace 10.254.254.1/32") {
 		t.Fatalf("executed %v", m)
@@ -157,7 +150,6 @@ func TestPortalIface_NoAddressDeletesTheInterface(t *testing.T) {
 	if pn.exists {
 		t.Fatal("the portal interface survived its address being removed")
 	}
-	// ...and an absent interface with no address is a no-op.
 	pn.cmds = nil
 	if changed, _ := a.ensurePortalIface(context.Background(), ""); changed || len(pn.mutations()) != 0 {
 		t.Fatalf("removing an absent interface executed %v", pn.mutations())
@@ -188,8 +180,6 @@ func TestPortalIface_DryRunTouchesNothingAndFailuresAreReported(t *testing.T) {
 		t.Fatal("a failed address assignment was reported as success")
 	}
 }
-
-// ---- validation and the socket endpoint -------------------------------------------------------------------
 
 func TestParseHostAddrs(t *testing.T) {
 	raw := `[{"ifindex":1,"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8}]},
@@ -226,7 +216,7 @@ func portalValidateCall(t *testing.T, a *applier, body string) (int, map[string]
 
 func TestPortalIPValidateEndpoint(t *testing.T) {
 	a := portalApplier(t, newFakeKernel(t), &fakePortalNet{})
-	a.intentFn = func(context.Context) ([]netcfg.GuestNetwork, error) { return testIntent(), nil } // 10.20.0.0/22
+	a.intentFn = func(context.Context) ([]netcfg.GuestNetwork, error) { return testIntent(), nil }
 
 	cases := []struct {
 		body string
@@ -234,10 +224,10 @@ func TestPortalIPValidateEndpoint(t *testing.T) {
 		code string
 	}{
 		{`{"portal_ip":"10.255.255.1"}`, true, ""},
-		{`{"portal_ip":"10.20.1.1"}`, false, "portal_ip_overlap"},       // inside the guest network
-		{`{"portal_ip":"172.17.9.9"}`, false, "portal_ip_overlap"},      // inside docker0
-		{`{"portal_ip":"172.21.60.77"}`, false, "portal_ip_overlap"},    // inside the WAN/management subnet
-		{`{"portal_ip":"203.0.113.5"}`, false, "portal_ip_not_private"}, // not RFC 1918
+		{`{"portal_ip":"10.20.1.1"}`, false, "portal_ip_overlap"},
+		{`{"portal_ip":"172.17.9.9"}`, false, "portal_ip_overlap"},
+		{`{"portal_ip":"172.21.60.77"}`, false, "portal_ip_overlap"},
+		{`{"portal_ip":"203.0.113.5"}`, false, "portal_ip_not_private"},
 		{`{"portal_ip":""}`, false, "required"},
 	}
 	for _, tc := range cases {
@@ -267,14 +257,12 @@ func TestPortalIPValidateEndpoint(t *testing.T) {
 	if code, _ := portalValidateCall(t, a, "{not json"); code != 400 {
 		t.Fatalf("a malformed body got HTTP %d", code)
 	}
-	// FAIL CLOSED: host addresses that cannot be read are an error, never a pass.
+	// Unreadable host addresses are an error, never a pass.
 	a.hostAddrsFn = func(context.Context) ([]netcfg.HostAddr, error) { return nil, errors.New("ip: netlink busy") }
 	if code, _ := portalValidateCall(t, a, `{"portal_ip":"10.255.255.1"}`); code != 500 {
 		t.Fatalf("an unknowable overlap answered HTTP %d", code)
 	}
 }
-
-// ---- the revision record: generate, rollback, boot ---------------------------------------------------------
 
 func TestGenerateRecordsThePortalAddressInTheBundle(t *testing.T) {
 	a := portalApplier(t, newFakeKernel(t), &fakePortalNet{})
@@ -290,7 +278,6 @@ func TestGenerateRecordsThePortalAddressInTheBundle(t *testing.T) {
 	if !strings.Contains(string(nft), "dnat ip to 10.255.255.1:8343") {
 		t.Fatal("the bundle's ruleset does not carry the portal address it records")
 	}
-	// "none" is recorded as an empty file, which is different from no file at all.
 	a.setInForce(testIntent(), "")
 	b2 := filepath.Join(t.TempDir(), "revision-000043")
 	if err := a.generate(b2, testIntent()); err != nil {
@@ -307,7 +294,7 @@ func TestGenerateRecordsThePortalAddressInTheBundle(t *testing.T) {
 func TestRollbackRestoresThePreviousRevisionsPortalAddress(t *testing.T) {
 	rev := &fakeRevisions{prev: confirmedIntent()}
 	a, k := rollbackHarness(t, rev)
-	pn := &fakePortalNet{exists: true, up: true, addrs: []string{"10.254.254.1/32"}} // the FAILED apply's address
+	pn := &fakePortalNet{exists: true, up: true, addrs: []string{"10.254.254.1/32"}}
 	b := portalApplier(t, k, pn)
 	a.runFn, a.portalLinkFn, a.addrsFn = b.runFn, b.portalLinkFn, b.addrsFn
 	a.setInForce(draftIntent(), "10.254.254.1")
@@ -323,7 +310,6 @@ func TestRollbackRestoresThePreviousRevisionsPortalAddress(t *testing.T) {
 	if _, vip, _ := a.inForce(); vip != "10.255.255.1" {
 		t.Fatalf("in-force portal address %q", vip)
 	}
-	// The restored RULESET names the restored address, so the firewall and the interface agree.
 	topo := a.topo
 	topo.PortalVIP = "10.255.255.1"
 	if want := netcfg.RenderFingerprint(confirmedIntent(), topo); k.fp != want {
@@ -337,7 +323,7 @@ func TestRollbackToABundleThatPredatesThePortalAddressKeepsTheConfirmedOne(t *te
 	pn := &fakePortalNet{exists: true, up: true, addrs: []string{"10.254.254.1/32"}}
 	b := portalApplier(t, k, pn)
 	a.runFn, a.portalLinkFn, a.addrsFn = b.runFn, b.portalLinkFn, b.addrsFn
-	a.setActiveVIP("10.255.255.1") // what the confirmed revision has run with since boot
+	a.setActiveVIP("10.255.255.1")
 	a.setInForce(draftIntent(), "10.254.254.1")
 
 	a.rollback(context.Background(), "failed-rev", "health check failed")
@@ -380,7 +366,6 @@ func TestBootReconcileUsesTheRevisionsRecordNotTheSetting(t *testing.T) {
 	a := newLifecycleApplier(t, k, rev)
 	b := portalApplier(t, k, pn)
 	a.runFn, a.portalLinkFn, a.addrsFn, a.hostAddrsFn = b.runFn, b.portalLinkFn, b.addrsFn, b.hostAddrsFn
-	// The operator SAVED a different address but never applied it.
 	a.portalIPFn = func(context.Context) (string, error) { return "10.254.254.1", nil }
 
 	a.ReconcileActiveOnBoot(context.Background())
@@ -397,7 +382,7 @@ func TestBootReconcileUsesTheRevisionsRecordNotTheSetting(t *testing.T) {
 
 func TestBootReconcileAdoptsAValidSettingOnceForAPreFeatureRevision(t *testing.T) {
 	k := newFakeKernel(t)
-	dir := t.TempDir() // no portal-ip record: the revision predates the portal address
+	dir := t.TempDir()
 	rev := &fakeRevisions{id: "rev-confirmed", intent: confirmedIntent(), bundle: dir}
 	pn := &fakePortalNet{}
 	a := newLifecycleApplier(t, k, rev)
@@ -423,7 +408,7 @@ func TestBootReconcileAdoptsNothingInvalid(t *testing.T) {
 	a := newLifecycleApplier(t, k, rev)
 	b := portalApplier(t, k, pn)
 	a.runFn, a.portalLinkFn, a.addrsFn, a.hostAddrsFn = b.runFn, b.portalLinkFn, b.addrsFn, b.hostAddrsFn
-	a.portalIPFn = func(context.Context) (string, error) { return "10.20.0.77", nil } // inside the guest network
+	a.portalIPFn = func(context.Context) (string, error) { return "10.20.0.77", nil }
 
 	a.ReconcileActiveOnBoot(context.Background())
 
@@ -434,8 +419,6 @@ func TestBootReconcileAdoptsNothingInvalid(t *testing.T) {
 		t.Fatal("a refused adoption was recorded")
 	}
 }
-
-// ---- the runtime refresh: option 114 and the resolver fragment -------------------------------------------
 
 type fakeKea struct {
 	running  map[string]any
@@ -450,7 +433,7 @@ func (f *fakeKea) RunningDhcp4() (map[string]any, error) {
 	if f.failRead {
 		return nil, errors.New("kea dial: no such file")
 	}
-	// What Kea answers is generic JSON, not netd's typed maps -- round-trip so the comparison is like for like.
+	// Kea answers generic JSON, so round-trip for a like-for-like comparison.
 	raw, _ := json.Marshal(f.running)
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
@@ -488,7 +471,6 @@ func refreshApplier(t *testing.T, tls netcfg.PortalTLS) (*applier, *fakeKea, *fa
 	a.keaRTSeam = fk
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) { return tls, nil }
 	a.setInForce(localIntent(), "10.255.255.1")
-	// Kea is running the fallback configuration, as an apply in the fallback state would have left it.
 	fk.running = a.renderKea(localIntent())
 	return a, fk, pn
 }
@@ -509,19 +491,16 @@ func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing
 	if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
 		t.Fatalf("Kea now runs %q", got)
 	}
-	// The pushed configuration IS the apply render for the same moment: same intent, same state, same function.
 	want := a.renderKea(localIntent())
 	if !jsonEqual(fk.lastSet, want) {
 		t.Fatal("the refresh pushed something other than what an apply of the in-force intent renders")
 	}
-	// No nft and no netplan on this path, ever.
 	for _, c := range pn.cmds {
 		if strings.HasPrefix(c, "nft") || strings.HasPrefix(c, "netplan") {
 			t.Fatalf("the runtime refresh touched %s", c)
 		}
 	}
 
-	// Steady state: nothing more is pushed.
 	a.portalRefresh(context.Background())
 	if fk.set != 1 {
 		t.Fatalf("a refresh with nothing to change pushed again (config-set=%d)", fk.set)
@@ -531,7 +510,6 @@ func TestRefresh_HTTPSBecomingActiveSwitchesOption114WithoutARevision(t *testing
 func TestRefresh_FallbackSwitchesBackToHTTP(t *testing.T) {
 	a, fk, _ := refreshApplier(t, netcfg.PortalTLS{HTTPSActive: true, CanonicalHostname: "k3j9x0ab.gw.onegate.work"})
 	a.portalRefresh(context.Background())
-	// The certificate expired: scd reports the fallback.
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) {
 		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work"}, nil
 	}
@@ -570,7 +548,7 @@ func TestRefresh_StandsAsideAndFailsSafe(t *testing.T) {
 	})
 	t.Run("the HTTPS state is unreadable", func(t *testing.T) {
 		a, fk, _ := refreshApplier(t, active)
-		a.portalRefresh(context.Background()) // now https
+		a.portalRefresh(context.Background())
 		a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) { return netcfg.PortalTLS{}, errors.New("db down") }
 		a.portalRefresh(context.Background())
 		if got := opt114Of(fk.running); got != "https://k3j9x0ab.gw.onegate.work/captive-portal/api" {
@@ -590,7 +568,7 @@ func TestRefresh_StandsAsideAndFailsSafe(t *testing.T) {
 
 func TestRefresh_ReassertsADeletedPortalInterface(t *testing.T) {
 	a, _, pn := refreshApplier(t, netcfg.PortalTLS{})
-	pn.exists, pn.up, pn.addrs = false, false, nil // someone ran `ip link del ogportal0`
+	pn.exists, pn.up, pn.addrs = false, false, nil
 	a.portalRefresh(context.Background())
 	if !pn.exists || !pn.up || strings.Join(pn.addrs, ",") != "10.255.255.1/32" {
 		t.Fatalf("the portal interface was not re-asserted: exists=%v up=%v addrs=%v", pn.exists, pn.up, pn.addrs)
@@ -623,7 +601,6 @@ func TestRefresh_WritesThePortalNamesFragmentAndReloadsOnlyOnChange(t *testing.T
 		}
 	}
 
-	// The hotel domain is VERIFIED: it joins the fragment.
 	a.portalTLSFn = func(context.Context) (netcfg.PortalTLS, error) {
 		return netcfg.PortalTLS{OneGateHostname: "k3j9x0ab.gw.onegate.work", CustomDomain: "wifi.nilehotel.com"}, nil
 	}
@@ -655,7 +632,6 @@ func TestRefresh_ARefusedFragmentIsPutBack(t *testing.T) {
 }
 
 func TestCaptiveOptionsReadsKeasOwnAnswer(t *testing.T) {
-	// config-get answers with code and name and extra keys; the comparison must read both shapes.
 	running := map[string]any{"subnet4": []any{
 		map[string]any{"subnet": "10.20.0.0/22", "option-data": []any{
 			map[string]any{"code": float64(3), "name": "routers", "data": "10.20.0.1", "always-send": false},

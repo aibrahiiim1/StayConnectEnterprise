@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// GDPR audit C5: the Overview warns while the database accepts its default password, checks at most every six
-// hours, and raises nothing when the answer is not known.
 func TestTheDefaultDatabasePasswordIsWarnedAbout(t *testing.T) {
 	calls := 0
 	found, ok := true, true

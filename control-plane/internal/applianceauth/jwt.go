@@ -1,26 +1,6 @@
-// Package applianceauth handles Ed25519-signed JWTs used by appliances
-// (scd) to prove their identity to the control plane.
-//
-// The on-wire format is a tiny JWT: header.payload.signature, each segment
-// base64url-encoded (no padding). alg="EdDSA", typ="JWT".
-//
-// A signed request BINDS the whole HTTP call, not just the identity, so a
-// captured token cannot be replayed against a different method, path, body,
-// or audience. Claims:
-//
-//	iss — appliance UUID
-//	kid — key id (fingerprint of the signing public key), for rotation
-//	iat — issued at (unix seconds)
-//	exp — expiration (unix seconds); we enforce exp-iat <= MaxLifetime
-//	jti — random nonce; the verifier caches seen jti's to block replay
-//	aud — audience (required; must equal the server's expected audience)
-//	mth — HTTP method
-//	pth — canonical request path (no query)
-//	bsh — base64url(sha256(request body))
-//	ver — appliance software version (optional, informational + audited)
-//
-// Keep the surface minimal and mirrored on the data-plane side
-// (data-plane/internal/applianceauth) — the two MUST stay in sync.
+// Package applianceauth handles the Ed25519-signed JWTs appliances use to prove identity. A signed request binds
+// the whole HTTP call (method, path, body hash, audience), so a captured token cannot be replayed elsewhere.
+// Mirrored in data-plane/internal/applianceauth; the two must stay in sync.
 package applianceauth
 
 import (
@@ -36,15 +16,13 @@ import (
 	"time"
 )
 
-// Audience is the single cloud-API audience every appliance request must
-// carry. A token minted for any other audience is rejected.
+// Audience is the only audience accepted.
 const Audience = "stayconnect-cloud-api"
 
-// MaxLifetime bounds how long a signed request is usable. Clients sign a
-// fresh token per request; a short window keeps the replay surface tiny.
+// MaxLifetime bounds how long a signed request is usable; a short window keeps the replay surface small.
 const MaxLifetime = 60 * time.Second
 
-// SkewFuture is how far in the future iat may be (clock-skew tolerance).
+// SkewFuture is how far in the future iat may be.
 const SkewFuture = 5 * time.Second
 
 type header struct {
@@ -52,16 +30,15 @@ type header struct {
 	Typ string `json:"typ"`
 }
 
-// Claims are the signed payload.
 type Claims struct {
-	Iss string `json:"iss"` // appliance ID (uuid)
-	Kid string `json:"kid"` // signing-key id (public-key fingerprint)
-	Iat int64  `json:"iat"` // issued-at, unix seconds
-	Exp int64  `json:"exp"` // expiration, unix seconds
-	Jti string `json:"jti"` // random nonce
-	Aud string `json:"aud"` // audience (required)
-	Mth string `json:"mth"` // HTTP method
-	Pth string `json:"pth"` // canonical request path
+	Iss string `json:"iss"` // appliance ID
+	Kid string `json:"kid"` // public-key fingerprint
+	Iat int64  `json:"iat"` // unix seconds
+	Exp int64  `json:"exp"` // unix seconds; exp-iat is held to MaxLifetime
+	Jti string `json:"jti"` // random nonce, cached by the verifier to block replay
+	Aud string `json:"aud"`
+	Mth string `json:"mth"`
+	Pth string `json:"pth"` // canonical path, no query
 	Bsh string `json:"bsh"` // base64url(sha256(body))
 	Ver string `json:"ver,omitempty"`
 }
@@ -80,21 +57,18 @@ var (
 	ErrKeyID           = errors.New("applianceauth: key id mismatch")
 )
 
-// KeyID returns the canonical short fingerprint of a public key used as the
-// `kid` claim: first 16 hex chars of sha256(raw pubkey).
+// KeyID is the `kid` claim: the first 16 hex chars of sha256(raw pubkey).
 func KeyID(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
 	return fmt.Sprintf("%x", sum[:8])
 }
 
-// BodyHash is the canonical base64url(sha256(body)) used in the `bsh` claim.
 func BodyHash(body []byte) string {
 	sum := sha256.Sum256(body)
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// RequestParams describes the actual HTTP call the verifier observed. The
-// signed claims must match these exactly.
+// RequestParams is the HTTP call the verifier observed; the signed claims must match it exactly.
 type RequestParams struct {
 	Audience string
 	Method   string
@@ -103,7 +77,6 @@ type RequestParams struct {
 	KeyID    string // expected kid derived from the looked-up public key
 }
 
-// Encode produces a signed JWT from fully-populated claims.
 func Encode(key ed25519.PrivateKey, c Claims) (string, error) {
 	hb, _ := json.Marshal(header{Alg: "EdDSA", Typ: "JWT"})
 	pb, err := json.Marshal(c)
@@ -115,9 +88,8 @@ func Encode(key ed25519.PrivateKey, c Claims) (string, error) {
 	return signingInput + "." + b64(sig), nil
 }
 
-// Verify checks only the signature + temporal claims and returns the parsed
-// claims. It is stateless; callers must also run the jti through a
-// ReplayCache and (for request binding) call VerifyRequest.
+// Verify checks only the signature and temporal claims. It is stateless: callers must also run the jti through a
+// ReplayCache and use VerifyRequest for request binding.
 func Verify(token string, pub ed25519.PublicKey, now time.Time) (*Claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -162,9 +134,8 @@ func Verify(token string, pub ed25519.PublicKey, now time.Time) (*Claims, error)
 	return &c, nil
 }
 
-// VerifyRequest runs Verify then binds the claims to the observed request:
-// audience, method, path, body hash, and key id must all match. This is the
-// defense that turns a bearer identity token into a per-request signature.
+// VerifyRequest runs Verify then requires audience, method, path, body hash and key id to match the observed
+// request, turning a bearer token into a per-request signature.
 func VerifyRequest(token string, pub ed25519.PublicKey, now time.Time, p RequestParams) (*Claims, error) {
 	c, err := Verify(token, pub, now)
 	if err != nil {
@@ -190,11 +161,8 @@ func VerifyRequest(token string, pub ed25519.PublicKey, now time.Time, p Request
 
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
-// ----- Replay cache -----
-
-// ReplayCache is an in-process LRU of recently-seen jti values. ctrlapi runs
-// as a single instance on Central, so an in-process cache is authoritative;
-// if it is ever scaled out this must move to Redis (SETNX with TTL).
+// ReplayCache holds recently seen jti values in process. That is authoritative only while ctrlapi runs as a
+// single instance; scaling out requires Redis (SETNX with TTL).
 type ReplayCache struct {
 	mu   sync.Mutex
 	seen map[string]time.Time
@@ -206,7 +174,6 @@ func NewReplayCache(ttl time.Duration, max int) *ReplayCache {
 	return &ReplayCache{seen: make(map[string]time.Time, max), ttl: ttl, max: max}
 }
 
-// Use returns ErrReplay if jti was seen within ttl; otherwise records it.
 func (rc *ReplayCache) Use(jti string, now time.Time) error {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
@@ -225,7 +192,6 @@ func (rc *ReplayCache) Use(jti string, now time.Time) error {
 	return nil
 }
 
-// Describe renders a claims failure compactly for logs/audit.
 func Describe(err error) string {
 	if err == nil {
 		return "ok"

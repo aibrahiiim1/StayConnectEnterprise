@@ -1,16 +1,9 @@
 package main
 
-// THE KERNEL HALF OF A STAFF DISCONNECT, DONE BY THE COMPONENT THAT OWNS THE KERNEL STATE.
-//
-// denyAtGate used to remove the address from the legacy set and delete its tc class itself, then wait for
-// netd's next pass to revoke the Phase-3 authorization. In between, the guest was still authorized with NO
-// class: every open flow -- and any new one -- forwarded unshaped through the bridge's default class, uncounted
-// (audit B-1 / F-14). Removing an address from a set also never ended a flow that was already open, because the
-// forward chain accepts established traffic before it consults the sets.
-//
-// netd's POST /v1/flows/end revokes the Phase-3 authorization for the address (proven gone) and deletes every
-// conntrack entry naming it. When netd reports the address as Phase-3-managed, its tc class is netd's and is
-// left to netd's reconciliation, which removes it once durable state no longer lists the session.
+// The kernel half of a staff disconnect is done by netd, which owns the kernel state: removing an address from a set never
+// ends an open flow (the forward chain accepts established traffic first), and deleting the tc class early left the guest
+// authorized with no class, unshaped and uncounted. netd's POST /v1/flows/end revokes the Phase-3 authorization and deletes
+// every conntrack entry naming the address; when netd manages the address its tc class is left to netd's reconciliation.
 
 import (
 	"bytes"

@@ -12,18 +12,15 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// setupOfflineImport imports an appliance-specific signed offline activation
-// package: it verifies the vendor signature + binding (id/serial/key
-// fingerprints) + expiry, enforces SINGLE-USE via a reboot-persistent local
-// ledger, installs the embedded signed license, and records consumption for
-// later online reconciliation. Rejected packages mutate nothing.
+// setupOfflineImport imports an appliance-specific signed offline package: verifies signature, binding and expiry, enforces
+// single use via a reboot-persistent ledger, installs the embedded license and records consumption for later reconciliation.
+// Rejected packages mutate nothing.
 func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 	var pkg offline.Package
 	if err := json.NewDecoder(r.Body).Decode(&pkg); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad package")
 		return
 	}
-	// Vendor public key (the appliance already trusts it for licenses).
 	raw, err := os.ReadFile(envOr("SCD_VENDOR_PUB", "/etc/stayconnect/vendor-license.pub"))
 	if err != nil || len(raw) != ed25519.PublicKeySize {
 		httpErr(w, http.StatusServiceUnavailable, "vendor public key unavailable")
@@ -38,16 +35,12 @@ func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Verify signature + binding + expiry for THIS appliance.
 	if reason := offline.AcceptFor(pub, &pkg, s.applID, s.serial, s.identityKeyFpr, mtlsFpr, time.Now()); reason != "" {
 		httpErr(w, http.StatusForbidden, "package rejected: "+reason)
 		return
 	}
-	// Single-use: reboot-persistent ledger in the site DB.
 	if s.db != nil {
-		// edge_offline_packages is declared by migration 0048. It used to be created here on every import,
-		// which hid the schema from anyone reading the migrations and would silently produce a different
-		// shape than the declared one on a database restored from an older dump.
+		// edge_offline_packages is declared by migration 0048 and must not be created here: it would diverge from the declared shape on a restored older dump.
 		tag, err := s.db.Exec(r.Context(),
 			`INSERT INTO edge_offline_packages (package_id, nonce) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
 			pkg.PackageID, pkg.Nonce)
@@ -60,10 +53,7 @@ func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Install the embedded signed license (offline activation). A superseded/
-	// replayed offline file is REJECTED by the anti-rollback store — the
-	// consumption ledger entry above still stands (single-use), but no old
-	// authority is restored.
+	// An old or replayed offline file is rejected by the anti-rollback store; the single-use ledger entry above still stands.
 	installed := false
 	if s.lic != nil && len(pkg.LicenseEnvelope) > 0 && string(pkg.LicenseEnvelope) != "null" {
 		if _, err := s.lic.Install(r.Context(), pkg.LicenseEnvelope); err != nil {
@@ -79,9 +69,7 @@ func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 		}
 		installed = true
 	}
-	// Reconcile with Central (idempotent). offlineReconcileLoop (central_retry.go) offers every
-	// unreconciled package again until Central confirms, so an import made while offline is reconciled
-	// once the link returns.
+	// Reconcile with Central (idempotent); offlineReconcileLoop (central_retry.go) retries until Central confirms.
 	s.kickOfflineReconcile()
 
 	writeJSON(w, http.StatusOK, map[string]any{

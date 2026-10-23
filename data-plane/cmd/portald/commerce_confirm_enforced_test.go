@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// confirmBridge stands up an scd that grants on /v1/commerce/confirm and answers /v1/sessions/activate with
-// the given enforcement verdict, and records whether activation was asked for.
 func confirmBridge(t *testing.T, enforced bool, activated *bool) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +53,7 @@ func confirmReq(t *testing.T, h *handler) *httptest.ResponseRecorder {
 	return w
 }
 
-// The success-page panel says "Package active" when confirm answers with an entitlement. A grant whose
-// session netd has not enforced must therefore NOT be reported as one: the guest is still offline.
+// A grant whose session netd has not enforced must not be reported as "Package active": the guest is still offline.
 func TestCommerceConfirmWithoutEnforcementIsNotSuccess(t *testing.T) {
 	activated := false
 	w := confirmReq(t, confirmBridge(t, false, &activated))

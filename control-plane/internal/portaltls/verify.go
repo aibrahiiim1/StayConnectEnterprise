@@ -14,17 +14,9 @@ import (
 	"time"
 )
 
-// HOTEL DOMAIN VERIFICATION (contract §3.1). A hotel proves wifi.nilehotel.com with three public records:
-//
-//	_onegate-verify.<fqdn>  TXT    <verify_token>                        the claimant controls the name
-//	<fqdn>                  CNAME  <label>.gw.onegate.work.              the name follows the portal address
-//	_acme-challenge.<fqdn>  CNAME  <challenge_label>.acme.onegate.work.  Central may answer DNS-01 for it
-//
-// plus a CAA policy (on the name or the nearest parent that has one) that lets Let's Encrypt issue. Each is
-// read through two independent public DNS-over-HTTPS resolvers, and VERIFIED needs both to agree: one
-// resolver with a stale or poisoned cache must not be enough to bind a name, nor to break one.
+// Hotel domain verification reads the TXT/CNAME records and the CAA policy through two independent DoH
+// resolvers; VERIFIED needs both to agree, so one stale or poisoned cache can neither bind nor break a name.
 
-// DoH answer record types.
 const (
 	rrCNAME = 5
 	rrTXT   = 16
@@ -42,17 +34,13 @@ type dohResponse struct {
 	Answer []dohAnswer `json:"Answer"`
 }
 
-// DoHResolver queries one DNS-over-HTTPS JSON endpoint (Cloudflare's /dns-query and Google's /resolve speak
-// the same JSON dialect).
 type DoHResolver struct {
 	URL  string
 	HTTP *http.Client
 }
 
-// Query returns the answer records of type typ for name. Records of other types, such as the CNAMEs a
-// resolver followed, are dropped; records of the asked type at the END of a CNAME chain are kept, because
-// that is the RRset a CA sees for the name too (RFC 8659 §3). A CNAME query keeps only the name's own CNAME.
-// NXDOMAIN is an empty answer, not an error.
+// Query returns the records of type typ. Records at the end of a CNAME chain are kept because a CA sees that
+// RRset too (RFC 8659 §3); a CNAME query keeps only the name's own CNAME. NXDOMAIN is an empty answer.
 func (d DoHResolver) Query(ctx context.Context, name string, typ int) ([]string, error) {
 	u, err := url.Parse(d.URL)
 	if err != nil {
@@ -100,7 +88,6 @@ func (d DoHResolver) Query(ctx context.Context, name string, typ int) ([]string,
 	return out, nil
 }
 
-// txtValue undoes presentation quoting: `"abc" "def"` -> abcdef.
 func txtValue(data string) string {
 	data = strings.TrimSpace(data)
 	if !strings.HasPrefix(data, `"`) {
@@ -123,15 +110,13 @@ func txtValue(data string) string {
 	return b.String()
 }
 
-// CAARecord is one CAA record.
 type CAARecord struct {
 	Flags int
 	Tag   string
 	Value string
 }
 
-// ParseCAA reads a CAA record in presentation form (`0 issue "letsencrypt.org"`) or in the RFC 3597
-// generic form some resolvers return for it (`\# 22 00 05 69 73 73 75 65 ...`).
+// ParseCAA reads presentation form or the RFC 3597 generic form (`\# 22 00 05 ...`) some resolvers return.
 func ParseCAA(data string) (CAARecord, error) {
 	data = strings.TrimSpace(data)
 	if strings.HasPrefix(data, `\#`) {
@@ -157,7 +142,6 @@ func ParseCAA(data string) (CAARecord, error) {
 	return CAARecord{Flags: flags, Tag: strings.ToLower(f[1]), Value: txtValue(f[2])}, nil
 }
 
-// caaIssuerDomain is the issuer-domain-name of an issue value: "letsencrypt.org; accounturi=x" -> letsencrypt.org.
 func caaIssuerDomain(v string) string {
 	d, _, _ := strings.Cut(v, ";")
 	return strings.ToLower(strings.TrimSpace(d))
@@ -178,11 +162,10 @@ func caaParams(v string) map[string]string {
 	return out
 }
 
-// CAAPermits applies RFC 8659 to the CAA RRset of the relevant name: may Let's Encrypt issue a (non-wildcard)
-// certificate, by DNS-01, for our account? An empty set permits everything. A critical flag on a tag we do not
-// understand forbids issuance (that is what the flag is for). With no "issue" record the set does not restrict
-// non-wildcard issuance. Otherwise one issue record must name letsencrypt.org and, if it pins an account or
-// validation methods, include ours (accountURL "" = we do not know ours yet, so a pin cannot be judged here).
+// CAAPermits applies RFC 8659: may Let's Encrypt issue a non-wildcard certificate by DNS-01 for our account?
+// An unknown critical tag forbids issuance. Without "issue" records nothing is restricted; otherwise one must
+// name letsencrypt.org and match our account/validation method if it pins them (accountURL "" = unknown, so a
+// pin is not judged).
 func CAAPermits(set []CAARecord, accountURL string) (bool, string) {
 	if len(set) == 0 {
 		return true, ""
@@ -226,17 +209,15 @@ func CAAPermits(set []CAARecord, accountURL string) (bool, string) {
 	return false, "the domain's CAA records do not allow Let's Encrypt to issue for it; add 0 issue \"letsencrypt.org\""
 }
 
-// DomainCheck is what a hotel domain must show (from the claim row and the appliance's hostname).
 type DomainCheck struct {
 	FQDN           string
 	VerifyToken    string
-	CNAMETarget    string // <label>.gw.onegate.work
-	ChallengeAlias string // <challenge_label>.acme.onegate.work
+	CNAMETarget    string
+	ChallengeAlias string
 	AccountURL     string
 }
 
-// CheckDomain runs every check through one resolver and returns nil when all pass, otherwise the first
-// problem in words the hotel's IT can act on.
+// CheckDomain runs every check through one resolver; the first problem is worded for the hotel's IT.
 func CheckDomain(ctx context.Context, r DoHResolver, c DomainCheck) error {
 	txts, err := r.Query(ctx, "_onegate-verify."+c.FQDN, rrTXT)
 	if err != nil {
@@ -257,8 +238,7 @@ func CheckDomain(ctx context.Context, r DoHResolver, c DomainCheck) error {
 	if err := checkCNAME(ctx, r, "_acme-challenge."+c.FQDN, c.ChallengeAlias); err != nil {
 		return err
 	}
-	// CAA: climb from the name to its registrable domain; the first name with any CAA record decides
-	// (RFC 8659 §3). The registrable domain is the top: above it lies a public suffix.
+	// CAA: climb to the registrable domain; the first name with any CAA record decides (RFC 8659 §3).
 	reg, err := RegistrableDomain(c.FQDN)
 	if err != nil {
 		return err
@@ -307,7 +287,6 @@ func checkCNAME(ctx context.Context, r DoHResolver, name, want string) error {
 	return fmt.Errorf("CNAME %s points to %s, not %s.", name, NormalizeFQDN(got[0]), NormalizeFQDN(want))
 }
 
-// CheckDomainEverywhere runs CheckDomain through every resolver; all must pass.
 func CheckDomainEverywhere(ctx context.Context, urls []string, hc *http.Client, c DomainCheck) error {
 	type res struct {
 		url string

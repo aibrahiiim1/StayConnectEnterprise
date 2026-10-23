@@ -13,10 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GDPR plan C3 and C4 (migration 0128): staff can find one guest, hand over everything held about them, and
-// erase them -- only the roles D-C4 named, only with the password and a reason, never while the guest is live,
-// and without touching anyone else.
-
 func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -50,7 +46,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		t.Fatalf("seed audit: %v", err)
 	}
 
-	// --- Who may: site_admin and the IT manager (D-C4); not the desk.
+	// Who may: site_admin and the IT manager; not the desk.
 	q := "/guest-data-rights/search?q=" + "ada-" + sfx
 	st, body := f.do(t, "GET", q, nil)
 	matches, _ := body["matches"].([]any)
@@ -69,7 +65,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		}
 	}
 
-	// --- Export: the password, a reason, a real record.
+	// Export: the password, a reason, a real record.
 	req := func(kind, id, reason, pw string) map[string]any {
 		return map[string]any{"kind": kind, "id": id, "reason": reason, "password": pw}
 	}
@@ -121,7 +117,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		t.Fatal("the export was not audited by record id")
 	}
 
-	// --- Erasure is refused while the guest is live: access still running, a device online.
+	// Erasure is refused while the guest is live: access still running, a device online.
 	liveEmail := "live-" + sfx + "@example.com"
 	liveAcct, _, _ := seedAccountWithSessions(t, f, liveEmail, 0, "10.88.0.11")
 	st, body = f.do(t, "POST", "/guest-data-rights/erase", req("account", liveAcct, "guest asked", f.password))
@@ -134,13 +130,13 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 		t.Fatalf("a refused erasure changed the account: %q", liveName)
 	}
 
-	// --- ...and while the PMS still has the stay open.
+	// ...and while the PMS still has the stay open.
 	inHouse := seedGuestDataStay(t, f, "R-IN-"+sfx, "IN_HOUSE")
 	if st, body := f.do(t, "POST", "/guest-data-rights/erase", req("stay", inHouse, "guest asked", f.password)); st != 409 {
 		t.Fatalf("erasing an in-house stay = %d %v", st, body)
 	}
 
-	// --- Erase the ended account.
+	// Erase the ended account.
 	if st, _ := f.do(t, "POST", "/guest-data-rights/erase", req("account", acct, "guest asked", "wrong")); st != 401 {
 		t.Fatalf("erase with a wrong password = %d", st)
 	}
@@ -172,7 +168,7 @@ func TestIntegration_GuestDataRights_FindExportErase(t *testing.T) {
 	expect("session totals kept", str(`SELECT bytes_down::text FROM iam_v2.sessions WHERE id=$1`, session), "4096")
 	expect("sign-in attempt", str(`SELECT concat_ws(',',submitted_room,device_mac::text,host(device_ip)) || result FROM iam_v2.sign_in_attempts WHERE id=$1`, attempt), "CREDENTIAL_MISMATCH")
 	expect("code destination", str(`SELECT destination || coalesce(host(ip),'') FROM public.auth_otps WHERE id=$1`, otp), "anonymised")
-	// D-R2 (0144): the entry keeps who and when; what named the guest, and the record id, give way to the reference.
+	// The entry keeps who and when; what named the guest, and the record id, give way to the reference.
 	expect("audit entry about the guest", str(`SELECT concat_ws('|', actor_id, payload->>'username', payload->>'erasure_ref', coalesce(target_id,'-'))
 		FROM public.audit_log WHERE action='guest_account.password_set' AND tenant_id=$1`, f.tenant), "op-1|[erased]|"+ref+"|-")
 	expect("audit entry about someone else", str(`SELECT payload->>'username' FROM public.audit_log WHERE target_id=$1`, "other-"+sfx), "someone-else@example.com")
@@ -238,9 +234,9 @@ func TestIntegration_GuestDataRights_ErasesAStay(t *testing.T) {
 	}
 }
 
-// GDPR audit B1 and B2 (migration 0137): the export carries what the stay's PMS records and the guest's
-// devices hold; erasure follows a room move, covers a PMS event that never resolved to the stay, refuses while
-// an event is still waiting or a device is restricted, and erases a stay the PMS forgot to close.
+// The export carries what the stay's PMS records and the guest's devices hold; erasure follows a room move,
+// covers an unresolved PMS event, refuses while an event is waiting or a device is restricted, and erases a
+// stay the PMS forgot to close.
 func TestIntegration_GuestDataRights_ExportAndErasureCoverEverything(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -333,7 +329,7 @@ func TestIntegration_GuestDataRights_ExportAndErasureCoverEverything(t *testing.
 		t.Fatalf("erasing with a waiting PMS event = %d %v", st, body)
 	}
 
-	// D-B2 (0139): an event still waiting after 24 hours will not be processed. It no longer blocks the erasure:
+	// An event still waiting after 24 hours will not be processed. It no longer blocks the erasure:
 	// it is given up, FAILED with RETENTION_GIVEN_UP, and its contents blanked.
 	old := seedGuestDataStay(t, f, "R-OLDWAIT-"+sfx, "CHECKED_OUT")
 	var oldEv string
@@ -417,9 +413,7 @@ func seedGuestDataStay(t *testing.T, f *apiFixture, res, status string) string {
 	return stay
 }
 
-// GDPR audit C3 (migration 0141): a stay shared by two guests is exported and erased one guest at a time. Erasing
-// one leaves the other, the stay and its PMS record of the other guest alone; the last guest erased is the whole
-// stay, as before.
+// A stay shared by two guests is exported and erased one guest at a time; the last guest erased is the whole stay.
 func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -512,7 +506,7 @@ func TestIntegration_GuestDataRights_OneGuestOfASharedStay(t *testing.T) {
 	}
 }
 
-// GDPR final check D1 (migration 0142): a one-guest stay that continued into a shared room. Exporting or erasing
+// A one-guest stay that continued into a shared room. Exporting or erasing
 // it reaches the guest's own row on the shared stay, never the other guest, and never the shared stay whole.
 func TestIntegration_GuestDataRights_AStayLinkDoesNotLeadIntoASharedStay(t *testing.T) {
 	f := newAPI(t)
@@ -583,7 +577,7 @@ func TestIntegration_GuestDataRights_AStayLinkDoesNotLeadIntoASharedStay(t *test
 	}
 }
 
-// GDPR final check, low item 5 (migration 0143): a stay the PMS left open with no departure date is erasable once
+// A stay the PMS left open with no departure date is erasable once
 // the PMS's latest full room list no longer has it, and refused while no such list says so.
 func TestIntegration_GuestDataRights_AnOpenStayWithNoDepartureLeftOffTheRoomList(t *testing.T) {
 	f := newAPI(t)
@@ -605,7 +599,7 @@ func TestIntegration_GuestDataRights_AnOpenStayWithNoDepartureLeftOffTheRoomList
 	if st, body := erase(); st != 409 || fmt.Sprint(body["live"]) != "[pms_open]" {
 		t.Fatalf("with no room list the open stay must be refused: %d %v", st, body)
 	}
-	// The PMS publishes a full room list (generation 1) that does not have this stay.
+	// The PMS publishes a full room list (generation 1) without this stay.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		  (tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, resync_generation_seq, published_resync_generation,
 		   last_complete_sync_at)

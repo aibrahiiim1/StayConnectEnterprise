@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// D-R3: new recovery codes are refused before anything else unless a 6-digit authenticator code comes with the
-// password. A recovery code is not one. (The wrong, replayed and correct codes need the database and scd; they
-// are in operator_mfa_integration_test.go and cmd/scd.)
+// New recovery codes are refused unless a 6-digit authenticator code accompanies the password; a recovery code is not one.
 func TestNewRecoveryCodesRefusesWithoutAnAuthenticatorCode(t *testing.T) {
 	s := &server{}
 	for _, body := range []string{

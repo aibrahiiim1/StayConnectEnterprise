@@ -1,35 +1,12 @@
 package main
 
-// IAM-v2 VOUCHER ISSUANCE. Lives in scd, not edged, and that placement is the point.
-//
-// The voucher DEK is the root of voucher confidentiality: everything else in the database is sealed under
-// it, so a database compromise alone yields no code. edged runs as the unprivileged `stayconnect` user and
-// serves HTTP; scd runs as root and listens only on a protected unix socket. Putting issuance in edged
-// would have meant handing that DEK to the more exposed of the two processes, purely because that is where
-// the admin route happens to terminate. So the route stays in edged and PROXIES here -- the same
-// arrangement already used for the license store, which scd also owns.
-//
-// Nothing in the runtime could issue an IAM-v2 voucher: iam_v2.vouchers and iam_v2.voucher_code_key_generations
-// were both empty, and the only INSERTs into either in the whole repository were test fixtures. VOUCHER was
-// therefore enabled by flag, correctly refusing every login, and structurally incapable of ever succeeding.
-//
-// The accepted model (FINAL contract key hierarchy + the Phase-1B voucher design) is implemented here as it
-// is written, not approximated:
-//
-//   appliance secret store -> DEK (AES-256-GCM, named by encryption_key_id)
-//                          -> per-generation voucher code key, stored ONLY as hmac_key_ciphertext
-//                          -> per-voucher blind index (code_hmac) + recoverable ciphertext (code_ciphertext,
-//                             code_nonce) + display hint (code_last4), pinned to code_key_generation_id
-//
-// Key separation is real: the DEK encrypts and never indexes; the per-generation HMAC key indexes and never
-// encrypts, and is never persisted in the clear. Rotation is expressible because vouchers pin the generation
-// that indexed them, so superseding a generation leaves unredeemed vouchers usable -- which a single raw key
-// could not express at all.
-//
-// The plaintext code exists only in memory and is returned to the operator ONCE, in the issuance response.
-// It is never logged, never stored in a column, and never placed in an audit payload. Recovering it later is
-// the separate reveal/export action the contract puts behind operator re-authentication and audit; this file
-// deliberately does not expose it as a side effect of issuing.
+// IAM-v2 voucher issuance lives in scd, not edged, on purpose: the voucher DEK is the root of voucher confidentiality, and scd (root, protected unix socket)
+// is less exposed than edged (unprivileged, serves HTTP). The route stays in edged and PROXIES here.
+// Key hierarchy: appliance secret store -> DEK (AES-256-GCM, encryption_key_id) -> per-generation HMAC key stored ONLY as hmac_key_ciphertext -> per-voucher
+// blind index (code_hmac) + recoverable ciphertext + display hint (code_last4), pinned to code_key_generation_id. The DEK encrypts and never indexes; the HMAC
+// key indexes and never encrypts. Vouchers pin their generation, so rotation leaves unredeemed vouchers usable.
+// The plaintext code exists only in memory and is returned ONCE in the issuance response; never logged, stored in a column or put in an audit payload.
+// Recovery is the separate reveal/export action behind re-authentication and audit.
 
 import (
 	"context"
@@ -52,9 +29,7 @@ import (
 
 const (
 	voucherDEKFile = "voucher_dek.key"
-	// encryption_key_id is a uuid column, so the DEK id is a fixed UUID rather than a readable label.
-	// Stable by contract: changing it orphans every generation sealed under the old id, and every voucher
-	// pinned to those generations becomes unrecoverable -- which the design says is reissue, not repair.
+	// encryption_key_id is a uuid column, so the DEK id is a fixed UUID. Stable by contract: changing it orphans every generation sealed under the old id.
 	voucherDEKID = "0a5c1e00-0000-4000-8000-0000000000d1"
 )
 
@@ -70,9 +45,8 @@ func (s *server) voucherKeyring() (iamv2.VoucherKeyring, error) {
 	return iamv2.MapVoucherKeyring{voucherDEKID: dek}, nil
 }
 
-// ensureVoucherKeyGeneration returns the active generation and its clear HMAC key, creating generation 1 if
-// the site has none. It never overwrites or reuses an existing generation's key: doing so would orphan every
-// voucher already indexed under it.
+// Returns the active generation and its clear HMAC key, creating generation 1 if the site has none. Never overwrites an existing generation's key:
+// that would orphan every voucher already indexed under it.
 func (s *server) ensureVoucherKeyGeneration(ctx context.Context, kr iamv2.VoucherKeyring) (genID string, genNo int, hmacKey []byte, err error) {
 	var sealed []byte
 	var nonceB64, keyID string
@@ -95,12 +69,7 @@ func (s *server) ensureVoucherKeyGeneration(ctx context.Context, kr iamv2.Vouche
 		return genID, genNo, clear, nil
 	}
 
-	// No ACTIVE generation: mint the next one.
-	//
-	// The number is max(generation_no)+1, not 1. Hardcoding 1 meant that once an operator superseded
-	// generation 1 there was no active generation, so this branch ran and immediately collided with the
-	// existing generation 1 -- issuance died permanently at the first rotation, while already-issued
-	// vouchers kept working. Found by actually rotating rather than by reading the code.
+	// No ACTIVE generation: mint max(generation_no)+1, not 1. Hardcoding 1 collided with the superseded generation 1 and killed issuance at the first rotation.
 	if err := s.db.QueryRow(ctx, `
 	    SELECT COALESCE(MAX(generation_no), 0) + 1
 	      FROM iam_v2.voucher_code_key_generations
@@ -126,38 +95,25 @@ func (s *server) ensureVoucherKeyGeneration(ctx context.Context, kr iamv2.Vouche
 		s.tenID, s.siteID, genNo, sealedNew, string(params), voucherDEKID).Scan(&genID); err != nil {
 		return "", 0, nil, err
 	}
-	// The authenticator's cached key set no longer describes this site: drop it now so a voucher issued
-	// under this brand-new generation authenticates immediately rather than after the cache TTL.
+	// Drop the authenticator's cached key set so a voucher under this new generation authenticates immediately rather than after the cache TTL.
 	invalidateVoucherKeyCache(s.tenID, s.siteID)
 	return genID, genNo, clear, nil
 }
 
-// issueVouchersIAMv2 mints N vouchers against a pinned package revision.
-//
-// The package revision is REQUIRED and is pinned on the voucher row: what a voucher grants is fixed at
-// issuance by an immutable revision, so republishing a package later cannot retroactively change what an
-// already-printed card is worth.
+// The package revision is REQUIRED and pinned on the voucher row, so republishing a package cannot retroactively change what a printed card is worth.
 func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PackageRevisionID string `json:"package_revision_id"`
 		Count             int    `json:"count"`
 		Note              string `json:"note,omitempty"`
-		// The operator edged resolved from the SESSION. Required: "somebody printed these" is not a record,
-		// and the column exists so that a batch found in a drawer can be traced to whoever made it.
+		// The SESSION-resolved operator, required so a batch found in a drawer can be traced to whoever made it.
 		IssuedBy string `json:"issued_by"`
-		// The optional redemption window. The authenticator has always enforced [from, until) with NULL
-		// meaning unbounded (internal/iamv2/repo_pg.go), and nothing ever wrote these columns -- so every
-		// voucher this system could issue was valid forever. These are the columns, not a new rule.
+		// Optional redemption window, [from, until) with NULL unbounded, as the authenticator enforces (internal/iamv2/repo_pg.go).
 		ValidFrom  string `json:"valid_from,omitempty"`
 		ValidUntil string `json:"valid_until,omitempty"`
 	}
-	// DisallowUnknownFields, and specifically so that `length` is REFUSED rather than ignored.
-	//
-	// This request used to carry its own length. The format is now the site setting from 0085, and a caller
-	// that still sends a length is a caller working from the old contract -- one whose vouchers would come
-	// out in a format it did not choose while the response said 201. Accepting and discarding a field is the
-	// same defect as the guest-network update path that answered "updated" to a VLAN change it dropped, so
-	// this refuses and says where the format lives instead.
+	// DisallowUnknownFields so that `length` is REFUSED rather than ignored: the format is the site setting, and accepting and discarding a field would
+	// issue vouchers in a format the caller did not choose while answering 201.
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
@@ -184,9 +140,8 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, werr.Error())
 		return
 	}
-	// A CARD THAT COULD NEVER BE REDEEMED IS NOT ISSUED. The issuance gate (0095) checks the package is
-	// active, current and acquirable by Voucher; it cannot see that the package's own rules exclude every
-	// voucher client (a group-only audience, a hotel condition) or that its allowance is computed per stay night.
+	// A card that could never be redeemed is not issued: the issuance gate cannot see that the package rules exclude every voucher client or that its
+	// allowance is computed per stay night.
 	if why, rerr := s.voucherRevisionBlocker(r.Context(), in.PackageRevisionID); rerr != nil {
 		httpErr(w, http.StatusServiceUnavailable, "the package's conditions could not be read; vouchers were not issued")
 		return
@@ -194,8 +149,7 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusConflict, why)
 		return
 	}
-	// THE FORMAT COMES FROM THE SITE SETTING, and a site that has never opened the screen gets the defaults
-	// the column carries. A read failure is fatal on purpose: see voucherCodeFormatFor.
+	// The format comes from the site setting (defaults if never saved); a read failure is fatal on purpose, see voucherCodeFormatFor.
 	format, ferr := s.voucherCodeFormatFor(r.Context())
 	if ferr != nil {
 		httpErr(w, http.StatusServiceUnavailable,
@@ -222,27 +176,15 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// GENERATED AS A BATCH, not one at a time, and that is a correctness change rather than a tidy-up.
-	//
-	// codegen.GenerateN guarantees the batch is internally unique and REFUSES a batch too large for its own
-	// code space (count must be at most a quarter of it). The per-code loop this replaced had neither
-	// property: it leaned entirely on UNIQUE (code_hmac) to catch a collision, which surfaces as
-	// "voucher insert failed" after some of the batch has already committed. That matters much more now
-	// that the ceiling is eight characters and digits-only is offered: 500 codes out of 7^6 is fine, and the
-	// guard is what keeps a future shorter floor from being quietly unsafe.
+	// Generated as a BATCH: codegen.GenerateN guarantees in-batch uniqueness and refuses a batch too large for its code space, whereas catching
+	// collisions through UNIQUE (code_hmac) surfaced as a failure after part of the batch had committed.
 	codes, gerr := codegen.GenerateN(in.Count, opts)
 	if gerr != nil {
 		httpErr(w, http.StatusUnprocessableEntity, "code generation refused: "+gerr.Error())
 		return
 	}
-	// ONE BATCH PER CALL. batch_id has existed since mg3 and has never been written, so every voucher this
-	// system could issue was an orphan: there was no way to say "cancel the cards we printed on Tuesday" or
-	// "export that batch", because there were no batches -- only rows. An export selection and a bulk recall
-	// both need this, so issuance mints it here rather than leaving the column to a later feature.
-	//
-	// ATOMIC: the batch row and every voucher commit together or not at all, so a failure part-way leaves
-	// no printed-but-partial batch. The issuance gate (0095) refuses, inside the same transaction, a package
-	// that is inactive, not acquirable by Voucher, or not on its current revision.
+	// ONE BATCH PER CALL (batch_id), so export selection and bulk recall have something to name. ATOMIC: the batch row and every voucher commit
+	// together; the issuance gate refuses, in the same transaction, a package that is inactive, not acquirable by Voucher or not on its current revision.
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		httpErr(w, http.StatusInternalServerError, "issuance could not start")
@@ -258,8 +200,7 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, code := range codes {
-		// The row id is generated up front because the code ciphertext's AAD binds it: the ciphertext
-		// cannot be moved to another voucher row and still open.
+		// The row id is generated up front because the ciphertext AAD binds it, so the ciphertext cannot move to another voucher row.
 		var vid string
 		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&vid); err != nil {
 			httpErr(w, http.StatusInternalServerError, "id allocation failed")
@@ -292,10 +233,8 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "issuance could not be committed")
 		return
 	}
-	// The audit records how many were issued, against which revision, and in which format -- NEVER a code,
-	// not even its last4 in bulk, because a batch log line is not the audited reveal action. The format is
-	// recorded because "these cards will not scan" is answered by knowing what format they were printed in,
-	// and config_version says whether that came from a saved setting or from the defaults.
+	// The audit records how many were issued, against which revision and in which format, NEVER a code (not even last4 in bulk: a batch log line is
+	// not the audited reveal). config_version says whether the format came from a saved setting or the defaults.
 	slog.Info("iamv2 vouchers issued", "count", in.Count, "batch_id", batchID,
 		"package_revision_id", in.PackageRevisionID, "generation", genID,
 		"code_mode", format.Mode, "code_length", format.Length, "format_version", format.Version)
@@ -309,11 +248,9 @@ func (s *server) issueVouchersIAMv2(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// voucherRevisionBlocker reads one revision's allocation mode and eligibility rules and asks
-// iamv2.VoucherBlocker whether a voucher for it could ever be redeemed. An unknown revision is left to the
-// issuance gate, which answers it in its own words.
+// Asks iamv2.VoucherBlocker whether a voucher for this revision could ever be redeemed; an unknown revision is left to the issuance gate.
 func (s *server) voucherRevisionBlocker(ctx context.Context, revID string) (string, error) {
-	if !validRequestID(revID) { // the canonical-UUID shape check
+	if !validRequestID(revID) {
 		return "That is not a package version id.", nil
 	}
 	var mode string
@@ -350,12 +287,7 @@ func (s *server) voucherRevisionBlocker(ctx context.Context, revID string) (stri
 	return iamv2.VoucherBlocker(mode, rules), nil
 }
 
-// parseRedemptionWindow validates the optional validity window and returns the two column values.
-//
-// It REFUSES a window that can never open rather than storing it. The failure it exists to prevent is
-// physical: an operator prints two hundred cards, hands them out, and learns from a guest that they expired
-// before they were printed. Nothing downstream would have said anything -- voucherRedeemable simply returns
-// false, and the guest sees "that code is not valid", which is what a wrong code looks like too.
+// Refuses a window that can never open rather than storing it: nothing downstream would complain and the guest would see "that code is not valid", the same as a wrong code.
 func parseRedemptionWindow(from, until string) (any, any, error) {
 	var vf, vu any
 	var fromT, untilT time.Time

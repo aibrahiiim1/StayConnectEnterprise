@@ -1,14 +1,5 @@
 "use client";
 
-// ALLOWED SITES — what a guest's device may reach before it has signed in.
-//
-// Two changes beyond the visual refit:
-//
-//   * the form is a DIALOG. It was a card pushed above the table, which on a long rule list opened off-screen.
-//   * deleting a rule no longer goes through `window.confirm`. A browser confirm cannot say which rule is about
-//     to be removed or what removing it does, and "Delete this walled-garden rule?" was the whole of its
-//     explanation — for an action that can stop a captive portal or a payment page from loading.
-
 import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, WalledGardenRule, WalledGardenPolicy } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
@@ -45,8 +36,7 @@ const KIND_LABELS: Record<string, string> = {
 
 export default function WalledGardenPage() {
   const toast = useToast();
-  // WHY A SITE MIGHT BE ALLOWED, limited to what this site can have: a payment provider only with Card payment
-  // licensed, an identity provider only with Social sign-in. Unknown module state lists neither (fail closed).
+  // Payment and identity providers are listed only when licensed; unknown module state lists neither.
   const caps = useCapabilities();
   const reasons: string[] = [
     "a captive-portal check, so the device notices the sign-in page",
@@ -54,12 +44,12 @@ export default function WalledGardenPage() {
     ...(moduleLicensed(caps, "social_login") ? ["an identity provider, for social login"] : []),
   ];
   const [rows, setRows] = useState<WalledGardenRule[] | null>(null);
-  // The widest network a rule may name: a site setting (0125), changed with a reason and the password.
+  // Widest network a rule may name; changed with a reason and the password.
   const [policy, setPolicy] = useState<WalledGardenPolicy | null>(null);
   const [editingPolicy, setEditingPolicy] = useState(false);
   const [policyPrefix, setPolicyPrefix] = useState("24");
   const [policyErr, setPolicyErr] = useState<unknown>(null);
-  // null = adding a new rule; a rule = editing that one
+  // null = adding a new rule
   const [editing, setEditing] = useState<WalledGardenRule | null>(null);
   const [roles, setRoles] = useState<string[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
@@ -68,9 +58,7 @@ export default function WalledGardenPage() {
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<unknown>(null);
 
-  // The form fields are held in state rather than read out of FormData on submit. The submit button lives in the
-  // dialog footer, outside the <form>, so it reaches the form by id — and a controlled form is what lets the
-  // footer's button be disabled until the value is actually present.
+  // Controlled fields: the submit button sits in the dialog footer outside the <form> and is disabled until a value is present.
   const [kind, setKind] = useState("domain");
   const [value, setValue] = useState("");
   const [ports, setPorts] = useState("");
@@ -82,7 +70,7 @@ export default function WalledGardenPage() {
     try { setRows((await api.get<ListResp<WalledGardenRule>>("/walled-garden")).data); }
     catch (e) { setErr(e); }
     try { setPolicy(await api.get<WalledGardenPolicy>("/walled-garden/policy")); }
-    catch { /* the list still works; the limit line is simply not shown */ }
+    catch { /* the limit line is simply not shown */ }
   }
   useEffect(() => {
     load();

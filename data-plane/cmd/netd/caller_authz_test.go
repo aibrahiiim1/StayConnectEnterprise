@@ -40,7 +40,7 @@ func testCallerPolicy(t *testing.T, env map[string]string) callerPolicy {
 }
 
 func shippedPolicy(t *testing.T) callerPolicy {
-	// exactly what deploy/systemd/stayconnect-netd.service sets
+	// Mirrors deploy/systemd/stayconnect-netd.service.
 	return testCallerPolicy(t, map[string]string{
 		"NETD_ADMIN_CALLERS": "stayconnect,root",
 		"NETD_FLOW_CALLERS":  "root",
@@ -52,7 +52,7 @@ func asCaller(r *http.Request, uid int) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), peerConnKey{}, producerIdentity{UID: uid, PID: 4242}))
 }
 
-// every route netd serves, and the class that admits it
+// netdRoutes lists every route netd serves and the class that admits it.
 var netdRoutes = []struct {
 	method, path string
 	class        routeClass
@@ -76,8 +76,8 @@ var netdRoutes = []struct {
 	{http.MethodGet, "/v1/system-network/diagnostics", classAdmin},
 }
 
-// THE B-2 BOUNDARY, ROUTE BY ROUTE. The captive portal's identity (and pmsd's, and an unidentified connection)
-// is refused on every route before its handler runs; the Phase-3 routes refuse it in their own producer check.
+// The captive portal's identity, pmsd's and an unidentified connection are refused on every route before its
+// handler runs; the Phase-3 routes refuse them in their own producer check.
 func TestEveryRouteRefusesThePortalAndUnidentifiedCallers(t *testing.T) {
 	srv := &server{callers: shippedPolicy(t), phase3: &phase3Shaping{authz: shapingAuthz{allowedUID: uidRoot, configured: true}}}
 	h := srv.routes()
@@ -110,8 +110,7 @@ func TestEveryRouteRefusesThePortalAndUnidentifiedCallers(t *testing.T) {
 	}
 }
 
-// The admitted callers get past the gate (the handler then answers whatever it answers -- these stubs have no
-// store, so a 5xx is expected; what must not happen is 403).
+// Admitted callers get past the gate; these stubs have no store, so a 5xx is expected but never a 403.
 func TestAdmittedCallersPassTheGate(t *testing.T) {
 	p := shippedPolicy(t)
 	for _, rt := range netdRoutes {
@@ -125,7 +124,7 @@ func TestAdmittedCallersPassTheGate(t *testing.T) {
 			}
 		}
 	}
-	// edged is NOT a flow caller: a staff disconnect is scd's to make, after it has ended the session row.
+	// edged is not a flow caller: a staff disconnect is scd's to make, after it has ended the session row.
 	reached := false
 	p.gate(classFlows, func(http.ResponseWriter, *http.Request) { reached = true })(httptest.NewRecorder(),
 		asCaller(httptest.NewRequest(http.MethodPost, "/v1/flows/end", nil), uidEdged))
@@ -134,7 +133,7 @@ func TestAdmittedCallersPassTheGate(t *testing.T) {
 	}
 }
 
-// FAIL CLOSED: an unset or unresolvable list admits nobody, and says so.
+// Fail closed: an unset or unresolvable list admits nobody, and says so.
 func TestUnsetOrUnresolvableCallerListsAdmitNobody(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"unset":        {},
@@ -158,8 +157,7 @@ func TestUnsetOrUnresolvableCallerListsAdmitNobody(t *testing.T) {
 	}
 }
 
-// THE ACTOR COMES FROM THE AUTHENTICATED CALLER. Only edged authenticates operators, so only edged's body actor
-// is recorded; anything else is recorded as itself, however it describes itself.
+// Only edged authenticates operators, so only its body actor is recorded; any other caller is recorded as itself.
 func TestActorIsBelievedOnlyFromEdged(t *testing.T) {
 	p := shippedPolicy(t)
 	r := asCaller(httptest.NewRequest(http.MethodPost, "/v1/system-network/apply", nil), uidEdged)
@@ -180,12 +178,10 @@ func TestActorIsBelievedOnlyFromEdged(t *testing.T) {
 	}
 }
 
-// ---- B-1: revocation ends the address's flows ---------------------------------------------------------------
-
 type fakeFlows struct {
 	mu      sync.Mutex
 	flushed []string
-	// order is shared with the gate so the test can assert revoke-before-flush
+	// order is shared with the gate so the test can assert revoke-before-flush.
 	order *[]string
 	err   error
 }
@@ -263,8 +259,8 @@ func TestFailedFlushKeepsTheRevocationAndRetries(t *testing.T) {
 	}
 }
 
-// THE TEARDOWN ORDER IN THE RECONCILIATION: deny (which flushes) BEFORE the tc class is deleted, so no open flow
-// is left running through the bridge's default class. Stray authorizations are revoked before stray classes.
+// Teardown denies (which flushes) before the tc class is deleted, so no open flow runs through the bridge's
+// default class; stray authorizations are revoked before stray classes.
 func TestTeardownFlushesFlowsBeforeTheClassIsDeleted(t *testing.T) {
 	var order []string
 	tc := &orderedTC{fakeTC: newFakeTC(), order: &order}
@@ -305,8 +301,6 @@ func (o *orderedTC) DeleteSession(ctx context.Context, bridge string, ip net.IP)
 	*o.order = append(*o.order, "delete "+ip.String())
 	return o.fakeTC.DeleteSession(ctx, bridge, ip)
 }
-
-// ---- /v1/flows/end -------------------------------------------------------------------------------------------
 
 func TestFlowsEndRevokesThePhase3ElementThenFlushes(t *testing.T) {
 	var order []string
@@ -352,8 +346,6 @@ func TestFlowsEndHandlerRefusesBadInput(t *testing.T) {
 	}
 }
 
-// ---- B-9: per-pass cost ----------------------------------------------------------------------------------
-
 type countingLeases struct {
 	n    int
 	rows []KeaLease
@@ -361,7 +353,7 @@ type countingLeases struct {
 
 func (c *countingLeases) Leases() ([]KeaLease, error) { c.n++; return c.rows, nil }
 
-// ONE LEASE LIST PER PASS, however many sessions the pass judges.
+// One lease list per pass, however many sessions the pass judges.
 func TestOwnershipAsksDHCPOncePerPass(t *testing.T) {
 	src := &countingLeases{rows: []KeaLease{lease("10.0.0.5", "aa:aa:aa:aa:aa:01"), lease("10.0.0.6", "aa:aa:aa:aa:aa:02"),
 		lease("10.0.0.7", "aa:aa:aa:aa:aa:03")}}

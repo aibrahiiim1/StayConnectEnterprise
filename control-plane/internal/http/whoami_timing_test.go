@@ -10,8 +10,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// whoami reports when the sign-in ends, so the console can warn before it does (WCAG 2.2.1): the idle expiry
-// follows the last activity and the idle limit, the absolute expiry follows sign-in and the lifetime cap.
 func TestWhoamiReportsSessionExpiry(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	sess := &auth.Session{OperatorID: "op", Email: "a@example.com", Roles: []string{"platform_admin"},
@@ -52,7 +50,7 @@ func TestWhoamiReportsSessionExpiry(t *testing.T) {
 		t.Errorf("server_time = %v", got.ServerTime)
 	}
 
-	// Without the session policy in front (nothing computed the limits) the times are omitted, not invented.
+	// Without a computed policy the times are omitted, not invented.
 	bare := *sess
 	req = httptest.NewRequest(http.MethodGet, "/v1/auth/whoami", nil)
 	req = req.WithContext(auth.ContextWithSession(req.Context(), &bare))

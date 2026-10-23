@@ -15,8 +15,7 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// ----- argon2id passwords (same parameters as the cloud control plane) ------
-
+// argon2id parameters match the cloud control plane.
 const (
 	argonMemory  = 64 * 1024
 	argonTime    = 1
@@ -60,11 +59,8 @@ func verifyPassword(pw, encoded string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// ----- in-memory session store ------------------------------------------------
-
-// Hotel Admin sessions live in edged's memory: an appliance runs exactly one
-// edged, and re-login after a daemon restart is acceptable for a management
-// UI. Cookie name intentionally differs from the cloud's sc_session.
+// Sessions live in edged's memory (one edged per appliance; re-login after a restart is acceptable). The cookie
+// name differs from the cloud's sc_session on purpose.
 const sessionCookie = "sc_edge_session"
 
 type session struct {
@@ -73,12 +69,10 @@ type session struct {
 	DisplayName string
 	Roles       []string
 	Expires     time.Time
-	// CreatedAt and LastSeen are what the session limits are measured from (0132): LastSeen moves with each
-	// request that counts as activity, CreatedAt never does.
+	// Session limits are measured from these: LastSeen moves with activity, CreatedAt never does.
 	CreatedAt time.Time
 	LastSeen  time.Time
-	// MustChangePassword confines the session to changing the password (0119): requireAuth refuses every
-	// other route until the operator has set a password that meets the policy.
+	// MustChangePassword confines the session to changing the password; requireAuth refuses every other route.
 	MustChangePassword bool
 }
 
@@ -105,8 +99,7 @@ func newSessionStore(ttl time.Duration) *sessionStore {
 	return s
 }
 
-// sessionStoreCap is the store's own outer bound, the longest session the setting allows (24 hours, 0132).
-// The setting's idle and absolute limits are enforced by active(); this only bounds memory.
+// sessionStoreCap is the longest session the setting allows; active() enforces the idle and absolute limits.
 const sessionStoreCap = 24 * time.Hour
 
 func (s *sessionStore) create(sess *session) string {
@@ -115,8 +108,7 @@ func (s *sessionStore) create(sess *session) string {
 	tok := base64.RawURLEncoding.EncodeToString(b)
 	now := time.Now()
 	sess.Expires = now.Add(s.ttl)
-	// A replacement session (after changing one's own password) keeps the original sign-in time, so changing
-	// the password does not extend the absolute limit.
+	// A replacement session keeps the original sign-in time so a password change cannot extend the absolute limit.
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = now
 	}
@@ -139,8 +131,8 @@ func (s *sessionStore) get(tok string) *session {
 	return sess
 }
 
-// active is the session the request carries if it is within the limits: not idle for longer than idle, not
-// older than maxAge. touch says whether this request counts as activity. A session past either limit is ended.
+// active returns the session if within the idle and maxAge limits (ending it otherwise); touch says whether
+// this request counts as activity.
 func (s *sessionStore) active(tok string, idle, maxAge time.Duration, touch bool) *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -156,8 +148,7 @@ func (s *sessionStore) active(tok string, idle, maxAge time.Duration, touch bool
 	return sess
 }
 
-// peek answers whether a token is a live session WITHOUT sliding its expiry -- for a caller that only wants
-// to know who is asking (the health summary), not to keep the session alive.
+// peek does not slide the expiry: for callers that only want to know who is asking.
 func (s *sessionStore) peek(tok string) *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,7 +165,6 @@ func (s *sessionStore) destroy(tok string) {
 	s.mu.Unlock()
 }
 
-// destroyOperator kills every session belonging to an operator (disable).
 func (s *sessionStore) destroyOperator(operatorID string) {
 	s.mu.Lock()
 	for k, v := range s.m {
@@ -185,8 +175,6 @@ func (s *sessionStore) destroyOperator(operatorID string) {
 	s.mu.Unlock()
 }
 
-// ----- role → permission matrix -------------------------------------------------
-
 type perm int
 
 const (
@@ -195,295 +183,166 @@ const (
 	permWrite
 )
 
-// rolePerms maps site role → resource → permission. site_admin implicitly
-// has permWrite everywhere. Matrix per docs/ROLE_AND_SCOPE_MATRIX.md.
+// rolePerms maps role -> resource -> permission; site_admin implicitly has write everywhere
+// (docs/ROLE_AND_SCOPE_MATRIX.md).
 //
-// TWO RESOURCE KEYS CARRY THE GUEST SIGN-IN PERMISSIONS, and the mapping to the names the Product Owner
-// uses is stated here because it is the only place both spellings appear:
+// Guest sign-in is split across separate keys because the model has one axis (read/write) and the distinctions
+// are between kinds of read or between blast radii; separate resources keep the boundary server-enforced:
 //
-//	guest-signin-attempts     = View_Guest_SignIn_Attempts     (the list, rooms, results, diagnostic reasons)
-//	guest-signin-credentials  = View_Guest_SignIn_Credentials  (the submitted and accepted values, unmasked)
+//	guest-signin-attempts     the list, rooms, results, diagnostic reasons
+//	guest-signin-credentials  the submitted and accepted values, unmasked
+//	guest-signin-protection   WRITE changes the property's thresholds (affects every guest)
+//	guest-signin-restrictions WRITE ends ONE device's wait early
+//	code-requests             READ lists code requests; WRITE lets one device try again
+//	code-reveal               WRITE reads a LIVE one-time code, under password step-up
 //
-// TWO MORE CARRY GUEST SIGN-IN PROTECTION, and they are separate from both of the above and from each other:
-//
-//	guest-signin-protection    = Manage_Guest_SignIn_Protection  (WRITE changes the property's thresholds)
-//	guest-signin-restrictions  = Release_Guest_SignIn_Restriction (WRITE ends ONE device's wait early)
-//
-// TWO KEYS CARRY STAFF HELP FOR CODE REQUESTS (2026-10-12), and they are separate for the same reason:
-//
-//	code-requests  READ lists recent code requests and windows; WRITE lets ONE device try again (its ended
-//	               windows stop counting; nothing is deleted, no access is granted)
-//	code-reveal    WRITE reads a LIVE one-time code to the client it was sent to, under password step-up
-//
-// Clearing a device's history permits another attempt; revealing a code lets an operator vouch for an address
-// the client did not prove. Guest relations may do the first and not the second.
-//
-// The blast radii are not comparable. A release affects one device for the remainder of one restriction; a
-// policy change affects every guest on the property until somebody changes it back. So the desk holds the
-// release and reads the policy, and neither key implies the other or implies the credentials key — an
-// operator who can end a restriction still cannot read what anybody typed, and still cannot weaken the
-// control that created it.
-//
-// They are two KEYS rather than one key with two levels because this model has exactly one axis — read and
-// write — and the distinction being drawn is between two kinds of READ. A second key is how that is
-// expressed here without inventing a second permission mechanism alongside the one every other screen uses.
-// Mounting them as separate resources is also what makes the boundary server-enforced: the middleware
-// refuses a caller who lacks the second key before the handler runs, so hiding the button in the browser and
-// calling the API directly give the same answer.
+// No key implies another: an operator who can end a restriction cannot read what anyone typed or weaken the
+// control, and clearing a device's history is allowed where vouching for an address by revealing a code is not.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
-		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
-		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead, "code-reveal": permWrite,
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
-		// The Usage Explorer only ever READS durable accounting; there is no write to grant.
-		"usage":        permRead,
-		"auth-methods": permWrite, "walled-garden": permWrite, "client-groups": permWrite,
+		"usage":          permRead,
+		"auth-methods":   permWrite, "walled-garden": permWrite, "client-groups": permWrite,
 		"portal-branding": permWrite, "portal-assets": permWrite, "notification-providers": permWrite,
-		"social-providers": permWrite,
-		// Card payment provider accounts (site-local; secrets write-only and sealed). Replaces the retired
-		// plaintext stripe-accounts surface.
+		"social-providers":  permWrite,
 		"payment-providers": permWrite,
-		// Modules: the IT manager sees what the licence authorises and what is switched on; switching a
-		// module is a site_admin decision. Financial onboarding of a PMS interface is likewise read here and
-		// approved by site_admin only.
+		// Switching a module and approving a PMS interface's financial onboarding are site_admin decisions.
 		"modules": permRead, "pms-financial-onboarding": permRead,
 		"network": permWrite,
-		// PORTAL HTTPS (portal_https.read / portal_https.manage). The portal address and the hotel portal domain
-		// are network configuration, which this role already owns; Renew now is the same kind of action as the
-		// Admin Console certificate's Rotate. Every change additionally requires the password step-up.
-		"portal-https": permWrite,
-		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
+		// Portal address and hotel portal domain are network configuration, which this role owns; every change
+		// also needs the password step-up.
+		"portal-https":        permWrite,
 		"commercial-packages": permWrite,
-		// Phase 3 (DARK): the IT manager owns the PMS integration, so publishing the checkout-grace policy
-		// and clearing operational alerts are manager actions; stays/events/resolutions are read evidence.
+		// This role owns the PMS integration: stays/events/resolutions are read evidence.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
 		"checkout-grace": permWrite, "operational-alerts": permWrite,
-		// Answering a PMS message that waits for review (acknowledge, link to a stay) and the review-expiry
-		// setting: the integration owner's decision, each under password step-up (audit H-15 / D-D).
 		"pms-event-decisions": permWrite,
-		// The room-credential tuple on Stays and PMS activity -- guest names and reservation numbers, which
-		// together with the room are what a guest signs in with (audit H-7). A field-level key, not a route.
+		// Guest names and reservation numbers are, with the room, the sign-in credential: a field-level key, not a route.
 		"pms-stay-identity": permRead,
-		// The interface itself: publishing a Revision and rotating a credential are the two actions this
-		// role exists for. Routing and source conflicts are read-only everywhere — the first is a network
-		// topology decision made where the networks are configured, the second is evidence, not a control.
+		// Routing and source conflicts are read-only everywhere (topology decision / evidence, not a control).
 		"pms-interfaces": permWrite, "pms-routing": permRead, "pms-source-conflicts": permRead,
-		// Phase 5 (DARK): post-stay identities. WRITE here means reset (rotate the credential) and revoke
-		// (end post-stay access for that stay episode) -- both additionally require password step-up and a
-		// bounded reason at the route. It is never a way to READ a PIN: no surface returns a stored one.
+		// Reset and revoke, under step-up and a reason; no surface ever returns a stored PIN.
 		"post-stay-profiles": permWrite,
-		// Cross-PMS transfer: the IT manager owns the integration, and a transfer is an integration action as
-		// much as a guest one. WRITE means preview and execute, both under step-up and a bounded reason.
-		"stay-transfers": permWrite,
-		// The IT manager can SEE the financial review queue as integration evidence, and cannot decide it:
-		// section 15 gives the decision to payments_operator (and site_admin).
+		"stay-transfers":     permWrite,
+		// Sees the financial review queue as integration evidence; the decision belongs to payments_operator.
 		"financial-review": permRead,
-		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
-		// same money from a different angle, and two permissions for one boundary is how they drift apart.
+		// financial-ops mirrors financial-review so the two cannot drift apart.
 		"financial-ops": permRead,
 		"operators":     permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
-		// DOWNLOADING the full database dump (decision D-B): the IT manager and site_admin only, behind the
-		// password step-up at the route. Every other role that reads backups sees the list and downloads nothing.
+		// Database dump download: IT manager and site_admin only, behind password step-up.
 		"backup-download": permWrite,
-		// GUEST DATA RIGHTS (Product-Owner decision D-C4): looking a guest up, exporting their data and erasing
-		// them. The IT manager and site_admin only, each export and erasure behind the password step-up and a
-		// reason. No other role holds this key at all: a desk role can see guests, but handing over or erasing
-		// everything held about one is a data-protection act, not a desk one.
-		"guest-data-rights": permWrite,
-		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
-		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
-		// which is a configuration decision rather than a daily desk action. No new ROLE is introduced: the
-		// existing matrix already expresses this ownership.
+		// Guest data export and erasure is a data-protection act, not a desk one: this role and site_admin only,
+		// behind step-up and a reason.
+		"guest-data-rights":         permWrite,
 		"guest-device-self-service": permWrite,
-		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
-		"diagnostics": permWrite,
-		// Guest sign-in attempts. The IT manager owns the PMS integration, and "which guests cannot sign in,
-		// and why" is the integration's most direct symptom — including the credential comparison, which is
-		// what turns "room sign-in is broken" into "this property's PMS spells names differently".
+		"diagnostics":               permWrite,
+		// The IT manager owns the PMS integration, and "which guests cannot sign in, and why" is its most direct symptom.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
-		// The protection policy is a property-wide configuration decision, which is this role's own
-		// territory — the same reasoning that puts auth-methods and checkout-grace here. Releasing one
-		// device's restriction comes with it: whoever may set the threshold may certainly waive one instance
-		// of it.
+		// The protection policy is property-wide configuration; whoever sets it may also waive one restriction.
 		"guest-signin-protection": permWrite, "guest-signin-restrictions": permWrite,
-		// The CASE LIST stays read-only for every role: an individual departure the engine could not place is
-		// still answered by the PMS, because stay_events is one-way and a checkout boundary must be an
-		// APPLIED GO event.
+		// The case list is read-only for every role: checkout boundaries come from APPLIED GO events, not the desk.
 		"pms-reconciliation": permRead,
-		// ROSTER RECONCILIATION is a different power and therefore a different key. A complete published
-		// roster IS authoritative evidence -- the PMS stating in full who is in the building -- so closing
-		// the stays it does not mention is supported. It belongs to the role that owns the PMS integration,
-		// because it is an integration action, and because closing several hundred stays at once is not
-		// something a desk under pressure should be able to reach for.
+		// Closing the stays a complete roster omits is an integration action, too heavy for a desk under pressure.
 		"pms-roster-reconciliation": permWrite,
-		// VOUCHERS. The row in docs/ROLE_AND_SCOPE_MATRIX.md 3 has said W for this role since before the
-		// resource key existed, which is why it was never enforced: there was no `vouchers` key at all, so
-		// the documented boundary was decorative. It is the document's row, not a new decision.
-		"vouchers": permWrite,
-		// The code FORMAT is a property configuration decision -- digits for a keypad, mixed for a printed
-		// card -- which is the same reasoning that puts auth-methods and checkout-grace here.
-		"voucher-code-settings": permWrite,
-		// What a GENERATED client-account password looks like (0104) is the same kind of property
-		// configuration decision, so it follows the voucher code format role for role.
+		"vouchers":                  permWrite,
+		"voucher-code-settings":     permWrite,
 		"account-password-settings": permWrite,
-		// NOT voucher-codes. This role owns configuration and the PMS integration; neither job requires
-		// reading a guest's credential in the clear, and issuing a NEW card is a different act from reading
-		// one already in a guest's hand.
+		// Deliberately no voucher-codes: neither configuration nor the PMS integration requires reading a code in the clear.
 	},
 	"front_office_operator": {
-		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
-		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead, "code-reveal": permWrite,
-		// THE RECEPTION DESK, and the role this feature was asked for. They already hold the guest's room,
-		// stay and access credentials; the comparison panel is how they answer the guest standing in front
-		// of them instead of asking that guest to try again while somebody watches a log.
+		// The reception desk answers the guest in front of it, so it holds the guest's sign-in credentials.
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
-		// THE DESK RELEASES, AND DOES NOT RE-TUNE. A guest who has just locked themselves out is standing at
-		// reception now, so the desk must be able to end that one wait — and is the only place that can see
-		// the guest and judge it. Changing the property's thresholds is a different decision made once, by
-		// the role that owns configuration, so the policy is read-only here: a desk under pressure must not
-		// be able to make "five" into "twenty" for everybody as the quickest way to help one person.
+		// The desk may end one device's wait but not re-tune the policy: it must not be able to turn "five" into
+		// "twenty" for everybody to help one person.
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite,
-		// THE USAGE EXPLORER is the sessions this role already reads and disconnects, summed: "how much did room
-		// 412 use" is a desk question. It was in the console's table and not here, so the menu offered a screen
-		// that answered 403 (audit L-2); the documented intent ("read-only elsewhere") is the grant.
 		"usage": permRead,
-		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
+		// Reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
-		// The desk identifies the guest in front of it by name and reservation, so it sees them (H-7).
+		// The desk identifies the guest in front of it by name and reservation.
 		"pms-stay-identity": permRead,
-		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
-		// telling a guest to try again, but must not be able to publish or rotate anything.
+		// Read-only on the integration: it may see whether the PMS is reachable but not publish or rotate.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
-		// "Is this guest still checked in according to the PMS" is a question reception answers hourly, and
-		// this list is the honest form of it. The desk reads the reconciliation state for the same reason,
-		// and runs it for none: closing stays in bulk is an integration action, not a desk one.
+		// Closing stays in bulk is an integration action, not a desk one.
 		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
-		// Phase 5 (DARK): the front desk is where a guest who lost their post-stay PIN actually turns up,
-		// so this role can rotate and revoke -- under step-up, a mandatory reason and audit like everyone
-		// else. Reset is a rotation; revoke is terminal for the episode.
+		// A guest who lost their post-stay PIN turns up here; reset and revoke need step-up and a reason.
 		"post-stay-profiles": permWrite,
-		// The front desk is where a guest moving between the group's properties actually presents.
-		"stay-transfers":   permWrite,
-		"financial-review": permRead,
-		"financial-ops":    permRead,
-		"auth-methods":     permRead, "walled-garden": permRead, "client-groups": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
-		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
-		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
-		// desk action.
+		"stay-transfers":     permWrite,
+		"financial-review":   permRead,
+		"financial-ops":      permRead,
+		"auth-methods":       permRead, "walled-garden": permRead, "client-groups": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		"guest-device-self-service": permRead,
 		"diagnostics":               permRead,
-		// The desk prints cards and hands them over, which is what the documented matrix row has always
-		// said. Reading a code already issued comes with it: the guest standing at the desk with a smudged
-		// card is exactly the case, and it is gated by the password step-up and an audit row either way.
+		// Reading an issued code (a smudged card at the desk) is gated by step-up and an audit row.
 		"vouchers": permWrite, "voucher-codes": permWrite,
-		// The format is set once, by the role that owns configuration. The desk sees what it is.
 		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"guest_relations_operator": {
-		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
-		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
-		"code-requests": permRead,
-		// Same desk, same conversation with the guest, same need.
+		"code-requests":         permRead,
 		"guest-signin-attempts": permRead, "guest-signin-credentials": permWrite,
 		"guest-signin-restrictions": permWrite, "guest-signin-protection": permRead,
 		"guest-accounts": permWrite, "sessions": permWrite, "usage": permRead,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
-		// Same desk, same guest in front of it: this role already reads guest-signin-credentials (what the guest
-		// typed, names included), so hiding the names on Stays would protect nothing (H-7).
+		// This role already reads guest-signin-credentials (names included), so hiding names on Stays protects nothing.
 		"pms-stay-identity": permRead,
-		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
-		// telling a guest to try again, but must not be able to publish or rotate anything.
-		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
-		// Same desk, same conversation, same read-only relationship with the engine.
+		"pms-interfaces":    permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"pms-reconciliation": permRead, "pms-roster-reconciliation": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
 		"auth-methods":       permRead, "reports": permRead, "client-groups": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
-		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
-		// the same question and changes no property capability.
 		"guest-device-self-service": permRead,
 		"diagnostics":               permRead,
-		// Same desk, same conversation with the guest, same need.
-		"vouchers": permWrite, "voucher-codes": permWrite, "voucher-code-settings": permRead,
+		"vouchers":                  permWrite, "voucher-codes": permWrite, "voucher-code-settings": permRead,
 		"account-password-settings": permRead,
 	},
 	"voucher_operator": {
 		"guest-accounts": permWrite, "sessions": permRead, "reports": permRead,
 		"license": permRead, "diagnostics": permRead,
-		// THE ROLE IS NAMED FOR THIS AND DID NOT HAVE IT. Until the resource key existed, voucher_operator
-		// -- the kiosk and print-station account -- held guest-accounts and four read-only keys, and no
-		// voucher permission at all, while two documents said otherwise.
 		"vouchers": permWrite, "voucher-codes": permWrite,
-		// Reads the format so the print station knows what it is printing; does not set it.
+		// Reads the format so the print station knows what it prints; does not set it.
 		"voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	"payments_operator": {
 		"payment-providers": permRead, "modules": permRead, "pms-financial-onboarding": permRead,
-		// Phase 6 (DARK): read-only, which is this role's established relationship with everything that is
-		// not money. It is on the list rather than absent because "read-only on everything else" is the
-		// documented semantic, and silently omitting a resource would narrow the role by accident.
 		"guest-device-self-service": permRead,
-		// Contract section 15: payments_operator is the role that holds financial-review WRITE. Every
-		// action additionally requires password re-authentication, enforced at the route.
+		// Holds financial-review WRITE; every action also needs password re-authentication at the route.
 		"financial-review": permWrite,
 		"financial-ops":    permWrite,
 		"sessions":         permRead, "reports": permRead, "audit": permRead, "license": permRead,
 		"diagnostics": permRead,
-		// Read-only on everything that is not money is this role's documented semantic: the usage behind a
-		// disputed charge, and the packages and their prices that the Payment methods screen lists. Both were
-		// missing, so the menu offered Usage explorer and Payment methods and both answered 403 (audit L-2).
+		// Read-only on everything that is not money.
 		"usage": permRead, "commercial-packages": permRead,
-		// A voucher is a commercial instrument, so this role reads the list -- and reads no code and
-		// cancels nothing, which is its established relationship with everything that is not money.
+		// A voucher is a commercial instrument: this role reads the list, reads no code and cancels nothing.
 		"vouchers": permRead,
 	},
 	"site_viewer": {
-		// Code requests (contract §6.7): the list of recent SMS / WhatsApp code requests. READ only: the WRITE that
-		// cleared a device's temporary-internet windows went with the email code. code-reveal reads a LIVE code.
 		"code-requests": permRead,
-		// THE ATTEMPTS LIST, AND NOT THE CREDENTIALS. A viewer may see that sign-in is failing and for which
-		// rooms — the same class of operational evidence they already read everywhere else. What a read-only
-		// observer has no reason to hold is thirty days of what every guest typed, so the second key is
-		// deliberately absent rather than merely unused.
-		"guest-signin-attempts": permRead,
-		// A viewer sees WHAT the policy is and WHICH devices are waiting it out — both are operational
-		// evidence of the same kind they read everywhere else — and acts on neither.
+		// The attempts list but not the credentials: a read-only observer has no reason to hold what every guest typed.
+		"guest-signin-attempts":   permRead,
 		"guest-signin-protection": permRead, "guest-signin-restrictions": permRead,
 		"guest-accounts": permRead, "sessions": permRead, "usage": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "client-groups": permRead, "portal-branding": permRead, "portal-assets": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"payment-providers": permRead, "modules": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
-		// Portal HTTPS state is operational evidence of the same kind as the network it sits under.
 		"portal-https":        permRead,
 		"commercial-packages": permRead,
-		// Phase 3 (DARK): a viewer sees the evidence and never acts on it. NOT pms-stay-identity: a viewer sees
-		// rooms, statuses and access, never the guest names and reservation numbers that, with the room, are
-		// the room sign-in credential (audit H-7) -- the same line drawn at guest-signin-credentials.
+		// Deliberately no pms-stay-identity: names and reservation numbers are, with the room, the sign-in credential.
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
-		// The reconciliation backlog is evidence of the same kind. A viewer reads it and acts on none of it.
 		"pms-reconciliation": permRead,
 
 		"checkout-grace": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
-		// Phase 5 (DARK): a viewer sees WHETHER a post-stay identity can authenticate, and never acts on it.
-		"post-stay-profiles": permRead,
-		// Phase 6 (DARK): a viewer sees whether the property offers guest device self-service, and cannot
-		// change it -- read-only everywhere is the whole definition of this role.
+		"post-stay-profiles":        permRead,
 		"guest-device-self-service": permRead,
-		// A viewer reads the lineage and the review signals, and acts on neither.
-		"stay-transfers":   permRead,
-		"financial-review": permRead,
-		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
-		// same money from a different angle, and two permissions for one boundary is how they drift apart.
-		"financial-ops": permRead,
-		// A viewer sees which cards exist and in what state, and reads no code -- the same shape as
-		// guest-signin-credentials, which is deliberately absent from this role for the same reason.
+		"stay-transfers":            permRead,
+		"financial-review":          permRead,
+		"financial-ops":             permRead,
+		// Sees which cards exist, reads no code (as with guest-signin-credentials).
 		"vouchers": permRead, "voucher-code-settings": permRead, "account-password-settings": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
@@ -506,13 +365,10 @@ func permFor(roles []string, resource string, want perm) bool {
 	return false
 }
 
-// ----- middleware -----------------------------------------------------------------
-
 type ctxKey int
 
 const sessKey ctxKey = 1
 
-// sessPolicyKey carries the session limits requireAuth applied, for whoami to report the real end.
 var sessPolicyKey = struct{ name string }{"session-policy"}
 
 func (s *server) requireAuth(next http.Handler) http.Handler {
@@ -522,8 +378,7 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "login required")
 			return
 		}
-		// THE SESSION LIMITS (0132). The console's background whoami check is not activity: counting it would
-		// keep every open tab signed in for ever.
+		// The console's background whoami check is not activity; counting it would keep open tabs signed in forever.
 		pol := s.sessionPolicyFor(r.Context())
 		touch := isActivity(r)
 		sess := s.sessions.active(ck.Value, pol.idle(), pol.max(), touch)
@@ -531,8 +386,7 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			jsonErr(w, http.StatusUnauthorized, "unauthenticated", "session expired")
 			return
 		}
-		// A SESSION THAT MUST CHANGE ITS PASSWORD CAN DO NOTHING ELSE (0119). Enforced here, for every route, so
-		// no screen can be reached by URL or by API before the weak or administrator-chosen password is replaced.
+		// Enforced here for every route, so nothing is reachable by URL or API before the password is replaced.
 		if sess.MustChangePassword && !mustChangeAllowed(r) {
 			jsonErr(w, http.StatusForbidden, "password_change_required",
 				"Set a new password before using the Admin Console.")
@@ -545,13 +399,11 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// backgroundHeader marks a request the console made on its own -- a poll, a refresh timer, the whoami check --
-// rather than on an operator's action. Polling screens (dashboard, sessions, interfaces, ...) used to count as
-// activity, so an open tab was never signed out for idleness and the idle warning closed itself.
+// backgroundHeader marks console-initiated requests (polls, timers, whoami), which must not count as activity or
+// an open tab would never time out.
 const backgroundHeader = "X-OneGate-Background"
 
-// isActivity reports whether a request extends the session's idle limit. Background requests and whoami do
-// not; the idle warning's keepalive always does, whatever the console sent with it.
+// isActivity: background requests and whoami do not extend the idle limit; keepalive always does.
 func isActivity(r *http.Request) bool {
 	switch strings.TrimSuffix(r.URL.Path, "/") {
 	case "/edge/v1/auth/keepalive":
@@ -567,7 +419,6 @@ func sessFrom(ctx context.Context) *session {
 	return s
 }
 
-// resourcePermission enforces read/write on a resource by HTTP method.
 func (s *server) resourcePermission(resource string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -590,7 +441,6 @@ func (s *server) resourcePermission(resource string) func(http.Handler) http.Han
 	}
 }
 
-// requireRole is a coarse variant for one-off routes.
 func (s *server) requireRole(resource string, want perm) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -603,10 +453,6 @@ func (s *server) requireRole(resource string, want perm) func(http.Handler) http
 		})
 	}
 }
-
-// ----- login/logout/whoami -----------------------------------------------------
-//
-// login, logout and the password change live in operator_signin.go with the throttle they use.
 
 func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, error) {
 	rows, err := s.db.Query(ctx,
@@ -626,8 +472,7 @@ func (s *server) loadRoles(ctx context.Context, operatorID string) ([]string, er
 	return out, rows.Err()
 }
 
-// sessionEnds is when the session ends if nothing else happens: the idle limit or the absolute one, whichever is
-// first.
+// sessionEnds is the earlier of the idle and absolute limits.
 func sessionEnds(sess *session, pol sessionPolicy) time.Time {
 	ends := sess.LastSeen.Add(pol.idle())
 	if abs := sess.CreatedAt.Add(pol.max()); abs.Before(ends) {
@@ -636,7 +481,6 @@ func sessionEnds(sess *session, pol sessionPolicy) time.Time {
 	return ends
 }
 
-// sessionPolicyFrom is the session limits requireAuth applied to this request, or the defaults.
 func sessionPolicyFrom(ctx context.Context) sessionPolicy {
 	if pol, ok := ctx.Value(sessPolicyKey).(sessionPolicy); ok {
 		return pol
@@ -655,14 +499,12 @@ func (s *server) whoami(w http.ResponseWriter, r *http.Request) {
 		"site_id":              s.siteID,
 		"expires_at":           sessionEnds(sess, pol).UTC(),
 		"idle_timeout_minutes": pol.IdleTimeoutMinutes,
-		// The console shows only the change-password form while this is true (0119).
 		"must_change_password": sess.MustChangePassword,
 	})
 }
 
-// keepalive: GET /edge/v1/auth/keepalive, the "Stay signed in" button of the console's idle warning (WCAG 2.2.1).
-// It does nothing itself: passing requireAuth is what counts as activity, which whoami deliberately is not. The
-// answer is the new end, so the console needs no second request to learn it. It cannot move the absolute limit.
+// keepalive backs the idle warning's "Stay signed in" (WCAG 2.2.1): passing requireAuth is the activity. It
+// cannot move the absolute limit.
 func (s *server) keepalive(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{

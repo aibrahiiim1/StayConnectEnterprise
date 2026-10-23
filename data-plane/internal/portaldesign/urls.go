@@ -7,18 +7,12 @@ import (
 	"strings"
 )
 
-// URL RULES.
+// A URL on the sign-in page may point only at this appliance, an https origin, or inline image bytes: no
+// javascript:, data:text/html, protocol-relative //host or plain http.
 //
-// Every URL a hotel can put on the sign-in page is loaded or followed by a guest's browser, on the page that
-// holds their credentials. So the question is never "is this a URL" but "where can this send the guest, or
-// what can it load". The answer is always one of three places: this appliance, an https origin, or bytes
-// carried inline as an image. Nothing else -- no javascript:, no data:text/html, no protocol-relative //host,
-// no plain http that anyone on the path can rewrite.
-//
-// BROWSERS NORMALISE BEFORE THEY DECIDE, SO WE DO TOO. The HTML parser has already decoded entities by the
-// time a value reaches here (javascript&#58; arrives as javascript:), and the URL parser in every browser
-// deletes ASCII tab and newline anywhere in a URL -- "java\tscript:" IS javascript:. A check that ran on the
-// raw string would be checking a different URL from the one the browser follows.
+// Normalise as browsers do before deciding: entities are already decoded by the HTML parser, and browsers
+// delete tab and newline anywhere in a URL ("java\tscript:" is javascript:), so checking the raw string
+// would check a different URL than the one followed.
 
 var (
 	reDataHead = regexp.MustCompile(`^data:image/(png|jpeg|jpg|gif|webp);base64,$`)
@@ -26,9 +20,8 @@ var (
 )
 var reCSSDataImage = regexp.MustCompile(`^data:image/(png|jpeg|jpg|gif|webp|avif|svg\+xml)[;,]`)
 
-// normaliseURL applies the browser's own pre-processing: trim C0 controls and spaces from both ends and delete
-// every tab, line feed and carriage return. Any other control character left inside is refused outright; no
-// legitimate link contains one and several parsers disagree about what they mean.
+// normaliseURL mimics the browser: trim C0 controls and spaces, delete tab/LF/CR; any other control character
+// is refused since parsers disagree about it.
 func normaliseURL(raw string) (string, error) {
 	s := strings.TrimFunc(raw, func(r rune) bool { return r <= 0x20 })
 	s = strings.NewReplacer("\t", "", "\n", "", "\r", "").Replace(s)
@@ -44,8 +37,7 @@ func normaliseURL(raw string) (string, error) {
 	return s, nil
 }
 
-// sitePath reports whether s is a path on THIS appliance: it starts with exactly one slash. "//host" is
-// protocol-relative and resolves to another server over whatever scheme the page was served with.
+// sitePath: exactly one leading slash; "//host" is protocol-relative and resolves to another server.
 func sitePath(s string) bool {
 	return strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//")
 }
@@ -58,12 +50,11 @@ func httpsURL(s string) bool {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return false
 	}
-	// https://reception@evil.example/ reads to a guest like a link to "reception". It is nobody's terms page.
+	// https://reception@evil.example/ reads like a link to "reception".
 	return u.User == nil
 }
 
-// CheckLinkURL is the rule for a link a guest can FOLLOW from the sign-in page: the terms-of-use link, and
-// href on an <a> in the custom fragment. https, or a path on this appliance.
+// CheckLinkURL covers links a guest follows (terms, fragment <a>): https or an appliance path.
 func CheckLinkURL(raw string) (string, error) {
 	s, err := normaliseURL(raw)
 	if err != nil {
@@ -80,8 +71,7 @@ func CheckLinkURL(raw string) (string, error) {
 	return "", errors.New("must be an https:// address or a path on this appliance starting with /")
 }
 
-// checkFragmentHref is CheckLinkURL plus the three link kinds that make sense inside a hotel's own markup and
-// cannot navigate anywhere dangerous: an in-page #anchor, mailto: and tel: ("call reception on 9").
+// checkFragmentHref adds #anchor, mailto: and tel: to CheckLinkURL.
 func checkFragmentHref(raw string) (string, error) {
 	s, err := normaliseURL(raw)
 	if err != nil {
@@ -97,9 +87,7 @@ func checkFragmentHref(raw string) (string, error) {
 	return CheckLinkURL(s)
 }
 
-// CheckImageURL is the rule for an image the design names directly (logo, background, hero): a path on this
-// appliance, an https URL, or an inline raster image. SVG is not an inline option: as a document it can carry
-// script, and this is the page that collects credentials.
+// CheckImageURL covers logo/background/hero: appliance path, https, or inline raster. Never inline SVG (it can carry script).
 func CheckImageURL(raw string) (string, error) {
 	s, err := normaliseURL(raw)
 	if err != nil {
@@ -118,10 +106,8 @@ func CheckImageURL(raw string) (string, error) {
 	return "", errors.New("must be an appliance path, an https URL or an inline PNG/JPEG/GIF/WebP image")
 }
 
-// checkFragmentImage is the rule for <img src> inside the custom fragment: the hotel's uploaded assets, https,
-// or an inline raster image. Stricter than CheckImageURL on purpose -- an arbitrary appliance path such as
-// /auth/voucher is not an image, and an <img> pointing at it is a request the guest's browser makes on the
-// hotel's behalf.
+// checkFragmentImage is stricter than CheckImageURL: an <img> at an arbitrary appliance path such as
+// /auth/voucher would make the guest's browser issue that request.
 func checkFragmentImage(raw string) (string, error) {
 	s, err := CheckImageURL(raw)
 	if err != nil {
@@ -133,7 +119,6 @@ func checkFragmentImage(raw string) (string, error) {
 	return s, nil
 }
 
-// checkCSSURL is the rule for url(...) inside custom CSS: uploaded assets, https, or an inline image.
 func checkCSSURL(raw string) error {
 	s, err := normaliseURL(raw)
 	if err != nil {
@@ -151,8 +136,6 @@ func checkCSSURL(raw string) error {
 	return errors.New("only uploaded images (/assets/…), https:// addresses and inline data:image/… are allowed in url()")
 }
 
-// isDataImage accepts an inline raster image: a data: URL whose media type is one of the four image formats
-// every guest browser decodes, carried as base64 and nothing else.
 func isDataImage(s string) bool {
 	i := strings.IndexByte(s, ',')
 	if i < 0 {
@@ -161,8 +144,7 @@ func isDataImage(s string) bool {
 	return reDataHead.MatchString(strings.ToLower(s[:i+1])) && reBase64.MatchString(s[i+1:])
 }
 
-// assetPath is an uploaded image on this appliance. Dot segments are refused, raw or percent-encoded:
-// "/assets/../auth/voucher" is normalised by the browser into a request for the sign-in endpoint.
+// assetPath refuses dot segments, raw or percent-encoded: "/assets/../auth/voucher" becomes a sign-in request.
 func assetPath(s string) bool {
 	if !strings.HasPrefix(s, "/assets/") {
 		return false

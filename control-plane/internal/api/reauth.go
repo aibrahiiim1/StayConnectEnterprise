@@ -13,10 +13,8 @@ import (
 // ReauthTTL is how long a password step-up stays valid for sensitive actions.
 const ReauthTTL = 5 * time.Minute
 
-// reauthKey namespaces the step-up marker by the session cookie value.
 func reauthKey(sessionToken string) string { return "reauth:" + sessionToken }
 
-// MarkReauth records a fresh password step-up for the given session token.
 func MarkReauth(rdb *redis.Client, sessionToken string) {
 	if rdb == nil || sessionToken == "" {
 		return
@@ -24,10 +22,7 @@ func MarkReauth(rdb *redis.Client, sessionToken string) {
 	_ = rdb.Set(context.Background(), reauthKey(sessionToken), "1", ReauthTTL).Err()
 }
 
-// RequireReauth is middleware that demands a recent password re-authentication
-// (POST /v1/auth/reauth within ReauthTTL) in addition to the permission check.
-// It gates state-changing, high-blast-radius operations (assign, reassign,
-// revoke, license issue/suspend/revoke, replace, decommission, offline package).
+// RequireReauth demands a recent password re-authentication (within ReauthTTL) in addition to the permission check.
 func RequireReauth(rdb *redis.Client) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

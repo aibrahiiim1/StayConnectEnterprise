@@ -13,8 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// gateConn wraps a net.Conn and can be armed to fail all subsequent Writes, so a test can inject a socket
-// write failure at a precise point AFTER a successful startup. Reads/Close/deadlines delegate unchanged.
+// gateConn can be armed to fail all subsequent Writes, injecting a write failure after a successful startup.
 type gateConn struct {
 	net.Conn
 	fail atomic.Bool
@@ -27,8 +26,6 @@ func (c *gateConn) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-// newAdapterOverGatedPipe builds an adapter whose socket is a gateConn over a net.Pipe; returns the adapter,
-// the gate (to arm write failures) and the peer side.
 func newAdapterOverGatedPipe(t *testing.T) (*fiasAdapter, *gateConn, net.Conn) {
 	t.Helper()
 	client, server := net.Pipe()
@@ -44,11 +41,7 @@ func newAdapterOverGatedPipe(t *testing.T) (*fiasAdapter, *gateConn, net.Conn) {
 	return a, gc, server
 }
 
-// ---- item 1: strict-parse EVERY inbound frame ---------------------------------------------------------
-
-// TestFrames_MalformedControlTerminates proves a malformed/unsupported CONTROL record (or unknown record id)
-// terminates the ownership cycle with the bounded PROTOCOL_FRAMING_ERROR code, recording NO heartbeat and
-// sending NO ack for the invalid record.
+// A malformed control record or unknown record id ends the cycle with PROTOCOL_FRAMING_ERROR, no heartbeat, no ack.
 func TestFrames_MalformedControlTerminates(t *testing.T) {
 	cases := []string{
 		"LAjunk|", // junk right after a control record id
@@ -91,8 +84,7 @@ func TestFrames_MalformedControlTerminates(t *testing.T) {
 	}
 }
 
-// TestFrames_MalformedDomainGapAndZeroAdmission proves a malformed DOMAIN record drives the atomic gap/resync
-// transition, admits zero events, requests DR, and keeps the link (does NOT terminate).
+// A malformed domain record drives a gap/resync, admits zero events and keeps the link up.
 func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	adapter.rev.HeartbeatInterval = time.Hour
@@ -106,14 +98,13 @@ func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		<-peer.recv
 	}
-	// consume the initial DR (barrier already requested a resync at connect)
 	if peer.waitFor("DR", 1, 2*time.Second) < 1 {
 		t.Fatal("adapter must send an initial DR after connect")
 	}
 	if err := peer.send("GIjunk|"); err != nil { // malformed domain
 		t.Fatal(err)
 	}
-	// the malformed domain must drive a continuity fault (a resync is already outstanding, so no NEW DR)
+	// A resync is already outstanding, so no new DR is sent.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		sink.mu.Lock()
@@ -139,10 +130,7 @@ func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	}
 }
 
-// ---- item 2: prompt bounded shutdown ------------------------------------------------------------------
-
-// TestShutdown_PromptOnCancel proves cancellation releases a reader parked behind a multi-minute heartbeat
-// timeout: a controlled LE is emitted, the transport is closed, and Serve returns within a short bound.
+// Cancellation must release a reader parked behind a long heartbeat timeout: emit LE, close, return promptly.
 func TestShutdown_PromptOnCancel(t *testing.T) {
 	before := runtime.NumGoroutine()
 	adapter, server := newAdapterOverPipe(t)
@@ -175,13 +163,8 @@ func TestShutdown_PromptOnCancel(t *testing.T) {
 	}
 }
 
-// ---- item 4: post-start writer-failure per frame ------------------------------------------------------
-
-// TestFrames_PostStartWriteFailures injects a socket write failure AFTER a successful startup, separately for
-// each critical outbound frame, and proves each ends the ownership cycle (Serve returns, transport closed,
-// reader released, no goroutine leak).
+// A write failure after startup, on each critical outbound frame, must end the cycle without leaking goroutines.
 func TestFrames_PostStartWriteFailures(t *testing.T) {
-	// trigger is a function that, after startup + arming the gate, causes the specific outbound frame.
 	cases := []struct {
 		name    string
 		setup   func(a *fiasAdapter)
@@ -194,8 +177,7 @@ func TestFrames_PostStartWriteFailures(t *testing.T) {
 		{"idle keepalive LA", func(a *fiasAdapter) { a.rev.HeartbeatInterval = 20 * time.Millisecond },
 			func(p *pipePeer) {}}, // no send: the idle ticker fires the failing write
 		{"DR after malformed domain (post-sync)", func(a *fiasAdapter) { a.rev.HeartbeatInterval = time.Hour },
-			// a fresh DR is only emitted for a malformed domain when NOT already resyncing, i.e. after a
-			// completed DS→DE lowers the barrier; then a malformed domain requests a new (failing) DR.
+			// A new DR is only emitted when not already resyncing, i.e. after a completed DS→DE.
 			func(p *pipePeer) { _ = p.send("DS|"); _ = p.send("DE|"); _ = p.send("GIjunk|") }},
 	}
 	for _, tc := range cases {
@@ -211,7 +193,7 @@ func TestFrames_PostStartWriteFailures(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			<-peer.recv // startup succeeds
 		}
-		// let the INITIAL DR (sent after connect) succeed first, so each subcase exercises its OWN frame.
+		// Let the initial DR succeed first so each subcase exercises its own frame.
 		if peer.waitFor("DR", 1, 2*time.Second) < 1 {
 			t.Fatalf("%s: initial DR never arrived", tc.name)
 		}
@@ -233,8 +215,7 @@ func TestFrames_PostStartWriteFailures(t *testing.T) {
 	}
 }
 
-// TestShutdown_LEWriteFailureStillTerminates proves that even if the controlled LE write fails during
-// shutdown, the writer still closes the transport and Serve returns promptly.
+// Even if the LE write fails during shutdown, the transport closes and Serve returns.
 func TestShutdown_LEWriteFailureStillTerminates(t *testing.T) {
 	adapter, gc, server := newAdapterOverGatedPipe(t)
 	adapter.rev.HeartbeatTimeout = 5 * time.Minute

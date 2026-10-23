@@ -1,12 +1,6 @@
 package main
 
-// ADVERSARIAL TESTS for staged, accountable-before-forwarding class provisioning.
-//
-// Each one injects a failure at one stage of provisionSession and proves the invariant holds: nothing is left
-// forwarding, no class is recorded active, no generation is exposed, `Shaped` does not advance, the plan is
-// admitted (anti-replay) but not converged (health degraded), and a retry can complete without a duplicate
-// origin or a wasted generation. They drive the REAL reconciliation (p.submit → reconcileLocked →
-// provisionSession), not an isolated helper.
+// Each test injects a failure at one stage of provisionSession through the real reconciliation (p.submit).
 
 import (
 	"context"
@@ -18,8 +12,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// fakeOrigins records every controlled origin registration, and can fail on demand. Recording is what lets a
-// test prove a retry does NOT create a duplicate origin and reuses the same generation.
 type fakeOrigins struct {
 	mu    sync.Mutex
 	calls []classOrigin
@@ -42,7 +34,6 @@ func (o *fakeOrigins) count() int {
 	return len(o.calls)
 }
 
-// provWriter is a live writer wired with a recording origin registrar and a controllable generation allocator.
 func provWriter(tc *fakeTC, gens *fakeGenerations, origins *fakeOrigins) *phase3Shaping {
 	p := liveWriter(tc)
 	p.generations = gens
@@ -51,7 +42,6 @@ func provWriter(tc *fakeTC, gens *fakeGenerations, origins *fakeOrigins) *phase3
 	return p
 }
 
-// oneLive is a single entitled session on br-guest.
 func oneLive(gen int64, ip string, down, up int) shapeplan.Envelope {
 	return envelopeOn([]string{"br-guest"}, gen,
 		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-1", IP: ip, Bridge: "br-guest",
@@ -60,7 +50,6 @@ func oneLive(gen int64, ip string, down, up int) shapeplan.Envelope {
 
 const provIP = "10.0.0.1"
 
-// assertNothingForwarding is the shared fail-closed assertion.
 func assertNothingForwarding(t *testing.T, tc *fakeTC, p *phase3Shaping, res shapingPlanResponse) {
 	t.Helper()
 	if res.Shaped != 0 {
@@ -75,7 +64,6 @@ func assertNothingForwarding(t *testing.T, tc *fakeTC, p *phase3Shaping, res sha
 	if len(p.Epochs()) != 0 {
 		t.Fatalf("a class generation is exposed for a class that never came into force: %v", p.Epochs())
 	}
-	// the plan is admitted (anti-replay) but NOT converged
 	if !p.hasAccepted {
 		t.Fatal("the plan was not admitted; a replay of an older generation could reinstate access")
 	}
@@ -88,7 +76,6 @@ func assertNothingForwarding(t *testing.T, tc *fakeTC, p *phase3Shaping, res sha
 	}
 }
 
-// 1. Generation allocation fails BEFORE anything is prepared, so no class exists and none forwards.
 func TestProvision_GenerationFailureInstallsNothing(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{err: errors.New("allocator unreachable")}
@@ -108,7 +95,6 @@ func TestProvision_GenerationFailureInstallsNothing(t *testing.T) {
 	}
 }
 
-// 2. Download preparation succeeds but upload preparation fails; the half-prepared class is cleaned up.
 func TestProvision_UploadPrepareFailureLeavesNothing(t *testing.T) {
 	tc := newFakeTC()
 	tc.failPrepareUpload[provIP] = errors.New("ifb class add failed")
@@ -124,7 +110,6 @@ func TestProvision_UploadPrepareFailureLeavesNothing(t *testing.T) {
 	}
 }
 
-// 3. Reading the prepared class's counters fails, so the origin cannot be recorded and the class is aborted.
 func TestProvision_OriginCounterReadFailureAborts(t *testing.T) {
 	tc := newFakeTC()
 	tc.readErr["ifb-guest"] = errors.New("tc class show failed") // only the origin read touches the ifb device
@@ -144,7 +129,6 @@ func TestProvision_OriginCounterReadFailureAborts(t *testing.T) {
 	}
 }
 
-// 4. register_class_origin returns a database error, so the class never activates.
 func TestProvision_OriginRegistrationErrorAborts(t *testing.T) {
 	tc := newFakeTC()
 	origins := &fakeOrigins{err: errors.New("ACCT_SOURCE_MISMATCH")}
@@ -163,8 +147,7 @@ func TestProvision_OriginRegistrationErrorAborts(t *testing.T) {
 	}
 }
 
-// 5. The origin commits but its result is lost (a returned error), then a RETRY of the same plan completes —
-// reusing the SAME generation, so the origin is not re-baselined and no generation is wasted.
+// The origin commits but its result is lost; the retry must reuse the same generation.
 func TestProvision_LostOriginResultThenRetrySucceedsWithSameEpoch(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{}
@@ -176,7 +159,6 @@ func TestProvision_LostOriginResultThenRetrySucceedsWithSameEpoch(t *testing.T) 
 	assertNothingForwarding(t, tc, p, res)
 	firstEpoch := origins.calls[0].Epoch
 
-	// the result is no longer lost; the SAME plan is retried
 	origins.err = nil
 	res2, _ := p.submit(context.Background(), plan, time.Now())
 	if res2.Shaped != 1 || res2.Degraded {
@@ -194,7 +176,6 @@ func TestProvision_LostOriginResultThenRetrySucceedsWithSameEpoch(t *testing.T) 
 	}
 }
 
-// 6. The first forwarding filter activates and the second fails; the session is never left forwarding one way.
 func TestProvision_SecondFilterFailureLeavesNothingForwarding(t *testing.T) {
 	tc := newFakeTC()
 	tc.failActivateUpload[provIP] = errors.New("ifb filter add failed")
@@ -207,7 +188,6 @@ func TestProvision_SecondFilterFailureLeavesNothingForwarding(t *testing.T) {
 	}
 }
 
-// 7. On a failure whose cleanup SUCCEEDS, nothing is left and no forwarding-denial quarantine is needed.
 func TestProvision_CleanupSucceedsNoQuarantine(t *testing.T) {
 	tc := newFakeTC()
 	tc.failActivate[provIP] = errors.New("download filter add failed")
@@ -226,8 +206,7 @@ func TestProvision_CleanupSucceedsNoQuarantine(t *testing.T) {
 	}
 }
 
-// 8. When cleanup itself FAILS, the approved forwarding-denial quarantine runs: the class is left provably
-// non-forwarding even though it could not be removed.
+// When cleanup itself fails, the class is left provably non-forwarding.
 func TestProvision_CleanupFailureTriggersForwardingDenial(t *testing.T) {
 	tc := newFakeTC()
 	tc.failActivate[provIP] = errors.New("download filter add failed")
@@ -235,7 +214,7 @@ func TestProvision_CleanupFailureTriggersForwardingDenial(t *testing.T) {
 	p := provWriter(tc, &fakeGenerations{}, &fakeOrigins{})
 
 	res, _ := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now())
-	assertNothingForwarding(t, tc, p, res) // still: nothing forwards
+	assertNothingForwarding(t, tc, p, res)
 	calls, _ := tc.snapshot()
 	denied := false
 	for _, c := range calls {
@@ -246,14 +225,11 @@ func TestProvision_CleanupFailureTriggersForwardingDenial(t *testing.T) {
 	if !denied {
 		t.Fatal("cleanup failed but the tc classification quarantine did not run")
 	}
-	// the class may remain installed (could not be removed) but it is provably NOT forwarding
 	if tc.countForwarding() != 0 {
 		t.Fatalf("a quarantined class is still forwarding: %d", tc.countForwarding())
 	}
 }
 
-// 9. A retry of the same admitted plan after a transient activation failure completes with NO duplicate origin
-// and NO duplicate generation.
 func TestProvision_RetryNoDuplicateOriginOrGeneration(t *testing.T) {
 	tc := newFakeTC()
 	tc.failActivate[provIP] = errors.New("transient")
@@ -273,7 +249,6 @@ func TestProvision_RetryNoDuplicateOriginOrGeneration(t *testing.T) {
 	if len(gens.issued) != 1 {
 		t.Fatalf("generation was allocated more than once across a retry: %v", gens.issued)
 	}
-	// both origin registrations carry the SAME epoch (register_class_origin returns ORIGIN_UNCHANGED for it)
 	for _, c := range origins.calls {
 		if c.Epoch != origins.calls[0].Epoch {
 			t.Fatalf("a retry registered a different epoch: %d vs %d", c.Epoch, origins.calls[0].Epoch)
@@ -281,19 +256,16 @@ func TestProvision_RetryNoDuplicateOriginOrGeneration(t *testing.T) {
 	}
 }
 
-// 10. A process RESTART during prepared-but-not-active state: the orphan prepared class (present in the kernel,
-// absent from durable inventory, never forwarding) is reconciled cleanly — removed as a stray if unwanted.
+// A prepared class in the kernel with no durable inventory entry is removed as a stray.
 func TestProvision_RestartDuringPreparedNotActive(t *testing.T) {
 	tc := newFakeTC()
-	// simulate a crash after PrepareSession: a class present on both devices, no forwarding filter, and no
-	// durable inventory entry (it was never persisted).
+	// Crash after PrepareSession: class on both devices, no filter, never persisted.
 	minor := 0x1001
 	tc.put("br-guest", minor, tcCall{op: "prepare", bridge: "br-guest", minor: minor})
 	tc.put("ifb-guest", minor, tcCall{op: "prepare", bridge: "ifb-guest", minor: minor})
 
 	p := provWriter(tc, &fakeGenerations{}, &fakeOrigins{})
-	// a plan that manages the bridge but does NOT want that session: the orphan must be removed as a stray.
-	env := envelopeOn([]string{"br-guest"}, 1) // no sessions
+	env := envelopeOn([]string{"br-guest"}, 1) // manages the bridge, wants no sessions
 	res, _ := p.submit(context.Background(), env, time.Now())
 	if res.Degraded {
 		t.Fatalf("stray removal of a prepared orphan should be clean: %+v", res)
@@ -306,15 +278,12 @@ func TestProvision_RestartDuringPreparedNotActive(t *testing.T) {
 	}
 }
 
-// 11. A REBOOT during prepared-but-not-active state: the prepared class is gone with the kernel, and the next
-// plan provisions the session fresh, with a strictly new generation.
 func TestProvision_RebootDuringPreparedNotActive(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{}
 	origins := &fakeOrigins{}
 	p := provWriter(tc, gens, origins)
 
-	// reboot wiped the kernel; nothing prepared survives. The plan wants the session.
 	tc.wipe()
 	res, _ := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now())
 	if res.Shaped != 1 || res.Degraded {
@@ -328,8 +297,6 @@ func TestProvision_RebootDuringPreparedNotActive(t *testing.T) {
 	}
 }
 
-// 12. No class appears in Epochs() before it is activated: a provisioning that fails at activation exposes no
-// generation at all.
 func TestProvision_NoEpochBeforeActivation(t *testing.T) {
 	tc := newFakeTC()
 	tc.failActivate[provIP] = errors.New("filter add failed")
@@ -341,7 +308,6 @@ func TestProvision_NoEpochBeforeActivation(t *testing.T) {
 	}
 }
 
-// 13. Shaped stays zero on every failed provisioning path.
 func TestProvision_ShapedZeroOnEveryFailure(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -373,8 +339,6 @@ func TestProvision_ShapedZeroOnEveryFailure(t *testing.T) {
 	}
 }
 
-// 14. No accounting origin (hence no checkpoint) is created for a failure BEFORE the register step — a class
-// that never reached "read + register" leaves no accounting trace at all.
 func TestProvision_NoOriginBeforeRegisterStep(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -397,10 +361,6 @@ func TestProvision_NoOriginBeforeRegisterStep(t *testing.T) {
 	}
 }
 
-// 15. A successful activation registers the origin exactly once, at the allocated generation, from the read
-// baseline — which is what makes the first ordinary observation count from a real starting point, exactly once.
-// (The "exactly once" byte-counting itself is the ingestion operation's property, proven against a real
-// database in the acctd boundary integration suite.)
 func TestProvision_SuccessRegistersOriginOnceAtTheGeneration(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{}
@@ -424,8 +384,6 @@ func TestProvision_SuccessRegistersOriginOnceAtTheGeneration(t *testing.T) {
 	if tc.countForwarding() != 1 {
 		t.Fatal("the class is not forwarding after a successful provision")
 	}
-	// the origin was registered BEFORE forwarding was activated: in the call log, the register (origin) call
-	// precedes the activate call.
 	calls, _ := tc.snapshot()
 	activateIdx := -1
 	for i, c := range calls {
@@ -438,8 +396,7 @@ func TestProvision_SuccessRegistersOriginOnceAtTheGeneration(t *testing.T) {
 	}
 }
 
-// An ordinary RE-RATE of an already-active class keeps its generation, does NOT re-register the origin, and is
-// a `class change` in place (never a delete+recreate that would reset the counters).
+// A re-rate is a `class change` in place; delete+recreate would reset the counters.
 func TestProvision_ReRatePreservesEpochAndOrigin(t *testing.T) {
 	tc := newFakeTC()
 	gens := &fakeGenerations{}
@@ -453,7 +410,6 @@ func TestProvision_ReRatePreservesEpochAndOrigin(t *testing.T) {
 	originsBefore := origins.count()
 	genBefore := len(gens.issued)
 
-	// re-rate: same session, new rates
 	res, _ := p.submit(context.Background(), oneLive(2, provIP, 20000, 9000), time.Now())
 	if res.Shaped != 1 || res.Degraded {
 		t.Fatalf("re-rate did not converge: %+v", res)
@@ -467,7 +423,6 @@ func TestProvision_ReRatePreservesEpochAndOrigin(t *testing.T) {
 	if len(gens.issued) != genBefore {
 		t.Fatalf("re-rate allocated a new generation: %v", gens.issued)
 	}
-	// the re-rate was a `rerate` (class change), never a prepare/activate (delete+recreate)
 	calls, _ := tc.snapshot()
 	sawRerate := false
 	for _, c := range calls {

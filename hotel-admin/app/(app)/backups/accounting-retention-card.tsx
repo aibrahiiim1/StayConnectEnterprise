@@ -1,13 +1,7 @@
 "use client";
 
-// HOW LONG USAGE DETAIL IS KEPT (migration 0122, Product-Owner decision D-H; default 365 days since 0131, GDPR C2).
-//
-// The appliance records every client session's traffic as a series of small samples. Totals per package and per
-// session are kept for good; this setting only decides how long the per-sample DETAIL is kept. The default is
-// 365 days; the administrator may choose another number of days, or Unlimited, which means nothing is ever
-// removed. A number of days lets the appliance remove, once an hour, detail older than that -- only of sessions that have ended and packages that have finished. Shortening
-// it removes history for good, so it asks for a reason and the password, and every change and every removal is
-// recorded and listed here.
+// Only the per-sample traffic detail ages out (default 365 days, or Unlimited); totals are kept. Shortening
+// removes history for good, so it asks for a reason and the password.
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -50,7 +44,6 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
   const load = useCallback(async () => {
     try {
       const r = await api.get<RetentionResp>("/accounting-retention/");
-      // An appliance without the setting (or an answer of another shape) shows nothing rather than a guess.
       if (r && r.settings && "detail_retention_days" in r.settings) setData(r);
       else setUnavailable(true);
     } catch {

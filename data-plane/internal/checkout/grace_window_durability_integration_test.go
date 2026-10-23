@@ -8,26 +8,11 @@ import (
 	"time"
 )
 
-// THE GRACE CLOCK BELONGS TO THE ROW, NOT TO A RUNNING PROCESS.
-//
-// A guest gets an hour after checkout. The two ways that promise gets quietly broken are a restart handing
-// them a fresh hour, and ordinary activity -- reconnecting, a second device, a new session -- nudging the
-// deadline along. Both are easy to introduce and neither shows up in a log: the guest just stays online
-// longer than the hotel agreed to, and nobody notices until somebody adds up the usage.
-//
-// Nothing in the existing suite asked either question. It proves the conversion, the idempotency, the
-// grandfathering and the boundary arithmetic, but never that the deadline SURVIVES -- and survival is the
-// part a reboot tests in production whether or not anybody wrote it down.
-//
-// These read the window from the database, then do the thing that might move it, then read it again.
+// The grace clock belongs to the row, not a process: neither a restart nor ordinary activity (reconnecting,
+// a second device, a new session) may move the deadline. Each test reads the window, acts, and reads again.
 
-// A RESTART MUST NOT GRANT A SECOND HOUR.
-//
-// The appliance's authorization predicate is `window_ends_at IS NULL OR window_ends_at > now()`, evaluated
-// against the stored column on every check. So the deadline is durable by construction -- but "by
-// construction" is exactly the kind of claim that stops being true the first time somebody caches it in
-// memory for performance. A fresh Converter over a fresh connection is what a service restart produces, and
-// the window it sees must be the window the previous process wrote.
+// A restart must not grant a second hour: authorization reads the stored window_ends_at every check, and a
+// fresh Converter over a fresh connection must see what the previous process wrote.
 func TestIntegration_GraceWindowSurvivesRestartUnchanged(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -35,8 +20,7 @@ func TestIntegration_GraceWindowSurvivesRestartUnchanged(t *testing.T) {
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	activeEnt(t, p, f)
 
-	// ONE episode, one boundary source -- reused below, because replaying a checkout means the SAME event
-	// arriving twice, not a second departure.
+	// One boundary source, reused below: a replay is the same event twice, not a second departure.
 	src := checkoutEvent(t, p, f)
 	res, err := NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, src)
 	if err != nil || !res.GraceCreated {
@@ -54,9 +38,7 @@ func TestIntegration_GraceWindowSurvivesRestartUnchanged(t *testing.T) {
 		t.Fatal("a grace entitlement with no window_ends_at would never end on time")
 	}
 
-	// THE RESTART. A genuinely new connection pool and a new Converter over it -- nothing carried from the
-	// process that created the grace. Reusing the original pool would have tested almost nothing: the point
-	// is that the deadline lives in the database and is re-read, not remembered.
+	// The restart: a new pool and Converter, nothing carried over, so the deadline must be re-read.
 	p2 := pool(t)
 	defer p2.Close()
 	restarted := NewConverter(p2)
@@ -70,15 +52,12 @@ func TestIntegration_GraceWindowSurvivesRestartUnchanged(t *testing.T) {
 		t.Fatalf("the grace deadline moved across a restart: %s -> %s", before, after)
 	}
 
-	// AND THE DEADLINE IS STILL THE ORIGINAL ONE, measured from the original activation rather than from the
-	// restart. A window that silently re-based on process start is the precise failure this guards.
+	// The deadline is still measured from the original activation, not the restart.
 	if got := after.Sub(activated); got <= 0 {
 		t.Fatalf("window_ends_at %s is not after activated_at %s", after, activated)
 	}
 
-	// A REPEATED CHECKOUT AFTER THE RESTART MUST NOT RE-ARM IT EITHER. This is the realistic shape of the
-	// bug: the appliance reboots, the PMS re-delivers the departure, and a second conversion hands out a
-	// fresh hour.
+	// A repeated checkout after the restart (the PMS re-delivers the departure) must not re-arm the window.
 	again, err := restarted.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, src)
 	if err != nil {
 		t.Fatal(err)
@@ -99,11 +78,7 @@ func TestIntegration_GraceWindowSurvivesRestartUnchanged(t *testing.T) {
 	}
 }
 
-// RECONNECTING DOES NOT BUY MORE TIME.
-//
-// During grace a guest's laptop sleeps and wakes, their phone joins, a lease changes and a new session is
-// written. Every one of those is a perfectly ordinary write against the same subject, and every one is an
-// opportunity for a deadline to be recomputed "helpfully". The window must be indifferent to all of it.
+// Reconnecting, a second device or a new session must not recompute the deadline.
 func TestIntegration_ActivityDuringGraceDoesNotExtendIt(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -121,18 +96,14 @@ func TestIntegration_ActivityDuringGraceDoesNotExtendIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A DEVICE RECONNECTS AND A NEW SESSION OPENS against the grace entitlement -- the ordinary shape of a
-	// guest still using the wifi during their grace hour. sessions.device_id is NOT NULL, so the device is
-	// real rather than a placeholder.
+	// A device reconnects and a new session opens; sessions.device_id is NOT NULL, so the device is real.
 	var dev string
 	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 		VALUES (gen_random_uuid(),$1,$2,gen_random_uuid(),$3::macaddr) RETURNING id`,
 		f.tenant, f.site, "02:00:00:00:be:ef").Scan(&dev); err != nil {
 		t.Fatalf("seed a reconnecting device: %v", err)
 	}
-	// On the full schema a live session requires an AUTHORIZED binding (p6_session_requires_authorized_binding),
-	// so the device is authorized on the grace entitlement through the real operation first -- which is also
-	// exactly what a reconnecting guest's device goes through.
+	// A live session requires an AUTHORIZED binding (p6_session_requires_authorized_binding), so authorize first.
 	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, res.NewEntitlementID, dev); err != nil {
 		t.Fatalf("authorize the reconnecting device: %v", err)
 	}
@@ -152,8 +123,7 @@ func TestIntegration_ActivityDuringGraceDoesNotExtendIt(t *testing.T) {
 		t.Fatalf("activity during grace moved the deadline: %s -> %s", before, after)
 	}
 
-	// AND THE ENTITLEMENT IS STILL THE ONLY LIVE ONE for this stay. A reconnect that quietly minted a second
-	// entitlement would extend access just as effectively as moving the deadline, and would be harder to see.
+	// It is still the only live entitlement for the stay: a second one would extend access just as well.
 	if n := count(t, p, `
 		SELECT count(*) FROM iam_v2.entitlements
 		 WHERE stay_id=$1 AND status='ACTIVE'`, f.stay); n != 1 {

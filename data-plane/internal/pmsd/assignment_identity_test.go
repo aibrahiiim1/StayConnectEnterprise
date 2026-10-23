@@ -1,15 +1,7 @@
 package pmsd
 
-// The regression: CentralAssignmentLoader collapsed every identity failure into the factory-clean answer —
-//
-//	if err != nil || ident == nil || ident.ApplianceID == "" { return Assignment{}, false, nil }
-//
-// so an unreadable or tampered identity.json produced assigned=false with no error, pmsd logged "no
-// assignment" and exited 0, and a damaged appliance was indistinguishable from one that had never been
-// enrolled. identity.Store.LoadPublic already separates the two cases; this branch threw the distinction away.
-//
-// Every case below asserts on the ERROR, not on `assigned`. All four states report assigned=false, so a test
-// that checked only that flag would pass against the bug — which is precisely how it survived review.
+// Every case asserts on the error, not on `assigned`: all four states report assigned=false, so that flag
+// alone cannot tell a damaged identity from a factory-clean one.
 
 import (
 	"context"
@@ -21,9 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// loaderFor builds the loader over two temp dirs. The assignment side is deliberately left empty: these tests
-// are about the IDENTITY gate, which runs first, and an empty assignment dir keeps the assignment layer from
-// deciding the outcome for us.
+// loaderFor leaves the assignment dir empty so only the identity gate decides the outcome.
 func loaderFor(t *testing.T, identityDir string) func(context.Context) (Assignment, bool, error) {
 	t.Helper()
 	adir := t.TempDir()
@@ -47,7 +37,6 @@ func TestCentralAssignmentLoader_AbsentIdentityIsFactoryClean(t *testing.T) {
 
 func TestCentralAssignmentLoader_CorruptIdentityIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	// The file EXISTS and does not parse. This is the case that used to be reported as factory-clean.
 	if err := os.WriteFile(filepath.Join(dir, "identity.json"), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +51,7 @@ func TestCentralAssignmentLoader_CorruptIdentityIsAnError(t *testing.T) {
 
 func TestCentralAssignmentLoader_EmptyIdentityIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	// Valid JSON carrying neither an appliance id nor a public key. A pre-enrolment identity always has the
-	// public half, so this is a damaged file wearing a well-formed shape — the kind of corruption that parses.
+	// Valid JSON with neither an appliance id nor a public key is a damaged file.
 	if err := os.WriteFile(filepath.Join(dir, "identity.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +66,7 @@ func TestCentralAssignmentLoader_EmptyIdentityIsAnError(t *testing.T) {
 
 func TestCentralAssignmentLoader_AwaitingEnrolmentIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
-	// A real pre-enrolment identity: the keypair exists, Central has not yet minted an appliance id. This is
-	// an ordinary state of a new appliance and must stay distinct from the corrupt cases above.
+	// Pre-enrolment: keypair exists, no appliance id yet. Ordinary, and distinct from the corrupt cases.
 	body := `{"appliance_id":"","serial":"SC-TEST","public_key":"bm90LWEtcmVhbC1rZXk"}`
 	if err := os.WriteFile(filepath.Join(dir, "identity.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -95,9 +82,7 @@ func TestCentralAssignmentLoader_AwaitingEnrolmentIsNotAnError(t *testing.T) {
 
 func TestCentralAssignmentLoader_EnrolledButUnassignedIsFactoryClean(t *testing.T) {
 	dir := t.TempDir()
-	// Enrolled (an appliance id exists) but no assignment has been adopted. The identity gate passes and the
-	// assignment layer reports OutcomeAbsent, which is factory-clean rather than a refusal — this is the
-	// boundary between the two classifications, so it is asserted rather than assumed.
+	// Enrolled but no assignment adopted: OutcomeAbsent is factory-clean, not a refusal.
 	body := `{"appliance_id":"appl-1","serial":"SC-TEST","public_key":"bm90LWEtcmVhbC1rZXk"}`
 	if err := os.WriteFile(filepath.Join(dir, "identity.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)

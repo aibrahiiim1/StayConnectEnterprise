@@ -2,12 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// USAGE EXPLORER — BY ACCESS SOURCE.
-//
-// What this asserts: the list is organised by what granted the access (client account, voucher, Hotel
-// room/stay), the type filter and search reach edged as parameters, room and stay words appear ONLY on a stay
-// source, a voucher is named by its card reference and never a code, and /usage?stay=<id> still opens the stay.
-
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -72,9 +66,7 @@ async function renderPage() {
   return userEvent.setup();
 }
 
-// THE PERIOD (audit C-8) travels as from/to on every request, and the search text in the X-Usage-Search header
-// (never the URL). The paths below are compared with the period removed, and the search folded back in as q= so
-// each assertion still says what was asked for.
+// Search text travels in a header to keep sensitive terms out of URLs and logs.
 const calls = () => get.mock.calls.map((c) => {
   const [path, query = ""] = String(c[0]).split("?");
   const params = new URLSearchParams(query);
@@ -108,7 +100,6 @@ describe("usage explorer by access source", () => {
     expect(await screen.findByText("alex.morgan")).toBeTruthy();
     expect(screen.getByText("Card 3fa85f64…")).toBeTruthy();
     expect(screen.getByText("Room 4202")).toBeTruthy();
-    // A room always travels with its PMS connection.
     expect(screen.getByText(/Hotel room\/stay · Main PMS/)).toBeTruthy();
     expect(calls()[0]).toBe("/usage/sources?type=&q=&page=1&page_size=50");
   });
@@ -169,7 +160,6 @@ describe("usage explorer by access source", () => {
 
     expect(await screen.findByText("Card reference")).toBeTruthy();
     expect(calls()).toContain(`/usage/sources/voucher/${VOUCHER_ID}`);
-    // "Ended" is both the access status badge and the sessions column heading.
     expect(screen.getAllByText("Ended").length).toBeGreaterThanOrEqual(2);
     expect(document.body.textContent ?? "").not.toMatch(/\bcode\b/i);
   });
@@ -184,7 +174,6 @@ describe("usage explorer by access source", () => {
     expect(header.textContent).toMatch(/→/);
     expect(screen.getByText("In house")).toBeTruthy();
     expect(screen.getByText("Service plan: Free Internet")).toBeTruthy();
-    // The samples drill-down is still one click from each session.
     expect(screen.getByRole("button", { name: "Show evidence" })).toBeTruthy();
   });
 
@@ -204,7 +193,6 @@ describe("usage explorer by access source", () => {
     const detail = raw.find((u) => u.startsWith("/usage/sources/account/"))!;
     expect(list.length).toBeGreaterThan(0);
     for (const u of list) expect(u).not.toMatch(/[?&]q=/);
-    // Same length of period on both: the list and the detail are not computed over different windows.
     const span = (u: string) => {
       const q = new URLSearchParams(u.split("?")[1] ?? "");
       return Math.round((Date.parse(q.get("to")!) - Date.parse(q.get("from")!)) / 86_400_000);

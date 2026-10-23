@@ -1,14 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/*
-  THE ONEGATE WORDMARK. "One" is set bold in a green linear gradient; "Gate" is set bold in solid black. It is
-  type, not an image, so the appliance ships no logo file and the mark renders crisply at every size.
-
-  "Gate" stays black on every surface. Where the surface is dark (the sidebar, the sign-in panel), the wordmark
-  sits on a light tile rather than turning "Gate" white -- the black half is part of the mark.
-
-  The company behind the product is Semantics; the product is OneGate (design-system/README.md, "Brand").
-*/
+// Keep the black half of the wordmark on a light tile when the surrounding surface is dark.
 
 const ONE_GRADIENT = "linear-gradient(95deg, #0b7a3b 0%, #149c4a 38%, #3cc05a 70%, #8fdc5f 100%)";
 
@@ -22,8 +14,7 @@ export function OneGateWordmark({
   return (
     <Tag
       className={cn("inline-flex items-baseline font-extrabold leading-none tracking-[-0.03em]", className)}
-      // The two halves are hidden, so the name comes from aria-label, which a plain span or div may not carry
-      // (axe: aria-prohibited-attr, so the name was dropped). As an image of the name it may; a heading may anyway.
+      // Image semantics allow aria-label to name the hidden wordmark for assistive technology.
       role={Tag === "h1" ? undefined : "img"}
       aria-label="OneGate"
     >
@@ -40,7 +31,6 @@ export function OneGateWordmark({
   );
 }
 
-/** The compact mark for tight spaces (collapsed rail, favicon-sized): the gradient "O" of "One". */
 export function OneGateMark({ className, title }: { className?: string; title?: string }) {
   const id = "onegate-o";
   return (
@@ -63,7 +53,6 @@ export function OneGateMark({ className, title }: { className?: string; title?: 
   );
 }
 
-/** The wordmark in its tile, with the product line beside it. Same props as the lockup it replaces. */
 export function OneGateLockup({
   product,
   collapsed = false,
@@ -104,7 +93,6 @@ export function OneGateLockup({
   );
 }
 
-/** A one-line company attribution for footers. */
 export function BySemantics({ className }: { className?: string }) {
   return <span className={cn("text-caption", className)}>OneGate by Semantics</span>;
 }

@@ -8,9 +8,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaltls/portaltlstest"
 )
 
-// A LET'S ENCRYPT STAGING CHAIN is named as such in the refusal, and that naming decides nothing: the chain is
-// still refused because its roots are in no trust store. testdata holds the PUBLIC staging intermediates a real
-// staging order returned on 2026-10-14 (no key material).
+// A staging chain is named as such in the refusal, but still refused because its roots are in no trust store.
+// testdata holds public staging intermediates only (no key material).
 func TestAStagingChainIsRecognisedButNeverTrusted(t *testing.T) {
 	raw, err := os.ReadFile("testdata/letsencrypt-staging-intermediates.pem")
 	if err != nil {

@@ -1,6 +1,4 @@
-// Package metrics defines ctrlapi's Prometheus metric surface: build info, uptime and the HTTP layer.
-// Route labels use chi's route pattern (not the raw URL) to keep cardinality bounded. The handler is served
-// to loopback only (see internal/http.loopbackOnly).
+// Package metrics defines ctrlapi's Prometheus metrics; route labels use chi's pattern to bound cardinality.
 package metrics
 
 import (
@@ -20,8 +18,8 @@ type Registry struct {
 	BuildInfo prometheus.Gauge
 	Uptime    prometheus.GaugeFunc
 
-	HTTPRequests *prometheus.CounterVec   // labels: method, route, status
-	HTTPDuration *prometheus.HistogramVec // labels: method, route
+	HTTPRequests *prometheus.CounterVec
+	HTTPDuration *prometheus.HistogramVec
 }
 
 func New(version string) *Registry {
@@ -62,9 +60,7 @@ func (r *Registry) Handler() http.Handler {
 	return promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{EnableOpenMetrics: true})
 }
 
-// Middleware records HTTPRequests + HTTPDuration. Must be mounted AFTER
-// chi routes are populated so chi.RouteContext().RoutePattern() returns
-// the matched pattern (e.g. "/cloud/v1/appliances/{id}") instead of empty.
+// Middleware must be mounted so chi's RoutePattern() is populated when the request finishes.
 func (r *Registry) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ww := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -74,7 +70,7 @@ func (r *Registry) Middleware(next http.Handler) http.Handler {
 
 		route := chi.RouteContext(req.Context()).RoutePattern()
 		if route == "" {
-			route = "unmatched" // 404s, OPTIONS preflight, etc.
+			route = "unmatched"
 		}
 		r.HTTPRequests.WithLabelValues(req.Method, route, strconv.Itoa(ww.status)).Inc()
 		r.HTTPDuration.WithLabelValues(req.Method, route).Observe(dur)

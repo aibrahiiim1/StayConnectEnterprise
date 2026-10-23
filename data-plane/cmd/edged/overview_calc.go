@@ -1,12 +1,7 @@
 package main
 
-// THE ARITHMETIC BEHIND THE OVERVIEW, KEPT APART FROM THE QUERIES.
-//
-// Everything in this file is a pure function of its arguments: no database, no socket, no clock of its own. That
-// is deliberate. The overview's figures are only as trustworthy as the arithmetic that turns rows into buckets,
-// intervals into concurrency, address ranges into pool sizes and leases into utilisation — and the repository's
-// integration tests are compiled by CI but not run by it. So the parts that can be wrong in a way a reviewer
-// would not see are here, where the ordinary `go test` exercises them on every build.
+// Pure functions of their arguments (no database, socket or clock), kept apart from the queries so ordinary
+// `go test` covers the overview's arithmetic; integration tests are compiled by CI but not run.
 
 import (
 	"errors"
@@ -18,12 +13,7 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------------------------------------
-// the time window
-// ---------------------------------------------------------------------------------------------------------
-
-// overviewRange is one choice on the range selector. The bucket widths are chosen so each range draws a chart
-// with a readable number of points (24, 56, 30) rather than one per sample.
+// overviewRange is one choice on the range selector; bucket widths give a readable number of points (24, 56, 30).
 type overviewRange struct {
 	Key     string
 	Bucket  time.Duration
@@ -36,9 +26,8 @@ var overviewRanges = map[string]overviewRange{
 	"30d": {Key: "30d", Bucket: 24 * time.Hour, Buckets: 30},
 }
 
-// overviewMaxWindow is the hard ceiling on any window this endpoint will read. It is not a knob: the sign-in
-// attempt ledger keeps thirty days, and a longer window over the accounting samples would be a query nobody
-// could afford to poll.
+// overviewMaxWindow is a hard ceiling, not a knob: the sign-in attempt ledger keeps thirty days and a longer
+// accounting query would be too expensive to poll.
 const overviewMaxWindow = 30 * 24 * time.Hour
 
 type overviewWindow struct {
@@ -52,10 +41,8 @@ type overviewWindow struct {
 
 var errUnknownRange = errors.New("range must be one of 24h, 7d or 30d")
 
-// computeWindow places the buckets. They are ALIGNED to the database's local midnight (dayStart), so an hourly
-// bucket is 14:00-15:00 rather than 14:37-15:37 and a daily bucket is a calendar day at the property. The last
-// bucket is the one containing `now`, and is therefore partial; callers that average over a bucket divide by the
-// elapsed part of it, not by its nominal width.
+// computeWindow aligns buckets to the database's local midnight (dayStart). The last bucket contains `now` and is
+// partial; callers that average over a bucket divide by its elapsed part, not its nominal width.
 func computeWindow(key string, now, dayStart time.Time) (overviewWindow, error) {
 	r, ok := overviewRanges[key]
 	if !ok {
@@ -74,7 +61,6 @@ func computeWindow(key string, now, dayStart time.Time) (overviewWindow, error) 
 	return w, nil
 }
 
-// edges returns the N+1 bucket boundaries.
 func (w overviewWindow) edges() []time.Time {
 	out := make([]time.Time, w.N+1)
 	for i := range out {
@@ -83,13 +69,11 @@ func (w overviewWindow) edges() []time.Time {
 	return out
 }
 
-// bucketStarts is what the UI labels its x-axis with.
 func (w overviewWindow) bucketStarts() []time.Time {
 	e := w.edges()
 	return e[:w.N]
 }
 
-// bucketOf returns the bucket index for t, or -1 when t falls outside the window.
 func (w overviewWindow) bucketOf(t time.Time) int {
 	if t.Before(w.Start) || !t.Before(w.End) {
 		return -1
@@ -97,28 +81,10 @@ func (w overviewWindow) bucketOf(t time.Time) int {
 	return int(t.Sub(w.Start) / w.Bucket)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// traffic buckets from accounting samples
-// ---------------------------------------------------------------------------------------------------------
-
-// ACCOUNTING SAMPLES ARE DELTAS. This was established from the writer, not assumed from the reader:
-//
-//   - The only function allowed to insert into iam_v2.accounting_records is ingest_absolute_counters — the
-//     p3_controlled_writer_only trigger resolves the table's owner through exactly that signature and refuses
-//     every other writer. It receives ABSOLUTE counters, compares them with the locked checkpoint, and stores
-//     v_up := p_abs_up - prev_bytes_up (and the same for down). What lands in the row is the bytes moved since
-//     the previous accepted observation.
-//   - The older iam_base ingest_sample stores the absolute counter in the row instead, and it is precisely the
-//     path that trigger shuts out; it survives only as a scratch fixture.
-//   - Every existing reader already treats rows as deltas: the usage screen sums them into the session total,
-//     and the quota-crossing derivation runs a cumulative SUM() over them.
-//
-// So a bucket's bytes are the SUM of the rows sampled inside it. Differencing consecutive rows — the right move
-// for a cumulative counter — would here subtract one interval's traffic from the next and report nonsense.
-//
-// The row is attributed to the bucket its sampled_at falls in. A delta covers the interval since the previous
-// sample (one tick, normally a second), so at most one tick's traffic can land in the bucket after the one it
-// was moved in. That is the resolution of the measurement, stated rather than hidden.
+// Accounting samples are deltas: ingest_absolute_counters is the only writer allowed into iam_v2.accounting_records
+// and stores the bytes moved since the previous observation. A bucket's bytes are therefore the SUM of the rows
+// sampled inside it; differencing consecutive rows would report nonsense. A row lands in the bucket of its
+// sampled_at, so at most one tick's traffic can fall in the following bucket.
 type sampleBucketRow struct {
 	Bucket    int
 	SessionID string
@@ -126,9 +92,7 @@ type sampleBucketRow struct {
 	Up        int64
 }
 
-// counterMode names the two ways a sample series can be encoded. Only counterDelta occurs in this schema; the
-// cumulative branch exists so the arithmetic for the other encoding is written down, tested, and cannot be
-// reached for by accident.
+// counterMode: only counterDelta occurs in this schema; the cumulative branch is kept written down and tested.
 type counterMode int
 
 const (
@@ -136,10 +100,8 @@ const (
 	counterCumulative
 )
 
-// perBucketBytes turns ONE session's ordered samples into bytes per bucket under the given encoding. For deltas
-// it sums; for cumulative counters it differences consecutive readings, treating a decrease as a counter reset
-// (the new reading is then the bytes since the reset). The first cumulative reading contributes nothing, because
-// its value includes traffic from before the window and nothing says how much.
+// perBucketBytes: for cumulative counters a decrease is a counter reset, and the first reading contributes nothing
+// because it includes unknown earlier traffic.
 func perBucketBytes(w overviewWindow, times []time.Time, values []int64, mode counterMode) []int64 {
 	out := make([]int64, w.N)
 	var prev int64
@@ -168,7 +130,6 @@ func perBucketBytes(w overviewWindow, times []time.Time, values []int64, mode co
 	return out
 }
 
-// trafficAttribution says what a session is attributed to for the "top networks" and "top packages" lists.
 type trafficAttribution struct {
 	Interface string
 	PackageID string
@@ -183,7 +144,6 @@ type trafficRollup struct {
 	SessionsWithData int
 }
 
-// rollupTraffic folds per-(bucket, session) sums into the series and the two attributions.
 func rollupTraffic(w overviewWindow, rows []sampleBucketRow, attr map[string]trafficAttribution) trafficRollup {
 	r := trafficRollup{
 		SeriesDown: make([]int64, w.N), SeriesUp: make([]int64, w.N),
@@ -215,22 +175,14 @@ func rollupTraffic(w overviewWindow, rows []sampleBucketRow, attr map[string]tra
 	return r
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// concurrency from session intervals
-// ---------------------------------------------------------------------------------------------------------
-
 type sessionInterval struct {
 	Start time.Time
 	End   *time.Time // nil = still open
 }
 
-// concurrency computes, per bucket, the PEAK number of sessions open at the same instant and the TIME-WEIGHTED
-// AVERAGE number open. Both are exact for the intervals given: the peak by a sweep over start/end events, the
-// average as session-seconds inside the bucket divided by the bucket's elapsed seconds.
-//
-// Intervals are half-open [start, end): a session that ends at 14:00 and one that starts at 14:00 were never
-// on at the same time, so ends are processed before starts at the same instant. An open session runs to `now`.
-// One session is one device, so these are connected devices.
+// concurrency returns per-bucket peak and time-weighted average open sessions (one session is one device).
+// Intervals are half-open [start, end): a session ending at 14:00 and one starting then never overlapped, so ends
+// are processed before starts at the same instant. An open session runs to `now`.
 func concurrency(w overviewWindow, ivs []sessionInterval) (peak []int, avg []float64) {
 	edges := w.edges()
 	peak = make([]int, w.N)
@@ -261,7 +213,6 @@ func concurrency(w overviewWindow, ivs []sessionInterval) (peak []int, avg []flo
 			continue
 		}
 		evs = append(evs, ev{s, +1}, ev{e, -1})
-		// session-seconds per bucket
 		for b := w.bucketOf(s); b >= 0 && b < w.N && edges[b].Before(e); b++ {
 			lo, hi := edges[b], edges[b+1]
 			if s.After(lo) {
@@ -320,10 +271,6 @@ func concurrency(w overviewWindow, ivs []sessionInterval) (peak []int, avg []flo
 	return peak, avg
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// address pools
-// ---------------------------------------------------------------------------------------------------------
-
 func ipv4ToUint(s string) (uint32, bool) {
 	ip := net.ParseIP(strings.TrimSpace(s))
 	if ip == nil {
@@ -336,11 +283,7 @@ func ipv4ToUint(s string) (uint32, bool) {
 	return uint32(v4[0])<<24 | uint32(v4[1])<<16 | uint32(v4[2])<<8 | uint32(v4[3]), true
 }
 
-// ipv4RangeSize is the number of addresses in [start, end], inclusive, for ANY IPv4 range.
-//
-// The dashboard used to subtract fourth octets, which is only arithmetic inside one /24, and so it refused (and
-// scored as zero) every pool that crossed an octet boundary — 10.20.0.10-10.20.3.250 on a /22 was reported as
-// "no address range is configured". The addresses are 32-bit integers; the size is their difference plus one.
+// ipv4RangeSize counts addresses in [start, end] inclusive as 32-bit integers, so pools crossing an octet boundary work.
 func ipv4RangeSize(start, end string) (int64, bool) {
 	a, ok1 := ipv4ToUint(start)
 	b, ok2 := ipv4ToUint(end)
@@ -368,12 +311,7 @@ func newIPv4Range(start, end string) (ipv4Range, bool) {
 
 func (r ipv4Range) contains(ip uint32) bool { return ip >= r.lo && ip <= r.hi }
 
-// ---------------------------------------------------------------------------------------------------------
-// DHCP leases
-// ---------------------------------------------------------------------------------------------------------
-
-// keaLeaseRow is the part of a Kea lease the overview reads. The hardware address and hostname are
-// deliberately not decoded: this surface reports counts, and a field it never parses is one it cannot leak.
+// keaLeaseRow deliberately omits the hardware address and hostname: this surface reports counts, and a field it never parses cannot leak.
 type keaLeaseRow struct {
 	IPAddress string `json:"ip-address"`
 	State     int    `json:"state"`
@@ -381,12 +319,10 @@ type keaLeaseRow struct {
 	ValidLft  int64  `json:"valid-lft"`
 }
 
-// keaLeaseExpired is Kea's state for a released or expired lease (netd uses the same constant).
 const keaLeaseExpired = 2
 
-// leaseIsCurrent mirrors netd's rule exactly: memfile keeps lapsed rows with state 0 until the address is
-// reused, so a lease is current only if it is not in the expired state AND its lifetime has not run out.
-// Counting the lapsed rows was measured to overstate occupancy by ninety-odd addresses on the PRE-LIVE unit.
+// leaseIsCurrent mirrors netd's rule: Kea's memfile keeps lapsed rows with state 0 until the address is reused,
+// so a lease is current only if not expired and its lifetime has not run out.
 func leaseIsCurrent(l keaLeaseRow, now time.Time) bool {
 	if l.State == keaLeaseExpired || l.ValidLft <= 0 || l.CLTT <= 0 {
 		return false
@@ -413,9 +349,8 @@ type leaseNetworkCount struct {
 	Pools        []leasePoolCount
 }
 
-// aggregateLeases counts current leases per guest network (by subnet membership, not by Kea's subnet-id, which
-// is positional in the rendered config and changes when a network is added) and per pool range. Leases that
-// match no configured network are counted as unmatched rather than dropped silently.
+// aggregateLeases matches by subnet membership, not Kea's subnet-id (positional, shifts when a network is added);
+// leases matching no network are counted as unmatched.
 func aggregateLeases(leases []keaLeaseRow, nets []leaseNetwork, now time.Time, expiringWithin time.Duration) (map[string]*leaseNetworkCount, int64, int64) {
 	out := map[string]*leaseNetworkCount{}
 	for _, n := range nets {
@@ -465,8 +400,7 @@ func aggregateLeases(leases []keaLeaseRow, nets []leaseNetwork, now time.Time, e
 	return out, total, unmatched
 }
 
-// utilisationPct is leases-in-pool over pool size, as a percentage with one decimal. nil when there is no pool,
-// because "0 %" of nothing would read as an empty pool.
+// utilisationPct is nil when there is no pool, since "0 %" of nothing would read as an empty pool.
 func utilisationPct(inPool, size int64) *float64 {
 	if size <= 0 {
 		return nil
@@ -474,10 +408,6 @@ func utilisationPct(inPool, size int64) *float64 {
 	v := math.Round(float64(inPool)/float64(size)*1000) / 10
 	return &v
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// what needs attention
-// ---------------------------------------------------------------------------------------------------------
 
 type attentionItem struct {
 	ID       string `json:"id"`
@@ -488,8 +418,7 @@ type attentionItem struct {
 	Action   string `json:"action"`
 }
 
-// Thresholds for the two utilisation warnings. They are presentation thresholds on a read-only overview, not
-// operational behaviour: nothing on the appliance acts on them.
+// Presentation thresholds only; nothing on the appliance acts on them.
 const (
 	attentionPoolPct     = 85.0
 	attentionDiskPct     = 85.0
@@ -536,18 +465,15 @@ type attentionInput struct {
 	RevisionPending    bool
 	RevisionSeq        int64
 	SystemNetPending   bool
-	// PortalHTTPS is the portal_https check (portal_https_health.go), set only for a caller who may read
-	// portal-https. nil means not known or not permitted, and raises nothing.
+	// PortalHTTPS is set only for a caller who may read portal-https; nil means unknown or not permitted and raises nothing.
 	PortalHTTPS *portalHTTPSCheck
-	// DefaultDBPassword: the database still accepts its default superuser password (db_default_password.go),
-	// set only for a caller who may read diagnostics.
+	// DefaultDBPassword is set only for a caller who may read diagnostics.
 	DefaultDBPassword bool
-	// CardUnsellable: live packages sold by card that no client can actually pay by card (packageSaleIssues).
+	// CardUnsellable: live packages sold by card that no client can actually pay by card.
 	CardUnsellable []attentionPackage
 }
 
-// attentionPackage is a live package offered by card whose card sale cannot complete: no active default card
-// account, or one that settles another currency and does not convert.
+// attentionPackage is a card-sold package whose sale cannot complete: no default card account, or one in another currency.
 type attentionPackage struct {
 	Name, Currency, AccountCurrency string
 	NoAccount                       bool
@@ -566,9 +492,7 @@ func serviceLabel(name string) string {
 	return name
 }
 
-// deriveAttention turns the overview's facts into the short list of things a person must act on. Each item
-// names what it stops and links to the screen that fixes it. Things that are merely worth knowing are NOT here:
-// a list that mixes the two trains people to skim it.
+// deriveAttention lists only what a person must act on; merely informative items are excluded so the list is not skimmed.
 func deriveAttention(in attentionInput) []attentionItem {
 	out := []attentionItem{}
 	add := func(it attentionItem) { out = append(out, it) }
@@ -620,10 +544,7 @@ func deriveAttention(in attentionInput) []attentionItem {
 				Href:  "/health", Action: "Open diagnostics"})
 		}
 	}
-	// A PACKAGE NOBODY CAN BUY BY CARD. The portal offers a priced package only by a method the client can
-	// complete; card is never converted, so a package in a currency the card account does not settle is simply
-	// not offered -- and a client with no voucher and no room is left with nothing (found on PRE-LIVE
-	// 2026-10-15: OneDay in USD, the card account in GBP). The operator is told, with what to fix.
+	// Card is never converted, so a package in a currency the card account does not settle is not offered at all.
 	for _, p := range in.CardUnsellable {
 		detail := "Clients cannot buy it by card, so without a voucher or a room sign-in they are offered nothing."
 		if p.NoAccount {
@@ -669,7 +590,6 @@ func deriveAttention(in attentionInput) []attentionItem {
 			Detail: "Backups, logs and usage records need free space.",
 			Href:   "/health", Action: "Open diagnostics"})
 	}
-	// LicenseState is the section 8 vocabulary (docs/CENTRAL_CONTROL_PLANE.md), from scd's one computation.
 	if in.LicenseKnown {
 		switch {
 		case !in.LicenseInstalled || in.LicenseState == "none":
@@ -722,7 +642,7 @@ func deriveAttention(in attentionInput) []attentionItem {
 	if in.DefaultDBPassword {
 		add(defaultDBPasswordAttention())
 	}
-	// Errors first, then warnings; stable within each, so the list does not reshuffle between polls.
+	// Errors first; stable within each so the list does not reshuffle between polls.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Severity == "err" && out[j].Severity != "err" })
 	return out
 }

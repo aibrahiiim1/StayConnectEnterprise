@@ -1,26 +1,10 @@
 "use client";
 
-// PAYMENT METHODS — how a client may acquire an Internet package at this site, and the Card payment setup.
-//
-// FOUR METHODS, AND ONLY FOUR. Free (a package priced at zero), Voucher (a code the property issues), Card
-// payment (through a provider's hosted payment page) and Room charge (posted to the guest's folio in the PMS).
-// There is no cash method: money that changes hands at a desk is sold as a voucher, which is the auditable
-// instrument for it. There is no refund button either: a refund or chargeback the provider reports is recorded
-// in Settlements, and OneGate never originates one.
-//
-// FREE AND VOUCHER ARE CORE; CARD AND ROOM CHARGE ARE MODULES. The two core methods are always there, so their
-// cards only explain themselves. Card payment and Room charge each come from a site module (GET /modules), and
-// the card says which of the four things stands between the method and a client: it is not licensed, it is
-// switched off for this site, it is not ready (with each readiness reason in words), or it is ready. The words
-// for the codes are shared with Hotel → Room charge (lib/payment-admin.ts) so the same code never reads two
-// ways.
-//
-// THE CARD CONFIGURATION APPEARS ONLY ONCE IT CAN BE USED. While Card payment is not manageable — not licensed
-// for this site — the accounts, domains and timings are not rendered at all: every one of those requests would
-// be refused, and a form that 403s on save is worse than a sentence saying when it will appear.
-//
-// ROLES FAIL CLOSED WHILE LOADING. Nothing is shown until whoami answers, and a role without read access on
-// payment-providers is told so rather than shown an empty page. edged enforces the real gate either way.
+// Exactly four methods: Free, Voucher, Card payment and Room charge. There is no cash method (desk money is
+// sold as a voucher) and no refund button: provider refunds and chargebacks are recorded in Settlements and
+// OneGate never originates one. Card and Room charge come from site modules (GET /modules). The card
+// configuration is not rendered until Card payment is manageable, since its requests would be refused.
+// Roles fail closed while loading; edged enforces the real gate either way.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -44,11 +28,10 @@ type Tone = "ok" | "warn" | "err" | "default" | "info";
 type MethodState = {
   tone: Tone;
   label: string;
-  /** What to show under the badge: readiness or module reasons, and where to go about it. */
   detail?: React.ReactNode;
 };
 
-/** The single state a module-backed method is in, in the order an operator has to fix them. */
+// States are checked in the order an operator has to fix them.
 function moduleState(m: SiteModule | undefined): MethodState {
   if (!m) {
     return { tone: "default", label: "Not available", detail: <p className="text-xs text-muted-foreground">This appliance does not report this method.</p> };
@@ -167,8 +150,7 @@ export default function PaymentMethodsPage() {
 
   const card = mods?.modules?.card_payment;
   const room = mods?.modules?.room_charge;
-  // A method this site is not licensed for is not presented at all: a café does not look like it charges rooms,
-  // and a site without Card payment does not look like it takes cards. Settlements keep any history.
+  // A method the site is not licensed for is not presented at all; Settlements keeps any history.
   const cardLicensed = !!card?.licensed && !!card?.deployed;
   const roomLicensed = !!room?.licensed && !!room?.deployed;
   const cardState = moduleState(card);

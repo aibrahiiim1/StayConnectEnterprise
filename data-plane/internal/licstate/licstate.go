@@ -1,12 +1,6 @@
-// Package licstate manages the appliance's local view of its vendor-signed
-// license: loading/verifying the envelope from disk, periodically fetching
-// renewals from the cloud, evaluating the operational state, and bridging
-// the license limits into the site database so existing data-plane queries
-// (tenant_effective_limits) keep working unchanged.
-//
-// Guest authentication NEVER calls the cloud: everything here evaluates
-// against the on-disk envelope and the local clock (with rollback
-// protection). Cloud reachability only affects renewal freshness.
+// Package licstate manages the appliance's local view of its vendor-signed license: loading and verifying the
+// envelope, fetching renewals, evaluating state, and bridging limits into the site database. Guest authentication
+// never calls the cloud; it evaluates against the on-disk envelope and the local clock.
 package licstate
 
 import (
@@ -28,8 +22,6 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// Feature names accepted by FeatureEnabled. They mirror the portal auth
-// methods plus the coarser commercial features.
 const (
 	FeatEmailOTP = "email_otp"
 	FeatSMSOTP   = "sms_otp"
@@ -46,57 +38,43 @@ type Manager struct {
 	store       *lic.Store
 	db          *pgxpool.Pool
 	tenantID    string
-	applianceID string // set once known; used to verify per-appliance binding
+	applianceID string
 
-	// local is this appliance's hardware/identity fingerprint used to verify a
-	// signed license was minted for THIS box. The identity key fingerprint is
-	// the primary trust anchor; serial/hw-fingerprint/WAN-MAC are mismatch and
-	// clone-detection signals. hwMismatch holds a non-empty reason when the
-	// current license matches the identity but the WAN MAC differs (NIC swap /
-	// migration) — a warning, not a reject: the licence stays in force, with no
-	// time limit, until a rebind issues a corrected one.
-	//
-	// wrongDevice holds a non-empty reason when the licence on disk is bound to a
-	// DIFFERENT appliance (identity key, appliance id, serial or hardware
-	// fingerprint). It is recomputed on EVERY evaluation -- boot included -- so a
-	// licence copied onto another box, or a box whose identity was replaced, is
-	// refused after a reboot exactly as it is refused at install.
+	// local is this appliance's identity/hardware facts used to verify a license was minted for this box; the identity
+	// key is the trust anchor, serial/hardware/WAN-MAC are mismatch and clone signals.
+	// hwMismatch holds a reason when the identity matches but the WAN MAC differs (NIC swap): a warning, not a reject.
+	// wrongDevice holds a reason when the licence is bound to a different appliance. It is recomputed on every
+	// evaluation, boot included, so a copied licence is refused after a reboot.
 	local       lic.LocalIdentity
 	hwMismatch  string
 	wrongDevice string
 
-	// Required=false (dev/pilot pre-cutover): no license file → permissive
-	// unlicensed mode with a warning. Required=true (production): no
-	// license → Expired behavior until one is installed.
+	// Required=false (dev/pilot): no licence gives permissive unlicensed mode. Required=true (production): no licence
+	// behaves as Expired.
 	required bool
 
 	mu      sync.RWMutex
 	current lic.Evaluation
 	loaded  bool
 
-	// mTLS transport (Phase B/#4): once the appliance holds a client cert,
-	// license fetch/refresh routes over the mutual-TLS listener instead of the
-	// plain HTTPS ingress. Set via SetMTLSTransport; nil = use ctrlBase.
+	// mTLS transport: once a client cert exists, fetches use the mutual-TLS listener; nil means ctrlBase.
 	mtlsClient *http.Client
 	mtlsBase   string
 
-	// Cloud fetch scheduling (see runFetchLoop). kick asks for an immediate fetch; onFetch observes every
-	// fetch outcome (scd uses it to track when Central last answered). fastEvery is the poll interval while
-	// no licence is installed.
+	// kick asks for an immediate fetch; onFetch observes each fetch outcome; fastEvery is the poll interval while no
+	// licence is installed.
 	kick      chan struct{}
 	onFetch   func(error)
 	fastEvery time.Duration
 }
 
-// DefaultFastFetchInterval is how often an appliance with NO installed licence asks Central for one. A freshly
-// activated appliance used to wait for the next six-hour tick; now it collects its licence within a minute.
+// DefaultFastFetchInterval is how often an appliance with no installed licence asks Central for one.
 const DefaultFastFetchInterval = time.Minute
 
-// ErrNoLicenseYet is Central answering that no licence has been issued for this appliance yet. It is a
-// successful conversation with Central, not a connectivity failure.
+// ErrNoLicenseYet is Central answering that no licence has been issued yet; a successful conversation, not a
+// connectivity failure.
 var ErrNoLicenseYet = errors.New("no license issued for this appliance yet")
 
-// HTTPError is Central answering a licence fetch with an unexpected status.
 type HTTPError struct {
 	Code int
 	Body string
@@ -104,15 +82,13 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string { return fmt.Sprintf("license fetch: HTTP %d: %s", e.Code, e.Body) }
 
-// OnFetch registers an observer called after every cloud fetch attempt with its outcome.
 func (m *Manager) OnFetch(fn func(error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onFetch = fn
 }
 
-// Kick asks the fetch loop to contact Central now (Check now, a newly adopted assignment). Non-blocking; a
-// kick while one is already pending is merged into it.
+// Kick asks the fetch loop to contact Central now; non-blocking, and pending kicks merge.
 func (m *Manager) Kick() {
 	select {
 	case m.kick <- struct{}{}:
@@ -120,8 +96,7 @@ func (m *Manager) Kick() {
 	}
 }
 
-// SetMTLSTransport routes subsequent cloud license fetches over the given mTLS
-// client + base URL (the Central mutual-TLS listener). Safe to call at runtime.
+// SetMTLSTransport routes cloud licence fetches over the given mTLS client and base URL; safe at runtime.
 func (m *Manager) SetMTLSTransport(client *http.Client, base string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -138,10 +113,8 @@ func (m *Manager) transport() (*http.Client, string, bool) {
 	return nil, "", false
 }
 
-// New creates the manager. dir is the license directory
-// (default /etc/stayconnect/license), pubKeyPath the vendor public key file.
-// Returns a manager even when the pub key is missing (unlicensed mode) so
-// the appliance still boots; Install/Fetch will fail until the key exists.
+// New creates the manager. One is returned even when the pub key is missing (unlicensed mode) so the appliance
+// boots; Install/Fetch fail until the key exists.
 func New(db *pgxpool.Pool, tenantID, dir, pubKeyPath string, required bool) *Manager {
 	m := &Manager{db: db, tenantID: tenantID, required: required, kick: make(chan struct{}, 1),
 		fastEvery: DefaultFastFetchInterval}
@@ -160,7 +133,6 @@ func New(db *pgxpool.Pool, tenantID, dir, pubKeyPath string, required bool) *Man
 	return m
 }
 
-// Load evaluates the on-disk license and refreshes the DB limit bridge.
 func (m *Manager) Load(ctx context.Context) {
 	if m.store == nil {
 		return
@@ -176,10 +148,8 @@ func (m *Manager) Load(ctx context.Context) {
 		m.mu.Unlock()
 		return
 	}
-	// THE BINDING IS CHECKED ON EVERY EVALUATION, not only at install. It used to live in Install alone, and the
-	// verdict was held in memory: a reboot cleared it, and a licence file copied from another appliance -- or a
-	// box whose identity had been replaced under an installed licence -- evaluated as valid. Fail closed exactly
-	// as install does.
+	// The binding is checked on every evaluation, not only at install, so a licence copied from another appliance or
+	// an identity replaced under an installed licence fails closed after a reboot.
 	res, reason := lic.BindingOK, ""
 	if ev.Doc != nil {
 		res, reason = ev.Doc.CheckBinding(m.local)
@@ -215,15 +185,13 @@ func (m *Manager) Load(ctx context.Context) {
 	}
 }
 
-// Evaluation returns the cached evaluation plus a loaded flag.
 func (m *Manager) Evaluation() (lic.Evaluation, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.current, m.loaded
 }
 
-// State returns the effective operational state. Unlicensed mode maps to
-// Active (dev) or Expired (required=true).
+// State returns the effective operational state; unlicensed maps to Active (dev) or Expired (required).
 func (m *Manager) State() lic.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -233,11 +201,8 @@ func (m *Manager) State() lic.State {
 	}
 	if !m.loaded {
 		if m.required {
-			// No valid signed license on a production appliance: the SAFE state.
-			// Never Active — AllowsNewSessions() is false, so no guest auth,
-			// nft, shaping, accounting or session is ever created. This is the
-			// only path a config error (missing/invalid vendor key) can take —
-			// it fails closed, never to permissive.
+			// No valid signed licence on a production appliance: the safe state. Never Active, so no guest auth, nft, shaping,
+			// accounting or session is created; config errors fail closed.
 			return lic.StateUnlicensed
 		}
 		return lic.StateActive // permissive unlicensed-dev (development builds only)
@@ -245,12 +210,10 @@ func (m *Manager) State() lic.State {
 	return m.current.State
 }
 
-// AllowsNewSessions gates every guest auth path.
 func (m *Manager) AllowsNewSessions() bool { return m.State().AllowsNewSessions() }
 
-// MaxConcurrentOnlineGuests returns the appliance-wide concurrent
-// online-guest cap from the LOCAL signed license: -1 = unlimited (or
-// unlicensed dev mode). Enforcement never consults Central.
+// MaxConcurrentOnlineGuests returns the concurrent-guest cap from the local signed licence (-1 unlimited). It never
+// consults Central.
 func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -269,11 +232,8 @@ func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	return -1
 }
 
-// FeatureEnabled evaluates a legacy feature name under the current state. It
-// is a thin alias over ModuleEnabled: since licence v4 the signed `modules`
-// map is the SOLE authority, and a v1-v3 licence is read through the
-// conservative legacy mapping in license.AuthorizedModules. The Features
-// block of a v4 licence is never consulted.
+// FeatureEnabled aliases ModuleEnabled: since licence v4 the signed modules map is the sole authority (v1-v3 are
+// read through license.AuthorizedModules) and a v4 Features block is never consulted.
 func (m *Manager) FeatureEnabled(name string) bool {
 	switch name {
 	case FeatPMS:
@@ -287,9 +247,8 @@ func (m *Manager) FeatureEnabled(name string) bool {
 	}
 }
 
-// ModuleEnabled reports whether the installed licence authorises module id
-// AND the licence state allows entitled features (Active or Grace).
-// Unlicensed dev mode allows everything (with the boot warning).
+// ModuleEnabled reports whether the licence authorises module id and the state allows entitled features (Active or
+// Grace). Unlicensed dev mode allows everything.
 func (m *Manager) ModuleEnabled(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -302,8 +261,7 @@ func (m *Manager) ModuleEnabled(id string) bool {
 	return lic.FeatureEnabled(m.current.State, m.current.Doc.AuthorizedModules()[id])
 }
 
-// AuthorizedModules returns the modules the installed licence authorises,
-// independent of licence state (for display). Nil when no usable licence.
+// AuthorizedModules returns the modules the licence authorises regardless of state (for display).
 func (m *Manager) AuthorizedModules() map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -313,20 +271,16 @@ func (m *Manager) AuthorizedModules() map[string]bool {
 	return m.current.Doc.AuthorizedModules()
 }
 
-// LicenseRequired reports whether this build requires a licence (production).
 func (m *Manager) LicenseRequired() bool { return m.required }
 
-// Install verifies and persists a new envelope (Hotel Admin upload or cloud
-// push), then reloads.
 func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error) {
 	if m.store == nil {
 		return nil, errors.New("vendor public key not installed")
 	}
-	// Enforce the hardware/identity binding BEFORE persisting, so a license
-	// minted for a different appliance (or a clone) is never written to disk.
+	// Enforce the binding before persisting so a licence for another appliance is never written to disk.
 	pre, err := m.store.Verify(raw)
 	if err != nil {
-		return nil, err // bad signature / unknown signer / malformed / invalid
+		return nil, err
 	}
 	res, reason := pre.CheckBinding(m.local)
 	if res == lic.BindingWrongDevice {
@@ -341,14 +295,12 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	if err != nil {
 		return nil, err
 	}
-	// WAN MAC mismatch is a soft hardware signal (NIC replaced / migration): the licence stays installed and in
-	// force -- there is no time limit -- and a warning is shown until an authorised rebind issues a corrected
-	// licence. Load (below) records it, and re-derives it on every evaluation.
+	// A WAN MAC mismatch is a soft signal: the licence stays in force with a warning until a rebind. Load re-derives it
+	// on every evaluation.
 	if res == lic.BindingWANMismatch {
 		slog.Warn("licstate: hardware binding mismatch", "reason", reason,
 			"license_id", doc.LicenseID, "doc_wan_mac", doc.WANMAC, "local_wan_mac", m.local.WANMAC)
 	}
-	// Legacy site-wide binding warning (v1 / unbound docs).
 	if m.applianceID != "" && len(doc.ApplianceIDs) > 0 && !applianceBound(doc, m.applianceID) {
 		slog.Warn("licstate: appliance not listed in license binding",
 			"appliance_id", m.applianceID, "license_id", doc.LicenseID, "bound_count", len(doc.ApplianceIDs))
@@ -357,16 +309,13 @@ func (m *Manager) Install(ctx context.Context, raw []byte) (*lic.Document, error
 	return doc, nil
 }
 
-// SetLocalIdentity records this appliance's hardware/identity facts for license
-// binding verification. Call once identity + hardware are known.
 func (m *Manager) SetLocalIdentity(local lic.LocalIdentity) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.local = local
 }
 
-// WrongHardware returns a non-empty reason when the installed licence is bound to a different appliance and is
-// therefore refused (no new guest sessions).
+// WrongHardware returns a reason when the licence is bound to a different appliance and is refused.
 func (m *Manager) WrongHardware() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -376,23 +325,21 @@ func (m *Manager) WrongHardware() string {
 	return m.wrongDevice
 }
 
-// HasUsableLicense reports whether a real signed licence for THIS appliance is installed (whatever its time
-// state). It is what decides the fast "collect my first licence" fetch cadence.
+// HasUsableLicense reports whether a real signed licence for this appliance is installed; it sets the fast
+// first-licence fetch cadence.
 func (m *Manager) HasUsableLicense() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.loaded && m.wrongDevice == "" && m.current.Doc != nil
 }
 
-// HardwareMismatch returns a non-empty reason when the installed license is
-// bound to this identity but the WAN MAC no longer matches (rebind needed).
+// HardwareMismatch returns a reason when the licence matches this identity but the WAN MAC differs (rebind needed).
 func (m *Manager) HardwareMismatch() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.hwMismatch
 }
 
-// applianceBound reports whether id is in the license's ApplianceIDs binding.
 func applianceBound(d *lic.Document, id string) bool {
 	for _, a := range d.ApplianceIDs {
 		if a == id {
@@ -402,9 +349,8 @@ func applianceBound(d *lic.Document, id string) bool {
 	return false
 }
 
-// syncLimits rewrites the license-sourced rows of tenant_effective_limits in
-// the SITE database so session.CheckConcurrency and provisioning caps read
-// the signed values. License semantics 0 = unlimited map to the view's -1.
+// syncLimits rewrites the license-sourced rows of tenant_effective_limits in the site database; licence 0
+// (unlimited) maps to the view's -1.
 func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 	if m.db == nil {
 		return nil
@@ -423,7 +369,6 @@ func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 		"retention_days_accounting": unlim(d.Limits.AccountingRetentionDays),
 		"retention_days_audit":      unlim(d.Limits.AuditRetentionDays),
 	}
-	// Mirrored from the authorised modules (never from a v4 Features block).
 	am := d.AuthorizedModules()
 	bools := map[string]bool{
 		"feature.pms_integration":   am[lic.ModuleHospitality],
@@ -463,20 +408,18 @@ func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 	return tx.Commit(ctx)
 }
 
-// FetchFromCloud pulls the current signed license over the appliance's
-// authenticated channel and installs it. A 200 also counts as a cloud
-// validation; revoked ids from the response feed the local revocation store.
+// FetchFromCloud pulls the signed licence over the authenticated channel and installs it; a 200 counts as cloud
+// validation and revoked ids feed the local revocation store.
 func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID string, priv ed25519.PrivateKey) error {
 	if m.store == nil {
 		return errors.New("vendor public key not installed")
 	}
-	m.applianceID = applianceID // remember for per-appliance binding verification
+	m.applianceID = applianceID
 	tok, err := applianceauth.SignRequest(priv, applianceID, http.MethodGet, "/v1/appliance/license", nil)
 	if err != nil {
 		return fmt.Errorf("sign: %w", err)
 	}
-	// Prefer the mTLS transport once a client cert is installed; otherwise the
-	// plain HTTPS ingress (signed-JWT still applied on top in both cases).
+	// Prefer the mTLS transport once a client cert is installed (signed-JWT still applies on top).
 	base := ctrlBase
 	client := &http.Client{Timeout: 10 * time.Second}
 	if mc, mb, ok := m.transport(); ok {
@@ -510,8 +453,7 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	for _, id := range out.Revoked {
 		_ = m.store.AddRevocation(id)
 	}
-	// A revocation-only response (no current license) carries a null
-	// envelope: apply revocations, keep the installed doc, re-evaluate.
+	// A revocation-only response carries a null envelope: apply revocations and keep the installed doc.
 	if len(out.Envelope) == 0 || string(out.Envelope) == "null" {
 		if err := m.store.MarkCloudValidated(time.Now().UTC()); err != nil {
 			slog.Warn("licstate: mark cloud validated failed", "err", err)
@@ -531,8 +473,8 @@ func (m *Manager) FetchFromCloud(ctx context.Context, ctrlBase, applianceID stri
 	return nil
 }
 
-// StartLoops runs (a) a minute-level re-evaluation so time-based state transitions -- and the hardware binding
-// -- are re-checked, and (b) the cloud fetch loop when fetch parameters are configured. Both stop with ctx.
+// StartLoops runs a minute-level re-evaluation (time-based transitions and the hardware binding) and the cloud
+// fetch loop when configured; both stop with ctx.
 func (m *Manager) StartLoops(ctx context.Context, ctrlBase, applianceID string, priv ed25519.PrivateKey, refreshEvery time.Duration) {
 	go func() {
 		t := time.NewTicker(time.Minute)
