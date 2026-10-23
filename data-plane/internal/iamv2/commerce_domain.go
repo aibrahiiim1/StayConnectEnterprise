@@ -7,60 +7,41 @@ import (
 	"time"
 )
 
-// ---- Phase-2 commerce domain: typed eligibility, ordered grant tiers, free-only money safety ----
-//
-// Everything here is PURE (no DB, no PMS). Rule/tier conditions use only the contract-approved,
-// non-PMS typed dimensions available in Phase 2. PMS-dependent rule/tier types are recognized but
-// CAPABILITY-DISABLED — they fail closed until Phase 3 provides authoritative Stay resolution. No
-// executable scripts, arbitrary expressions or user SQL are ever evaluated.
-
-// SubjectKind is the non-PMS subject class an auth-context resolved to.
 type SubjectKind string
 
 const (
 	SubjectVoucher   SubjectKind = "VOUCHER"
 	SubjectAccount   SubjectKind = "ACCOUNT"
 	SubjectPrincipal SubjectKind = "PRINCIPAL" // OTP / SOCIAL
-	// SubjectStay is a client who proved a stay by Room sign-in. It is its own kind: room guests used to be
-	// evaluated as PRINCIPAL, so a SUBJECT_KIND rule written for email/phone/social sign-ins also matched them.
+	// Room sign-in is its own kind; evaluating it as PRINCIPAL made SUBJECT_KIND rules written for
+	// email/phone/social sign-ins match room guests.
 	SubjectStay SubjectKind = "STAY"
 )
 
-// EligibilitySubject is what a rule or tier condition may test.
-//
-// Phase 2 could only carry non-PMS facts, so the seven PMS rule types below were recognised but
-// capability-disabled: with no authoritative Stay data, evaluating them would have meant guessing, and a
-// guess that says "eligible" hands out access nobody authorised. Phase 3 supplies that data, so the same
-// rule types now evaluate for real — but ONLY when the evidence is present and coherent. StayEvidence being
-// absent is not "no constraint"; it is "we cannot answer", and the answer to that is still no.
+// EligibilitySubject is what a rule or tier condition may test. PMS rules evaluate only when StayEvidence is
+// present and coherent; absent evidence means "cannot answer", and the answer is no.
 type EligibilitySubject struct {
 	Now                       time.Time
 	AuthMethod                Method // VOUCHER | ACCOUNT | OTP | SOCIAL | PMS
 	Kind                      SubjectKind
 	GuestNetworkID            string
 	HasPriorPurchaseOfPackage bool
-	// ClientGroupID is the effective Client Group pinned on the auth context ("" = Public). It is a recorded
-	// decision (client_groups.go), never re-derived here.
+	// The effective Client Group pinned on the auth context ("" = Public); recorded, never re-derived here.
 	ClientGroupID string
 
-	// GuestNetworkLineage is the client networks GuestNetworkID is the continuation of: the ones it replaced,
-	// transitively, from iam_v2.guest_network_lineage (0106). It exists because a package REVISION is immutable
-	// and names client networks by id, while a replacement — moving a port onto a tagged trunk, changing a VLAN
-	// id, re-addressing a subnet — gives the network a NEW id. Without lineage every pinned revision's
-	// SITE_NETWORK rule stopped matching the guests sitting on that very network the moment the cable moved,
-	// and an unused printed voucher pinned to such a revision became unredeemable.
-	//
-	// It only ever widens BACKWARD, to networks this one actually succeeded. It is server-derived, like
-	// GuestNetworkID itself, and empty is the normal case.
+	// GuestNetworkLineage lists the client networks GuestNetworkID continues (transitively, from
+	// iam_v2.guest_network_lineage). A replacement gives a network a new id while revisions are immutable and
+	// name networks by id, so without lineage SITE_NETWORK rules stop matching. Server-derived, only widens
+	// backward; empty is normal.
 	GuestNetworkLineage []string
 
-	// Stay is the authoritative Stay evidence for a PMS-authenticated subject. Nil for every other method,
-	// which is what keeps a voucher guest from matching a room-type rule.
+	// Authoritative Stay evidence for a PMS-authenticated subject; nil for every other method, so a voucher
+	// guest cannot match a room-type rule.
 	Stay *StayEvidence
 }
 
-// StayEvidence is the server-pinned Stay state a PMS rule may test. Every field comes from the resolved Stay
-// row under the pinned Interface Revision — never from a guest, and never from a request body.
+// Server-pinned Stay state a PMS rule may test, from the resolved Stay row under the pinned Interface
+// Revision; never from a guest or request body.
 type StayEvidence struct {
 	StayID      string
 	InterfaceID string
@@ -71,13 +52,12 @@ type StayEvidence struct {
 	VIP         *bool // nil means the PMS did not state it — not "false"
 	Arrival     *time.Time
 	Departure   *time.Time
-	// EvidenceVersion is the occupancy-evidence version this snapshot was taken at. It is carried into the
-	// Quote so a decision can be re-read later against the exact evidence that produced it.
+	// The occupancy-evidence version, carried into the Quote so a decision can be re-read against the evidence
+	// that produced it.
 	EvidenceVersion int64
 }
 
-// Nights is the stay length in nights, and whether it could be computed at all. A missing bound means the
-// question cannot be answered, which fails closed rather than defaulting to zero.
+// A missing bound means the question cannot be answered and fails closed rather than defaulting to zero.
 func (e *StayEvidence) Nights() (int, bool) {
 	if e == nil || e.Arrival == nil || e.Departure == nil {
 		return 0, false
@@ -89,35 +69,28 @@ func (e *StayEvidence) Nights() (int, bool) {
 	return int(d.Hours() / 24), true
 }
 
-// EligibilityRule is one typed rule attached to a package revision (rule_type + rule_value jsonb).
 type EligibilityRule struct {
 	Type  string
 	Value map[string]any
 }
 
-// GrantTier is one ordered tier (tier_order + grant_value jsonb). grant_value may carry an optional
-// typed "match" condition; a tier with no condition is unconditional.
 type GrantTier struct {
 	Order int
 	Value map[string]any
 }
 
-// Contract-approved NON-PMS rule/condition types (Phase 2).
 const (
 	RuleDateWindow    = "DATE_WINDOW"    // {from, until} RFC3339 (either bound optional)
 	RuleAuthMethod    = "AUTH_METHOD"    // {methods: ["ACCOUNT","VOUCHER","OTP","SOCIAL"]}
 	RuleSubjectKind   = "SUBJECT_KIND"   // {kinds: ["ACCOUNT","VOUCHER","PRINCIPAL"]}
 	RulePriorPurchase = "PRIOR_PURCHASE" // {requires_prior|forbids_prior: bool, within_hours?: int, also_by_device?: bool}
-	// CLIENT_GROUP is the package's AUDIENCE: {group_ids: [uuid], public: bool}. It passes for a member of a
-	// listed group, or -- with public -- for a Client in no group. It is how "employees free, partners
-	// discounted, public normal price" is written without coupling the offer to the sign-in method.
+	// CLIENT_GROUP is the package audience: {group_ids: [uuid], public: bool}; passes for a listed group
+	// member or, with public, a Client in no group.
 	RuleClientGroup = "CLIENT_GROUP"
 	RuleSiteNetwork = "SITE_NETWORK" // {guest_network_ids: [uuid,...]}
 )
 
-// The PMS rule types. Phase 2 recognised them and refused to evaluate them, because there was no
-// authoritative Stay data and a guess in the permissive direction hands out access. Phase 3 evaluates them
-// against server-pinned Stay evidence — and still refuses when that evidence is missing or incoherent.
+// PMS rule types evaluate against server-pinned Stay evidence and refuse when it is missing or incoherent.
 const (
 	RuleStayStatus   = "STAY_STATUS"   // {statuses: ["IN_HOUSE", ...]}
 	RuleStayLength   = "STAY_LENGTH"   // {min_nights?, max_nights?}
@@ -133,20 +106,17 @@ var pmsRuleTypes = map[string]bool{
 	RuleTravelAgent: true, RulePMSInterface: true, RuleRatePlan: true,
 }
 
-// IsPMSRuleType reports whether a rule/condition type needs authoritative Stay evidence.
 func IsPMSRuleType(t string) bool {
 	return pmsRuleTypes[strings.ToUpper(strings.TrimSpace(t))]
 }
 
-// IsCapabilityDisabledRuleType reports whether a type cannot be evaluated for THIS subject. A PMS rule
-// without Stay evidence is exactly that: recognised, but unanswerable, so it fails closed.
+// A PMS rule without Stay evidence is recognised but unanswerable, so it fails closed.
 func IsCapabilityDisabledRuleType(t string) bool {
 	return false
 }
 
-// EvaluatePackageEligible returns whether ALL of a package revision's eligibility rules pass for the
-// subject (AND semantics), and a non-sensitive reason when not. FAILS CLOSED: an unknown rule type, a
-// capability-disabled PMS type, or a malformed rule value makes the package ineligible.
+// All rules must pass (AND). Fails closed: unknown rule type, capability-disabled PMS type, or malformed value
+// makes the package ineligible.
 func EvaluatePackageEligible(rules []EligibilityRule, s EligibilitySubject) (bool, string) {
 	for _, r := range rules {
 		ok, reason := evalTypedCondition(r.Type, r.Value, s)
@@ -157,9 +127,8 @@ func EvaluatePackageEligible(rules []EligibilityRule, s EligibilitySubject) (boo
 	return true, "eligible"
 }
 
-// FirstMatchTier returns the first tier (ascending tier_order) whose optional typed "match" condition
-// passes; a tier with no condition matches unconditionally. Deterministic; capability-disabled
-// conditions never match (fail closed). Returns ok=false when no tier matches.
+// First tier by ascending tier_order whose optional "match" passes; no condition matches unconditionally;
+// disabled conditions never match.
 func FirstMatchTier(tiers []GrantTier, s EligibilitySubject) (GrantTier, bool) {
 	sorted := append([]GrantTier(nil), tiers...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Order < sorted[j].Order })
@@ -168,9 +137,8 @@ func FirstMatchTier(tiers []GrantTier, s EligibilitySubject) (GrantTier, bool) {
 		if !has {
 			return t, true // ONLY an absent match is unconditional
 		}
-		// A present match must be a JSON object carrying one recognized typed condition. Malformed,
-		// empty, unknown or PMS-disabled match => the tier does NOT match (never reinterpreted as
-		// unconditional).
+		// A present match must be an object with one recognised condition; anything else does not match and is
+		// never reinterpreted as unconditional.
 		cond, ok := mv.(map[string]any)
 		if !ok {
 			continue
@@ -186,18 +154,16 @@ func FirstMatchTier(tiers []GrantTier, s EligibilitySubject) (GrantTier, bool) {
 	return GrantTier{}, false
 }
 
-// evalTypedCondition evaluates a single typed condition against the subject. Fail-closed on
-// unknown/disabled/malformed.
 func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (bool, string) {
 	t := strings.ToUpper(strings.TrimSpace(ctype))
 	if IsPMSRuleType(t) {
 		if s.Stay == nil {
-			// The rule is recognised and the subject cannot answer it. That is not "no constraint" — it is
-			// "unknown", and a permissive reading of unknown is how a voucher guest matches a suite rate.
+			// Unanswerable is not "no constraint"; a permissive reading is how a voucher guest matches a suite
+			// rate.
 			return false, "pms_rule_without_stay_evidence"
 		}
 		if s.Stay.EvidenceVersion <= 0 {
-			// Evidence exists but was never authoritatively versioned, so it cannot be reproduced later.
+			// Evidence that was never authoritatively versioned cannot be reproduced later.
 			return false, "pms_rule_without_versioned_evidence"
 		}
 		return evalPMSCondition(t, v, s.Stay)
@@ -284,11 +250,8 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 		if set[strings.ToLower(strings.TrimSpace(s.GuestNetworkID))] {
 			return true, ""
 		}
-		// ...OR A CLIENT NETWORK THIS ONE IS THE CONTINUATION OF. A rule is written against the network an
-		// operator chose; a replacement (0105) gives that network a new id for reasons — a VLAN id, a port, a
-		// subnet — that have nothing to do with who may buy what. The lineage is server-derived (0106) and only
-		// ever reaches backward, to networks this one actually succeeded, so this widens eligibility to exactly
-		// the devices the rule's author meant and to no others.
+		// Or a client network this one continues: a replacement changes the network id for reasons unrelated
+		// to who may buy what, and lineage only reaches backward to networks this one succeeded.
 		for _, prior := range s.GuestNetworkLineage {
 			if set[strings.ToLower(strings.TrimSpace(prior))] {
 				return true, ""
@@ -300,16 +263,14 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 	}
 }
 
-// PriorPurchasePolicy is how a package's PRIOR_PURCHASE rule wants the Client's history read (contract §5).
 type PriorPurchasePolicy struct {
 	Present      bool
 	WithinHours  int  // 0 = ever
 	AlsoByDevice bool // the device's own history counts too (default true on a free package)
 }
 
-// PriorPurchasePolicyOf reads the policy from a revision's rules. Defaults: once per Client, ever; the device
-// counts when the package is free (price 0), because that is the case "sign in again with another email on the
-// same phone" is aimed at.
+// Defaults: once per Client, ever; the device counts when the package is free, which is what blocks a second
+// free allowance via another email on the same phone.
 func PriorPurchasePolicyOf(rules []EligibilityRule, priceMinor int64) PriorPurchasePolicy {
 	for _, r := range rules {
 		if strings.ToUpper(strings.TrimSpace(r.Type)) != RulePriorPurchase {
@@ -327,14 +288,8 @@ func PriorPurchasePolicyOf(rules []EligibilityRule, priceMinor int64) PriorPurch
 	return PriorPurchasePolicy{}
 }
 
-// ForSubject adapts the policy to the subject redeeming it.
-//
-// A VOUCHER IS ITS OWN ALLOWANCE. Each card is a separate prepaid credential, burned by its redemption; the
-// device switch exists to stop a Client taking a second FREE allowance by signing in again with another email
-// on the same phone (contract §5). Applied to a voucher it did the opposite of its purpose: the default every
-// new free package starts with ("once per client", device counted) refused a guest's SECOND voucher on the same
-// phone, because the first card's grant was in the device's history. The voucher's own history still counts --
-// a card is redeemed once -- and the rule still binds every other subject exactly as before.
+// A voucher is its own allowance: the device switch exists to stop repeat FREE allowances, and applied to a
+// voucher it refused a guest's second card on the same phone. The voucher's own history still counts.
 func (p PriorPurchasePolicy) ForSubject(k SubjectKind) PriorPurchasePolicy {
 	if k == SubjectVoucher {
 		p.AlsoByDevice = false
@@ -342,9 +297,8 @@ func (p PriorPurchasePolicy) ForSubject(k SubjectKind) PriorPurchasePolicy {
 	return p
 }
 
-// parseTimeField returns (time, present, valid). A field that is absent/empty is (_, false, _). A field
-// that is present but not a valid RFC3339 string is (_, true, false) so the caller can fail closed
-// rather than treat malformed input as an omitted optional bound.
+// Returns (time, present, valid); present-but-invalid lets the caller fail closed instead of treating it as an
+// omitted bound.
 func parseTimeField(v map[string]any, key string) (time.Time, bool, bool) {
 	raw, has := v[key]
 	if !has {
@@ -361,8 +315,6 @@ func parseTimeField(v map[string]any, key string) (time.Time, bool, bool) {
 	return t, true, true
 }
 
-// stringSet lowercases-and-uppercases-insensitively builds a membership set from a JSON array of
-// strings (values are compared upper-cased for enum fields; caller lower-cases for id fields).
 func stringSet(a any) map[string]bool {
 	arr, ok := a.([]any)
 	if !ok {
@@ -378,9 +330,6 @@ func stringSet(a any) map[string]bool {
 	return out
 }
 
-// ---- money safety (free-only, Phase 2) ----
-
-// MoneySpec is the pricing/settlement of a package revision as seen by the free-purchase gate.
 type MoneySpec struct {
 	PriceMinor        int64
 	Currency          string // ISO-4217 alpha-3
@@ -388,10 +337,8 @@ type MoneySpec struct {
 	SettlementMethods []string
 }
 
-// IsFreePackage reports whether a package revision qualifies for the Phase-2 free-only path, with a
-// deterministic reason when not. Requires price_minor == 0, settlement methods EXACTLY {NOT_REQUIRED},
-// and an AUTHORITATIVE ISO-4217 currency whose supplied exponent matches (zero price is still
-// money-typed).
+// Free means price_minor == 0, settlement methods exactly {NOT_REQUIRED}, and an authoritative ISO-4217
+// currency whose exponent matches.
 func IsFreePackage(m MoneySpec) (bool, string) {
 	if m.PriceMinor != 0 {
 		return false, "not_free"
@@ -405,9 +352,8 @@ func IsFreePackage(m MoneySpec) (bool, string) {
 	return true, "free"
 }
 
-// evalPMSCondition evaluates one PMS rule against server-pinned Stay evidence. Every branch fails closed on a
-// malformed rule or on evidence the PMS did not state: a rule the property wrote must never be satisfied by
-// the absence of the thing it tests.
+// Every branch fails closed on a malformed rule or evidence the PMS did not state; absence must never satisfy
+// a rule.
 func evalPMSCondition(t string, v map[string]any, e *StayEvidence) (bool, string) {
 	switch t {
 	case RuleStayStatus:
@@ -462,8 +408,8 @@ func evalPMSCondition(t string, v map[string]any, e *StayEvidence) (bool, string
 			return false, "malformed_vip_rule"
 		}
 		if e.VIP == nil {
-			// The PMS did not state it. Treating "not stated" as false would silently satisfy every
-			// {is_vip:false} rule for guests whose status the property simply has not recorded.
+			// Not stated is not false: treating it so would satisfy every {is_vip:false} rule for guests whose
+			// status was never recorded.
 			return false, "vip_unknown"
 		}
 		if *e.VIP == want {
@@ -474,7 +420,6 @@ func evalPMSCondition(t string, v map[string]any, e *StayEvidence) (bool, string
 	return false, "unknown_pms_rule"
 }
 
-// matchStringField is the shared shape of the set-membership PMS rules.
 func matchStringField(set map[string]bool, value, label string) (bool, string) {
 	if len(set) == 0 {
 		return false, "malformed_" + label + "_rule"
@@ -488,32 +433,16 @@ func matchStringField(set map[string]bool, value, label string) (bool, string) {
 	return false, label + "_not_matched"
 }
 
-// parseIntField reads an optional integer bound: (value, present, wellFormed). A present-but-malformed bound
-// is never treated as omitted — that would turn a typo into a wider offer.
-// parseIntField reads a non-negative whole number out of a rule value.
-//
-// IT MUST ACCEPT EVERY NUMERIC SHAPE A DECODER IN THIS SYSTEM PRODUCES, because they are not the same shape
-// and never have been. edged decodes request bodies with UseNumber, so a number arrives as json.Number; the
-// Phase-2 repository decodes rule_value with UseNumber too; but the Phase-3 offers path in scd calls plain
-// json.Unmarshal, which produces float64. Postgres round-trips add int64.
-//
-// This handled float64, int and int64 -- and not json.Number. STAY_LENGTH is the first rule type to carry a
-// number at all, so nothing had ever exercised the gap, and the first operator to set "1 to 5 nights" was
-// told "invalid_eligibility_rule" with no way to publish it. Worse than the refusal was what would have
-// happened had it published: the rule would have evaluated correctly in the Room Login path (float64) and
-// failed closed in the Phase-2 engine (json.Number), so the same stored rule would mean two different things
-// depending on who asked.
-//
-// The strictness is unchanged and deliberate: a fractional or exponent-bearing value is REFUSED rather than
-// rounded, because "1.5 nights" is not a number of nights and silently turning it into 1 or 2 publishes a
-// rule the operator did not write onto a revision they cannot edit.
+// parseIntField reads an optional non-negative whole number: (value, present, wellFormed). It must accept
+// every numeric shape in the system (json.Number from edged and the repository, float64 from plain Unmarshal
+// in scd, int/int64 from Postgres) so a stored rule means the same everywhere. A fractional or exponent value
+// is refused, not rounded; a malformed bound is never treated as omitted.
 func parseIntField(v map[string]any, key string) (int, bool, bool) {
 	raw, present := v[key]
 	if !present || raw == nil {
 		return 0, false, true
 	}
-	// json.Number, int and int64 all go through the one strict integer reader the grant snapshot uses, so
-	// there is a single definition of "a whole number" rather than two that can drift apart.
+	// All integer shapes go through the one strict reader the grant snapshot uses.
 	if n, ok := asInt64(raw); ok {
 		if n < 0 || n > math.MaxInt32 {
 			return 0, true, false

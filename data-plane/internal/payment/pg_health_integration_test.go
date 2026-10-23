@@ -8,12 +8,8 @@ import (
 	"testing"
 )
 
-// OBSERVABILITY, and the redaction proof that makes it trustworthy.
-//
-// The redaction test is written the way the standing rule requires: it seeds recognisable secrets and guest
-// data into the rows the health query reads, then asserts none of it -- and nothing identifier-shaped --
-// appears anywhere in the rendered output. It was verified to FAIL against a build in which a single raw
-// field (the provider reference) was added to FinancialHealth, so it is a check that can fail.
+// Redaction proof: seeds recognisable secrets and guest data into the rows the health query reads and asserts none of
+// it, nor anything identifier-shaped, appears in the output.
 
 func TestIntegrationHealth_ReportsTheContractRequiredSignals(t *testing.T) {
 	p := pool(t)
@@ -35,7 +31,6 @@ func TestIntegrationHealth_ReportsTheContractRequiredSignals(t *testing.T) {
 		t.Fatalf("a healthy site reports %s (%v)", h.Status, h.Reasons)
 	}
 
-	// drive an UNKNOWN and watch the status become actionable
 	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	_, _ = e.Execute(ctx, s.tenant, s.site, in.ID)
 	h, err = e.Health(ctx, s.tenant, s.site)
@@ -52,7 +47,6 @@ func TestIntegrationHealth_ReportsTheContractRequiredSignals(t *testing.T) {
 		t.Fatalf("the reasons are not actionable: %v", h.Reasons)
 	}
 
-	// recovery outranks everything
 	actor := seedOperator(t, p, s.tenant)
 	if _, err := e.DeclareRecovery(ctx, s.tenant, s.site, actor, "reconciling after a restore drill"); err != nil {
 		t.Fatal(err)
@@ -71,14 +65,12 @@ func TestIntegrationHealth_NoSecretGuestOrIdentifierDataInAnyOutput(t *testing.T
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 
-	// Seed material that MUST NOT be able to escape. These are placed exactly where a careless
-	// implementation would pick them up: on the account configuration and in the review evidence.
+	// Seed material that must not escape, placed where a careless implementation would pick it up.
 	const secret = "sk_live_SUPERSECRETKEY"
 	const guest = "Mr Wolfgang Amadeus Guestname"
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.payment_provider_accounts
 		SET display_name = $2, merchant_account_ref = $3 WHERE id = $1`,
-		// The merchant reference is globally unique across the (shared, re-used) database, so it carries the
-		// run nonce; the secret itself is still the substring every forbidden-output check looks for.
+		// The merchant reference carries the run nonce because it is globally unique across the shared database.
 		s.merchant, guest, "acct_"+secret+"_"+runNonce+"_"+s.site[:8]); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +98,6 @@ func TestIntegrationHealth_NoSecretGuestOrIdentifierDataInAnyOutput(t *testing.T
 			t.Fatalf("%s output contains identifier-shaped data:\n%s", name, out)
 		}
 	}
-	// and the reason vocabulary is closed: nothing outside the known set can appear
 	for _, r := range h.Reasons {
 		if !knownReasons[r] {
 			t.Fatalf("an unknown reason code escaped: %q", r)

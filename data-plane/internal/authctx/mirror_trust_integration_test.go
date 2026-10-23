@@ -2,16 +2,9 @@
 
 package authctx
 
-// A DEAD SOCKET IS NOT A DEAD MIRROR.
-//
-// The Product Owner's rule: a live PMS connection must not be required for a new guest Room sign-in when
-// StayConnect already holds trustworthy PMS-derived Stay data locally. Transport availability answers "can I
-// hear the PMS right now"; mirror trust answers "do I hold PMS-derived state I have reason to believe". Only
-// the second one is a reason to refuse a guest.
-//
-// These tests pin both sides of that boundary, because a change that implemented only the first half would
-// hand out access on a mirror that was never filled — which is worse than the behaviour it replaced, and
-// would look identical in a demo.
+// A dead socket is not a dead mirror: Room sign-in must not require a live PMS connection when trustworthy
+// local Stay data exists. Only mirror trust, not transport availability, is a reason to refuse a guest.
+// Both sides are pinned, or access would be handed out on a mirror that was never filled.
 
 import (
 	"context"
@@ -21,10 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// establishMirror makes the local mirror trustworthy: a complete sync finished, and none is in flight.
-//
-// This is the whole of the offline branch's own state. Everything else it requires — ACTIVE, CONTINUOUS,
-// pinned revision, evidence within the ceiling — is shared with the live branch and is not relaxed here.
+// establishMirror makes the mirror trustworthy: a complete sync finished and none is in flight.
 func establishMirror(t *testing.T, p *pgxpool.Pool, s fixture, completedAt time.Time) {
 	t.Helper()
 	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
@@ -34,8 +24,7 @@ func establishMirror(t *testing.T, p *pgxpool.Pool, s fixture, completedAt time.
 	}
 }
 
-// startResync marks a complete sync as in flight — the one state where local Stay data is genuinely
-// inconsistent rather than merely stale, because some of the truth has been applied and the rest has not.
+// startResync marks a sync in flight: local data is inconsistent, not merely stale.
 func startResync(t *testing.T, p *pgxpool.Pool, s fixture, at time.Time) {
 	t.Helper()
 	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
@@ -47,9 +36,7 @@ func startResync(t *testing.T, p *pgxpool.Pool, s fixture, at time.Time) {
 	}
 }
 
-// SCENARIO 1 — the live path still works, unchanged. Asserted here as well as in the freshness suite because
-// the local-first change rewrote the predicate around it, and a rewrite that broke the connected case while
-// fixing the disconnected one would be a strictly worse system.
+// The live path still works.
 func TestIntegration_ConnectedFeedWithTrustedMirrorStillAuthorises(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -66,11 +53,8 @@ func TestIntegration_ConnectedFeedWithTrustedMirrorStillAuthorises(t *testing.T)
 	}
 }
 
-// SCENARIO 2 — THE RULE ITSELF. Transport down, mirror trustworthy, Stay in house: the guest signs in.
-//
-// Every transport failure mode is exercised, because the rule is about the ABSENCE of a working socket, not
-// about one particular way of failing to have one. A predicate written against DISCONNECTED alone would leave
-// guests stranded whenever the interface happened to fail as DIAL_FAILED or ERROR instead.
+// Transport down, mirror trustworthy, Stay in house: the guest signs in. Every transport failure mode is
+// exercised, not just DISCONNECTED.
 func TestIntegration_TransportDownWithTrustedMirrorAuthorisesLocally(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -79,9 +63,8 @@ func TestIntegration_TransportDownWithTrustedMirrorAuthorisesLocally(t *testing.
 	for _, transport := range []string{"DISCONNECTED", "ERROR", "UNKNOWN", "CONNECTING"} {
 		t.Run(transport, func(t *testing.T) {
 			s := seedCacheAge(t, p, "null")
-			// sync_status is deliberately RESYNC_REQUIRED, which is what pmsd writes the moment a transport
-			// drops — every real outage looks like this. Requiring IN_SYNC on the offline branch would have
-			// made the whole rule unreachable in production while passing every test that set it by hand.
+			// sync_status is RESYNC_REQUIRED, which pmsd writes the moment a transport drops; requiring IN_SYNC
+			// offline would make the rule unreachable in production.
 			setFeed(t, p, s, transport, "RESYNC_REQUIRED", "CONTINUOUS", now.Add(-3*time.Hour))
 			establishMirror(t, p, s, now.Add(-4*time.Hour))
 			setEvidenceAge(t, p, s, now.Add(-5*time.Hour))
@@ -95,12 +78,7 @@ func TestIntegration_TransportDownWithTrustedMirrorAuthorisesLocally(t *testing.
 	}
 }
 
-// SCENARIO 6 — NEVER SYNCHRONISED FAILS CLOSED. No complete sync has ever finished, so there is no mirror to
-// fall back on: the tables would answer "no such Stay" for a hotel full of guests, and every guest would be
-// refused with the uniform failure while the system reported itself available.
-//
-// This is the case that makes the whole rule safe, and it is the one an implementation is most likely to get
-// wrong, because a fresh interface looks calm — no gap, no error, nothing obviously broken.
+// Never synchronised fails closed: with no complete sync there is no mirror, and a fresh interface looks calm.
 func TestIntegration_NeverSynchronisedInterfaceFailsClosedWhileDisconnected(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -108,7 +86,6 @@ func TestIntegration_NeverSynchronisedInterfaceFailsClosedWhileDisconnected(t *t
 
 	now := time.Now().UTC()
 	setFeed(t, p, s, "DISCONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now.Add(-time.Hour))
-	// last_complete_sync_at deliberately left NULL — the fixture's own default.
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
 	if authorizable(t, p, s) {
@@ -117,11 +94,7 @@ func TestIntegration_NeverSynchronisedInterfaceFailsClosedWhileDisconnected(t *t
 	}
 }
 
-// SCENARIO 5 — UNRESOLVED CONTINUITY LOSS FAILS CLOSED, whether or not the socket is up.
-//
-// A detected gap means events went missing. The mirror may be describing a guest who checked out during the
-// gap, and no amount of local completeness fixes that: the missing events are exactly the ones that would have
-// said so.
+// Unresolved continuity loss fails closed whether or not the socket is up: a gap may hide a checkout.
 func TestIntegration_ContinuityLossFailsClosedRegardlessOfTransport(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -136,7 +109,7 @@ func TestIntegration_ContinuityLossFailsClosedRegardlessOfTransport(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			s := seedCacheAge(t, p, "null")
 			setFeed(t, p, s, tc.transport, "IN_SYNC", tc.continuity, now)
-			establishMirror(t, p, s, now.Add(-time.Hour)) // a complete sync HAS happened — and does not save it
+			establishMirror(t, p, s, now.Add(-time.Hour))
 			setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
 			if authorizable(t, p, s) {
@@ -147,8 +120,7 @@ func TestIntegration_ContinuityLossFailsClosedRegardlessOfTransport(t *testing.T
 	}
 }
 
-// A RESYNC IN FLIGHT FAILS CLOSED. Part of the truth has been applied and the rest has not, which is the one
-// moment the mirror is inconsistent rather than merely behind. Brief, and worth refusing for.
+// A resync in flight fails closed: the mirror is inconsistent, not merely behind.
 func TestIntegration_ResyncInFlightKeepsTheLastGoodRoster(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -167,12 +139,11 @@ func TestIntegration_ResyncInFlightKeepsTheLastGoodRoster(t *testing.T) {
 	}
 }
 
-// ...AND A RESYNC THAT BEGAN AND FAILED IS NO DIFFERENT. This is the live shape of the outage: the attempt is
-// recorded, nothing ever completes it, and the roster it was going to replace is still the only one there is.
+// A resync that began and failed leaves the old roster as the only one, so it still authorises within the cache age.
 func TestIntegration_FailedResyncDoesNotInvalidateThePublishedRoster(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
-	s := seedCacheAge(t, p, "259200") // the property's configured seventy-two hours
+	s := seedCacheAge(t, p, "259200") // seventy-two hours
 
 	now := time.Now().UTC()
 	setFeed(t, p, s, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now.Add(-71*time.Hour))
@@ -186,8 +157,7 @@ func TestIntegration_FailedResyncDoesNotInvalidateThePublishedRoster(t *testing.
 	}
 }
 
-// THE WINDOW STILL CLOSES. One hour later the same roster is outside the cache age and nothing authorises —
-// which is the state the appliance is in today, four days into the outage, and the RIGHT reason to be blocked.
+// One hour later the same roster is outside the cache age and nothing authorises.
 func TestIntegration_TheSeventyTwoHourWindowStillExpires(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -204,9 +174,7 @@ func TestIntegration_TheSeventyTwoHourWindowStillExpires(t *testing.T) {
 	}
 }
 
-// THE PARTIAL GENERATION IS STILL NOT A ROSTER. A resync that is RECEIVING accumulates events for a generation
-// that has not been published; they are not claimable, so they neither block authorisation nor contribute to
-// it. What a guest is authenticated against remains the roster that was published before the attempt began.
+// Events of an unpublished generation are unclaimable: they neither block nor contribute to authorisation.
 func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -218,7 +186,6 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 	startResync(t, p, s, now.Add(-time.Minute))
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
-	// An event of the generation currently arriving: above the published one, therefore unclaimable.
 	if _, err := gexec(context.Background(), p, "stay", `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
 		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
@@ -233,8 +200,7 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 		t.Fatal("an unpublished generation's event blocked authorisation against the roster that IS published")
 	}
 
-	// ...whereas a CLAIMABLE pending event — one the applier could consume and has not — still blocks, because
-	// then the published roster genuinely is behind.
+	// A claimable pending event still blocks: the published roster is then behind.
 	if _, err := gexec(context.Background(), p, "stay", `INSERT INTO iam_v2.stay_events
 		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
 		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
@@ -247,11 +213,8 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 	}
 }
 
-// SCENARIO 10 — RECONNECT RETURNS TO THE LIVE PATH NATURALLY, with no separate transition to get wrong.
-//
-// The sequence a real outage follows: healthy, drop, serve locally, resync begins, resync completes,
-// reconnected. Authorisation must be continuous across it apart from the deliberate pause while the mirror is
-// mid-update, and the interface must end in exactly the state it started in.
+// Outage sequence: healthy, drop, serve locally, resync begins and completes, reconnect. Authorisation is
+// continuous apart from the pause while the mirror is mid-update, and the interface ends as it started.
 func TestIntegration_OutageAndReconnectSequence(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -283,8 +246,7 @@ func TestIntegration_OutageAndReconnectSequence(t *testing.T) {
 		establishMirror(t, p, s, now)
 	})
 
-	// The Stay must come out of the sequence intact: one row, still in house, with its evidence coherent. A
-	// resync that duplicated or corrupted Stay state would show up here rather than at the next sign-in.
+	// The Stay must come out intact: one row, still in house, evidence coherent.
 	var rows int
 	var status string
 	if err := p.QueryRow(context.Background(),
@@ -297,19 +259,14 @@ func TestIntegration_OutageAndReconnectSequence(t *testing.T) {
 	}
 }
 
-// NO OFFLINE TTL WAS INVENTED, and this proves the claim rather than restating it: the bound that limits
-// offline authorisation is the SAME evidence ceiling the connected path has always applied.
-//
-// While the feed is live each complete sync re-stamps occupancy evidence and the ceiling never bites. While it
-// is down nothing re-stamps anything, so each Stay ages out on its own as its evidence crosses the bound. That
-// is the offline validity limit, and there is no second number anywhere to keep consistent with it.
+// Offline authorisation is bounded by the same evidence ceiling as the connected path: with the feed down
+// nothing re-stamps evidence, so each Stay ages out on its own. There is no separate offline TTL.
 func TestIntegration_OfflineValidityIsTheExistingEvidenceCeiling(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	now := time.Now().UTC()
 
-	// An explicit max_auth_cache_age_seconds is the operator's lever, so a short one makes the boundary
-	// observable in a test without inventing a constant in the predicate.
+	// A short explicit max_auth_cache_age_seconds makes the boundary observable.
 	s := seedCacheAge(t, p, `"3600"`)
 	setFeed(t, p, s, "DISCONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now.Add(-2*time.Hour))
 	establishMirror(t, p, s, now.Add(-3*time.Hour))

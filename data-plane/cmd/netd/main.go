@@ -1,14 +1,6 @@
-// netd — the privileged network-configuration daemon.
-//
-// netd is the ONLY component allowed to change appliance networking. It runs as
-// root, listens on a protected unix socket (/run/stayconnect/netd.sock, group
-// stayconnect, 0660), and exposes a small structured JSON API used by edged
-// (the unprivileged Hotel Admin API). It renders guest-network configuration
-// from the Site database, validates it (structural + Kea config-test + nft -c),
-// applies it surgically and reversibly, health-checks it, and auto-rolls-back
-// if the operator does not confirm within a safe window.
-//
-// netd is NEVER exposed on TCP. edged proxies operator requests to it.
+// netd is the privileged network-configuration daemon, the only component allowed to change appliance
+// networking. It listens on a root-owned unix socket (never TCP) and applies, health-checks and auto-rolls-back
+// guest-network configuration; edged proxies operator requests to it.
 package main
 
 import (
@@ -46,15 +38,13 @@ func envOr(k, d string) string {
 }
 
 func main() {
-	// `netd flows-end --ip X`: the conntrack flush alone, in the calling namespace (flows.go). Handled before
-	// anything else so it needs no database, no socket and no backoff tracker.
+	// `netd flows-end --ip X` (flows.go) runs first so it needs no database, socket or backoff tracker.
 	if len(os.Args) > 1 && os.Args[1] == "flows-end" {
 		os.Exit(runFlowsEndCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	// Adaptive crash-loop backoff (see internal/startupbackoff): a persistently
-	// broken netd backs off exponentially instead of a fixed 2s restart storm.
+	// Exponential crash-loop backoff (internal/startupbackoff).
 	startupbackoff.Guard("netd")
 
 	sock := envOr("NETD_SOCKET", "/run/stayconnect/netd.sock")
@@ -64,8 +54,7 @@ func main() {
 	topo := netcfg.DefaultTopology()
 	topo.WANInterface = envOr("NETD_WAN_IFACE", topo.WANInterface)
 	topo.MgmtInterface = envOr("NETD_MGMT_IFACE", topo.MgmtInterface)
-	// Pin the admin UI to the mgmt IP (blocks it on a shared mgmt/WAN NIC's WAN
-	// address). Empty keeps the interface-wide accept for separate-NIC installs.
+	// Pins the admin UI to the mgmt IP (blocks it on a shared NIC's WAN address); empty keeps the interface-wide accept.
 	topo.MgmtAddr = envOr("NETD_MGMT_ADDR", topo.MgmtAddr)
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -96,7 +85,7 @@ func main() {
 		generatedDir: envOr("NETD_GENERATED_DIR", "/etc/stayconnect/generated/network"),
 		netplanFile:  envOr("NETD_NETPLAN_FILE", "/etc/netplan/50-stayconnect-guest.yaml"),
 		unboundFrag:  envOr("NETD_UNBOUND_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-guest.conf"),
-		// The portal's public names -> the portal address. A separate file: it changes at runtime (portal.go).
+		// Separate file because it changes at runtime (portal.go).
 		unboundPortalFrag: envOr("NETD_UNBOUND_PORTAL_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-portal.conf"),
 		keaLeaseCSV:       envOr("NETD_KEA_LEASE_CSV", "/var/lib/kea/kea-leases4.csv"),
 		keaSocket:         envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket"),
@@ -106,14 +95,8 @@ func main() {
 		dryRun:            dryRun,
 	}
 
-	// Refresh interface inventory at boot.
-	//
-	// THE SYNC ERROR IS LOGGED, because discarding it is what hid a dead inventory for weeks. netd upserts
-	// this table with ON CONFLICT DO UPDATE; when the role was missing UPDATE, every refresh failed with
-	// "permission denied for table network_interfaces" and both call sites threw the error away. The table
-	// simply stopped advancing, and the symptom surfaced somewhere else entirely -- guest-network
-	// validation reading an inventory that no longer described the appliance and rejecting parents that
-	// were plainly present. A refresh that cannot write is worth a line in the journal.
+	// Refresh the interface inventory at boot. Log the sync error: a swallowed failure (for example a missing
+	// UPDATE grant) leaves guest-network validation reading a stale inventory and rejecting present parents.
 	if ifaces, err := Discover(rootCtx); err == nil {
 		if err := st.SyncInterfaces(rootCtx, ifaces, topo.MgmtInterface, topo.WANInterface); err != nil {
 			slog.Error("interface inventory refresh failed; the inventory is now STALE and guest-network "+
@@ -123,19 +106,14 @@ func main() {
 		slog.Warn("interface discovery failed", "err", err)
 	}
 
-	// Boot reconciliation: re-assert the active revision's generated artifacts
-	// onto the live OS. nftables loads its static /etc/nftables.conf on boot (the
-	// IP-only auth set), so without this the concatenated auth set — and any
-	// managed guest bridge netplan did not recreate — would silently drift from
-	// the DB source of truth until the next apply.
+	// Boot reconciliation re-asserts the active revision onto the live OS: nftables loads only its static
+	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
 	ap.ReconcileActiveOnBoot(rootCtx)
 
-	// The portal's runtime state: the portal interface (kernel state anything can remove), DHCP option 114 and
-	// the portal-names resolver fragment (both follow scd's HTTPS verdict, which changes with no revision).
-	// Never touches nftables or netplan. See portal.go.
+	// Portal runtime state (interface, DHCP option 114, resolver fragment follow scd's HTTPS verdict, which
+	// changes with no revision). Never touches nftables or netplan. See portal.go.
 	go ap.portalRuntimeLoop(rootCtx)
-	// The ruleset is re-asserted while netd runs, not only at boot and apply (nft_watch.go): a restart of
-	// nftables.service or a hand-loaded ruleset is repaired within one tick. Steady state issues no mutation.
+	// Re-asserts the ruleset while netd runs (nft_watch.go).
 	go ap.nftStructureLoop(rootCtx, 10*time.Second)
 
 	sn := &sysNetMgr{
@@ -146,16 +124,13 @@ func main() {
 		mgmtAddr:      topo.MgmtAddr,
 		confirmWindow: confirmWindow,
 		dryRun:        dryRun,
-		// A WAN address change moves the Admin Console's pinned address (NETD_MGMT_ADDR=auto): the firewall follows
-		// as soon as netplan has applied, so the operator can confirm from the new address.
+		// A WAN address change moves the pinned console address (NETD_MGMT_ADDR=auto); follow it once netplan applies.
 		afterNetplan: func(ctx context.Context) { ap.reassertNftStructure(ctx, "system_network") },
 		settle:       3 * time.Second,
 	}
 
-	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping — and it decides for itself
-	// whether Phase 3 is live. Deriving the mode here, from the same flags, enrollment identity and signed
-	// assignment every other daemon uses, is what makes the kill switch real: a dark appliance refuses to
-	// mutate tc no matter what any other local process submits.
+	// Phase 3 (ADR-0002): netd is the only process that mutates Phase-3 shaping and decides for itself whether
+	// it is live, so a dark appliance refuses to mutate tc whatever another local process submits.
 	p3mode, p3err := loadPhase3Mode(rootCtx, os.Getenv)
 	if p3err != nil {
 		slog.Error("netd: phase3 config fail-closed", "err", p3err)
@@ -163,16 +138,12 @@ func main() {
 	}
 	p3authz := newShapingAuthz(os.Getenv)
 	if p3mode.Active && !p3authz.configured {
-		// Live enforcement with no way to tell the producer from any other local process is not a degraded
-		// mode, it is an unenforceable one. Refuse to start rather than accept plans from anyone.
+		// Refuse to start rather than accept plans from anyone.
 		slog.Error("netd: phase3 is live but NETD_PHASE3_PRODUCER_UID is unset — no producer can be authenticated")
 		os.Exit(1)
 	}
 	if p3mode.Active {
-		// netd writes no Phase-3 table directly, but it DOES perform two authoritative operations — allocating
-		// a class generation and registering a class origin — and both are only meaningful if the boundary
-		// they belong to is actually installed. On a schema whose guards were never applied, netd would go on
-		// allocating generations perfectly happily while nothing enforced that they were the only ones.
+		// Allocating generations and registering class origins is only meaningful if the writer-guard boundary is installed.
 		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
 			slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
 			os.Exit(1)
@@ -183,51 +154,36 @@ func main() {
 		mode:  p3mode,
 		authz: p3authz,
 		store: &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
-		// The accounting origin is registered by the process that creates the class — the only one that can
-		// read its counters before a guest can use it (see phase3_origin.go).
+		// The class creator registers the accounting origin: only it can read the counters before a guest uses it (phase3_origin.go).
 		origins:    &pgOrigins{pool: pool},
 		classStore: &classStore{path: envOr("NETD_PHASE3_CLASS_STATE", "/var/lib/stayconnect/netd-phase3-classes.json")},
-		// The WRITE-AHEAD activation journal, in its own file. It is fsynced before a guest is provisionally
-		// authorized, which the once-per-pass class inventory above cannot be (see phase3_journal.go).
+		// Write-ahead activation journal, fsynced before a guest is provisionally authorized (phase3_journal.go).
 		journal: &activationJournal{path: envOr("NETD_PHASE3_ACTIVATION_JOURNAL",
 			"/var/lib/stayconnect/netd-phase3-activation-journal.json")},
-		// The MONOTONIC security clock the activation bound is measured against — never the wall clock, which
-		// an NTP correction or a wrong RTC can move backwards and thereby lengthen the bound.
+		// Monotonic clock for the activation bound; the wall clock can move backwards and lengthen it.
 		secClock: newSecurityClock(),
-		// Generations come from a durable, appliance-scoped allocator that reconciles against the
-		// generations surviving accounting checkpoints actually pin — never from this process's memory and
-		// never from the clock.
+		// Generations come from a durable, appliance-scoped allocator, never process memory or the clock.
 		generations: &pgGenerations{pool: pool},
-		// THE PACKET-AUTHORIZATION GATE. netd owns both halves of Phase-3 enforcement — the nft admission and
-		// the accountable tc class — so no other daemon can admit a guest while this one is still preparing to
-		// meter them. It writes ONLY the Phase-3 set, never legacy auth_ipv4.
-		//
-		// Revocation also ENDS THE ADDRESS'S OPEN FLOWS (conntrack), so a guest whose access ends is cut off,
-		// not merely prevented from opening new connections (audit B-1).
+		// Packet-authorization gate: writes only the Phase-3 set, and revocation also flushes the address's
+		// conntrack flows so access ends for open connections too.
 		gate: newFlushingGate(newNFTGate(), conntrack.New()),
-		// ...and the legacy auth_ipv4 set, which nothing writes any more, is kept EMPTY (audit B-15).
+		// The legacy auth_ipv4 set is kept empty.
 		legacy: newNFTLegacySet(),
-		// The confirmed kernel result, recorded through the controlled writers, so a Session only ever claims
-		// `active` once both halves are actually in force.
+		// Confirmed kernel result, so a Session is only `active` once both halves are in force.
 		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
-		// DHCP is the authority on who holds an address, and netd owns it. Without this the applier renews
-		// authorization on the producer's word alone, which is how an address reassigned to another guest kept
-		// carrying traffic under the previous guest's entitlement (phase3_address_owner.go).
+		// DHCP decides who holds an address; without it a reassigned address kept the previous guest's entitlement (phase3_address_owner.go).
 		owner: addressOwner{src: ap.kea},
-		// ...and the same Kea tells us where its lease database lives, so an evidence outage can be reported
-		// with the artifact that caused it rather than as a bare query failure.
+		// Kea also locates its lease database so an evidence outage can name the artifact.
 		leaseFiles: ap.kea,
 	}
-	// Continuity is PROVEN, not assumed: a persisted class is carried forward only when the kernel still has
-	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now
-	// belongs to a different session is dropped so its successor allocates a fresh generation.
+	// A persisted class is carried forward only when the kernel still has that exact slot under the same boot;
+	// otherwise it is dropped so its successor allocates a fresh generation.
 	bootID := readBootID(envOr("NETD_BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id"))
 	prevClasses, _, _ := p3shaping.classStore.load()
 	inv, verified := kernelInventory(rootCtx, p3shaping.shp, bridgesIn(prevClasses))
 	p3shaping.restore(prevClasses, bootID, inv, verified)
-	// The activation journal is restored SEPARATELY from the class inventory, and unconditionally. A reboot
-	// legitimately drops every class — the kernel is empty — but it must not drop the fact that a session's
-	// activation has been unprovable, or rebooting would be a way to buy a fresh grace period.
+	// The activation journal is restored separately and unconditionally: a reboot drops classes but must not
+	// forget unprovable activations, or rebooting would buy a fresh grace period.
 	p3shaping.restoreAttempts(p3shaping.journal.load(p3mode.TenantID, p3mode.SiteID, p3mode.ApplianceID))
 	if p3mode.Active {
 		slog.Info("netd phase3 managed-class state restored",
@@ -235,8 +191,7 @@ func main() {
 			"kernel_verified", verified, "note", p3shaping.restoreNote)
 	}
 	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn, phase3: p3shaping}
-	// The scope is re-read while netd runs, so a reassignment does not leave every guest offline until a restart
-	// (phase3_scope_watch.go).
+	// The scope is re-read while running so a reassignment needs no restart (phase3_scope_watch.go).
 	go scopeWatch{
 		p:    p3shaping,
 		load: func(ctx context.Context) (phase3Mode, error) { return loadPhase3Mode(ctx, os.Getenv) },
@@ -246,18 +201,14 @@ func main() {
 	}.loop(rootCtx, 30*time.Second)
 	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
-	// Watchdog: roll back any pending revision whose deadline has passed. Also
-	// runs once at boot to recover from a crash during pending_confirmation.
+	// Watchdog: rolls back pending revisions past their deadline; also runs at boot to recover from a crash.
 	go srv.watchdogLoop(rootCtx)
 
-	// System-network (WAN/LAN) safety: reconcile a stale unconfirmed change left
-	// by a crash/reboot (carryover E), then run the in-process auto-rollback
-	// watchdog (carryover D — fully audited).
+	// System-network: reconcile a stale unconfirmed change left by a crash, then run the auto-rollback watchdog.
 	sn.ReconcileStalePendingOnBoot(rootCtx)
 	go sn.sysnetWatchdog(rootCtx)
 
-	// EVERY ROUTE NAMES ITS CALLERS (caller_authz.go). The Phase-3 routes keep their own, stricter producer check
-	// (exactly NETD_PHASE3_PRODUCER_UID, phase3_control.go); everything else is admitted per class.
+	// Every route names its callers (caller_authz.go); the Phase-3 routes keep a stricter producer-uid check (phase3_control.go).
 	callers := loadCallerPolicy(os.Getenv)
 	for _, pr := range callers.problems {
 		slog.Warn("netd caller policy", "problem", pr)
@@ -279,8 +230,7 @@ func main() {
 		}
 	}
 
-	// Every accepted connection carries the kernel's statement of who is on the other end, so the Phase-3
-	// handler can authenticate its caller instead of believing a header.
+	// Every connection carries the kernel-reported peer identity so the Phase-3 handler never trusts a header.
 	hs := &http.Server{
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -305,8 +255,7 @@ func main() {
 	_ = hs.Shutdown(shutCtx)
 }
 
-// routes is netd's whole HTTP surface. Every route names its callers (caller_authz.go); the two Phase-3 routes
-// authenticate the single producer themselves.
+// routes is netd's whole HTTP surface; the Phase-3 routes authenticate the single producer themselves.
 func (s *server) routes() http.Handler {
 	admin := func(h http.HandlerFunc) http.HandlerFunc { return s.callers.gate(classAdmin, h) }
 
@@ -321,17 +270,13 @@ func (s *server) routes() http.Handler {
 	r.Post("/v1/rollback", admin(s.rollback))
 	r.Get("/v1/leases", admin(s.leases))
 	r.Get("/v1/pending", admin(s.pending))
-	// May this address become the portal address? Read-only; edged asks before saving the setting.
 	r.Post("/v1/portal-ip/validate", admin(s.portalIPValidate))
-	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002). Authenticated in the handler
-	// against the single producer uid.
+	// The only Phase-3 tc mutation entry point (ADR-0002), authenticated in the handler against the producer uid.
 	r.Post("/v1/phase3/shaping", s.phase3ShapingHandler)
-	// the TC owner's per-class generations: the only trustworthy answer to "did this counter series restart?"
+	// Per-class generations: the only trustworthy answer to "did this counter series restart?"
 	r.Get("/v1/phase3/shaping/epochs", s.phase3EpochsHandler)
-	// End an address's flows NOW: the kernel half of a staff disconnect (flows.go).
 	r.Post("/v1/flows/end", s.callers.gate(classFlows, s.flowsEnd))
 
-	// System (WAN/LAN) network management — the appliance's own base networking.
 	r.Get("/v1/system-network", admin(s.sysnetGet))
 	r.Post("/v1/system-network/validate", admin(s.sysnetValidate))
 	r.Post("/v1/system-network/apply", admin(s.sysnetApply))
@@ -348,9 +293,9 @@ type server struct {
 	kea  *keaClient
 	topo netcfg.Topology
 	sn   *sysNetMgr
-	// phase3 is the SINGLE Phase-3 shaping writer (ADR-0002). acctd derives the plan; netd applies it.
+	// phase3 is the single Phase-3 shaping writer (ADR-0002); acctd derives the plan.
 	phase3 *phase3Shaping
-	// callers decides who may call each route, and whose body-supplied actor is believed (caller_authz.go).
+	// callers decides who may call each route and whose body-supplied actor is believed (caller_authz.go).
 	callers callerPolicy
 }
 
@@ -362,9 +307,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	configured, healthy, detail := s.keaStatus(r.Context())
-	// ASK THE QUESTION OWNERSHIP DEPENDS ON. status-get answering is not evidence that leases can be read: on
-	// 2026-08-31 a Kea with no lease manager answered status-get for three days while refusing every lease
-	// command, and this surface called it healthy throughout (phase3_ownership_evidence.go).
+	// status-get answering is not evidence that leases can be read (a Kea with no lease manager still answers it).
 	ev := s.phase3.evidenceStatus(r.Context())
 	if configured && healthy && !ev.Available {
 		healthy = false
@@ -372,35 +315,24 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"service": "netd", "version": version,
-		// TWO DIFFERENT QUESTIONS, DELIBERATELY NOT CONFLATED: is Kea supposed to be running on this
-		// appliance yet, and -- only if it is -- is it healthy? Reporting a single boolean made an
-		// intentionally-idle Kea indistinguishable from a broken one.
+		// Configured and healthy are separate so an intentionally idle Kea differs from a broken one.
 		"kea_configured": configured,
 		"kea_healthy":    healthy,
 		"kea_detail":     detail,
-		// Phase-3 shaping is reported here because netd is its only writer (ADR-0002): if a submitted plan
-		// could not be put in force, this is where it becomes visible.
 		"phase3_shaping": s.phase3.statusWithEvidence(ev, true),
 	})
 }
 
-// keaStatus separates "Kea has nothing to serve yet" from "Kea is broken".
-//
-// Kea binds the LAN bridge, which does not exist until an operator has APPLIED AND CONFIRMED a guest
-// network. Before that it is deliberately stopped, and calling that a failed service told every operator
-// their brand-new appliance was faulty -- while also holding boot convergence open forever, since a service
-// that is never meant to start on a factory-clean box can never become healthy.
-//
-// The prerequisite is the CONFIRMED active revision, not the draft rows in guest_networks: a draft an
-// operator typed and walked away from has not configured anything, and must not make Kea's absence a fault.
+// keaStatus separates "Kea has nothing to serve yet" from "Kea is broken". Kea is deliberately stopped until a
+// guest network is applied and confirmed (it binds that bridge), and reporting that as a fault would hold boot
+// convergence open forever. The prerequisite is the confirmed active revision, not draft rows.
 func (s *server) keaStatus(ctx context.Context) (configured, healthy bool, detail string) {
 	qctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	id, _, err := s.st.CurrentActive(qctx)
 	switch {
 	case err != nil:
-		// We could not read the prerequisite. FAIL TOWARDS REPORTING: an unreadable store must never be
-		// the reason a genuinely broken Kea is presented as "waiting".
+		// Unreadable prerequisite: fail towards reporting, so a broken Kea is never shown as "waiting".
 		configured = true
 	default:
 		configured = id != ""
@@ -421,14 +353,11 @@ func (s *server) interfaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	// Logged, not discarded — see the boot-refresh call site. This is the request that populates the
-	// wizard's dropdown, so a silent failure here is what makes a present interface look absent.
+	// Log the sync error: a silent failure makes a present interface look absent in the wizard.
 	if err := s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface); err != nil {
 		slog.Error("interface inventory refresh failed; serving discovery without a fresh inventory", "err", err)
 	}
-	// Overlay the operator-assigned role/protected flag from the inventory so the
-	// UI can tell which interfaces may parent a guest network. Discover() alone
-	// leaves Role empty, which made every interface non-selectable in the wizard.
+	// Discover() leaves Role empty; overlay the operator-assigned role and protected flag from the inventory.
 	if meta, err := s.st.InterfaceMeta(r.Context()); err == nil {
 		for i := range ifaces {
 			if m, ok := meta[ifaces[i].Name]; ok {
@@ -500,10 +429,7 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	if err := s.ap.Rollback(changeCtx(r), req.RevisionID, actor); err != nil {
-		// A DELIBERATE REFUSAL IS NOT AN INTERNAL ERROR. Rollback declines when the revision is not in a
-		// state that has a rollback target -- most importantly when it is the CONFIRMED active
-		// configuration, where the only remaining code path would tear down every guest network. Reporting
-		// that as 500 tells the operator the appliance is broken when what it did was protect their guests.
+		// A deliberate refusal (for example the confirmed active revision, which would tear down every guest network) is a 409, not a 500.
 		if errors.Is(err, errRollbackRefused) {
 			writeJSON(w, 409, map[string]string{"error": err.Error()})
 			return
@@ -514,12 +440,6 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"state": "rolled_back"})
 }
 
-// RETIRED: POST /v1/adopt used to live here. It recorded the current DB intent as an already-active revision
-// WITHOUT applying anything, for two reasons that no longer exist: importing a legacy running system that
-// already matched (the edge-first migration is long finished, and nothing has used this route since -- zero
-// adopted revisions and zero audit entries over the whole life of the appliance), and seeding a first
-// known-good rollback target (rollback handles having none: see its prevBundle == "" branch and
-// TestAFirstApplyThatExpiresStillComesBackFactoryClean). store.MarkActive carries the full reasoning.
 func (s *server) leases(w http.ResponseWriter, r *http.Request) {
 	leases, err := s.kea.Leases()
 	if err != nil {
@@ -538,7 +458,6 @@ func (s *server) pending(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"revision_id": id, "bundle_path": bundle, "overdue": overdue})
 }
 
-// watchdogLoop rolls back any pending revision past its confirm deadline.
 func (s *server) watchdogLoop(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()

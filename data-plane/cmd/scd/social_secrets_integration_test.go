@@ -1,8 +1,7 @@
 package main
 
-// SOCIAL SECRETS ARE SEALED, THE PLAINTEXT COLUMN EMPTIES ITSELF, PROVIDERS ARE BUILT FROM SEALED SECRETS ONLY,
-// AND AN ATTEMPT CARRIES ITS PKCE VERIFIER, NONCE AND CANONICAL REDIRECT URI (contract §5).
-// Needs PHASE3_TEST_DSN (a disposable full-schema database); skipped otherwise.
+// Social secrets are sealed, the plaintext column empties itself, providers are built from sealed secrets only, and an attempt carries its PKCE
+// verifier, nonce and canonical redirect URI. Needs PHASE3_TEST_DSN; skipped otherwise.
 
 import (
 	"bytes"

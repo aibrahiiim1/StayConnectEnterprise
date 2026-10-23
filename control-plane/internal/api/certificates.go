@@ -12,22 +12,16 @@ import (
 	pki "github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
-// CertBase serves both the appliance-facing CSR/cert-fetch endpoints and the
-// platform-facing certificate lifecycle (issue/revoke/list). The CA private
-// key lives only inside b.CA (a file on Central); it is never exposed.
+// CertBase serves the appliance CSR/cert-fetch endpoints and the platform certificate lifecycle.
+// The CA private key lives only inside b.CA and is never exposed.
 type CertBase struct {
 	*Base
 	CA          *pki.CA
 	ClientValid time.Duration // issued client-cert lifetime
 }
 
-// ----- Appliance-facing (signed-auth) -----
-
-// SubmitCSR stores a certificate-signing request from the appliance. The
-// appliance generates its key locally and sends only the CSR (public). If the
-// appliance ALREADY holds an active, non-revoked certificate and is in a good
-// lifecycle state, the CSR is auto-signed immediately (autonomous ROTATION);
-// otherwise it is queued pending a Platform operator's first issuance.
+// SubmitCSR stores the appliance's CSR (its key stays local). An appliance already holding an active
+// certificate in a good lifecycle state is auto-signed (rotation); otherwise the CSR is queued for first issuance.
 func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
 	if ident == nil {
@@ -54,17 +48,14 @@ func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	}
 	b.certEvent(ctx, ident.ApplianceID, "", "csr_submitted", "appliance", clientIP(r))
 
-	// Autonomous rotation: an already-certified, healthy appliance rotating its
-	// key/cert does not need a human in the loop — its existing valid cert is
-	// the trust proof. First issuance still requires Platform approval.
+	// Rotation needs no human: the existing valid certificate is the trust proof.
 	var activeCount int
 	var lifecycle string
 	b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificates WHERE appliance_id=$1 AND status='active'`, ident.ApplianceID).Scan(&activeCount)
 	b.DB.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,'') FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&lifecycle)
 	rotatable := activeCount > 0 && lifecycle == "assigned"
-	// Once an operator has activated the appliance, its FIRST certificate is auto-issued the moment the CSR
-	// arrives — activation already authorized it, so there is no second button and the appliance converges on
-	// its own. A waiting appliance's CSR is queued and signed by the activation itself.
+	// Activation already authorized the first certificate, so it is issued on arrival; a waiting appliance's CSR
+	// is queued and signed by the activation itself.
 	firstAfterActivate := activeCount == 0 && lifecycle == "assigned"
 	if rotatable || firstAfterActivate {
 		actor := "appliance-rotation"
@@ -83,8 +74,7 @@ func (b *CertBase) SubmitCSR(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusAccepted, map[string]any{"status": "pending", "request_id": reqID})
 }
 
-// FetchCertificate returns the appliance's current active client cert + the CA
-// chain once a Platform operator has issued it; otherwise reports pending/none.
+// FetchCertificate returns the current client cert and CA chain, or pending/none.
 func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
 	if ident == nil {
@@ -100,7 +90,6 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
          WHERE appliance_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1`,
 		ident.ApplianceID).Scan(&certPEM, &fpr, &notAfter)
 	if err == pgx.ErrNoRows {
-		// Is there a pending CSR?
 		var pend int
 		b.DB.QueryRow(ctx, `SELECT count(*) FROM appliance_certificate_requests WHERE appliance_id=$1 AND status='pending'`, ident.ApplianceID).Scan(&pend)
 		status := "none"
@@ -121,9 +110,7 @@ func (b *CertBase) FetchCertificate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// issueCertForAppliance signs the appliance's latest pending CSR, supersedes
-// any prior active cert (rotation overlap is handled appliance-side), records
-// the issuance, and drives current_cert_fingerprint. actor labels the event.
+// issueCertForAppliance signs the latest pending CSR, supersedes any prior active cert, and records the issuance.
 func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, appID, actor string) (*pki.SignedClient, error) {
 	var csrPEM, tenantID, siteID, serial string
 	if err := b.DB.QueryRow(ctx, `
@@ -173,15 +160,12 @@ func (b *CertBase) issueCertForAppliance(ctx context.Context, r *http.Request, a
 	return sc, nil
 }
 
-// SupersededOverlap is how long a certificate replaced by a rotation stays usable on the mTLS listener: long
-// enough for the appliance to fetch and install its new certificate (it does so at once), far shorter than
-// the 90-day lifetime the superseded certificate would otherwise keep. The assignment channel never accepts a
-// superseded certificate at all (strictMTLSSelf).
+// SupersededOverlap is how long a rotated-out certificate stays usable on the mTLS listener, long enough to install
+// its replacement. The assignment channel never accepts a superseded certificate (strictMTLSSelf).
 const SupersededOverlap = 24 * time.Hour
 
-// RevokeSupersededCertificates records every certificate superseded more than SupersededOverlap ago (or at an
-// unknown time, before migration 0051) as revoked, where the mTLS listener checks it. Idempotent; run by the
-// housekeeping loop.
+// RevokeSupersededCertificates records as revoked every certificate superseded more than SupersededOverlap ago (or
+// at an unknown time) where the mTLS listener checks. Idempotent; run by the housekeeping loop.
 func RevokeSupersededCertificates(ctx context.Context, b *Base) (int64, error) {
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {

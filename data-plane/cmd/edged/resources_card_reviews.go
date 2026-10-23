@@ -1,15 +1,8 @@
 package main
 
-// CARD DISPUTES AND CHARGEBACKS ARE CASES (Product-Owner policy 2026-10-12, migration 0115).
-//
-// A chargeback, or a dispute the provider reports, never ends a client's access by itself. scd opens a case;
-// an operator holding financial-review WRITE (the payments operator) resolves it once, explicitly:
-//
-//	KEEP_ACCESS  nothing else changes (for example, the dispute was won)
-//	END_ACCESS   the access that charge paid for is ended (reason REVOKED), its devices and sessions closed
-//
-// Both take the operator's password and a reason, are recorded on the case by the definer and audited here.
-// A full REFUND needs no case: the policy ends the access it paid for and records the evidence, listed here too.
+// A chargeback or dispute never ends access by itself: scd opens a case and a financial-review WRITE operator
+// resolves it once, with password and reason, as KEEP_ACCESS (no change) or END_ACCESS (access ended, reason
+// REVOKED, devices and sessions closed). A full refund needs no case; it ends access and its evidence is listed too.
 
 import (
 	"net/http"
@@ -44,7 +37,6 @@ type refundEndOut struct {
 	TerminatedAt  time.Time `json:"terminated_at"`
 }
 
-// GET /financial-review/card-cases
 func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -91,7 +83,6 @@ func (s *server) listCardCases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"cases": cases, "refund_terminations": refunds})
 }
 
-// POST /financial-review/card-cases/{id}/resolve {resolution, reason, password}
 func (s *server) resolveCardCase(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Resolution string `json:"resolution"`

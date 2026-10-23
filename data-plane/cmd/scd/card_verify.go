@@ -1,17 +1,8 @@
 package main
 
-// CARD PAYMENT IS READY ONLY ON CREDENTIALS THE PROVIDER HAS ACCEPTED.
-//
-// Readiness used to require only that the stored credentials were present and complete. Revoked, malformed or
-// mode-mismatched keys therefore made card payment effective and it was offered to guests, who then took a quote
-// and created a purchase before the provider refused the checkout (automated review finding on PR #202).
-//
-// Now a card account is ready only while an authenticated, non-financial provider check (the adapter's
-// TestConnection: a balance or token read that moves no money) has succeeded for exactly that account and exactly
-// those credentials. The check runs in the background and is cached, so a guest request never waits on a
-// provider: a fresh success lasts 30 minutes and is refreshed before it lapses; a failure is retried after 5.
-// Rotating a secret changes the fingerprint, so the new credentials are verified before they are trusted. An
-// operator's "Test connection" records its result here too.
+// Card payment is ready only while an authenticated, non-financial provider check (TestConnection) has succeeded for exactly those credentials.
+// The check runs in the background and is cached so guest requests never wait on the provider: success lasts 30 minutes, failure is retried after 5.
+// Rotating a secret changes the fingerprint, so new credentials are verified before they are trusted.
 
 import (
 	"context"
@@ -41,8 +32,7 @@ type cardVerifier struct {
 	mu     sync.Mutex
 	checks map[string]*cardCheck
 	now    func() time.Time
-	// run performs the provider check; replaced in tests.
-	run func(ctx context.Context) error
+	run    func(ctx context.Context) error
 }
 
 func newCardVerifier() *cardVerifier {
@@ -90,7 +80,6 @@ func (v *cardVerifier) ready(fp string, check func(ctx context.Context) error) b
 	return c.ok && now.Sub(c.at) <= cardVerifiedFor
 }
 
-// record stores a check result (background, or an operator's Test connection).
 func (v *cardVerifier) record(fp string, ok bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()

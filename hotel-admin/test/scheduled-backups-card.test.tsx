@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
 import { backupHeadline, backupKindLabel, SCHEDULE_SETTING_KEYS, type BackupStatus } from "@/lib/ledger-words";
 
-// The Scheduled backups card: OFF by default, one source of settings, manual backups, the kinds of backup, the earlier backups that
-// only an administrator can remove, and the plain statement that the protections before a restore, a migration or a deployment do not
-// depend on the switch.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();

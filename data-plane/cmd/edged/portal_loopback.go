@@ -1,21 +1,9 @@
 package main
 
-// READING A PAGE FROM THE PORTAL ON THIS APPLIANCE, WITHOUT LEAVING IT.
-//
-// The portal preview and the portal's built-in wording (resources_branding.go) are portald's own responses,
-// fetched over loopback. They used http.DefaultClient against portald's HTTP listener, which FOLLOWS REDIRECTS --
-// and once HTTPS is active that listener answers every page with 302 https://<canonical portal hostname>/. From
-// the appliance host that name resolves to Caddy's :443 (clients reach portald's TLS listener only through the
-// guest-interface DNAT), which has no certificate for it, so both screens answered 503 "portal_unreachable" on a
-// portal that was serving clients perfectly. It is the defect the portald health check had and lost on
-// 2026-10-15 (health_checks.go tcpGet / tlsListenerGet), and it is fixed the same way:
-//
-//   - the HTTP listener is asked WITHOUT following redirects;
-//   - a redirect while HTTPS is active is answered by asking portald's TLS listener on loopback directly
-//     (127.0.0.1:8343), presenting the canonical hostname as SNI and Host -- exactly what a client's browser
-//     sends after the redirect -- and verifying the certificate it serves;
-//   - nothing is ever fetched from the redirect's target address, so a Location header can never take edged off
-//     the box.
+// Fetches portald pages over loopback. Once HTTPS is active the HTTP listener answers 302 to the canonical
+// hostname, which on the appliance host resolves to Caddy's :443 (no certificate), so redirects are never followed:
+// the TLS listener is asked directly with the canonical hostname as SNI/Host and its certificate verified.
+// Nothing is fetched from a redirect target, so a Location header cannot take edged off the box.
 
 import (
 	"context"
@@ -33,8 +21,7 @@ const (
 	portalLoopbackLimit = 5 * time.Second
 )
 
-// portalLoopback is where portald listens on this appliance. The zero value is the appliance's own listeners;
-// tests point it at their own.
+// portalLoopback locates portald's listeners; the zero value is the appliance's own.
 type portalLoopback struct {
 	httpBase  string         // portald's HTTP listener, e.g. http://127.0.0.1:8380
 	httpsAddr string         // portald's TLS listener, e.g. 127.0.0.1:8343
@@ -53,9 +40,8 @@ func (p portalLoopback) withDefaults() portalLoopback {
 
 func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
-// get fetches path from portald. canonical is the portal's canonical hostname while HTTPS is active, "" when it is
-// not (or unknown). It returns portald's own status and body; a redirect that cannot be answered on loopback is
-// returned as the redirect status, never followed.
+// get fetches path from portald. canonical is the canonical hostname while HTTPS is active, "" otherwise.
+// A redirect that cannot be answered on loopback is returned as the redirect status, never followed.
 func (p portalLoopback) get(ctx context.Context, path, canonical string) (int, []byte, error) {
 	p = p.withDefaults()
 	ctx, cancel := context.WithTimeout(ctx, portalLoopbackLimit)
@@ -76,7 +62,7 @@ func (p portalLoopback) get(ctx context.Context, path, canonical string) (int, [
 		return resp.StatusCode, body, err
 	}
 
-	// HTTPS IS ACTIVE: ask the TLS listener this redirect points clients at, on loopback.
+	// HTTPS is active: ask the TLS listener the redirect points at, on loopback.
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -100,9 +86,7 @@ func (p portalLoopback) get(ctx context.Context, path, canonical string) (int, [
 	return tresp.StatusCode, body, err
 }
 
-// portalGet fetches path from this appliance's portal, with the canonical hostname read from the portal's
-// HTTPS state. An unreadable state reads as "HTTPS not active": the HTTP listener's answer is then reported as it
-// is, never followed.
+// portalGet fetches path from this appliance's portal; an unreadable HTTPS state reads as "not active".
 func (s *server) portalGet(ctx context.Context, path string) (int, []byte, error) {
 	canonical := ""
 	if s.db != nil {

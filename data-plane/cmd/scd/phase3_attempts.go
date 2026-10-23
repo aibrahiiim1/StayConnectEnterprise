@@ -1,18 +1,9 @@
 package main
 
-// WHAT SCD RECORDS ABOUT A GUEST SIGN-IN, AND HOW IT DECIDES WHAT HAPPENED.
-//
-// Two jobs live here, and they are the same job seen from two sides.
-//
-// The first is CLASSIFICATION. The resolver answers a narrow question — does this evidence identify exactly
-// one eligible Stay — and its vocabulary is correspondingly narrow. An operator at the desk needs a wider
-// answer: was the room even in the mirror, was there a stay on it, was the stay eligible, did more than one
-// candidate match, or was the property's feed unable to answer for anybody. Those distinctions are all
-// visible at probe time and were simply being discarded. This file keeps them.
-//
-// The second is RECORDING. Every deliberate submission leaves one row, including the ones that used to leave
-// nothing at all because they failed before any resolver was reached. The write is best-effort by
-// construction: a guest's access must never depend on the diagnostics about it.
+// What scd records about a guest sign-in, and how it classifies what happened. Classification keeps the distinctions an
+// operator needs (room not in the mirror, no stay, stay ineligible, several candidates, feed unable to answer) that the narrow
+// resolver verdict discards. Recording leaves one row per deliberate submission, best-effort: a guest's access must never
+// depend on diagnostics about it.
 
 import (
 	"context"
@@ -31,20 +22,13 @@ import (
 
 const (
 	signInAttemptDEKFile = "signin_attempts_dek.key"
-	// encryption_key_id is a uuid column, so the DEK id is a fixed UUID rather than a readable label. Stable
-	// by contract: changing it makes every row sealed under the old id unreadable, and unlike a voucher there
-	// is nothing to reissue — the record simply stops answering the question it exists for.
+	// encryption_key_id is a uuid column, so the DEK id is a fixed UUID. Stable by contract: changing it makes every row sealed under the old id unreadable, with nothing to reissue.
 	signInAttemptDEKID = "0a5c1e00-0000-4000-8000-0000000000d2"
 )
 
-// loadSignInAttemptKeyring loads the sealing key, and DOES NOT fail closed when it is absent.
-//
-// That is the opposite of the voucher DEK's behaviour and the difference is deliberate. A missing voucher key
-// means scd cannot issue a credential, so refusing to start is the only safe answer. A missing key here means
-// only that the credential half of a DIAGNOSTIC record cannot be sealed. Refusing to start would take a
-// property's guest internet offline because an audit feature's key file was not created — trading a working
-// product for a complete log. So scd runs, records every attempt with the sensitive columns NULL, and says so
-// once, loudly, where an operator will see it.
+// loadSignInAttemptKeyring does not fail closed when the key is absent, unlike the voucher DEK: a missing key only means the
+// credential half of a diagnostic record cannot be sealed, and refusing to start would take a property's guest internet
+// offline over an audit key file. scd runs, records attempts with the sensitive columns NULL, and says so once, loudly.
 func loadSignInAttemptKeyring(secretsDir string) signinattempt.Keyring {
 	path := filepath.Join(secretsDir, signInAttemptDEKFile)
 	key, err := localkeys.LoadExistingKey(path)
@@ -56,36 +40,23 @@ func loadSignInAttemptKeyring(secretsDir string) signinattempt.Keyring {
 	return signinattempt.MapKeyring{signInAttemptDEKID: key}
 }
 
-// ---- what one interface saw -------------------------------------------------
-
-// probeObservation is everything ONE interface learned about the submitted room, beyond the verdict the
-// resolver needs. The resolver's Probe contract deliberately stays as it is — a verdict and a Stay id — and
-// these are collected alongside it, so the decision core keeps its narrow, testable interface while the
-// operator still gets an answer.
+// probeObservation is everything one interface learned about the submitted room beyond the resolver's verdict, collected alongside it so the decision core keeps its narrow interface.
 type probeObservation struct {
 	InterfaceID string
-	// RoomExists is true when ANY stay carries this room number on this interface, whatever its status. It is
-	// what separates "you have the wrong room number" from "your name is spelled differently from the PMS",
-	// which are different conversations and used to be the same refusal.
-	RoomExists bool
-	// EligibleStays counts the stays on that room that are in a state that may authenticate.
+	// RoomExists is true when any stay carries this room number on this interface, whatever its status: it separates a wrong room number from a name spelled differently from the PMS.
+	RoomExists    bool
 	EligibleStays int
-	// Matches counts the eligible stays the submitted value actually matched.
-	Matches int
-	// MatchedStay / MatchedGuest / MatchedField describe the single match, when there was exactly one.
-	MatchedStay  string
-	MatchedGuest string
-	MatchedField signinattempt.MatchedField
-	// CandidateStay is the stay to show accepted values for when the evidence matched nothing: with exactly
-	// one eligible stay on the room there is no ambiguity about which values WOULD have been accepted.
+	Matches       int
+	MatchedStay   string
+	MatchedGuest  string
+	MatchedField  signinattempt.MatchedField
+	// CandidateStay is the stay to show accepted values for when nothing matched: with exactly one eligible stay on the room there is no ambiguity.
 	CandidateStay string
-	// Failed records a probe that could not answer. An interface whose state cannot be read is indeterminate,
-	// never a determinate "no such guest", and the recorded result must say so.
+	// Failed records a probe that could not answer: an unreadable interface is indeterminate, never a determinate "no such guest".
 	Failed bool
 }
 
-// observations collects what each interface saw. The resolver probes concurrently, so this is mutex-guarded
-// rather than a plain map — a data race here would corrupt the operator's answer, not merely lose it.
+// observations collects what each interface saw; the resolver probes concurrently, so it is mutex-guarded (a race would corrupt the operator's answer).
 type observations struct {
 	mu   sync.Mutex
 	seen []probeObservation
@@ -97,7 +68,6 @@ func (o *observations) add(p probeObservation) {
 	o.seen = append(o.seen, p)
 }
 
-// summarise folds the per-interface observations into the fields the attempt record carries.
 func (o *observations) summarise() (roomExists bool, eligible int, matched probeObservation, anyFailed bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -110,9 +80,7 @@ func (o *observations) summarise() (roomExists bool, eligible int, matched probe
 		}
 	}
 	if matched.MatchedStay == "" {
-		// No match: fall back to the single unambiguous candidate, so the panel can still show what WOULD
-		// have been accepted. With more than one candidate it deliberately shows none — picking one would be
-		// inventing an expectation the guest never had.
+		// No match: fall back to the single unambiguous candidate so the panel shows what would have been accepted; with several candidates show none, since picking one invents an expectation.
 		var candidates []probeObservation
 		for _, p := range o.seen {
 			if p.CandidateStay != "" {
@@ -126,11 +94,7 @@ func (o *observations) summarise() (roomExists bool, eligible int, matched probe
 	return
 }
 
-// ---- the mirror's own state -------------------------------------------------
-
-// mirrorState is the feed's condition at the instant of the attempt, recorded so that "the mirror was four
-// days old" is a fact captured at the time rather than reconstructed later from a runtime row that has since
-// moved on.
+// mirrorState is the feed's condition at the instant of the attempt, captured then rather than reconstructed from a runtime row that has moved on.
 type mirrorState struct {
 	TransportStatus    string
 	LastCompleteSync   *time.Time
@@ -138,25 +102,14 @@ type mirrorState struct {
 	CanAuthoriseAnyone bool
 }
 
-// mirrorStateFor reads the feed condition for the interfaces mapped to this guest network, and answers the
-// SITE-WIDE question: can the local mirror authorise ANYBODY right now?
-//
-// THE ORDERING IS THE SECURITY PROPERTY. This is asked BEFORE any room is looked up, and the answer is used
-// to refuse with MIRROR_STALE_OR_MISSING_CHANGE before the evidence is evaluated at all. A "the mirror cannot
-// answer" response produced only when a room was NOT found would be a per-room signal wearing a site-wide
-// label, and would let anyone in the lobby enumerate occupied rooms by watching which ones answered
-// differently.
-//
-// p3_feed_authorizes is asked with now() as the evidence timestamp on purpose: that makes its freshness term
-// trivially true, so what remains is exactly the feed-health half — connected-and-in-sync, or a published
-// roster that still stands. It is therefore strictly more permissive than the real per-stay check, which is
-// what makes it safe to refuse on: if it says no, no stay could have passed either.
-//
-// IT GOES THROUGH A SCOPED READER RATHER THAN READING pms_interface_runtime. svc_scd deliberately holds no
-// privilege on that table: the role being authorised must not read, still less rewrite, the feed health it is
-// authorised against. The first version of this queried it directly, and the permission error did not produce
-// a missing diagnostic — it made "can the mirror authorise anybody" answer NO, and every guest on the
-// property was refused. The Gate-P privilege suite caught it before it reached an appliance.
+// mirrorStateFor answers the site-wide question: can the local mirror authorise anybody right now?
+// The ordering is the security property: it is asked before any room is looked up and used to refuse with
+// MIRROR_STALE_OR_MISSING_CHANGE before evidence is evaluated, otherwise a per-room signal wearing a site-wide label would
+// let anyone in the lobby enumerate occupied rooms.
+// p3_feed_authorizes is asked with now() as the evidence timestamp, which makes its freshness term trivially true, so it is
+// strictly more permissive than the real per-stay check: if it says no, no stay could have passed.
+// It goes through a scoped reader because svc_scd deliberately holds no privilege on pms_interface_runtime (the role being
+// authorised must not read the feed health it is authorised against); querying it directly answered NO and refused every guest.
 func (p *phase3Auth) mirrorStateFor(ctx context.Context, guestNetwork string) mirrorState {
 	var st mirrorState
 	row := p.srv.db.QueryRow(ctx, `
@@ -180,18 +133,10 @@ func (p *phase3Auth) mirrorStateFor(ctx context.Context, guestNetwork string) mi
 	return st
 }
 
-// ---- the values that would have been accepted -------------------------------
-
-// acceptedValues reads the identity a stay actually carries: the primary guest's normalized first and family
-// names and the stay's reservation identifier.
-//
-// THE NORMALIZED VALUES ARE THE ACCEPTED ONES. They are what the comparison is made against, so they are what
-// belongs in a comparison panel; showing the PMS's own mixed-case spelling instead would put a value on the
-// screen that is NOT what the server requires, which is how an operator ends up telling a guest to type
-// something that will not work.
-//
-// It also counts the other guests on the stay whose names would have been accepted too. Without that count an
-// operator reads the panel as "only this one name works" and turns away a legitimate sharer.
+// acceptedValues reads the identity a stay carries: the primary guest's normalized first and family names and the
+// reservation identifier. The normalized values are the accepted ones (the comparison is made against them; the PMS's
+// mixed-case spelling would tell a guest to type something that fails). It also counts other guests whose names would have
+// been accepted, so an operator does not turn away a legitimate sharer.
 func (p *phase3Auth) acceptedValues(ctx context.Context, stayID string) (first, family, reservation, guestID string, others int) {
 	if stayID == "" {
 		return
@@ -216,24 +161,16 @@ func (p *phase3Auth) acceptedValues(ctx context.Context, stayID string) (first, 
 	return
 }
 
-// ---- writing the record -----------------------------------------------------
-
-// recordAttempt writes the attempt the handler assembled.
-//
-// IT RUNS ON ITS OWN CONTEXT, not the request's. The request context is cancelled the moment the guest's
-// browser gives up or portald's response-time budget expires — and an abandoned attempt is precisely the one
-// an operator most wants to see afterwards. Writing on the request context would drop exactly those.
-//
-// Every failure here is logged and swallowed. The guest has already been answered by the time this runs, and
-// nothing about their access depends on it.
+// recordAttempt runs on its own context: the request context is cancelled when the guest's browser gives up or portald's
+// budget expires, and an abandoned attempt is the one an operator most wants to see. Every failure is logged and swallowed;
+// the guest has already been answered.
 func (p *phase3Auth) recordAttempt(at signinattempt.Attempt, started time.Time) {
 	if p.attempts == nil {
 		return
 	}
 	at.LatencyMS = time.Since(started).Milliseconds()
 	if at.Result == "" {
-		// A path that returned without classifying itself is a defect in this file, not a guest problem. It is
-		// recorded as an internal fault rather than silently dropped or, worse, attributed to the guest.
+		// A path that returned without classifying itself is a defect here; record it as an internal fault rather than attributing it to the guest.
 		at.Result = signinattempt.ServiceUnavailable
 		slog.Warn("phase3 auth: an attempt ended with no recorded result", "request", at.RequestID)
 	}
@@ -241,20 +178,14 @@ func (p *phase3Auth) recordAttempt(at signinattempt.Attempt, started time.Time) 
 	defer cancel()
 	if _, err := p.attempts.Record(ctx, at); err != nil {
 		slog.Warn("phase3 auth: the sign-in attempt could not be recorded", "err", err, "result", at.Result)
-		// The policy counts the attempt ROWS, so an attempt that was not recorded is an attempt that did not
-		// happen as far as the threshold is concerned. Reporting it anyway would count an event the operator
-		// screen cannot show them.
+		// The policy counts attempt rows, so an unrecorded attempt did not happen as far as the threshold is concerned.
 		return
 	}
 	p.applyProtection(ctx, at)
 }
 
-// applyProtection tells the policy what happened, after the attempt row exists.
-//
-// AFTER, not before: the rolling count is derived from the attempt rows themselves, so reporting a failure
-// before its row is written would count one fewer than the operator sees. And a success clears the counter
-// rather than adding to it, because a guest who has just proved who they are has demonstrated the one thing
-// the counter exists to doubt.
+// applyProtection runs after the attempt row exists: the rolling count is derived from the rows, so reporting a failure
+// earlier would undercount. A success clears the counter rather than adding to it.
 func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attempt) {
 	if p.protection == nil || at.DeviceMAC == "" {
 		return
@@ -276,8 +207,7 @@ func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attem
 			return
 		}
 		if restricted {
-			// Worth a line at INFO: an operator looking at "why can this guest not get online" should find
-			// the moment the property started refusing that device, without the room or anything they typed.
+			// INFO so an operator can find when the property started refusing a device, without the room or anything typed.
 			slog.Info("phase3 auth: guest sign-in restricted for a device after repeated wrong credentials",
 				"failures", count, "expires_at", expires, "guest_network", at.GuestNetworkName)
 		}
@@ -288,16 +218,14 @@ func (p *phase3Auth) applyProtection(ctx context.Context, at signinattempt.Attem
 			return
 		}
 		if paused {
-			// WARN: many wrong room sign-ins from many devices is what guessing looks like. Hotel Admin shows
-			// the pause; this line is for whoever reads the journal.
+			// WARN: many wrong room sign-ins from many devices looks like guessing.
 			slog.Warn("phase3 auth: room sign-in paused on a guest network after many wrong room sign-ins",
 				"failures", n, "until", until, "guest_network", at.GuestNetworkName)
 		}
 	}
 }
 
-// completeAttempt stamps what the grant produced onto the attempt the resolve already wrote, keyed by the
-// request id the two calls share. Best-effort for the same reason as recordAttempt.
+// completeAttempt stamps what the grant produced onto the attempt the resolve wrote, keyed by the shared request id. Best-effort like recordAttempt.
 func (p *phase3Auth) completeAttempt(requestID string, result signinattempt.Result, entitlementID, sessionID string) {
 	if p.attempts == nil || requestID == "" {
 		return
@@ -309,8 +237,7 @@ func (p *phase3Auth) completeAttempt(requestID string, result signinattempt.Resu
 	}
 }
 
-// requestIDForContext finds the resolution request id an Auth Context was issued under, so the grant can
-// complete the attempt the resolve wrote instead of starting a second record for one guest's one submission.
+// requestIDForContext finds the resolution request id an Auth Context was issued under, so the grant completes the resolve's attempt rather than starting a second record.
 func (p *phase3Auth) requestIDForContext(ctx context.Context, authContextID string) string {
 	if authContextID == "" {
 		return ""
@@ -325,19 +252,10 @@ func (p *phase3Auth) requestIDForContext(ctx context.Context, authContextID stri
 	return id
 }
 
-// ---- opening a sealed attempt for an authorised operator ---------------------
-
-// signInAttemptCredentialsHandler returns the sealed half of ONE attempt, in clear.
-//
-// WHY THIS LIVES IN SCD AND NOT IN EDGED. edged serves the operator API and runs unprivileged over HTTP; scd
-// runs as root behind a unix socket and is the only service that holds the sealing key. Putting the key in
-// edged would mean the process that answers an HTTP request could also decrypt every guest credential on the
-// appliance — so the permission check and the key deliberately sit on opposite sides of a boundary, and
-// neither alone is enough. This is the same split the voucher DEK already uses.
-//
-// WHAT THIS ENDPOINT IS NOT. It is not an authorisation decision. Reaching scd's socket at all requires being
-// a trusted local service, and WHICH operator may ask is settled by edged against the site role matrix before
-// the call is made. Restating that check here would be a second copy of a boundary that must have one.
+// signInAttemptCredentialsHandler returns the sealed half of one attempt in clear. It lives in scd because scd is root behind
+// a unix socket and the only holder of the sealing key; putting the key in edged would let the process answering HTTP decrypt
+// every guest credential. Which operator may ask is settled by edged against the site role matrix; restating it here would
+// be a second copy of a boundary that must have one.
 func (p *phase3Auth) signInAttemptCredentialsHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AttemptID string `json:"attempt_id"`
@@ -355,10 +273,7 @@ func (p *phase3Auth) signInAttemptCredentialsHandler(w http.ResponseWriter, r *h
 		writeJSONScd(w, http.StatusInternalServerError, map[string]any{"error": "unavailable"})
 		return
 	}
-	// A NO ROW and a ROW WITH NO SEALED HALF answer the same way on purpose. The first is an id from another
-	// site or an id that never existed; the second is an attempt recorded while the key was unavailable.
-	// Neither has values to show, and distinguishing them here would let a caller probe for the existence of
-	// attempts it is not entitled to see.
+	// No row and a row with no sealed half answer the same on purpose: distinguishing them would let a caller probe for attempts it may not see.
 	if !ok {
 		writeJSONScd(w, http.StatusOK, map[string]any{"available": false})
 		return

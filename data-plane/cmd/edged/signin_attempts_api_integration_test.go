@@ -2,14 +2,8 @@
 
 package main
 
-// THE GUEST SIGN-IN ATTEMPTS OPERATOR API, through the real router and a real PostgreSQL.
-//
-// The RBAC tests next door prove which roles reach which route. They are not proof about the DATA: a
-// perfectly authorized operator must still be unable to read another site's attempts, a credential read must
-// still be recorded against the person who made it, and a response carrying guest credentials must still be
-// uncacheable. Those are properties of the handler and the database together, so they are tested together.
-//
-// NO REAL GUEST DATA APPEARS HERE. Every value is invented.
+// Guest sign-in attempts operator API through the real router and PostgreSQL: site confinement, audited credential reads, uncacheable sensitive responses.
+// No real guest data appears; every value is invented.
 
 import (
 	"context"
@@ -20,9 +14,7 @@ import (
 	"testing"
 )
 
-// seedAttempt inserts one recorded attempt directly. scd's own suite proves the RECORDING path; what is
-// under test here is what edged does with a row that exists, so writing it directly keeps the test about
-// that and avoids dragging the whole guest authentication stack into an operator-API test.
+// seedAttempt inserts one recorded attempt directly; the recording path is scd's suite.
 func (f *apiFixture) seedAttempt(t *testing.T, room, result string) string {
 	t.Helper()
 	var id string
@@ -39,11 +31,7 @@ func (f *apiFixture) seedAttempt(t *testing.T, room, result string) string {
 	return id
 }
 
-// THE LIST CARRIES NO CREDENTIAL VALUE OF ANY KIND.
-//
-// Not masked — absent. A list projection that carried the values "hidden by the UI" would hand every holder
-// of the weaker permission exactly what the stronger one exists to gate, and the first screen to render them
-// by accident would never be noticed.
+// The list carries no credential value of any kind: absent, not masked.
 func TestIntegration_SignInAttemptsAPI_TheListCarriesNoCredentialValues(t *testing.T) {
 	f := newAPI(t)
 	id := f.seedAttempt(t, "412", "CREDENTIAL_MISMATCH")
@@ -69,12 +57,7 @@ func TestIntegration_SignInAttemptsAPI_TheListCarriesNoCredentialValues(t *testi
 	}
 }
 
-// SITE CONFINEMENT, PROVED WITH A REAL SECOND SITE UNDER THE SAME TENANT.
-//
-// A tenant-only scope check passes this test's happy path and fails its point: a multi-property customer has
-// several sites under one tenant, and an attempt from the hotel next door must be as unreachable as one from
-// another company. The out-of-scope id must also be INDISTINGUISHABLE from an id that never existed, or the
-// 404s themselves become a way to enumerate.
+// Site confinement is proved with a real second site under the same tenant; an out-of-scope id must be indistinguishable from a nonexistent one.
 func TestIntegration_SignInAttemptsAPI_AnotherSitesAttemptIsUnreachableAndIndistinguishable(t *testing.T) {
 	a := newAPI(t)
 	b := newAPIIn(t, a.tenant) // same tenant, different site
@@ -98,18 +81,13 @@ func TestIntegration_SignInAttemptsAPI_AnotherSitesAttemptIsUnreachableAndIndist
 	}
 }
 
-// A CREDENTIAL READ IS RECORDED AGAINST THE PERSON WHO MADE IT.
-//
-// The audit row is written BEFORE the values are fetched, so an attempt that fails downstream is still
-// recorded. Recording only successful reads would leave the interesting case — somebody walking ids — the
-// one thing the log does not contain.
+// A credential read is recorded against the operator; the audit row is written before the values are fetched, so failed reads are recorded too.
 func TestIntegration_SignInAttemptsAPI_ACredentialReadIsAudited(t *testing.T) {
 	f := newAPI(t)
 	id := f.seedAttempt(t, "412", "CREDENTIAL_MISMATCH")
 
 	before := f.auditCount(t, "guest_signin_attempt.credentials_viewed")
-	// scd is not wired in this fixture, so the proxy hop fails — which is exactly the case the audit must
-	// still cover. The status is unimportant here; the record is the assertion.
+	// scd is not wired here, so the proxy hop fails: the audit must still cover that case.
 	// B8: without the operator's password nothing is revealed, and nothing is fetched.
 	if st, _ := f.doRaw(t, http.MethodPost, "/guest-signin-credentials/"+id, map[string]any{"password": "not-the-password"}); st != http.StatusUnauthorized {
 		t.Fatalf("a reveal with a wrong password = %d, want 401", st)
@@ -123,9 +101,7 @@ func TestIntegration_SignInAttemptsAPI_ACredentialReadIsAudited(t *testing.T) {
 		t.Fatalf("credential reads recorded: %d, want one more than %d", after, before)
 	}
 
-	// Selected by the attempt it names rather than by "the newest row": the disposable fixture and the
-	// production schema spell audit_log's timestamp column differently, and a test that ordered by it would
-	// be asserting something about the fixture instead of about the audit trail.
+	// Selected by the attempt it names: the fixture and production spell audit_log's timestamp column differently.
 	var actor, target string
 	var payload map[string]any
 	if err := f.pool.QueryRow(context.Background(), `
@@ -144,8 +120,7 @@ func TestIntegration_SignInAttemptsAPI_ACredentialReadIsAudited(t *testing.T) {
 	if fmt.Sprint(payload["site_id"]) != f.site {
 		t.Errorf("the audit row does not name the site: %v", payload)
 	}
-	// ...and it records WHO LOOKED, never WHAT THEY SAW. An audit trail that copied the credential would
-	// simply move the guest's data into a table with a longer retention and a wider readership.
+	// ...and it records who looked, never what they saw.
 	blob := fmt.Sprint(payload)
 	for _, forbidden := range []string{"submitted", "verifier", "accepted", "first_name", "family_name"} {
 		if strings.Contains(strings.ToLower(blob), forbidden) {
@@ -154,9 +129,7 @@ func TestIntegration_SignInAttemptsAPI_ACredentialReadIsAudited(t *testing.T) {
 	}
 }
 
-// SENSITIVE RESPONSES ARE NOT CACHEABLE. Without this the values can sit in a browser cache, a corporate
-// proxy or a disk image long after the thirty-day purge has removed the row they came from — which would
-// make the retention promise false by a mechanism nobody on the appliance can see.
+// Sensitive responses are not cacheable (a cache would outlive the retention purge).
 func TestIntegration_SignInAttemptsAPI_CredentialResponsesAreNotCacheable(t *testing.T) {
 	f := newAPI(t)
 	id := f.seedAttempt(t, "412", "CREDENTIAL_MISMATCH")
@@ -180,9 +153,7 @@ func TestIntegration_SignInAttemptsAPI_CredentialResponsesAreNotCacheable(t *tes
 	}
 }
 
-// The DETAIL response says whether a sealed half exists, so the panel can tell "you may not see this" from
-// "there is nothing to see because the key was unavailable when this was recorded". Those look identical on
-// screen and mean completely different things to whoever is trying to help the guest.
+// The detail says whether a sealed half exists, so the panel can tell "not permitted" from "nothing sealed because the key was unavailable".
 func TestIntegration_SignInAttemptsAPI_DetailReportsWhetherValuesExistWithoutRevealingThem(t *testing.T) {
 	f := newAPI(t)
 	id := f.seedAttempt(t, "412", "ROOM_NOT_IN_MIRROR")
@@ -205,7 +176,6 @@ func TestIntegration_SignInAttemptsAPI_DetailReportsWhetherValuesExistWithoutRev
 	}
 }
 
-// auditCount counts audit rows for one action in this fixture's tenant.
 func (f *apiFixture) auditCount(t *testing.T, action string) int {
 	t.Helper()
 	var n int

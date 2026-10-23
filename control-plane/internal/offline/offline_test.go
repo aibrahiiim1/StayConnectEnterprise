@@ -21,19 +21,16 @@ func TestOfflineAcceptMatrix(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Now()
 
-	// intended appliance accepts
 	p := mkPkg(pub)
 	Sign(priv, p)
 	if r := AcceptFor(pub, p, "app-1", "SER-1", "idfpr", "mtfpr", now); r != "" {
 		t.Fatalf("intended appliance rejected: %s", r)
 	}
 
-	// different appliance rejects
 	if r := AcceptFor(pub, p, "app-2", "SER-1", "idfpr", "mtfpr", now); r == "" {
 		t.Fatal("different appliance was accepted")
 	}
 
-	// serial / identity / mtls mismatch reject
 	if AcceptFor(pub, p, "app-1", "OTHER", "idfpr", "mtfpr", now) == "" {
 		t.Fatal("serial mismatch accepted")
 	}
@@ -41,7 +38,6 @@ func TestOfflineAcceptMatrix(t *testing.T) {
 		t.Fatal("identity fpr mismatch accepted")
 	}
 
-	// modified package rejects (tamper after signing)
 	p2 := mkPkg(pub)
 	Sign(priv, p2)
 	p2.TenantID = "tamper"
@@ -49,7 +45,6 @@ func TestOfflineAcceptMatrix(t *testing.T) {
 		t.Fatal("modified package accepted")
 	}
 
-	// expired rejects
 	p3 := mkPkg(pub)
 	p3.ExpiresAt = now.Add(-time.Hour).Unix()
 	Sign(priv, p3)
@@ -57,7 +52,6 @@ func TestOfflineAcceptMatrix(t *testing.T) {
 		t.Fatal("expired package accepted")
 	}
 
-	// wrong signer rejects
 	_, priv2, _ := ed25519.GenerateKey(rand.Reader)
 	p4 := mkPkg(pub)
 	Sign(priv2, p4)

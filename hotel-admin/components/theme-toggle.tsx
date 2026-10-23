@@ -13,16 +13,7 @@ const OPTIONS = [
 ] as const;
 const VALUES = OPTIONS.map((o) => o.value);
 
-/**
- * ThemeToggle — the control the operator asked for: dark is an option, not the only mode.
- *
- * Three explicit states rather than a two-way switch. "System" matters on an appliance that is left open on a
- * front-desk machine all day: the screen should follow the desk's own light/dark schedule without anyone
- * touching it.
- *
- * `mounted` guards the render because the resolved theme is not knowable on the server. Showing the wrong
- * segment as selected for one frame is worse than showing a neutral strip for one frame.
- */
+/** Wait for mount because the server cannot know which theme the operator has selected. */
 export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
@@ -31,8 +22,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   const onKeyDown = useRadioKeys<string>(VALUES, current, setTheme);
 
   return (
-    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex, useRadioKeys), never the group
-    // itself, which is the ARIA pattern; jsx-a11y reads the container role as a control.
+    // The checked radio is the group's sole tab stop under roving tabindex.
     // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div
       role="radiogroup"
@@ -51,7 +41,6 @@ export function ThemeToggle({ className }: { className?: string }) {
             type="button"
             role="radio"
             aria-checked={active}
-            // Roving tabindex: one tab stop for the group, arrows between the three.
             tabIndex={value === current ? 0 : -1}
             title={label}
             onClick={() => setTheme(value)}

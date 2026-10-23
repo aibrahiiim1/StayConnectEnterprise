@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// fakeFacebook stands in for www.facebook.com + graph.facebook.com: the token
-// endpoint and Graph /me on one host, dispatched by path.
+// fakeFacebook serves the token endpoint and Graph /me on one host, dispatched by path.
 func fakeFacebook(t *testing.T, tokenStatus int, tokenBody string, meStatus int, meBody string,
 	tokenForm *url.Values, meQuery *url.Values) *httptest.Server {
 	t.Helper()
@@ -97,8 +96,6 @@ func TestFacebookExchangeSuccess(t *testing.T) {
 			t.Errorf("token form[%s] = %q, want %q", k, form.Get(k), want)
 		}
 	}
-	// appsecret_proof = hex(HMAC-SHA256(key=app secret, msg=access token)),
-	// computed independently here.
 	if got, want := meQ.Get("appsecret_proof"), appSecretProof("fb-at-1", "fb-app-secret"); got != want || len(got) != 64 {
 		t.Errorf("appsecret_proof = %q, want %q", got, want)
 	}
@@ -108,7 +105,7 @@ func TestFacebookExchangeSuccess(t *testing.T) {
 	if meQ.Get("access_token") != "" {
 		t.Error("the access token must travel in the Authorization header, not the URL")
 	}
-	// Facebook binds nothing beyond state: no verifier leaves the appliance, and an attempt without one exchanges.
+	// Facebook binds nothing beyond state, so an attempt without a verifier still exchanges.
 	if form.Has("code_verifier") || f.Binding() != (Binding{}) {
 		t.Errorf("facebook must not use PKCE or a nonce: form=%v binding=%+v", form, f.Binding())
 	}

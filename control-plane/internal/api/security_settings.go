@@ -9,12 +9,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// CENTRAL SECURITY SETTINGS (one row, migrations 0051, 0052 and 0053). The sign-in lockout (0053) adds how many
-// wrong passwords lock an account and for how long. The first two values: the ABSOLUTE console session
-// lifetime -- how long a sign-in lasts however active the operator is -- and the idle limit. It is an operational value an
-// operator may need to change (shorter for a shared workstation, longer for a field engineer), so it is a
-// setting with a default, a unit, bounds, a permission and an audit trail, not a constant
-// (docs/OPERATIONAL_SETTINGS_POLICY.md).
+// Central security settings (one row): the absolute console session lifetime (however active the operator is),
+// the idle limit, and the sign-in lockout.
 
 type securitySettingsView struct {
 	OperatorSessionMaxHours int        `json:"operator_session_max_hours"`
@@ -24,11 +20,10 @@ type securitySettingsView struct {
 	Unit                    string     `json:"unit"`
 	UpdatedAt               *time.Time `json:"updated_at"`
 	UpdatedBy               *string    `json:"updated_by"`
-	// The idle limit (0052, GDPR plan C10): a session with no activity for this long ends.
+	// A session with no activity for this long ends.
 	OperatorIdleMinutes int           `json:"operator_idle_minutes"`
 	Idle                settingBounds `json:"idle_bounds"`
-	// The sign-in lockout (0053): this many wrong passwords (or authenticator codes) within the lock time lock
-	// the account for the lock time.
+	// This many wrong passwords or authenticator codes within the lock time lock the account for the lock time.
 	SigninLockFailures int           `json:"signin_lock_failures"`
 	LockFailures       settingBounds `json:"signin_lock_failures_bounds"`
 	SigninLockMinutes  int           `json:"signin_lock_minutes"`
@@ -75,11 +70,9 @@ func (b *Base) getSecuritySettings(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, v)
 }
 
-// patchSecuritySettings: PATCH /cloud/v1/settings/security {operator_session_max_hours?, operator_idle_minutes?,
-// signin_lock_failures?, signin_lock_minutes?, reason}
+// patchSecuritySettings: PATCH /cloud/v1/settings/security; omitted values keep their setting.
 //
-// The new limits apply to every session at its next request, including sessions already open: a shorter value
-// ends the ones that are now too old or too long idle. A value left out keeps its current setting.
+// New limits apply at each session's next request, including open ones: a shorter value ends sessions now too old or idle.
 func (b *Base) patchSecuritySettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		OperatorSessionMaxHours *int   `json:"operator_session_max_hours"`

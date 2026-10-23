@@ -1,21 +1,8 @@
 package main
 
-// THE ACCOUNTING ORIGIN, registered by the process that creates the class.
-//
-// There is a window between "netd installs a managed class" and "acctd's next periodic pass reads it". On a
-// tick interval that window is seconds of real traffic, for every session, forever — and it is invisible,
-// because the first observation legitimately has nothing to subtract from and BASELINES. A baseline is a
-// normal outcome, so nothing anywhere looks wrong while every guest's first seconds are discarded.
-//
-// Only the TC owner can close it. It is the only process that knows the instant a class came into existence,
-// and it is the only one that can read the counters BEFORE the guest can push a packet through it. So netd
-// registers the origin — the counters it actually read immediately after creation — through the controlled
-// operation, and acctd's first pass then measures a difference from a real starting point instead of
-// inventing one.
-//
-// Note what this deliberately does NOT do: it never asserts zero. A class netd created is expected to read
-// zero, but "expected" is not evidence, and a class adopted rather than created would not. Whatever the owner
-// read is what gets registered.
+// netd, as the tc owner, registers the counters it read right after creating a class as the accounting origin,
+// so acctd's first pass has a real starting point instead of silently baselining and discarding the first
+// seconds of traffic. It registers what it read and never assumes zero (an adopted class would not be zero).
 
 import (
 	"context"
@@ -28,7 +15,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// originRegistrar records a newly created managed class's accounting origin.
 type originRegistrar interface {
 	RegisterClassOrigin(ctx context.Context, o classOrigin) (string, error)
 }
@@ -45,7 +31,6 @@ type classOrigin struct {
 	CreatedAt    time.Time
 }
 
-// pgOrigins is the database-backed registrar.
 type pgOrigins struct {
 	pool interface {
 		QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -60,11 +45,8 @@ func (p *pgOrigins) RegisterClassOrigin(ctx context.Context, o classOrigin) (str
 	return outcome, err
 }
 
-// registerOrigin reads the class's counters immediately after creation and records them as the accounting
-// origin. A failure here is reported, never swallowed: without an origin the first ordinary observation
-// silently baselines, and the traffic in between is lost with nothing to show it ever existed.
-//
-// The caller holds p.mu, so this runs before any further plan can be applied to the same class.
+// A failure is reported, never swallowed: without an origin the traffic before the first observation is lost
+// silently. The caller holds p.mu.
 func (p *phase3Shaping) registerOrigin(ctx context.Context, s shapeplan.Session, minor int, epoch int64) string {
 	if p.origins == nil {
 		return "" // no registrar wired (unit tests drive apply() directly); nothing to report
@@ -72,8 +54,6 @@ func (p *phase3Shaping) registerOrigin(ctx context.Context, s shapeplan.Session,
 	if s.DeviceID == "" {
 		return "class origin not registered for " + s.SessionID + ": the plan carries no device identity"
 	}
-	// Read what is actually there. The expected value is zero for a class created a moment ago, but the
-	// point of an origin is to record evidence rather than an expectation.
 	up, upErr := p.shp.ReadClasses(ctx, shape.IFBName(s.Bridge))
 	down, downErr := p.shp.ReadClasses(ctx, s.Bridge)
 	if upErr != nil || downErr != nil {

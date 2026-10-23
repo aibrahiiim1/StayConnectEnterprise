@@ -1,13 +1,6 @@
 "use client";
 
-// TOASTS — the confirmation that an action happened.
-//
-// Before this, a successful save said nothing: the dialog closed and the operator had to infer from the table
-// whether the change took. On a slow appliance that inference is wrong often enough to cause a second click, and a
-// second click on "Activate" is a second activation attempt.
-//
-// Deliberately small and dependency-free. A toast confirms or reports — it never carries the only copy of
-// information the operator needs later (a revealed code, an error explaining what to fix). Those stay in the page.
+// Keep durable information on the page; toasts only confirm or report actions.
 
 import * as React from "react";
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from "lucide-react";
@@ -26,7 +19,7 @@ const Ctx = React.createContext<ToastApi | null>(null);
 
 const NOOP: ToastApi = { toast: () => {}, success: () => {}, error: () => {} };
 
-/** Safe outside a provider (tests render pages bare): the calls simply do nothing. */
+/** Bare page tests may render without a provider. */
 export function useToast(): ToastApi {
   return React.useContext(Ctx) ?? NOOP;
 }
@@ -45,10 +38,9 @@ const TONE: Record<Tone, string> = {
   info: "text-info",
 };
 
-// Long enough to read a two-line confirmation at a slow reading pace or with a screen magnifier; the timer still
-// pauses on hover and focus.
+// Allow time to read confirmations; interaction pauses the timer.
 const DISMISS_AFTER_MS = 8000;
-// Never `hidden` when empty either: a region must already be in the accessibility tree when content arrives.
+// The live region must exist before content arrives.
 const REGION = "flex w-full flex-col items-center gap-2 sm:items-end";
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -69,14 +61,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // THE TIMER PAUSES WHILE THE OPERATOR IS WITH THE TOAST. Hovering it or tabbing to its Dismiss button stops the
-  // clock, and leaving restarts it. An error never times out at all: it is the one the operator most needs to
-  // finish reading, so it stays until dismissed.
+  // Pause while the operator reads a toast; errors stay until dismissed.
   const [paused, setPaused] = React.useState(false);
 
-  // Two live regions, created once and never nested: toasts are rendered INTO them, so each announcement comes
-  // from exactly one region (polite for confirmations, assertive for errors) rather than a live role inside
-  // another live region.
+  // Separate live regions announce errors assertively and confirmations politely.
   const polite = items.filter((t) => t.tone !== "err");
   const assertive = items.filter((t) => t.tone === "err");
 
@@ -92,9 +80,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
         }}
       >
-        {/* Bare aria-live rather than role="status"/"alert": an alert role that is always on the page, empty,
-            reads to assistive tech (and to tests) as an error that is always present. Not `display: contents`
-            either: Safari drops such an element from the accessibility tree, live region included. */}
+        {/* Keep empty live regions mounted; Safari drops display:contents regions from the accessibility tree. */}
         <div aria-live="polite" aria-relevant="additions" className={REGION}>
           {polite.map((t) => (
             <ToastCard key={t.id} item={t} paused={paused} onDismiss={dismiss} />
@@ -119,7 +105,7 @@ function ToastCard({
   paused: boolean;
   onDismiss: (id: number) => void;
 }) {
-  // Time already shown survives a pause, so hovering at 4 s does not buy a fresh 8 s.
+  // Pausing preserves elapsed time.
   const remaining = React.useRef(DISMISS_AFTER_MS);
   React.useEffect(() => {
     if (t.tone === "err" || paused) return;

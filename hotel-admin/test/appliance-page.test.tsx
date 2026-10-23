@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, within, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// APPLIANCE & LICENCE renders the appliance's section 8 status (docs/CENTRAL_CONTROL_PLANE.md). These tests pin
-// the words and actions for every activation, licence and Central state, that offline activation uses only the
-// section 8 endpoints, and that protocol vocabulary stays inside Technical details.
-
 const get = vi.fn();
 const post = vi.fn();
 const postRaw = vi.fn();
@@ -66,7 +62,6 @@ function region(name: string) {
   return within(screen.getByRole("region", { name }));
 }
 
-/** Text of the page OUTSIDE the collapsed Technical details. */
 function primaryText(): string {
   const clone = document.body.cloneNode(true) as HTMLElement;
   clone.querySelector('[data-testid="technical-details"]')?.remove();
@@ -96,7 +91,6 @@ describe("activation states", () => {
     expect(a.getByText(/Give your OneGate vendor this serial number/)).toBeTruthy();
     expect(a.getByText("SC-7F3A-19")).toBeTruthy();
     expect(a.getByRole("button", { name: /Copy serial number/ })).toBeTruthy();
-    // Registered appliances do not emit an offline request (the appliance refuses it); only the package upload.
     expect(screen.queryByRole("button", { name: /Download activation request/ })).toBeNull();
     expect(region("Licence").getByText(/Clients cannot sign in until/)).toBeTruthy();
   });
@@ -191,7 +185,6 @@ describe("Central connection", () => {
     expect(region("OneGate Central").getByText("Temporarily unreachable", { selector: "span" })).toBeTruthy();
     expect(region("OneGate Central").getByText(/Clients are not affected/)).toBeTruthy();
     expect(region("OneGate Central").getByText("OneGate Central did not answer in time.")).toBeTruthy();
-    // Unreachable: offline files are offered even to an activated appliance.
     expect(screen.getByRole("button", { name: /Upload activation package/ })).toBeTruthy();
     cleanup(); vi.resetModules();
 
@@ -259,7 +252,6 @@ describe("vocabulary", () => {
       for (const word of ["CSR", "mTLS", "assignment", "registry", "real-time", "Real-time", "fingerprint", "certificate"]) {
         expect(text, `"${word}" appears outside Technical details`).not.toContain(word);
       }
-      // ...and they are available for support.
       const details = screen.getByTestId("technical-details");
       expect(within(details).getByText("Identity key fingerprint")).toBeTruthy();
       cleanup(); vi.resetModules();

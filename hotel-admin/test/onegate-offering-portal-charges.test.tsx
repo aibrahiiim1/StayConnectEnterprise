@@ -1,17 +1,9 @@
-// ONEGATE REDESIGN — Internet offering, Guest portal and Charges.
-//
-// Two rules from the redesign handoff, asserted where they were broken:
-//
-//   1. "The UI must never show a button the role cannot use." Service plans hard-coded `writable = true`,
-//      Internet packages offered Add / Edit / Disable to everyone, and Sign-in methods drew On/Off buttons for
-//      the desk, which the server then refused. A read-only role now sees the state and no write control.
-//   2. "Every page has a title equal to its menu label." The four Charges screens had none.
+// A read-only role sees state and no write control; every Charges page has a title equal to its menu label.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-// A site licensed for every module: these tests are about roles, not about which modules a site has.
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
@@ -64,7 +56,6 @@ function routes(roles: string[], extra: Record<string, unknown> = {}) {
   g.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles });
     if (path in extra) return Promise.resolve(extra[path]);
-    // A paged list (?page=&page_size=) is answered by a fake that reads its parameters.
     const fake = extra[path.split("?")[0]];
     if (typeof fake === "function") return Promise.resolve(fake(path));
     if (path === "/commercial-packages/plans") return Promise.resolve(list([PLAN]));
@@ -127,10 +118,8 @@ describe("a read-only role is offered no write control", () => {
     routes(["front_office_operator"]);
     render(<SignInMethodsPage />);
     expect(await screen.findByText(/can see which sign-in methods are offered but not change them/i)).toBeInTheDocument();
-    // Also an <option> of the Client journey's Primary method select, so more than one match is expected.
     expect(screen.getAllByText("Voucher code").length).toBeGreaterThan(0);
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
-    // Guest sign-in protection is read-only for the desk too: the numbers show, no Save.
     expect(await screen.findByText(/can see these settings but not change them/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save protection settings/i })).toBeNull();
     expect(screen.getByLabelText(/maximum failed attempts/i)).toBeDisabled();
@@ -144,8 +133,6 @@ describe("a read-only role is offered no write control", () => {
     expect(voucher).toHaveAttribute("aria-checked", "true");
     fireEvent.click(voucher);
     await waitFor(() => expect(put).toHaveBeenCalledWith("/auth-methods", { voucher: { enabled: false } }));
-    // SMS cannot be switched on until a sender exists, and says so. Email accounts can: registration does not wait
-    // for the mail server, but the missing sender is stated, because no verification email could be sent.
     expect(screen.getByRole("switch", { name: "SMS code" })).toBeDisabled();
     expect(screen.getAllByText(/not available until/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("switch", { name: "Email accounts" })).not.toBeDisabled();

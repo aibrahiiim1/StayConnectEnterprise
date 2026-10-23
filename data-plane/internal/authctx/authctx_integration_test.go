@@ -33,10 +33,8 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// openOps opens the named capability-scoped controlled operations in tx. On the production schema the test
-// login (postgres) no longer owns iam_v2.begin_controlled_operation, so a raw write to a controlled family
-// (stays/stay_events -> 'stay', auth_contexts -> 'auth_context', ...) needs the operation open in the SAME
-// transaction - exactly what the product writers do through writerguard.Open.
+// openOps opens controlled operations in tx: the test login no longer owns begin_controlled_operation, so a raw
+// write to a controlled family needs the operation open in the same transaction (as writerguard.Open does).
 func openOps(ctx context.Context, tx pgx.Tx, families ...string) error {
 	for _, fam := range families {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, fam); err != nil {
@@ -46,9 +44,7 @@ func openOps(ctx context.Context, tx pgx.Tx, families ...string) error {
 	return nil
 }
 
-// gexec is p.Exec for a fixture write to a controlled-writer family: one transaction that opens the family's
-// operation, performs the statement and commits. Used only for SEEDING/driving state, never for the code path
-// under test.
+// gexec is p.Exec for a fixture write to a controlled-writer family; seeding only, never the path under test.
 func gexec(ctx context.Context, p *pgxpool.Pool, family, sql string, args ...any) (pgconn.CommandTag, error) {
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -67,26 +63,20 @@ func gexec(ctx context.Context, p *pgxpool.Pool, family, sql string, args ...any
 
 type fixture struct{ tenant, site, iface, rev, stay, device, network string }
 
-// seed builds tenant/site/interface/revision + an IN_HOUSE stay + a guest network, returning the pins a PMS
-// Auth Context needs. The revision's max_auth_cache_age_seconds is 3600; occupancy evidence is fresh (now()).
+// seed builds tenant/site/interface/revision, an IN_HOUSE stay and a guest network. max_auth_cache_age_seconds is 3600.
 func seed(t *testing.T, p *pgxpool.Pool) fixture { return seedCacheAge(t, p, "3600") }
 
-// seedCacheAge is seed with an explicit max_auth_cache_age_seconds JSON value (e.g. "3600", "\"abc\"",
-// "null"), so the immutable revision carries the (possibly malformed) config from creation.
+// seedCacheAge is seed with an explicit (possibly malformed) max_auth_cache_age_seconds JSON value; revisions are immutable.
 func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
 	return seedAged(t, p, cacheAgeJSON, "now()", false)
 }
 
-// seedAged builds the fixture with an explicit occupancy-evidence timestamp EXPRESSION (e.g. "now()" or
-// "now() - interval '2 hours'") and clock-suspect flag, both fixed at seed time. Because the migration's
-// evidence-version guard now rejects mutating occupancy fields without the required version transition, tests
-// that need a stale / clock-suspect Stay must seed it that way (and prove the ISSUANCE-time guard rejects it),
-// rather than mutating a fresh Stay after issue.
+// seedAged fixes the occupancy-evidence timestamp expression and clock-suspect flag at seed time, because the
+// evidence-version guard rejects mutating them without a version transition.
 func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string, clockSuspect bool) fixture {
 	t.Helper()
 	ctx := context.Background()
 	cfg := `{"endpoint":"x","max_auth_cache_age_seconds":` + cacheAgeJSON + `}`
-	// evidenceAtExpr and clockSuspect are test-controlled literals spliced into the seed DDL (never guest input).
 	suspect := "false"
 	if clockSuspect {
 		suspect = "true"
@@ -110,7 +100,6 @@ func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
 	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`
 	var f fixture
-	// The Stay is a controlled-writer family: the seed opens the 'stay' operation in the same transaction.
 	stx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
@@ -130,10 +119,8 @@ func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$1 WHERE id=$2`, f.rev, f.iface); err != nil {
 		t.Fatalf("seed set current revision: %v", err)
 	}
-	// A HEALTHY runtime row, because eligibility now depends on the feed as well as on the Stay. Every fixture
-	// here exists to exercise an evidence/version/revision rule, so the feed is put in the state where those
-	// rules are the only thing left deciding. The feed-health dimension itself is exercised in
-	// freshness_feed_health_integration_test.go, which drives these columns deliberately.
+	// A healthy runtime row, so evidence/version/revision rules are the only thing deciding; feed health is
+	// exercised in freshness_feed_health_integration_test.go.
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
 		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
@@ -153,8 +140,6 @@ func pres(f fixture) Presenter {
 	return Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network}
 }
 
-// TestIntegration_OneTimeConsumeAndReplay proves the core one-time semantics: a fresh context consumes once
-// (returning server pins), a replay is rejected, and an expired context is rejected — uniformly.
 func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -190,8 +175,6 @@ func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 	}
 }
 
-// TestIntegration_PinnedPresenterAndOccupancy proves a context is UNUSABLE from a different device or guest
-// network, and that a PMS context whose pinned Stay is no longer IN_HOUSE cannot be consumed.
 func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -225,12 +208,6 @@ func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 	}
 }
 
-// TestIntegration_EvidenceAndInterfacePins proves the pinned Interface / occupancy-evidence guards:
-//   - a context whose pinned Interface is disabled AFTER issue is rejected at consume;
-//   - a Stay whose occupancy evidence is already STALE or CLOCK-SUSPECT at issue never yields a context
-//     (issuance fails closed — an unusable context is never persisted);
-//   - an authoritative occupancy-evidence replacement (material change + monotonic version bump) invalidates
-//     an already-issued context at consume.
 func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -276,8 +253,6 @@ func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConsumeTxRollback proves the consumption is ATOMIC with the caller's transaction: if the
-// intended commerce transaction fails (rollback), the context is NOT left permanently consumed.
 func TestIntegration_ConsumeTxRollback(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -301,8 +276,6 @@ func TestIntegration_ConsumeTxRollback(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConcurrentConsumeSingleWinner proves that under concurrent consumption of the SAME context,
-// exactly ONE caller wins (the single-row atomic UPDATE) — no double-spend.
 func TestIntegration_ConcurrentConsumeSingleWinner(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -342,7 +315,6 @@ func scalar(t *testing.T, p *pgxpool.Pool, sql string, args ...any) int {
 	return n
 }
 
-// secondRevision inserts another immutable Revision for the same interface and returns its id.
 func secondRevision(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	t.Helper()
 	var id string
@@ -359,9 +331,6 @@ func authCtxCount(t *testing.T, p *pgxpool.Pool, f fixture) int {
 	return scalar(t, p, `SELECT count(*) FROM iam_v2.auth_contexts WHERE pms_interface_id=$1`, f.iface)
 }
 
-// TestIntegration_OccupancyRevisionProvenance proves the context binds to the EXACT Revision that produced the
-// Stay's occupancy evidence: a matching evidence-version integer under a DIFFERENT occupancy Revision is
-// rejected; a newer published Revision does not by itself invalidate the immutable pinned Revision.
 func TestIntegration_OccupancyRevisionProvenance(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -409,8 +378,6 @@ func TestIntegration_OccupancyRevisionProvenance(t *testing.T) {
 	}
 }
 
-// TestIntegration_IssueRejectsIncomplete proves PMS issuance fails BEFORE any INSERT when a required pin is
-// missing/invalid — no unusable/already-expired context reaches the table — with a sanitized error.
 func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -484,15 +451,8 @@ func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 	}
 }
 
-// TestIntegration_FreshnessConfigFailClosed proves a malformed / out-of-range max_auth_cache_age config never
-// causes a cast error and never produces an unbounded window: it falls back to the DERIVED ceiling — one
-// complete-sync cadence plus the heartbeat allowance — and an explicitly valid value is still honoured exactly.
-//
-// The fallback used to be a flat 300 seconds, and this test asserted that. That default is what made Room
-// sign-in unusable: a guest whose Stay the PMS had not mentioned for five minutes was refused even though the
-// feed was healthy and actively confirming nothing had changed. The property worth protecting here was never
-// the number — it is that a value nobody can parse must not WIDEN the window and must not raise. Both are
-// still asserted, against the ceiling that replaced it.
+// A malformed or out-of-range max_auth_cache_age never raises a cast error or widens the window: it falls back
+// to the derived ceiling (one complete-sync cadence plus heartbeat allowance); a valid value is honoured exactly.
 func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -541,10 +501,6 @@ func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_EpisodeAndEvidenceSnapshot proves the context pins the exact Stay EPISODE + evidence
-// snapshot: a Checkout→Reinstatement (new lifecycle_version) invalidates the old context even within TTL, a
-// new context for the reinstated episode succeeds, and an authoritative evidence-version bump invalidates an
-// old context under the same Revision + normalization version + IN_HOUSE.
 func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -594,8 +550,7 @@ func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 	}
 }
 
-// lockStayFirst mimics a Checkout/evidence writer that correctly obeys L1: it locks the Stay row FIRST
-// (SELECT ... FOR UPDATE) inside the returned open transaction. The caller then mutates + commits/rolls back.
+// lockStayFirst locks the Stay row first, as a Checkout/evidence writer must; the caller then mutates and ends the tx.
 func lockStayFirst(t *testing.T, p *pgxpool.Pool, stay string) pgx.Tx {
 	t.Helper()
 	tx, err := p.Begin(context.Background())
@@ -606,8 +561,7 @@ func lockStayFirst(t *testing.T, p *pgxpool.Pool, stay string) pgx.Tx {
 		_ = tx.Rollback(context.Background())
 		t.Fatal(err)
 	}
-	// The writer's Stay mutation is a controlled-family write: open the 'stay' operation (after the Stay lock,
-	// so the lock order under test is unchanged).
+	// Open the 'stay' operation after the Stay lock so the lock order under test is unchanged.
 	if err := openOps(context.Background(), tx, "stay"); err != nil {
 		_ = tx.Rollback(context.Background())
 		t.Fatal(err)
@@ -615,8 +569,7 @@ func lockStayFirst(t *testing.T, p *pgxpool.Pool, stay string) pgx.Tx {
 	return tx
 }
 
-// TestIntegration_ConsumeStayFirstLockOrder proves ConsumeTx obeys the global L1 Stay-first lock order, so it
-// serializes deterministically against Checkout / evidence replacement and never races them.
+// ConsumeTx must take the Stay lock first so it serializes against Checkout and evidence replacement.
 func TestIntegration_ConsumeStayFirstLockOrder(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -713,11 +666,8 @@ func TestIntegration_ConsumeStayFirstLockOrder(t *testing.T) {
 	}
 }
 
-// TestIntegration_MixedCheckoutConsumeNoDeadlock runs ≥24 mixed Checkout-cycle / Consume operations against the
-// SAME Stay concurrently. Because every operation acquires the single Stay row lock FIRST (L1), there is a total
-// lock order and NO deadlock is possible; every operation completes and none returns a deadlock (SQLSTATE
-// 40P01). Consumers may legitimately reject (ErrContextInvalid) when a concurrent reinstatement bumped the
-// episode first — that is correct, not a failure.
+// Mixed Checkout/Consume against one Stay never deadlock (40P01) because each takes the Stay lock first;
+// ErrContextInvalid after a concurrent reinstatement is legitimate.
 func TestIntegration_MixedCheckoutConsumeNoDeadlock(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

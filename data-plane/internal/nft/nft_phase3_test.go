@@ -1,13 +1,7 @@
 package nft
 
-// CONTRACT TESTS for the packet-authorization commands.
-//
-// The orchestration tests in cmd/netd prove ordering with a fake kernel. These prove the other half: that the
-// exact `nft` command strings this package builds are the ones intended — that a Phase-3 authorization names
-// the Phase-3 set and never auth_ipv4, that a revoke deletes the right element, and that membership is read
-// from the right set. A fake kernel cannot catch a command that names the wrong set; this can.
-//
-// These are COMMAND-STRING tests, not live evidence: no nft binary runs.
+// Contract tests for the packet-authorization commands: no nft binary runs, they prove the exact command strings (a
+// fake kernel cannot catch a command naming the wrong set).
 
 import (
 	"context"
@@ -78,8 +72,7 @@ func testClient() (*Client, *recordingNft) {
 
 var gIP = net.ParseIP("10.0.0.5")
 
-// A Phase-3 authorization names the PHASE-3 set — never the legacy one. This is the single most important
-// property in the two-set design: if it named auth_ipv4, Phase-3 reconciliation could delete legacy guests.
+// A Phase-3 authorization names the Phase-3 set, never the legacy one; otherwise reconciliation could delete legacy guests.
 func TestPhase3AllowNamesOnlyThePhase3Set(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -95,7 +88,6 @@ func TestPhase3AllowNamesOnlyThePhase3Set(t *testing.T) {
 			t.Fatalf("a Phase-3 authorization named the LEGACY set: %s", cmd)
 		}
 	}
-	// concatenated key, as the rendered set declares it
 	if !rr.has(`"br-guest" . 10.0.0.5`) {
 		t.Fatalf("the element is not the (bridge, ip) concatenation: %v", rr.all())
 	}
@@ -139,8 +131,7 @@ func TestPhase3DenyDeletesFromThePhase3Set(t *testing.T) {
 	}
 }
 
-// Revoking something that is not there is a no-op, not an error: fail-closed cleanup runs on paths where the
-// element may never have been added, and it must not report a false failure.
+// Revoking something absent is a no-op, not an error: cleanup runs on paths where the element may never have been added.
 func TestPhase3DenyAbsentElementIsNoOp(t *testing.T) {
 	c, rr := testClient()
 	rr.listJSON[Phase3AuthV4] = `{"nftables":[{"set":{"name":"phase3_auth_ipv4","elem":[]}}]}`
@@ -152,7 +143,7 @@ func TestPhase3DenyAbsentElementIsNoOp(t *testing.T) {
 	}
 }
 
-// Membership is read from the named set — the verification half of the gate.
+// Membership is read from the named set.
 func TestAuthorizedInReadsTheNamedSet(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -166,7 +157,6 @@ func TestAuthorizedInReadsTheNamedSet(t *testing.T) {
 	if !on {
 		t.Fatal("an installed authorization was not detected")
 	}
-	// and an address that is not in the set reads as unauthorized
 	off, err := c.AuthorizedIn(context.Background(), Phase3AuthV4, "br-guest", net.ParseIP("10.0.0.9"))
 	if err != nil {
 		t.Fatal(err)
@@ -176,8 +166,7 @@ func TestAuthorizedInReadsTheNamedSet(t *testing.T) {
 	}
 }
 
-// ListIn enumerates only the named set, which is what makes Phase-3 stray removal unable to reach a legacy
-// authorization even in principle.
+// ListIn enumerates only the named set, so Phase-3 stray removal cannot reach a legacy authorization.
 func TestListInEnumeratesOnlyTheNamedSet(t *testing.T) {
 	c, rr := testClient()
 	rr.listJSON[Phase3AuthV4] = `{"nftables":[{"set":{"name":"phase3_auth_ipv4","elem":[
@@ -199,8 +188,7 @@ func TestListInEnumeratesOnlyTheNamedSet(t *testing.T) {
 	}
 }
 
-// The concat probe is PER SET. One shared flag would let one set's key type decide the other's element
-// format, which would silently build malformed elements for whichever set was probed second.
+// The concat probe is per set: one shared flag would build malformed elements for whichever set is probed second.
 func TestConcatProbeIsPerSet(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[AuthV4] = "set auth_ipv4 { type ipv4_addr }"                       // IP-only (older ruleset)
@@ -241,10 +229,7 @@ func TestAllowInCarriesTheTimeout(t *testing.T) {
 	}
 }
 
-// ---- the bounded lease -----------------------------------------------------
-
-// A Phase-3 lease is always installed WITH a timeout. An element with no timeout survives every process that
-// maintains it, so the command that installs one is the command that has to be wrong for that to happen.
+// A Phase-3 lease is always installed with a timeout; an element with none survives every process that maintains it.
 func TestPhase3LeaseAlwaysCarriesATimeout(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -257,8 +242,7 @@ func TestPhase3LeaseAlwaysCarriesATimeout(t *testing.T) {
 	}
 }
 
-// A zero or negative lease is REFUSED rather than installed. nft reads "no timeout" as permanent, so a
-// rounding error or an uninitialised duration would otherwise become an authorization nobody can expire.
+// A zero or negative lease is refused: nft reads "no timeout" as permanent.
 func TestPhase3LeaseRefusesAnUnboundedAuthorization(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -273,15 +257,8 @@ func TestPhase3LeaseRefusesAnUnboundedAuthorization(t *testing.T) {
 	}
 }
 
-// A SUB-SECOND LEASE IS REFUSED, NOT ROUNDED UP.
-//
-// nft's element timeout granularity is whole seconds, so a 300ms lease can only be installed as `timeout 1s`
-// — 700ms LONGER than asked for. For a lease clamped to a guest's hard access boundary that overshoot IS the
-// boundary being exceeded, which is the one thing the clamp exists to prevent. So the unrepresentable lease is
-// an error the caller has to handle, not a number quietly made bigger.
-//
-// (`timeout 0s` is not an option either: nft reads it as NO timeout, which would turn an about-to-expire
-// authorization into a permanent one — the exact failure the lease design removes.)
+// A sub-second lease is refused, not rounded up: nft timeouts are whole seconds, so 300ms would install as 1s and
+// exceed a hard access boundary; `timeout 0s` means no timeout.
 func TestPhase3LeaseRefusesAnUnrepresentableSubSecondLease(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -300,8 +277,7 @@ func TestPhase3LeaseRefusesAnUnrepresentableSubSecondLease(t *testing.T) {
 	}
 }
 
-// AND A LEASE IS NEVER ROUNDED UP. The installed timeout must never be later than what the caller asked for,
-// at any timestamp precision — that is the whole invariant behind clamping a lease to a hard deadline.
+// A lease is never rounded up: the installed timeout must never be later than requested, at any timestamp precision.
 func TestPhase3LeaseNeverInstallsATimeoutLongerThanRequested(t *testing.T) {
 	cases := []struct {
 		ttl  time.Duration
@@ -337,9 +313,8 @@ func TestPhase3LeaseNeverInstallsATimeoutLongerThanRequested(t *testing.T) {
 	}
 }
 
-// RENEWAL IS NOT A REPEATED ADD. nftables does not restart an existing element's timer on a second add, so a
-// renewal built on `add element` would look healthy and still drop every guest at the first lease boundary.
-// The refresh is a delete+add in ONE command buffer, which nft commits as a single transaction.
+// Renewal is not a repeated add: nftables does not restart an existing element's timer, so the refresh is a
+// delete+add in one command buffer (a single transaction).
 func TestPhase3LeaseRenewalIsAnAtomicDeleteAndAdd(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -369,14 +344,12 @@ func TestPhase3LeaseRenewalIsAnAtomicDeleteAndAdd(t *testing.T) {
 	if !strings.Contains(refresh, "timeout 90s") {
 		t.Fatalf("the refreshed element carries no new lease: %q", refresh)
 	}
-	// and it is still the Phase-3 set, on both halves of the buffer
 	if strings.Contains(refresh, " "+AuthV4+" ") {
 		t.Fatalf("a Phase-3 renewal named the LEGACY set: %q", refresh)
 	}
 }
 
-// The REMAINING lease is what a renewal decision reads. An element created with a 90s timeout says nothing
-// about whether it is one second from disappearing.
+// The remaining lease is what a renewal decision reads; the original timeout says nothing about imminent expiry.
 func TestPhase3ListReportsRemainingLease(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
@@ -417,12 +390,8 @@ func TestLegacyAllowIsUnchangedByTheLeaseWork(t *testing.T) {
 	}
 }
 
-// A PERMANENT concatenated element carries no `val` wrapper in nft's JSON, because it has no stateful
-// attributes to wrap. Reading only the wrapped shape made every legacy (permanent) authorization invisible to
-// List — and therefore to Authorized, and therefore to Deny, which then silently deleted nothing.
-//
-// The whole legacy-parity proof of the surgical foundation rests on being able to enumerate exactly those
-// elements, so this is the shape that had to be got right.
+// A permanent concatenated element carries no `val` wrapper in nft's JSON (it has no stateful attributes). Reading
+// only the wrapped shape made every permanent legacy authorization invisible to List, Authorized and Deny.
 func TestListReadsPermanentConcatElementsWithNoValWrapper(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[AuthV4] = "set auth_ipv4 { type ifname . ipv4_addr }"
@@ -448,7 +417,6 @@ func TestListReadsPermanentConcatElementsWithNoValWrapper(t *testing.T) {
 	if perm.Timeout != 0 || perm.Expires != 0 {
 		t.Fatalf("a permanent element reported a lease: %+v", perm)
 	}
-	// and it can therefore be revoked, which is what silently failed before
 	if ok, err := c.AuthorizedIn(context.Background(), AuthV4, "br-guest", net.ParseIP("10.20.0.14")); err != nil || !ok {
 		t.Fatalf("a permanent element is not visible to Authorized (ok=%v err=%v)", ok, err)
 	}

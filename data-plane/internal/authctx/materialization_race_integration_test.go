@@ -2,25 +2,10 @@
 
 package authctx
 
-// THE RACE THIS CLOSES, RUN AS A RACE.
-//
-// A predicate alone cannot close it. p3_feed_authorizes is STABLE and these transactions are READ COMMITTED,
-// so evaluating "the roster is materialized" proves only that it was true as of one statement's snapshot — a
-// concurrent pmsd admission can commit a conflicting occupancy event immediately afterwards and the
-// authorisation can still commit on top of it.
-//
-// That was measured against PostgreSQL 16 before this fix existed:
-//
-//	A1 predicate = true, Stay locked
-//	B  admission COMMITTED 3s later, never blocked (it locks the RUNTIME row, auth locks the STAY row)
-//	A3 auth COMMITTED 8s later, having never observed the pending event
-//
-// SERIALIZABLE does not help either — also measured. The auth transaction reads stay_events and writes
-// auth_contexts while admission writes stay_events and reads nothing auth wrote, so SSI finds no dangerous
-// cycle and aborts nobody.
-//
-// The fix is the lock these tests assert: callers take pms_interface_runtime FOR UPDATE, the row admission
-// already serializes on, so from that point until commit no new occupancy event can be admitted.
+// A predicate alone cannot close the race: p3_feed_authorizes is STABLE under READ COMMITTED, so it proves the
+// roster was materialized only as of one snapshot, and a concurrent pmsd admission can commit a conflicting
+// event right after. SERIALIZABLE does not help (SSI sees no dangerous cycle). The fix asserted here is that
+// callers take pms_interface_runtime FOR UPDATE, the row admission serializes on.
 
 import (
 	"context"
@@ -31,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// admitPending inserts a durable PENDING occupancy event exactly as pmsd's admission path does: runtime row
-// locked first, then the insert, then commit.
+// admitPending mirrors pmsd's admission: lock the runtime row, insert, commit.
 func admitPending(t *testing.T, s fixture, kind string, gen int64) {
 	t.Helper()
 	p := pool(t)
@@ -65,7 +49,7 @@ func admitPending(t *testing.T, s fixture, kind string, gen int64) {
 	}
 }
 
-// A CLAIMABLE PENDING EVENT CLOSES ROOM AUTH — the everyday case, no full sync involved.
+// A claimable pending event closes room auth.
 func TestIntegration_Materialization_LivePendingBlocks(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -84,11 +68,8 @@ func TestIntegration_Materialization_LivePendingBlocks(t *testing.T) {
 	}
 }
 
-// AN ABANDONED GENERATION MUST NOT BLOCK — the case that would otherwise kill D39 offline auth permanently.
-//
-// An interrupted resync leaves rows PENDING at a generation that will never publish. The applier can never
-// claim them, so blocking on them would disable Room sign-in forever, including offline where the mirror is
-// otherwise perfectly serviceable.
+// An abandoned generation must not block: an interrupted resync leaves PENDING rows the applier can never
+// claim, and blocking on them would disable Room sign-in forever, including offline.
 func TestIntegration_Materialization_AbandonedGenerationDoesNotBlock(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -97,7 +78,6 @@ func TestIntegration_Materialization_AbandonedGenerationDoesNotBlock(t *testing.
 	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
-	// published_resync_generation stays where it is; the row belongs to a HIGHER, never-published generation.
 	var published int64
 	if err := p.QueryRow(context.Background(),
 		`SELECT published_resync_generation FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$1`,
@@ -113,7 +93,7 @@ func TestIntegration_Materialization_AbandonedGenerationDoesNotBlock(t *testing.
 	}
 }
 
-// A PUBLISHED-GENERATION PENDING ROW DOES BLOCK: the post-publish drain, which is the window measured live.
+// A pending row at the published generation does block (the post-publish drain).
 func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -128,8 +108,7 @@ func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing
 		s.iface).Scan(&published); err != nil {
 		t.Fatal(err)
 	}
-	// se_admission_coherent requires a RESYNC row to carry a generation > 0, so a fixture published at 0 has
-	// to advance first. This is what a completed sync leaves behind anyway.
+	// se_admission_coherent requires a RESYNC row to carry a generation > 0, so advance first.
 	if published == 0 {
 		if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
 			SET resync_generation_seq=1, published_resync_generation=1 WHERE pms_interface_id=$1`,
@@ -146,8 +125,7 @@ func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing
 	}
 }
 
-// TERMINAL ROWS NEVER BLOCK. APPLIED, MANUAL_REVIEW and SKIPPED_DUPLICATE are finished work; the 608
-// GO_UNKNOWN_STAY rows on the appliance are MANUAL_REVIEW and must not refuse a single guest.
+// Terminal rows (APPLIED, MANUAL_REVIEW, SKIPPED_DUPLICATE) never block.
 func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -159,9 +137,7 @@ func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 			setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 			setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 			admitPending(t, s, "LIVE", 0) // se_admission_coherent: LIVE rows carry generation 0
-			// Terminal states have their own guards: APPLIED demands a resolved same-interface stay_id and
-			// MANUAL_REVIEW a bounded review_code. Satisfying them is the point — these are real terminal
-			// rows, not a status string forced onto the column.
+			// APPLIED demands a resolved same-interface stay_id and MANUAL_REVIEW a bounded review_code.
 			if _, err := gexec(ctx, p, "stay",
 				`UPDATE iam_v2.stay_events
 				    SET processing_status=$2, processed_at=now(),
@@ -178,8 +154,7 @@ func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 	}
 }
 
-// THE OFFLINE BRANCH IS GATED TOO. Materialization is a property of the mirror, not of the transport: a
-// mirror the applier has not caught up with is incomplete, whether or not the socket is up.
+// The offline branch is gated too: materialization is a property of the mirror, not the transport.
 func TestIntegration_Materialization_OfflineBranchIsAlsoGated(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -199,11 +174,8 @@ func TestIntegration_Materialization_OfflineBranchIsAlsoGated(t *testing.T) {
 	}
 }
 
-// THE LINEARIZATION LOCK, ASSERTED AS AN ORDERING not as a hope.
-//
-// Session A takes the Stay lock then the runtime lock and holds them. Session B attempts an admission. B must
-// not commit until A releases — that is the entire safety property, and it is what makes the STABLE predicate
-// trustworthy at commit time rather than only at snapshot time.
+// Session A holds the Stay then runtime lock; B's admission must not commit until A releases. That makes the
+// STABLE predicate trustworthy at commit time.
 func TestIntegration_Materialization_RuntimeLockSerializesAdmission(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -224,8 +196,7 @@ func TestIntegration_Materialization_RuntimeLockSerializesAdmission(t *testing.T
 		t.Fatalf("runtime lock: %v", err)
 	}
 
-	// A second connection tries to take the same runtime row with NOWAIT: if the lock were not held, this
-	// would succeed and the test would be asserting nothing.
+	// NOWAIT on a second connection proves the lock is actually held.
 	p2 := pool(t)
 	defer p2.Close()
 	tx2, err := p2.Begin(ctx)
@@ -246,9 +217,7 @@ func TestIntegration_Materialization_RuntimeLockSerializesAdmission(t *testing.T
 	}
 }
 
-// NO NEW DEADLOCK CYCLE. Auth takes stays then runtime; admission takes runtime only and never takes a Stay
-// lock. Nothing acquires stays after runtime, so the two orders cannot form a cycle — run concurrently here
-// rather than argued, because "no cycle exists" is exactly the claim that is embarrassing to get wrong.
+// No deadlock cycle: auth takes stays then runtime; admission takes runtime only.
 func TestIntegration_Materialization_NoDeadlockUnderConcurrency(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -305,17 +274,9 @@ func TestIntegration_Materialization_NoDeadlockUnderConcurrency(t *testing.T) {
 	}
 }
 
-// LEAST PRIVILEGE. The readiness term reads iam_v2.stay_events from inside p3_feed_authorizes, and
-// internal/authctx locks iam_v2.pms_interface_runtime. Both must already be within svc_scd's existing
-// grants: this change must widen nothing.
-//
-// PRODUCTION TRUTH (converted when the suite moved onto the full Gate-P schema). The historical scratch
-// fixture asserted that svc_scd held direct SELECT on iam_v2.stay_events and iam_v2.pms_interface_runtime.
-// Production Gate-P (deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql) grants neither: the readiness term is
-// evaluated by iam_v2.p3_feed_authorizes and the linearization lock is taken by
-// iam_v2.lock_pms_interface_runtime (migration 0058), both SECURITY DEFINER functions owned by iam_v2_owner
-// with EXECUTE granted to svc_scd. That is strictly narrower than the old posture, so the assertion is now:
-// svc_scd can EXECUTE both definer functions, and holds NO direct privilege on either table.
+// Least privilege: svc_scd can EXECUTE the definer functions p3_feed_authorizes and
+// lock_pms_interface_runtime and holds no direct privilege on stay_events or pms_interface_runtime
+// (deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql).
 func TestIntegration_Materialization_NoPrivilegeWidening(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

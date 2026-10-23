@@ -1,16 +1,7 @@
 package main
 
-// RECORDING THE CONFIRMED KERNEL RESULT.
-//
-// A Session row that says `active` is a claim about the kernel: this guest is authorized and metered right
-// now. The grant path cannot honestly make that claim, because when it commits, no kernel work has happened
-// yet — the class does not exist and the guest is not authorized. So the grant commits the Session as
-// PENDING_ENFORCEMENT, and netd — the process that actually performs the enforcement, and the only one that
-// can see whether it took — promotes it to active through the controlled writer once BOTH halves are proven:
-// the accountable tc class is classifying, and the nft gate is authorizing.
-//
-// The promotion is idempotent. A lost acknowledgement, a retried plan, or a restart mid-flight must converge
-// on exactly one active Session rather than a second grant.
+// netd promotes a PENDING_ENFORCEMENT session to active only once both the tc class and the nft gate are proven;
+// the promotion is idempotent so retries and restarts converge on one active session.
 
 import (
 	"context"
@@ -23,22 +14,14 @@ import (
 
 // enforcementRecorder converges durable Session state with the confirmed kernel result.
 type enforcementRecorder interface {
-	// Activate promotes a Session to network-active. It is idempotent and must refuse a Session that has
-	// ended, so a late plan cannot resurrect access that was revoked.
+	// Activate is idempotent and must refuse an ended Session, so a late plan cannot resurrect revoked access.
 	Activate(ctx context.Context, sessionID, bridge string, minor int, epoch int64) (string, error)
-	// Ended records that enforcement for a Session is gone, so durable state stops claiming it is active.
 	Ended(ctx context.Context, sessionID, reason string) error
-	// Confirm re-reads AUTHORITATIVE durable state and answers whether the Session is active.
-	//
-	// It exists because a failed Activate is ambiguous in the one way that matters: the transaction may well
-	// have committed and only the acknowledgement been lost. Treating that as failure would tear down a guest
-	// whose state is already correct; treating it as success would leave an unproven claim standing. Asking
-	// the database is the only way to tell, and the promotion being idempotent is what makes asking safe.
+	// Confirm re-reads durable state; a failed Activate may have committed with only the acknowledgement lost.
 	Confirm(ctx context.Context, sessionID string) (bool, error)
 }
 
-// pgEnforcement is the database-backed recorder. Both operations go through controlled writers, so netd
-// cannot move Session state by raw UPDATE any more than anything else can.
+// pgEnforcement writes only through controlled writers, never raw UPDATE.
 type pgEnforcement struct {
 	pool interface {
 		QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -61,8 +44,7 @@ func (e *pgEnforcement) Ended(ctx context.Context, sessionID, reason string) err
 		e.tenant, e.site, sessionID, reason).Scan(&outcome)
 }
 
-// Confirm reads the Session's own durable state. It is a plain read of the authoritative row — not a second
-// attempt at the promotion — so it can answer "did the commit land?" without changing anything if it did not.
+// Confirm is a plain read, not a second promotion attempt.
 func (e *pgEnforcement) Confirm(ctx context.Context, sessionID string) (bool, error) {
 	var state string
 	var ended *time.Time
@@ -75,27 +57,6 @@ func (e *pgEnforcement) Confirm(ctx context.Context, sessionID string) (bool, er
 	return ended == nil && state == "active", nil
 }
 
-// proveActive promotes a Session to active after both enforcement halves are confirmed, and reports whether
-// durable ACTIVE is PROVEN. Caller holds p.mu.
-//
-// The earlier policy left the kernel enforcing whenever this write failed, reasoning that the kernel was right
-// and the bookkeeping merely behind. That reasoning has a hole with no floor under it: if the database stays
-// unreachable, "merely behind" never ends, and the outcome is a guest permanently on the internet whose
-// Session says PENDING_ENFORCEMENT — access that no durable record claims, that no audit can explain, and that
-// no revocation acting on Session state can ever remove.
-//
-// So the outcome is one of exactly three, and none of them is "leave it and hope":
-//
-//	PROVEN     — the promotion committed, or a re-read shows it had already committed. Full lease.
-//	UNPROVEN   — the outcome is genuinely unknown and still inside the activation grace. The guest keeps only
-//	             the SHORT provisional lease, so if nothing ever proves the promotion the kernel expires the
-//	             authorization on its own.
-//	FAILED     — the grace is spent. The caller fails closed: authorization revoked and proven gone first,
-//	             then the accountable class torn down.
-//
-// The re-read is what makes this safe rather than merely strict. A lost acknowledgement on a committed
-// transaction is indistinguishable from a failed one at the call site, and tearing a correct guest down over
-// it would be an outage manufactured out of a dropped packet.
 type activationOutcome int
 
 const (
@@ -104,13 +65,8 @@ const (
 	activationFailed
 )
 
-// quarantineBackoff is how long a session stays denied after an attempt exhausts the activation grace.
-//
-// It doubles, and it is capped. The doubling is what makes the outcome converge: a session whose activation
-// is permanently impossible (a mismatched accounting origin, a source that no longer describes it) spends a
-// rapidly shrinking fraction of its life admitted, instead of flapping online and offline at a fixed period
-// forever. The cap is so that a property whose database was down for an hour recovers within minutes of it
-// coming back rather than hours.
+// quarantineBackoff is how long a session stays denied after exhausting the activation grace. It doubles so a
+// permanently unactivatable session is admitted a shrinking fraction of the time, capped so recovery stays fast.
 func quarantineBackoff(strikes int) time.Duration {
 	if strikes < 1 {
 		strikes = 1
@@ -141,23 +97,17 @@ func (p *phase3Shaping) quarantineFor(key string) *quarantineState {
 // proveActive promotes a Session to active after both enforcement halves are confirmed, and reports whether
 // durable ACTIVE is PROVEN. Caller holds p.mu.
 //
-// The outcome is one of exactly three, and none of them is "leave it and hope":
+// Outcomes:
 //
-//	PROVEN     — the promotion committed, or a re-read shows it had already committed. Full lease.
-//	UNPROVEN   — genuinely unknown and still inside the activation grace. The guest keeps only the SHORT
-//	             provisional lease, so if nothing ever proves the promotion the kernel expires it unaided.
-//	FAILED     — the grace is spent. The caller fails closed: authorization revoked and proven gone first,
-//	             then the accountable class torn down, and the session quarantined with a doubling backoff.
+//	PROVEN   — committed, or a re-read shows it had. Full lease.
+//	UNPROVEN — unknown and inside the activation grace. Only the short provisional lease, which the kernel expires unaided.
+//	FAILED   — grace spent. The caller revokes authorization, then tears the class down; the session is quarantined.
 //
-// The re-read is what makes this safe rather than merely strict. A lost acknowledgement on a committed
-// transaction is indistinguishable from a failed one at the call site, and tearing a correct guest down over
-// it would be an outage manufactured out of a dropped packet.
-//
-// EVERY DURATION HERE IS BOOT-RELATIVE MONOTONIC TIME. nowBoot comes from /proc/uptime, not the wall clock,
-// so an NTP correction or a wrong RTC cannot lengthen the grace (see phase3_securitytime.go).
+// The re-read matters: a lost acknowledgement on a committed transaction looks like a failure at the call site.
+// Every duration is boot-relative monotonic time (/proc/uptime), so wall-clock changes cannot lengthen the grace.
 func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge string, minor int, epoch int64, nowBoot int64) (activationOutcome, string) {
 	if p.enforcement == nil {
-		return activationProven, "" // no recorder wired (unit tests drive the kernel halves directly)
+		return activationProven, ""
 	}
 	outcome, err := p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
 	if err == nil {
@@ -166,7 +116,7 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 			"minor", minor, "epoch", epoch, "outcome", outcome)
 		return activationProven, ""
 	}
-	// AMBIGUOUS. Ask authoritative state whether the promotion actually landed.
+	// Ambiguous: ask durable state whether the promotion landed.
 	active, cerr := p.enforcement.Confirm(ctx, sessionID)
 	if cerr == nil && active {
 		p.clearAttempt(key)
@@ -180,23 +130,20 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 
 	bootID, bootErr := p.currentBootID()
 	if bootErr != nil {
-		// The bound cannot be anchored to a boot, so it cannot be trusted after one. Treat it exactly as an
-		// exhausted grace rather than recording a deadline nothing can later interpret.
+		// A bound not anchored to a boot cannot be interpreted later; treat it as an exhausted grace.
 		q.Strikes++
 		q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
 		return activationFailed, problem +
 			" — and the boot identity is not trustworthy (" + bootErr.Error() + "); failing closed"
 	}
 	if q.BeganBootMs == 0 || q.crossBoot(bootID) {
-		// The first failure of this attempt. The write-ahead record already exists (admission could not have
-		// happened otherwise), so this only sharpens it with the moment the grace actually started.
+		// First failure of this attempt: the write-ahead record exists; this records when the grace started.
 		q.BootID = bootID
 		q.BeganBootMs = nowBoot
 		q.DeadlineBootMs = nowBoot + phase3ActivationGrace.Milliseconds()
 		q.BeganWall = p.wallStamp()
 		if perr := p.persistAttempts(); perr != nil {
-			// The bound could not be made durable. A restart would not know this grace had started, so the
-			// only safe answer is to stop granting it.
+			// A restart would not know this grace had started, so stop granting it.
 			q.Strikes++
 			q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
 			return activationFailed, problem +
@@ -207,26 +154,20 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	if nowBoot <= q.DeadlineBootMs {
 		return activationUnproven, problem + " — holding a provisional lease only"
 	}
-	// The grace is spent. Record the strike, deny re-admission for the backoff, and clear the start so the
-	// next permitted attempt gets its own full chance rather than an already-spent one.
+	// Grace spent: record the strike and clear the start so the next permitted attempt gets a full grace.
 	q.Strikes++
 	q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
 	q.BeganBootMs = 0
 	q.DeadlineBootMs = 0
 	if perr := p.persistAttempts(); perr != nil {
-		// Failing to persist a HARDER state is safe: the in-memory record already denies, and the older
-		// durable record still says an attempt is outstanding. It is reported, never swallowed.
+		// Safe: the in-memory record already denies and the older durable record still shows an outstanding attempt.
 		problem += " (the strike could not be persisted: " + perr.Error() + ")"
 	}
 	return activationFailed, problem + " — activation grace exhausted; failing closed and quarantining"
 }
 
-// clearAttempt removes a durable activation record once the Session is PROVEN active. Caller holds p.mu.
-//
-// A failure to clear is deliberately NOT an error the caller acts on. The record is a fail-closed marker: a
-// stale one is harmless to a session that can be proven active — the next pass proves it again and clears it
-// again — and protective for one that cannot. Leaving it behind is always the safe direction, so this reports
-// and moves on rather than turning a cleanup problem into a disconnection.
+// clearAttempt removes the durable activation record once the Session is proven active. Caller holds p.mu.
+// A failed clear is not acted on: a stale fail-closed marker is harmless to a provable session and protective otherwise.
 func (p *phase3Shaping) clearAttempt(key string) {
 	if _, held := p.quarantined[key]; !held {
 		return
@@ -247,18 +188,14 @@ func problemFor(sessionID string, err, cerr error) string {
 	return problem
 }
 
-// wallStamp is the AUDIT-ONLY timestamp recorded beside the monotonic readings.
+// wallStamp is audit-only; never used for bounds.
 func (p *phase3Shaping) wallStamp() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // markEnded converges durable state after access has been denied and torn down. Caller holds p.mu.
 //
-// The reason comes from the plan when the producer supplied one, because it knows things the applier cannot
-// see: a session torn down because a newer session took its address is a routine handover, not a teardown, and
-// the durable record should not call it one. Anything malformed falls back to the default rather than being
-// passed to the writer, which validates the code and would refuse the whole call.
-//
-// It reports whether durable state converged, so a teardown is only considered finished (and not repeated)
-// once the record says so.
+// The plan's reason is used when well-formed (the producer knows if it was a routine address handover); a
+// malformed one falls back to the default because the writer would refuse the whole call.
+// It reports whether durable state converged, so a teardown is repeated until the record says so.
 func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string) bool {
 	if p.enforcement == nil {
 		return true
@@ -267,7 +204,7 @@ func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string)
 		reason = "ENFORCEMENT_TORN_DOWN"
 	}
 	if err := p.enforcement.Ended(ctx, sessionID, reason); err != nil {
-		// Access is already denied at the packet layer, so this is a bookkeeping lag, not continued access.
+		// Access is already denied at the packet layer; this is only bookkeeping lag.
 		slog.Warn("phase3: session enforcement ended but durable state not converged",
 			"session", sessionID, "err", err)
 		return false
@@ -275,14 +212,10 @@ func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string)
 	return true
 }
 
-// endReasonPattern is the writer's own rule, restated here so a malformed code is replaced rather than sent:
-// iam_v2.end_session_enforcement refuses anything outside it, and a refused call would leave durable state
-// claiming a session is still live after its access was already removed from the kernel.
-// endReasonAddressNotOwned is recorded when DHCP says the session's address belongs to somebody else, or to
-// nobody. It is deliberately distinct from an ordinary teardown: an operator reading it needs to know the
-// address moved, not that enforcement failed.
+// endReasonAddressNotOwned is recorded when DHCP says the address belongs to somebody else; distinct from a failed teardown.
 const endReasonAddressNotOwned = "ADDRESS_NO_LONGER_OWNED"
 
+// endReasonPattern mirrors iam_v2.end_session_enforcement's own rule; a refused call would leave the session shown live.
 var endReasonPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 func validEndReason(s string) bool { return endReasonPattern.MatchString(s) }

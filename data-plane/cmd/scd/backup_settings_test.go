@@ -1,11 +1,5 @@
 package main
 
-// RETENTION IS A SETTING, AND A SETTING NEEDS BOUNDS THAT MEAN SOMETHING.
-//
-// These are not range checks for their own sake. Each lower bound is the point below which the appliance
-// loses its own ability to recover, and the cross-field rule is the one an operator is most likely to get
-// wrong in a way that looks stricter and is actually broken.
-
 import (
 	"os"
 	"path/filepath"
@@ -13,9 +7,7 @@ import (
 )
 
 func TestRetentionDefaultsMatchTheSweepsOwn(t *testing.T) {
-	// The screen must show what is IN FORCE. The sweep falls back to these exact numbers when the file is
-	// absent, which is the state of a freshly onboarded appliance, so the schema has to agree with it or the
-	// operator reads values the appliance is not using.
+	// The sweep falls back to these numbers when the file is absent, so the schema must agree.
 	want := map[string]int{
 		"KEEP_BINARIES": 5, "KEEP_RELEASES": 5, "KEEP_CONFIG": 3, "DISK_WARN": 80, "DISK_CRIT": 90,
 		"RESTORE_TEST_MONTHS": 6, "SET_ASIDE_DAYS": 14, "BACKUP_ENABLED": 0, "BACKUP_HOUR": 2, "BACKUP_EVERY_DAYS": 1,
@@ -50,13 +42,11 @@ func TestRecoveryFloorsCannotBeSetToZero(t *testing.T) {
 	if byKey["BACKUP_KEEP"].Min < 1 {
 		t.Error("backups may be set to zero")
 	}
-	// the backups a restore, a migration or a deployment take first: at least two are always kept
 	if byKey["SAFETY_BACKUP_KEEP"].Min < 2 {
 		t.Error("the safety backups floor may be set below two")
 	}
 }
 
-// SCHEDULED BACKUPS ARE OFF UNTIL AN ADMINISTRATOR SWITCHES THEM ON, and the retention is one count with a safe ceiling: no age rule.
 func TestScheduledBackupsAreOffByDefaultAndRetentionIsOneCount(t *testing.T) {
 	byKey := map[string]retentionSetting{}
 	for _, s := range retentionSchema {
@@ -79,8 +69,6 @@ func TestScheduledBackupsAreOffByDefaultAndRetentionIsOneCount(t *testing.T) {
 }
 
 func TestReadRetentionUsesDefaultsWhenTheFileIsAbsent(t *testing.T) {
-	// The appliance this was written for had no config file at all. Absent must mean "the defaults are in
-	// force", not "nothing is in force".
 	got := readRetention()
 	if len(got) != len(retentionSchema) {
 		t.Fatalf("read %d settings, want %d", len(got), len(retentionSchema))
@@ -93,8 +81,7 @@ func TestReadRetentionUsesDefaultsWhenTheFileIsAbsent(t *testing.T) {
 }
 
 func TestTimeOfDayIsBounded(t *testing.T) {
-	// The schedule is interpolated into a systemd OnCalendar line. A value that is not a time of day is a
-	// value that ends up in a unit file.
+	// The schedule is interpolated into a systemd OnCalendar line; reject anything not a time of day.
 	for _, bad := range []string{"24:00", "3:30", "03:60", "", "03:30:00", "*-*-* 03:30", "03:30; rm -rf /"} {
 		if reTimeOfDay.MatchString(bad) {
 			t.Errorf("%q was accepted as a time of day", bad)
@@ -108,8 +95,7 @@ func TestTimeOfDayIsBounded(t *testing.T) {
 }
 
 func TestConfLineParsingIgnoresWhatItShould(t *testing.T) {
-	// The file is shell-sourced by the sweep, so it may legitimately contain comments and quoting. Reading it
-	// back must agree with what the sweep would see.
+	// The file is shell-sourced, so it may contain comments and quoting.
 	dir := t.TempDir()
 	f := filepath.Join(dir, "conf")
 	if err := os.WriteFile(f, []byte(

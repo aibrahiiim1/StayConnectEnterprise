@@ -7,14 +7,9 @@ import (
 	"time"
 )
 
-// ----------------------------------------------------------------------------
-// Tier-1: per-kind field-map defaults. The loader merges these with the
-// tenant-supplied overrides (Tier-2) before handing the result to the
-// provider via Configure.
-// ----------------------------------------------------------------------------
+// Tier-1 per-kind field-map defaults, merged with tenant overrides (Tier-2) before Configure.
 
-// Canonical field names every provider should be able to populate. Tier-2
-// overrides use these as the LHS keys.
+// Canonical field names; Tier-2 overrides use them as the left-hand keys.
 const (
 	FRoomNumber        = "room_number"
 	FFirstName         = "first_name"
@@ -27,7 +22,6 @@ const (
 )
 
 // DefaultFIASFieldMap maps canonical names to FIAS Field-IDs (Appendix C).
-// Used by Protel/Opera/Suite8/Fidelio when no per-tenant overrides exist.
 func DefaultFIASFieldMap() FieldMap {
 	return FieldMap{
 		FRoomNumber:        "RN", // Room number
@@ -39,8 +33,7 @@ func DefaultFIASFieldMap() FieldMap {
 	}
 }
 
-// DefaultRESTFieldMap is the placeholder for Mews/Apaleo etc. Real REST
-// providers will override with provider-specific dotted paths in 4.5.x.
+// DefaultRESTFieldMap is a placeholder; REST providers override with provider-specific dotted paths.
 func DefaultRESTFieldMap() FieldMap {
 	return FieldMap{
 		FRoomNumber:        "room.number",
@@ -53,9 +46,7 @@ func DefaultRESTFieldMap() FieldMap {
 	}
 }
 
-// MergeFieldMap returns defaults overlaid with non-empty overrides. The
-// loader calls this before Configure so providers always receive a fully
-// populated map and never have to default missing keys themselves.
+// MergeFieldMap: providers always receive a fully populated map.
 func MergeFieldMap(defaults, override FieldMap) FieldMap {
 	out := make(FieldMap, len(defaults)+len(override))
 	for k, v := range defaults {
@@ -69,26 +60,18 @@ func MergeFieldMap(defaults, override FieldMap) FieldMap {
 	return out
 }
 
-// ----------------------------------------------------------------------------
-// Normalization application
-// ----------------------------------------------------------------------------
-
-// commonTitles is a small set of name prefixes we strip when
-// NameStripTitles is enabled. Lowercased + trailing dot removed for matching.
+// commonTitles are the prefixes stripped when NameStripTitles is on (lowercased, trailing dot removed).
 var commonTitles = map[string]struct{}{
 	"mr": {}, "mrs": {}, "ms": {}, "miss": {}, "mx": {}, "dr": {}, "prof": {},
 	"sir": {}, "madam": {}, "lord": {}, "lady": {},
 }
 
-// ApplyRoomFormat applies a Sprintf format ("%03d", "Suite-%s", ...) to a
-// room number AFTER NormalizeRoom, when format is non-empty. Numeric formats
-// (%d) only fire when the room is purely digits; otherwise the input is
-// returned unchanged so alphanumeric room ids ("A12") pass through.
+// ApplyRoomFormat applies a Sprintf format after NormalizeRoom; numeric formats fire only for all-digit rooms so ids
+// like "A12" pass through.
 func ApplyRoomFormat(format, room string) string {
 	if format == "" || room == "" {
 		return room
 	}
-	// %d / %03d / %05d / %-d → numeric format, only valid for all-digit rooms.
 	if strings.ContainsAny(format, "d") && allDigits(room) {
 		n, err := strconv.Atoi(room)
 		if err == nil {
@@ -101,8 +84,6 @@ func ApplyRoomFormat(format, room string) string {
 	return room
 }
 
-// ApplyNameNormalization optionally strips common titles before the lower /
-// diacritic-fold pass NormalizeName already does.
 func ApplyNameNormalization(n Normalization, name string) string {
 	if n.NameStripTitles {
 		name = stripTitle(name)
@@ -110,8 +91,7 @@ func ApplyNameNormalization(n Normalization, name string) string {
 	return NormalizeName(name)
 }
 
-// ApplyReservationCase honors n.ReservationCase ("upper"|"lower"|"preserve").
-// Default (empty) = upper, matching NormalizeReservation.
+// ReservationCase is upper|lower|preserve; empty means upper, matching NormalizeReservation.
 func ApplyReservationCase(n Normalization, res string) string {
 	res = strings.TrimSpace(res)
 	switch n.ReservationCase {
@@ -145,13 +125,7 @@ func allDigits(s string) bool {
 	return s != ""
 }
 
-// ----------------------------------------------------------------------------
-// Stay-policy application
-// ----------------------------------------------------------------------------
-
-// EffectiveWindow expands the PMS-reported [check_in, check_out) by the
-// configured early/late grace minutes. Either bound can be zero (unknown);
-// grace is only applied when the bound is non-zero.
+// EffectiveWindow widens [check_in, check_out) by the grace minutes; grace applies only to non-zero (known) bounds.
 func EffectiveWindow(p StayPolicy, checkIn, checkOut time.Time) (time.Time, time.Time) {
 	in := checkIn
 	if !in.IsZero() && p.EarlyCheckinMinutes > 0 {
@@ -164,8 +138,7 @@ func EffectiveWindow(p StayPolicy, checkIn, checkOut time.Time) (time.Time, time
 	return in, out
 }
 
-// MinRemainingOK returns false when the stay is about to end too soon to
-// hand out a meaningful session. Defaults to 60s when not configured.
+// MinRemainingOK is false when the stay ends too soon for a meaningful session (default 60s).
 func MinRemainingOK(p StayPolicy, checkOut time.Time, now time.Time) bool {
 	if checkOut.IsZero() {
 		return true

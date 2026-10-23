@@ -1,19 +1,7 @@
 "use client";
 
-// ONE PMS CONNECTION, IN FULL.
-//
-// Opened from its card, over the list, so an operator can move between connections without losing their place.
-// Six tabs, each answering one question:
-//
-//   Overview        is it working, and if not, which of the checks is failing and what is waiting?
-//   Configuration   what is live, what is drafted, and how the link recovers from a drop;
-//   Credentials     (only for a system that signs in with a key) is one stored — never what it is;
-//   Guest networks  which Wi-Fi networks resolve their guests against it;
-//   History         every saved version, where it came from, and putting an older one back;
-//   Actions         activate / pause / wind down, test the connection, reload the guest list.
-//
-// Everything that changes what happens to guests — publishing, activating, pausing, storing a credential,
-// testing, reloading the guest list — asks for the operator's own password, because edged requires it.
+// Everything that changes what happens to guests (publish, activate, pause, store a credential, test, reload
+// the guest list) asks for the operator's own password, because edged requires it.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -167,8 +155,6 @@ export function ConnectionSheet({
   );
 }
 
-// ---------------------------------------------------------------- Overview
-
 function OverviewTab({
   iface, health, provider, routes,
 }: {
@@ -321,8 +307,6 @@ function OverviewTab({
   );
 }
 
-// ---------------------------------------------------------------- Configuration
-
 function PublishDialog({
   iface, target, onClose, onDone,
 }: {
@@ -335,9 +319,8 @@ function PublishDialog({
   const [reason, setReason] = useState(PUBLISH_REASONS[0].value);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
-  // ROOM CHARGE WOULD BE SWITCHED OFF (audit H-3). edged refuses, with room_charge_reset_unconfirmed, to put
-  // live a version without the posting target the live version carries -- room charge would stop for this
-  // connection until it is onboarded again. The operator is told and may confirm.
+  // edged refuses (room_charge_reset_unconfirmed) to put live a version without the live version's posting
+  // target, since room charge would stop until onboarded again; the operator may confirm.
   const [resetWarning, setResetWarning] = useState<string | null>(null);
   const [resetAck, setResetAck] = useState(false);
   const older = !!target && !!iface.current_revision_no && target.revision_no < iface.current_revision_no;
@@ -373,8 +356,7 @@ function PublishDialog({
         try {
           await api.post(`/pms-interfaces/${iface.id}/publish`, {
             revision_id: target.id,
-            // The version this operator believed was live. If it changed while the dialog was open, edged refuses
-            // rather than silently reverting whoever published in between.
+            // If the live version changed meanwhile, edged refuses rather than reverting someone else's publish.
             expected_revision_id: iface.current_revision_id ?? "",
             reason_code: reason,
             password,
@@ -514,7 +496,7 @@ function RevisionDialog({
   onOpenChange: (v: boolean) => void;
   iface: PmsConnection;
   provider: PmsProvider;
-  /** The configuration to start from — the live one — so Edit means "change what is there". */
+  /** The live configuration, so Edit changes what is there. */
   from: PmsRevision | null;
   onDone: () => void | Promise<void>;
 }) {
@@ -566,8 +548,7 @@ function RevisionDialog({
   );
 }
 
-// WHAT ACTUALLY CHANGED between a version and the one before it — derived only from stored values. Where two
-// versions carry identical settings this says so, and names any derived state that moved instead.
+// Derived only from stored values; identical settings are said so, naming any derived state that moved.
 function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRevision; provider: PmsProvider }) {
   if (!prev) return <p className="text-sm text-muted-foreground">The first saved configuration.</p>;
   const a = configRows(provider, prev);
@@ -615,8 +596,7 @@ function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRe
 
 function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable?: boolean }) {
   const when = rev.published_at ?? rev.authored_at;
-  // NEVER INVENTED, and never conflated: "nothing was recorded" and "the record could not be read" look the same
-  // in the data and mean opposite things.
+  // "Nothing was recorded" and "the record could not be read" look the same in the data but mean opposite things.
   if (unavailable) {
     return (
       <p className="text-xs text-warning-subtle-foreground">
@@ -639,7 +619,6 @@ function VersionProvenance({ rev, unavailable }: { rev: PmsRevision; unavailable
   );
 }
 
-// CONNECTION RECOVERY — how the link retries after a drop, for THIS connection only.
 const CONN_FIELDS: {
   key: Extract<keyof PmsConnectionSettings, string>;
   label: string;
@@ -686,7 +665,7 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
     try {
       setSettings(await api.get<PmsConnectionSettings>(`/pms-interfaces/${id}/connection-settings`));
     } catch {
-      /* not every connection exposes recovery settings; the section is simply not shown */
+      /* not every connection exposes recovery settings */
     }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
@@ -765,8 +744,6 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
     </SheetSection>
   );
 }
-
-// ---------------------------------------------------------------- Credentials
 
 function CredentialsTab({
   iface, provider, writable, onChanged,
@@ -855,8 +832,6 @@ function CredentialsTab({
   );
 }
 
-// ---------------------------------------------------------------- Guest networks
-
 function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
   return (
     <SheetSection
@@ -886,8 +861,6 @@ function NetworksTab({ routes }: { routes: PmsGuestNetworkRoute[] | null }) {
     </SheetSection>
   );
 }
-
-// ---------------------------------------------------------------- History
 
 function HistoryTab({
   iface, provider, revisions, provenance, writable, onChanged,
@@ -947,8 +920,6 @@ function HistoryTab({
     </SheetSection>
   );
 }
-
-// ---------------------------------------------------------------- Actions
 
 type LifecycleMove = {
   to: "ACTIVE" | "AUTH_DISABLED" | "DRAINING";

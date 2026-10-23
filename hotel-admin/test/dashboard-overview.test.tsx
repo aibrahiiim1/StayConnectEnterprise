@@ -3,12 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from "@testing-library/rea
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// THE OVERVIEW: every block says why it is empty instead of drawing a zero, the attention list routes to the
-// screen that fixes each item, the range selector actually asks for the range, and nothing claims a figure that
-// is not recorded anywhere.
-
 const get = vi.fn();
-// A site licensed for every module (the scenarios below are a hotel with every module).
 vi.mock("@/lib/capabilities", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/capabilities")>();
   const on = { deployed: true, licensed: true, enabled: true, ready: true, effective: true, manageable: true };
@@ -157,7 +152,6 @@ describe("the overview", () => {
     expect(screen.getByText("Name or reservation did not match")).toBeInTheDocument();
     expect(screen.getByText(/median 140 ms/)).toBeInTheDocument();
     expect(screen.getByTestId("resources")).toBeInTheDocument();
-    // The PMS card names the system, not the whole Hotel module (docs/PRODUCT_TERMINOLOGY.md).
     expect(screen.getByText("Property Management System")).toBeInTheDocument();
     expect(screen.getByText("Client networks")).toBeInTheDocument();
   });
@@ -232,19 +226,15 @@ describe("unavailable blocks", () => {
     const { container } = render(<DashboardPage />);
     await screen.findAllByText(/traffic history for this range is too large/);
     const body = container.textContent ?? "";
-    // No byte figure, and no zero standing in for an unknown count.
     expect(body).not.toMatch(/\b0 B\b/);
     expect(body).not.toMatch(/\d+(\.\d+)? (KB|MB|GB|TB)\b/);
     expect(body).not.toContain("0 different devices");
-    // The four headline tiles show a dash, not a number.
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
     expect(screen.queryByTestId("resources")).toBeNull();
     expect(screen.queryByTestId("services-grid")).toBeNull();
   });
 
   it("survives the generic list envelope the browser specs answer every request with", async () => {
-    // e2e/sidebar-collapse and e2e/sweep-guest-accounts-and-nav mock every edged path as {data:[],meta}.
-    // The page must render its unavailable surfaces there, not throw a client-side exception.
     get.mockImplementation(() => Promise.resolve({ data: [], meta: { has_more: false } }));
     render(<DashboardPage />);
     expect((await screen.findAllByTestId("block-unavailable")).length).toBeGreaterThan(3);
@@ -265,7 +255,6 @@ describe("the source", () => {
   const src = read("app/(app)/dashboard/page.tsx") + read("app/(app)/dashboard/overview-blocks.tsx") + read("lib/api/dashboard.ts");
 
   it("no longer claims the usage records cannot be read", () => {
-    // They can (edged was granted SELECT on them), and the traffic chart is built from them.
     expect(src).not.toMatch(/not permitted to read/i);
     expect(src).not.toMatch(/cannot read (the )?(usage|accounting)/i);
     expect(src).not.toContain("Why not data per hour?");
@@ -277,8 +266,6 @@ describe("the source", () => {
 });
 
 describe("PMS connections on the overview (found live on PRE-LIVE)", () => {
-  // A connection that is switched off and never had a configuration published is not connected to any PMS.
-  // Listed by the name a setup script gave it, it read as a second PMS that was failing.
   it("counts a never-configured connection instead of listing it", async () => {
     route(() => {
       const s = healthy();

@@ -1,11 +1,7 @@
 package main
 
-// WHAT A RESTORE LEAVES BEHIND (GDPR final mission).
-//
-// A restore keeps the database it replaced (<db>_before_<stamp>) so it can be undone. That copy still holds everything the
-// restored database was cleaned of -- guests erased since, expired records -- and nothing ever removed the LAST one. It is
-// removed here, hourly, once it is older than the SET_ASIDE_DAYS setting, never while a restore is running. And an
-// interrupted write leaves a *.partial file in the backup folders; one older than a day is a dead write, and it is removed.
+// A restore keeps the database it replaced (<db>_before_<stamp>) for undo; it is removed hourly once older than SET_ASIDE_DAYS, never while a restore runs.
+// *.partial files in the backup folders older than a day are dead writes and removed too.
 
 import (
 	"context"
@@ -34,11 +30,10 @@ func asideExpired(name string, now time.Time, days int) bool {
 
 var reStaging = regexp.MustCompile(`^restore_(\d{8}t\d{6}z)$`)
 
-// stagingOrphanAfter is how long a restore's staging database may exist before it is called the remains of a restore that was
-// interrupted. A restore runs minutes (its longest step, retention, is bounded to an hour); six hours is a dead one.
+// How long a staging database may exist before it counts as the remains of an interrupted restore (restores take minutes; the longest step is bounded to an hour).
 const stagingOrphanAfter = 6 * time.Hour
 
-// stagingOrphaned says whether a restore staging database is the remains of an interrupted restore. A name that is not exactly ours is never orphaned.
+// A name that is not exactly ours is never orphaned.
 func stagingOrphaned(name string, now time.Time) bool {
 	m := reStaging.FindStringSubmatch(name)
 	if m == nil {
@@ -63,12 +58,9 @@ func setAsideDays() int {
 	return 14
 }
 
-// sweepOrphanStaging removes the staging database of a restore that was interrupted -- a FULL COPY of the backup's personal data, no
-// retention applied, serving nobody. It does NOT wait for the maintenance flag to clear: a process killed mid-restore leaves that flag
-// behind too, and the staging copy must go all the same. It is safe at any time because (a) a running restore is bounded far below the
-// age at which a staging database is called dead (restoreOverallDeadline against stagingOrphanAfter), and (b) it is only done while the
-// live database exists: between the two renames of the swap the staging database IS the restored data, and nothing is removed then.
-// It returns the names still present that may belong to a running restore.
+// Removes the staging database of an interrupted restore: a FULL COPY of personal data with no retention applied. It does not wait for the
+// maintenance flag (a killed restore leaves it too). Safe at any time because a running restore is bounded far below stagingOrphanAfter and it
+// only runs while the live database exists: between the swap renames staging IS the restored data. Returns names that may belong to a running restore.
 func sweepOrphanStaging(ctx context.Context) (remaining []string, liveExists bool, state string) {
 	state, err := execPsql(ctx, "postgres", "SELECT datname FROM pg_database WHERE datname = '"+pgDatabase+`' OR datname LIKE 'restore\_%' OR datname LIKE '`+pgDatabase+`\_before\_%';`)
 	if err != nil {
@@ -95,7 +87,6 @@ func sweepOrphanStaging(ctx context.Context) (remaining []string, liveExists boo
 	return remaining, liveExists, state
 }
 
-// sweepSetAside drops the set-aside databases that have expired. It returns how many were dropped.
 func (s *server) sweepSetAside(ctx context.Context) int {
 	remaining, live, state := sweepOrphanStaging(ctx)
 	if readMaintenance().Active {
@@ -130,8 +121,7 @@ func (s *server) sweepSetAside(ctx context.Context) int {
 	return dropped
 }
 
-// sweepPartials removes *.partial files older than maxAge from dir. The name is the contract: a writer renames its
-// .partial file away on success, so one that is old is the remains of a write that never finished.
+// The name is the contract: a writer renames its .partial away on success, so an old one is a write that never finished.
 func sweepPartials(dir string, now time.Time, maxAge time.Duration) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -153,13 +143,11 @@ func sweepPartials(dir string, now time.Time, maxAge time.Duration) int {
 	return n
 }
 
-// leftoverDirs are the folders an interrupted write can leave a .partial file in. scdBackupDir is where a crashed backup leaves its
-// full-size encrypted dump and configuration partials; the others are those of the earlier backups, the compliance archive and the ledger.
+// Folders an interrupted write can leave a .partial in: scdBackupDir (crashed backup dump and config partials) and those of earlier backups, the compliance archive and the ledger.
 func leftoverDirs() []string {
 	return []string{scdBackupDir, nightlyBackupDir, complianceArchiveDir, filepath.Dir(ledgerLocalPath)}
 }
 
-// runLeftovers is the hourly sweep of what a restore or an interrupted write leaves behind.
 func (s *server) runLeftovers(ctx context.Context) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

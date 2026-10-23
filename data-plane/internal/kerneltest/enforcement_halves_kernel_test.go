@@ -2,19 +2,8 @@
 
 package kerneltest
 
-// BOTH HALVES, ON ONE GUEST, WITH REAL PACKETS.
-//
-// The applier calls a Session enforced only when the nft gate is authorizing it AND an accountable tc class is
-// classifying its traffic. Every other suite proves that arrangement against fakes, which is the right place
-// to prove the ORDERING and the failure handling — but a fake cannot answer the two questions a guest and an
-// invoice actually depend on:
-//
-//	is this device on the internet?
-//	is what it sends being counted, on ITS class rather than the bridge's default?
-//
-// The appliance answered "yes" to neither for two real Room Logins while every proxy for those answers looked
-// correct. So this test asks the kernel, with traffic: authorize, meter, send, read the counters back, revoke,
-// and confirm the internet goes away.
+// Both halves on one guest with real packets: a Session is enforced only when the nft gate authorizes it and an
+// accountable tc class classifies it; only the kernel can show the guest is online and metered on its own class.
 
 import (
 	"context"
@@ -25,8 +14,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
-// TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted drives the two surfaces netd drives, in netd's order —
-// accountable class first, packet authorization second — and then measures the result in packets and bytes.
+// Drives netd's two surfaces in netd's order (class first, authorization second) and measures packets and bytes.
 func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 	if !ifbOK {
 		t.Skip("KG_IFB=0: ifb unavailable on this runner, so the accountable half cannot be driven; " +
@@ -39,14 +27,12 @@ func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 		_ = sh.AbortSession(context.Background(), guestIface, ip)
 	})
 
-	// A guest with neither half has no internet. Establishing that first is what makes the rest evidence
-	// rather than coincidence.
 	if reaches(t) {
 		t.Fatal("the guest reached the WAN before anything authorized them")
 	}
 
-	// HALF ONE: the accountable class, staged exactly as netd stages it. Prepared, then activated — a class
-	// that classifies before it is accountable is the window this ordering exists to close.
+	// Half one: the accountable class, prepared then activated; classifying before it is accountable is the window
+	// this order closes.
 	if err := sh.EnsureBridgeInfra(ctx(t), guestIface); err != nil {
 		t.Fatalf("bridge infra: %v", err)
 	}
@@ -56,8 +42,7 @@ func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 	if err := sh.ActivateSession(ctx(t), guestIface, ip); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
-	// Metered but not admitted is NOT enforcement, and it is the state a guest sees as "connected, no
-	// internet". It must still be offline here.
+	// Metered but not admitted is not enforcement and must still be offline.
 	if reaches(t) {
 		t.Fatal("a guest with a tc class but no nft authorization reached the WAN: the gate is not gating")
 	}
@@ -74,7 +59,6 @@ func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 		t.Fatalf("the accountable class was not installed: %v", before)
 	}
 
-	// HALF TWO: packet authorization, leased as netd leases it.
 	if err := gate.LeaseIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, 60*time.Second); err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
@@ -82,10 +66,7 @@ func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 		t.Fatal("a guest with both halves in force cannot reach the WAN")
 	}
 
-	// ...and the traffic lands on THIS guest's class. A bridge default class would carry the packets just as
-	// happily and count them for nobody, which is how usage silently becomes unattributable. The traffic is
-	// generated the same way the rest of this suite generates it, so a runner where ICMP behaves oddly fails
-	// every counter test rather than only this one.
+	// Traffic must land on this guest's class; a bridge default class would carry it and count it for nobody.
 	for i := 0; i < 3; i++ {
 		if !reaches(t) {
 			t.Fatal("the authorized guest stopped reaching the WAN while sending its measured traffic")
@@ -103,8 +84,7 @@ func TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted(t *testing.T) {
 	grew := after[minor].Bytes - before[minor].Bytes
 	t.Logf("accountable class %d counted %d bytes of guest traffic", minor, grew)
 
-	// REVOKING ONE HALF ENDS ACCESS. The class stays — teardown is a separate step — and that must not keep
-	// the guest online for a moment longer.
+	// Revoking one half ends access even though the class stays.
 	if err := gate.DenyIn(ctx(t), nft.Phase3AuthV4, guestIface, ip); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}

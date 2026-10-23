@@ -7,14 +7,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 )
 
-// These tests assert the production default (no build tags). Under `-tags
-// devlicense` buildprofile.Production is false and they are skipped, since the
-// dev build intentionally permits permissive mode.
+// Asserts the production default; skipped under -tags devlicense, which intentionally permits permissive mode.
 func TestProductionRequiresLicenseAndBlocksEnvBypass(t *testing.T) {
 	if !buildprofile.Production {
 		t.Skip("dev build: permissive allowed")
 	}
-	t.Setenv("SCD_LICENSE_REQUIRED", "false") // attempt to disable enforcement
+	t.Setenv("SCD_LICENSE_REQUIRED", "false")
 
 	required, attempt := resolveLicenseRequired(false)
 	if !required {
@@ -29,7 +27,6 @@ func TestProductionCleanNoAttempt(t *testing.T) {
 	if !buildprofile.Production {
 		t.Skip("dev build")
 	}
-	// No env, no dev-mode marker → required, no attempt.
 	os.Unsetenv("SCD_LICENSE_REQUIRED")
 	required, attempt := resolveLicenseRequired(false)
 	if !required {

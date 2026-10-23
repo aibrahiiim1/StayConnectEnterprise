@@ -8,8 +8,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// A factory-clean appliance (no assignment, no database rows) holds no customer, so its registration omits
-// holds_customer_id and Central may activate it for anyone.
 func TestHeldCustomerFactoryCleanHoldsNone(t *testing.T) {
 	got, err := heldCustomerID(context.Background(), nil, t.TempDir())
 	if err != nil || got != "" {
@@ -17,8 +15,6 @@ func TestHeldCustomerFactoryCleanHoldsNone(t *testing.T) {
 	}
 }
 
-// An identity reset wipes the identity but may leave the assignment directory: a granting or a terminal
-// assignment still names the customer this box held.
 func TestHeldCustomerFromAssignmentOnDisk(t *testing.T) {
 	for _, state := range []string{assignment.StateAssigned, assignment.StateDecommissioned} {
 		dir := t.TempDir()

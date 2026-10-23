@@ -1,16 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// Browser-level E2E for the Phase-5 (DARK) cross-PMS transfer screen. edged is fully mocked at the network
-// layer — no real backend, no database, no PMS.
-//
-// The properties only a browser can settle:
-//
-//   * the review signals are presented as signals. There is no control next to them that performs anything,
-//     so an operator cannot act on an inference nobody made.
-//   * the confirm controls DO NOT EXIST until a preview has succeeded. A transfer that could be submitted
-//     without looking would be a transfer performed blind.
-//   * a blocker is plain language, before any password is typed.
+// Confirm controls appear only after preview so ambiguous signals cannot trigger blind transfers.
 
 type Mutations = { path: string; body: any }[];
 
@@ -72,14 +63,10 @@ test.describe("the cross-PMS transfer screen", () => {
     await page.goto("/stay-transfers");
     await expect(page.getByRole("heading", { name: /cross-pms transfer/i })).toBeVisible();
 
-    // The API's own words, rendered rather than paraphrased.
     await expect(page.getByTestId("signal-notice")).toContainText("not transfers");
     await expect(page.getByTestId("signal-notice")).toContainText("never evidence");
-    // Shown in the hotel's words ("More than one match"), not as the API's code.
     await expect(page.getByRole("cell", { name: "More than one match" })).toBeVisible();
 
-    // No control INSIDE the signals section performs anything. Counting the page's buttons would count the
-    // navigation too, and the claim is about this section: an operator cannot act from a signal.
     await expect(page.getByTestId("review-signals").getByRole("button")).toHaveCount(0);
     await expect(page.getByTestId("review-signals").getByRole("link")).toHaveCount(0);
   });
@@ -98,8 +85,6 @@ test.describe("the cross-PMS transfer screen", () => {
 
     await expect(page.getByTestId("preview-summary")).toContainText("RES-A");
     await expect(page.getByTestId("preview-summary")).toContainText("RES-B");
-    // The confirmation opens only from a successful preview, and it says what moves and what ends in the
-    // same place the operator confirms it.
     await page.getByRole("button", { name: /transfer access…/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(/2 devices and 1 live session move to the new stay/i)).toBeVisible();
@@ -131,7 +116,6 @@ test.describe("the cross-PMS transfer screen", () => {
 
     await expect(page.getByText(/cannot be performed/i)).toBeVisible();
     await expect(page.getByText(/room move, not a transfer/i)).toBeVisible();
-    // ...and there is nothing to submit.
     await expect(page.getByRole("button", { name: /transfer access/i })).toHaveCount(0);
     await expect(page.getByLabel(/your password/i)).toHaveCount(0);
     expect(mutations.filter((m) => m.path.endsWith("/execute"))).toHaveLength(0);
@@ -141,7 +125,6 @@ test.describe("the cross-PMS transfer screen", () => {
     await installBackend(page, [], GOOD_PREVIEW, ["site_viewer"]);
     await page.goto("/stay-transfers");
     await expect(page.getByRole("cell", { name: "More than one match" })).toBeVisible();
-    // The UI never shows a control the role cannot use: no preview, no transfer, no password field.
     await expect(page.getByRole("button", { name: /preview/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /transfer access/i })).toHaveCount(0);
   });

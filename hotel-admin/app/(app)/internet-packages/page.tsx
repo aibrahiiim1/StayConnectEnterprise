@@ -1,14 +1,5 @@
 "use client";
 
-// INTERNET PACKAGES — what a guest is offered, and what those offers actually did.
-//
-// Two views of one domain. PACKAGES is the catalogue: what each package gives, how many guests are on it now,
-// and Add / Edit / Disable / Delete… from the package's record. GUEST ACTIVITY is the operational picture: every
-// grant in a period — whether it came from the portal, a voucher, a guest account, a grace period or staff —
-// with what it used, and the stay's own usage one click away.
-//
-// See packages-tab.tsx and activity-tab.tsx for the reasoning each view carries.
-
 import { useCallback, useEffect, useState } from "react";
 import { Package, Plus } from "lucide-react";
 import { api, ApiError, Whoami } from "@/lib/api";
@@ -44,8 +35,7 @@ export default function InternetPackagesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [addRequest, setAddRequest] = useState(0);
   const { disabled, guard } = useDisabled();
-  // Fails closed while it loads: the Add / Edit / Disable / Delete controls appear only for a role the server
-  // will accept them from. edged enforces the real gate either way.
+  // Fails closed while loading; edged enforces the real gate either way.
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));

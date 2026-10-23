@@ -1,15 +1,7 @@
 "use client";
 
-// CODE REQUESTS — staff help for a client who asked for a sign-in code by SMS or WhatsApp (contract §6.7,
-// 2026-10-12).
-//
-// The list: recent code requests with the device that asked and the code's state. One action, behind the
-// operator's password and a reason, audited by edged:
-//   * Show code (code-reveal WRITE) — reads a LIVE code so the desk can tell it to the client. The code works only
-//     on the device that asked, once, until it expires. It is shown once in this dialog and never stored here.
-//
-// The temporary internet that accompanied an EMAIL code, and "Let them try again" that cleared it, are removed with
-// the email code (Email + Password self-service contract §1). Historical email rows may still be listed.
+// Revealing a live code requires password and reason; the code works once on the requesting device only.
+// The revealed code stays in this dialog's memory and is never stored here.
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";

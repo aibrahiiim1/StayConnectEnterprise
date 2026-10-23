@@ -1,12 +1,4 @@
-// THE INVARIANTS THE REBUILT DESIGN SYSTEM DEPENDS ON, ASSERTED AGAINST THE SOURCE.
-//
-// Every rule here was broken in the admin before this delivery, and every one of them is invisible in a rendered
-// component test: a page that sets its own `p-6` looks fine on its own and produces double padding only inside
-// the app shell; a `text-red-600` renders perfectly in light mode and is unreadable in dark; a `window.prompt`
-// for a password passes every functional test there is while displaying the password on a front-desk screen.
-//
-// These are source assertions on purpose. They are the only kind that can say "nobody has reintroduced this
-// anywhere", which is the actual requirement — a component test proves one screen, and there are thirty-four.
+// Source-level design-system invariants: the only way to prove nobody reintroduced a banned pattern anywhere.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -30,17 +22,16 @@ const rel = (f: string) => relative(ROOT, f).split(sep).join("/");
 const read = (f: string) => readFileSync(f, "utf8");
 
 describe("the page gutter is owned by the shell, not by the pages", () => {
-  // The fault this replaces: about half the screens opened with their own `p-6 max-w-7xl mx-auto` and the other
-  // half with a bare `space-y-4`, which has no padding at all — so those pages rendered flush against the window
-  // edge and the sidebar. The gutter now lives on the scrolling container in app/(app)/layout.tsx.
+  // Pages must not set their own gutter (`p-6 max-w-7xl mx-auto`); it lives on the scrolling container in
+  // app/(app)/layout.tsx.
   it("no page sets its own page-level padding", () => {
     const offenders: string[] = [];
     for (const f of PAGES) {
       const src = read(f);
       for (const m of src.matchAll(/className="([^"]*)"/g)) {
         const classes = m[1].split(/\s+/);
-        // A page-level gutter is padding on ALL sides combined with a centring measure. `p-3` inside a card or
-        // `p-6` on a modal overlay is not that and must not be flagged.
+        // A page-level gutter is padding on all sides plus a centring measure; `p-3` in a card or `p-6` on an overlay
+        // is not.
         const hasAllSidePad = classes.some((c) => /^p-\d+$/.test(c));
         const centres = classes.includes("mx-auto") || classes.some((c) => /^max-w-/.test(c));
         if (hasAllSidePad && centres) offenders.push(`${rel(f)} :: ${m[1]}`);
@@ -52,15 +43,13 @@ describe("the page gutter is owned by the shell, not by the pages", () => {
   it("the shell supplies exactly one gutter and one measure", () => {
     const layout = read(join(ROOT, "app/(app)/layout.tsx"));
     expect(layout).toMatch(/<main[^>]*className="[^"]*overflow-y-auto/);
-    // The gutter and the measure are on the wrapper INSIDE main, so the scrollbar sits at the window edge while
-    // the content stays inset.
+    // The gutter and measure sit inside main so the scrollbar stays at the window edge.
     expect(layout).toMatch(/mx-auto w-full max-w-\[\d+rem\] px-4 py-5 sm:px-6 sm:py-6 lg:px-8/);
   });
 });
 
 describe("colour only ever comes from a theme token", () => {
-  // A literal palette class cannot be theme-aware: it is one fixed colour, so it is correct in at most one of the
-  // two themes. This is what made the old admin dark-only.
+  // A literal palette class is one fixed colour, correct in at most one theme.
   const LITERAL = /\b(?:text|bg|border|ring|from|to|via|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
 
   it("no component uses a literal Tailwind palette colour", () => {
@@ -74,19 +63,10 @@ describe("colour only ever comes from a theme token", () => {
   });
 
   it("no component hard-codes a hex colour", () => {
-    // ONE EXEMPTION, AND IT IS NOT A LOOPHOLE.
-    //
-    // This rule is about the ADMIN's chrome: a hex here bypasses the token system and breaks one of the two
-    // themes. The portal branding designer is the one screen whose subject matter IS colour — it edits the
-    // GUEST portal's palette and previews it. Those hexes are the hotel's chosen brand colours and the
-    // portal's own shipped defaults; expressing them as admin theme tokens would make the preview show the
-    // admin's colours instead of the hotel's, which is the opposite of what the screen is for.
-    //
-    // Scoped to the single file rather than to a pattern, so a hex added anywhere else still fails.
-    //
-    // The OneGate wordmark (components/brand.tsx) is the second: its green gradient and its black "Gate" are the
-    // brand itself and stay the same on every surface -- on a dark surface the mark sits on a light tile rather
-    // than changing colour. Tokens would let a theme recolour the logo, which is exactly what must not happen.
+    // Exemptions, scoped to single files so a hex added anywhere else still fails: the portal branding designer (edits
+    // the GUEST portal's
+    // palette, so admin tokens would preview the wrong colours) and the OneGate wordmark in components/brand.tsx (must
+    // not be recoloured by a theme).
     const EXEMPT = new Set(["app/(app)/portal-branding/page.tsx", "components/brand.tsx"]);
     const offenders: string[] = [];
     for (const f of SOURCES) {
@@ -103,16 +83,8 @@ describe("colour only ever comes from a theme token", () => {
     const names = (block: string) => new Set([...block.matchAll(/--([a-z0-9-]+):/g)].map((m) => m[1]));
     const dark = names(darkBlock);
 
-    // CLASSIFY BY VALUE, NOT BY NAME.
-    //
-    // This rule is about COLOUR: a colour defined only for light renders with the light value on a dark
-    // surface. Geometry tokens -- `radius`, and the sidebar's expanded/rail widths -- are deliberately
-    // theme-invariant, and a dark override for them would be a bug rather than a fix.
-    //
-    // The exception used to be the single hard-coded name `radius`, which meant every new dimension token
-    // failed this test until someone added it to the list. Matching the VALUE shape instead makes the rule
-    // self-maintaining and strictly stronger: every token whose value is an HSL triple is still required to
-    // have a dark counterpart, including ones that do not exist yet.
+    // Classify by value, not name: every token whose value is an HSL triple needs a dark counterpart; geometry tokens
+    // (radius, sidebar widths) are theme-invariant.
     const HSL_TRIPLE = /^\s*[\d.]+\s+[\d.]+%\s+[\d.]+%/;
     const lightColours = [...lightBlock.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)]
       .filter((m) => HSL_TRIPLE.test(m[2]))
@@ -122,9 +94,8 @@ describe("colour only ever comes from a theme token", () => {
   });
 
   it("the dark chart series are stepped independently, not reused from light", () => {
-    // A dark palette that is literally the light one fails its own lightness band. If these ever become equal it
-    // means somebody "simplified" the duplication away and silently broke dark-mode chart legibility.
-    // The token values moved to the canonical design-system/tokens.css, copied here as app/tokens.css.
+    // A dark palette identical to the light one fails its lightness band (chart legibility). Token values come from
+    // design-system/tokens.css, copied as app/tokens.css.
     const css = read(join(ROOT, "app/tokens.css"));
     const grab = (block: string) =>
       [...block.matchAll(/--chart-(\d):\s*([^;]+);/g)].map((m) => `${m[1]}:${m[2].trim()}`).join("|");
@@ -137,10 +108,8 @@ describe("colour only ever comes from a theme token", () => {
 });
 
 describe("no browser dialog collects a password or guards a destructive action", () => {
-  // `window.prompt` renders a PLAIN TEXT field. Three screens were taking an operator's own admin password
-  // through one, so every character appeared on the screen. `window.confirm` cannot say what an action does,
-  // which is how "Delete this guest network permanently?" was the entire explanation before removing the network
-  // every guest on a VLAN is connected through.
+  // `window.prompt` renders a plain-text field (an admin password would show) and `window.confirm` cannot say what an
+  // action does.
   const SCREENS = SOURCES.filter((f) => /[\\/](app|components)[\\/]/.test(f) && !/[\\/]ui[\\/]dialog\.tsx$/.test(f));
 
   it("window.prompt is never used", () => {
@@ -152,7 +121,6 @@ describe("no browser dialog collects a password or guards a destructive action",
     const offenders: string[] = [];
     for (const f of SCREENS) {
       const src = stripComments(read(f));
-      // Any prompt-like call whose argument mentions a password at all.
       if (/(?:prompt|confirm)\s*\([^)]*[Pp]assword/.test(src)) offenders.push(rel(f));
     }
     expect(offenders, "a password must be typed into type=\"password\", never into a browser dialog").toEqual([]);
@@ -162,8 +130,7 @@ describe("no browser dialog collects a password or guards a destructive action",
 describe("form controls are programmatically labelled", () => {
   it("Field binds its label to the control it wraps", () => {
     const src = read(join(ROOT, "components/ui/input.tsx"));
-    // The id is generated and injected into the child, so a caller that forgets htmlFor still produces a bound
-    // pair. Before this, Field rendered a label pointing at nothing and looked identical on screen.
+    // The id is generated and injected into the child, so a caller that forgets htmlFor still gets a bound pair.
     expect(src).toMatch(/React\.cloneElement/);
     expect(src).toMatch(/htmlFor \?\? \(childProps\.id as string \| undefined\) \?\? `\$\{generated\}-control`/);
     expect(src).toMatch(/<Label htmlFor=\{controlId\}>/);
@@ -192,9 +159,8 @@ describe("the theme is an operator choice that follows the system by default", (
   });
 
   it("the root layout suppresses the hydration warning the theme script requires", () => {
-    // next-themes stamps the stored choice onto <html> before React hydrates, so the server markup and the first
-    // client render legitimately differ on that attribute. Without this, React logs a mismatch for something
-    // that is working correctly — and a console error is a live-acceptance failure.
+    // next-themes stamps the stored choice onto <html> before hydration, so that attribute legitimately differs;
+    // hydration is suppressed for it.
     const src = read(join(ROOT, "app/layout.tsx"));
     expect(src).toMatch(/<html[^>]*suppressHydrationWarning/);
     expect(src).toMatch(/ThemeProvider/);
@@ -217,17 +183,14 @@ describe("the theme is an operator choice that follows the system by default", (
 
 describe("the sidebar and the role matrix stay in step with the server", () => {
   it("every nav item names a resource the UI role matrix knows about", () => {
-    // A nav item whose resource is missing from the matrix is hidden from every role but site_admin — which is
-    // how PMS connection, Network routing and Duplicate sources became unreachable for the role that owns them.
+    // A nav item whose resource is missing from the matrix is hidden from every role but site_admin.
     const nav = read(join(ROOT, "components/nav.tsx"));
-    // The console's matrix is GENERATED from edged's rolePerms (lib/role-permissions.generated.json), so "known"
-    // is every key some role holds there.
+    // "Known" means some role holds the key in the matrix GENERATED from edged's rolePerms.
     const generated = JSON.parse(read(join(ROOT, "lib/role-permissions.generated.json"))) as {
       roles: Record<string, Record<string, string>>;
     };
     const resources = new Set([...nav.matchAll(/resource:\s*"([^"]+)"/g)].map((m) => m[1]));
     const known = new Set(Object.values(generated.roles).flatMap((row) => Object.keys(row)));
-    // These are legitimately site_admin-only on the server too.
     const adminOnly = new Set(["operators"]);
     const missing = [...resources].filter((r) => !known.has(r) && !adminOnly.has(r));
     expect(missing, `nav resources absent from lib/roles.ts — unreachable for every non-admin role: ${missing.join(", ")}`).toEqual([]);

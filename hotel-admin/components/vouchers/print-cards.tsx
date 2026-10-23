@@ -1,25 +1,7 @@
 "use client";
 
-// THE PRINTABLE VOUCHER SHEET.
-//
-// "Print" used to call window.print() on the admin page itself: the sidebar, the header, the tables and a
-// plain list of codes, with no card layout at all. This prints ONLY a sheet of cut-out cards.
-//
-// How: while a print job is active, the sheet is portalled to the end of <body> and a print-only stylesheet
-// hides every other child of <body>. On screen the portal is hidden, so nothing flashes. The codes come
-// from the caller's memory -- the one-time issue response or a step-up export that was just recorded -- and
-// are never written to storage, a URL or the DOM outside this job. The job is cleared as soon as the browser
-// reports the print dialog closed.
-//
-// THE CARD. An A4 sheet of 2 × 4 cards (65 mm tall), each inside its own dashed cut line with corner marks, so a desk
-// with scissors or a guillotine gets eight identical cards per page. Everything a guest needs is on the
-// card and nothing else is: the hotel's heading, the internet package, the code large and monospaced, how
-// long it is valid, and three steps to get online. It is designed for black ink on white paper -- no fills,
-// no tints, no colour that a mono laser printer turns into a grey block the code cannot be read through.
-//
-// COLOURS ON PAPER. The admin may be in dark mode, and its tokens would print light text for a dark card on
-// white paper. The print stylesheet therefore switches the sheet to the light system palette (`Canvas` /
-// `CanvasText` under `color-scheme: light`) instead of carrying colours of its own.
+// Print only the transient voucher sheet; the portal and its codes disappear after the print job.
+// Force light colors because dark-mode tokens print unreadable text on white paper.
 
 import * as React from "react";
 import { createPortal } from "react-dom";
@@ -52,7 +34,6 @@ const PRINT_CSS = `
 }
 `;
 
-/** Corner cut marks: four short L-shapes just inside the dashed line, for lining up a guillotine. */
 function CutMarks() {
   const mark = "pointer-events-none absolute size-2.5 border-foreground/60";
   return (
@@ -65,7 +46,6 @@ function CutMarks() {
   );
 }
 
-/** One card face. Used both for the on-screen preview and on paper. */
 export function VoucherCardFace({
   heading,
   packageName,
@@ -126,10 +106,7 @@ export function VoucherCardFace({
   );
 }
 
-/**
- * Renders nothing on screen. While `job` is set it mounts the sheet for print, opens the browser's print
- * dialog, and calls `onDone` once that dialog closes -- which is the caller's cue to drop the job.
- */
+/** Drop the transient print job when the browser closes its print dialog. */
 export function PrintCards({ job, onDone }: { job: PrintJob | null; onDone: () => void }) {
   const [host, setHost] = React.useState<HTMLElement | null>(null);
   const done = React.useRef(onDone);
@@ -157,12 +134,12 @@ export function PrintCards({ job, onDone }: { job: PrintJob | null; onDone: () =
       done.current();
     };
     window.addEventListener("afterprint", finish);
-    // Let the portal paint before the print snapshot is taken.
+    // Let the portal paint before the browser snapshots the print sheet.
     const t = window.setTimeout(() => {
       try {
         window.print();
       } finally {
-        // Browsers whose print() blocks have already printed by now; those that do not fire afterprint.
+        // Some browsers block in print(); others signal completion with afterprint.
         window.setTimeout(finish, 1000);
       }
     }, 50);

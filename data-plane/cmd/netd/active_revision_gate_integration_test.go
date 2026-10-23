@@ -11,12 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ONLY AN APPLIED, HEALTH-CHECKED CONFIGURATION CAN BECOME THE ACTIVE ONE.
-//
-// This is the behavioural half of active_revision_provenance_test.go, against real DDL and the real constraint.
-// `pending_confirmation` is reachable only through applier.Apply, which renders the bundle, puts it on the wire
-// and passes every health check before MarkPending -- so refusing every other state is what makes "active" mean
-// "this appliance applied this and kept it", which is the claim netd's boot reconcile relies on.
+// Only an applied, health-checked configuration can become the active one: pending_confirmation is reachable only through applier.Apply
+// (render, wire, health checks, MarkPending), so refusing every other state is what makes "active" trustworthy at boot reconcile.
+// Behavioural half of active_revision_provenance_test.go.
 
 func gateTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -53,9 +50,7 @@ func TestIntegration_OnlyAPendingRevisionCanBecomeActive(t *testing.T) {
 		return id
 	}
 
-	// EVERY state that is not pending_confirmation is refused. 'draft' and 'validated' are the ones that matter
-	// most: a revision in either has never been applied, and the retired adopt route created exactly that and
-	// then declared it active.
+	// Every state other than pending_confirmation is refused; draft and validated matter most (never applied).
 	for _, state := range []string{"draft", "validated", "failed", "rolled_back", "superseded", "active"} {
 		id := newRevision(state)
 		err := st.MarkActive(ctx, id, "")
@@ -71,9 +66,7 @@ func TestIntegration_OnlyAPendingRevisionCanBecomeActive(t *testing.T) {
 		}
 	}
 
-	// 'applying' is refused too: the bundle is on the wire but the health checks have not been passed yet, so
-	// there is nothing anybody has confirmed. It is kept separate because it is the only non-terminal state the
-	// retired route produced, and because it holds the in-flight slot.
+	// 'applying' is refused too: the bundle is on the wire but health checks have not passed, and it holds the in-flight slot.
 	applying := newRevision("applying")
 	if err := st.MarkActive(ctx, applying, ""); !errors.Is(err, errNotPending) {
 		t.Errorf("a revision still mid-apply was activated (err=%v)", err)

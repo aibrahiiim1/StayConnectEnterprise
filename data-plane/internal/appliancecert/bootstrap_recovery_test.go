@@ -17,14 +17,8 @@ import (
 	"time"
 )
 
-// fakeCentral is Central's certificate contract, and only that contract:
-//
-//	POST /v1/appliance/csr          records a request, returns pending
-//	GET  /v1/appliance/certificate  status = issued | pending | none
-//
-// It counts CSR submissions so a retry loop that resubmits can be caught: SubmitCSR inserts a new request
-// row every time it is called, so a loop that posts on every attempt leaves an operator choosing between
-// duplicate pending requests for one appliance.
+// fakeCentral is Central's certificate contract only (POST /v1/appliance/csr records a request and returns pending; GET /v1/appliance/certificate reports
+// issued, pending or none). It counts CSR submissions because SubmitCSR inserts a new row every call, so a loop that resubmits leaves duplicate requests.
 type fakeCentral struct {
 	csrSubmissions atomic.Int32
 	certFetches    atomic.Int32
@@ -60,8 +54,7 @@ func (f *fakeCentral) handler() http.Handler {
 	return mux
 }
 
-// mintCertFor issues a self-signed CA and a leaf bound to the manager's mTLS public key, so the certificate
-// Central hands back actually pairs with the key the appliance kept.
+// mintCertFor issues a self-signed CA and a leaf bound to the manager's mTLS public key, so the certificate pairs with the key the appliance kept.
 func mintCertFor(t *testing.T, pub ed25519.PublicKey) (certPEM, caPEM string) {
 	t.Helper()
 	caPub, caPriv, _ := ed25519.GenerateKey(rand.Reader)
@@ -95,15 +88,8 @@ func newManagerFor(t *testing.T, base string) *Manager {
 	return New(t.TempDir(), base, base, "appliance-1", priv)
 }
 
-// THE REAL FAILURE, END TO END.
-//
-// The Production appliance submitted its CSR at 15:10:46, gave up at 15:20:46 when a fixed ten-minute
-// window expired, and the operator issued the certificate at 15:21:45 — fifty-nine seconds later. The
-// bootstrap goroutine had already returned, so the appliance never asked again. Because the assignment
-// channel is mTLS-only, the signed assignment, the licence and convergence were all stuck behind a
-// certificate that was sitting on Central ready to collect, and the only recovery was a restart.
-//
-// Activation is a human action. It has no deadline, and the appliance must survive one of any length.
+// The real failure end to end: a fixed ten-minute window expired 59 seconds before an operator issued the certificate, the bootstrap goroutine had already
+// returned, and the mTLS-only assignment, licence and convergence stayed stuck until a restart. Activation is a human action with no deadline.
 func TestCertificateAcquiredAfterLongWaitWithoutRestart(t *testing.T) {
 	central := &fakeCentral{}
 	srv := httptest.NewServer(central.handler())
@@ -123,8 +109,7 @@ func TestCertificateAcquiredAfterLongWaitWithoutRestart(t *testing.T) {
 		t.Fatalf("expected exactly 1 CSR submission, got %d", got)
 	}
 
-	// Many more attempts while the operator has not yet pressed Activate — far more than the old
-	// ten-minute window would have allowed.
+	// Many more attempts while the operator has not pressed Activate, far beyond the old ten-minute window.
 	for i := 0; i < 50; i++ {
 		if err := m.Ensure(context.Background()); !errors.Is(err, ErrCertPending) {
 			t.Fatalf("attempt %d should still be pending, got %v", i, err)
@@ -152,8 +137,7 @@ func TestCertificateAcquiredAfterLongWaitWithoutRestart(t *testing.T) {
 	}
 }
 
-// EnsureUntilInstalled is what keeps the lifecycle alive across that wait. It must return only when the
-// certificate is installed, and it must not resubmit a CSR while waiting.
+// EnsureUntilInstalled returns only when the certificate is installed and must not resubmit a CSR while waiting.
 func TestEnsureUntilInstalledSurvivesTheWait(t *testing.T) {
 	central := &fakeCentral{}
 	srv := httptest.NewServer(central.handler())
@@ -229,7 +213,6 @@ func TestExistingLocalCertificateNeedsNoCSR(t *testing.T) {
 	central.certPEM, central.caPEM = certPEM, caPEM
 	central.issued.Store(true)
 
-	// Acquire once.
 	if err := m.Ensure(context.Background()); err != nil {
 		t.Fatalf("initial acquire: %v", err)
 	}

@@ -1,12 +1,7 @@
-// Package clientip decides which address a request came from.
-//
-// ctrlapi sits behind Caddy on the same host (deploy/caddy/Caddyfile.central), which connects from loopback
-// and REPLACES X-Real-IP with the address it accepted the connection from. That header is therefore trusted
-// only when the TCP peer is loopback. From anywhere else it is whatever the client chose to send, and a rate
-// limit keyed on it is a rate limit the client controls, so it is ignored and the TCP peer is the answer.
-//
-// When the loopback peer sent no X-Real-IP, the LAST X-Forwarded-For hop is used: it is the one appended by
-// the proxy that connected to us. The first hop is the client's own claim.
+// Package clientip decides which address a request came from. Caddy connects from loopback and replaces
+// X-Real-IP, so that header is trusted only when the TCP peer is loopback; elsewhere it is client-chosen and the
+// TCP peer is the answer. Without X-Real-IP, the last X-Forwarded-For hop (appended by the proxy) is used, never
+// the first, which is the client's own claim.
 package clientip
 
 import (
@@ -15,12 +10,10 @@ import (
 	"strings"
 )
 
-// From returns the client address for r.
 func From(r *http.Request) string {
 	return Resolve(r.RemoteAddr, r.Header.Get("X-Real-IP"), r.Header.Get("X-Forwarded-For"))
 }
 
-// Resolve is From without the request, for testing.
 func Resolve(remoteAddr, xRealIP, xForwardedFor string) string {
 	peer := hostOf(remoteAddr)
 	if !IsLoopback(peer) {
@@ -41,13 +34,11 @@ func Resolve(remoteAddr, xRealIP, xForwardedFor string) string {
 // Peer is the TCP peer, ignoring every forwarding header.
 func Peer(r *http.Request) string { return hostOf(r.RemoteAddr) }
 
-// Proxied reports whether the request carries forwarding headers, i.e. arrived through a proxy.
 func Proxied(r *http.Request) bool {
 	return r.Header.Get("X-Real-IP") != "" || r.Header.Get("X-Forwarded-For") != "" ||
 		r.Header.Get("Forwarded") != ""
 }
 
-// IsLoopback reports whether host is a loopback address.
 func IsLoopback(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()

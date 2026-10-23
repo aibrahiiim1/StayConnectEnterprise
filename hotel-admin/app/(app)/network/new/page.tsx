@@ -39,7 +39,6 @@ const STEP_HINT = [
   "Create the network, validate the whole configuration, then apply it with an automatic rollback.",
 ];
 
-// interfaces whose role permits a guest network as parent
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
 const ROLE_LABEL: Record<string, string> = {
@@ -58,23 +57,18 @@ export default function NewGuestNetworkPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // identity
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ssidLabel, setSsidLabel] = useState("");
-  // interface / vlan
   const [interfaces, setInterfaces] = useState<Interface[] | null>(null);
   const [parentInterface, setParentInterface] = useState("");
   const [vlanTagged, setVlanTagged] = useState(false);
-  // ONE WIZARD FOR ONE NETWORK OR A WHOLE TRUNK. An untagged network uses the single fields below; a tagged
-  // port carries one row per VLAN, each becoming its own client network with its own subnet and DHCP scope.
+  // Each tagged VLAN becomes a separate client network with its own subnet and DHCP scope.
   const [vlans, setVlans] = useState<VlanRow[]>([newVlanRow()]);
   const [addrMode, setAddrMode] = useState<"common" | "separate">("common");
   const [existing, setExisting] = useState<GuestNetwork[]>([]);
-  // subnet / gateway
   const [subnetCidr, setSubnetCidr] = useState("");
   const [gatewayIp, setGatewayIp] = useState("");
-  // dhcp / dns
   const [pools, setPools] = useState<Pool[]>([{ start_ip: "", end_ip: "" }]);
   const [dnsMode, setDnsMode] = useState<"appliance" | "custom">("appliance");
   const [dnsServers, setDnsServers] = useState("");
@@ -82,28 +76,24 @@ export default function NewGuestNetworkPage() {
   const [leaseDefault, setLeaseDefault] = useState("3600");
   const [leaseMin, setLeaseMin] = useState("900");
   const [leaseMax, setLeaseMax] = useState("7200");
-  // captive portal
   const [captivePortal, setCaptivePortal] = useState(true);
   const [internetAccess, setInternetAccess] = useState(true);
   const [nat, setNat] = useState(true);
-  // On by default for a new network (GDPR audit A3): one client must not reach another's device.
+  // Isolate clients by default so one guest cannot reach another's device.
   const [clientIsolation, setClientIsolation] = useState(true);
 
-  // apply flow
   const [created, setCreated] = useState<{ id: string; bridge_name: string; portal_url: string } | null>(null);
   const [issues, setIssues] = useState<ValidationIssue[] | null>(null);
   const [applied, setApplied] = useState<ApplyResult | null>(null);
   const [deadline, setDeadline] = useState<string | null>(null);
   const [acting, setActing] = useState<"confirm" | "rollback" | null>(null);
 
-  // What this appliance already serves, so a conflict is shown before the operator fills anything in.
   useEffect(() => {
     api.get<ListResp<GuestNetwork>>("/network/guest-networks")
       .then((r) => setExisting(r.data ?? []))
       .catch(() => setExisting([]));
   }, []);
 
-  // fetch interfaces when entering step 1
   useEffect(() => {
     if (step === 1 && interfaces === null) {
       api.get<{ interfaces: Interface[] }>("/network/interfaces")
@@ -120,7 +110,7 @@ export default function NewGuestNetworkPage() {
   const separate = multi && addrMode === "separate";
   const vlanProblems = vlanTagged ? vlanPlanProblems(vlans, usedVLANs, usedSubnets) : {};
 
-  /** Give a row free addressing as soon as it has a VLAN id, unless the operator chose it. */
+  /** Preserve operator-chosen addressing rather than replacing it with an automatic range. */
   function setVlanRows(rows: VlanRow[]) {
     const taken = new Set(usedSubnets);
     setVlans(rows.map((r) => {
@@ -188,7 +178,6 @@ export default function NewGuestNetworkPage() {
   const dnsList = (mode: string, servers: string) =>
     mode === "custom" ? servers.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
 
-  /** The client networks this wizard will create: one, or one per VLAN on the trunk. */
   function buildBodies(): GuestNetworkInput[] {
     if (!vlanTagged) {
       return [{
@@ -228,8 +217,7 @@ export default function NewGuestNetworkPage() {
     });
   }
 
-  // The apply response carries no deadline; the revision list does. Read it so the countdown is the appliance's
-  // real one rather than a guess. Best-effort: without it the banner still offers Keep / Roll back.
+  // Read the revision deadline because apply responses omit it; keep controls available if that read fails.
   async function readDeadline(revisionId: string) {
     try {
       const r = await api.get<ListResp<NetRevision>>("/network/revisions");
@@ -238,7 +226,6 @@ export default function NewGuestNetworkPage() {
     } catch { /* the banner works without it */ }
   }
 
-  // Apply, Keep and Roll back need the operator's password (the server requires it).
   const stepUp = useNetworkChangeStepUp();
 
   function onRunApply() {
@@ -255,7 +242,7 @@ export default function NewGuestNetworkPage() {
           c = await api.post<{ id: string; bridge_name: string; portal_url: string }>(
             "/network/guest-networks", bodies[0]);
         } else {
-          // Every VLAN in one transaction: all of them are created, or none is.
+          // Create every VLAN in one transaction to avoid a partial trunk.
           const batch = await api.post<{ networks: { id: string; bridge_name: string; portal_url: string }[] }>(
             "/network/guest-networks/batch", { networks: bodies });
           c = batch.networks[0];

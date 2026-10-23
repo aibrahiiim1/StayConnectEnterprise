@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// dark: portal OFF -> Disabled, nil repo untouched.
 func TestListEligiblePackagesDark(t *testing.T) {
 	e, err := NewCommerceEngine(DefaultCommerceConfig(), nil, NopObserver{})
 	if err != nil {
@@ -20,15 +19,13 @@ func TestListEligiblePackagesDark(t *testing.T) {
 	}
 }
 
-// C2 listing: only eligible, free, in-window packages appear; ineligible ones are silently excluded;
-// listing creates no quote/purchase/entitlement and returns guest-safe display + opaque package ids.
 func TestListEligiblePackagesFiltersAndIsReadOnly(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil) // eligible free package "PKG1"
 	e := newEngine(t, db, 5*time.Minute)
 	ctx := context.Background()
 
-	// add a priced package (must be excluded) sharing the plan/account.
+	// Priced package: must be excluded.
 	pricedPkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'PRICED',true) RETURNING id::text`, p2Tenant, p2Site)
 	pricedRev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
@@ -37,7 +34,7 @@ func TestListEligiblePackagesFiltersAndIsReadOnly(t *testing.T) {
 	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, pricedRev, pricedPkg); err != nil {
 		t.Fatalf("priced pointer: %v", err)
 	}
-	// add a voucher-only eligible free package (account subject must NOT see it).
+	// Voucher-only package: an account subject must not see it.
 	vPkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'VOUCHERONLY',true) RETURNING id::text`, p2Tenant, p2Site)
 	vRev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,display)
@@ -65,12 +62,10 @@ func TestListEligiblePackagesFiltersAndIsReadOnly(t *testing.T) {
 	if res.Packages[0].PackageID != s.packageID {
 		t.Fatalf("wrong package listed: %s", res.Packages[0].PackageID)
 	}
-	// guest-safe display only: has free/name, no price internals beyond the zeroed free marker.
 	d := res.Packages[0].Display
 	if d["free"] != true || d["name"] == nil {
 		t.Fatalf("display not guest-safe/complete: %+v", d)
 	}
-	// read-only: nothing was created.
 	for _, tbl := range []string{"offer_quotes", "purchases", "settlements", "entitlements"} {
 		if n := count(t, db, `SELECT count(*) FROM iam_v2.`+tbl); n != 0 {
 			t.Fatalf("listing created %d rows in %s (must be read-only)", n, tbl)
@@ -78,7 +73,6 @@ func TestListEligiblePackagesFiltersAndIsReadOnly(t *testing.T) {
 	}
 }
 
-// listing denies on a mismatched device (wrong pin) without disclosing packages.
 func TestListEligiblePackagesAuthPin(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -92,12 +86,7 @@ func TestListEligiblePackagesAuthPin(t *testing.T) {
 	}
 }
 
-// THE SYSTEM GRACE PACKAGE MUST NOT EMPTY EVERY GUEST'S LIST.
-//
-// edged provisions an emergency-grace system package on every site, and its revision carries NO currency.
-// The listing scanned currency into a string, so that one NULL failed the whole query: every guest -- any
-// method -- was told no packages existed, while a quote for a known package id still worked. Found on
-// PRE-LIVE when guest access was first enabled. The NULL-currency row must simply be excluded.
+// The emergency-grace system package has a NULL currency; it must be excluded, not fail the whole listing.
 func TestListEligiblePackagesSurvivesNullCurrencyPackage(t *testing.T) {
 	db := p2DB(t)
 	ctx := context.Background()

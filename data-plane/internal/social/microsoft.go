@@ -1,59 +1,19 @@
 package social
 
-// Real Microsoft identity platform (v2.0) OpenID Connect provider.
+// Microsoft identity platform v2.0 OIDC. The identity is the verified id_token (userinfo lives on Graph
+// and gives no email verification signal). The issuer is https://login.microsoftonline.com/{tid}/v2.0
+// with tid taken from the token, since the multi-tenant endpoints issue tokens naming the user's home tenant.
 //
-// Flow:
-//   1. AuthorizeURL builds
-//      https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
-//      with our client_id, redirect_uri, scope, state, response_mode=query,
-//      prompt=select_account, the attempt's OIDC nonce and its PKCE S256
-//      code_challenge (the identity platform accepts PKCE from confidential
-//      web clients alongside the client secret).
-//   2. Microsoft redirects back to our callback with ?code=...&state=...
-//   3. Exchange POSTs the code and the attempt's code_verifier to
-//      .../{tenant}/oauth2/v2.0/token and receives an id_token.
-//   4. The id_token is verified here: RS256 signature against the tenant's
-//      key set (.../{tenant}/discovery/v2.0/keys), exp/nbf/iat, aud ==
-//      client_id, nonce == the attempt's, and iss ==
-//      https://login.microsoftonline.com/{tid}/v2.0 where tid is the token's
-//      own tenant claim (the multi-tenant endpoints — common, organizations,
-//      consumers — issue tokens whose issuer names the user's home tenant, so
-//      the issuer cannot be a constant).
+// Tenant comes from social_oauth_providers.extra->>'tenant': ""/"common" (personal or any work/school),
+// "consumers" (personal only), "organizations" (work/school only), or a GUID/domain for one tenant (a GUID
+// must equal the token's tid).
 //
-// Why the id_token rather than a userinfo call:
-//   Microsoft's userinfo lives on Graph and returns no verification signal
-//   for email at all. The id_token is where the claims that justify trusting
-//   an email live (see emailFromClaims), and it is signed, so verifying it is
-//   both necessary and sufficient.
-//
-// Tenant: configured per site in social_oauth_providers.extra->>'tenant'.
-//   ""/"common"      personal Microsoft accounts and any work/school tenant
-//   "consumers"      personal Microsoft accounts only
-//   "organizations"  any work/school tenant
-//   <GUID>/<domain>  one specific work/school tenant; when it is a GUID the
-//                    token's tid must equal it.
-//
-// EMAIL VERIFICATION — the part that differs most from Google.
-//   Entra ID (work/school) does not verify the `email` claim: a tenant admin
-//   can put any address on a user. Accepting it would let one tenant's admin
-//   mint a guest identity for someone else's address. So an email is treated
-//   as verified only when the claim set justifies it:
-//     - personal Microsoft accounts (tid 9188040d-…-36a304b66dad): the account
-//       email is verified by Microsoft at sign-up, so `email` — or, if absent,
-//       `preferred_username` when it is shaped like an email — is accepted;
-//     - `xms_edov` = true (optional claim "email domain owner verified"):
-//       the tenant has proven ownership of the email's domain, so `email` is
-//       accepted;
-//     - `verified_primary_email` (optional claim, sourced from the user's
-//       verified proxy addresses): its first entry is accepted.
-//   Anything else returns ErrEmailUnverified with the UserInfo populated,
-//   exactly as google.go does for email_verified=false. For work/school
-//   sign-in to succeed, the app registration must therefore emit xms_edov or
-//   verified_primary_email (Token configuration → Add optional claim).
-//
-// Endpoints are overridable through the unexported loginBase field so the
-// httptest fakes in microsoft_test.go can drive the implementation without
-// reaching Microsoft.
+// Email verification differs from Google: Entra ID does not verify `email` (a tenant admin can put any
+// address on a user, which would let them mint a guest identity for someone else's address). So an email
+// counts as verified only for a personal account (tid 9188040d-...; `email`, or an email-shaped
+// `preferred_username`), when `xms_edov` is true, or via the first `verified_primary_email`. Otherwise
+// ErrEmailUnverified; work/school sign-in therefore needs the app registration to emit xms_edov or
+// verified_primary_email.
 
 import (
 	"context"
@@ -70,23 +30,19 @@ import (
 const (
 	defaultMicrosoftLoginBase = "https://login.microsoftonline.com"
 	defaultMicrosoftTenant    = "common"
-	// profile stays (GDPR plan C9 reviewed it): a personal Microsoft account may give its email only as
-	// preferred_username, which needs profile (emailFromClaims).
+	// profile stays because a personal account may give its email only as preferred_username (emailFromClaims).
 	defaultMicrosoftScope = "openid email profile"
 
-	// msaConsumerTenant is the fixed tenant id every personal Microsoft
-	// account token carries in its tid claim.
+	// msaConsumerTenant is the fixed tid of every personal Microsoft account token.
 	msaConsumerTenant = "9188040d-6c67-4c5b-b112-36a304b66dad"
 )
 
 var guidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// microsoftTenantRe is what may appear in the {tenant} path segment: the
-// three well-known aliases, a GUID or a verified domain name.
+// microsoftTenantRe allows the well-known aliases, a GUID or a domain name in the {tenant} path segment.
 var microsoftTenantRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$`)
 
-// ValidMicrosoftTenant reports whether t is usable as the {tenant} segment.
-// Empty means "common". Exported for the edged configuration API.
+// ValidMicrosoftTenant: empty means "common". Exported for the edged configuration API.
 func ValidMicrosoftTenant(t string) bool {
 	return t == "" || microsoftTenantRe.MatchString(t)
 }
@@ -99,8 +55,7 @@ type Microsoft struct {
 
 	HTTPClient *http.Client
 
-	// Endpoint override (tests). Every endpoint and the expected issuer are
-	// derived from it.
+	// Endpoint override (tests); every endpoint and the expected issuer derive from it.
 	loginBase string
 	now       func() time.Time
 
@@ -108,7 +63,6 @@ type Microsoft struct {
 	jwks     *jwksCache
 }
 
-// NewMicrosoft requires a client_id + secret. Scopes and tenant are optional.
 func NewMicrosoft(clientID, clientSecret, scopes, tenant string) (*Microsoft, error) {
 	if clientID == "" || clientSecret == "" {
 		return nil, errors.New("microsoft: client_id and client_secret are required")
@@ -160,7 +114,6 @@ func (m *Microsoft) keySet() *jwksCache {
 	return m.jwks
 }
 
-// Binding: PKCE S256 and the OIDC nonce, both supported for confidential web clients.
 func (m *Microsoft) Binding() Binding { return Binding{PKCE: true, Nonce: true} }
 
 func (m *Microsoft) AuthorizeURL(a AuthRequest) string {
@@ -179,7 +132,7 @@ func (m *Microsoft) AuthorizeURL(a AuthRequest) string {
 	q.Set("response_mode", "query") // the portal callback reads code/state from the query
 	q.Set("scope", scope)
 	q.Set("state", a.State)
-	q.Set("prompt", "select_account") // shared devices: always show the account picker
+	q.Set("prompt", "select_account") // always show the account picker (shared devices)
 	if a.Nonce != "" {
 		q.Set("nonce", a.Nonce)
 	}
@@ -230,9 +183,7 @@ func (m *Microsoft) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo,
 	if want := m.base() + "/" + tid + "/v2.0"; c.Iss != want {
 		return nil, fmt.Errorf("microsoft: %w: unexpected issuer", errIDToken)
 	}
-	// A single-tenant configuration named by id accepts that tenant only. The
-	// authority already enforces this for sign-in, but a token for another
-	// tenant must not verify here even if one were somehow presented.
+	// A single-tenant configuration accepts that tenant only, even if a token for another were presented.
 	if t := m.tenant(); guidRe.MatchString(t) && !strings.EqualFold(t, tid) {
 		return nil, fmt.Errorf("microsoft: %w: token is for another tenant", errIDToken)
 	}
@@ -250,28 +201,21 @@ func (m *Microsoft) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo,
 		return nil, fmt.Errorf("microsoft: %w", err)
 	}
 
-	// Stable subject: oid is the user's immutable id across every app in the
-	// tenant; scoped by tid it is globally unique. sub (pairwise per app) is
-	// the fallback when oid was not issued.
+	// oid scoped by tid is a globally unique stable subject; sub (pairwise per app) is the fallback.
 	sub := c.Sub
 	if oid := c.str("oid"); oid != "" {
 		sub = tid + ":" + oid
 	}
 	email, verified := emailFromClaims(c, tid)
 	info := &UserInfo{Sub: sub, Email: email, EmailVerified: verified, Name: c.str("name"),
-		// The directory tenant is the organisation: it is what an IDP_TENANT Client Group rule reads. It came
-		// out of a verified id_token, so it is Microsoft's assertion about the account, not the user's.
+		// tid and oid come from the verified token and are read by IDP_TENANT Client Group rules.
 		Claims: map[string]string{"tid": tid, "oid": c.str("oid")}}
 	if !verified {
-		// Caller maps this to ErrEmailUnverified for a friendlier message at
-		// the portal layer, as with Google.
 		return info, ErrEmailUnverified
 	}
 	return info, nil
 }
 
-// emailFromClaims picks the email address and decides whether the claim set
-// justifies treating it as verified (see the file comment).
 func emailFromClaims(c *idClaims, tid string) (string, bool) {
 	email := strings.TrimSpace(c.str("email"))
 	if vpe, ok := c.raw["verified_primary_email"].([]any); ok && len(vpe) > 0 {

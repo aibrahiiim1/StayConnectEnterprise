@@ -1,15 +1,9 @@
 "use client";
 
-// DATA CONTROLS — the pieces every list screen was building for itself.
-//
-// Search boxes of three different heights and state filters as native <select>s on one screen and as buttons on
-// the next. These are the one version of each.
-
 import * as React from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** A search field with a leading icon and a clear button. Debounces onChange by `delay` ms when given. */
 export function SearchInput({
   value,
   onChange,
@@ -21,7 +15,6 @@ export function SearchInput({
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  /** Accessible name. Defaults to the placeholder. */
   label?: string;
   delay?: number;
   className?: string;
@@ -70,11 +63,6 @@ export function SearchInput({
   );
 }
 
-/**
- * FilterChips — a single-choice filter with counts ("All 214 · Unused 180 · Used 30 · Cancelled 4").
- *
- * A count on each option answers "is there anything there?" before the click, which a <select> cannot.
- */
 export function FilterChips<T extends string>({
   value,
   onChange,

@@ -1,25 +1,7 @@
 package main
 
-// SESSION-AFTER-GRANT for the IAM-v2 commerce path.
-//
-// Confirming a free purchase produces an ENTITLEMENT -- a durable statement that this subject may have
-// access. It does not produce access. The session is what the enforcement plane acts on, and until one
-// exists the guest has bought something and is still offline.
-//
-// This is the step that was missing: authentication landed in iam_v2, commerce landed in iam_v2, and then
-// nothing turned the entitlement into a session, so iam_v2.sessions stayed at its pre-existing count while
-// every other IAM-v2 table moved.
-//
-// WHAT IT DOES NOT DO
-// -------------------
-// It does not write 'active'. It opens the session as PENDING_ENFORCEMENT, exactly as the accepted Phase-3
-// grant path does, because at this instant nothing has been enforced: no accountable tc class exists and the
-// guest is not authorized at the packet gate. Writing 'active' here would be a false statement about the
-// kernel, and it is the statement every other component trusts. netd -- the only process that can see
-// whether enforcement actually took -- promotes it through iam_v2.activate_session_enforcement once the
-// class is classifying and the nft gate is authorizing. acctd's plan picks the session up on its own cadence
-// because that plan is generic over iam_v2.sessions joined to an ACTIVE entitlement; nothing here needs to
-// be special-cased for VOUCHER or ACCOUNT.
+// Session-after-grant for the IAM-v2 commerce path: an entitlement is not access. The session opens as PENDING_ENFORCEMENT, never active,
+// because nothing has been enforced yet; netd promotes it through iam_v2.activate_session_enforcement once the tc class and nft gate are live.
 
 import (
 	"context"
@@ -40,12 +22,10 @@ type activateReq struct {
 	DeviceID      string `json:"device_id"`
 	IP            string `json:"ip"`
 	MAC           string `json:"mac"`
-	// AuthContextID is this device's own fresh sign-in. It is what lets a device OTHER than the purchaser join
-	// the entitlement: see "joining" below.
+	// AuthContextID is this device's own fresh sign-in; it lets a device other than the purchaser join (see Joining below).
 	AuthContextID string `json:"auth_context_id,omitempty"`
 }
 
-// activateIAMv2Session turns an entitlement into a session, idempotently.
 func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 	var req activateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -76,17 +56,14 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The Email accounts settings decide whether an unverified account past its deadline is suspended. Read before
-	// the transaction (cached); an unreadable read enforces the defaults, which are the strictest a site can have.
+	// The Email accounts settings decide whether an unverified account past its deadline is suspended; an unreadable read enforces the strictest defaults.
 	selfService := s.selfServiceSettingsOrDefault(ctx)
 
 	var sessionID string
 	var reused bool
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		// The entitlement must be ours, live, and still within its window. Checked inside the transaction so
-		// a revocation racing this activation cannot slip a session in behind it.
-		// maxDevices NULL = no device limit (audit B-24), as authorize_entitlement_device and 0118 read it.
-		// devicePolicy: DISCONNECT_OLDEST (0122) admits over the limit by disconnecting the oldest device.
+		// The entitlement must be ours, live and in its window, checked inside the transaction so a racing revocation cannot slip a session in.
+		// maxDevices NULL = no device limit; devicePolicy DISCONNECT_OLDEST admits over the limit by disconnecting the oldest device.
 		var maxDevices *int
 		var status, devicePolicy string
 		if err := tx.QueryRow(ctx, `
@@ -105,29 +82,15 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		if status != "ACTIVE" {
 			return errEntitlementUnusable
 		}
-		// A SUSPENDED EMAIL ACCOUNT GETS NO SESSION (contract §3). Its entitlement is untouched -- the window keeps
-		// running on the wall clock and nothing is terminated -- but no device, the purchaser's or a joining one,
-		// is admitted on it until the address is verified or the client takes the grace hour. Checked inside the
-		// transaction, before the reconnect shortcut below, so a returning device is refused like a new one.
+		// A suspended Email account gets no session on any device; checked in the transaction before the reconnect shortcut so a returning device is refused like a new one.
 		if suspended, err := s.entitlementAccountSuspended(ctx, tx, req.EntitlementID, selfService); err != nil {
 			return err
 		} else if suspended {
 			return errVerificationRequired
 		}
 
-		// THE DEVICE MUST BE THE ONE THAT ACQUIRED THIS ENTITLEMENT.
-		//
-		// Found by adversarial probe, not by review: passing an arbitrary device_id with a real entitlement id
-		// activated a session and consumed a device slot on someone else's grant. The endpoint trusted the
-		// device from the request body, while the accepted Phase-3 grant path derives device identity from the
-		// connection and says explicitly that it is "never from the body".
-		//
-		// The socket is root-only and portald passes the device from its server-side commerce session, so the
-		// browser could not reach this. That is an argument for the caller being careful, not for the boundary
-		// being absent -- an entitlement is a grant to a subject on the device that acquired it, and any
-		// future caller getting this wrong should be refused rather than trusted.
-		//
-		// entitlement -> purchase -> auth_context -> device is the chain that records who actually acquired it.
+		// The device must be the one that acquired this entitlement (entitlement -> purchase -> auth_context -> device), never trusted
+		// from the request body: an arbitrary device_id with a real entitlement id once consumed a slot on someone else's grant.
 		var acquiringDevice string
 		if err := tx.QueryRow(ctx, `
 		    SELECT ac.device_id::text
@@ -141,17 +104,13 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
-		// JOINING. A device other than the purchaser may take one of the entitlement's device slots (contract
-		// 6.3) only on the strength of ITS OWN sign-in: an unconsumed, unexpired auth context issued to this
-		// very device on this network, for the same subject the entitlement belongs to. That context is spent
-		// here, in this transaction, so one sign-in admits one device once. The body's device id alone still
-		// admits nothing -- the adversarial finding above stands.
+		// Joining: a device other than the purchaser may take a slot only on its OWN unconsumed, unexpired sign-in for the same subject on this
+		// network; that context is spent here so one sign-in admits one device once. The body's device id alone admits nothing.
 		if acquiringDevice != req.DeviceID {
 			if req.AuthContextID == "" {
 				return errDeviceNotOnEntitlement
 			}
-			// The auth_context family is written only inside its controlled operation (a database trigger
-			// refuses anything else), exactly as authctx does when it consumes a PMS context.
+			// auth_context writes require the controlled operation (a database trigger refuses anything else).
 			if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
 				return err
 			}
@@ -181,20 +140,8 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// ...AND THE REST OF THE IDENTITY MUST COHERE.
-		//
-		// Binding the device alone still let a caller present that device with somebody else's MAC, or on a
-		// guest network it was never seen on. Each of those is a different lie about who is being admitted:
-		//
-		//   MAC     -- device identity IS (tenant, site, appliance, MAC) in this domain, so a device row and a
-		//              MAC that disagree are not the same device, whatever the id says.
-		//   network -- the session is enforced on the bridge derived from the source IP. Admitting a device
-		//              onto a network it never appeared on would enforce it somewhere its appearance record
-		//              cannot account for.
-		//
-		// The IP is deliberately NOT pinned to the appearance record: DHCP legitimately reassigns it within a
-		// network, and the source IP is already server-derived from the connection rather than the body. The
-		// network it resolves to is the invariant that matters.
+		// The rest of the identity must cohere: device identity is (tenant, site, appliance, MAC) and the session is enforced on the bridge
+		// for the source IP, so MAC and network must match the device's records. The IP is not pinned: DHCP reassigns it within a network.
 		var deviceMAC, deviceTenant, deviceSite string
 		if err := tx.QueryRow(ctx, `
 		    SELECT mac::text, tenant_id::text, site_id::text
@@ -204,8 +151,7 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
-		// Tenant/site come from this appliance's own config, never the request, so a device belonging to
-		// another owner cannot be activated here even with a valid id.
+		// Tenant/site come from this appliance's config, never the request.
 		if deviceTenant != s.tenID || deviceSite != s.siteID {
 			return errDeviceNotOnEntitlement
 		}
@@ -223,18 +169,9 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return errIdentityMismatch
 		}
 
-		// RECONNECT / IDEMPOTENCY. The same device returning to the same entitlement gets the session it
-		// already has rather than a second one. Without this, a retried request -- a lost response, a guest
-		// reloading the page -- would consume another device slot against its own limit.
-		//
-		// ...BUT ONLY AT THE SAME ADDRESS (audit B-19). A session is pinned to its IP and ingress bridge: that is
-		// what nft authorizes and what the shaping class and the accounting checkpoint are keyed on. A device that
-		// comes back with a NEW address (a DHCP change, a different network) used to be handed its old session,
-		// which still authorized the OLD address -- so the device stayed offline at its new one while the old
-		// address stayed admitted for whoever holds it next. The pinned columns are accounting identity and are not
-		// rewritten in place (the sessions guard refuses that, rightly); the old session is ended through the
-		// controlled writer instead and a fresh one is opened below at the current address. The device keeps its
-		// place on the package (the authorization binding is untouched) and no extra licensed slot is used.
+		// Reconnect/idempotency: the same device at the same address gets its existing session, so a retried request does not consume another
+		// slot. At a NEW address (audit B-19) the old session still authorizes the old address, so end it through the controlled writer and
+		// open a fresh one; pinned columns are accounting identity and are not rewritten in place.
 		stale, err := s.liveSessionsOfDevice(ctx, tx, req.EntitlementID, req.DeviceID)
 		if err != nil {
 			return err
@@ -253,13 +190,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// LICENSED CONCURRENT-GUEST CAP. Scope, serialization and rationale live with the function.
 		if err := reserveLicensedSlot(ctx, tx, s.applID, s.lic.MaxConcurrentOnlineGuests()); err != nil {
 			return err
 		}
 
-		// DEVICE LIMIT, enforced against the PINNED plan revision, counted inside the same transaction that
-		// inserts. Counting outside it is the classic way two simultaneous logins both see "one slot left".
+		// Device limit against the PINNED plan revision, counted in the inserting transaction so two simultaneous logins cannot both see one slot left.
 		var inUse int
 		if err := tx.QueryRow(ctx, `
 		    SELECT count(DISTINCT device_id) FROM iam_v2.sessions
@@ -267,25 +202,15 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			req.EntitlementID).Scan(&inUse); err != nil {
 			return err
 		}
-		// DISCONNECT_OLDEST (0122) admits the new device by disconnecting the entitlement's oldest one, inside
-		// authorize_entitlement_device under the entitlement lock -- so a full plan with that policy is not a
-		// refusal here. Every other policy refuses at the limit, as before.
+		// DISCONNECT_OLDEST admits the new device by disconnecting the oldest inside authorize_entitlement_device under the entitlement lock; other policies refuse at the limit.
 		if maxDevices != nil && inUse >= *maxDevices && devicePolicy != "DISCONNECT_OLDEST" {
 			return &maxDevicesError{Limit: *maxDevices, Current: inUse}
 		}
 
-		// DEVICE ADMISSION. A session's device must first hold an authorization binding on the entitlement --
-		// the database refuses the insert otherwise ("session for a device with no authorization binding on
-		// entitlement ..."), which is the accepted domain making the ordering explicit rather than trusting
-		// callers to remember it. Admission is its own step precisely so the set of devices an entitlement has
-		// admitted survives sessions coming and going.
+		// Device admission: the database refuses a session for a device with no authorization binding, so admission is its own step.
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`,
 			req.EntitlementID, req.DeviceID); err != nil {
-			// THE DATABASE'S OWN LIMIT IS AUTHORITATIVE, and it counts more than the check above can: an admitted device
-			// keeps its slot after it signs out (moving the slot is the guest release, p6_guest_release_device), which
-			// svc_scd cannot see -- it has no read on entitlement_device_authorizations, on purpose. On PRE-LIVE a second
-			// device on a 1-device account passed the session count and this refusal surfaced as "could not bring your
-			// device online" (2026-10-15). Answer it as the device limit it is.
+			// The database limit is authoritative: an admitted device keeps its slot after signing out, which svc_scd cannot see; answer it as the device limit.
 			if strings.Contains(err.Error(), "MAX_DEVICES_REACHED") {
 				limit := 0
 				if maxDevices != nil {
@@ -296,11 +221,7 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// credential_method records HOW this device signed in, so an operator reading the session can tell an
-		// emailed code from a WhatsApp code or a Google sign-in without joining back through the entitlement.
-		// It is the credential recorded on the auth context (iamv2/credential.go): this device's own sign-in
-		// when it joined with one, otherwise the sign-in that acquired the entitlement. A context minted before
-		// credentials were recorded falls back to the authority's name, as before.
+		// credential_method records how this device signed in: its own sign-in when it joined with one, else the sign-in that acquired the entitlement, else the authority name.
 		var method string
 		if err := tx.QueryRow(ctx, `
 		    SELECT COALESCE(
@@ -366,20 +287,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// WAIT FOR ENFORCEMENT BEFORE ANSWERING.
-	//
-	// The session row is durable at this point, but the guest is not online: no accountable tc class exists
-	// and nft has not authorized them yet. netd converges on its own cadence. Returning here and letting the
-	// portal show "connected" would reproduce, one layer up, the exact defect the portal seam just fixed --
-	// a success page for a guest whose packets are still being dropped.
-	//
-	// So the caller is told the truth: the state actually reached. The wait is bounded by the caller's own
-	// deadline, because a wait longer than the caller's budget is not a longer wait -- the context is already
-	// cancelled and it ends immediately, on precisely the requests it was meant to protect.
+	// Wait for enforcement before answering: the row is durable but the guest is not online until netd converges, and a connected page for
+	// dropped packets is a lie. Report the state actually reached; the wait is bounded by the caller deadline.
 	state := s.awaitIAMv2Enforcement(ctx, sessionID)
 	if !reused && state == "active" {
-		// SessionsStarted counts sessions that actually started. Incrementing on a row that never got enforced
-		// would put the same lie in the metrics that it would have put on the success page.
+		// SessionsStarted counts only sessions that actually started.
 		s.met.SessionsStarted.WithLabelValues("iamv2").Inc()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -392,14 +304,12 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// endReasonAddressChanged ends a device's session when it comes back to the same package at a different address
-// (or on a different bridge): the old session's pinned address is no longer this device's (audit B-19).
+// endReasonAddressChanged ends a session when the device returns at a different address or bridge (audit B-19).
 const endReasonAddressChanged = "ADDRESS_CHANGED"
 
 type liveDeviceSession struct{ id, ip, iface string }
 
-// liveSessionsOfDevice lists the device's live sessions on the entitlement with the address and bridge each is
-// pinned to. Read inside the activation transaction, which already holds the entitlement row lock.
+// liveSessionsOfDevice runs inside the activation transaction, which holds the entitlement row lock.
 func (s *server) liveSessionsOfDevice(ctx context.Context, tx pgx.Tx, entitlementID, deviceID string) ([]liveDeviceSession, error) {
 	rows, err := tx.Query(ctx, `
 	    SELECT id::text, COALESCE(host(ip), ''), COALESCE(ingress_interface, '')
@@ -424,15 +334,11 @@ func (s *server) liveSessionsOfDevice(ctx context.Context, tx pgx.Tx, entitlemen
 
 var errEntitlementUnusable = errors.New("entitlement not usable")
 
-// errVerificationRequired is returned when the entitlement's subject is a self-registered Email account that is
-// suspended for Internet: unverified past its deadline, with no grace running (self_service.go accountSuspended).
+// errVerificationRequired: the subject is an Email account suspended for Internet (unverified past its deadline, no grace running).
 var errVerificationRequired = errors.New("the account's email address must be verified")
 
-// errDeviceNotOnEntitlement is returned when the device did not acquire the entitlement it is activating.
 var errDeviceNotOnEntitlement = errors.New("device did not acquire this entitlement")
 
-// errIdentityMismatch is returned when the device exists and acquired the entitlement, but the presented
-// MAC or guest network does not match what that device actually is or where it has been seen.
 var errIdentityMismatch = errors.New("device identity does not match the presented network identity")
 
 type maxDevicesError struct{ Limit, Current int }
@@ -441,11 +347,8 @@ func (e *maxDevicesError) Error() string { return "max devices reached" }
 
 var _ = context.Background
 
-// awaitIAMv2Enforcement polls durable session state until netd has promoted the session, or the caller's
-// budget runs out. It returns the state actually observed -- never an optimistic one.
-//
-// Polling durable state rather than trusting a signal is deliberate: netd promotes through a controlled
-// writer, and the database is the only place that can answer whether the promotion actually committed.
+// awaitIAMv2Enforcement polls durable session state until netd has promoted the session or the caller budget runs out, returning the
+// state actually observed; the database is the only place that can answer whether promotion committed.
 func (s *server) awaitIAMv2Enforcement(ctx context.Context, sessionID string) string {
 	deadline := time.Now().Add(iamv2EnforcementWaitMax)
 	if d, ok := ctx.Deadline(); ok {
@@ -485,10 +388,7 @@ const (
 	iamv2EnforcementPoll = 100 * time.Millisecond
 )
 
-// licenseCapacityError reports that admitting this session would take the site past the concurrent-guest
-// limit in its local signed licence. It carries the limit and the current count so the portal can say which
-// wall the guest hit, and it is deliberately distinct from maxDevicesError: "your plan allows fewer devices"
-// and "this property is at its licensed capacity" are different facts and lead to different actions.
+// licenseCapacityError: admitting this session would pass the licensed concurrent-guest limit. Distinct from maxDevicesError, since plan device limit and property capacity lead to different actions.
 type licenseCapacityError struct {
 	Limit   int64
 	Current int64

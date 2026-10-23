@@ -11,10 +11,8 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 )
 
-// CENTRAL DATA RETENTION (migration 0054; GDPR remediation plan, Product-Owner decision 2026-10-19). How long
-// Central keeps its own records: four periods, settings with bounds, a reason and an audit trail
-// (docs/OPERATIONAL_SETTINGS_POLICY.md). central_retention_apply() in the database does the work, so the rules
-// live in one place; ApplyRetention runs it hourly from ctrlapi's housekeeping loop.
+// Central's retention periods are bounded settings. central_retention_apply() in the database holds the rules in
+// one place; ApplyRetention runs it hourly from the housekeeping loop.
 
 type retentionSettingsView struct {
 	AuditLogMonths        int           `json:"audit_log_months"`
@@ -29,7 +27,7 @@ type retentionSettingsView struct {
 	UpdatedBy             *string       `json:"updated_by"`
 }
 
-// The bounds match the CHECK constraints of migration 0054.
+// The bounds match the CHECK constraints in the database.
 var (
 	retentionAuditLog        = settingBounds{Default: 24, Min: 6, Max: 120, Unit: "months"}
 	retentionHistoryPersonal = settingBounds{Default: 24, Min: 6, Max: 120, Unit: "months"}
@@ -37,7 +35,6 @@ var (
 	retentionDisabledAccount = settingBounds{Default: 24, Min: 1, Max: 120, Unit: "months"}
 )
 
-// ApplyRetention applies the retention periods once and returns what it removed or anonymised, by kind.
 func ApplyRetention(ctx context.Context, b *Base) (map[string]int64, error) {
 	var raw []byte
 	if err := b.DB.QueryRow(ctx, `SELECT central_retention_apply()`).Scan(&raw); err != nil {
@@ -83,9 +80,8 @@ func (b *Base) getRetentionSettings(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, v)
 }
 
-// patchRetentionSettings: PATCH /cloud/v1/settings/retention {audit_log_months?, history_personal_months?,
-// history_years?, disabled_account_months?, reason}. A value left out keeps its current setting. The new
-// periods apply at the next hourly run.
+// patchRetentionSettings: PATCH /cloud/v1/settings/retention; omitted values keep their setting, and new periods
+// apply at the next hourly run.
 func (b *Base) patchRetentionSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		AuditLogMonths        *int   `json:"audit_log_months"`

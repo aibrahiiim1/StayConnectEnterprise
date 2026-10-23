@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// memCounter is an in-memory RateCounter.
 type memCounter struct {
 	mu sync.Mutex
 	n  map[string]int64
@@ -38,8 +37,7 @@ func hit(h http.Handler, remote, xRealIP, xff string) int {
 	return rec.Code
 }
 
-// A client talking to ctrlapi directly cannot escape the limit by rotating forwarding headers: its bucket is
-// its TCP peer address.
+// A direct client cannot escape the limit by rotating forwarding headers.
 func TestRateLimitIgnoresSpoofedHeadersFromDirectClients(t *testing.T) {
 	c := newMemCounter()
 	h := RateLimitWith(c, "login", 3, time.Minute)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
@@ -56,8 +54,7 @@ func TestRateLimitIgnoresSpoofedHeadersFromDirectClients(t *testing.T) {
 	}
 }
 
-// Behind the loopback proxy, the proxy's X-Real-IP is the client: two clients get two buckets, and a client's
-// own first X-Forwarded-For hop is not believed.
+// Behind the loopback proxy, X-Real-IP is the client; a client's own first X-Forwarded-For hop is not believed.
 func TestRateLimitTrustsTheLoopbackProxy(t *testing.T) {
 	c := newMemCounter()
 	h := RateLimitWith(c, "reauth", 1, time.Minute)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))

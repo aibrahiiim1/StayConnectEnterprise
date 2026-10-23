@@ -1,16 +1,14 @@
 package pmsprovider
 
-// The catalogue entries. Every endpoint, header and field named in help text below was taken from the
-// provider's published documentation (see each DocsURL); none of the REST connectors has been exercised
-// against the real service, which is exactly what their verification status says.
+// Help text is taken from each provider's published documentation (DocsURL); no REST connector has been
+// exercised against the real service.
 
 const restVerificationNote = "Built from the provider's published API documentation and proven by automated " +
 	"contract tests that replay documentation-shaped responses (paging, rate limiting, authentication " +
 	"failures, check-outs and room moves). It has not yet been connected to a live property: verify it " +
 	"against your own property before relying on it for guest sign-in."
 
-// sourceTimezoneField is common to every connector: the property's IANA time zone, used to turn provider
-// timestamps into the property's calendar dates exactly as the FIAS feed reports them.
+// sourceTimezoneField turns provider timestamps into the property's calendar dates as the FIAS feed reports them.
 func sourceTimezoneField() Field {
 	return Field{
 		Key: "source_timezone", Label: "Property time zone", Type: FieldString, Required: true,
@@ -45,8 +43,7 @@ func protelFIAS() Provider {
 			{Key: "endpoint", Label: "PMS address", Type: FieldHostPort, Required: true,
 				Placeholder: "pms.example.local:5010",
 				Help:        "The host and port of the Protel FIAS interface, as host:port."},
-			// GDPR plan C8: the guest list crosses the hotel network, so it can be encrypted. Off by default:
-			// many FIAS interfaces speak plain TCP only, and turning it on is the hotel's decision.
+			// Off by default: many FIAS interfaces speak plain TCP only.
 			{Key: "tls_enabled", Label: "Encrypt the connection (TLS)", Type: FieldBool, Default: false,
 				Help: "Turn on only if the Protel FIAS interface is set up for TLS. When on, the appliance never " +
 					"falls back to an unencrypted connection: if TLS fails, the link stays down."},
@@ -195,9 +192,8 @@ func operaCloud() Provider {
 				Help:    "The OHIP application key (sent as x-app-key)."},
 		}},
 		Fields: fields,
-		// OPERA Cloud's reservation list offers no documented "changed since" filter, so changes are found by
-		// re-reading the in-house list on every check and comparing it with the last one. Rooms cannot be
-		// enumerated through the reservation API, so roster reconciliation stays with explicit check-outs.
+		// OPERA Cloud has no documented "changed since" filter, so changes come from re-reading the in-house list
+		// and diffing. Rooms can't be enumerated via the reservation API, so reconciliation stays with check-outs.
 		Capabilities: Capabilities{FullResync: true, LiveEvents: true, TestConnection: true, Arrivals: true, Departures: true},
 		SetupSteps: []string{
 			"Register an integration in the OHIP developer portal for the property's OPERA Cloud environment and note the gateway URL, client ID, client secret, application key and scope.",

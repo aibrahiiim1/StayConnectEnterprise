@@ -14,11 +14,10 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/portaltls"
 )
 
-// PORTAL HOSTNAMES AND CERTIFICATES (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §7, §8).
-// The handlers are thin: internal/portaltls decides everything, and says why it refuses (portaltls.Refusal).
+// Handlers are thin: internal/portaltls decides, and says why it refuses (portaltls.Refusal).
 
-// portalTLSFail writes a portaltls refusal as the standard envelope, and anything else as an internal error
-// whose detail stays in the log (it may name a database object; it never holds a secret).
+// portalTLSFail writes a refusal as the standard envelope; anything else is a generic internal error whose
+// detail stays in the log (it may name a database object).
 func portalTLSFail(w http.ResponseWriter, r *http.Request, err error) {
 	var ref *portaltls.Refusal
 	if errors.As(err, &ref) {
@@ -29,12 +28,7 @@ func portalTLSFail(w http.ResponseWriter, r *http.Request, err error) {
 	Fail(w, r, http.StatusInternalServerError, CodeInternal, "the request could not be completed")
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Appliance side: mutual TLS + appliance JWT (registered in appliance_mtls.go)
-// ---------------------------------------------------------------------------------------------------------
-
-// PortalTLSBase serves the three appliance messages. They are licensing-plane certificate lifecycle
-// (CLAUDE.md §0E): hostnames, the portal address, CSRs and certificate status -- no guest data.
+// PortalTLSBase serves the three appliance messages: hostnames, portal address, CSRs and certificate status; no guest data.
 type PortalTLSBase struct {
 	Svc *portaltls.Service
 }
@@ -94,13 +88,8 @@ func (p *PortalTLSBase) GetOrder(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, out)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Operator side: /cloud/v1/portal-tls/* (registered in routes.go)
-// ---------------------------------------------------------------------------------------------------------
-
-// portalTLSRoutes mounts the console API. Reads need fleet.view; every write needs security.manage -- the
-// platform-admin permission that already governs trust and security decisions -- plus a fresh password
-// (step-up): these settings decide who can obtain certificates for the whole zone.
+// portalTLSRoutes mounts the console API. Reads need fleet.view; every write needs security.manage plus a fresh
+// password (step-up), because these settings decide who can obtain certificates for the whole zone.
 func (b *Base) portalTLSRoutes(r chi.Router) {
 	if b.PortalTLS == nil {
 		na := unavailable("portal_tls_unavailable", "portal certificates are not available on this Central")
@@ -147,8 +136,7 @@ func (b *Base) putPortalTLSSettings(w http.ResponseWriter, r *http.Request) {
 	b.portalTLSSettings(w, r)
 }
 
-// putPortalTLSToken stores the DNS API token. WRITE-ONLY: the answer says it is set, never what it is, and
-// neither the audit record nor the event holds any part of it.
+// putPortalTLSToken stores the DNS API token. Write-only: neither the answer, the audit record nor the event holds any of it.
 func (b *Base) putPortalTLSToken(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Token string `json:"token"`

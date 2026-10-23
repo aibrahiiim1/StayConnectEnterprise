@@ -1,20 +1,10 @@
 package main
 
-// MODULES IN THE ADMIN CONSOLE.
-//
-// scd holds the licence and runs the four-gate module resolver (deployment ceiling, licence, local switch,
-// readiness). edged asks it (GET /v1/modules) and does two things with the answer:
-//
-//  1. Every module-owned operator surface is gated per request on MANAGEABILITY: the module is deployed and
-//     is licensed or already holds records. Readiness is deliberately NOT part of this gate: an unreachable
-//     provider or PMS must stop new client execution (scd enforces that) while configuration, diagnostics,
-//     history, reconciliation and recovery stay available to restore service.
-//  2. /capabilities stops reporting a surface whose module is not manageable, so the navigation (which
-//     already hides surfaces that are not reported) follows the licence and the site's choice without a second
-//     model in the browser. The full module state is reported alongside.
-//
-// FAIL CLOSED: if the module state cannot be read, module-owned surfaces answer 503 and are not reported.
-// Core surfaces are never module-gated.
+// scd resolves module state; edged gates each module-owned surface per request on manageability (deployed, and
+// licensed or still holding records) and stops reporting unmanageable surfaces in /capabilities.
+// Readiness is deliberately not part of the gate: an unreachable provider or PMS must stop new client execution
+// (scd enforces that) while configuration, history and recovery stay available.
+// Fails closed: if module state cannot be read, module-owned surfaces answer 503. Core surfaces are never gated.
 
 import (
 	"context"
@@ -28,8 +18,7 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// surfaceModules maps a module-owned surface to the module(s) that own it. A surface is manageable when ANY
-// of its modules is manageable (the financial screens serve both card payment and room charge).
+// surfaceModules maps a module-owned surface to its owning modules; any one being manageable is enough.
 var surfaceModules = map[string][]string{
 	"pms-stays":                 {lic.ModuleHospitality},
 	"pms-events":                {lic.ModuleHospitality},
@@ -52,21 +41,14 @@ var surfaceModules = map[string][]string{
 	"payment-providers":         {lic.ModuleCardPayment},
 	"financial-review":          {lic.ModuleRoomCharge, lic.ModuleCardPayment},
 	"financial-ops":             {lic.ModuleRoomCharge, lic.ModuleCardPayment},
-	// The provider screens behind the optional sign-in methods. The menu offered them only to a site licensed for
-	// the method; the API now refuses them on the same rule, so a direct call cannot configure a sender or an
-	// identity provider for a method the site may not offer.
+	// Provider screens for optional sign-in methods: refused by the API too, so a direct call cannot configure an unlicensed method.
 	"social-providers":       {lic.ModuleSocialLogin},
 	"notification-providers": {lic.ModuleEmailOTP, lic.ModuleSMSOTP, lic.ModuleWhatsAppOTP},
 }
 
-// historySurfaces are the module-owned surfaces that hold HISTORY, AUDIT, RECONCILIATION or RECOVERY. They
-// stay reachable while the module is manageable -- licensed, OR no longer licensed but still holding records --
-// because withdrawing a licence must never make evidence or recovery inaccessible.
-//
-// Every OTHER module-owned surface is day-to-day configuration or operation, and is served only while the
-// module is LICENSED (and deployed). A site without Hospitality therefore does not see PMS connection, Room
-// sign-in protection, grace or routing screens merely because it once ran a PMS; it keeps its stays, PMS
-// activity, sign-in history, reconciliation and financial review.
+// historySurfaces hold history, audit, reconciliation or recovery and stay reachable while the module is manageable
+// (even if no longer licensed), so withdrawing a licence never makes evidence inaccessible. Every other
+// module-owned surface is served only while the module is licensed and deployed.
 var historySurfaces = map[string]bool{
 	"pms-stays":                 true,
 	"pms-events":                true,
@@ -81,8 +63,6 @@ var historySurfaces = map[string]bool{
 	"financial-ops":             true,
 }
 
-// surfaceServed is the one rule for a module-owned surface: history needs the module manageable, everything
-// else needs it licensed and deployed.
 func surfaceServed(name string, st moduleState) bool {
 	if historySurfaces[name] {
 		return st.Manageable
@@ -90,7 +70,6 @@ func surfaceServed(name string, st moduleState) bool {
 	return st.Licensed && st.Deployed
 }
 
-// moduleState is one module as scd reports it (internal/modules.State).
 type moduleState struct {
 	ID         string   `json:"id"`
 	Label      string   `json:"label"`
@@ -114,8 +93,7 @@ type moduleReport struct {
 	Deployment   map[string]bool        `json:"deployment"`
 }
 
-// moduleCache keeps scd's answer for a few seconds so a page load that asks several surfaces does not ask scd
-// several times. A switch change invalidates it.
+// moduleCache holds scd's answer briefly; a switch change invalidates it.
 type moduleCache struct {
 	mu  sync.Mutex
 	at  time.Time
@@ -124,7 +102,7 @@ type moduleCache struct {
 
 const moduleCacheTTL = 3 * time.Second
 
-// moduleReport returns scd's module state, or ok=false when it cannot be read (callers fail closed).
+// moduleReport returns ok=false when the state cannot be read; callers fail closed.
 func (s *server) moduleReport(ctx context.Context) (*moduleReport, bool) {
 	if s.modCache == nil || s.scd == nil {
 		return nil, false
@@ -157,16 +135,14 @@ func (s *server) invalidateModules() {
 	s.modCache.mu.Unlock()
 }
 
-// surfaceManageable reports whether a surface may be served. Core surfaces always may. ok=false means the
-// module state could not be read.
+// surfaceManageable: core surfaces always may be served; ok=false means the module state could not be read.
 func (s *server) surfaceManageable(ctx context.Context, name string) (manageable bool, ok bool) {
 	mods, owned := surfaceModules[name]
 	if !owned {
 		return true, true
 	}
 	if s.modCache == nil {
-		// A server assembled without module wiring (focused unit tests) has no gate to apply. Production
-		// always wires it in main, where the cache is created unconditionally.
+		// Only unit tests build a server without module wiring; main always creates the cache.
 		return true, true
 	}
 	rep, ok := s.moduleReport(ctx)
@@ -181,7 +157,6 @@ func (s *server) surfaceManageable(ctx context.Context, name string) (manageable
 	return false, true
 }
 
-// moduleGate is applied by mountResource to every surface. It is a no-op for core surfaces.
 func (s *server) moduleGate(name string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if _, owned := surfaceModules[name]; !owned {
@@ -204,8 +179,7 @@ func (s *server) moduleGate(name string) func(http.Handler) http.Handler {
 	}
 }
 
-// filterSurfaces removes module-owned surfaces that are not manageable. When the module state cannot be read,
-// every module-owned surface is removed (fail closed) and core surfaces are kept.
+// filterSurfaces drops module-owned surfaces that are not manageable; if state cannot be read, all of them (fail closed).
 func (s *server) filterSurfaces(ctx context.Context, all []string) ([]string, *moduleReport) {
 	var rep *moduleReport
 	if s.modCache != nil {
@@ -230,8 +204,6 @@ func (s *server) filterSurfaces(ctx context.Context, all []string) ([]string, *m
 	}
 	return out, rep
 }
-
-// ---- the Modules screen -----------------------------------------------------------------------------------
 
 func (s *server) modulesRoutes() http.Handler {
 	r := chi.NewRouter()
@@ -283,9 +255,7 @@ func (s *server) getModuleChanges(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"changes": out})
 }
 
-// putModule switches a licensed module on or off for this site. Password step-up and a reason: turning a
-// module off stops new client execution immediately (history and recovery stay available), so it is a
-// deliberate act by a named operator.
+// putModule needs password step-up: turning a module off stops new client execution immediately.
 func (s *server) putModule(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	switch id {

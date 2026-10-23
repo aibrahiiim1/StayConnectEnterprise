@@ -1,12 +1,5 @@
 "use client";
 
-// PIECES SHARED BY THE NETWORKING SCREENS (Guest networks, New guest network, Guest network detail, DHCP & leases,
-// Config history). Only those screens import this file.
-//
-// Everything here is presentation: the words a state is shown with, the list a validation or health result is
-// shown as, and the reservation add/edit/remove dialogs that two screens used to hand-build separately (one of
-// them behind a native confirm box). The request bodies are exactly the ones those screens sent before.
-
 import * as React from "react";
 import { api, Whoami, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
@@ -17,14 +10,7 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* Roles                                                                                                    */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/**
- * The operator's roles, and whether they are known yet. `known` matters: before whoami answers, the page must
- * neither offer write actions nor tell the operator they are read-only.
- */
+/** Wait for whoami before offering writes or declaring the operator read-only. */
 export function useNetworkAccess(): { roles: string[]; known: boolean; writable: boolean } {
   const [roles, setRoles] = React.useState<string[] | null>(null);
   React.useEffect(() => {
@@ -33,10 +19,6 @@ export function useNetworkAccess(): { roles: string[]; known: boolean; writable:
   const list = roles ?? [];
   return { roles: list, known: roles !== null, writable: canWrite("network", list) };
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* Words for states                                                                                         */
-/* ------------------------------------------------------------------------------------------------------ */
 
 export const REVISION_STATE: Record<string, { label: string; tone: "ok" | "warn" | "err" | "default" }> = {
   active: { label: "Active", tone: "ok" },
@@ -66,10 +48,6 @@ export function DhcpModeBadge({ mode }: { mode: string }) {
 export function networkTypeLabel(n: Pick<GuestNetwork, "network_type" | "vlan_id">): string {
   return n.network_type === "vlan" ? `VLAN ${n.vlan_id ?? "?"}` : "Untagged";
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* Validation issues and health checks                                                                      */
-/* ------------------------------------------------------------------------------------------------------ */
 
 export function ValidationIssueList({ issues, className }: { issues: ValidationIssue[]; className?: string }) {
   if (issues.length === 0) return null;
@@ -109,7 +87,6 @@ export function HealthCheckList({
   );
 }
 
-/** The "what did Validate / Apply find" block, shown under the pending banner or on its own. */
 export function ApplyResults({
   validation,
   health,
@@ -139,16 +116,8 @@ export function ApplyResults({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* DHCP reservations: add, edit, remove                                                                     */
-/* ------------------------------------------------------------------------------------------------------ */
-
 type NewReservation = { guest_network_id: string; mac: string; reserved_ip: string; hostname: string; enabled: boolean };
 
-/**
- * Add a reservation. `networkId` fixed = the detail page (one network); otherwise the operator picks the network
- * from `networks`. The request body is the one both screens sent before.
- */
 export function AddReservationDialog({
   open,
   onOpenChange,
@@ -224,7 +193,6 @@ export function AddReservationDialog({
   );
 }
 
-/** Edit a reservation: the MAC and network are fixed, the address, hostname and on/off can change. */
 export function EditReservationDialog({
   reservation,
   networkName,
@@ -286,10 +254,6 @@ export function EditReservationDialog({
   );
 }
 
-/**
- * Remove a reservation. This replaced a native confirm box on two screens. It says which address stops being
- * reserved and what that means for the device — a printer, a TV or a door lock that relied on it.
- */
 export function RemoveReservationDialog({
   reservation,
   onClose,
@@ -331,11 +295,6 @@ export function RemoveReservationDialog({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* Small form helpers                                                                                       */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/** A labelled switch row, with an optional one-line explanation. The label is bound to the switch. */
 export function SwitchRow({
   label,
   hint,

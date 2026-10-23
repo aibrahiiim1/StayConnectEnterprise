@@ -1,16 +1,6 @@
 "use client";
 
-// ROOM SIGN-IN READINESS — whether Room sign-in can actually serve a guest right now, which is not the same
-// question as whether it is switched on.
-//
-// Shared by two screens: Hotel → Room sign-in carries the full callout (which guest networks are affected and
-// why), and Client access → Sign-in methods carries a one-line warning beside the switch, so an operator
-// turning the method on during an outage is not left believing it works. The data is loaded here once, by the
-// same rule for both, so the two screens cannot disagree about whether there is an outage.
-//
-// Guest authentication requires a live PMS feed for the network a guest is on, so an interface that is
-// disconnected or still loading its guest list refuses every guest — with the uniform message, which looks
-// exactly like a wrong surname. The per-network decision itself lives in lib/pms-availability.ts.
+// Enabled room sign-in still fails uniformly when its network lacks a live PMS feed.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -19,32 +9,25 @@ import { api, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/l
 import { roomSignInReadiness, type RoomSignInReadiness } from "@/lib/pms-availability";
 import { Callout } from "@/components/ui/error-banner";
 
-// The reasons read as sentence fragments so they can be listed after a network name; the single-outage copy
-// puts one at the start of a sentence instead.
 const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
-/**
- * Loads the PMS interfaces, their health and the network routing, and returns the readiness verdict.
- * Readiness is ADVISORY: any failure leaves it "unknown", which shows nothing, and never blocks the screen.
- */
+/** Readiness is advisory; failed checks leave it unknown and never block the screen. */
 export function useRoomSignInReadiness(enabled = true): { readiness: RoomSignInReadiness; reload: () => Promise<void> } {
   const [ifaces, setIfaces] = useState<PmsInterface[] | null>(null);
   const [health, setHealth] = useState<PmsInterfaceHealth[] | null>(null);
   const [routes, setRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
 
   const reload = useCallback(async () => {
-    // Asked only where Room sign-in exists at all: a site without Hospitality never calls the PMS surfaces.
+    // Sites without Hospitality never call PMS surfaces.
     if (!enabled) return;
     try {
       const [list, routing] = await Promise.all([
         api.get<{ interfaces?: PmsInterface[] }>("/pms-interfaces"),
         api.get<{ routes: PmsGuestNetworkRoute[] }>("/pms-routing"),
       ]);
-      // edged answers { interfaces: [...] } (resources_phase3_interfaces.go), as every other PMS screen reads it.
-      // Reading `.data` here saw no interface at all, so a healthy, connected PMS was reported as "not working".
+      // Read the interfaces field; treating the response as .data falsely reports healthy PMS as unavailable.
       const all = list.interfaces ?? [];
-      // Health is read for ACTIVE interfaces only: the others cannot serve a guest whatever their axes say,
-      // and asking is a request per interface.
+      // Query health only for active interfaces because inactive ones cannot serve guests.
       const healths = await Promise.all(
         all.filter((i) => i.lifecycle_state === "ACTIVE").map((i) =>
           api.get<{ health: PmsInterfaceHealth }>(`/pms-interfaces/${i.id}/health`)
@@ -54,7 +37,7 @@ export function useRoomSignInReadiness(enabled = true): { readiness: RoomSignInR
       setIfaces(all);
       setHealth(healths.filter(Boolean) as PmsInterfaceHealth[]);
       setRoutes(routing?.routes ?? []);
-    } catch { /* readiness unknown; the notice is simply not shown */ }
+    } catch { /* Failed checks leave advisory readiness unknown. */ }
   }, [enabled]);
   useEffect(() => { reload(); }, [reload]);
 
@@ -62,20 +45,11 @@ export function useRoomSignInReadiness(enabled = true): { readiness: RoomSignInR
   return { readiness, reload };
 }
 
-/** True when there is something the operator must be told. */
 export function roomSignInImpaired(r: RoomSignInReadiness): boolean {
   return r.state === "down" || r.state === "partial";
 }
 
-/**
- * The full outage callout: which guest networks cannot sign in by room, and why. Renders nothing when Room
- * sign-in is working or its readiness is unknown.
- *
- * WHY THIS IS SEPARATE FROM THE SETTING. The method can be switched on and correctly configured while the live
- * PMS feed it depends on is missing, and there is nothing on the settings screen to fix. PARTIAL IS ITS OWN
- * CASE: when one guest network is affected and another is fine, "not working" would be false for half the
- * property, so the networks are named.
- */
+/** Name affected networks so a partial PMS outage is not reported as a property-wide failure. */
 export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignInReadiness }) {
   if (readiness.state !== "down" && readiness.state !== "partial") return null;
   return (
@@ -109,8 +83,7 @@ export function RoomSignInReadinessCallout({ readiness }: { readiness: RoomSignI
         </>
       )}
       {readiness.unchecked.length > 0 && (
-        // Neutral, and never counted as an outage. A health read that failed is absence of evidence, and one
-        // of those networks may be perfectly fine.
+        // Unknown health is not evidence of an outage.
         <p className="mt-1">Readiness could not be checked for {readiness.unchecked.join(", ")}.</p>
       )}
       <p className="mt-1">

@@ -2,12 +2,8 @@ package iamv2
 
 import "testing"
 
-// ONLY APPROVED ACQUISITION METHODS ARE EVER OFFERED. The approved set is Free (NOT_REQUIRED), Voucher
-// (PREPAID), Card (ONLINE_PAYMENT) and Room charge (PMS_POSTING); Room charge is offered only on the Room
-// sign-in path, never here. MANUAL_APPROVAL stays dormant in the settlement contract and is never offered;
-// CASH exists nowhere. The database refuses an unapproved method on a revision (TestAcquisitionDatabaseRules);
-// this proves that even a revision that somehow listed one could not get it offered, for every subject kind,
-// price and site switch.
+// Even a revision that somehow listed an unapproved method (MANUAL_APPROVAL, CASH) must never get it offered;
+// Room charge is offered only on the Room sign-in path, never here.
 func TestOnlyApprovedMethodsAreEverOffered(t *testing.T) {
 	approved := map[string]bool{AcquireFree: true, AcquireVoucher: true, AcquireCard: true}
 	listed := []string{AcquireFree, AcquireVoucher, AcquireCard, AcquireRoomCharge, "MANUAL_APPROVAL", "CASH", "", "card"}

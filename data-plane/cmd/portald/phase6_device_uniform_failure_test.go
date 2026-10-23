@@ -1,14 +1,7 @@
 package main
 
-// A DARK CAPABILITY MUST NOT MANUFACTURE AUTHENTICATION FAILURES.
-//
-// Phase 6 device management is deliberately off on this appliance, and the portal fires /devices/list on every
-// success-page load. Those requests used the AUTHENTICATION uniform failure, so each one answered the guest
-// "We could not verify your stay. Please check your details or contact the site team for assistance." — on a page they reached BY
-// verifying their stay — and wrote "phase3 guest auth not verified" into the operator's journal. Nothing had
-// been authenticated. A feature being switched off was being reported as guests failing to log in.
-//
-// These cases pin both halves: the answer is about devices, and it still tells a guest nothing about WHY.
+// A dark device capability must not report authentication failures: the answer is about devices, and it
+// tells the guest nothing about why.
 
 import (
 	"bytes"
@@ -22,7 +15,7 @@ import (
 	"testing"
 )
 
-// darkScd is an appliance with Phase 6 off: scd does not mount the endpoints, so the hop cannot succeed.
+// darkScd models scd not mounting the endpoints.
 type darkScd struct{}
 
 func (darkScd) RoundTrip(*http.Request) (*http.Response, error) {
@@ -39,8 +32,7 @@ func darkFixture(t *testing.T) *handler {
 	return h
 }
 
-// darkProbe drives one device route through the REAL router against a dark appliance, capturing what the guest
-// is told AND what the operator's journal records.
+// darkProbe returns what the guest is told and what the journal records.
 func darkProbe(t *testing.T, route, body string) (int, deviceOut, string) {
 	t.Helper()
 	var logged bytes.Buffer
@@ -59,8 +51,7 @@ func darkProbe(t *testing.T, route, body string) (int, deviceOut, string) {
 	return rec.Code, out, logged.String()
 }
 
-// THE REGRESSION. Whatever the cause, a device request that is not served must never claim the stay failed to
-// verify — not in the body, and not in the log.
+// An unserved device request must never claim the stay failed to verify, in the body or the log.
 func TestDeviceFailure_DoesNotClaimTheStayCouldNotBeVerified(t *testing.T) {
 	for _, c := range []struct{ route, body string }{
 		{"/devices/list", "{}"},
@@ -94,9 +85,7 @@ func TestDeviceFailure_DoesNotClaimTheStayCouldNotBeVerified(t *testing.T) {
 	}
 }
 
-// AND IT STILL DISCLOSES NOTHING. One message for every cause is what keeps "this appliance does not have the
-// feature" indistinguishable from "your request did not succeed" — the property the shared builder was
-// originally chosen for, and which the fix must not spend.
+// One message for every cause keeps "no such feature here" indistinguishable from "request failed".
 func TestDeviceFailure_TellsTheGuestNothingAboutTheCause(t *testing.T) {
 	causes := []struct{ route, body string }{
 		{"/devices/list", "{}"},
@@ -130,8 +119,7 @@ func TestDeviceFailure_TellsTheGuestNothingAboutTheCause(t *testing.T) {
 	}
 }
 
-// THE AUTHENTICATION SURFACE IS UNCHANGED. The fix is scoped to the device routes: a real Phase-3 failure must
-// still answer with the stay message, or this became a regression in the other direction.
+// A real Phase-3 failure must still answer with the stay message.
 func TestDeviceFailure_AuthenticationSurfaceStillSaysWhatItAlwaysSaid(t *testing.T) {
 	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "room_not_found", classCredential, "", "", 0)
 	if body.Message != guestAuthMessage {

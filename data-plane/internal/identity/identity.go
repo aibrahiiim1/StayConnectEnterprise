@@ -1,13 +1,4 @@
-// Package identity manages this appliance's persistent cryptographic
-// identity and its mapping to the control-plane appliance row.
-//
-// On first boot (no identity file present) scd generates an Ed25519 keypair
-// and registers it with Central, token-less, with a request signed by that key
-// (POST /v1/appliances/register). The returned appliance_id is saved to
-// identity.json alongside the key. Enrollment tokens no longer exist.
-//
-// On subsequent boots the files are loaded as-is; scd uses the private key
-// to sign outbound control-plane calls (see applianceauth.Sign).
+// Package identity manages the appliance's persistent Ed25519 identity and its token-less registration with Central.
 package identity
 
 import (
@@ -29,49 +20,35 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 )
 
-// Identity is the fully-resolved set of facts scd needs to operate against
-// the control plane. ApplianceID is populated once Central has registered this appliance.
-// TenantID/SiteID are legacy fields that are never read for authority: the signed assignment is the only source
-// of tenant and site.
+// Identity is the appliance's resolved identity. TenantID/SiteID are legacy and never read for authority: the signed assignment is the only source of tenant and site.
 type Identity struct {
-	ApplianceID  string             `json:"appliance_id"`
-	TenantID     string             `json:"tenant_id"`
-	SiteID       string             `json:"site_id"`
-	Serial       string             `json:"serial"`
-	PublicKeyB64 string             `json:"public_key"` // base64-raw
-	privKey      ed25519.PrivateKey // not persisted in JSON; lives in key file
+	ApplianceID  string `json:"appliance_id"`
+	TenantID     string `json:"tenant_id"`
+	SiteID       string `json:"site_id"`
+	Serial       string `json:"serial"`
+	PublicKeyB64 string `json:"public_key"`
+	privKey      ed25519.PrivateKey
 }
 
 func (i *Identity) PrivateKey() ed25519.PrivateKey { return i.privKey }
 
-// Store is the on-disk directory layout:
-//
-//	<Dir>/identity.json  — appliance_id, tenant_id, site_id, serial, public key
-//	<Dir>/ed25519.key    — 64-byte raw Ed25519 private seed+public (Go's format)
+// Store is the on-disk identity directory (identity.json and ed25519.key).
 type Store struct {
 	Dir string
-	// HeldCustomer, when set, reports the customer (tenant) id whose data the appliance's local site database
-	// still holds ("" for a factory-clean appliance). Register sends it as holds_customer_id inside the signed
-	// body, so Central refuses to activate the appliance for any other customer. An error refuses the
-	// registration attempt: an appliance that cannot tell what it holds must not present itself as clean.
+	// HeldCustomer reports the customer id whose data the local site database still holds ("" when clean). Register
+	// sends it signed so Central refuses activation for any other customer; an error refuses registration.
 	HeldCustomer func(context.Context) (string, error)
 }
 
 func (s *Store) idPath() string  { return filepath.Join(s.Dir, "identity.json") }
 func (s *Store) keyPath() string { return filepath.Join(s.Dir, "ed25519.key") }
 
-// ErrCentralUnreachable wraps a registration attempt that never got an HTTP answer from Central (DNS, TCP,
-// TLS or timeout). It is the retryable case: the appliance keeps its keypair and tries again later.
+// ErrCentralUnreachable marks a registration that got no HTTP answer from Central; it is retryable.
 var ErrCentralUnreachable = errors.New("central unreachable")
 
-// LoadBound returns the persisted identity ONLY when Central has bound an appliance id to it.
-//
-// AN UNBOUND KEYPAIR IS NOT AN ENROLLED IDENTITY. EnsureLocalKeypair (offline first activation) writes an
-// identity.json holding a keypair and no appliance id -- deliberately, because a factory-clean appliance has
-// no id to claim yet. Counting that file as an identity would mean: download one offline activation request
-// and this appliance can never self-register online again.
-//
-// Returns (nil, nil) for a factory-clean or not-yet-registered appliance.
+// LoadBound returns the persisted identity only when Central has bound an appliance id to it.
+// An unbound keypair (offline first activation) is not an enrolled identity; counting it would stop the
+// appliance from ever self-registering online. Returns (nil, nil) when not yet registered.
 func (s *Store) LoadBound() (*Identity, error) {
 	id, err := s.load()
 	if err != nil {
@@ -86,25 +63,13 @@ func (s *Store) LoadBound() (*Identity, error) {
 	return id, nil
 }
 
-// HTTPDoer is the one method Register needs from an HTTP client, so a test can answer for Central.
 type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Register performs TOKEN-LESS self-registration, the only way an appliance obtains an appliance id online.
-// Enrollment tokens no longer exist (docs/CENTRAL_CONTROL_PLANE.md section 4).
-//
-// It signs the registration WITH the appliance's identity key (proof of possession) and POSTs the hardware
-// facts to Central, which creates a waiting-for-activation appliance row and returns its id; the id is then
-// persisted beside the key.
-//
-// An existing UNBOUND keypair is reused: an appliance has ONE identity key, and an offline activation request
-// the operator is already carrying names it. A new key is generated only when there is nothing to reuse, and
-// it is written to disk BEFORE the request goes out, so every retry of an unanswered registration presents the
-// same key rather than minting a new one per attempt.
-//
-// A network-level failure returns an error wrapping ErrCentralUnreachable; a refusal from Central returns a
-// *StatusError. Neither is fatal to the caller, which retries with backoff.
+// Register performs token-less self-registration, signed with the identity key (proof of possession).
+// An existing unbound keypair is reused and a new key is written to disk before the request, so every retry
+// presents the same key. Network failures wrap ErrCentralUnreachable; refusals return *StatusError.
 func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) (*Identity, error) {
 	if ctrlBase == "" {
 		return nil, errors.New("identity: no Central endpoint configured")
@@ -115,7 +80,7 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	if id, err := s.LoadBound(); err != nil {
 		return nil, err
 	} else if id != nil {
-		return id, nil // already registered; nothing to do
+		return id, nil
 	}
 	local, err := s.EnsureLocalKeypair()
 	if err != nil {
@@ -134,8 +99,7 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 		"model":                hw.Model,
 		"public_key":           pubB64,
 	}
-	// HOLDS_CUSTOMER_ID. Optional, and inside the signed body (the request token carries the body's SHA-256),
-	// so it cannot be stripped or changed in transit. Omitted when the appliance holds no customer's data.
+	// HOLDS_CUSTOMER_ID is inside the signed body (the token carries its SHA-256) so it cannot be stripped in transit.
 	if s.HeldCustomer != nil {
 		held, err := s.HeldCustomer(ctx)
 		if err != nil {
@@ -161,8 +125,7 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := client.Do(req)
 	if err != nil {
-		// NOT FATAL, BUT NEVER SILENT. The most common cause on a real appliance has been that it does not
-		// trust Central's CA; the hint points there instead of at a setup screen.
+		// Not fatal but never silent: the usual cause is that the appliance does not trust Central's CA.
 		slog.Warn("appliance self-registration could not reach Central; will retry",
 			"endpoint", ctrlBase+"/v1/appliances/register", "err", err,
 			"hint", "TLS verification failure? the appliance must trust Central's CA — "+
@@ -184,8 +147,7 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	if r.ApplianceID == "" {
 		return nil, errors.New("register: Central returned no appliance id")
 	}
-	// Tenant and site are NEVER taken from the registration answer: the signed assignment is the only
-	// authority for them (docs/CENTRAL_CONTROL_PLANE.md section 5).
+	// Tenant and site never come from the registration answer; only the signed assignment is authority.
 	if local.Serial == "" {
 		local.Serial = hw.Serial
 	}
@@ -197,7 +159,6 @@ func (s *Store) Register(ctx context.Context, ctrlBase string, client HTTPDoer) 
 	return local, nil
 }
 
-// StatusError is Central answering a registration with something other than success.
 type StatusError struct {
 	Code int
 	Body string
@@ -207,12 +168,9 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("register status=%d body=%s", e.Code, e.Body)
 }
 
-// detectHW is hwid.Detect, replaceable in tests.
 var detectHW = hwid.Detect
 
-// writeFileAtomic writes data to a temp file in the same directory, fsyncs it,
-// then renames it over the destination — so readers never observe a partial
-// file and a crash mid-write cannot corrupt an existing key.
+// writeFileAtomic fsyncs a temp file and renames it so readers never see a partial file.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -220,7 +178,7 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
+	defer os.Remove(tmpName)
 	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
 		return err
@@ -259,17 +217,8 @@ func (s *Store) load() (*Identity, error) {
 	return &id, nil
 }
 
-// LoadPublic returns the appliance's PUBLIC identity — appliance id, serial and public key — without reading
-// the private key file at all.
-//
-// It exists for readers that need to know WHICH appliance this is but have no business holding its signing
-// key. pmsd is the case in point: it verifies a Central-signed assignment against this appliance's identity
-// and never signs anything, so requiring the private key would give a PMS connector the appliance's key for
-// no reason — and, because ed25519.key is 0600 root-only while identity.json is world-readable, it also
-// simply fails for any daemon running under its own service account.
-//
-// Returns (nil, nil) when no identity.json exists: a factory-clean appliance has no identity, which is an
-// answer rather than an error.
+// LoadPublic returns the public identity without reading the private key. pmsd uses it: it never signs, and
+// ed25519.key is root-only 0600 while identity.json is world-readable.
 func (s *Store) LoadPublic() (*Identity, error) {
 	ij, err := os.ReadFile(s.idPath())
 	if err != nil {
@@ -285,17 +234,8 @@ func (s *Store) LoadPublic() (*Identity, error) {
 	return &id, nil
 }
 
-// EnsureLocalKeypair creates and persists an identity keypair WITHOUT contacting Central, and returns the
-// identity. If one already exists it is returned unchanged.
-//
-// This exists for OFFLINE FIRST ACTIVATION: a factory-clean appliance with no route to Central still has to
-// prove possession of a key before Central will bind an activation package to it. The key is generated here,
-// on the appliance, and the private half never leaves — the activation request carries only the public half
-// and a signature made with the private one.
-//
-// ApplianceID is deliberately left EMPTY. Only Central mints appliance ids, and only the signed assignment
-// carries tenant and site; generating a keypair locally does not make an appliance identity, it makes the
-// evidence that one can be issued.
+// EnsureLocalKeypair creates an identity keypair without contacting Central (offline first activation).
+// ApplianceID stays empty: only Central mints ids, and only the signed assignment carries tenant and site.
 func (s *Store) EnsureLocalKeypair() (*Identity, error) {
 	if id, err := s.load(); err == nil {
 		return id, nil
@@ -323,9 +263,7 @@ func (s *Store) EnsureLocalKeypair() (*Identity, error) {
 	return id, nil
 }
 
-// AdoptApplianceID records the appliance id Central minted for an offline first activation. It refuses to
-// overwrite an existing, different id: an appliance has one identity, and silently repointing it is exactly
-// the confusion this whole subsystem exists to prevent.
+// AdoptApplianceID records the id Central minted for an offline activation; it refuses to overwrite a different id.
 func (s *Store) AdoptApplianceID(applianceID string) error {
 	id, err := s.load()
 	if err != nil {

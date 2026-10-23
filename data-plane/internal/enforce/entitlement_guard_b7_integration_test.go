@@ -2,16 +2,9 @@
 
 package enforce
 
-// AUDIT B-7 (migration 0124): THE ENTITLEMENT GUARD CANNOT BE SWITCHED OFF BY ITS CALLER, AND THE RUNTIME ROLES
-// HOLD ONLY WHAT THEIR CODE USES.
-//
-// Before 0124 any role that could UPDATE iam_v2.entitlements could `SET LOCAL iam_v2.allow_adjust = 'on'` and
-// then give a guest their data back or move their window with no adjustment recorded, and could raise
-// data_quota_bytes or swap service_plan_revision_id with no setting at all -- svc_scd and svc_pmsd held exactly
-// that UPDATE. These cases attempt each write as the roles that matter and assert the database's answer.
-//
-// Runs against the full Gate-P schema (scripts/lib-fullschema-testdb.sh), where the svc_* roles hold exactly the
-// deploy/gatep privileges. A role that is not provisioned skips its case rather than passing it.
+// The entitlement guard cannot be switched off by its caller (a role with UPDATE could otherwise set
+// iam_v2.allow_adjust, or alter quota and plan with no record), and runtime roles hold only what their code
+// uses. Runs against the full Gate-P schema (scripts/lib-fullschema-testdb.sh); an unprovisioned role skips.
 
 import (
 	"context"
@@ -23,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// asRole runs fn inside a transaction that has assumed role (SET LOCAL ROLE) and is ALWAYS rolled back, so a
-// write that the test expects to be refused can never leave state behind if it is wrongly accepted.
+// asRole runs fn as role in a transaction that is always rolled back, so a wrongly accepted write leaves no state.
 func asRole(t *testing.T, p *pgxpool.Pool, role string, fn func(tx pgx.Tx) error) error {
 	t.Helper()
 	ctx := context.Background()
@@ -54,8 +46,7 @@ func wantRefused(t *testing.T, what string, err error, fragment string) {
 	}
 }
 
-// A writer role with table-level UPDATE: the shape svc_scd and svc_pmsd had before 0124. Created inside the
-// test's own transaction and gone with its rollback.
+// A writer role with table-level UPDATE, created inside the test's transaction.
 func withLegacyWriter(t *testing.T, p *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	t.Helper()
 	ctx := context.Background()
@@ -115,8 +106,7 @@ func TestIntegration_B7_TheCallerCannotSwitchTheGuardOff(t *testing.T) {
 		t.Fatalf("row lock by a writer: %v", err)
 	}
 
-	// The OWNER -- whose definers the switch used to unlock when a caller set it first -- is refused too unless
-	// an adjustment was recorded in this transaction.
+	// The owner is refused too unless an adjustment was recorded in this transaction.
 	err = asRole(t, p, "iam_v2_owner", func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL iam_v2.allow_adjust = 'on'`); err != nil {
 			return err
@@ -190,7 +180,7 @@ func TestIntegration_B7_TheCallerCannotSwitchTheGuardOff(t *testing.T) {
 	}(); err != nil {
 		t.Fatalf("superuser maintenance correction refused: %v", err)
 	}
-	// ...and without it is refused, as before 0124.
+	// ...and without it is refused.
 	_, err = p.Exec(ctx, `UPDATE iam_v2.entitlements SET window_ends_at = window_ends_at - interval '1 hour' WHERE id=$1`, ent)
 	wantRefused(t, "superuser window move without the switch", err, "only via entitlement_adjustments")
 

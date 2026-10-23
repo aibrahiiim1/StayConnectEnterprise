@@ -3,14 +3,7 @@ import { render, screen, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { fakeAudit } from "./fake-paged";
 
-// A SITE DOES NOT LOOK LIKE A HOTEL UNLESS HOSPITALITY IS AVAILABLE, does not look like it takes cards unless
-// Card payment is, and does not offer an optional sign-in method unless its identity module is (Product Owner
-// rule). What these assert is mostly ABSENCE -- the room filter, the PMS reassurance, the payment-provider
-// bullet -- on a site without the module, and presence with it, because a page that always hides them would
-// pass the first half just as happily.
-//
-// History stays reachable: a filter over records follows moduleHasHistory (manageable), and a row of a kind
-// that exists is never left without its filter.
+// Historical records remain reachable after a module becomes unavailable.
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
@@ -26,7 +19,6 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
 }));
 
-// File-scoped, as in nav.test.tsx: the holder chooses, the real moduleLicensed / moduleHasHistory decide.
 const ALL = ["hospitality", "email_otp", "sms_otp", "whatsapp_otp", "social_login", "card_payment", "room_charge"];
 const MODS: { licensed: string[]; history: string[] } = { licensed: [], history: [] };
 vi.mock("@/lib/capabilities", async (importOriginal) => {
@@ -67,7 +59,6 @@ afterEach(() => { cleanup(); vi.resetModules(); });
 const options = (label: RegExp) =>
   Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map((o) => o.textContent ?? "");
 
-// ------------------------------------------------------------------------------------------------ sessions
 const VOUCHER_SESSION = {
   id: "s1", tenant_id: "t", site_id: "s", appliance_id: "a", guest_id: "g", ip: "10.0.0.5", mac: "02:00:00:00:00:05",
   state: "active", started_at: new Date().toISOString(), bytes_down: 1, bytes_up: 1, subject_kind: "voucher",
@@ -107,7 +98,6 @@ describe("Active sessions", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------ usage explorer
 describe("Usage explorer", () => {
   it("has no Hotel room/stay type and no room search without hospitality history", async () => {
     routes({ "/usage/sources": { data: [] } });
@@ -130,7 +120,6 @@ describe("Usage explorer", () => {
   });
 });
 
-// -------------------------------------------------------------------------------------------- activity log
 const HOTEL_ENTRY = fakeAudit([{ ts: "2026-09-20T10:00:00Z", actor_type: "system", action: "pms_interface.created" }]);
 
 describe("Activity", () => {
@@ -160,7 +149,6 @@ describe("Activity", () => {
   });
 });
 
-// -------------------------------------------------------------------------------------------- allowed sites
 describe("Allowed sites", () => {
   async function tips() {
     routes({ "/walled-garden": { data: [] } });
@@ -185,7 +173,6 @@ describe("Allowed sites", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------- client accounts
 describe("Client accounts", () => {
   async function tips() {
     routes({ "/guest-accounts": { data: [], meta: { has_more: false } } });
@@ -208,7 +195,6 @@ describe("Client accounts", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------------ diagnostics
 describe("Diagnostics", () => {
   const PG = {
     service: "postgres", state: "healthy", process_state: "running", health_ok: true, health_detail: "ok",
@@ -238,7 +224,6 @@ describe("Diagnostics", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------- internet package activity
 describe("Client activity on Internet packages", () => {
   const VOUCHER_ROW = {
     purchase_id: "pu2", package_id: "pk2", package_code: "PREMIUM", package_name: "Premium", package_revision_id: "r9",
@@ -287,7 +272,6 @@ describe("Client activity on Internet packages", () => {
   });
 });
 
-// ------------------------------------------------------------------------------------------- portal preview
 describe("the portal preview's sign-in methods", () => {
   const DOC = {
     voucher: { enabled: true }, guest_account: { enabled: false }, open: { enabled: true },

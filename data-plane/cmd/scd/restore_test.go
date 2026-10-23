@@ -1,11 +1,7 @@
 package main
 
-// THE SAFETY PROPERTIES OF THE ONE OPERATION THAT CAN LOSE A HOTEL'S DATA.
-//
-// These are not tests of whether a restore works — that is proven on the appliance, against a real database,
-// because a restore that only works against a mock is not evidence of anything. These pin the properties
-// that make it safe to attempt at all, each of which is a decision that could be quietly reversed by a later
-// edit that looked like a simplification.
+// Safety properties of the one operation that can lose a hotel's data. They pin decisions a later "simplifying" edit could quietly reverse;
+// that a restore works is proven on the appliance.
 
 import (
 	"encoding/json"
@@ -27,12 +23,11 @@ func TestOnlyAVerifiedBackupMayBeRestored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// UNVERIFIED IS REFUSED. The screen also checks, but the screen is not the security boundary.
+	// Unverified is refused here too: the screen is not the security boundary.
 	if _, err := readVerifiedMarker(name); err == nil {
 		t.Fatal("an unverified backup was accepted for restore")
 	}
 
-	// A verification makes it eligible.
 	writeVerifiedMarker(name, 63)
 	rec, err := readVerifiedMarker(name)
 	if err != nil {
@@ -44,9 +39,7 @@ func TestOnlyAVerifiedBackupMayBeRestored(t *testing.T) {
 }
 
 func TestAVerifiedBackupThatCHANGEDIsRefused(t *testing.T) {
-	// "This NAME was verified once" is not the same claim as "these BYTES were verified". A file replaced
-	// under the same name — a re-run backup, a copy dropped in by hand, a partial write — must lose its
-	// verification rather than inherit it.
+	// A name verified once is not bytes verified: a replaced file (re-run, hand copy, partial write) must lose its verification.
 	dir := t.TempDir()
 	defer scdBackupDirForTest(t, dir)()
 
@@ -60,7 +53,6 @@ func TestAVerifiedBackupThatCHANGEDIsRefused(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	// Same name, different bytes.
 	if err := os.WriteFile(path, []byte("replaced contents, longer than before"), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -110,12 +102,8 @@ func TestMaintenanceRoundTrips(t *testing.T) {
 	}
 }
 
-// THE ORDER OF OPERATIONS IS THE SAFETY MODEL.
-//
-// Asserted on the source because the sequence is the property: a load into STAGING before any swap, a rename
-// rather than a drop, an integrity check after, and a rollback on both failure paths. A future edit that
-// "simplified" this into drop-and-load would pass every behavioural test and lose a hotel's data the first
-// time a dump was truncated.
+// The order of operations is the safety model, asserted on the source: staging load before any swap, rename not drop, integrity check after,
+// rollback on both failure paths. A drop-and-load "simplification" would pass behavioural tests and lose data.
 func TestTheDestructiveStepIsARenameAndComesLast(t *testing.T) {
 	s := restoreSequence(t)
 
@@ -149,7 +137,6 @@ func TestTheDestructiveStepIsARenameAndComesLast(t *testing.T) {
 		last = i
 	}
 
-	// Both failure paths must put the original back.
 	if strings.Count(s, "RENAME TO \" + pgDatabase") < 2 {
 		t.Error("there is no rollback rename; a failed restore must put the original database back")
 	}
@@ -201,16 +188,8 @@ func TestTheRestoreOutcomeSurvivesTheServiceRestart(t *testing.T) {
 }
 
 func TestDatabaseNamesSurviveIdentifierFolding(t *testing.T) {
-	// FOUND ON THE APPLIANCE, not here, which is why it is pinned here now.
-	//
-	// The staging name was built from an RFC3339-ish stamp containing `T` and `Z`. `CREATE DATABASE
-	// restore_20260920T090146Z` created `restore_20260920t090146z` -- SQL folds unquoted identifiers -- and
-	// the very next command, `psql -d restore_20260920T090146Z`, was told no such database existed, because
-	// libpq passes a dbname through verbatim. The restore failed at the load step complaining about a
-	// database it had just successfully created.
-	//
-	// It failed safely: the live database had not been opened. But "safe" is not "working", and the next
-	// person to reintroduce an uppercase character in a database name would get the same hour back.
+	// Staging names must be lowercase: SQL folds unquoted identifiers but libpq passes dbname verbatim, so CREATE DATABASE restore_...T...Z
+	// created a database the next psql could not find.
 	s := restoreSequence(t)
 	if !strings.Contains(s, "strings.ToLower(stamp)") {
 		t.Error("the database-name stamp is no longer lowercased; SQL folds identifiers and libpq does not")
@@ -223,16 +202,8 @@ func TestDatabaseNamesSurviveIdentifierFolding(t *testing.T) {
 }
 
 func TestTheRequestDoesNotWaitForTheRestore(t *testing.T) {
-	// FOUND ON THE APPLIANCE, and it was the worst available way to be wrong.
-	//
-	// edged's socket call gave up after fifteen seconds and told the operator the restore had FAILED. scd
-	// finished it successfully ten seconds later. An operator reading "failed" while a destructive operation
-	// is still running is one keystroke away from starting a second one -- which makes the deliberate decision
-	// never to retry a destructive step worth nothing, because the screen invites the human to do it instead.
-	//
-	// So the handler starts the work and returns; the durable record is the answer. These assertions are on
-	// the source because the property is structural: a later edit that "simplified" the goroutine away would
-	// restore the original bug and pass every behavioural test.
+	// The handler starts the work and returns and the durable record is the answer: a socket timeout reporting FAILED while the restore ran
+	// invites a second destructive run. Asserted on the source so removing the goroutine fails.
 	src, err := os.ReadFile("restore.go")
 	if err != nil {
 		t.Fatal(err)
@@ -265,21 +236,13 @@ func TestTheRequestDoesNotWaitForTheRestore(t *testing.T) {
 		t.Error("the single-flight guard is never released; one restore would wedge the appliance forever")
 	}
 
-	// A poller has to be able to tell running from finished.
 	if !strings.Contains(s, `"running":  false`) {
 		t.Error("the finished record does not clear `running`, so a polling screen never stops waiting")
 	}
 }
 
 func TestVerificationIsBoundToTHEBYTESNotTheirSizeAndTimestamp(t *testing.T) {
-	// THE HOLE THIS CLOSES, demonstrated rather than described.
-	//
-	// The marker used to record only size and modification time. Both are metadata, and anybody able to
-	// write the file is able to write them back: truncate an archive, pad it to its original length, put the
-	// timestamp back with `touch -r`, and a corrupt backup presented itself as verified and was eligible for
-	// a restore that replaces a hotel's data. That is not hypothetical -- it is exactly how the deliberate
-	// failure proof for this feature had to be constructed, which is what showed the check was a change
-	// notice rather than an integrity check.
+	// The marker once recorded only size and mtime, which touch -r restores, so a corrupt backup presented itself as verified. It must hash content.
 	dir := t.TempDir()
 	defer scdBackupDirForTest(t, dir)()
 
@@ -300,7 +263,6 @@ func TestVerificationIsBoundToTHEBYTESNotTheirSizeAndTimestamp(t *testing.T) {
 	}
 	before, _ := os.Stat(path)
 
-	// SAME LENGTH, SAME MODIFICATION TIME, DIFFERENT BYTES.
 	replaced := []byte("the contents that were NOT verified.....")
 	if len(replaced) != len(original) {
 		t.Fatalf("the test's own premise is broken: %d vs %d bytes", len(replaced), len(original))
@@ -366,7 +328,6 @@ func TestTheDigestIsCheckedAtTheRestoreBoundaryNotOnlyInTheUI(t *testing.T) {
 	}
 	s := string(src)
 
-	// readVerifiedMarker must recompute, not trust the recorded digest.
 	read := s[strings.Index(s, "func readVerifiedMarker("):]
 	if end := strings.Index(read, "\n// ---"); end > 0 {
 		read = read[:end]
@@ -375,7 +336,6 @@ func TestTheDigestIsCheckedAtTheRestoreBoundaryNotOnlyInTheUI(t *testing.T) {
 		t.Error("readVerifiedMarker does not recompute the digest; it is trusting the marker's own claim")
 	}
 
-	// And backupRestore must go through it before anything destructive.
 	h := s[strings.Index(s, "func (s *server) backupRestore("):]
 	if end := strings.Index(h, "func (s *server) runRestore("); end > 0 {
 		h = h[:end]
@@ -390,13 +350,7 @@ func TestTheDigestIsCheckedAtTheRestoreBoundaryNotOnlyInTheUI(t *testing.T) {
 	}
 }
 
-// ---- helpers --------------------------------------------------------------------------------------------
-
-// restoreSequence returns the BODY of backupRestore.
-//
-// Scoped to the function rather than the file because the ordering assertions are about CALL SITES: every
-// helper is also DEFINED in this file, and matching a definition would have the test asserting the order
-// things were written in rather than the order they happen in.
+// restoreSequence returns the body of runRestore: the ordering assertions are about call sites, and helpers are also defined in this file.
 func restoreSequence(t *testing.T) string {
 	t.Helper()
 	src, err := os.ReadFile("restore.go")
@@ -415,7 +369,6 @@ func restoreSequence(t *testing.T) string {
 	return body
 }
 
-// scdBackupDirForTest points the backup directory at a temporary one for the duration of a test.
 func scdBackupDirForTest(t *testing.T, dir string) func() {
 	t.Helper()
 	old := scdBackupDir
@@ -433,16 +386,8 @@ func maintenanceFileForTest(t *testing.T, path string) func() {
 var _ = json.Marshal
 
 func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
-	// FOUND ON THE APPLIANCE, and it is the finding that mattered most.
-	//
-	// The first successful restore replaced the data correctly and left the appliance unable to serve.
-	// Backups are taken --no-owner --no-privileges, so the restored database came up owned by the superuser
-	// with PUBLIC holding the default EXECUTE on every function. scd could not read pms_providers, edged
-	// could not reach schema iam_v2, and once that was fixed edged still refused to serve -- correctly --
-	// because PUBLIC held EXECUTE on iam_v2.apply_entitlement_transition. Every service was behaving
-	// properly; the database had lost its shape.
-	//
-	// A restore that produces an appliance which cannot serve is not a restore.
+	// Backups are --no-owner --no-privileges, so without the privilege replay the restored database is superuser-owned with PUBLIC EXECUTE on
+	// every function and the services cannot work.
 	s := restoreSequence(t)
 
 	capture := strings.Index(s, "capturePrivileges(ctx, pgDatabase)")
@@ -489,14 +434,8 @@ func TestTheAccessRulesTravelWithTheRestore(t *testing.T) {
 }
 
 func TestColumnPrivilegesAreCarriedToo(t *testing.T) {
-	// FOUND ON THE APPLIANCE, and it is the worst shape a bug in this file can take.
-	//
-	// Migration 0083 grants svc_edged five COLUMNS of iam_v2.auth_contexts. A restore ran, and the grant was
-	// gone afterwards -- while the restore reported "all 1491 ownership and access rules reinstated and
-	// verified identical". The capture read nspacl, relacl and proacl; column privileges live in
-	// pg_attribute.attacl, which it never looked at. Both the replay AND the before/after comparison were
-	// blind to the same thing, so the self-check could not possibly have caught it. A capture is only ever
-	// as complete as the catalogs it reads.
+	// Column privileges live in pg_attribute.attacl, not nspacl/relacl/proacl; a capture is only as complete as the catalogs it reads.
+	// The self-check was blind to the same gap.
 	src, err := os.ReadFile("privileges.go")
 	if err != nil {
 		t.Fatal(err)

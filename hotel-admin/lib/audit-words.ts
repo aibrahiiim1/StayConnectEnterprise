@@ -1,18 +1,6 @@
-// WHAT HAPPENED, IN WORDS A HOTEL USES.
-//
-// The audit trail records action codes: `branding.draft_saved`, `license.permissive_attempt_blocked`,
-// `network.revision.rolledback`. Those are exactly right for support and forensics and exactly wrong as the
-// only thing on screen — an operator scanning for "who changed the wifi settings on Tuesday" cannot scan
-// forty dotted identifiers.
-//
-// So every code gets a sentence, a category and a severity. THE CODE IS NEVER REPLACED: it stays in the row's
-// technical details along with the actor id, target id, IP and payload, because the day this screen matters
-// most is the day somebody needs the exact record.
-//
-// EVERY ENTRY BELOW IS A CODE THIS APPLIANCE HAS ACTUALLY WRITTEN. The list was built from the live trail
-// rather than from the source, so it describes what happens rather than what was once intended to. A code
-// with no entry here is shown as-is — an unknown action is information, and inventing a friendly name for one
-// would hide that the product has learned something new.
+// Audit action codes as sentences, categories and severities. The code itself is never replaced (it stays in the row's
+// technical details);
+// an unknown code is shown as-is rather than given an invented friendly name.
 
 export type AuditSeverity = "notice" | "change" | "security";
 
@@ -41,9 +29,7 @@ export const AUDIT_CATEGORIES: AuditCategory[] = [
   "Networks", "Licence & cloud", "Backups", "Diagnostics",
 ];
 
-/** Categories that belong to an optional module. "Hotel" (PMS, grace, stays) is hospitality: offered as a
- *  filter only where that module is licensed or has left records -- the audit is history, so it stays
- *  reachable after the licence lapses, but a site that never was a hotel is not shown a Hotel filter. */
+/** Keep Hotel history filter available after its module license expires. */
 export const MODULE_CATEGORIES: Partial<Record<AuditCategory, string>> = { Hotel: "hospitality" };
 
 /** The categories offered as filters, given which modules have history here. */
@@ -55,7 +41,6 @@ export function auditCategoriesFor(hasHistory: (module: string) => boolean): Aud
 }
 
 const WORDS: Record<string, AuditWords> = {
-  // ---- sign-in & access ---------------------------------------------------------------------------------
   "operator.login": { title: "Signed in to Admin Console", category: "Sign-in & access", severity: "notice" },
   "operator.logout": { title: "Signed out of Admin Console", category: "Sign-in & access", severity: "notice" },
   "operator.login_failed": {
@@ -95,7 +80,6 @@ const WORDS: Record<string, AuditWords> = {
     title: "Viewed what a client typed at sign-in", category: "Sign-in & access", severity: "security",
     note: "The details a client entered are only revealed on request, and every reveal is recorded here.",
   },
-  // Who looked at a client's data (GDPR plan F8): opening one record, and every search of a client list.
   "guest_data.viewed": {
     title: "Opened a client's record", category: "Client data", severity: "notice",
     note: "Opening one client's account, device, session, stay, sign-in attempt or usage is recorded, so the hotel can show who looked at whose data. Opening the same record again within 10 minutes is not recorded twice.",
@@ -119,7 +103,6 @@ const WORDS: Record<string, AuditWords> = {
   },
   "auth_methods.updated": { title: "Changed how clients sign in", category: "Sign-in & access", severity: "change" },
 
-  // ---- guest portal -------------------------------------------------------------------------------------
   "branding.published": { title: "Saved the Client Portal settings", category: "Client Portal", severity: "change" },
   "branding.draft_saved": {
     title: "Edited the Client Portal settings", category: "Client Portal", severity: "notice",
@@ -129,7 +112,6 @@ const WORDS: Record<string, AuditWords> = {
   "portal_asset.uploaded": { title: "Uploaded a portal image", category: "Client Portal", severity: "change" },
   "portal_asset.deleted": { title: "Deleted a portal image", category: "Client Portal", severity: "change" },
 
-  // ---- internet offering --------------------------------------------------------------------------------
   "commercial_package.published": { title: "Published an internet package", category: "Internet offering", severity: "change" },
   "commercial_package.activated": { title: "Made an internet package available", category: "Internet offering", severity: "change" },
   "commercial_package.deactivated": { title: "Withdrew an internet package", category: "Internet offering", severity: "change" },
@@ -139,7 +121,6 @@ const WORDS: Record<string, AuditWords> = {
     note: "How long a departing guest keeps internet after checking out.",
   },
 
-  // ---- hotel (PMS) ---------------------------------------------------------------------------------------------
   "pms_provider.created": { title: "Added a PMS provider", category: "Hotel", severity: "change" },
   "pms_interface.created": { title: "Added a PMS connection", category: "Hotel", severity: "change" },
   "pms_interface.lifecycle": { title: "Changed a PMS connection's state", category: "Hotel", severity: "change" },
@@ -155,7 +136,6 @@ const WORDS: Record<string, AuditWords> = {
     note: "Which PMS guest list room sign-ins on that network are checked against.",
   },
 
-  // ---- networks ----------------------------------------------------------------------------------------
   "network.guest.created": { title: "Created a client network", category: "Networks", severity: "change" },
   "network.guest.updated": { title: "Changed a client network", category: "Networks", severity: "change" },
   "network.guest.disabled": { title: "Disabled a client network", category: "Networks", severity: "change" },
@@ -170,7 +150,6 @@ const WORDS: Record<string, AuditWords> = {
     note: "The appliance returned to the previous working configuration.",
   },
 
-  // ---- licence & cloud ----------------------------------------------------------------------------------
   "license.permissive_attempt_blocked": {
     title: "Blocked an attempt to run without a licence", category: "Licence & cloud", severity: "security",
     note: "This appliance refused to run in unlicensed mode and kept enforcement on. Recorded every time it starts while the misconfiguration is present.",
@@ -181,7 +160,6 @@ const WORDS: Record<string, AuditWords> = {
   "renewal_succeeded": { title: "Certificate renewed", category: "Licence & cloud", severity: "notice" },
   "hotel_admin_cert.check": { title: "Checked the Admin Console certificate", category: "Licence & cloud", severity: "notice" },
 
-  // ---- backups -----------------------------------------------------------------------------------------
   "backup.created": { title: "Created a backup", category: "Backups", severity: "change" },
   "backup.verified": { title: "Verified a backup", category: "Backups", severity: "notice" },
   "backup.failed": {
@@ -210,7 +188,6 @@ const WORDS: Record<string, AuditWords> = {
     note: "The safety backup taken before the restore was put back.",
   },
 
-  // ---- diagnostics -------------------------------------------------------------------------------------
   "health.recheck": { title: "Re-ran the health checks", category: "Diagnostics", severity: "notice" },
 };
 
@@ -238,17 +215,10 @@ function categoryFromPrefix(action: string): AuditCategory {
   }
 }
 
-/** Who did it, as something readable. A system action says so rather than showing an empty column. */
-/** Who did it, in words.
- *
- *  Found on the live appliance: half the rows said "An operator" and half showed a raw uuid, depending only
- *  on whether the action happened to record an actor id. The uuid is the more precise fact and the less
- *  useful one -- an operator scanning the trail for "who changed the retention policy" cannot read it, and
- *  the screen has the answer, because the operator directory is one request away.
- *
- *  `names` maps operator id to a human name. An id that is not in it is an operator who has since been
- *  removed, which is worth saying plainly rather than printing their uuid as if it were a name. The exact id
- *  is always in the expandable record; this is the summary line. */
+/**
+ * Who did it, in words. `names` maps operator id to name; an id not in it is a removed operator, said plainly. The
+ * exact id stays in the expandable record.
+ */
 export function auditActor(
   actorType?: string | null,
   actorID?: string | null,
@@ -258,7 +228,6 @@ export function auditActor(
   if (!actorID) return "An operator";
   const known = names?.get(actorID);
   if (known) return known;
-  // Anything that is not a uuid is already readable -- a username, a service name, a device.
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actorID)) {
     return "A removed operator";
   }

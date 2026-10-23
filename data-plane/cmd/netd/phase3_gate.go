@@ -1,22 +1,7 @@
 package main
 
-// THE PHASE-3 PACKET-AUTHORIZATION GATE.
-//
-// Three different things decide whether a guest is on the internet, and conflating any two of them is how a
-// guest ends up either unaccounted or unexpectedly cut off:
-//
-//	nft  — PACKET AUTHORIZATION. The forward chain accepts a guest's traffic only when its (bridge, IP) is in
-//	       an authorization set, and the captive-portal DNAT rules redirect it when it is not. This, and only
-//	       this, is what gives or denies internet access.
-//	tc   — ACCOUNTABLE SHAPING/METERING. Classifies an authorized guest's packets into a managed HTB class so
-//	       they are rate-limited and counted. Removing a tc filter does NOT deny access: the packets fall back
-//	       to the bridge's default class and keep flowing, now unmetered.
-//	DB   — DURABLE RUNTIME AUTHORIZATION STATE. What the appliance believes it granted, and the only record
-//	       that survives a restart.
-//
-// netd owns the two kernel halves. Phase 3 writes ONLY the phase3_auth_ipv4 set; legacy scd writes only
-// auth_ipv4. That separation is what lets Phase-3 reconciliation delete every stray it finds without ever
-// being able to remove a live legacy guest's authorization.
+// Only the nft set gives or denies internet access. Removing a tc filter does not deny access: packets fall
+// back to the bridge's default class and keep flowing, unmetered.
 
 import (
 	"context"
@@ -29,42 +14,31 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
-// gate is the packet-authorization surface netd owns for Phase 3. It is an interface so the ordering
-// properties (authorize only after accountable tc; deny before teardown) can be proven without a kernel.
+// gate is the packet-authorization surface; an interface so ordering can be tested without a kernel.
 type gate interface {
-	// Authorize admits (bridge, ip) to the internet for a BOUNDED, RENEWABLE lease.
-	//
-	// ttl must be positive. A permanent authorization would survive the death of every process that maintains
-	// it, so there is no legitimate caller for one and the gate refuses rather than quietly installing it.
-	// Calling Authorize again for a session that already holds a lease REFRESHES it; that is how a healthy
-	// reconciliation keeps a guest online, and how silence takes them offline.
+	// Authorize admits (bridge, ip) for a bounded, renewable lease. ttl must be positive: a permanent
+	// authorization would outlive every process that maintains it. Re-calling refreshes the lease.
 	Authorize(ctx context.Context, bridge string, ip net.IP, ttl time.Duration) error
-	// Revoke removes the authorization. It must be safe to call when absent.
+	// Revoke must be safe to call when absent.
 	Revoke(ctx context.Context, bridge string, ip net.IP) error
-	// Authorized reports whether the authorization is ACTUALLY present. An Authorize that returned nil but
-	// did not take is otherwise indistinguishable from success.
+	// Authorized reports whether the authorization is actually present; a nil Authorize may not have taken.
 	Authorized(ctx context.Context, bridge string, ip net.IP) (bool, error)
-	// List enumerates every Phase-3 authorization, for stray removal. It never enumerates the legacy set.
+	// List enumerates the Phase-3 set only, never the legacy set.
 	List(ctx context.Context) ([]gateElem, error)
 }
 
-// gateElem is one authorization currently installed in the Phase-3 set.
 type gateElem struct {
 	Bridge string
 	IP     net.IP
-	// Expires is the lease REMAINING on this element. Renewal is decided from it, so that a healthy pass
-	// refreshes only the leases that are actually running down instead of rewriting every guest every tick.
+	// Expires is the lease remaining; renewal refreshes only leases running down.
 	Expires time.Duration
 }
 
-// nftGate is the real gate, scoped to the Phase-3 set.
 type nftGate struct{ c *nft.Client }
 
 func newNFTGate() *nftGate { return &nftGate{c: nft.New()} }
 
-// Authorize installs or refreshes the bounded lease. LeaseIn, not AllowIn: a repeated `add element` does not
-// restart an existing element's timer, so building renewal on it would produce a system that looks like it is
-// renewing and still drops every guest at the first lease boundary.
+// LeaseIn, not AllowIn: a repeated `add element` does not restart an existing element's timer.
 func (g *nftGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl time.Duration) error {
 	return g.c.LeaseIn(ctx, nft.Phase3AuthV4, bridge, ip, ttl)
 }
@@ -89,18 +63,11 @@ func (g *nftGate) List(ctx context.Context) ([]gateElem, error) {
 	return out, nil
 }
 
-// THE LEGACY SET IS KEPT EMPTY (audit B-14/B-15).
-//
-// auth_ipv4 is the pre-IAM-v2 authorization set. Nothing writes to it any more -- the legacy session domain and
-// its scd writer are gone -- but the forward chain still accepts whatever it holds, and nothing ever emptied it.
-// An element left behind there (by an old build, a restore, or a hand-run `nft add element`) would be internet
-// access that no session, entitlement or plan accounts for, and that no reconciliation would ever remove.
-//
-// So while netd owns Phase-3 enforcement, the legacy set is reconciled to EMPTY on every pass. This is a
-// separate sweeper rather than a gate method on purpose: the gate's contract -- it can only ever enumerate and
-// mutate the Phase-3 set -- is unchanged, and the sweeper does exactly one thing.
+// The forward chain still accepts whatever the legacy auth_ipv4 set holds, so a stray element there would be
+// unaccounted internet access. It is drained every pass by this separate sweeper so the gate can only ever
+// touch the Phase-3 set.
 type legacySet interface {
-	// Drain removes every element of the legacy set and reports how many it removed.
+	// Drain removes every element and reports how many.
 	Drain(ctx context.Context) (int, error)
 }
 
@@ -123,24 +90,16 @@ func (l *nftLegacySet) Drain(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// flushingGate ENDS THE ADDRESS'S OPEN FLOWS WHEN ITS AUTHORIZATION IS REVOKED (audit B-1).
-//
-// The forward chain accepts `ct state established,related` before it looks at the authorization sets, so
-// removing an element stops only NEW connections: a download that was already running went on for as long as it
-// lasted -- unshaped, too, once its tc class was deleted, and uncounted. Every path that ends a guest's access
-// goes through Revoke (denyAccess: teardown, expiry, quota, DHCP loss, strays, fail-closed, quarantine), and
-// denyAccess runs BEFORE any tc class is removed, so flushing here ends the flows while their class still meters
-// them and leaves nothing to fall into the bridge's default class.
-//
-// A flush is a dump of the conntrack table, so it is not repeated for an address that has not been authorized
-// again since its last successful flush (a quarantined session is denied every pass).
+// flushingGate ends an address's open flows on revoke. The forward chain accepts established/related before
+// the authorization sets, so removing an element alone stops only new connections. denyAccess runs before any
+// tc class is removed, so the flows are ended while still metered.
+// A flush dumps conntrack, so it is not repeated until the address is authorized again.
 type flushingGate struct {
 	gate
 	flows conntrack.Flusher
 
 	mu sync.Mutex
-	// clean marks bridge|ip keys whose flows were flushed after their last revocation and that have not been
-	// authorized since. Absent means unknown, and unknown is flushed.
+	// clean marks bridge|ip keys flushed since their last revocation; absent means unknown, and unknown is flushed.
 	clean map[string]bool
 }
 
@@ -168,8 +127,7 @@ func (g *flushingGate) Revoke(ctx context.Context, bridge string, ip net.IP) err
 	}
 	n, err := g.flows.FlushAddrs(ctx, []net.IP{ip})
 	if err != nil {
-		// The authorization IS gone, so no new flow can start; what survives is whatever was already open. That
-		// is reported loudly but does not undo the revocation, and the next revocation tries again.
+		// The revocation stands; only already-open flows survive, and the next revocation retries.
 		slog.Error("netd: authorization revoked but the address's open flows could not be ended",
 			"bridge", bridge, "ip", ip.String(), "err", err)
 		return nil
@@ -183,16 +141,11 @@ func (g *flushingGate) Revoke(ctx context.Context, bridge string, ip net.IP) err
 	return nil
 }
 
-// gateView is ONE reconciliation pass's snapshot of the Phase-3 authorization set.
-//
-// It exists for two reasons. Correctness: stray removal and per-session renewal must judge the same set, and
-// enumerating twice would let an element appear between the two reads and be treated inconsistently. Cost: the
-// steady state is one nft transaction per pass rather than one per guest per tick, which on a busy property is
-// the difference between a few transactions a second and several hundred.
+// gateView is one pass's snapshot of the Phase-3 set, so stray removal and renewal judge the same set and the
+// steady state costs one nft transaction per pass.
 type gateView struct {
-	// ok is false when the set could not be enumerated. Everything downstream then treats the installed
-	// authorization state as UNKNOWN — never as empty, which would read as "nobody is authorized" and quietly
-	// skip renewals that are actually due.
+	// ok is false when the set could not be enumerated: the state is then unknown, never empty, which would
+	// skip due renewals.
 	ok    bool
 	byKey map[string]gateElem
 }
@@ -204,7 +157,7 @@ func gateKey(bridge string, ip net.IP) string {
 	return bridge + "|" + ip.String()
 }
 
-// snapshotGate enumerates the Phase-3 set once for this pass. Caller holds p.mu.
+// Caller holds p.mu.
 func (p *phase3Shaping) snapshotGate(ctx context.Context) gateView {
 	v := gateView{byKey: map[string]gateElem{}}
 	if p.gate == nil {
@@ -222,8 +175,7 @@ func (p *phase3Shaping) snapshotGate(ctx context.Context) gateView {
 	return v
 }
 
-// lookup returns the installed element and whether the answer is KNOWN. A caller must not read "not present"
-// out of an unreadable set.
+// lookup's last result is whether the answer is known; never read "not present" from an unreadable set.
 func (v gateView) lookup(bridge string, ip net.IP) (gateElem, bool, bool) {
 	if !v.ok {
 		return gateElem{}, false, false
@@ -232,11 +184,8 @@ func (v gateView) lookup(bridge string, ip net.IP) (gateElem, bool, bool) {
 	return e, ok, true
 }
 
-// denyAccess is THE fail-closed primitive: it removes packet authorization first and confirms it is gone.
-//
-// It is deliberately not named after tc. Stripping a tc filter leaves the guest forwarding through the
-// bridge's default class — unshaped and uncounted, but still online — so "deny" can only ever mean the nft
-// gate. Everything that must stop a guest's traffic calls this, and only then touches tc.
+// denyAccess is the fail-closed primitive: revoke nft authorization and confirm it is gone. Stripping a tc
+// filter leaves the guest online, so anything that must stop traffic calls this before touching tc.
 func (p *phase3Shaping) denyAccess(ctx context.Context, bridge string, ip net.IP) error {
 	if p.gate == nil {
 		return nil // no gate wired (older unit tests drive tc directly); nothing to deny
@@ -244,8 +193,7 @@ func (p *phase3Shaping) denyAccess(ctx context.Context, bridge string, ip net.IP
 	if err := p.gate.Revoke(ctx, bridge, ip); err != nil {
 		return err
 	}
-	// Verify. A Revoke that reported success but left the element behind would leave the guest online while
-	// every record said otherwise — the exact state this ordering exists to prevent.
+	// Verify: a Revoke that succeeded but left the element would leave the guest online unnoticed.
 	still, err := p.gate.Authorized(ctx, bridge, ip)
 	if err != nil {
 		return err
@@ -256,7 +204,6 @@ func (p *phase3Shaping) denyAccess(ctx context.Context, bridge string, ip net.IP
 	return nil
 }
 
-// errStillAuthorized means packet authorization could not be proven removed.
 var errStillAuthorized = errAuthz("packet authorization is still present after revocation")
 
 type errAuthz string

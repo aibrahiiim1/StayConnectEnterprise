@@ -28,7 +28,7 @@ type Entry struct {
 	Payload    map[string]any
 }
 
-// Emit writes the entry to audit_log. Caller should NOT fail on errors.
+// Emit writes the entry; callers must not fail on errors.
 func Emit(ctx context.Context, db *pgxpool.Pool, e Entry) {
 	if e.Action == "" {
 		return
@@ -59,9 +59,8 @@ func Emit(ctx context.Context, db *pgxpool.Pool, e Entry) {
 	}
 }
 
-// Op is the common-case helper: derives actor/IP/user-agent from the request
-// context, then emits. action follows `<resource>.<verb>` (e.g. "site.created",
-// "operator.disabled"). Call AFTER the main operation commits.
+// Op derives actor, IP and user agent from the request and emits. action is `<resource>.<verb>`; call after the
+// main operation commits.
 func Op(ctx context.Context, db *pgxpool.Pool, r *http.Request, action, targetType, targetID string, payload map[string]any) {
 	e := Entry{
 		Action:     action,
@@ -76,8 +75,7 @@ func Op(ctx context.Context, db *pgxpool.Pool, r *http.Request, action, targetTy
 		e.ActorID = s.OperatorID
 		e.TenantID = s.DefaultTenantID
 	}
-	// Prefer an explicit tenant in the query or path — set via payload["tenant_id"] if caller
-	// wants to override (e.g. platform admin acting on a specific tenant).
+	// payload["_tenant_id"] overrides the session's tenant (e.g. a platform admin acting on a specific one).
 	if tid, _ := payload["_tenant_id"].(string); tid != "" {
 		e.TenantID = tid
 		delete(payload, "_tenant_id")
@@ -85,8 +83,7 @@ func Op(ctx context.Context, db *pgxpool.Pool, r *http.Request, action, targetTy
 	Emit(ctx, db, e)
 }
 
-// System emits an audit entry for an action taken by the platform itself rather
-// than an operator (e.g. registering the assignment-signing key on boot).
+// System emits an entry for an action taken by the platform itself rather than an operator.
 func System(ctx context.Context, db *pgxpool.Pool, action, targetType, targetID string, payload map[string]any) {
 	Emit(ctx, db, Entry{
 		Action:     action,

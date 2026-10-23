@@ -25,8 +25,6 @@ func execErr(t *testing.T, db *pgxpool.Pool, sql string, args ...any) error {
 	return err
 }
 
-// An issued voucher keeps redeeming the immutable revision it was printed for, through a republish AND a
-// normal deactivation of its package. It settles PREPAID, is burned exactly once, and a second use fails.
 func TestVoucherSurvivesRepublishAndDeactivation(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -35,7 +33,6 @@ func TestVoucherSurvivesRepublishAndDeactivation(t *testing.T) {
 
 	voucherID, vdev, vac := newVoucherChain(t, db, s.pkgRevID)
 
-	// Republish (a new current revision) and deactivate the package.
 	rev2 := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
 		VALUES ($1,$2,$3,2,$4,'GENERAL',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb) RETURNING id::text`,
@@ -68,7 +65,6 @@ func TestVoucherSurvivesRepublishAndDeactivation(t *testing.T) {
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.vouchers WHERE id=$1 AND state='REDEEMED'`, voucherID); n != 1 {
 		t.Fatal("voucher must be burned")
 	}
-	// A second sign-in with the same (now spent) voucher cannot grant again.
 	ac2 := scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,voucher_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'VOUCHER',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`, p2Tenant, p2Site, voucherID, vdev, p2GN)
 	q2, _ := e.CreateQuote(ctx, QuoteRequest{TenantID: p2Tenant, SiteID: p2Site, AuthContextID: ac2, DeviceID: vdev, GuestNetworkID: p2GN})
@@ -83,7 +79,6 @@ func TestVoucherSurvivesRepublishAndDeactivation(t *testing.T) {
 	}
 }
 
-// A voucher is ISSUED only against the current revision of an active package that accepts Voucher.
 func TestVoucherIssuanceGate(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, func(o *seedOpts) { o.settlement = "{NOT_REQUIRED}" })
@@ -116,8 +111,6 @@ func TestVoucherIssuanceGate(t *testing.T) {
 	}
 }
 
-// Card payment: the confirm creates the purchase and a REQUIRED settlement and grants NOTHING. The paid grant
-// entry point refuses until the settlement is SETTLED.
 func TestCardConfirmGrantsNothing(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, func(o *seedOpts) { o.price = 2500; o.settlement = "{ONLINE_PAYMENT}" })
@@ -144,8 +137,6 @@ func TestCardConfirmGrantsNothing(t *testing.T) {
 	}
 }
 
-// The site gates are re-checked at confirm: a method switched off after the quote is refused and nothing is
-// consumed.
 func TestMethodRecheckedAtConfirm(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, func(o *seedOpts) { o.price = 2500; o.settlement = "{ONLINE_PAYMENT}" })
@@ -172,7 +163,6 @@ func TestMethodRecheckedAtConfirm(t *testing.T) {
 	}
 }
 
-// The database refuses an incoherent package or settlement, whatever the caller.
 func TestAcquisitionDatabaseRules(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
@@ -196,7 +186,6 @@ func TestAcquisitionDatabaseRules(t *testing.T) {
 			t.Fatalf("price %d methods %s: ok=%v err=%v", c.price, c.methods, c.ok, err)
 		}
 	}
-	// A settlement cannot be born SETTLED on a money rail, nor PREPAID outside a voucher redemption.
 	pid := scan1Guarded(t, db, "commerce_intent", `INSERT INTO iam_v2.purchases (tenant_id,site_id,package_revision_id,auth_context_id,trigger,amount_minor,state)
 		VALUES ($1,$2,$3,$4,'ADMIN_GRANT',0,'PENDING') RETURNING id::text`, p2Tenant, p2Site, s.pkgRevID, s.authCtxID)
 	for _, bad := range [][2]string{{"ONLINE_PAYMENT", "SETTLED"}, {"PMS_POSTING", "SETTLED"}, {"PREPAID", "SETTLED"}, {"NOT_REQUIRED", "SETTLED"}} {

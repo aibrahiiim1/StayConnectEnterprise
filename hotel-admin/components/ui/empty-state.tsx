@@ -1,8 +1,5 @@
 import { cn } from "@/lib/utils";
 
-// EmptyState kept its `{ title, hint }` signature — roughly thirty screens call it that way. `icon` and
-// `action` are optional additions, so an empty list can now offer the thing that would fill it instead of
-// only reporting that it is empty.
 export function EmptyState({
   title,
   hint,
@@ -17,8 +14,7 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    // role="status": an empty list is often the ANSWER to a search or a filter, and a screen-reader user who just
-    // typed a query otherwise hears nothing at all when no rows come back (WCAG 4.1.3).
+    // Announce empty search results to screen readers.
     <div role="status" className={cn("flex flex-col items-center justify-center px-6 py-12 text-center", className)}>
       {icon && (
         <div className="mb-3 flex size-10 items-center justify-center rounded-full border border-border bg-surface text-muted-foreground [&_svg]:size-5">

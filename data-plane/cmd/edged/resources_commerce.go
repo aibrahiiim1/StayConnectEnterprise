@@ -1,10 +1,8 @@
 package main
 
-// Phase 2 (DARK) Hotel-Admin commercial-packages resource: revisioned, free-only, non-PMS package
-// management. Mounted ONLY when the Phase-2 admin surface is ON (see main.go); while dark the routes are
-// absent and the admin engine holds a nil repository, so zero Phase-2 SQL is issued. RBAC is enforced by
-// mountResource ("commercial-packages" in the role matrix) and every mutation is audited. Unlike the
-// guest portal, the admin operator is trusted, so validation reasons are returned verbatim.
+// Hotel-Admin commercial-packages resource, mounted only when the Phase-2 admin surface is on (see main.go);
+// otherwise the routes are absent and no Phase-2 SQL is issued. Every mutation is audited. The operator is
+// trusted, so validation reasons are returned verbatim.
 
 import (
 	"encoding/json"
@@ -25,33 +23,23 @@ import (
 
 func (s *server) commercialPackagesRoutes() http.Handler {
 	r := chi.NewRouter()
-	// packages
 	r.Get("/", s.listCommercialPackages)
 	r.Post("/", s.publishCommercialPackage)
-	// service plans (static paths matched before the /{id} param routes)
+	// Service plans: static paths are matched before the /{id} param routes.
 	r.Get("/plans", s.listServicePlans)
 	r.Post("/plans", s.publishServicePlan)
 	r.Get("/plans/{id}/revisions", s.listServicePlanRevisions)
-	// What still references a plan, and why it cannot be deleted (read-only; see resources_commerce_activity.go).
 	r.Get("/plans/{id}/deletability", s.getServicePlanDeletability)
-	// Permanent deletion of a plan nothing has ever used (migration 0091). Step-up + reason; audited.
+	// Permanent deletion of a never-used plan: step-up + reason.
 	r.Delete("/plans/{id}", s.deleteServicePlan)
-	// site checkout-grace configuration
 	r.Get("/grace", s.getGraceConfig)
 	r.Put("/grace", s.setGraceConfig)
-	// read-only inspection (guest-PII-free)
-	// GUEST ACTIVITY, in words. The quote/purchase listings below stay for support; this is what the
-	// operator screen reads. See listGuestActivity.
+	// Read-only inspection (guest-PII-free).
 	r.Get("/guest-activity", s.listGuestActivity)
-	// THE PACKAGE ACTIVITY VIEW: every grant, whatever produced it, with paging, filters and a summary. The
-	// guest-activity route above stays for compatibility; this is what the operator screen now reads.
 	r.Get("/activity", s.listPackageActivity)
 	r.Get("/quotes", s.listCommerceQuotes)
 	r.Get("/purchases", s.listCommercePurchases)
-	// package-scoped
 	r.Get("/{id}/revisions", s.listCommercialPackageRevisions)
-	// The CURRENT configuration, for the Edit form to load. Read-only: saving still goes through the ordinary
-	// publish route, which creates a new immutable revision.
 	r.Get("/{id}/current", s.getCommercialPackageCurrent)
 	r.Get("/{id}/deletability", s.getCommercialPackageDeletability)
 	r.Delete("/{id}", s.deleteCommercialPackage)
@@ -97,9 +85,8 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	// REVISING AN EXISTING PLAN changes the speeds and allowances of every package that moves onto it, so it is
-	// a step-up. And it keeps the plan's time accounting unless the body names one: an editor that did not
-	// send the field used to turn an AGGREGATE_ONLINE_TIME plan into VALIDITY_WINDOW on every save.
+	// Revising a plan changes every package on it, so it needs step-up. It keeps the existing time accounting
+	// unless the body names one (a missing field must not flip AGGREGATE_ONLINE_TIME to VALIDITY_WINDOW).
 	if !in.CreateOnly {
 		plans, disabled, perr := s.commerce.ListPlans(r.Context(), s.tenantID, s.siteID)
 		if perr != nil {
@@ -137,9 +124,7 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
-		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
-		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		// A domain refusal (e.g. a reserved system code) is the operator's to fix, not a 500.
 		var de *iamv2.Error
 		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
 			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
@@ -201,30 +186,20 @@ func (s *server) getGraceConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, gc)
 }
 
-// setGraceReq is POLICY ONLY (D32).
-//
-// grace_package_revision_id is deliberately absent. Under D32 the operator does not choose a package: the
-// system derives the one that exactly expresses this policy, because the checkout validator demands exact
-// equality between the two and a package the operator picked by hand can only accidentally satisfy it.
-// expected_version is the config_version the operator last read -- mandatory, so two operators editing at
-// once produce one winner and one explicit conflict rather than a silent overwrite.
+// setGraceReq carries policy only: the system derives the grace package, since the checkout validator needs it
+// to match the policy exactly. expected_version (the config_version last read) is mandatory so concurrent edits
+// conflict instead of overwriting.
 type setGraceReq struct {
 	Config          map[string]any `json:"config"`
 	ExpectedVersion *int           `json:"expected_version"`
 	ReasonCode      string         `json:"reason_code"`
-	// Accepted by the decoder ONLY so that a caller still sending the retired field gets told what changed.
-	// The decoder rejects unknown fields, so without this line an old client's request fails as "bad body" --
-	// a caller reading that would look for a malformed JSON problem that does not exist. It is never used.
+	// Decoded only so a caller still sending the retired field gets a clear refusal (the decoder rejects unknown fields).
 	RetiredPackageRevisionID string `json:"grace_package_revision_id"`
-	// Password is the step-up. It is required here for the same reason it is required on /checkout-grace:
-	// BOTH routes write the same site policy, so a step-up on only one of them is not a control, it is a
-	// detour. This route had none.
+	// Step-up: required here as on /checkout-grace, since both routes write the same site policy.
 	Password string `json:"password"`
 }
 
-// graceReasonCode bounds the reason code to ^[A-Z][A-Z0-9_]{0,63}$ -- the same shape the audited boundary
-// enforces. Checked here as well so a bad code is a 400 naming the rule, rather than a 409 raised from inside
-// a database function, which reads like a concurrency conflict and is not one.
+// graceReasonCode matches the audited boundary's shape; checked here so a bad code is a 400, not a 409 from the database.
 var graceReasonCode = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
@@ -253,9 +228,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
 	}
-	// The actor is taken from the authenticated SESSION, never from the body. The audited boundary records
-	// who changed what every departing guest receives, and a caller-supplied actor would make that record
-	// worth nothing.
+	// The actor comes from the session, never the body, or the audited record would be worthless.
 	sess := sessFrom(r.Context())
 	if sess == nil || sess.OperatorID == "" {
 		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "an operator session is required")
@@ -263,8 +236,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := strings.TrimSpace(in.ReasonCode)
 	if reason == "" {
-		// A bounded default rather than a free-text one: the boundary requires ^[A-Z][A-Z0-9_]{0,63}$, and a
-		// publication with no recorded reason is an unattributable change.
+		// A bounded default: a publication without a recorded reason is unattributable.
 		reason = "HOTEL_ADMIN_UPDATE"
 	}
 	if !graceReasonCode.MatchString(reason) {
@@ -289,9 +261,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 		ActorOperatorID: sess.OperatorID, ReasonCode: reason, ExpectedVersion: *in.ExpectedVersion,
 	})
 	if err != nil {
-		// Every refusal the boundary raises is actionable by the operator -- a stale version, an invalid
-		// policy, a derivation the checkout validator rejected -- so it is reported as such rather than as an
-		// internal error.
+		// Boundary refusals (stale version, invalid policy, rejected derivation) are the operator's to act on.
 		var de *iamv2.Error
 		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
 			jsonErr(w, http.StatusBadRequest, "validation", de.Msg)
@@ -300,7 +270,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
-	// The audit payload records the version and the derived package, never the operator's raw config blob.
+	// Audit the version and derived package, not the raw config blob.
 	s.audit(r, "commercial_grace.published", "commercial_grace", pkgRev,
 		map[string]any{"config_version": version, "reason_code": reason})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -310,10 +280,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// gracePolicyFromConfig maps the operator's typed config keys onto the policy the system derives from.
-//
-// The key names are the ones the schema itself designates as typed (grace_config_no_dup_policy_keys), so the
-// operator-facing vocabulary and the columns cannot drift apart.
+// gracePolicyFromConfig maps typed config keys (those designated by grace_config_no_dup_policy_keys) onto the policy.
 func gracePolicyFromConfig(cfg map[string]any) (iamv2.SystemGracePolicy, error) {
 	num := func(k string) (int64, bool) {
 		v, ok := cfg[k]
@@ -361,8 +328,7 @@ func gracePolicyFromConfig(cfg map[string]any) (iamv2.SystemGracePolicy, error) 
 	}
 	pol, _ := cfg["grace_device_limit_policy"].(string)
 	if pol == "" {
-		// The only policy the enforcement path implements; defaulted so an operator supplying the other five
-		// is not tripped by a field with exactly one legal value.
+		// The only policy enforcement implements; defaulted.
 		pol = "REJECT_NEW_DEVICE"
 	}
 	p.DeviceLimitPolicy = pol
@@ -428,33 +394,23 @@ type publishPackageReq struct {
 	GrantTiers            []commerceTierDTO `json:"grant_tiers"`
 	VisibleFrom           *time.Time        `json:"visible_from"`
 	VisibleUntil          *time.Time        `json:"visible_until"`
-	// DataAllocationPolicy is optional and absent means FIXED, so every client that predates it -- and every
-	// package that stays on a flat allowance -- goes on publishing exactly what it published before.
+	// Absent DataAllocationPolicy means FIXED.
 	DataAllocationPolicy map[string]any `json:"data_allocation_policy"`
-	// CreateOnly is sent by "Add package". Without it a code that already existed silently became a new
-	// revision of that package; with it the answer is 409 code_exists. Edit omits it and revises as before.
+	// CreateOnly (Add package) answers 409 code_exists instead of silently revising an existing code.
 	CreateOnly bool `json:"create_only"`
-	// Price and acquisition (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md).
-	//
-	// POINTERS, BECAUSE ABSENT AND ZERO ARE DIFFERENT ANSWERS. A NEW package that names none of these is Free,
-	// as it always was. A REVISION of an existing package must name every one of them: "Apply current settings
-	// to packages" (the plan repin) used to post a body without them, the server read the absence as Free, and
-	// card, room-charge and voucher-only packages were republished free -- after which voucher issue was
-	// refused. A republish never infers commercial terms; it states them (commercial_fields_required).
+	// Price and acquisition are pointers because absent differs from zero: a new package naming none is Free, but a
+	// revision of an existing package must state every one (commercial_fields_required), or it would be republished free.
 	PriceMinor         *int64                     `json:"price_minor"`
 	Currency           *string                    `json:"currency"`
 	CurrencyExponent   *int                       `json:"currency_exponent"`
 	AcquisitionMethods *[]string                  `json:"acquisition_methods"`
 	RoomChargeMappings *[]iamv2.RoomChargeMapping `json:"room_charge_mappings"`
-	// THE REVISION FIELDS THE EDITOR DOES NOT SHOW. Absent means "keep what the current revision has": every
-	// save used to reset them to GENERAL / NULL / false / NULL on a new immutable revision.
+	// Fields the editor does not show: absent means keep the current revision's value.
 	PackageType         *string         `json:"package_type"`
 	PlanOverrides       *map[string]any `json:"plan_overrides"`
 	Renewable           *bool           `json:"renewable"`
 	MaxPurchasesPerStay optionalInt     `json:"max_purchases_per_stay"`
-	// Password is the step-up, required when a revision changes what the package costs, how it is paid for,
-	// or which service-plan revision it grants (separation of duties: the console session alone is not enough
-	// to reprice the offer or move it to other speeds).
+	// Step-up is required when a revision changes cost, payment method or service-plan revision (separation of duties).
 	Password string `json:"password"`
 }
 
@@ -478,9 +434,8 @@ func (o *optionalInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// acquisitionModuleRefusal names the module a publication needs and does not have. Publishing is
-// configuration, so readiness (a provider account, an onboarded interface) is not required -- the module
-// must be licensed and switched on at this site. The client offer is gated again on all four gates.
+// acquisitionModuleRefusal names the module a publication needs and lacks. Only licensed-and-enabled is required
+// to publish; readiness is gated again when the offer is made.
 func (s *server) acquisitionModuleRefusal(r *http.Request, spec iamv2.PackagePublishSpec) (string, bool) {
 	need := map[string]bool{}
 	if spec.PriceMinor > 0 {
@@ -559,8 +514,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		spec.MaxPurchasesPerStay = in.MaxPurchasesPerStay.Value
 	}
 
-	// A REVISION OF AN EXISTING PACKAGE: explicit commercial terms, carried non-commercial fields, and a
-	// step-up when the terms or the plan change.
+	// Revising an existing package needs explicit commercial terms, and a step-up when terms or plan change.
 	if !in.CreateOnly {
 		cur, exists, ok := s.currentPackageByCode(w, r, in.Code)
 		if !ok {
@@ -606,9 +560,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	for _, ti := range in.GrantTiers {
 		spec.GrantTiers = append(spec.GrantTiers, iamv2.GrantTier{Order: ti.Order, Value: ti.Grant})
 	}
-	// Speed steps were shown to clients and never applied (audit O-5): an operator saving a package may give it
-	// one grant step, with no overrides. See iamv2.GrantTiersEnforceableRefusal for why this refuses rather than
-	// guessing at a threshold model.
+	// A package may have one grant step with no overrides (see iamv2.GrantTiersEnforceableRefusal).
 	if msg := iamv2.GrantTiersEnforceableRefusal(spec.GrantTiers); msg != "" {
 		jsonErr(w, http.StatusBadRequest, "validation", msg)
 		return
@@ -620,9 +572,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
-		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
-		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		// A domain refusal (e.g. a reserved system code) is the operator's to fix, not a 500.
 		var de *iamv2.Error
 		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
 			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
@@ -650,8 +600,7 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// currentPackageByCode reads the CURRENT configuration of the package that owns code, if any. ok=false means
-// the answer was written already (the package exists but cannot be read safely).
+// currentPackageByCode reads the current configuration of the package owning code. ok=false means the error response was already written.
 func (s *server) currentPackageByCode(w http.ResponseWriter, r *http.Request, code string) (iamv2.PackageCurrent, bool, bool) {
 	pkgs, disabled, err := s.commerce.ListPackages(r.Context(), s.tenantID, s.siteID)
 	if err != nil {
@@ -659,7 +608,7 @@ func (s *server) currentPackageByCode(w http.ResponseWriter, r *http.Request, co
 		return iamv2.PackageCurrent{}, false, false
 	}
 	if disabled {
-		return iamv2.PackageCurrent{}, false, true // PublishRevision answers phase2_disabled itself
+		return iamv2.PackageCurrent{}, false, true
 	}
 	for _, p := range pkgs {
 		if p.Code != strings.TrimSpace(code) {
@@ -676,7 +625,6 @@ func (s *server) currentPackageByCode(w http.ResponseWriter, r *http.Request, co
 	return iamv2.PackageCurrent{}, false, true
 }
 
-// missingCommercialFields names the commercial terms a revision of an existing package left out.
 func missingCommercialFields(in publishPackageReq) []string {
 	var out []string
 	if in.PriceMinor == nil {
@@ -697,8 +645,6 @@ func missingCommercialFields(in publishPackageReq) []string {
 	return out
 }
 
-// commercialTermsChanged reports whether a revision changes the price, the currency, the set of acquisition
-// methods or the pinned service-plan revision of the package's current revision.
 func commercialTermsChanged(cur iamv2.PackageCurrent, spec iamv2.PackagePublishSpec) bool {
 	if cur.PriceMinor != spec.PriceMinor || !strings.EqualFold(strings.TrimSpace(cur.Currency), strings.TrimSpace(spec.Currency)) {
 		return true
@@ -730,7 +676,7 @@ func commercialTermsChanged(cur iamv2.PackageCurrent, spec iamv2.PackagePublishS
 
 type setActiveReq struct {
 	Active   bool   `json:"active"`
-	Password string `json:"password"` // step-up, required for destructive deactivation
+	Password string `json:"password"`
 	Reason   string `json:"reason"`
 }
 
@@ -741,8 +687,7 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	// Deactivation is destructive (it withdraws a live package from guests): require a reason + password
-	// step-up, mirroring the destructive service-restart / cert-rotate policy.
+	// Deactivation withdraws a live package: require a reason and step-up.
 	if !in.Active {
 		if strings.TrimSpace(in.Reason) == "" {
 			jsonErr(w, http.StatusBadRequest, "reason_required", "a reason is required to deactivate a package")
@@ -753,8 +698,7 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	} else if !s.reauth(r, in.Password) {
-		// REACTIVATION puts a package back in front of clients at whatever price and plan it carries, so it is
-		// the same separation-of-duties decision as changing them: a step-up, like deactivation (T30).
+		// Reactivation re-offers the package at its price and plan, so it needs step-up too.
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
 		return
 	}
@@ -778,13 +722,8 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Request) {
 	cur, disabled, err := s.commerce.GetPackageCurrent(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
 	if err != nil {
-		// SAYING WHICH FAILURE IT IS, because the two need different actions from the operator.
-		//
-		// If this service cannot read the package's conditions, editing must not be offered at all: saving
-		// republishes the whole package, so a form loaded without the eligibility rules and speed steps would
-		// quietly drop them - and a package left with no grant tier is offered to nobody. Answering
-		// "not found" here would invite exactly that, by looking like a missing package rather than a
-		// refusal to risk one.
+		// Unreadable conditions must not read as "not found": saving republishes the whole package, so a form
+		// loaded without eligibility rules and speed steps would silently drop them.
 		if errors.Is(err, iamv2.ErrPackageConditionsUnreadable) {
 			jsonErr(w, http.StatusConflict, "conditions_unreadable",
 				"This package cannot be edited here yet: its eligibility conditions and speed steps are not "+
@@ -802,13 +741,7 @@ func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, cur)
 }
 
-// ------------------------------------------------------------------- GUEST ACTIVITY ----------------------
-
-// guestActivityRow is what happened between one guest and one internet package, in the order an operator
-// asks about it: who, what, did they take it, when, what did it cost, and what did they actually get.
-//
-// The ids are still here -- quote, purchase, package revision -- because support needs them. They are simply
-// no longer the ANSWER. The screen leads with the sentence and keeps these for the details view.
+// guestActivityRow is what happened between one guest and one internet package.
 type guestActivityRow struct {
 	QuoteID    string     `json:"quote_id,omitempty"`
 	PurchaseID string     `json:"purchase_id,omitempty"`
@@ -817,63 +750,35 @@ type guestActivityRow struct {
 	TakenAt    *time.Time `json:"taken_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 
-	// WHO, as far as the data honestly supports. A room is always shown with its PMS interface; a guest who
-	// signed in with a voucher or an account has no room, and the screen says which rather than leaving a gap.
+	// A room is always shown with its PMS interface; voucher and account guests have no room.
 	Room         string `json:"room,omitempty"`
 	PMSInterface string `json:"pms_interface,omitempty"`
 	Reservation  string `json:"reservation,omitempty"`
 	StayID       string `json:"stay_id,omitempty"`
 	SignInMethod string `json:"sign_in_method,omitempty"`
 
-	// WHAT
 	Package     string `json:"package"`
 	PackageType string `json:"package_type,omitempty"`
 	PriceMinor  int64  `json:"price_minor"`
 	Currency    string `json:"currency,omitempty"`
 
-	// THE OUTCOME, already decided here rather than left to the browser: TAKEN, NOT_TAKEN, EXPIRED, or the
-	// purchase state when it is something else.
+	// Outcome is TAKEN, NOT_TAKEN, EXPIRED, or the purchase state.
 	Outcome string `json:"outcome"`
 	Trigger string `json:"trigger,omitempty"`
 
-	// WHAT ACCESS IT ACTUALLY PRODUCED. An offer that was taken but granted nothing is the interesting case,
-	// and the old screen could not show it at all.
 	ServicePlan   string `json:"service_plan,omitempty"`
 	QuotaBytes    *int64 `json:"quota_bytes,omitempty"`
 	EntitlementID string `json:"entitlement_id,omitempty"`
 }
 
-// listGuestActivity answers "what happened with internet packages", per guest, in words.
 func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 	limit := queryLimit(r, 100, 500)
 
-	// ONE QUERY, starting from the OFFER, because an offer that was never taken is exactly as much a part of
-	// the story as one that was -- and starting from purchases would silently drop it.
-	//
-	// WHERE THE ROOM COMES FROM, AND WHY THERE ARE TWO SOURCES.
-	//
-	// A taken offer resolves through its PURCHASE, which records the stay the grant was made against. An
-	// offer that expired unused has no purchase, and that is exactly the case an operator opens this screen
-	// to investigate -- so it resolves through the AUTH CONTEXT the quote was issued under, which is the only
-	// recorded link from a quote to a stay before the offer is taken.
-	//
-	// They are not two guesses. On the appliance both paths were available for all sixteen recorded offers
-	// and returned the SAME stay and the SAME PMS interface every time, zero disagreements. The purchase is
-	// preferred where it exists because it is the record of what was actually granted; the auth context is
-	// the same answer, recorded earlier.
-	//
-	// THE JOIN READS FIVE COLUMNS AND MAY NOT READ ANY OTHER. Migration 0083 grants svc_edged column-level
-	// SELECT on (id, tenant_id, site_id, stay_id, pms_interface_id) and nothing else. auth_contexts is the
-	// authentication record: every row carries exactly one subject -- a stay, a voucher, a guest account, a
-	// guest principal or a post-stay profile -- plus the device and network it came from. Table-level SELECT
-	// would hand this screen the credential linkage for every authentication the appliance has performed.
-	// Adding a column here is therefore not a query change; it is a privilege change, and the database will
-	// refuse it until somebody decides otherwise.
-	//
-	// STILL NOTHING IS INFERRED. The stay comes from a recorded link or the room stays blank -- never from
-	// timing, never from the interface alone. And the room is never read on its own: stays are keyed by
-	// (tenant, site, pms_interface, stay), so every room this returns travels with the interface that gives
-	// it meaning. A room is not an identity.
+	// Starts from the offer so never-taken offers are included. The stay resolves through the purchase when there
+	// is one, else through the auth context the quote was issued under (the only recorded quote-to-stay link).
+	// The auth_contexts join may read only the five columns svc_edged is granted (id, tenant_id, site_id, stay_id,
+	// pms_interface_id): wider access would expose credential linkage, so adding a column is a privilege change.
+	// Nothing is inferred: no recorded link means a blank room, and a room always travels with its pms_interface.
 	rows, err := s.db.Query(r.Context(), `
 		SELECT q.id::text,
 		       COALESCE(p.id::text, ''),
@@ -932,8 +837,7 @@ func (s *server) listGuestActivity(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "internal", "client activity could not be read")
 			return
 		}
-		// OfferedAt is left EMPTY. offer_quotes records when an offer expires and when it was consumed, and no
-		// time it was made; this used to copy the expiry into it, which printed a fabricated offer time.
+		// OfferedAt stays empty: offer_quotes records expiry and consumption, not when the offer was made.
 		switch {
 		case state == "GRANTED":
 			x.Outcome = "TAKEN"

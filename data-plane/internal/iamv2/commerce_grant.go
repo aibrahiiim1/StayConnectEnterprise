@@ -6,11 +6,9 @@ import (
 	"strings"
 )
 
-// GrantSnapshotVersion is the canonical Phase-2 grant-snapshot schema version.
 const GrantSnapshotVersion = 1
 
-// Bounded operational limits for a Phase-2 grant (defensive caps; a hostile/typo config cannot request
-// absurd values).
+// Defensive caps so a hostile or typo config cannot request absurd values.
 const (
 	maxKbps            = 10_000_000 // 10 Gbps
 	maxDevices         = 1_000
@@ -22,16 +20,14 @@ const (
 
 var deviceLimitPolicies = map[string]bool{"REJECT_NEW_DEVICE": true, "DISCONNECT_OLDEST": true, "ADMIN_APPROVAL": true}
 
-// knownGrantKeys are the only keys permitted in a tier grant_value (besides "match", the tier
-// condition). Any other key at publication is rejected.
+// knownGrantKeys are the only keys permitted in a tier grant_value; any other is rejected.
 var knownGrantKeys = map[string]bool{
 	"match": true, "down_kbps": true, "up_kbps": true, "max_concurrent_devices": true,
 	"device_limit_policy": true, "idle_timeout_seconds": true, "max_continuous_session_seconds": true,
 	"time_quota_seconds": true, "data_quota_bytes": true, "time_accounting_mode": true,
 }
 
-// GrantSnapshot is the typed, validated, canonical grant frozen into a quote. It is the ONLY grant data
-// a purchase/entitlement trusts — never raw jsonb.
+// GrantSnapshot is the only grant data a purchase or entitlement trusts, never raw jsonb.
 type GrantSnapshot struct {
 	Version                     int    `json:"version"`
 	ServicePlanRevisionID       string `json:"service_plan_revision_id"`
@@ -46,21 +42,19 @@ type GrantSnapshot struct {
 	TimeQuotaSeconds            int64  `json:"time_quota_seconds"`
 	DataQuotaBytes              int64  `json:"data_quota_bytes"`
 	TimeAccountingMode          string `json:"time_accounting_mode"`
-	// Duration / end policy (resolved once at quote time; never recomputed for historical rows).
+	// End policy is resolved once at quote time and never recomputed.
 	EndMode        string          `json:"end_mode"`
 	WindowEndsAt   string          `json:"window_ends_at,omitempty"`  // RFC3339 UTC, "" = none
 	DurationPolicy json.RawMessage `json:"duration_policy,omitempty"` // verbatim source policy (audit)
-	// AcquisitionMethod is how the client chose to acquire this quote (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT,
-	// PMS_POSTING). Pinned at quote time and re-validated at confirm; "" on quotes that predate it means Free.
+	// AcquisitionMethod is pinned at quote time and re-validated at confirm; "" means Free.
 	AcquisitionMethod string `json:"acquisition_method,omitempty"`
-	// FrozenDataQuotaBytes is a PER_STAY_NIGHT allowance resolved once from the pinned stay. The grant kernel
-	// freezes it onto the entitlement; 0 means the entitlement reads its plan revision as always.
+	// FrozenDataQuotaBytes is a PER_STAY_NIGHT allowance resolved once from the pinned stay; 0 means the
+	// entitlement reads its plan revision.
 	FrozenDataQuotaBytes int64 `json:"frozen_data_quota_bytes,omitempty"`
 }
 
-// asInt64 accepts only INTEGER numeric JSON (json.Number without a fractional part, or an int/int64).
-// A JSON float (e.g. 5.5) or a whole-looking float64(5) that carries no integer guarantee is rejected;
-// the repository decodes grant_value with UseNumber so tier numbers arrive as json.Number.
+// asInt64 accepts only integer JSON; floats (even whole-looking float64) are rejected. The repository decodes
+// grant_value with UseNumber so tier numbers arrive as json.Number.
 func asInt64(v any) (int64, bool) {
 	switch n := v.(type) {
 	case json.Number:
@@ -78,11 +72,9 @@ func asInt64(v any) (int64, bool) {
 	return 0, false
 }
 
-// BuildGrantSnapshot merges the pinned plan revision with the matched tier's typed overrides, validated
-// against the Phase-2 bounds. Returns a deterministic error on any malformed/out-of-range/unknown-key
-// input; tier overrides may not violate required plan constraints.
+// BuildGrantSnapshot merges the pinned plan revision with the matched tier's overrides, failing on any
+// malformed, out-of-range or unknown-key input.
 func BuildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisionRow) (GrantSnapshot, error) {
-	// unknown tier keys are rejected (publication-grade validation applied at runtime too)
 	for k := range tier.Value {
 		if !knownGrantKeys[k] {
 			return GrantSnapshot{}, &Error{Code: ErrInvalidInput, Msg: "unknown grant key: " + k}
@@ -101,7 +93,6 @@ func BuildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisio
 		DataQuotaBytes:        plan.DataQuotaBytes,
 		TimeAccountingMode:    plan.TimeAccountingMode,
 	}
-	// integer overrides from the tier
 	intOverride := func(key string, dst *int, max int) error {
 		if v, ok := tier.Value[key]; ok {
 			iv, ok := asInt64(v)
@@ -135,7 +126,6 @@ func BuildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisio
 			return GrantSnapshot{}, e
 		}
 	}
-	// enum overrides
 	if v, ok := tier.Value["device_limit_policy"]; ok {
 		s, ok := v.(string)
 		if !ok || !deviceLimitPolicies[strings.ToUpper(strings.TrimSpace(s))] {
@@ -143,41 +133,33 @@ func BuildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisio
 		}
 		g.DeviceLimitPolicy = strings.ToUpper(strings.TrimSpace(s))
 	}
-	// A TIER MAY NOT CHOOSE THE ACCOUNTING MODE. The mode belongs to the IMMUTABLE plan revision -- that is
-	// what "selectable per immutable revision" means -- and an offer-time override would let the same
-	// revision be granted under two different accounting rules, which is precisely the retroactive
-	// reinterpretation immutability exists to prevent. Overrides of rates and quotas remain allowed; this
-	// one is refused whatever the Phase-6 capability says.
+	// A tier may not choose the accounting mode: it belongs to the immutable plan revision, and an override
+	// would grant one revision under two accounting rules.
 	if _, ok := tier.Value["time_accounting_mode"]; ok {
 		return GrantSnapshot{}, &Error{Code: ErrInvalidInput,
 			Msg: "time_accounting_mode belongs to the plan revision and cannot be overridden by a tier"}
 	}
 	if g.TimeAccountingMode == "" {
-		// An omitted mode is VALIDITY_WINDOW, which is what every revision published before Phase 6 carries.
+		// An omitted mode is VALIDITY_WINDOW.
 		g.TimeAccountingMode = "VALIDITY_WINDOW"
 	}
 	switch strings.ToUpper(g.TimeAccountingMode) {
 	case "VALIDITY_WINDOW", "AGGREGATE_ONLINE_TIME":
-		// The revision's own mode is honoured. It could only have become AGGREGATE_ONLINE_TIME by being
-		// published that way, which the admin path allows only with the Phase-6 capability on.
 	default:
 		return GrantSnapshot{}, &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode " + g.TimeAccountingMode}
 	}
-	// required plan constraints a tier may never violate
 	if g.MaxConcurrentDevices < 1 {
 		return GrantSnapshot{}, &Error{Code: ErrInvalidInput, Msg: "max_concurrent_devices must be >= 1"}
 	}
 	return g, nil
 }
 
-// Canonical returns the deterministic JSON encoding of the snapshot (stable field order via struct
-// tags) for storage in offer_quotes.grant_snapshot.
+// Canonical is the deterministic JSON stored in offer_quotes.grant_snapshot.
 func (g GrantSnapshot) Canonical() []byte {
 	b, _ := json.Marshal(g)
 	return b
 }
 
-// ParseGrantSnapshot decodes a stored canonical snapshot.
 func ParseGrantSnapshot(b []byte) (GrantSnapshot, error) {
 	var g GrantSnapshot
 	if err := json.Unmarshal(b, &g); err != nil {

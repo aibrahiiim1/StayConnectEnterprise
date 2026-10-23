@@ -1,14 +1,8 @@
 package main
 
-// THE RESPONSE-TIME BUDGET, held to its contract.
-//
-// pms_phase3_handlers_test.go proves every guest-visible non-success is the same BYTES. These prove it is the
-// same TIME, which is the other half of the same property: a uniform body that arrives 4µs after a malformed
-// request and 400ms after a wrong room still tells an attacker which rooms exist.
-//
-// Most of these assert the DEADLINE the handler waits for rather than measuring elapsed wall clock. A
-// measurement would be a flake generator on a loaded CI runner — and worse, it would pass for the wrong
-// reason, since two paths that both take "about 1.2 seconds" is exactly the property that has to be exact.
+// pms_phase3_handlers_test.go proves non-successes are the same bytes; these prove they take the same time.
+// Most assert the deadline the handler waits for, not measured wall clock, which would be flaky and would
+// pass for "about" equal paths.
 
 import (
 	"bytes"
@@ -23,13 +17,12 @@ import (
 	"time"
 )
 
-// recordingClock stands in for the wall clock. It starts at a real instant so that the context deadlines the
-// handler derives are sane against the runtime's own timers, then advances only when the handler waits.
+// recordingClock starts at a real instant (so derived context deadlines are sane) and advances only when the handler waits.
 type recordingClock struct {
 	mu    sync.Mutex
 	now   time.Time
 	start time.Time
-	waits []time.Time // every deadline SleepUntil was asked to wait for, in order
+	waits []time.Time
 }
 
 func newRecordingClock() *recordingClock {
@@ -52,7 +45,6 @@ func (c *recordingClock) SleepUntil(_ context.Context, t time.Time) {
 	}
 }
 
-// waited reports the single deadline the handler waited for, and whether it waited exactly once.
 func (c *recordingClock) waited() (time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -70,12 +62,8 @@ func (c *recordingClock) offset() (time.Duration, bool) {
 	return d.Sub(c.start), true
 }
 
-// EVERY non-success leaves at the SAME offset, and it is the budget.
-//
-// The cases are chosen to span the full range of how early a failure can be known: two of them never touch
-// the network at all (the fastest possible answer), one is refused by the resolver, one by the grant, one by
-// the transport. If the budget were a floor-with-jitter or applied only to the upstream paths, the local ones
-// would come back first and the room-enumeration oracle would be wide open.
+// Cases span how early a failure can be known (two never touch the network); a budget applied only to
+// upstream paths would let local ones return first and open a room-enumeration oracle.
 func TestPhase3EveryFailureLeavesAtTheSameOffset(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -124,7 +112,6 @@ func TestPhase3EveryFailureLeavesAtTheSameOffset(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.authPMSPhase3(rec, req)
 
-			// it really is a non-success
 			var out guestPMSResponse
 			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.OK {
 				t.Fatalf("expected the uniform non-success, got %q", rec.Body.String())
@@ -140,8 +127,7 @@ func TestPhase3EveryFailureLeavesAtTheSameOffset(t *testing.T) {
 	}
 }
 
-// SUCCESS is not padded. A guest who is in should be in immediately; success is already distinguishable by
-// its content, so spending the guest's patience would hide nothing.
+// Success is not padded; its content already differs.
 func TestPhase3SuccessDoesNotWaitOutTheBudget(t *testing.T) {
 	stub := &scdStub{
 		resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx",
@@ -158,8 +144,7 @@ func TestPhase3SuccessDoesNotWaitOutTheBudget(t *testing.T) {
 	}
 }
 
-// The CHOICE step is a success too — the guest proved who they are and is being asked to pick. Padding it
-// would make choosing feel like failing, and it discloses nothing that the success case does not.
+// The choice step is a success too.
 func TestPhase3ChoiceStepDoesNotWaitOutTheBudget(t *testing.T) {
 	stub := &scdStub{resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx",
 		"offers": []map[string]any{
@@ -175,8 +160,7 @@ func TestPhase3ChoiceStepDoesNotWaitOutTheBudget(t *testing.T) {
 	}
 }
 
-// blockingStub never answers. It is how a wedged PMS, a saturated interface or a deadlocked scd looks from
-// portald: not an error, just silence.
+// blockingStub never answers, like a wedged PMS or deadlocked scd.
 type blockingStub struct {
 	entered chan struct{}
 	once    sync.Once
@@ -188,12 +172,8 @@ func (s *blockingStub) RoundTrip(req *http.Request) (*http.Response, error) {
 	return nil, req.Context().Err()
 }
 
-// THE CEILING. A padded-but-unbounded budget leaks exactly as much as no budget at all: a nine-second answer
-// is distinguishable from a 1.2-second one no matter what floor sits underneath it. So an upstream hop that
-// has not answered when the budget expires is abandoned, and the guest gets the uniform non-success there.
-//
-// This one uses the REAL clock, because the property under test is that the deadline actually fires — a fake
-// clock would prove only that the arithmetic was written down.
+// The ceiling: an unanswered upstream hop is abandoned at the budget. Uses the real clock because the
+// property is that the deadline actually fires.
 func TestPhase3AnUnansweringUpstreamIsAbandonedAtTheBudget(t *testing.T) {
 	stub := &blockingStub{entered: make(chan struct{})}
 	h := &handler{scd: &http.Client{Transport: stub}} // nil clock: the real one
@@ -220,24 +200,19 @@ func TestPhase3AnUnansweringUpstreamIsAbandonedAtTheBudget(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.OK {
 		t.Fatalf("a wedged upstream did not produce the uniform non-success: %q", rec.Body.String())
 	}
-	// Bounded above: the whole point. The slack absorbs scheduling on a loaded runner without weakening the
-	// assertion — the failure mode this catches is the 5s client timeout, which is 4x outside it.
+	// The slack absorbs runner scheduling; the failure this catches is the 5s client timeout.
 	if elapsed > phase3FailureBudget+500*time.Millisecond {
 		t.Fatalf("a wedged upstream took %v, past the %v budget", elapsed, phase3FailureBudget)
 	}
-	// Bounded below: it must not have come back early either, or a wedged PMS would be distinguishable from
-	// a wrong room by being SLOWER to fail than the padded fast paths.
 	if elapsed < phase3FailureBudget {
 		t.Fatalf("a wedged upstream answered in %v, before the %v budget", elapsed, phase3FailureBudget)
 	}
 }
 
-// A guest who closes the page must not pin a goroutine for the rest of the budget. The wait honours the
-// request's cancellation; on an appliance serving a lobby full of devices, a budget that outlived its request
-// would be a slow leak under exactly the load that matters.
+// A closed page must not pin a goroutine for the rest of the budget.
 func TestPhase3TheWaitReleasesWhenTheGuestGivesUp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // the guest is already gone
+	cancel()
 
 	done := make(chan time.Duration, 1)
 	go func() {
@@ -255,8 +230,7 @@ func TestPhase3TheWaitReleasesWhenTheGuestGivesUp(t *testing.T) {
 	}
 }
 
-// The budget is spent BEFORE the body reaches the guest. Waiting afterwards would be indistinguishable from
-// not waiting at all — the bytes are already on the wire and the clock an attacker reads stops when they land.
+// Waiting after the bytes are on the wire would delay nothing an attacker can measure.
 func TestPhase3TheWaitHappensBeforeTheBodyIsWritten(t *testing.T) {
 	stub := &scdStub{resolve: map[string]any{"outcome": "NOT_VERIFIED"}}
 	h, clk := stubHandlerWithClock(t, stub)
@@ -272,7 +246,7 @@ func TestPhase3TheWaitHappensBeforeTheBodyIsWritten(t *testing.T) {
 	}
 }
 
-// orderRecorder notes whether the clock had already been asked to wait by the time the first byte was written.
+// orderRecorder notes whether the clock had waited before the first byte was written.
 type orderRecorder struct {
 	*httptest.ResponseRecorder
 	clk         *recordingClock
@@ -298,8 +272,7 @@ func (o *orderRecorder) note() {
 	_, o.waitedFirst = o.clk.waited()
 }
 
-// A sanity check on the stub itself: the uniform failure body is still the uniform failure body when it comes
-// out of a budgeted path. A budget that quietly changed the answer would trade one leak for another.
+// A budget that quietly changed the answer would trade one leak for another.
 func TestPhase3TheBudgetedFailureIsStillTheUniformBody(t *testing.T) {
 	h, _ := stubHandlerWithClock(t, &scdStub{resolve: map[string]any{"outcome": "NOT_VERIFIED"}})
 	rec, _ := phase3Post(t, h, map[string]any{"room": "999", "request_id": "r"})

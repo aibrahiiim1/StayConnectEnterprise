@@ -7,8 +7,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// ---- the scheduler: cadence, serialization, backoff and the unanswered release ------------------------------
-
 func TestFinResync_AsksAtMostOncePerMinuteAndNeverWhileResyncing(t *testing.T) {
 	var f finResyncScheduler
 	t0 := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
@@ -70,8 +68,6 @@ func TestFinResync_AnUnansweredRequestReleasesOnceAndAStartedOneNever(t *testing
 		t.Fatal("a request the PMS began answering (DS) is never released by the timeout")
 	}
 }
-
-// ---- the adapter: one DR from the owning loop, never inside a roster, none when not due ---------------------
 
 func TestFinResync_TheAdapterRequestsOneDRWhenDue(t *testing.T) {
 	due := true

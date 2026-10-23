@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// PackageListRequest is the guest's package-discovery input. Only server-resolved trusted identifiers;
-// the browser never supplies any of these directly (portald derives them from the trusted session).
+// Only server-resolved trusted identifiers; the browser never supplies them.
 type PackageListRequest struct {
 	TenantID       string
 	SiteID         string
@@ -16,24 +15,21 @@ type PackageListRequest struct {
 	GuestNetworkID string
 }
 
-// PackageListItem is the guest-safe view of one eligible free package. It carries ONLY an opaque package
-// id and guest-appropriate display — never pins, prices internals, revisions or ineligible-package data.
+// Guest-safe view: an opaque package id and display only, never pins, price internals, revisions or
+// ineligible-package data.
 type PackageListItem struct {
 	PackageID string         `json:"package_id"`
 	Display   map[string]any `json:"display"`
-	// Methods are the acquisition methods this client may use for this package right now (never a method
-	// that would predictably fail after selection). Price fields are for display; the quote pins them.
+	// Methods this client may use right now (never one that would predictably fail after selection); price
+	// fields are display only, the quote pins them.
 	Methods          []string `json:"methods"`
 	PriceMinor       int64    `json:"price_minor"`
 	Currency         string   `json:"currency"`
 	CurrencyExponent int      `json:"currency_exponent"`
 }
 
-// voucherMayHavePackage answers whether this package revision is the one the voucher was printed against.
-//
-// Non-voucher subjects are unaffected: an account or a guest principal has no printed card and no pin, so
-// this returns true and the remaining gates decide. A voucher whose row cannot be resolved offers NOTHING
-// -- the safe direction, and the same convention every other gate here uses for an unresolvable input.
+// Non-voucher subjects have no printed card or pin, so this returns true. A voucher whose row cannot be
+// resolved offers nothing.
 func (e *CommerceEngine) voucherMayHavePackage(ctx context.Context, tx CommerceTx, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (bool, error) {
 	if ac.Subject.Kind != SubjectVoucher || ac.Subject.VoucherID == "" {
 		return true, nil
@@ -45,26 +41,19 @@ func (e *CommerceEngine) voucherMayHavePackage(ctx context.Context, tx CommerceT
 	return pinned != "" && pinned == pkg.ID, nil
 }
 
-// PackageListResult is the result of ListEligiblePackages.
 type PackageListResult struct {
 	Disabled bool
 	Packages []PackageListItem
 	Reason   string
-	// FreeAllowanceUsed is the ONE withheld reason that is safe to show: a free package the Client could
-	// otherwise see was withheld only because their own history says they already had it. Every other
-	// exclusion stays silent. This is what turns "no packages" into "you have used your free access; here
-	// are the paid ones" (contract §6.1).
+	// The one withheld reason safe to show: a free package withheld only because the Client's own history says
+	// they already had it. Every other exclusion stays silent.
 	FreeAllowanceUsed bool
-	// ClientGroupID is the group pinned on the context, for the page to show (never decides anything here).
+	// For display only; never decides anything here.
 	ClientGroupID string
 }
 
-// ListEligiblePackages returns — read-only, in one transaction, WITHOUT creating any quote/purchase/
-// entitlement — the free packages the authenticated subject is eligible for right now. It enforces the
-// identical gates as CreateQuote (auth-context pins, non-PMS, free-only + NOT_REQUIRED, authoritative
-// currency, visibility window, typed eligibility, a resolvable first-match grant tier and pinned plan
-// revision) but SILENTLY EXCLUDES any package that fails a gate so no ineligible package's existence is
-// revealed. When the portal surface is OFF it returns Disabled without touching the repository.
+// Read-only, creates no quote, purchase or entitlement. Applies the same gates as CreateQuote but silently
+// excludes failures so no ineligible package's existence is revealed.
 func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageListRequest) (PackageListResult, error) {
 	if !e.cfg.PortalOn() {
 		e.obs.Event("phase2.disabled", map[string]string{"op": "list"})
@@ -80,7 +69,6 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 		if err != nil {
 			return err
 		}
-		// Auth-context pins (no consume): tenant/site + THIS device+network, non-PMS, unconsumed, unexpired.
 		if ac.TenantID != req.TenantID || ac.SiteID != req.SiteID || ac.DeviceID != req.DeviceID || ac.GuestNetworkID != req.GuestNetworkID {
 			res = PackageListResult{Reason: "auth_context_mismatch"}
 			return nil
@@ -95,8 +83,8 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 		}
 		var pkgs []PackageRevisionRow
 		if ac.Subject.Kind == SubjectVoucher {
-			// A voucher is offered the revision it was printed against and nothing else -- even after the
-			// package was republished or deactivated (an issued card is honoured until it is revoked).
+			// A voucher is offered only the revision it was printed against, even after the package was
+			// republished or deactivated.
 			pinned, perr := tx.VoucherPinnedPackageRevision(ctx, req.TenantID, req.SiteID, ac.Subject.VoucherID)
 			if perr != nil {
 				return perr
@@ -128,12 +116,12 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 				if why == "forbids_prior_purchase" && pkg.PriceMinor == 0 {
 					freeUsed = true
 				}
-				continue // silently excluded — never reveals an ineligible package
+				continue
 			}
 			_ = snap
 			methods := applicableMethods(pkg, ac, site)
 			if len(methods) == 0 {
-				continue // nothing this client could complete: not offered at all
+				continue
 			}
 			items = append(items, PackageListItem{PackageID: pkg.PackageID, Display: display, Methods: methods,
 				PriceMinor: pkg.PriceMinor, Currency: pkg.Currency, CurrencyExponent: pkg.CurrencyExponent})
@@ -147,26 +135,20 @@ func (e *CommerceEngine) ListEligiblePackages(ctx context.Context, req PackageLi
 	return res, nil
 }
 
-// evalPackageForSubject applies every guest-eligibility gate to one candidate package and, when it
-// passes, returns the resolved grant snapshot + guest-safe display. A gate failure returns eligible=false
-// (never an error) so the caller silently excludes the package. Only a repository/read error is a hard
-// error. This mirrors the CreateQuote pipeline exactly, minus any write.
+// A gate failure returns eligible=false, never an error, so the caller silently excludes the package; only a
+// read error is a hard error. Mirrors CreateQuote minus any write.
 func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceTx, now time.Time, req PackageListRequest, ac AuthContextRow, pkg PackageRevisionRow) (GrantSnapshot, map[string]any, bool, string, error) {
 	isVoucher := ac.Subject.Kind == SubjectVoucher
 	if !isVoucher && (!pkg.PackageActive || !pkg.IsCurrent) {
 		return GrantSnapshot{}, nil, false, "", nil
 	}
-	// A VOUCHER IS OFFERED WHAT IT WAS PRINTED FOR, AND NOTHING ELSE.
-	//
-	// This gate is first among the subject gates because it is the narrowest: for a voucher subject there
-	// is exactly one answer, and evaluating price, visibility and eligibility rules for packages the card
-	// can never grant is work whose only possible product is a wrong offer. Migration 0088 refuses the
-	// mismatch in the grant kernel regardless; this is what keeps a guest from being shown a choice that
-	// would then fail, and an operator from believing a card grants something it does not.
+	// A voucher is offered what it was printed for and nothing else. The gate is first because it is the
+	// narrowest; the grant kernel refuses a mismatch regardless, this keeps a guest from being shown a choice
+	// that would fail.
 	if ok, err := e.voucherMayHavePackage(ctx, tx, req, ac, pkg); err != nil || !ok {
 		return GrantSnapshot{}, nil, false, "", err
 	}
-	// The sale window governs OFFERS; a voucher already issued is not an offer and is not re-windowed.
+	// The sale window governs offers; an issued voucher is not re-windowed.
 	if !isVoucher && pkg.VisibleFrom != nil && now.Before(*pkg.VisibleFrom) {
 		return GrantSnapshot{}, nil, false, "", nil
 	}
@@ -178,21 +160,19 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	}
 	plan, err := tx.LoadPlanRevision(ctx, req.TenantID, req.SiteID, pkg.PlanRevisionID)
 	if err != nil {
-		// a missing/broken plan revision is a config gap, not a guest-visible fact: exclude, don't error
+		// A missing or broken plan revision is a config gap, not a guest-visible fact: exclude, don't error.
 		if isNotFound(err) {
 			return GrantSnapshot{}, nil, false, "", nil
 		}
 		return GrantSnapshot{}, nil, false, "", err
 	}
-	// ...and the client networks this one continues (0106), so a replaced network keeps its logical identity.
 	ancestors, aerr := tx.GuestNetworkAncestors(ctx, req.TenantID, req.SiteID, ac.GuestNetworkID)
 	if aerr != nil {
 		return GrantSnapshot{}, nil, false, "", aerr
 	}
 	subj := EligibilitySubject{Now: now, AuthMethod: ac.Method, Kind: ac.Subject.Kind,
 		GuestNetworkID: ac.GuestNetworkID, GuestNetworkLineage: ancestors, ClientGroupID: ac.ClientGroupID}
-	// Rules and tiers are keyed on the RESOLVED package revision id (pkg.ID), exactly as CreateQuote does.
-	// The prior-purchase history is keyed on the PACKAGE, under the revision's own policy (contract §5).
+	// Rules and tiers are keyed on the resolved revision id; prior-purchase history is keyed on the package.
 	rules, err := tx.LoadEligibilityRules(ctx, pkg.ID)
 	if err != nil {
 		return GrantSnapshot{}, nil, false, "", err
@@ -230,7 +210,6 @@ func (e *CommerceEngine) evalPackageForSubject(ctx context.Context, tx CommerceT
 	return snap, guestDisplay(snap, pkg), true, "", nil
 }
 
-// isNotFound reports whether err is a typed not-found domain error (missing plan/package config).
 func isNotFound(err error) bool {
 	var e *Error
 	if errors.As(err, &e) {

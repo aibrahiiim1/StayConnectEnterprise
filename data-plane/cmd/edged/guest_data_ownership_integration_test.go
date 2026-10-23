@@ -12,9 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration 0145 (Product Owner decision D-R5, 2026-10-20): room credentials prove eligibility, not identity.
-// A PMS may name only the reservation holder while several people use the room and its credentials. These tests
-// build those situations and prove a request about one person never exports or changes another person's data.
+// Room credentials prove eligibility, not identity: a PMS may name only the reservation holder while several
+// people use the room. A request about one person must never export or change another person's data.
 
 // newAccess creates one entitlement whose subject is the given column (stay_id, guest_account_id or
 // guest_principal_id): ended two days ago, or live when live is true.
@@ -205,7 +204,6 @@ func TestIntegration_Ownership_AnAccountAndItsReservationAreSeparate(t *testing.
 				if got := sessAddr(t, f, ownSess); got != "" {
 					t.Errorf("the account's own session address was kept: %s", got)
 				}
-				// The reservation and the room are untouched.
 				for name, got := range map[string][2]string{
 					"reservation kept":  {gdStr(t, f, `SELECT external_reservation_id FROM iam_v2.stays WHERE id=$1`, stay), "R-PAIR-" + sfx},
 					"holder kept":       {gdStr(t, f, `SELECT concat_ws(',',first_name_norm,last_name_norm) FROM iam_v2.stay_guests WHERE stay_id=$1`, stay), "ada,lovelace"},
@@ -311,7 +309,6 @@ func TestIntegration_Ownership_AmbiguousDevicesAreLeftAloneAndCounted(t *testing
 		t.Error("a staff-issued account's device was changed")
 	}
 
-	// Two self-registered accounts, one tablet.
 	a := selfAccount(t, f, "ann-"+sfx+"@example.com", true, "", "")
 	b := selfAccount(t, f, "ben-"+sfx+"@example.com", true, "", "")
 	aEnt := newAccess(t, f, "a"+sfx, "guest_account_id", a, false)
@@ -469,7 +466,6 @@ func TestIntegration_Ownership_SharedAccessIsNotRedactedOrSearchedByDevice(t *te
 		f.tenant, room); err != nil {
 		t.Fatalf("seed audit: %v", err)
 	}
-	// A device identifies nobody: no reservation is offered for its address.
 	st, body := f.do(t, "GET", "/guest-data-rights/search?q=02:aa:00:07:00:01", nil)
 	if m, _ := body["matches"].([]any); st != 200 || len(m) != 0 {
 		t.Fatalf("a MAC search offered %v (%d), want nothing: the device is the room's, not one person's", body, st)

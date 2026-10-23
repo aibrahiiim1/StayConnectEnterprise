@@ -1,18 +1,12 @@
 "use client";
 
-// The small pieces: a loading placeholder, a meter, a toggle and a copyable identifier. Each one exists
-// because three or more screens were building it inline.
-
 import * as React from "react";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./tooltip";
 
-/**
- * Skeleton — a shaped placeholder. "Loading…" as body text makes a page jump when the real content lands.
- * Under reduced motion it stops pulsing and stays as a static tint: the shape still says "loading".
- */
+/** Reduced motion keeps the loading shape static. */
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-surface motion-reduce:animate-none", className)} />;
 }
@@ -67,11 +61,7 @@ export function Switch({
   );
 }
 
-/**
- * Meter — a labelled proportion bar. Used for disk use on Backup health.
- *
- * The tone escalates automatically: a pool at 94% should not need the caller to remember to pass "warning".
- */
+/** Tone escalates with usage unless the caller supplies one. */
 export function Meter({
   value,
   max,
@@ -122,13 +112,7 @@ export function Meter({
   );
 }
 
-/**
- * MonoId — a long identifier, shortened, with copy-to-clipboard.
- *
- * Several screens print a raw UUID in a table cell. It is unreadable, it is the widest column on the page, and
- * it is almost always there because somebody might need to paste it into a support ticket — which is the one
- * thing a truncated, copyable chip does better than the full string.
- */
+/** Truncate long IDs visually while copying their full value. */
 export function MonoId({
   value,
   head = 8,
@@ -150,7 +134,7 @@ export function MonoId({
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
     } catch {
-      /* clipboard denied — the tooltip still shows the full value */
+      /* The tooltip retains the full value if clipboard access is denied. */
     }
   }
 
@@ -160,7 +144,6 @@ export function MonoId({
         <button
           type="button"
           onClick={copy}
-          // The name says what the button does and still contains the visible text (WCAG 2.5.3).
           aria-label={`Copy ${title ? title.toLowerCase() : "value"} ${short}`}
           className={cn(
             "group inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5",
@@ -177,8 +160,7 @@ export function MonoId({
           )}
         </button>
       </Tooltip>
-      {/* The check mark is visual only; this tells a screen reader the copy happened. Always rendered, so the
-          region exists before its content changes. */}
+      {/* Keep the live region mounted so copying is announced when its content changes. */}
       <span role="status" aria-live="polite" className="sr-only">{copied ? "Copied" : ""}</span>
     </>
   );

@@ -10,23 +10,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// A CONSOLE SESSION LIVES ONLY AS LONG AS THE ACCESS IT WAS GRANTED FOR.
+// A console session lives only as long as the access it was granted for. The session is a bearer token, so every
+// request re-reads the operator from the database and ends the session when:
 //
-// The Redis session is a bearer token with a 12-hour SLIDING lifetime, and it used to carry the operator's
-// roles as they were at sign-in. So a disabled, demoted or removed operator kept working until they stopped
-// using the console for 12 hours. Now every request re-reads the operator from the database:
+//	the operator row is gone or not active
+//	the session predates sessions_not_before (set on disable, role change, password reset, removal)
+//	the session is older than the absolute cap (central_security_settings.operator_session_max_hours)
+//	there is no activity for longer than the idle limit (operator_idle_minutes); the background whoami poll is not activity
 //
-//	the operator row is gone or not active            -> session ended
-//	the session was created before sessions_not_before -> session ended (set on disable, role change,
-//	                                                      password reset, removal)
-//	the session is older than the absolute cap          -> session ended, however active it was
-//	                                                      (central_security_settings.operator_session_max_hours)
-//	no activity for longer than the idle limit          -> session ended (operator_idle_minutes, 0052); the
-//	                                                      console's background whoami poll is not activity
-//
-// and the roles the request is authorised with are the CURRENT roles, never the snapshot.
+// The request is authorised with the current roles, never the snapshot stored in the session.
 
-// Session limits: the absolute lifetime and the idle limit (GDPR plan C10, decision D-C10: 12 hours, 30 minutes).
+// Defaults and bounds of the absolute lifetime (hours) and idle limit (minutes).
 const (
 	DefaultSessionMaxHours = 12
 	MinSessionMaxHours     = 1
@@ -36,10 +30,8 @@ const (
 	MaxIdleMinutes         = 240
 )
 
-// ErrSessionEnded means the session must not be used again; the middleware destroys it.
 var ErrSessionEnded = errors.New("session ended")
 
-// OperatorState is what the database says about the session's operator right now.
 type OperatorState struct {
 	Found             bool
 	Status            string
@@ -52,8 +44,7 @@ type OperatorState struct {
 	IdleMinutes       int
 }
 
-// Validate applies the policy above. It returns the session refreshed with the operator's current identity
-// and roles, or ErrSessionEnded with the reason.
+// Validate applies the policy above, returning the session with the operator's current identity and roles, or ErrSessionEnded.
 func Validate(s *Session, st OperatorState, now time.Time) (*Session, string, error) {
 	switch {
 	case !st.Found:
@@ -96,15 +87,12 @@ func Validate(s *Session, st OperatorState, now time.Time) (*Session, string, er
 	return &out, "", nil
 }
 
-// SessionChecker loads OperatorState.
 type SessionChecker interface {
 	OperatorState(ctx context.Context, operatorID string) (OperatorState, error)
 }
 
-// DBSessionChecker reads OperatorState from Central's database.
 type DBSessionChecker struct{ DB *pgxpool.Pool }
 
-// OperatorState reads the operator, their roles and the absolute session cap in one round trip.
 func (c DBSessionChecker) OperatorState(ctx context.Context, operatorID string) (OperatorState, error) {
 	var st OperatorState
 	var roles, tenants []string
@@ -136,9 +124,9 @@ func (c DBSessionChecker) OperatorState(ctx context.Context, operatorID string) 
 	return st, nil
 }
 
-// EndOperatorSessions makes every existing console session of the operator unusable from the next request
-// on. Called inside the transaction that disables, demotes or re-passwords them. The instant comes from the
-// same clock that stamps Session.CreatedAt, so a sign-in after the change is never mistaken for one before it.
+// EndOperatorSessions makes every existing session of the operator unusable from the next request; call it inside
+// the transaction that disables, demotes or re-passwords them. It uses the clock that stamps Session.CreatedAt, so
+// a later sign-in is never mistaken for an earlier one.
 func EndOperatorSessions(ctx context.Context, q interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, operatorID string) error {

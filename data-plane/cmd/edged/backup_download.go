@@ -1,20 +1,9 @@
 package main
 
-// DOWNLOADING A BACKUP (audit N-2, Product-Owner decision D-B).
-//
-// A database backup is a complete pg_dump of the site: every client account, stay, session and the activity
-// trail. It used to download for every role that could open the Backups page -- the IT manager, both desk roles
-// and the site viewer -- with nothing but an audit row. Now:
-//
-//   - its own resource key, backup-download: site_admin and hotel_it_manager only. Every role with backups
-//     read still sees the list.
-//   - the operator's password, every time. POST /backup-download/{name}/ticket with the password returns a
-//     single-use ticket that is valid for 60 seconds, for that backup and that operator only.
-//   - the file is streamed by POST /backup-download/{name} with the ticket as a form field. A form post rather
-//     than a link because the browser then saves the file without leaving the page, and the ticket never
-//     appears in a URL (edged logs request lines).
-//   - both steps are audited: backup.download_authorized when the password is accepted, backup.downloaded
-//     when the file is sent.
+// A backup is a complete pg_dump of the site, so downloading needs the backup-download key (site_admin and
+// hotel_it_manager only) and the operator's password every time: POST .../ticket returns a single-use 60 s
+// ticket for that backup and operator. The file is then streamed by a form POST carrying the ticket, because
+// edged logs request lines and the ticket must never appear in a URL.
 
 import (
 	"crypto/rand"
@@ -35,8 +24,7 @@ type downloadTicket struct {
 	expires    time.Time
 }
 
-// downloadTickets is in memory on purpose: a ticket lives for a minute, and edged restarting is a fine reason
-// for an operator to type the password again.
+// Tickets are in memory on purpose: they live a minute and a restart may ask for the password again.
 type downloadTicketStore struct {
 	mu sync.Mutex
 	m  map[string]downloadTicket
@@ -61,7 +49,7 @@ func (d *downloadTicketStore) issue(operatorID, name string) (string, time.Time)
 	return tok, exp
 }
 
-// redeem consumes a ticket: it is gone after the first use whatever the outcome.
+// redeem consumes the ticket whatever the outcome.
 func (d *downloadTicketStore) redeem(tok, operatorID, name string) bool {
 	if tok == "" {
 		return false

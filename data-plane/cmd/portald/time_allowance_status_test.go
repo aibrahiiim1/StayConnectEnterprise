@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-// Since migration 0122 a VALIDITY_WINDOW plan's time allowance is enforced. The guest must see the same number
-// the accrual is spending: scd marks the answer online_time_allowance, and the Status page shows the time left
-// although the package is not in the aggregate mode.
+// A validity-window plan's time allowance is enforced, so the guest must see the number accrual is spending: scd marks online_time_allowance.
 const scdAllowance = `{"ip":"10.77.0.43","session_id":"sess-10","active":true,"time_mode":"VALIDITY_WINDOW",` +
 	`"remaining_online_seconds":7800,"online_time_allowance":true,"hard_expiry":"2026-09-30T12:00:00Z"}` + "\n"
 

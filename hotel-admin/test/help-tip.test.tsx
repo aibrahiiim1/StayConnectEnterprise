@@ -1,6 +1,3 @@
-// The page-level lightbulb. Explanations moved off the screens and behind it, so the one thing that must hold is
-// that the button is there, is named for the page, and opens the explanation when pressed.
-
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,7 +22,6 @@ describe("PageHeader help", () => {
 
     const button = screen.getByRole("button", { name: "Tips: Service plans" });
     expect(button).toBeInTheDocument();
-    // Closed until asked for.
     expect(screen.queryByText(/reaches clients only through the packages/i)).toBeNull();
 
     await user.click(button);

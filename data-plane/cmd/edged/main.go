@@ -1,23 +1,7 @@
-// edged — the Hotel Admin API (Edge API) served on each appliance.
+// edged is the Hotel Admin API, served on the management interface only (never the guest LAN or WAN).
+// Enforcement actions go to scd over its unix socket; everything else is site-DB CRUD.
 //
-// Listens on the management interface (default 127.0.0.1:8090, fronted by
-// Caddy on the appliance's management IP — NEVER the guest LAN or WAN) and
-// owns the guest-domain resources in the site-local database: local
-// operators, guest access plans, vouchers, sessions, PMS configuration,
-// walled garden, portal branding, payments and the local audit log.
-//
-// It needs no cloud connectivity for anything: enforcement actions
-// (disconnect, PMS test/reload, license install) go to scd over its unix
-// socket; everything else is site-DB CRUD. That is what keeps Hotel Admin
-// fully functional during a cloud outage.
-//
-// Subcommands:
-//
-//	edged serve                             — run the API (default)
-//	edged seed-admin --email E --password P — create/update the first
-//	                                          site_admin (bootstrap)
-//	edged reset-mfa --email E               — remove an operator's
-//	                                          authenticator (break-glass)
+// Subcommands: serve (default), seed-admin --email E --password P, reset-mfa --email E.
 package main
 
 import (
@@ -50,11 +34,9 @@ type cfg struct {
 	DBURL       string
 	SCDSocket   string
 	IdentityDir string
-	// Resolved from the verified assignment at startup (scope.go); never read from the environment in a
-	// production build.
-	TenantID string
-	SiteID   string
-	// CookieSecure should be true when Caddy fronts edged with TLS.
+	// Resolved from the verified assignment at startup (scope.go); never from the environment in production.
+	TenantID     string
+	SiteID       string
 	CookieSecure bool
 }
 
@@ -64,8 +46,8 @@ func loadCfg() cfg {
 		DBURL:       envOr("EDGED_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable"),
 		SCDSocket:   envOr("EDGED_SCD_SOCKET", "/run/stayconnect/scd.sock"),
 		IdentityDir: envOr("EDGED_IDENTITY_DIR", "/etc/stayconnect/identity"),
-		// Secure unless explicitly switched off (GDPR plan C10): the console is served over HTTPS, and a browser
-		// treats http://localhost as secure, so only a deliberate plain-HTTP setup needs EDGED_COOKIE_SECURE=false.
+		// Secure unless explicitly switched off: browsers treat http://localhost as secure, so only a deliberate
+		// plain-HTTP setup needs EDGED_COOKIE_SECURE=false.
 		CookieSecure: os.Getenv("EDGED_COOKIE_SECURE") != "false",
 	}
 }
@@ -79,59 +61,47 @@ func envOr(k, d string) string {
 
 type server struct {
 	db *pgxpool.Pool
-	// dbDefaultPassword warns while the database accepts its default superuser password (GDPR audit C5).
+	// dbDefaultPassword warns while the database accepts its default superuser password.
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient
-	// ledgerC commits every erasure to both copies of the erasure ledger before it is reported (ledger_commit.go).
+	// ledgerC commits every erasure to both ledger copies before it is reported.
 	ledgerC  ledgerClient
 	netd     *netdClient
 	sessions *sessionStore
-	// pending holds the "password accepted, code not yet entered" sign-ins; mfa is the authenticator service
-	// (operator_mfa.go, 0132).
+	// pending holds sign-ins whose password was accepted but whose code is not yet entered.
 	pending  pendingSignins
 	mfa      mfaService
 	tenantID string
 	siteID   string
 	secure   bool
-	// reads records who opened or searched guest data (guest_data_reads.go, plan F8), off the request path.
+	// reads records who opened or searched guest data, off the request path.
 	reads *readRecorder
 
-	// surfaces records every resource mountResource actually mounted on THIS appliance, so the admin can ask
-	// rather than infer it from build-time flags. See capabilities.go.
+	// surfaces records every resource actually mounted, so the admin can ask rather than infer it from build flags.
 	surfaces *mountedSurfaces
-	// modCache holds scd's module resolver answer for a few seconds (modules.go). Always set in main; nil
-	// only in focused unit tests that assemble a server by hand.
+	// modCache holds scd's module resolver answer for a few seconds; nil only in unit tests that build a server by hand.
 	modCache *moduleCache
 
-	// Phase 2 DARK Hotel-Admin commerce. commerce is ALWAYS constructed but holds a nil repository while
-	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
+	// commerce is always constructed but holds a nil repository while the master flag is off; commerceCfg gates the admin routes.
 	commerce    *iamv2.CommerceAdmin
 	commerceCfg iamv2.CommerceConfig
-	// commerceRepo is the same repository the admin engine holds. The grace publication path needs it
-	// directly because D32 publication is not an admin-engine operation: it derives system catalogue rows and
-	// goes through the canonical audited boundary, neither of which the operator-facing engine may do.
+	// commerceRepo is the engine's repository; grace publication needs it directly because it derives system
+	// catalogue rows through the audited boundary, which the operator-facing engine may not do.
 	commerceRepo iamv2.CommerceAdminRepository
-	// iamv2Cfg is the IAM-v2 authentication config. edged needs it because credential ISSUANCE must land
-	// in whichever domain will later AUTHENTICATE the credential: with IAM-v2 as the ACCOUNT authority,
-	// an account issued into the legacy table can never be logged in with. Nothing in the runtime issued
-	// IAM-v2 credentials at all before this -- the authentication domain existed and the issuance side of
-	// it did not, so iam_v2.guest_access_accounts sat at 0 rows on an appliance with ACCOUNT enabled.
+	// iamv2Cfg: credential issuance must land in the domain that will authenticate it, or an account could never log in.
 	iamv2Cfg iamv2.Config
 
-	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
-	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
+	// pmsCfg gates whether any Phase-3 route is mounted; while off the routes do not exist and edged issues no Phase-3 SQL.
 	pmsCfg    iamv2.PMSConfig
 	phase5Cfg iamv2.Phase5Config
 	phase6    iamv2.Phase6Config
 
-	// Phase 4 DARK financial surface. financialCfg gates whether the Manual Review routes are mounted at
-	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
-	// live yet. It carries NO transport and constructs no engine — edged is an operator API, not a sender.
+	// financialCfg gates the Manual Review routes, so an unmounted route cannot leak a schema that is not live.
+	// It carries no transport and constructs no engine: edged is an operator API, not a sender.
 	financialCfg posting.Config
-	// The outcome of migration 0023 reconcile at startup, so the financial surface can report what the
-	// detector said rather than re-deriving it per request. Empty when it could not be established.
+	// financialEpoch is the startup outcome of the migration 0023 reconcile; empty when it could not be established.
 	financialEpoch string
-	// Where portald listens on this appliance (portal_loopback.go); the zero value is the appliance's own.
+	// Where portald listens on this appliance; the zero value is the appliance's own.
 	portalLB portalLoopback
 }
 
@@ -160,16 +130,14 @@ func main() {
 		}
 	}
 
-	// Adaptive crash-loop backoff (see internal/startupbackoff): a persistently
-	// broken edged backs off exponentially instead of a 2s restart storm.
+	// A persistently broken edged backs off exponentially instead of restart-storming.
 	startupbackoff.Guard("edged")
 
 	c := loadCfg()
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Site identity comes from the VERIFIED signed assignment (scope.go) — NOT from identity.json or env. A
-	// generic appliance ships with no tenant/site; before assignment edged runs in awaiting-assignment mode.
+	// Site identity comes only from the verified signed assignment, never identity.json or env; until then edged awaits assignment.
 	asgStore := &assignment.Store{Dir: envOr("EDGED_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
 	var scope assignment.Resolution
 	c.TenantID, c.SiteID, scope = resolveSiteScope(os.Getenv)
@@ -178,24 +146,17 @@ func main() {
 	} else {
 		slog.Warn("awaiting assignment: edged running without a tenant/site", "assignment_outcome", scope.Outcome.String())
 	}
-	// Adopt a new assignment with no manual restart: re-exec when the locally
-	// persisted assignment version changes (scd's agent writes it).
+	// Re-exec when the persisted assignment version changes.
 	go watchAssignmentReexec(rootCtx, asgStore)
 
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
 	if err != nil {
-		// A bad DSN is a genuine configuration fault, not a transient one.
 		slog.Error("db open", "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-	// The site DB is a container that may not be ready at cold boot, or during
-	// a restart of the DB. Retry the first connection with bounded backoff
-	// instead of exiting: crash-looping here would, under systemd's start-limit,
-	// wedge edged permanently (the Hotel Admin API would stay inactive with no
-	// automatic recovery). If the DB is still unreachable after the window we
-	// serve anyway — the pool keeps retrying per query, so edged recovers on its
-	// own the moment the DB comes back, with no manual restart.
+	// The site DB may not be ready at cold boot. Retry with bounded backoff rather than exit: crash-looping would
+	// hit systemd's start limit and wedge edged. After the window serve anyway; the pool keeps retrying per query.
 	for attempt := 1; ; attempt++ {
 		pctx, cancel := context.WithTimeout(rootCtx, 3*time.Second)
 		perr := pool.Ping(pctx)
@@ -234,18 +195,8 @@ func main() {
 	s.mfa = scdMFA{scd: s.scd, db: pool}
 	s.ledgerC = &scdLedger{c: s.scd}
 
-	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
-	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
-	// (cutover only) — edged holds ZERO iam_v2 privileges under its Gate-P role while dark.
-	// PHASE 6 (DARK) CONFIGURATION IS LOADED FIRST, BEFORE ANY COMPONENT CONSUMES IT.
-	//
-	// The ordering is the point. This block used to sit forty lines further down, after the commerce admin
-	// had already been handed s.phase6.AggregateTimeOn() -- reading a zero-value config nothing had assigned
-	// yet. The capability was therefore OFF whatever the environment said, and no unit test could see it,
-	// because every unit test called the validator directly with a flag it chose itself.
-	//
-	// The operator setting surface is mounted under its own admin flag; the per-appliance PRODUCT setting it
-	// edits is a different control entirely, lives in the database, and defaults OFF.
+	// Phase 6 configuration must load before the commerce admin consumes s.phase6.AggregateTimeOn(); otherwise it
+	// reads a zero-value config and the capability is off whatever the environment says.
 	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase6 configuration", "err", err)
@@ -259,27 +210,16 @@ func main() {
 		slog.Error("phase2 commerce config", "err", err)
 		os.Exit(2)
 	}
-	// Wired for the same reason as scd's: the AUTHORIZED DEVELOPMENT trial (D31/T0068) runs IAM-v2 for real,
-	// so the accepted admin repository is constructed when the master flag is on and left nil while it is off.
-	// This is NOT a Production transition decision -- D31 withdrew the "clean replacement / legacy disposable"
-	// wording as policy that was never approved, and the Production strategy remains OPEN.
-	var commRepo iamv2.CommerceAdminRepository // nil while dark
+	var commRepo iamv2.CommerceAdminRepository // nil while the master flag is off
 	if commCfg.MasterEnabled {
 		if pool == nil {
 			slog.Error("phase2 commerce master flag enabled but no database pool is available")
 			os.Exit(2)
 		}
 		commRepo = iamv2.NewPgCommerceAdminRepository(pool)
-		// D32: converge the site on its hidden system grace package at startup.
-		//
-		// Here rather than in scd because this repository is the one with the admin write surface, and
-		// because provisioning is an ADMIN-plane concern: it creates the thing Hotel Admin then points policy
-		// at. It is idempotent, so a site that already has one keeps it -- including its immutable revision
-		// history, which live entitlements pin.
-		//
-		// A provisioning failure is logged and does NOT abort startup: the normal grace package being absent
-		// is exactly the condition Emergency Grace exists to cover, so refusing to serve would turn a
-		// degraded path into an outage.
+		// Converge the site on its hidden system grace package (idempotent; keeps the immutable revision history that live
+		// entitlements pin). A failure is logged and must not abort startup: a missing grace package is the case
+		// Emergency Grace covers, so refusing to serve would turn a degraded path into an outage.
 		if r, perr := iamv2.NewGraceProvisioner(commRepo).EnsureSiteGracePackage(
 			context.Background(), commRepo.(iamv2.GraceProvisionRepository), c.TenantID, c.SiteID); perr != nil {
 			slog.Error("grace provisioning failed; Emergency Grace remains the fallback", "err", perr)
@@ -296,16 +236,12 @@ func main() {
 		slog.Error("phase2 commerce admin new", "err", err)
 		os.Exit(2)
 	}
-	// PHASE 6 (DARK by default): may this build PUBLISH AGGREGATE_ONLINE_TIME plan revisions? With the flag
-	// off -- every environment today -- the admin path refuses the mode exactly as it did before Phase 6, and
-	// every revision published stays VALIDITY_WINDOW. Existing revisions are immutable and are unaffected
-	// either way.
+	// Whether this build may publish AGGREGATE_ONLINE_TIME plan revisions; off, every new revision stays VALIDITY_WINDOW.
 	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
 	s.commerceRepo = commRepo
 	s.commerceCfg = commCfg
-	// Fail closed on an incoherent IAM-v2 auth config: LoadConfigFromEnv already rejects a per-method flag
-	// set while the master flag is off, and edged must not run with a config scd would refuse.
+	// Fail closed on an auth config scd would refuse.
 	iamAuthCfg, iamAuthErr := iamv2.LoadConfigFromEnv(os.Getenv, true)
 	if iamAuthErr != nil {
 		slog.Error("iamv2 auth config invalid", "err", iamAuthErr)
@@ -314,8 +250,6 @@ func main() {
 	s.iamv2Cfg = iamAuthCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
 
-	// Phase 3 DARK Hotel-Admin PMS/Stay surface. All flags default OFF and a child flag set while the master
-	// flag is OFF is a startup failure (a deployment mistake must be loud, not silently "off anyway").
 	finCfg, err := posting.LoadConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase-4 financial flags are incoherent", "err", err)
@@ -323,12 +257,7 @@ func main() {
 	}
 	s.financialCfg = finCfg
 
-	// MIGRATION 0023's RESTORE-ROLLBACK DETECTOR, WHICH HAD NO CALLER UNTIL NOW.
-	//
-	// Its own contract says it runs BEFORE any financial worker starts, and edged is the only process that
-	// constructs a financial engine, so this is that point: after the flags are loaded, before any route is
-	// mounted. See financial_epoch_reconcile.go for the failure posture, which mirrors the Phase-3
-	// controlled-writer precedent -- loud while Phase 4 is dark, fatal once money can move.
+	// The restore-rollback detector must run before any financial worker starts: after the flags load, before any route is mounted.
 	s.financialEpoch = s.reconcileFinancialEpochAtStartup(rootCtx)
 
 	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
@@ -338,8 +267,6 @@ func main() {
 	}
 	s.pmsCfg = pmsCfg
 
-	// Phase 5 DARK post-stay surface. Same rule as every phase before it: a child flag set while the master
-	// is off is a startup failure, not a quiet no-op.
 	p5cfg, err := iamv2.LoadPhase5ConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase-5 flags are incoherent", "err", err)
@@ -349,9 +276,7 @@ func main() {
 	slog.Info("phase5 dark post-stay admin surface", "flags", p5cfg.SafeFlagSummary())
 
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
-	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
-	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
-	// rows would leave authoritative state with no provenance and no way to tell afterwards.
+	// Prove the controlled-writer boundary is in force before serving Phase 3, or raw writes would leave state with no provenance.
 	if pmsCfg.Enabled() {
 		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
 			slog.Error("edged: refusing to serve the Phase-3 surface", "err", err)
@@ -359,10 +284,6 @@ func main() {
 		}
 	}
 
-	// Appliance Health Supervisor: observe/diagnose every critical service,
-	// persist the authoritative health model and track boot convergence.
-	// It never controls restarts (systemd + adaptive
-	// startup backoff own recovery), so it cannot fight the service manager.
 	go s.healthMonitorLoop(rootCtx)
 
 	s.reads = newReadRecorder(s.writeReadEntry)
@@ -371,88 +292,58 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	// No path, query or client address in the request log (reqlog; GDPR audit 2026-10-19).
+	// No path, query or client address in the request log.
 	r.Use(reqlog.Middleware)
 	r.Use(middleware.Recoverer)
 	// 15 s for every request but the network applies, which wait for netd (route_timeout.go).
 	r.Use(routeTimeout(defaultRequestTimeout, networkApplyTimeout))
 
 	r.Route("/edge/v1", func(r chi.Router) {
-		// Every state-changing request must come from the console's own origin (N-23), the login included.
+		// Every state-changing request, login included, must come from the console's own origin.
 		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
-		// The second step: set up the authenticator, or enter its code (operator_mfa.go, 0132).
 		r.Post("/auth/login/enrol", s.loginEnrol)
 		r.Post("/auth/login/code", s.loginCode)
-		// logout needs the caller's session and ends only that one (operator_signin.go).
 		r.Post("/auth/logout", s.logout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Use(s.recordGuestDataReads)
 			r.Get("/auth/whoami", s.whoami)
-			// The idle warning's "Stay signed in": a request that counts as activity, and nothing else.
 			r.Get("/auth/keepalive", s.keepalive)
-			// The operator's own password: the current one is a step-up; every session is ended (N-8).
 			r.Post("/auth/password", s.changeOwnPassword)
-			// The operator's own two-step sign-in: its state, and a new set of recovery codes (step-up).
 			r.Get("/auth/mfa", s.getOwnMFA)
 			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
 
-			// ALWAYS-PRESENT SURFACES THAT DO NOT GO THROUGH mountResource.
-			//
-			// The licence, diagnostics and the setup wizard are registered as plain routes because they are not
-			// tenant resources behind the role matrix in the same way. They are still SURFACES the navigation
-			// asks about, and the first sweep after /capabilities shipped caught the consequence of forgetting
-			// that: the License destination reported itself unavailable on an appliance that serves it.
-			//
-			// Recorded next to the routes themselves rather than in a list somewhere else, for the same reason
-			// mountResource records its own.
+			// Plain routes that bypass mountResource must still be recorded as surfaces, or /capabilities reports them unavailable.
 			s.surfaces.add("license")
 			s.surfaces.add("diagnostics")
 			s.surfaces.add("reports")
 
-			// APPLIANCE & LICENCE (docs/CENTRAL_CONTROL_PLANE.md section 8; resources_cloud.go). One status
-			// document, Check now, offline activation in both directions, and the licence file upload. They
-			// replace /license (GET), /license/refresh, /setup/*, and /network/cloud*.
 			r.With(s.requireRole("license", permRead)).Get("/central/status", s.centralStatus)
 			r.With(s.requireRole("license", permRead)).Post("/central/refresh", s.centralRefresh)
 			r.With(s.requireAnyWrite("license", "network")).Get("/central/offline-request", s.centralOfflineRequest)
 			r.With(s.requireAnyWrite("license", "network")).Post("/central/offline-package", s.centralOfflinePackage)
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
 
-			// WHAT THIS APPLIANCE SERVES. Read by the navigation so it never offers a destination that would
-			// 404. Authenticated, but not role-filtered -- see capabilities.go.
+			// Authenticated but not role-filtered: the navigation reads it so it never offers a destination that would 404.
 			r.Get("/capabilities", s.capabilities)
 
-			// Hotel Admin TLS certificate: status (read), diagnostic Check, and the
-			// manual Rotate (step-up inside the handler). Same "network" role as the
-			// system-network settings that own the management IP.
+			// Same "network" role as the settings that own the management IP; Rotate steps up inside the handler.
 			r.With(s.requireRole("network", permRead)).Get("/hotel-admin-cert", s.hotelAdminCertGet)
 			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/check", s.hotelAdminCertCheck)
 			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 
 			mountResource(r, s, "operators", s.operatorsRoutes)
-			// MODULES: what the licence authorises, what this site has switched on, and why anything is not
-			// available. Always mounted: it is how an operator learns what the site may use.
+			// Always mounted: it is how an operator learns what the licence authorises and the site may use.
 			mountResource(r, s, "modules", s.modulesRoutes)
-			// guest-access-plans, voucher-batches and vouchers are REMOVED. They were the operator surface
-			// over public.ticket_templates, public.voucher_batches and public.vouchers -- the superseded
-			// commerce and credential domain. The current surface is "commercial-packages" below: service
-			// plans and internet packages in iam_v2, with vouchers issued through scd against
-			// iam_v2.vouchers. Two operator surfaces over two competing plan models is how an operator ends
-			// up editing the plan that nothing reads.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
-			// The format of GENERATED client-account passwords (0104): a property configuration decision, so
-			// its own key rather than guest-accounts write -- the desk creates accounts, it does not decide how
-			// strong every generated password is.
+			// The generated-password format is a property configuration decision, so its own key rather than guest-accounts write.
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
-			// DEVICES (client_devices_admin.go, migration 0118): find a device, see what it holds, disconnect it,
-			// release its place on a package, make it sign in afresh. The same live-access state the sessions key
-			// governs, so the same key; the daily client device-change limit is a configuration decision, so
-			// auth-methods, like the Email accounts terms.
+			// Client devices share the sessions key (same live-access state); the daily device-change limit is a
+			// configuration decision, so it sits under auth-methods.
 			r.Route("/client-devices", func(r chi.Router) {
 				r.Use(s.resourcePermission("sessions"))
 				r.Mount("/", s.clientDevicesAdminRoutes())
@@ -461,172 +352,110 @@ func main() {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.deviceSettingsRoutes())
 			})
-			// ACCOUNTING-DETAIL RETENTION (accounting_retention_admin.go, migration 0122): a data-retention
-			// decision that removes history when shortened, so the "backups" key -- site administrators write.
+			// Retention removes history when shortened, so it sits under the "backups" key (site administrators write).
 			r.Route("/accounting-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.accountingRetentionRoutes())
 			})
-			// GUEST-DATA RETENTION (data_retention_admin.go, migration 0127): shortening a period anonymises
-			// history on the next run, so the same "backups" key.
+			// Shortening a period anonymises history on the next run, hence the same "backups" key.
 			r.Route("/data-retention", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.dataRetentionRoutes())
 			})
-			// BACKUP KEY HOLDERS (backup_keys.go, migration 0129): backups are encrypted to the hotel's own keys.
-			// Under "backups": readers see the state, site administrators manage the holders and run the test.
+			// Backup key holders: readers see the state, site administrators manage holders.
 			r.Route("/backup-keys", func(r chi.Router) {
 				r.Use(s.resourcePermission("backups"))
 				r.Mount("/", s.backupKeysRoutes())
 			})
-			// GUEST DATA RIGHTS (guest_data_rights.go, migration 0128): look up, export and erase one guest.
 			mountResource(r, s, "guest-data-rights", s.guestDataRightsRoutes)
-			// USAGE EXPLORER. Read-only investigation over durable accounting and session data; see
-			// resources_usage.go. Under the "sessions" role because it is the same live-access state that
-			// resource already governs, rather than a new row in the role matrix.
 			mountResource(r, s, "usage", s.usageRoutes)
-			// "pms-providers" is NOT mounted. It was the superseded PMS configuration model, replaced by the
-			// PMS Interface surface below; keeping both meant two operator screens configuring one property
-			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
-			// EMAIL ACCOUNTS' TERMS (contract §6, migration 0117): verification deadline, suspension, resend and
-			// grace. The same decision as switching the method on, so it is governed by the auth-methods key
-			// (read to see, write to change) rather than by a key of its own -- see self_service_settings.go.
+			// Email-account terms are the same decision as switching the method on, so they use the auth-methods key.
 			r.Route("/self-service-settings", func(r chi.Router) {
 				r.Use(s.resourcePermission("auth-methods"))
 				r.Mount("/", s.selfServiceSettingsRoutes())
 			})
-			// Staff help for clients who asked for a code (contract §6.7): the list and "try again" on one key, reading a
-			// live code on its own key -- see resources_code_requests.go.
+			// Reading a live code has its own key, separate from the list and "try again".
 			mountResource(r, s, "code-requests", s.codeRequestsRoutes)
 			mountResource(r, s, "code-reveal", s.codeRevealRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
-			// Client Groups: who a Client is, kept apart from what they may have (contract §3). Core, never a module.
 			mountResource(r, s, "client-groups", s.clientGroupsRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)
 			mountResource(r, s, "portal-assets", s.portalAssetRoutes)
-			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
-			// keyed to a superseded voucher and access plan. The current financial surface is
-			// "financial-ops" below, over the Phase-4 iam_v2 payment transactions and settlements.
-			// stripe-accounts is REMOVED (migration 0096). It stored provider secrets in clear text and was read by
-			// nothing. Card payment accounts live under "payment-providers": site-local, secrets sealed and
-			// write-only, served by scd which owns the key.
+			// Card payment accounts: site-local, secrets sealed and write-only, served by scd which owns the key.
 			mountResource(r, s, "payment-providers", s.paymentProvidersRoutes)
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
-			// Phase 2 (DARK): the commercial-packages admin resource is mounted ONLY when the admin
-			// surface is ON; while dark it is absent and the admin engine holds a nil repository.
 			if s.commerceCfg.AdminOn() {
 				mountResource(r, s, "commercial-packages", s.commercialPackagesRoutes)
 			}
-			// Phase 3 (DARK): the Stay/Event/Folio/Resolution/Grace surface is mounted ONLY when the
-			// Phase-3 master flag AND its admin flag are both ON. While dark these paths do not exist.
+			// Mounted only when the Phase-3 master and admin flags are both on; otherwise the paths do not exist.
 			if s.pmsCfg.AdminOn() {
 				mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
 				mountResource(r, s, "pms-events", s.pmsEventsRoutes)
-				// Decisions on PMS messages waiting for review (acknowledge / link to a stay) and the review
-				// expiry setting. Its own key: reading the activity log and answering it are different powers.
+				// Its own key: reading the activity log and answering it are different powers.
 				mountResource(r, s, "pms-event-decisions", s.pmsEventDecisionsRoutes)
 				mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
-				// GUEST SIGN-IN ATTEMPTS. Two resources, because the second permission is a real boundary and not a
-				// flag: the credential values hang off their OWN key, so a caller holding only the list permission is
-				// refused by middleware before the handler runs. Registered through mountResource for the reason
-				// recorded below — a route mounted directly inside requireAuth has authentication and no authorization.
+				// Credential values hang off their own key, so a caller with only the list permission is refused by middleware.
+				// Always register through mountResource: a route mounted directly inside requireAuth has no authorization.
 				mountResource(r, s, "guest-signin-attempts", s.signInAttemptsRoutes)
 				mountResource(r, s, "guest-signin-credentials", s.signInCredentialsRoutes)
-				// Guest sign-in protection: the policy, and the restrictions it creates. Two keys, because
-				// changing the property's thresholds and ending one device's wait are different powers —
-				// see resources_signin_protection.go. Neither carries the credentials key.
+				// Two keys: changing thresholds and ending one device's wait are different powers. Neither carries the credentials key.
 				mountResource(r, s, "guest-signin-protection", s.signInProtectionRoutes)
 				mountResource(r, s, "guest-signin-restrictions", s.signInRestrictionsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
-				// The connector catalogue the connection form is built from. Guarded by the pms-interfaces key.
 				r.With(s.resourcePermission("pms-interfaces")).Get("/pms-providers", s.listPMSProviders)
-				// Room charge: approving a FIAS interface financially. Module-gated on room_charge (modules.go).
+				// Module-gated on room_charge.
 				mountResource(r, s, "pms-financial-onboarding", s.pmsFinancialOnboardingRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
-				// Unresolved departures as CASES. Read is wide because "which guests does the PMS and the
-				// mirror disagree about" is a question the desk asks; write is the one action that hands a
-				// recorded event back to the ingestion engine, which is not a desk decision.
+				// Read is wide (the desk asks which guests disagree); write hands an event back to ingestion, which is not a desk decision.
 				mountResource(r, s, "pms-reconciliation", s.pmsReconciliationRoutes)
-				// Closing the stays a complete roster no longer lists. A separate key from the case list
-				// above, because reading a disagreement and acting on three hundred of them at once are
-				// different powers.
+				// Separate key: reading a disagreement and bulk-closing stays are different powers.
 				mountResource(r, s, "pms-roster-reconciliation", s.rosterReconciliationRoutes)
 			}
-			// Phase 5 (DARK): the operator post-stay surface. Mounted only when the Phase-5 master flag
-			// AND its admin flag are both ON; while dark this path does not exist.
 			if s.phase5Cfg.AdminOn() {
 				mountResource(r, s, "post-stay-profiles", s.postStayProfilesRoutes)
 			}
-			// Cross-PMS transfer is its OWN flag, not a child of the post-stay one: they are different
-			// operations with different blast radii, and a property that wants post-stay PINs has not
-			// thereby asked to be able to end a guest's access and move it.
+			// Cross-PMS transfer has its own flag: ending a guest's access and moving it has a different blast radius than post-stay PINs.
 			if s.phase5Cfg.TransferOn() {
 				mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
 			}
-			// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. Mounted only when the
-			// Phase-6 master AND its admin flag are on; while dark this path does not exist. Note the two
-			// controls are independent -- this mounts the SCREEN, and the screen edits a database setting
-			// that is OFF by default and governs the guest surface separately.
-			// It is mounted through mountResource like every other management surface, which is what puts it
-			// behind resourcePermission and therefore behind the role matrix. The earlier version registered
-			// the two routes directly, so they sat inside requireAuth with NO authorization boundary at all --
-			// every logged-in operator, including read-only desk roles, could change a guest-facing appliance
-			// capability. Authentication is not authorization.
+			// This mounts only the screen; the setting it edits is separate. It must go through mountResource so the role
+			// matrix applies: routes registered directly in requireAuth let any operator change a guest-facing capability.
 			if s.phase6.DeviceAdminOn() {
 				mountResource(r, s, "guest-device-self-service", s.guestDeviceSelfServiceRoutes)
 			}
-			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
-			// review flag are both ON. The delivered configuration has both OFF, so this path does not
-			// exist on the appliance.
 			if s.financialCfg.ReviewOn() {
 				mountResource(r, s, "financial-review", s.financialReviewRoutes)
-				// Financial OPERATIONS -- health, settlement history, recovery -- share the review
-				// permission because they share a readership, and mount under the same flag so the whole
-				// financial surface appears and disappears together.
+				// Financial operations share the review permission and flag, so the whole surface appears together.
 				mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 			} else {
-				// Card disputes are reachable whatever the review flag (resources_phase4_review.go cardCasesRoutes).
+				// Card disputes are reachable whatever the review flag.
 				mountResource(r, s, "financial-review", s.cardCasesRoutes)
 			}
-			// THE VOUCHER SURFACE, and it is mounted UNCONDITIONALLY on purpose.
-			//
-			// Issuance needs an existing package revision, and authoring packages lives behind the Phase-2
-			// commerce admin flag. It would have been easy to hang the whole voucher surface off that flag
-			// too -- and wrong: issuing against a revision somebody already published is not the same power
-			// as publishing one, and a property that is not authoring packages today still has cards to
-			// print and cards to cancel. A surface that appears and disappears with an unrelated flag is
-			// also how an operator loses a destination without anything failing.
-			//
-			// Three keys, three powers. `voucher-codes` is the narrow one: recovering a guest credential in
-			// the clear, which additionally requires a password step-up and a bounded reason at the route.
+			// Vouchers are mounted unconditionally: issuing against a published revision is not the power to publish one,
+			// and a flag-dependent surface silently loses a destination. `voucher-codes` is the narrow key
+			// (recovering a credential in the clear, with password step-up and a bounded reason).
 			mountResource(r, s, "vouchers", s.vouchersRoutes)
 			mountResource(r, s, "voucher-codes", s.voucherCodesRoutes)
 			mountResource(r, s, "voucher-code-settings", s.voucherCodeSettingsRoutes)
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
-			// DOWNLOADING A FULL DATABASE DUMP is its own key (decision D-B): site_admin and the IT manager only,
-			// behind the password step-up. Every role that reads backups still sees the list.
+			// A full database dump has its own key: site_admin and the IT manager only, behind password step-up.
 			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
-			// PORTAL HTTPS (contract §8): the portal address, the hotel portal domain, the hostnames and certificates
-			// scd installed, Check now and Renew now. Its own key -- portal_https.read / portal_https.manage -- rather
-			// than "network", because who may see the portal's certificate state and who may move it are decided
-			// here, not inherited from the guest-network editor. See resources_portal_https.go.
+			// Its own key rather than "network": who may see or move the portal certificate is not inherited from the guest-network editor.
 			mountResource(r, s, "portal-https", s.portalHTTPSRoutes)
-			// NOTE: mounted at "diagnostics", NOT "health" — the unauthenticated
-			// GET /edge/v1/health summary (common.go) must not be shadowed.
+			// Mounted at "diagnostics", not "health": the unauthenticated GET /edge/v1/health must not be shadowed.
 			mountResource(r, s, "diagnostics", s.healthRoutes)
 		})
 	})
 
-	// Management-plane listener only. Refuse to bind wildcard/guest-network
-	// addresses: misconfiguration must fail loudly, not expose Hotel Admin.
+	// Management plane only: refuse wildcard addresses so a misconfiguration cannot expose Hotel Admin.
 	if host, _, err := net.SplitHostPort(c.Addr); err == nil {
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			slog.Error("EDGED_ADDR must bind a specific management address, not a wildcard", "addr", c.Addr)
@@ -647,23 +476,20 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
-	// The reads still waiting (a search's last keystroke) are written before edged exits.
+	// Flush pending guest-data reads before exiting.
 	select {
 	case <-s.reads.done:
 	case <-shutCtx.Done():
 	}
 }
 
-// mountResource wires a resource router under its permission key: reads
-// need permRead on the key, writes permWrite. Fine-grained checks happen in
-// requireRole using the role→permission matrix in auth.go.
+// mountResource mounts a resource under its permission key: reads need permRead, writes permWrite.
 func mountResource(r chi.Router, s *server, name string, routes func() http.Handler) {
-	// Recorded HERE, where a surface actually becomes reachable, so /capabilities cannot drift from what is
-	// mounted. A separate list would be a second thing to remember.
+	// Recorded here so /capabilities cannot drift from what is mounted.
 	s.surfaces.add(name)
 	r.Route("/"+name, func(r chi.Router) {
 		r.Use(s.resourcePermission(name))
-		// Module-owned surfaces follow the licence and the site's choice (modules.go); core ones pass through.
+		// Module-owned surfaces follow the licence and the site's choice; core ones pass through.
 		r.Use(s.moduleGate(name))
 		r.Mount("/", routes())
 	})

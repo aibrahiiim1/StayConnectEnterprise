@@ -1,23 +1,7 @@
 "use client";
 
-// Phase 4 (DARK) — Manual review.
-//
-// This is where an operator decides what happened to money the system could not determine for itself. The
-// screen is built around one idea: it must show the EVIDENCE the decision has to rest on, and it must offer
-// only the actions the backend will actually accept.
-//
-// So the action list is fetched, never hard-coded. §15's catalog lives in the database and is served by
-// /financial-review/actions together with the evidence contract; a second copy in the frontend would drift,
-// and the first symptom of that drift would be an operator confidently choosing something the backend
-// refuses -- or worse, one that is missing an action they needed.
-//
-// There is deliberately no generic "approve". Programmatic PMS reversal is capability=false in v1, so
-// CREATE_REVERSAL records an audited ledger row and the folio correction stays a manual Front Office job;
-// the screen says so rather than implying the button fixes the folio.
-//
-// LAYOUT. The queue is the page; one charge opens in a side sheet with what it was attached to, every
-// attempt, the decisions already recorded and the decision form, so the queue stays in view behind it.
-// A role that may not decide sees the evidence and no form at all.
+// Fetch available actions from the backend so operators cannot choose stale or unsupported decisions.
+// CREATE_REVERSAL records a ledger row; Front Office must correct the PMS folio manually.
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { ClipboardCheck, Inbox } from "lucide-react";
@@ -45,11 +29,10 @@ import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
 import { humanize, money } from "./format";
 
-// NOT_SENT means pmsd proved no byte was written (Phase-0 Amendment A1): it is not a PMS failure and not UNKNOWN.
+// NOT_SENT means pmsd proved no bytes reached the PMS; it is distinct from an unknown outcome.
 const OUTCOME_TONE = (o: string) =>
   o === "UNKNOWN" ? "err" : o === "NOT_SENT" ? "neutral" : o === "ACKED" ? "ok" : "info";
 
-// Why the appliance wrote nothing (pmsd's reason on a NOT_SENT attempt).
 const NOT_SENT_REASON_WORDS: Record<string, string> = {
   ROOM_CHANGED: "The guest had moved room before it was sent",
   ROOM_CHANGED_ON_LINK: "The guest moved room just before it was sent",
@@ -86,8 +69,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // The decision form. Reason and evidence are separate because the audit record keeps them separate: the
-  // reason is why, the evidence is how it was established.
+  // Keep reason and evidence separate to preserve their distinct audit fields.
   const [action, setAction] = useState("");
   const [reason, setReason] = useState("");
   const [evSource, setEvSource] = useState("");
@@ -132,7 +114,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
     setDetail(null);
     setNote(null);
     setSheetErr(null);
-    // A password must not outlive the sheet that collected it.
+    // Drop the password when the sheet closes.
     setPassword("");
   }
 

@@ -1,16 +1,7 @@
 package main
 
-// GUEST SIGN-IN PROTECTION — AUTHORIZATION, through the ACTUAL router and session middleware.
-//
-// Four keys now touch guest sign-in, and the Product Owner's requirement is that the release permission
-// "must not implicitly grant access to credential values or permission to change the protection policy".
-// That is a statement about the permission MODEL, so it is tested as one: every role, every one of the four
-// routes, and the denied cases assert the handler is never REACHED.
-//
-// The shape that would fail here is the tempting one — a single "guest sign-in" permission covering the list,
-// the credentials, the policy and the release. It would put the property's thresholds in the hands of every
-// operator who can look at a dashboard, and thirty days of guest credentials in the hands of everyone who can
-// end one device's wait.
+// Guest sign-in protection authorization through the real router and session middleware, for the four guest sign-in keys; denied cases assert the handler is never reached.
+// A single "guest sign-in" permission would hand the thresholds and thirty days of credentials to far too many operators.
 
 import (
 	"net/http"
@@ -58,13 +49,7 @@ func protectionDo(t *testing.T, h http.Handler, method, path, cookie string) int
 	return rec.Code
 }
 
-// THE DESK RELEASES AND DOES NOT RE-TUNE.
-//
-// front_office_operator and guest_relations_operator are the rows this test exists for. They may end one
-// device's wait — the guest is standing in front of them and they are the only people who can judge it — and
-// they may not change the property's thresholds. If those ever collapse into one key, "make it twenty
-// attempts for everybody" becomes the quickest way for a desk under pressure to help one person, and this is
-// the test that fails when somebody does it.
+// The desk releases and does not re-tune: front_office_operator and guest_relations_operator may end one device's wait but not change the thresholds.
 func TestSignInProtection_ReleasingIsNotTheSameAsReTuning(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := protectionRBACRouter(s)
@@ -101,9 +86,7 @@ func TestSignInProtection_ReleasingIsNotTheSameAsReTuning(t *testing.T) {
 	}
 }
 
-// RELEASING CARRIES NO ACCESS TO CREDENTIAL VALUES. Stated as its own test because it is a requirement in the
-// Product Owner's words, and because the two permissions are held by overlapping sets of roles — which is
-// exactly the situation in which somebody later decides one implies the other.
+// Releasing carries no access to credential values; the two permissions are held by overlapping roles, where one is easily assumed to imply the other.
 func TestSignInProtection_TheReleasePermissionDoesNotCarryCredentials(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := protectionRBACRouter(s)

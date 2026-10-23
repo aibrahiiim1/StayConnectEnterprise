@@ -2,30 +2,18 @@ package posting
 
 import "fmt"
 
-// maxWireField bounds every value that reaches the wire. FIAS records are line-oriented and a PMS that
-// truncates silently would post a charge against a room nobody meant. 32 matches the DB constraint 0011
-// puts on rn and g_number.
+// maxWireField bounds every value sent to the PMS; silent truncation would charge the wrong room.
+// Matches the DB constraint on rn and g_number.
 const maxWireField = 32
 
-// Gate is the fail-closed financial creation gate.
-//
-// It runs BEFORE any side effect whatsoever: before a posting row exists, before an outbox row exists,
-// before a P# is allocated and before a single byte could reach a PMS. That ordering is the entire
-// guarantee — a refusal here is not "the transmission failed", it is "the transmission never began", so
-// there is nothing to reconcile, nothing to reverse and no protocol reference burned.
-//
-// Everything it checks is ALSO enforced in the database by migration 0011 and mg9. That duplication is
-// intentional and is not belt-and-braces for its own sake: the database refusal is what makes the rule
-// true for every writer forever, and this refusal is what makes it true BEFORE the side effects that the
-// database cannot see (P# allocation and transmission) are reached.
+// Gate is the fail-closed financial creation gate. It runs before any side effect (posting row, outbox
+// row, P# allocation, bytes on the wire), so a refusal means nothing began and nothing needs reconciling.
+// The same rules are also enforced in the database, which covers every writer; this check covers the
+// side effects the database cannot see.
 type Gate struct{}
 
-// Purpose distinguishes the two things the gate is asked, because the contract answers them differently.
-//
-// PurposeCreate is "may NEW financial work be authorized on this interface?" PurposeExecute is "may work
-// that was already authorized be drained?" Collapsing them -- which 0011 did, by refusing anything that was
-// not ACTIVE -- both strands legitimate money on a DRAINING interface and refuses a posting on an interface
-// that has merely stopped accepting new guest logins.
+// Purpose separates "may new financial work be created?" from "may already-authorized work drain?";
+// the lifecycle rules differ (a DRAINING interface must still drain).
 type Purpose int
 
 const (
@@ -33,12 +21,8 @@ const (
 	PurposeExecute
 )
 
-// lifecycleAllows implements Contract section 10 exactly:
-//
-//	ACTIVE          create yes, drain yes
-//	AUTH_DISABLED   create yes, drain yes  -- it disables guest AUTH, not posting
-//	DRAINING        create NO,  drain yes  -- "no new auth/purchases/postings; outbox drains"
-//	DECOMMISSIONED  create NO,  drain NO   -- terminal
+// lifecycleAllows: ACTIVE and AUTH_DISABLED (disables guest auth only) allow create and drain;
+// DRAINING allows drain only; DECOMMISSIONED allows neither.
 func lifecycleAllows(state string, p Purpose) error {
 	switch state {
 	case "ACTIVE", "AUTH_DISABLED":
@@ -55,21 +39,17 @@ func lifecycleAllows(state string, p Purpose) error {
 	}
 }
 
-// Check validates pinned evidence against the snapshot read from the database. It returns the FIRST
-// violation, ordered so the reason an operator sees is the most actionable one: onboarding before
-// targeting, targeting before money.
+// Check returns the first violation, ordered so the reason shown is the most actionable:
+// onboarding before targeting, targeting before money.
 func (g Gate) Check(p Pinned, s Snapshot) error { return g.CheckFor(PurposeCreate, p, s) }
 
-// CheckFor is Check with an explicit purpose. Creation and execution differ only in what the interface
-// lifecycle permits; every other rule is identical, deliberately, so a posting cannot be created under one
-// set of rules and transmitted under a weaker one.
+// CheckFor differs between create and execute only in the lifecycle rule, so a posting cannot be
+// created under one rule set and transmitted under a weaker one.
 func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
-	// ---- interface state -------------------------------------------------------------------------
 	if err := lifecycleAllows(s.InterfaceLifecycleState, purpose); err != nil {
 		return err
 	}
 
-	// ---- Tier-2 onboarding: posting target, then financial currency --------------------------------
 	if s.PostingTargetModel != "RESERVATION" {
 		return fail(ErrPostingTargetUnset,
 			"pinned interface revision has no posting target (property not financially onboarded)")
@@ -79,17 +59,12 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 			"pinned interface revision has no financial base currency (property not financially onboarded)")
 	}
 
-	// ---- the four PMS runtime freshness axes -----------------------------------------------------
-	// Contract section 9 / D10: a stale, disconnected, discontinuous or out-of-sync interface must fail
-	// closed BEFORE a P#, an attempt, an outbox execution or a byte. This is re-checked at execution too,
-	// so an interface that went stale between authorization and the wire stops the bytes.
+	// Re-checked at execution so an interface that went stale after authorization stops the bytes.
 	if s.FreshnessBlock != "" {
 		return fail(ErrInterfaceNotFresh, "PMS runtime axis: "+s.FreshnessBlock)
 	}
 
-	// ---- stale evidence --------------------------------------------------------------------------
-	// The posting must be authorized by the revision that is CURRENT for the interface. Charging against a
-	// superseded revision means charging under configuration the property has already replaced.
+	// The posting must be authorized by the interface's current revision, not a superseded configuration.
 	if s.InterfaceCurrentRevision != "" && s.InterfaceCurrentRevision != p.PostingInterfaceRevisionID {
 		return fail(ErrEvidenceStale,
 			"pinned posting interface revision is not the interface's current revision")
@@ -107,7 +82,6 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 			fmt.Sprintf("purchase state moved (expected %s, found %s)", p.ExpectPurchaseState, s.PurchaseState))
 	}
 
-	// ---- stay eligibility ------------------------------------------------------------------------
 	if s.StayStatus != "IN_HOUSE" {
 		return fail(ErrStayNotInHouse, fmt.Sprintf("pinned stay status is %s", s.StayStatus))
 	}
@@ -115,9 +89,8 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 		return fail(ErrPostingNotAllowed, "pinned stay does not allow posting")
 	}
 
-	// ---- financial targeting evidence (Phase-0 Amendment A1) ---------------------------------------
-	// G# is the posting identity: mandatory, wire-safe, and exactly the pinned stay's reservation number. A
-	// room-only posting can never be built, because there is no path past this check without a G#.
+	// G# is the posting identity: mandatory, wire-safe, and the pinned stay's reservation number, so a
+	// room-only posting can never be built.
 	if blank(p.GNumber) {
 		return fail(ErrGNumberMissing, "no reservation number (G#)")
 	}
@@ -127,8 +100,7 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 	if p.GNumber != s.StayReservation {
 		return fail(ErrReservationMismatch, "the posting's reservation is not the pinned stay's reservation")
 	}
-	// RN is mutable targeting data: the reservation's CURRENT room. It must resolve; at execution the attempt's
-	// RN must be exactly that room (the engine refreshes it from the stay immediately before building the PS).
+	// RN is the reservation's current room; at execution the attempt's RN must equal it.
 	if blank(s.StayRoomNumber) {
 		return fail(ErrRNMissing, "the reservation's current room cannot be resolved")
 	}
@@ -142,16 +114,13 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 		return fail(ErrWireFieldInvalid, "pinned posting code is not transmissible as a FIAS field")
 	}
 
-	// ---- money -----------------------------------------------------------------------------------
 	if p.AmountMinor <= 0 {
 		return fail(ErrAmountInvalid, "a charge must be a positive integer amount in minor units")
 	}
 	if blank(p.Currency) {
 		return fail(ErrCurrencyMismatch, "posting states no currency")
 	}
-	// Exact equality, three ways, exponent included. Not "convertible to", not "compatible with". If any of
-	// these differ the correct behaviour is to refuse, because the only alternative is to pick a rate — and
-	// picking a rate is exactly the implicit FX this system is not allowed to perform.
+	// Exact currency and exponent equality; any difference is refused because the alternative is implicit FX.
 	if p.Currency != s.InterfaceCurrency {
 		return fail(ErrCurrencyMismatch,
 			fmt.Sprintf("posting currency %s <> pinned interface currency %s (no implicit FX)",
@@ -168,8 +137,7 @@ func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 	if err := matchCurrency("package", s.PackageCurrency, s.PackageExponent, s); err != nil {
 		return err
 	}
-	// The WIRE bound, which is narrower than the currency model. Only the connector that actually carries
-	// the money gets to say what it can carry.
+	// The wire bound is narrower than the currency model: the connector decides what it can carry.
 	if s.ConnectorKind == "protel-fias" && p.CurrencyExponent != FIASCurrencyExponent {
 		return fail(ErrFIASExponent,
 			fmt.Sprintf("the protel-fias posting path is exponent %d by contract; posting exponent is %d",

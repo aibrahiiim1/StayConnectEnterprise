@@ -1,7 +1,6 @@
 package main
 
-// THE WORDS OF PACKAGE ACQUISITION: prices and methods on the package choice, the card payment return page,
-// open package selection and its return code. They join the one dictionary at start-up like pageStrings.
+// Words of package acquisition: prices and methods, the card payment return page, open selection and its return code.
 
 var acquisitionStrings = map[string]map[string]string{
 	"en": {
@@ -156,8 +155,7 @@ func init() {
 	serverMessageKeys[msgCardUnavailable] = "err.card.unavailable"
 }
 
-// The sentences the acquisition handlers compose. Existing sentences are reused where they already say the
-// right thing, so they keep their translations.
+// The sentences the acquisition handlers compose; existing sentences are reused to keep their translations.
 const (
 	msgServiceError       = "Something went wrong. Please try again."
 	msgNoDeviceAddress    = "Unable to detect your device address."

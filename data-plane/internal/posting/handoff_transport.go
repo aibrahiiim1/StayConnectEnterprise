@@ -9,14 +9,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 )
 
-// handoffTransport is the production financial transport (decision D45): it hands the immutable posting
-// command to pmsd, which owns the property's single FIAS connection, and turns pmsd's answer back into the
-// engine's three-valued UNKNOWN contract.
-//
-// It lives behind DarkGuard like any transport, it has no socket of its own (postinghandoff owns the local
-// unix dial), and it adds no judgement: the mapping below is exhaustive and conservative. Only two things
-// ever count as "not transmitted" -- pmsd could not be reached at all, or pmsd itself said it wrote nothing.
-// Everything else that is not a matched PA is UNKNOWN, and UNKNOWN is never retried by anyone.
+// handoffTransport hands the posting command to pmsd, which owns the FIAS connection. Only two outcomes
+// count as "not transmitted" (pmsd unreachable, or pmsd said it wrote nothing); anything else that is not
+// a matched PA is UNKNOWN, and UNKNOWN is never retried.
 type handoffTransport struct {
 	socket string
 	send   func(ctx context.Context, socket string, req postinghandoff.Request) (postinghandoff.Response, error)
@@ -63,7 +58,7 @@ func (h *handoffTransport) SendPS(ctx context.Context, interfaceID string, pNumb
 	}
 }
 
-// boundedCode keeps pmsd's reason to a short protocol word, so nothing unexpected reaches an attempt event.
+// boundedCode keeps pmsd's reason to a short protocol word so nothing unexpected reaches an attempt event.
 func boundedCode(c string) string {
 	if len(c) > 48 {
 		c = c[:48]
@@ -80,8 +75,7 @@ func boundedCode(c string) string {
 	return c
 }
 
-// handoffError is a typed posting error that is ALSO ErrNotTransmitted when, and only when, nothing was sent,
-// and ErrTransmittedNoAnswer otherwise -- so the engine's NotTransmitted() test is the whole classification.
+// handoffError is ErrNotTransmitted only when nothing was sent, ErrTransmittedNoAnswer otherwise.
 type handoffError struct {
 	code    Code
 	msg     string
@@ -91,7 +85,6 @@ type handoffError struct {
 
 func (e *handoffError) Error() string { return e.msg }
 
-// NotSentReason reports pmsd's reason for writing nothing, recorded on the NOT_SENT attempt.
 func (e *handoffError) NotSentReason() string { return e.reason }
 func (e *handoffError) Unwrap() []error {
 	if e.notSent {

@@ -1,10 +1,5 @@
 "use client";
 
-// APPLIANCE & LICENCE — one page. Activation, the licence and the connection to OneGate Central are three
-// answers to one operator question, so they are one status card fed by one appliance endpoint
-// (GET /central/status, docs/CENTRAL_CONTROL_PLANE.md section 8). The old /license, /network/cloud and
-// /setup/enrollment addresses redirect here (next.config.mjs).
-
 import { ServerCog } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";

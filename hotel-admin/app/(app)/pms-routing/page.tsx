@@ -1,27 +1,8 @@
 "use client";
 
-// WHICH PMS EACH GUEST NETWORK IS CHECKED AGAINST.
-//
-// The page existed and explained nothing. Its title was "Guest network routing", its one sentence was "Which PMS
-// interface each guest network is resolved against. Change these where the networks are configured", and it
-// showed two tables of mostly-uuids. An operator could not tell what the page was for, what breaks without it,
-// or where the "where the networks are configured" it pointed at actually was — because no such control existed.
-//
-// Two things changed:
-//
-//   1. IT SAYS WHAT IT IS FOR. When a guest types their room number, the appliance has to decide WHICH property
-//      management system to check that room against. It decides by the Wi-Fi network the device is on. That is
-//      the whole purpose of this screen, and getting it wrong fails silently in the worst way: the guest is
-//      checked against a different property's guest list, finds no matching room, and cannot get online — while
-//      every status on every other screen reports healthy.
-//
-//   2. IT CAN BE SET HERE. The previous "change it where the networks are configured" was not true: the guest
-//      network API has no PMS field, so the mapping could be set nowhere in the product and existed only as a
-//      row written by test fixtures. edged has had PUT/DELETE on this resource since; this screen now uses them.
-//
-// Rooms are only one way to sign in. Vouchers and guest accounts do not involve the PMS at all, so a network with
-// no mapping is a legitimate configuration — it just cannot offer room sign-in. The page says that rather than
-// flagging it as broken.
+// The Wi-Fi network decides which PMS a room number is checked against. A wrong mapping fails silently (the guest
+// is checked against another property's list while every status looks healthy). A network with no mapping is
+// legitimate: vouchers and accounts bypass the PMS, it just cannot offer room sign-in.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -45,9 +26,7 @@ type Unmapped = { guest_network_id: string; guest_network_name?: string };
 
 const MODE_WORDS: Record<string, string> = {
   MAPPED: "This one PMS",
-  // Stored on a few older rows. It never did anything: the resolver only ever consults the interface a network
-  // is mapped to, so such a route behaves exactly like MAPPED and is described that way rather than as a
-  // fan-out that does not exist. It can no longer be chosen.
+  // Legacy rows: the resolver only consults the mapped interface, so this behaves exactly like MAPPED and can no longer be chosen.
   ALL_ACTIVE_INTERFACES: "This one PMS",
 };
 
@@ -67,8 +46,7 @@ export default function PMSRoutingPage() {
     try {
       const [r, i, me] = await Promise.all([
         api.get<{ routes: PmsGuestNetworkRoute[]; unmapped_guest_networks: Unmapped[] }>("/pms-routing"),
-        // The pickable interfaces. A routing row pointing at a retired interface is still shown, but it cannot be
-        // chosen: offering it would let an operator configure a connection that will never dial.
+        // A row pointing at a retired interface is still shown but cannot be chosen: it would never dial.
         api.get<{ interfaces: PmsInterface[] }>("/pms-interfaces").catch(() => ({ interfaces: [] })),
         api.get<Whoami>("/auth/whoami").catch(() => null),
       ]);
@@ -85,8 +63,7 @@ export default function PMSRoutingPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // edged grants pms-routing WRITE to site_admin only — every other role reads it. The controls are therefore
-  // hidden rather than offered and refused: a Change button that always 403s is worse than no Change button.
+  // edged grants pms-routing write to site_admin only; controls are hidden for other roles rather than offered and refused.
   const writable = canWrite("pms-routing", roles);
   const choosable = useMemo(
     () => interfaces.filter((i) => i.lifecycle_state !== "DECOMMISSIONED" && i.published),
@@ -186,10 +163,6 @@ export default function PMSRoutingPage() {
           </div>
         </CardHeader>
         <CardBody className="p-0">
-          {/*
-            WHAT THIS PAGE IS AND IS NOT. Said here because "Site" appeared in the table for years and an
-            operator who wondered what a Site was had nowhere to find out.
-          */}
           {routes === null ? (
             <SkeletonRows rows={3} cols={4} />
           ) : routes.length === 0 ? (
@@ -227,22 +200,7 @@ export default function PMSRoutingPage() {
                       )}
                     </TD>
                     <TD>
-                      {/*
-                        "SITE DEFAULT" IS GONE, AND WAS THREE PROBLEMS IN TWO WORDS.
-
-                        It said SITE. The flag it rendered, guest_network_pms_map.is_default, is per GUEST
-                        NETWORK -- it marks which connection is the default for that one network, and the
-                        partial unique index gnpm_one_default enforces one per network, not one per site.
-
-                        It implied this page has something to do with Sites. It does not. The Site is fixed by
-                        the signed assignment this appliance is bound to; nothing here creates, chooses or
-                        changes one.
-
-                        And it carried no information. setPMSRoute deletes any other mapping for the network
-                        and inserts with is_default=true, so every row this table can ever show has the flag
-                        set. A badge that is always present tells an operator nothing except that there is
-                        something they have not understood.
-                      */}
+                      {/* is_default is not shown: it is per guest network and always true here (setPMSRoute replaces other mappings). */}
                       <div className="text-sm">{r.pms_interface_label || "Unnamed connection"}</div>
                     </TD>
                     <TD className="text-sm text-muted-foreground">
@@ -382,13 +340,10 @@ function RouteDialog({
   onSave: (mode: string, interfaceID: string) => void | Promise<void>;
 }) {
   const [iface, setIface] = useState("");
-  // A LEGACY ROW (routing_mode ALL_ACTIVE_INTERFACES) COULD NOT BE CHANGED (audit H-16): the dialog sent its
-  // stored mode back, and edged accepts only MAPPED -- so every save of such a row was refused. The only mode
-  // that exists is MAPPED, so that is what is always sent; saving a legacy row converts it.
+  // edged accepts only MAPPED, so MAPPED is always sent; saving a legacy ALL_ACTIVE_INTERFACES row converts it.
   const legacy = !!network?.current && network.current.routing_mode !== "MAPPED";
 
-  // Reset from the row each time the dialog opens, so "Change" starts on what is configured and "Point at a PMS"
-  // starts on the only sensible default rather than on whatever was picked last time.
+  // Reset on each open so "Change" starts on what is configured, not the last pick.
   useEffect(() => {
     if (!open) return;
     setIface(network?.current?.pms_interface_id ?? interfaces[0]?.id ?? "");

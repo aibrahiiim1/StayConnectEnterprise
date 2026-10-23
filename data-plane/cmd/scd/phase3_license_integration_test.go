@@ -2,14 +2,8 @@
 
 package main
 
-// ROOM SIGN-IN ANSWERS TO THE SAME LICENCE AS EVERY OTHER GUEST METHOD.
-//
-// Product-Owner decision: PMS room sign-in follows the same licence and concurrent-capacity contract as
-// vouchers, accounts, OTP and social sign-in. Before this, the room grant inserted its session directly --
-// no licence gate, no concurrent-guest reservation -- so an unlicensed, expired or full appliance still put
-// every PMS guest online. These tests drive the real resolve and grant handlers against a real PostgreSQL with
-// a real vendor-signed licence installed, and assert three things for every refusal: what the guest is told,
-// what the operator's attempt record says, and that nothing was granted.
+// Room sign-in follows the same licence and concurrent-capacity contract as other guest methods. For every
+// refusal these tests assert what the guest is told, the attempt record, and that nothing was granted.
 
 import (
 	"bytes"
@@ -23,8 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/signinattempt"
 )
 
-// otherDeviceBody is a resolve submission from a SECOND device on the same guest network: the same room and
-// name, a different address and hardware address. It is how a guest's second phone signs in.
+// otherDeviceBody is a resolve submission from a second device on the same network.
 func (f *authFixture) otherDeviceBody(reqID string) map[string]any {
 	return map[string]any{
 		"room": "412", "last_name": "Okonkwo", "request_id": reqID,
@@ -43,7 +36,6 @@ func (f *authFixture) attemptResult(t *testing.T, reqID string) string {
 	return r
 }
 
-// grantOffered drives the real grant for the first package the resolve offered this device.
 func (f *authFixture) grantOffered(t *testing.T, res phase3Response, ip, mac string) (*httptest.ResponseRecorder, phase3GrantResp) {
 	t.Helper()
 	if len(res.Offers) == 0 {
@@ -75,8 +67,7 @@ func (f *authFixture) openSessions(t *testing.T) int {
 	return n
 }
 
-// Every licence state that refuses a voucher refuses a room guest, BEFORE any evidence is evaluated, with the
-// same code, the LICENSE class, and a LICENSE_REFUSED attempt that does not count against the device.
+// Refused before any evidence is evaluated; LICENSE_REFUSED does not count against the device.
 func TestIntegration_Phase3License_RefusalsMatchTheOtherMethods(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -117,8 +108,7 @@ func TestIntegration_Phase3License_RefusalsMatchTheOtherMethods(t *testing.T) {
 	}
 }
 
-// The licence is asked again at the grant: a licence that lapses between the resolve and the grant grants
-// nothing, and the context stays unconsumed.
+// The licence is asked again at the grant; the context stays unconsumed.
 func TestIntegration_Phase3License_TheGrantAsksAgain(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -127,8 +117,7 @@ func TestIntegration_Phase3License_TheGrantAsksAgain(t *testing.T) {
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("setup: %+v", res)
 	}
-	f.srv.lic = signedLicence(t, 0, true, true) // the licence expired in between
-
+	f.srv.lic = signedLicence(t, 0, true, true)
 	_, out := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
 	if out.Outcome == outcomeVerified || out.SessionID != "" {
 		t.Fatalf("an expired licence still granted a session: %+v", out)
@@ -142,15 +131,13 @@ func TestIntegration_Phase3License_TheGrantAsksAgain(t *testing.T) {
 	}
 }
 
-// THE CONCURRENT-GUEST CAP covers first sign-in, a second device joining the stay, and a device rejoining
-// after its session ended -- each opens a new session, so each takes a licensed slot.
+// The concurrent-guest cap covers first sign-in, a second device joining, and a rejoin: each opens a new session.
 func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T) {
 	f := newAuthFixture(t)
-	f.srv.lic = signedLicence(t, 1, true, false) // one concurrent guest on this appliance
+	f.srv.lic = signedLicence(t, 1, true, false)
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
-	// FIRST SIGN-IN takes the only slot.
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00001c21-0000-4000-8000-000000000000"))
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("setup: %+v", res)
@@ -160,10 +147,9 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 		t.Fatalf("the first guest was refused under a free licence slot: %+v", first)
 	}
 
-	// The fixture has ONE free package and the stay now holds it. The second device is still offered it --
-	// choosing it joins the stay's live entitlement rather than buying it again (phase3_offers.go).
+	// The second device is still offered the held package; choosing it joins the live entitlement.
 
-	// SECOND DEVICE JOINING the same stay: verified, then refused at the grant with the capacity answer.
+	// Second device: verified, then refused at the grant with the capacity answer.
 	joinReq := "00001c22-0000-4000-8000-000000000000"
 	_, res2 := post(t, f.p3.resolveHandler, f.otherDeviceBody(joinReq))
 	if res2.Outcome != outcomeVerified {
@@ -183,7 +169,7 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 	if got := f.attemptResult(t, joinReq); got != string(signinattempt.LicenseCapacityReached) {
 		t.Fatalf("the attempt was completed as %s, want LICENSE_CAPACITY_REACHED", got)
 	}
-	// The refusal rolled the whole grant back: the second device's proof is still usable once there is room.
+	// The refusal rolled the grant back: the proof is still usable once there is room.
 	var consumed bool
 	if err := f.pool.QueryRow(ctx, `SELECT consumed_at IS NOT NULL FROM iam_v2.auth_contexts WHERE id=$1`,
 		res2.AuthContextID).Scan(&consumed); err != nil {
@@ -196,7 +182,6 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 		t.Fatalf("%d open sessions under a one-guest licence", n)
 	}
 
-	// The first device's session ends; the slot is free again.
 	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='admin'
 		WHERE id=$1::uuid`, first.SessionID); err != nil {
 		t.Fatal(err)
@@ -206,7 +191,7 @@ func TestIntegration_Phase3License_CapacityCoversFirstJoinAndRejoin(t *testing.T
 		t.Fatalf("the second device was refused once the slot was free: %+v", joined)
 	}
 
-	// REJOIN: the first device signs in again while the second holds the slot -- refused; nothing opened.
+	// Rejoin while the second device holds the slot is refused; nothing opened.
 	rejoinReq := "00001c23-0000-4000-8000-000000000000"
 	_, res3 := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", rejoinReq))
 	if res3.Outcome != outcomeVerified {

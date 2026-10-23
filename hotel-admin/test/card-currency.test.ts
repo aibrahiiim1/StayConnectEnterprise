@@ -1,8 +1,3 @@
-// WHICH PACKAGE CURRENCIES ARE OFFERED BY CARD — the console's copy of scd's rule (audit O-12).
-//
-// Only the DEFAULT active account takes checkouts. The editor used to compare against every ACTIVE account, so a
-// second, non-default account in the package currency silenced a warning that was true.
-
 import { describe, it, expect } from "vitest";
 import { cardAccepts, cardCurrencyProblem, defaultCardAccount, providerConverts } from "@/lib/card-currency";
 import type { PaymentAccount } from "@/lib/payment-admin";

@@ -1,14 +1,6 @@
 package iamv2
 
-// WHICH PLAN FIELD WAS OUT OF RANGE.
-//
-// A live edit of the OneDay service plan was refused with "plan integer out of range" and nothing else. Six
-// different fields produced that identical message, so the operator could not tell which number to correct,
-// and OneDay is the plan where that matters most: its speed sits exactly ON the 10 Gbps ceiling, so the
-// nearest wrong keystroke fails while the screen names no field.
-//
-// The refusals themselves are unchanged -- the same values are accepted and rejected as before. What is
-// guarded here is that a rejection says what to fix.
+// A rejection must name the plan field, its limit and the value sent.
 
 import (
 	"strings"
@@ -19,7 +11,6 @@ func ptr[T any](v T) *T { return &v }
 
 func planSpecErr(t *testing.T, mutate func(*PlanPublishSpec)) string {
 	t.Helper()
-	// A minimal spec that passes on its own, so any failure below belongs to the field under test.
 	spec := &PlanPublishSpec{MaxConcurrentDevices: 1}
 	mutate(spec)
 	err := validatePlanSpec(spec, false)
@@ -57,13 +48,11 @@ func TestPlanBoundRejectionNamesTheField(t *testing.T) {
 			if msg == "" {
 				t.Fatalf("%s past its bound was accepted", tc.field)
 			}
-			// The field, the limit and what was actually sent -- everything needed to fix it without guessing.
 			for _, want := range []string{tc.field, tc.limit, tc.offered} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("message %q does not contain %q", msg, want)
 				}
 			}
-			// ...and never the old message that named none of them.
 			if strings.Contains(msg, "plan integer out of range") {
 				t.Errorf("message %q is still the unhelpful one", msg)
 			}
@@ -82,7 +71,6 @@ func TestPlanBoundsStillAcceptWhatTheyAlwaysDid(t *testing.T) {
 	}); msg != "" {
 		t.Fatalf("the live OneDay plan was refused: %s", msg)
 	}
-	// Negative values remain refused, and now say which field.
 	if msg := planSpecErr(t, func(s *PlanPublishSpec) { s.DownKbps = ptr(-1) }); !strings.Contains(msg, "down_kbps") {
 		t.Fatalf("a negative speed was not refused by name: %q", msg)
 	}

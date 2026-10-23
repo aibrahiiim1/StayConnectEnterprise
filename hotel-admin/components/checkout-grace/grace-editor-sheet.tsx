@@ -1,11 +1,6 @@
 "use client";
 
-// The checkout grace editor: terms → review (old → new) → reason + password → publish.
-//
-// Publishing changes what every future departing guest receives, so it keeps a review step, a password step-up,
-// a bounded reason code and the version the operator was looking at (optimistic concurrency). A concurrent
-// publication is a 409: the page reloads what is now in force and the operator's draft is kept, so they can
-// compare it against the new policy instead of silently overwriting it.
+// Publish with the viewed config version; on conflict, reload the policy without discarding the draft.
 
 import * as React from "react";
 import { ArrowRight, LogOut } from "lucide-react";
@@ -40,7 +35,6 @@ import { cn } from "@/lib/utils";
 
 const STEPS = ["Terms", "Review and publish"];
 
-/** A number plus its unit. Receives the id/aria props `Field` injects, so the label binds to the number input. */
 function DurationInput({
   value,
   unit,
@@ -95,16 +89,13 @@ export function GraceEditorSheet({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The terms in force now — the draft starts from them and the review compares against them. */
   base: GraceTerms;
   baseLabel: string;
   published: boolean;
-  /** The config_version the operator is looking at; sent as expected_config_version. */
   version: number;
   supportedPolicies: string[];
   canWrite: boolean;
   onPublished: (newVersion: number) => void | Promise<void>;
-  /** Re-read the page after a version conflict. */
   reload: () => Promise<void>;
 }) {
   const [step, setStep] = React.useState(0);
@@ -117,7 +108,7 @@ export function GraceEditorSheet({
   const [error, setError] = React.useState<string | null>(null);
   const [fieldError, setFieldError] = React.useState<"password" | "reason" | null>(null);
 
-  // Seed on open, and only on open: a reload after a conflict changes `base` but must not wipe the draft.
+  // Seed only on open so a conflict reload cannot erase the operator's draft.
   React.useEffect(() => {
     if (open) {
       setDraft(draftFromTerms(base, supportedPolicies));
@@ -138,7 +129,7 @@ export function GraceEditorSheet({
   const terms = draftToTerms(draft);
   const changes = compareTerms(base, terms);
   const changedCount = changes.filter((c) => c.changed).length;
-  // An identical re-publish is idempotent on the server (the version does not move), so it is not offered.
+  // Do not offer an unchanged publish; the server would keep the same version.
   const nothingChanged = published && changedCount === 0;
 
   const reasonCode = reasonChoice === OTHER_REASON ? normaliseReasonCode(otherReason) : reasonChoice;
@@ -161,7 +152,7 @@ export function GraceEditorSheet({
     setError(null);
     setFieldError(null);
     try {
-      // No package is sent: the server derives the one that expresses these terms exactly.
+      // Let the server derive the package that matches these terms.
       const r = await api.put<{ config_version: number }>("/checkout-grace", {
         ...terms,
         config_version: version,
@@ -298,9 +289,7 @@ export function GraceEditorSheet({
                   </Field>
                 </SheetSection>
 
-                {/* NO "STAY RULES AFTER CHECKOUT" FIELD (audit H-19). The eligibility window was saved with every
-                    policy and read by nothing: who qualifies is decided from the guest's access AT checkout. The
-                    value already in force is carried through unchanged; there is nothing for an operator to set. */}
+                {/* Eligibility follows active access at checkout, not a separate policy window. */}
                 <SheetSection title="Eligibility">
                   <p className="text-sm text-muted-foreground">
                     Every guest who still has active internet access when they check out qualifies — free, paid or

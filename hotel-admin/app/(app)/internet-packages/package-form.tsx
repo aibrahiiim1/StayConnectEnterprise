@@ -1,17 +1,9 @@
 "use client";
 
-// ONE FORM FOR A PACKAGE — what it is called, WHICH SERVICE PLAN it uses, what it costs and how clients get
-// it, who gets it, how long it lasts.
-//
-// The two concepts stay distinct, because they are. A SERVICE PLAN is the technical service: speed, data,
-// time, devices, how the speed is shared. An INTERNET PACKAGE is the guest offer: a name, a duration, who is
-// eligible — and which service plan it hands out.
-//
-// What is hidden is the REVISION, not the relationship. The operator picks a plan by name and sees what it
-// grants; the service-plan revision that pins is worked out in lib/package-save. An earlier version of this
-// form carried the speed and allowance fields itself and published a plan revision behind the operator's
-// back, which hid the wrong thing: it let a package silently author technical settings belonging to a plan
-// that other packages also use. Those fields are shown here as read-only context and edited on Service Plans.
+// A service plan is the technical service (speed, data, time, devices); a package is the guest offer that
+// hands out one plan. The operator picks a plan by name; the pinned plan revision is resolved in
+// lib/package-save. Plan fields are read-only context here and edited on Service Plans, since other packages
+// share the plan.
 
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -58,11 +50,10 @@ import { TravelAgentPicker } from "./travel-agent-picker";
 
 export type PackageFormValue = {
   payload: PublishPayload;
-  /** The Service Plan the operator selected. The caller turns it into the revision that gets pinned. */
+  /** The caller turns the selected plan into the revision that gets pinned. */
   selectedPlanID: string;
 };
 
-/** PlanOption is one selectable Service Plan, described by what it grants rather than by an id. */
 export type PlanOption = {
   plan_id: string;
   code: string;
@@ -73,10 +64,9 @@ export type PlanOption = {
   max_concurrent_devices?: number | null; speed_allocation?: string | null;
 };
 
-/** One Client group as GET /client-groups lists it (only what the audience picker shows). */
 export type ClientGroupOption = { id: string; name: string; enabled?: boolean; priority?: number };
 
-// THE AUDIENCE, as the operator chooses it. Four words for one CLIENT_GROUP rule (or none).
+// Four choices map to one CLIENT_GROUP rule (or none).
 type Audience = "everyone" | "groups" | "public" | "groups_public";
 type AudienceRule = Extract<EligibilityRuleForm, { type: "CLIENT_GROUP" }>;
 function audienceOf(r: AudienceRule | undefined): Audience {
@@ -85,7 +75,7 @@ function audienceOf(r: AudienceRule | undefined): Audience {
   return "groups";
 }
 
-// THE FREE ALLOWANCE, as the operator chooses it: no limit (no rule), once ever, or once every N hours.
+// No limit (no rule), once ever, or once every N hours.
 type FreeAccess = "unlimited" | "once" | "every";
 type FreeRule = Extract<EligibilityRuleForm, { type: "PRIOR_PURCHASE" }>;
 function freeAccessOf(r: FreeRule | undefined): FreeAccess {
@@ -96,7 +86,6 @@ function freeAccessOf(r: FreeRule | undefined): FreeAccess {
 export type PackageFormInitial = {
   code: string;
   name: string;
-  /** The Service Plan this package currently uses, preselected on Edit. */
   planID: string;
   planRevisionID: string;
   rules: EligibilityRuleForm[];
@@ -104,13 +93,13 @@ export type PackageFormInitial = {
   duration: DurationForm;
   visibleFrom?: string;
   visibleUntil?: string;
-  /** The package's existing data-allowance policy. Absent means the plan's flat allowance. */
+  /** Absent means the plan's flat allowance. */
   allocation?: AllocationForm;
-  /** The package's price, currency, acquisition methods and room-charge mappings, handed back unchanged. */
+  /** Price, currency, methods and room-charge mappings, handed back unchanged. */
   acquisition?: AcquisitionForm;
-  /** Stored conditions of a type this form does not edit: shown read-only and republished exactly as loaded. */
+  /** Conditions of a type this form does not edit: shown read-only and republished as loaded. */
   preservedRules?: PreservedRule[];
-  /** The loaded display object; the edited name is merged into it so nothing else in it is dropped. */
+  /** The edited name is merged into it so nothing else in it is dropped. */
   display?: Record<string, unknown> | null;
 };
 
@@ -119,8 +108,7 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
     case "AUTH_METHOD": return { type, methods: "" };
     case "SUBJECT_KIND": return { type, kinds: "" };
     case "DATE_WINDOW": return { type, from: "", until: "" };
-    // A generic row starts as "requires prior": the free allowance (forbids_prior) has its own control above
-    // the rows, and a row that started there would simply move into it.
+    // forbids_prior has its own control above the rows.
     case "PRIOR_PURCHASE": return { type, mode: "requires_prior" };
     case "SITE_NETWORK": return { type, guest_network_ids: "" };
     case "CLIENT_GROUP": return { type, group_ids: [], public: false };
@@ -145,49 +133,37 @@ export function PackageForm({
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
-  /** Every Service Plan the site has. A package cannot exist without one. */
   plans: PlanOption[];
   busy?: boolean;
   onSave: (v: PackageFormValue) => void | Promise<void>;
   onCancel?: () => void;
-  /** GET /modules: which acquisition methods this site can offer. null while loading; "error" fails closed. */
+  /** null while loading; "error" fails closed. */
   modules?: ModulesReport | "error" | null;
-  /** The PMS interfaces a room charge can be mapped to. null while loading; "error" when they cannot be listed. */
+  /** null while loading; "error" when they cannot be listed. */
   roomChargeInterfaces?: RoomChargeInterface[] | "error" | null;
-  /** GET /client-groups: the groups an audience can name. null while loading; "error" when they cannot be read. */
+  /** null while loading; "error" when they cannot be read. */
   clientGroups?: ClientGroupOption[] | "error" | null;
-  /** The site's DEFAULT ACTIVE payment account (the one checkouts use); "none" when there is none; null =
-   *  unknown, and then no claim is made about card currencies. */
+  /** The default active payment account; "none" when there is none; null = unknown (no card-currency claim). */
   cardAccount?: CardAccountView | "none" | null;
 }) {
-  // HOSPITALITY decides whether hotel conditions and the per-night allowance are offered at all.
   const hotel = moduleLicensedIn("hospitality", modules ?? null);
   const [code, setCode] = useState(initial?.code ?? "");
   const [name, setName] = useState(initial?.name ?? "");
-  // A NEW PACKAGE STARTS WITH "ONCE PER CLIENT". It starts Free, and a free package with no limit is handed
-  // out again every time the same client's allowance runs out -- what the Product Owner watched happen on
-  // PRE-LIVE (2026-10-11). The operator can still choose "every N hours" or "no limit" below; an existing
-  // package keeps exactly the rules it has.
+  // A new Free package defaults to "once per client", or it would be handed out again whenever the allowance
+  // runs out; an existing package keeps exactly its rules.
   const [rules, setRules] = useState<EligibilityRuleForm[]>(
     initial ? (initial.rules ?? []) : [{ type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: true }],
   );
-  // THE DEFAULT FOLLOWS THE PRICE UNTIL THE OPERATOR DECIDES. A Free package defaults to once per client; a
-  // PRICED package defaults to repeatable (a second purchase is a sale, not a loophole). While the limit is still
-  // the untouched default, giving a new package a price drops it and making it free again restores it. The
-  // moment the operator chooses a limit themselves it is theirs, whatever the price does afterwards.
+  // The default follows the price until the operator chooses a limit: once per client when Free, repeatable
+  // when priced (a second purchase is a sale).
   const [freeDefaulted, setFreeDefaulted] = useState(!initial);
-  // A package with no grant tier is offered to nobody, so a new one starts with the single open tier that
-  // means "everyone who is eligible". The operator never has to know that.
+  // A package with no grant tier is offered to nobody, so a new one starts with the single open tier.
   const [tiers, setTiers] = useState<GrantTierForm[]>(initial?.tiers?.length ? initial.tiers : [{ order: 10 }]);
   const [duration, setDuration] = useState<DurationForm>(initial?.duration ?? { end_mode: "MANUAL_END" });
-  // The data allowance. FIXED is the default and means "whatever the service plan says", which is what every
-  // package did before this existed. It is loaded from the package rather than reset, so saving an unrelated
-  // change cannot quietly turn a per-night package back into a flat one.
+  // FIXED means the service plan's allowance; loaded from the package so an unrelated save cannot reset it.
   const [alloc, setAlloc] = useState<AllocationForm>(
     initial?.allocation ?? { mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" });
-  // PRICE AND HOW CLIENTS GET IT. Loaded on Edit for the same reason as the allowance: a save republishes
-  // everything, so a rename must not quietly make a priced package free or drop its room-charge posting codes.
-  // A new package starts Free, which is what the server publishes when these fields are absent.
+  // Loaded on Edit because a save republishes everything: a rename must not make a priced package free.
   const [acq, setAcq] = useState<AcquisitionForm>(initial?.acquisition ?? newAcquisitionForm());
   const [visFrom, setVisFrom] = useState(initial?.visibleFrom ?? "");
   const [visUntil, setVisUntil] = useState(initial?.visibleUntil ?? "");
@@ -196,32 +172,28 @@ export function PackageForm({
       ? String(Number(initial.duration.duration_seconds) / 3600)
       : "");
 
-  // WHICH SERVICE PLAN. On Edit this starts at the plan the package already uses.
   const [planID, setPlanID] = useState(initial?.planID ?? "");
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The section headings are the visible names of the control each one introduces; these ids bind them.
   const ids = useId();
   const planHeadingID = `${ids}-plan`;
   const endHeadingID = `${ids}-end`;
   const allocHeadingID = `${ids}-alloc`;
 
   const selected = plans.find((p) => p.plan_id === planID);
-  // Recomputed on every render, so it follows the plan, the mode and the three numbers immediately.
   const notice = allowanceNotice(alloc, selected?.data_quota_bytes, !!selected);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!planID || !selected) {
-      // A package with no service plan grants nothing, so this is refused here rather than discovered by a
-      // guest. The dropdown is required; this covers the case where the only plan was removed mid-edit.
+      // A package with no plan grants nothing; covers the only plan being removed mid-edit.
       setError("Choose a service plan. It decides the speed and allowances this package gives.");
       return;
     }
     const res = buildPublishPayload({
       code, name,
-      // The caller replaces this with the revision it resolves from the selected plan.
+      // The caller replaces this with the revision resolved from the selected plan.
       service_plan_revision_id: selected.current_revision_id || "pending",
       rules, tiers, duration,
       visible_from: visFrom || undefined, visible_until: visUntil || undefined,
@@ -242,14 +214,12 @@ export function PackageForm({
   const setRule = (i: number, patch: Partial<EligibilityRuleForm>) =>
     setRules((rs) => rs.map((r, j) => (j === i ? ({ ...r, ...patch } as EligibilityRuleForm) : r)));
 
-  // THE AUDIENCE AND THE FREE ALLOWANCE ARE RULES LIKE ANY OTHER -- one CLIENT_GROUP rule and one
-  // forbids-prior PRIOR_PURCHASE rule in the same list the generic rows edit. Each dedicated control finds its
-  // rule in that list and edits it in place, so a save republishes exactly one set of conditions and nothing
-  // can be stated twice. The generic rows below skip the two rules these controls own.
+  // The audience (CLIENT_GROUP) and free allowance (forbids-prior PRIOR_PURCHASE) are rules in the same list
+  // the generic rows edit; their dedicated controls edit them in place so nothing is stated twice, and the
+  // generic rows skip them.
   const audienceRule = rules.find((r): r is AudienceRule => r.type === "CLIENT_GROUP");
-  // The choice is held as state rather than derived from the rule: "These groups and public clients" with no
-  // group ticked yet is the same rule as "Public clients only", and deriving it would snap the picker shut the
-  // moment the operator chose it.
+  // Held as state: "groups and public" with no group ticked is the same rule as "public only", and deriving
+  // it would snap the picker shut as it is chosen.
   const [audience, setAudienceChoice] = useState<Audience>(() => audienceOf(audienceRule));
   const setAudienceRule = (next: AudienceRule | null) =>
     setRules((rs) => {
@@ -277,7 +247,6 @@ export function PackageForm({
       const rest = rs.filter((r) => !(r.type === "PRIOR_PURCHASE" && r.mode === "forbids_prior"));
       return next ? [...rest.filter((r) => r.type === "CLIENT_GROUP"), next, ...rest.filter((r) => r.type !== "CLIENT_GROUP")] : rest;
     });
-  // A new package's untouched default follows the price: once per client while Free, repeatable once priced.
   useEffect(() => {
     if (initial || !freeDefaulted) return;
     if (paid && freeRule) setFreeRule(null);
@@ -287,14 +256,12 @@ export function PackageForm({
   const setFreeAccess = (v: FreeAccess) => {
     setFreeDefaulted(false);
     if (v === "unlimited") { setFreeRule(null); return; }
-    // A rule created here counts the device too on a Free package (the contract's default), and not on a
-    // priced one, where a second purchase from the same phone is a sale rather than a loophole.
+    // Counts the device too on a Free package, not on a priced one (a second purchase is a sale).
     const base: FreeRule = freeRule ?? { type: "PRIOR_PURCHASE", mode: "forbids_prior", also_by_device: !paid };
     if (v === "once") { const { within_hours: _drop, ...rest } = base; setFreeRule(rest); }
     else setFreeRule({ ...base, within_hours: base.within_hours && base.within_hours !== "" ? base.within_hours : "24" });
   };
-  // Which groups the picker lists: every group the site has, plus any id the stored rule names that the list
-  // does not (a group removed since), so it can still be unticked rather than silently kept.
+  // Also lists stored ids missing from the site's groups (since removed) so they can still be unticked.
   const groupOptions: ClientGroupOption[] = Array.isArray(clientGroups) ? clientGroups : [];
   const unknownGroupIDs = (audienceRule?.group_ids ?? []).filter((id) => !groupOptions.some((g) => g.id === id));
 
@@ -304,9 +271,7 @@ export function PackageForm({
       {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {/* THE VISIBLE LABELS ARE THE NAMES. These controls used to carry aria-labels such as "code" and
-            "service-plan" -- test hooks that overrode the words on screen, so a screen reader announced
-            "service-plan, combo box". The hooks survive as data-testid; the names are the labels the operator reads. */}
+        {/* Accessible names are the visible labels; test hooks live in data-testid, not aria-label. */}
         <Field label="Name" hint="What the client sees on the portal.">
           <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
         </Field>
@@ -322,8 +287,7 @@ export function PackageForm({
       <div>
         <h3 id={planHeadingID} className="text-sm font-medium mb-2">Service plan</h3>
         {plans.length === 0 ? (
-          // A PACKAGE CANNOT BE CREATED WITHOUT ONE, so this says what to do rather than presenting an empty
-          // dropdown that looks like a loading state.
+          // Says what to do rather than showing an empty dropdown that looks like loading.
           <div className="text-sm rounded-md border border-border bg-surface px-3 py-2" role="status">
             There are no service plans yet. A service plan defines the speed, allowances and device limit a
             package hands out, so one has to exist first.{" "}
@@ -338,8 +302,6 @@ export function PackageForm({
                 <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
               ))}
             </Select>
-            {/* WHAT IT GRANTS, READ-ONLY. These belong to the plan and are edited on the Service Plans
-                screen; showing them here is context for the choice, not a second place to change them. */}
             <p className="text-xs text-muted mt-2" data-testid="plan-summary">
               {selected
                 ? planSummary(selected)
@@ -380,19 +342,14 @@ export function PackageForm({
         </div>
       </div>
 
-      {/* THE DATA ALLOWANCE.
-          A flat allowance treats a two-night guest and a three-week guest identically: generous to one and
-          exhausted on day four for the other. Per-night scales it with the stay, between a floor and a
-          ceiling, and the preview below is there because the clamp order is not obvious from three boxes —
-          and the revision this publishes cannot be edited afterwards. */}
+      {/* The preview exists because the clamp order is not obvious and the published revision is immutable. */}
       <div>
         <h3 id={allocHeadingID} className="mb-1.5 text-sm font-semibold">Data allowance</h3>
         <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
           {(Object.keys(ALLOCATION_MODE_LABELS) as (keyof typeof ALLOCATION_MODE_LABELS)[])
-            // A per-night allowance needs a stay to count nights of: offered with Hospitality, and kept for a
-            // stored package that already uses it.
+            // Per-night needs a stay: offered with Hospitality, and kept for a package that already uses it.
             .filter((m) => m !== "PER_STAY_NIGHT" || hotel || alloc.mode === "PER_STAY_NIGHT")
             .map((m) => (
               <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
@@ -420,8 +377,6 @@ export function PackageForm({
                   .map((r) => `${r.nights} nights → ${r.gb} GB`).join(" · ")}
               </div>
             )}
-            {/* TRUE AS STATED (audit O-4): a per-night allowance needs a stay to count nights of, so the
-                appliance offers and grants such a package only to a client who signed in with their room. */}
             <p className="text-xs text-muted-foreground" data-testid="per-night-audience-note">
               This allowance is given only to clients who signed in with their room, because it is counted from
               their stay. The package is not offered to clients who signed in with a voucher, an account, an email
@@ -436,10 +391,7 @@ export function PackageForm({
           </div>
         )}
 
-        {/* WHICH ALLOWANCE ACTUALLY APPLIES.
-            Two numbers are visible at once -- the plan's flat quota and the package's per-night one -- and
-            nothing said which a guest receives. Informational only: it never blocks Save, because both
-            configurations are legitimate. */}
+        {/* Says which allowance applies; informational only, never blocks Save. */}
         {notice && (
           <div
             data-testid="allowance-notice"
@@ -491,18 +443,14 @@ export function PackageForm({
       </div>
 
       <AcquisitionSection value={acq} onChange={setAcq} modules={modules} interfaces={roomChargeInterfaces} />
-      {/* WHETHER CLIENTS WILL BE OFFERED CARD FOR THIS PRICE, by the rule scd applies: the DEFAULT active account
-          settles the package currency, or it lets its provider convert that currency (lib/card-currency).
-          Said here, beside the price, rather than discovered by a client after choosing. */}
+      {/* Whether card is offered follows scd's rule (lib/card-currency), shown here rather than discovered by a client. */}
       {paid && acq.methods.includes("ONLINE_PAYMENT") && cardCurrencyProblem(cardAccount, acq.currency) && (
         <p className="text-xs text-warning-subtle-foreground" role="status" data-testid="card-currency-note">
           {cardCurrencyProblem(cardAccount, acq.currency)}
         </p>
       )}
 
-      {/* THE AUDIENCE. Who a package is for is a question about the CLIENT -- employees, partners, the public --
-          not about how they signed in. A site that wants "employees free, everyone else paid" says so here
-          with a Client group; the sign-in method never decides the offer (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4). */}
+      {/* The audience is about the client (employees, partners, public), never the sign-in method. */}
       <div>
         <h3 id={`${ids}-audience`} className="mb-1.5 text-sm font-semibold">Audience</h3>
         <Select data-testid="audience" aria-labelledby={`${ids}-audience`} value={audience}
@@ -555,10 +503,8 @@ export function PackageForm({
         )}
       </div>
 
-      {/* FREE ACCESS. The free allowance is the forbids-prior rule, keyed on the package rather than the
-          revision so a wording change does not hand everyone a fresh allowance (§5). It is offered on a priced
-          package too -- "one discounted purchase per client" is a real offer -- but it is Free packages that
-          need it, which is why the device switch defaults ON only for those. */}
+      {/* The free allowance is keyed on the package, not the revision, so a wording change does not reset it.
+          It also applies to priced packages, but the device switch defaults ON only for Free ones. */}
       <div>
         <h3 id={`${ids}-free`} className="mb-1.5 text-sm font-semibold">Free access</h3>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -612,33 +558,27 @@ export function PackageForm({
           </Button>
         </div>
         {rules.filter((r) => !isDedicatedRule(r)).length === 0 && <p className="text-xs text-muted-foreground">No further conditions. Add one to narrow the audience by sign-in method, date, network or stay.</p>}
-        {/* A PMS condition is only answerable for a guest who signed in through the PMS. Saying so here stops
-            the reasonable assumption that adding "VIP guests only" merely narrows the audience — for a voucher
-            guest there is no Stay to test, so the package is not offered to them at all. */}
+        {/* A voucher guest has no Stay to test, so a PMS condition excludes them entirely rather than narrowing. */}
         {rules.some((r) => isPMSRuleType(r.type)) && (
           <p className="text-xs text-muted mb-2" data-testid="pms-rule-note">
             Conditions about the stay only apply to clients who signed in with their room. Clients using a
             voucher or an account are not offered this package while any of them is set.
           </p>
         )}
-        {/* A condition row has no room for visible labels, so each control is named for the row it sits in:
-            "Condition 1: type", not the test hook "rule-type-0" it used to announce. */}
+        {/* Rows have no visible labels, so each control is named for its row ("Condition 1: type"). */}
         {rules.map((r, i) => {
-          // The audience and the free allowance have their own controls above; their rules are not rows.
           if (isDedicatedRule(r)) return null;
           const vi = rules.slice(0, i).filter((x) => !isDedicatedRule(x)).length;
-          // Test hooks are numbered by VISIBLE row, like the accessible name: the dedicated rules above are not rows.
+          // Numbered by visible row; the dedicated rules are not rows.
           const n = `Condition ${vi + 1}`;
           return (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${vi}`}>
             <Select data-testid={`rule-type-${vi}`} aria-label={`${n}: type`} className="h-9 w-auto shrink-0 ps-2.5"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
-              {/* Conditions about a PMS stay only mean something at a hotel, so they are grouped as such. The
-                  audience (CLIENT_GROUP) is set by its own control and is not offered as a row. */}
               <optgroup label="General">
                 {SUPPORTED_RULE_TYPES.filter((t) => !isPMSRuleType(t) && t !== "CLIENT_GROUP").map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
               </optgroup>
-              {/* Offered only with Hospitality; a stored condition of this kind stays visible so it can be changed. */}
+              {/* Offered only with Hospitality; a stored condition of this kind stays visible. */}
               {(hotel || isPMSRuleType(r.type)) && (
                 <optgroup label="Hotel (PMS stay)">
                   {SUPPORTED_RULE_TYPES.filter((t) => isPMSRuleType(t) && (hotel || t === r.type)).map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
@@ -652,16 +592,14 @@ export function PackageForm({
               <Input data-testid={`rule-until-${vi}`} aria-label={`${n}: until`} type="datetime-local" value={r.until} onChange={(e) => setRule(i, { until: e.target.value })} />
             </>}
             {r.type === "PRIOR_PURCHASE" && (
-              // Only "requires prior" is a row: the other mode is the Free access control above, and a row set
-              // to it would simply move there.
+              // The other mode is the Free access control above.
               <Select data-testid={`rule-mode-${vi}`} aria-label={`${n}: earlier purchase`} className="h-9 w-auto shrink-0 ps-2.5"
                 value={r.mode} onChange={(e) => setRule(i, { mode: e.target.value as "requires_prior" | "forbids_prior" })}>
                 <option value="requires_prior">Only clients who already had a package here</option>
               </Select>
             )}
             {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${vi}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
-            {/* STAY LENGTH. Either bound may be left empty — "8 nights or more" and "up to 7 nights" are both
-                real rules — so neither input is required and an empty one is omitted rather than sent as 0. */}
+            {/* Either bound may be empty; an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>
               <Input data-testid={`rule-min-nights-${vi}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"
                 value={r.min_nights} onChange={(e) => setRule(i, { min_nights: e.target.value })} />
@@ -683,8 +621,6 @@ export function PackageForm({
           </div>
           );
         })}
-        {/* CONDITIONS THIS FORM DOES NOT EDIT. A stored rule of a type the console has no control for (a newer
-            appliance's, or one set outside this screen) is kept and saved again exactly as it is, never dropped. */}
         {(initial?.preservedRules ?? []).length > 0 && (
           <div className="mt-2 space-y-1" data-testid="preserved-rules">
             {(initial?.preservedRules ?? []).map((r, i) => (
@@ -701,9 +637,7 @@ export function PackageForm({
         )}
       </div>
 
-      {/* SPEED STEPS WERE NEVER APPLIED (audit O-5): clients always got the service plan's speed. They are no
-          longer offered. A package that still carries them says so, and one click replaces them with the single
-          plain step every package has; the appliance refuses to save them otherwise. */}
+      {/* Speed steps are never applied; the appliance refuses to save them, so one click replaces them with the plain step. */}
       {!tiersArePlain(tiers) && (
         <div data-testid="speed-steps-notice">
           <Callout tone="warning" title="Speed steps are not applied">
@@ -714,9 +648,6 @@ export function PackageForm({
         </div>
       )}
 
-      {/* ADVANCED. The sale window is a real control and stays available, but it is not part of creating an
-          ordinary package, and putting it in the main flow is what made this form feel like configuration
-          rather than administration. */}
       <div>
         <button type="button" className="text-sm text-muted flex items-center gap-1"
           onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>

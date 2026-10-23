@@ -1,10 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-// THE DEFAULT LIMIT FOLLOWS THE PRICE UNTIL THE OPERATOR DECIDES: a Free package starts at once per client, a
-// priced one at repeatable, and an explicit choice survives whatever the price does afterwards. And a package
-// priced in a currency no active account settles says so beside the price.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

@@ -20,7 +20,7 @@ func issueCodes(iss []Issue) map[string]bool {
 	return out
 }
 
-// B-8: wider than /20 is refused (the shaper's class minor has 12 host bits); a /20 is fine.
+// Wider than /20 is refused (the shaper's class minor has 12 host bits).
 func TestSubnetWiderThan20IsRefused(t *testing.T) {
 	n := goodNet("a", "A", "br-g20", "10.20.0.0/19", "10.20.0.1", 20)
 	if !issueCodes(ValidateOne(n, DefaultTopology(), nil, nil, ""))["subnet_too_large"] {
@@ -32,7 +32,6 @@ func TestSubnetWiderThan20IsRefused(t *testing.T) {
 	}
 }
 
-// N-20: lease timers are bounded; negative values no longer pass.
 func TestLeaseTimersAreBounded(t *testing.T) {
 	for _, tc := range []struct{ def, min, max int }{{-5, 0, 0}, {30, 0, 0}, {3600, 0, 9_000_000}, {3600, -1, 0}} {
 		n := goodNet("a", "A", "br-g20", "10.20.0.0/24", "10.20.0.1", 20)
@@ -47,7 +46,6 @@ func TestLeaseTimersAreBounded(t *testing.T) {
 	}
 }
 
-// N-6: a custom-DNS network's resolvers are reachable on 53 before sign-in, from that network only.
 func TestCustomDNSServersAreOpenedPreAuth(t *testing.T) {
 	n := goodNet("a", "A", "br-g20", "10.20.0.0/24", "10.20.0.1", 20)
 	n.DNSMode, n.DNSServers = "custom", []string{"172.21.1.10", "9.9.9.9", "garbage", "9.9.9.9"}
@@ -66,7 +64,6 @@ func TestCustomDNSServersAreOpenedPreAuth(t *testing.T) {
 	}
 }
 
-// N-4: client isolation renders a same-bridge forward drop before the established accept.
 func TestClientIsolationIsRendered(t *testing.T) {
 	n := goodNet("a", "A", "br-g20", "10.20.0.0/24", "10.20.0.1", 20)
 	out := string(RenderNftables([]GuestNetwork{n}, DefaultTopology()))
@@ -83,7 +80,6 @@ func TestClientIsolationIsRendered(t *testing.T) {
 	}
 }
 
-// N-21: each network's clients get their own gateway for the portal names, not every gateway.
 func TestUnboundAnswersPortalNamesPerNetwork(t *testing.T) {
 	a := goodNet("a", "A", "br-g20", "10.20.0.0/24", "10.20.0.1", 20)
 	b := goodNet("b", "B", "br-g30", "10.30.0.0/24", "10.30.0.1", 30)
@@ -107,7 +103,6 @@ func TestUnboundAnswersPortalNamesPerNetwork(t *testing.T) {
 	}
 }
 
-// N-11: Kea subnet ids follow the network, not its position.
 func TestKeaSubnetIDsAreStable(t *testing.T) {
 	a := goodNet("6f1c0d8e-1111-4222-8333-000000000001", "A", "br-g20", "10.20.0.0/24", "10.20.0.1", 20)
 	b := goodNet("6f1c0d8e-1111-4222-8333-000000000002", "B", "br-g30", "10.30.0.0/24", "10.30.0.1", 30)
@@ -121,7 +116,7 @@ func TestKeaSubnetIDsAreStable(t *testing.T) {
 		return nil
 	}
 	before := id([]GuestNetwork{a, b, c}, c)
-	after := id([]GuestNetwork{b, c}, c) // A removed
+	after := id([]GuestNetwork{b, c}, c)
 	if before == nil || before != after {
 		t.Fatalf("removing a network renumbered another: %v -> %v", before, after)
 	}

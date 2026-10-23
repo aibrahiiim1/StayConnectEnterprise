@@ -14,8 +14,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// ---- fixed valid UUIDs -----------------------------------------------------
-
 const (
 	tTenantUUID = "11111111-1111-1111-1111-111111111111"
 	tSiteUUID   = "22222222-2222-2222-2222-222222222222"
@@ -51,7 +49,7 @@ func validRevision() Revision {
 	}
 }
 
-// noneRevision is a truthful Protel FIAS (no-auth) revision: credential mode NONE, NO secret generation.
+// noneRevision is a Protel FIAS (no-auth) revision: NONE, no secret generation.
 func noneRevision() Revision {
 	r := validRevision()
 	r.CredentialMode = CredentialNone
@@ -59,8 +57,6 @@ func noneRevision() Revision {
 	return r
 }
 func validSecret() SecretGeneration { return SecretGeneration{ID: tSecUUID, GenerationNo: 1} }
-
-// ---- fake repo (assignment-scoped, atomic generation, independent-axis CAS) -----
 
 type fakeRepo struct {
 	mu       sync.Mutex
@@ -172,8 +168,6 @@ func (r *fakeRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 	return nil
 }
 
-// MarkGapAndRequireResync moves BOTH axes atomically under a single CAS (both or neither): a stale generation
-// changes nothing, mirroring the real single-row transactional UPDATE.
 func (r *fakeRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error {
 	if r.markGapErr != nil {
 		return r.markGapErr
@@ -236,8 +230,6 @@ func (r *fakeRepo) scope() [2]string {
 	defer r.mu.Unlock()
 	return r.lastScope
 }
-
-// ---- fake locker / conn / spies -------------------------------------------
 
 type fakeLocker struct {
 	got    bool
@@ -304,8 +296,6 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Fatalf("condition not met within %s", d)
 }
 
-// ---- flags-off / fail-closed / assignment ---------------------------------
-
 func TestFlagsOff_ZeroSideEffects(t *testing.T) {
 	var sp spies
 	deps := Deps{
@@ -351,8 +341,6 @@ func TestUnassigned_FailsClosedNoWork(t *testing.T) {
 	}
 }
 
-// ---- discovery / independent workers --------------------------------------
-
 func TestOneInterface_OneWorkerDials(t *testing.T) {
 	var sp spies
 	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
@@ -375,8 +363,6 @@ func TestTwoInterfaces_IndependentWorkers(t *testing.T) {
 	<-done
 }
 
-// ---- cross-scope rejection ------------------------------------------------
-
 func TestCrossScope_NotDiscovered(t *testing.T) {
 	var sp spies
 	other := Interface{TenantID: "99999999-9999-9999-9999-999999999999", SiteID: tSiteUUID, ID: ifaceUUID("i2"), ConnectorKind: "protel-fias", LifecycleState: "ACTIVE", CurrentRevisionID: tRevUUID}
@@ -397,8 +383,6 @@ func TestCrossScope_NotDiscovered(t *testing.T) {
 	<-done
 }
 
-// ---- competing owner: no secret, no dial ----------------------------------
-
 func TestCompetingOwner_NoSecretNoSocket(t *testing.T) {
 	var sp spies
 	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return newFakeLocker(false) }, func() *fakeConn { return &fakeConn{} })
@@ -415,8 +399,6 @@ func TestCompetingOwner_NoSecretNoSocket(t *testing.T) {
 		t.Fatal("worker should have attempted to lock")
 	}
 }
-
-// ---- disabled / invalid-revision / missing-secret after re-read -> no dial -
 
 func TestDisabledAfterDiscovery_NoDial(t *testing.T) {
 	var sp spies
@@ -449,8 +431,6 @@ func TestRevisionInvalid_NoDial(t *testing.T) {
 		t.Fatalf("invalid (non-read-only) revision must not decrypt/dial; dials=%d", sp.dial.Load())
 	}
 }
-
-// ---- credential mode: truthful NONE (no-auth Protel FIAS) ------------------
 
 func TestRevision_CredentialCoherence(t *testing.T) {
 	// unknown credential mode → invalid (must be explicit)
@@ -486,8 +466,6 @@ func TestRevision_CredentialCoherence(t *testing.T) {
 	}
 }
 
-// TestCredentialModeNone_DialsWithoutDecrypt proves a NONE connector dials the no-auth transport WITHOUT
-// loading or decrypting any Secret Generation.
 func TestCredentialModeNone_DialsWithoutDecrypt(t *testing.T) {
 	var sp spies
 	repo := newFakeRepo(iface("i1"))
@@ -505,8 +483,6 @@ func TestCredentialModeNone_DialsWithoutDecrypt(t *testing.T) {
 		t.Fatal("NONE connector must still dial the no-auth transport")
 	}
 }
-
-// ---- startup persists CONNECTING, never a fabricated healthy ---------------
 
 func TestStartup_NoFakeHealthy(t *testing.T) {
 	var sp spies
@@ -530,8 +506,6 @@ func TestStartup_NoFakeHealthy(t *testing.T) {
 	<-done
 }
 
-// ---- lock loss closes the socket ------------------------------------------
-
 func TestLockLoss_ClosesSocket(t *testing.T) {
 	var sp spies
 	lk := newFakeLocker(true)
@@ -546,8 +520,6 @@ func TestLockLoss_ClosesSocket(t *testing.T) {
 	cancel()
 	<-done
 }
-
-// ---- independent axes: heartbeat preserves continuity/sync -----------------
 
 func TestIndependentAxes_HeartbeatPreservesContinuitySync(t *testing.T) {
 	repo := newFakeRepo(iface("i1"))
@@ -580,8 +552,6 @@ func TestIndependentAxes_HeartbeatPreservesContinuitySync(t *testing.T) {
 	}
 }
 
-// ---- stale generation rejected --------------------------------------------
-
 func TestRuntimeGeneration_StaleRejected(t *testing.T) {
 	repo := newFakeRepo(iface("i1"))
 	id := ifaceUUID("i1")
@@ -599,8 +569,6 @@ func TestRuntimeGeneration_StaleRejected(t *testing.T) {
 		t.Fatalf("current owner B must update, got %v", err)
 	}
 }
-
-// ---- assignment change drains + re-scopes ---------------------------------
 
 func TestAssignmentChange_DrainsWorkers(t *testing.T) {
 	var sp spies
@@ -625,8 +593,6 @@ func TestAssignmentChange_DrainsWorkers(t *testing.T) {
 	<-done
 }
 
-// ---- SIGTERM/cancel drains, no goroutine leak -----------------------------
-
 func TestCancelDrain_NoGoroutineLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
 	var sp spies
@@ -642,8 +608,6 @@ func TestCancelDrain_NoGoroutineLeak(t *testing.T) {
 		t.Errorf("goroutine leak after drain: before=%d after=%d", before, after)
 	}
 }
-
-// ---- one worker failure does not stop another -----------------------------
 
 func TestOneFailureDoesNotStopAnother(t *testing.T) {
 	var sp spies
@@ -671,13 +635,7 @@ func TestOneFailureDoesNotStopAnother(t *testing.T) {
 	<-done
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Operator command channel, faked at the same boundary the real repo implements.
-//
-// cmdQueue is drained one command per claim, and claimGen models the generation guard: a command whose
-// generation does not match the caller's is never handed out, which is what lets the stale-ownership test be
-// written against this fake rather than only against PostgreSQL.
-// ---------------------------------------------------------------------------------------------------------
+// cmdQueue drains one command per claim; claimGen never hands out a command whose generation differs from the caller's.
 
 func (r *fakeRepo) ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error) {
 	r.mu.Lock()
@@ -735,13 +693,10 @@ func (r *fakeRepo) RecordResyncCoverage(_ context.Context, _ ResyncScope, _ int6
 }
 
 func (r *fakeRepo) ReconcileRoster(_ context.Context, _ ResyncScope, _ int64) (ReconcileOutcome, error) {
-	// A refusal, because that is the honest default for a fake with no roster behind it -- and because it
-	// proves the publish path treats a refusal as a normal outcome rather than a failure.
+	// A refusal: the publish path must treat it as a normal outcome, not a failure.
 	return ReconcileOutcome{Outcome: "REFUSED_NO_COVERAGE_EVIDENCE"}, nil
 }
 
-// LoadConnectionSettings returns the approved defaults, which is what an unconfigured interface gets in
-// production too.
 func (r *fakeRepo) LoadConnectionSettings(_ context.Context, _, _, _ string) (ConnectionSettings, error) {
 	return ConnectionSettings{
 		BackoffMin:       500 * time.Millisecond,

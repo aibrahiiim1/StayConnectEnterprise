@@ -6,13 +6,8 @@ import (
 	"time"
 )
 
-// AUDIT H-8: WIND DOWN DRAINS, PAUSE DOES NOT KEEP THE LINK.
-//
-// The repository lists a DRAINING interface only while it still has room charges to finish
-// (iam_v2.pms_interface_has_undrained_postings). Such an interface must keep its worker -- and so its PMS link
-// -- until the outbox is empty. It used to be dropped like any non-ACTIVE interface, so queued charges could
-// never be sent.
-
+// A DRAINING interface with undrained charges (iam_v2.pms_interface_has_undrained_postings) keeps its worker and
+// PMS link until the outbox is empty.
 func TestWorkerLifecycle(t *testing.T) {
 	for state, want := range map[string]bool{
 		"ACTIVE": true, "DRAINING": true, "AUTH_DISABLED": false, "DECOMMISSIONED": false, "": false,

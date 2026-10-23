@@ -18,8 +18,6 @@ func newReq(t *testing.T) (*Request, ed25519.PrivateKey) {
 	return r, priv
 }
 
-// holds_customer_id is optional. An appliance that predates it signed exactly the eleven original fields; its
-// request must still verify, so an empty value must leave the signed bytes unchanged.
 func TestHoldsCustomerOmittedKeepsLegacySignedBytes(t *testing.T) {
 	r, _ := newReq(t)
 	legacy, _ := json.Marshal(struct {
@@ -45,7 +43,6 @@ func TestHoldsCustomerOmittedKeepsLegacySignedBytes(t *testing.T) {
 	}
 }
 
-// When present, the field is signed: it cannot be removed or changed to point at another customer.
 func TestHoldsCustomerIsCoveredBySignature(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	r := &Request{SchemaVersion: SchemaVersion, RequestID: "req-h", Serial: "SC-H",
@@ -61,7 +58,6 @@ func TestHoldsCustomerIsCoveredBySignature(t *testing.T) {
 			t.Fatalf("holds_customer_id changed to %q and the request still verified", v)
 		}
 	}
-	// Round trip through the file the operator carries.
 	b, _ := json.Marshal(r)
 	var back Request
 	if err := json.Unmarshal(b, &back); err != nil || back.HoldsCustomerID != "cust-a" || !VerifyRequest(&back) {

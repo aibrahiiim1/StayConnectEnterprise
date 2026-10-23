@@ -1,9 +1,4 @@
-// THE SYNCHRONIZATION SECTION MUST NOT INVENT A NUMBER.
-//
-// Everything else in this file is ordinary UI coverage. This is the part that matters: Protel's FIAS provides
-// no record total before the end of a sync, so a percentage or an "X of Y" on this screen would be fabricated
-// by the client. The assertions below fail if one ever appears, including by way of a well-meaning helper
-// someone adds later.
+// FIAS provides no record total before sync ends, so the UI cannot show a truthful percentage.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -44,13 +39,9 @@ describe("synchronization", () => {
         onRefreshed={() => {}}
       />,
     );
-    // The count appears twice on purpose: once in the field list, once inside the honest sentence.
     expect(screen.getAllByText(/1,847/).length).toBeGreaterThan(0);
-    // The wording moved into a Callout during the UI rework; the RULE it enforces is unchanged and is what the
-    // rest of this test pins.
     expect(screen.getByText(/does not say how many records it will send/i)).toBeInTheDocument();
 
-    // No percentage, no "of N", no progress bar. FIAS cannot support any of them before the end of a sync.
     const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/\d+\s*%/);
     expect(body).not.toMatch(/\bof\s+\d/i);
@@ -60,7 +51,6 @@ describe("synchronization", () => {
 
   it("explains that the first connection syncs automatically and this asks for another", async () => {
     render(<SynchronizationCard id="i1" health={health()} onRefreshed={() => {}} />);
-    // The explanation lives behind the section's lightbulb.
     await userEvent.click(screen.getByRole("button", { name: "Tips: Guest list refresh" }));
     expect(screen.getByText(/first successful connection/i)).toBeInTheDocument();
     expect(screen.getByText(/looks out of date/i)).toBeInTheDocument();
@@ -89,11 +79,6 @@ describe("synchronization", () => {
     expect(screen.getByRole("button", { name: /refresh the guest list now/i })).toBeDisabled();
   });
 
-  // THE STEP-UP MOVED INTO A CONFIRMATION DIALOG.
-  //
-  // The reason and the password used to be two inline fields beside the button, so a read-only status page asked
-  // for a password with nothing saying what it was for. The CONTRACT is unchanged and is what this test pins:
-  // exactly reason_code + password, and nothing resembling an actor or a secret.
   it("sends the reason and the password, and never an actor or an interface secret", async () => {
     const user = userEvent.setup();
     render(<SynchronizationCard id="i1" health={health()} onRefreshed={() => {}} />);
@@ -119,9 +104,7 @@ describe("synchronization", () => {
     const fast = onRefreshed.mock.calls.length;
     expect(fast).toBeGreaterThanOrEqual(2); // 3s cadence
 
-    // COMPLETE does not stop the card watching — the page is still open and the connection can still change.
-    // It stops the FAST loop, which is what the rate assertion below pins: 7s at the slow rate is at most one
-    // call, against at least two at the fast one.
+    // COMPLETE slows polling but does not stop watching the open page.
     rerender(
       <SynchronizationCard id="i1" health={health({ sync_stage: "COMPLETE" })} onRefreshed={onRefreshed} />,
     );
@@ -143,11 +126,6 @@ describe("synchronization", () => {
   });
 });
 
-// WATCHING A RECONNECT WITHOUT TOUCHING THE BROWSER.
-//
-// This is the scenario the section exists for: the operator opens the PMS Interface page, walks over and
-// plugs the PMS back in, and comes back to a screen that has kept up on its own. Nothing here re-renders the
-// component by hand for reasons the product would not — the only thing that advances is time.
 describe("observing an external reconnect", () => {
   it("polls while DISCONNECTED, so the reconnect can be discovered at all", async () => {
     vi.useFakeTimers();
@@ -160,8 +138,7 @@ describe("observing an external reconnect", () => {
       />,
     );
 
-    // No sync is active, and that is precisely when the interesting thing happens. A card that only polls
-    // once something is active could never observe the thing that starts it.
+    // Poll even while idle so a later reconnect is observed.
     await vi.advanceTimersByTimeAsync(11000);
     expect(onRefreshed.mock.calls.length).toBeGreaterThan(0);
   });
@@ -170,8 +147,6 @@ describe("observing an external reconnect", () => {
     vi.useFakeTimers();
     const onRefreshed = vi.fn();
 
-    // Each step is what the SERVER would report next; the component is re-rendered with it exactly as the
-    // page does when a poll returns. No manual refresh anywhere.
     const steps: Partial<PmsInterfaceHealth>[] = [
       { transport_status: "DISCONNECTED", sync_status: "RESYNC_REQUIRED" },
       { transport_status: "CONNECTED", sync_status: "RESYNC_REQUIRED", sync_stage: "REQUESTING_FULL_SYNC" },
@@ -201,7 +176,6 @@ describe("observing an external reconnect", () => {
     expect(seen[6]).toMatch(/Complete/i);
     expect(seen[6]).toMatch(/461/);
 
-    // COMPLETE is not active, so the fast loop stops. The slow one keeps running — the page is still open.
     const afterComplete = onRefreshed.mock.calls.length;
     await vi.advanceTimersByTimeAsync(3000);
     expect(onRefreshed.mock.calls.length).toBe(afterComplete);
@@ -213,7 +187,7 @@ describe("observing an external reconnect", () => {
     const { rerender } = render(
       <SynchronizationCard id="i1" health={health({ sync_stage: "COMPLETE" })} onRefreshed={onRefreshed} />,
     );
-    // Idle → active → idle. Two overlapping loops would show up as a doubled call rate afterwards.
+    // Catch overlapping polling loops through their doubled request rate.
     rerender(<SynchronizationCard id="i1" health={health({ sync_stage: "RECEIVING" })} onRefreshed={onRefreshed} />);
     await vi.advanceTimersByTimeAsync(3100);
     rerender(<SynchronizationCard id="i1" health={health({ sync_stage: "COMPLETE" })} onRefreshed={onRefreshed} />);
@@ -224,11 +198,7 @@ describe("observing an external reconnect", () => {
   });
 });
 
-// COMPLETE MUST NOT MEAN "DONE" WHILE GUESTS ARE STILL BEING REFUSED.
-//
-// sync_stage=COMPLETE means a generation was published; materialization_ready means the applier has finished
-// writing it into the Stay tables. Room sign-in is closed until the second is true, so a card that showed
-// "Complete" in between told the operator the sync had finished while guests were being turned away.
+// Published sync is not ready until materialization completes; room sign-in remains closed until then.
 describe("materialization readiness", () => {
   it("shows Applying guest list while COMPLETE but not yet materialized", () => {
     render(
@@ -251,7 +221,6 @@ describe("materialization readiness", () => {
         onRefreshed={() => {}}
       />,
     );
-    // "Complete" appears both as the stage value and in the Last-completed-full-sync label.
     expect(screen.getAllByText(/Complete/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Applying the guest list/i)).toBeNull();
   });
@@ -278,7 +247,6 @@ describe("materialization readiness", () => {
         onRefreshed={() => {}}
       />,
     );
-    // 595 is the live count. 461 was the publish-barrier stamp that used to contradict it on this screen.
     expect(screen.getByText(/595/)).toBeInTheDocument();
     expect(screen.queryByText(/461/)).toBeNull();
   });

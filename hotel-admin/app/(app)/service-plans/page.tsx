@@ -1,21 +1,7 @@
 "use client";
 
-// SERVICE PLANS — the technical service behind a guest-facing Internet package.
-//
-// A plan says what a guest GETS: speed, devices, data and time. Packages are what a guest sees and chooses, and
-// each one hands out one plan. This screen shows what every plan grants, which packages use it, whether any of
-// those packages is still on older settings (with the one-click "apply current settings" fix), and the plan's
-// saved versions — in a side sheet per plan.
-//
-// THERE IS NO ENABLE/DISABLE SWITCH HERE, ON PURPOSE. A plan row carries an `enabled` flag, but nothing that
-// decides what a guest receives reads it for an operator plan: the portal offers PACKAGES, and a package hands
-// out the plan version it pinned whatever that flag says. A switch that changes nothing a guest experiences
-// would be a control that lies, so the screen does not offer one. A plan stops reaching guests when no active
-// package uses it — the sheet lists those packages and says so.
-//
-// The form collects operator units (Mbps, GB, hours, days) and converts on submit; the API and wire contract
-// are unchanged. "Add plan" sends create_only, so a code that already exists is refused instead of silently
-// becoming a new version of that plan.
+// No enable/disable switch on purpose: nothing that decides what a guest receives reads a plan's `enabled`
+// flag (packages hand out the plan version they pinned), so a switch would be a control that lies.
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -67,9 +53,7 @@ type PackageRef = {
 };
 type Chip = "all" | "used" | "unused";
 
-// The server's bounds, in the units this form collects. edged is the authority and refuses anything past
-// these; repeating them here is what lets the browser refuse it at the field that caused it.
-//   maxKbps 10_000_000 · maxIdleSeconds 30d · maxSessionSeconds 365d · maxTimeQuotaSecond 10y
+// Mirrors edged's bounds (maxKbps 10_000_000, idle 30d, session 365d, time quota 10y) in form units.
 const LIMITS = { mbps: 10000, idleMinutes: 43200, sessionHours: 8760, timeQuotaDays: 3650 } as const;
 
 export default function ServicePlansPage() {
@@ -79,8 +63,7 @@ export default function ServicePlansPage() {
   const [err, setErr] = useState<unknown>(null);
   const [formErr, setFormErr] = useState<unknown>(null);
   const [unavailable, setUnavailable] = useState(false);
-  // Fails closed while it loads, so Add / Edit / Delete appear only for a role the server accepts them from.
-  // edged still enforces the real gate on every request.
+  // Fails closed while loading; edged enforces the real gate.
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
@@ -96,19 +79,14 @@ export default function ServicePlansPage() {
   const [revs, setRevs] = useState<RevisionInfo[] | null>(null);
   const [revsErr, setRevsErr] = useState<unknown>(null);
   const [deleting, setDeleting] = useState<PlanSummary | null>(null);
-  // THE REPIN STEP. Publishing new plan settings does NOT move any package onto them — packages pin a
-  // specific revision, and that is what keeps a guest's terms stable. So after saving, the operator is asked
-  // which packages should use the new settings for FUTURE guests. Nothing is repinned unless they say so,
-  // and no existing Entitlement changes either way. The same step is reachable on its own from the plan row.
+  // Publishing plan settings does not move packages (they pin a revision); the operator chooses which to repin for future guests.
   const [repin, setRepin] = useState<{
     planRevisionID: string; planLabel: string; packages: PackageRef[];
     chosen: Record<string, boolean>; standing: boolean;
   } | null>(null);
-  // Asked once for the whole repin, cleared when the prompt closes.
   const [repinPassword, setRepinPassword] = useState("");
   useEffect(() => { if (!repin) setRepinPassword(""); }, [repin]);
 
-  // The plan's existing time allowance, expressed in the largest unit that divides it exactly.
   const timeQuota = secondsToDurationField(prefill?.time_quota_seconds, ["hours", "days"]);
 
   const load = useCallback(async () => {
@@ -170,7 +148,6 @@ export default function ServicePlansPage() {
       const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
         code: str("code"),
         name: str("name"),
-        // Operator units in, wire units out.
         down_kbps: mbpsToKbps(str("down_mbps")),
         up_kbps: mbpsToKbps(str("up_mbps")),
         max_concurrent_devices: int("max_concurrent_devices") ?? 1,
@@ -179,20 +156,16 @@ export default function ServicePlansPage() {
         max_continuous_session_seconds: durationToSeconds(str("max_session"), "hours"),
         time_quota_seconds: durationToSeconds(str("time_quota"), (str("time_quota_unit") as "hours" | "days") || "hours"),
         data_quota_bytes: gbToBytes(str("data_quota_gb")),
-        // KEPT AS THE PLAN HAS IT on edit: an online-time (AGGREGATE_ONLINE_TIME) plan must not become a
-        // validity-window plan because it was opened and saved (audit O-20). A plan whose mode was not read is
-        // sent without one, and the server carries the current mode.
+        // On edit keep the plan's mode so an online-time plan never becomes validity-window; none sent means the server keeps it.
         ...(editingPlan
           ? (editingPlan.time_accounting_mode ? { time_accounting_mode: editingPlan.time_accounting_mode } : {})
           : { time_accounting_mode: str("time_accounting_mode") || "VALIDITY_WINDOW" }),
         speed_allocation: str("speed_allocation") || "PER_DEVICE",
-        // ADD refuses a code that already exists; EDIT publishes a new version of this plan, which changes
-        // what every package using it gives future clients -- a step-up, so the password goes with it.
+        // create_only refuses an existing code; an edit is a step-up and carries the password.
         ...(editingPlan ? { password: (f.get("password") as string) ?? "" } : { create_only: true }),
       });
       el.reset(); setShowNew(false);
       toast.success(editingPlan ? "Plan saved" : "Plan added");
-      // Which packages are now behind: active packages of this plan not already pinned to what was just published.
       const affected = editingPlan && res?.current_revision_id
         ? stalePackagesFor(
             { plan_id: editingPlan.plan_id, code: editingPlan.code, current_revision_id: res.current_revision_id },
@@ -219,8 +192,7 @@ export default function ServicePlansPage() {
     finally { setBusy(false); }
   }
 
-  // startRepin opens the same prompt from a plan row, for packages that are ALREADY behind. It publishes no plan
-  // revision, and nothing at all happens until the operator ticks a package and applies.
+  // Publishes no plan revision; nothing happens until the operator ticks a package and applies.
   function startRepin(p: PlanSummary) {
     const stale = stalePackagesFor(p, packages);
     if (stale.length === 0) return;
@@ -234,13 +206,8 @@ export default function ServicePlansPage() {
     });
   }
 
-  // applyRepin republishes ONLY the chosen packages, each from its own CURRENT configuration, pinned to the plan
-  // revision the prompt was opened with. It posts only to /commercial-packages.
-  //
-  // Each package is republished with its full stored terms (price, currency, methods, room-charge codes and
-  // every other field), and with the operator's password: moving a package to other plan settings changes what
-  // it gives future clients. A package whose stored price details cannot be read in full is NOT posted -- it is
-  // named instead, so nothing is ever republished as Free by omission.
+  // Republishes only the chosen packages with their full stored terms and the password. A package whose price
+  // details cannot be read in full is skipped and named, so nothing is ever republished as Free by omission.
   async function applyRepin() {
     if (!repin) return;
     const chosen = repin.packages.filter((k) => repin.chosen[k.package_id]);
@@ -367,7 +334,6 @@ export default function ServicePlansPage() {
                 </label>
               ))}
             </div>
-            {/* A PLAN CHANGE IS A STEP-UP. Asked once for every package moved in this run. */}
             <div className="mb-4 max-w-sm">
               <Label htmlFor="repin-password">Confirm your password</Label>
               <Input id="repin-password" type="password" autoComplete="current-password" value={repinPassword}
@@ -434,8 +400,6 @@ export default function ServicePlansPage() {
                 </TR></THead>
                 <TBody>
                   {shown.map((p) => {
-                    // Packages of this plan that still give guests older settings, per row, because the action is
-                    // per plan and the operator needs to see WHICH plan has drifted without opening anything.
                     const stale = stalePackagesFor(p, packages);
                     return (
                       <Fragment key={p.plan_id}>
@@ -489,7 +453,6 @@ export default function ServicePlansPage() {
         </Card>
       )}
 
-      {/* THE PLAN RECORD. */}
       <Sheet open={selected !== null} onOpenChange={(v) => !v && setSelected(null)}>
         <SheetContent width="md" onOpenAutoFocus={focusSheetItself}>
           {selected && (() => {
@@ -601,13 +564,10 @@ export default function ServicePlansPage() {
           }} />
       )}
 
-      {/* THE FORM IS A DIALOG: saving it publishes settings that decide how fast every guest on that plan gets. */}
       <Dialog open={showNew} onOpenChange={(v) => { if (!v && !busy) { setShowNew(false); setPrefill(null); } }}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>{prefill ? `Edit ${prefill.name || prefill.code}` : "Add a service plan"}</DialogTitle>
-            {/* Editing means publishing a NEW version — the previous one stays intact so anything already given
-                under it keeps its terms. Saying so prevents the assumption that this edits the plan in place. */}
             <DialogDescription>
               {prefill
                 ? "Saving records these as the plan's current settings. Clients already connected keep the terms they were given, and packages using this plan are only updated if you choose them afterwards."
@@ -616,8 +576,7 @@ export default function ServicePlansPage() {
           </DialogHeader>
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
-            {/* Keyed on the plan being edited: these are uncontrolled inputs, and switching straight from one plan
-                to another would otherwise leave the first plan's numbers on screen — and publish them. */}
+            {/* Keyed on the plan: uncontrolled inputs would otherwise keep the previous plan's numbers and publish them. */}
             <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="plan-code">Plan code</Label>
@@ -632,8 +591,6 @@ export default function ServicePlansPage() {
                 <Input id="plan-name" name="name" defaultValue={prefill?.name ?? ""} placeholder="Premium Wi-Fi" />
               </div>
 
-              {/* max= on every numeric field mirrors the server's bound, so an over-limit value is refused at the
-                  field that caused it instead of as a rejected save that names a wire field. */}
               <div>
                 <Label htmlFor="plan-down">Download speed (Mbps)</Label>
                 <Input id="plan-down" name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
@@ -664,8 +621,7 @@ export default function ServicePlansPage() {
                 <Hint>Disconnecting the oldest device ends its connection and frees its place for the new one.</Hint>
               </div>
 
-              {/* PRE-FILLED, and that is a bug fix rather than a nicety: the form publishes a complete new version
-                  from whatever the fields hold, so a field left blank because it was never loaded PUBLISHED a blank. */}
+              {/* Fields must be pre-filled: the form publishes a complete version from whatever they hold. */}
               <div>
                 <Label htmlFor="plan-time">Total time allowance</Label>
                 <div className="flex gap-2">
@@ -713,8 +669,6 @@ export default function ServicePlansPage() {
               <div className="sm:col-span-2">
                 <Label htmlFor="plan-time-mode">How time is counted</Label>
                 {prefill ? (
-                  // AN EXISTING PLAN KEEPS HOW ITS TIME IS COUNTED. Shown, not offered: the save sends the plan's
-                  // own mode, so editing a speed never converts an online-time plan into a validity-window one.
                   <>
                     <Select id="plan-time-mode" disabled value={prefill.time_accounting_mode || "VALIDITY_WINDOW"} onChange={() => {}}>
                       <option value={prefill.time_accounting_mode || "VALIDITY_WINDOW"}>
@@ -725,7 +679,6 @@ export default function ServicePlansPage() {
                   </>
                 ) : (
                   <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
-                    {/* Only VALIDITY_WINDOW is offered for a new plan; online-time plans are created elsewhere. */}
                     <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
                   </Select>
                 )}

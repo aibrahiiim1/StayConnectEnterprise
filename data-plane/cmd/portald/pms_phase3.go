@@ -1,22 +1,10 @@
 package main
 
-// Phase 3 guest-portal PMS authentication response contract.
-//
-// THE RULE, AS IT NOW STANDS. A guest learns whether they are in, and — on a failure — which of THREE things
-// to do about it: check what they typed, try again later, or wait out a rate limit. Nothing finer. Every
-// distinction that could describe a particular ROOM still collapses to one answer: "no such room", "wrong
-// name", "that stay checked out" and "two guests matched" are the same message, because anything else lets
-// someone in the lobby submit room numbers and read off which are occupied.
-//
-// IT USED TO BE ONE MESSAGE FOR EVERYTHING, and that was wrong in both directions. A guest whose details were
-// perfectly correct, on a property whose PMS mirror could not answer for anybody, was told to check their
-// details and contact reception — advice that could not possibly help. A guest who had merely mistyped was
-// told the same thing, and went to the desk. The Product Owner asked for the distinction; the mapping that
-// keeps it safe lives in internal/signinattempt.GuestClass, not here, and this file only turns a class into
-// words.
-//
-// The exact internal reason never reaches the guest. It is recorded in iam_v2.sign_in_attempts, where an
-// authorised operator can read it beside what the guest actually typed.
+// Guest-facing PMS sign-in failures carry one of a few coarse classes (check what you typed, try later,
+// wait out a rate limit). Anything describing a particular room ("no such room", "wrong name", "checked out",
+// "two matched") collapses to one answer, or a lobby visitor could read off occupied rooms. The class->reason
+// mapping lives in internal/signinattempt.GuestClass; this file only turns a class into words. The exact
+// reason is recorded in iam_v2.sign_in_attempts, never sent to the guest.
 
 import (
 	"encoding/json"
@@ -25,49 +13,31 @@ import (
 	"strings"
 )
 
-// The three guest-facing failure messages. There are exactly three, they are the only ones this daemon may
-// send, and guestAuthMessages below is what keeps that true.
+// guestAuthMessages (below) is the closed set of sentences this daemon may send.
 const (
-	// guestAuthMessage is the CREDENTIAL answer: something about what was typed did not match. It names the
-	// three things a guest may enter, and it says "full" first name deliberately — a property whose PMS holds
-	// a complete given name in one field accepts that whole value and not one word of it, and a guest who
-	// types a single word otherwise has no way to know why it failed.
+	// CREDENTIAL: what was typed did not match. "full" first name is deliberate: a PMS holding a complete
+	// given name in one field accepts the whole value, not one word of it.
 	guestAuthMessage = "The room number or guest detail you entered is incorrect. " +
 		"Check the room number and enter the full first name, family name, or reservation number."
-	// guestAuthTechnicalMessage is the TECHNICAL answer: the property could not check, whatever was typed. It
-	// must never be shown for an ordinary wrong value — sending someone to Reception because they mistyped
-	// their own surname is how a desk fills up with people who could have fixed it themselves.
+	// TECHNICAL: the property could not check. Never shown for an ordinary wrong value, which would send
+	// mistyped guests to Reception.
 	guestAuthTechnicalMessage = "We are unable to verify your stay right now. " +
 		"Please try again or contact the site team for assistance."
-	// guestAuthRateLimitedUnknownMessage is the RESTRICTED answer when the server did not send a remaining
-	// time. It exists because the alternative — printing a number this daemon guessed — would be the one
-	// sentence on the page that the server is not actually standing behind.
+	// RESTRICTED when the server sent no remaining time; this daemon never prints a number it guessed.
 	guestAuthRateLimitedUnknownMessage = "Too many attempts. Please wait and try again."
-	// guestPostStayMessage is the POST-STAY answer, and it is the wording this whole file used to carry for
-	// everything. It is kept, unchanged, because post-stay is a different credential method: a departed guest
-	// returning with a PIN has no room number, no family name and no reservation number to re-check, so the
-	// room sign-in sentence above would be actively misleading advice. This delivery changed the ROOM sign-in
-	// wording and deliberately left every other method's exactly as it was.
+	// POST-STAY: a departed guest with a PIN has no room or name to re-check, so the room sentence would mislead.
 	guestPostStayMessage = "We could not verify your stay. Please check your details or contact the site team for assistance."
 )
 
-// guestAuthMessages is the CLOSED SET. A test walks it to prove that every sentence a guest can receive
-// discloses nothing about the property, and callers resolve through messageForClass rather than writing a
-// string at a call site — a fourth sentence added somewhere else is the drift this exists to prevent.
-// guestRoomDeviceLimitMessage names no room, stay or system: it tells the guest the one thing they can act on.
 const guestRoomDeviceLimitMessage = "Every device place for this room is in use. On a device that is online with it, remove one under “Your devices”, or contact the site team."
 
-// guestCapacityMessage and guestLicenseRefusedMessage are the SAME sentences the voucher and account sign-in
-// show for the same two conditions (main.go, iamv2_commerce_session.go), so a guest reads one answer whichever
-// way they signed in.
+// The same sentences the voucher and account sign-in show (main.go, iamv2_commerce_session.go).
 const (
 	guestCapacityMessage       = "The Wi-Fi network is at capacity. Please try again shortly."
 	guestLicenseRefusedMessage = "This sign-in method is not available. Please contact the site team for assistance."
 )
 
-// isLicenceRefusal reports whether scd refused a sign-in because of the appliance's licence (cmd/scd
-// licenseRefusal) rather than anything about the guest. These are the codes every method shares; each is
-// shown to the guest as guestLicenseRefusedMessage.
+// isLicenceRefusal: scd refused because of the appliance's licence (cmd/scd licenseRefusal), not the guest.
 func isLicenceRefusal(code string) bool {
 	switch code {
 	case "unlicensed", "license_expired", "feature_not_licensed", "tenant_transition_pending", "removed_from_central":
@@ -80,28 +50,17 @@ var guestAuthMessages = map[string]string{
 	"CREDENTIAL": guestAuthMessage,
 	"TECHNICAL":  guestAuthTechnicalMessage,
 	"POST_STAY":  guestPostStayMessage,
-	// DEVICE_LIMIT: the stay's access is fine and has no free device slot.
+	// DEVICE_LIMIT: access is fine but there is no free device slot.
 	"DEVICE_LIMIT": guestRoomDeviceLimitMessage,
-	// LICENSE and CAPACITY are the two licence refusals every guest method shares, and they read exactly as a
-	// voucher or account guest reads them: the appliance's licence does not admit a new guest, or it is at its
-	// licensed number of guests online. Both are facts about the whole property, never about a room.
+	// LICENSE and CAPACITY are property-wide facts, never about a room.
 	"LICENSE":  guestLicenseRefusedMessage,
 	"CAPACITY": guestCapacityMessage,
-	// RATE_LIMITED is deliberately absent: it is the one class whose sentence carries a NUMBER, so it is
-	// produced by guestAuthRateLimitedMessage below rather than looked up. leaksDetail knows about both.
+	// RATE_LIMITED is absent on purpose: its sentence carries a number, so guestAuthRateLimitedMessage produces it.
 }
 
-// guestAuthRateLimitedMessage is the RESTRICTED answer, and it is kept separate from the other two for a
-// reason: folding it into the technical message would send a restricted attacker to Reception, and folding it
-// into the credential message would tell them their guesses are still being evaluated.
-//
-// THE NUMBER IS THE SERVER'S, NOT THIS DAEMON'S. remainingSeconds arrives from scd, which read it from the
-// restriction row, so the countdown a guest watches and the moment the property will actually accept another
-// submission are the same fact. A browser that ignores the number, edits it, or reloads to clear it gains
-// nothing at all — the next submission meets the same gate on the server.
-//
-// It discloses nothing: the sentence is identical for a guest who mistyped their own surname five times and
-// for somebody enumerating rooms, and the number is a duration rather than anything about the property.
+// guestAuthRateLimitedMessage stays separate from the other answers: folding it into TECHNICAL would send a
+// restricted attacker to Reception, into CREDENTIAL would imply guesses are still evaluated. The number is
+// the server's (from the restriction row), so the countdown matches when the gate actually opens.
 func guestAuthRateLimitedMessage(remainingSeconds int) string {
 	if remainingSeconds < 1 {
 		return guestAuthRateLimitedUnknownMessage
@@ -109,13 +68,8 @@ func guestAuthRateLimitedMessage(remainingSeconds int) string {
 	return fmt.Sprintf("Too many attempts. Please wait %d seconds and try again.", remainingSeconds)
 }
 
-// messageForClass turns scd's coarse failure class into the guest's sentence.
-//
-// AN UNKNOWN OR ABSENT CLASS FALLS TO THE CREDENTIAL MESSAGE, which is the safe default rather than the
-// obvious one. Defaulting to "we cannot check right now" would hand an attacker a way to make every answer
-// look technical, and would send a guest with a genuine typo to queue at the desk. The credential message is
-// also the one that is never harmful to show: re-reading what you typed costs nothing on a technical
-// failure, while contacting Reception about a typo costs a guest their evening.
+// An unknown or absent class falls to the credential message: defaulting to "cannot check right now" would
+// let an attacker make every answer look technical and send typo-ers to the desk.
 func messageForClass(class string, remainingSeconds int) string {
 	if class == "RATE_LIMITED" {
 		return guestAuthRateLimitedMessage(remainingSeconds)
@@ -126,7 +80,6 @@ func messageForClass(class string, remainingSeconds int) string {
 	return guestAuthMessage
 }
 
-// pmsOutcome is the resolver's internal outcome as portald receives it from scd.
 type pmsOutcome string
 
 const (
@@ -137,45 +90,37 @@ const (
 	outcomeThrottled     pmsOutcome = "THROTTLED"
 )
 
-// guestPMSResponse is the guest-facing body. On success it carries the session the guest just obtained; on
-// ANY failure it carries exactly the uniform message and nothing else — no outcome, no interface, no
-// property, no candidate count, no reason code, no hint that a room or name was partially right.
+// On any failure the body carries only the uniform message: no outcome, interface, candidate count, reason
+// code or hint that a room or name was partially right.
 type guestPMSResponse struct {
 	OK         bool   `json:"ok"`
 	Message    string `json:"message,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`
 	RedirectTo string `json:"redirect_to,omitempty"`
-	// RetryAfterSeconds is present ONLY on a rate-limited refusal, and it is the server's own remaining time.
-	// The portal page counts it down locally so the guest sees the wait shrink, but the page never decides
-	// when the wait is over: it re-asks, and the server answers.
+	// RetryAfterSeconds is the server's remaining time, on a rate-limited refusal only. The page counts it
+	// down but never decides the wait is over; it re-asks.
 	RetryAfterSeconds int `json:"retry_after_seconds,omitempty"`
 }
 
-// auditFields are what the SERVER records about the attempt. They never reach the guest.
+// pmsAuditFields are recorded server-side and never reach the guest.
 type pmsAuditFields struct {
 	Outcome    pmsOutcome
 	ReasonCode string
 }
 
-// buildGuestPMSResponse maps an internal outcome to the guest-facing body and the audit fields. It is a pure
-// function so the disclosure property can be tested exhaustively rather than argued about.
-//
-// failureClass is scd's coarse class, carried through verbatim. This function deliberately does not compute
-// it: exactly one mapping from an exact reason to a guest class exists, it lives in internal/signinattempt,
-// and a second one here would be a second thing to keep correct.
+// buildGuestPMSResponse is pure so disclosure can be tested exhaustively. failureClass is scd's class carried
+// verbatim; it is deliberately not computed here (the one mapping lives in internal/signinattempt).
 func buildGuestPMSResponse(outcome pmsOutcome, reasonCode, failureClass, sessionID, redirectTo string,
 	retryAfterSeconds int) (int, guestPMSResponse, pmsAuditFields) {
 	audit := pmsAuditFields{Outcome: outcome, ReasonCode: reasonCode}
 	if outcome == outcomeVerified && sessionID != "" {
 		return http.StatusOK, guestPMSResponse{OK: true, SessionID: sessionID, RedirectTo: redirectTo}, audit
 	}
-	// A retry hint belongs to the rate-limited answer and to nothing else. Attaching it to a wrong surname
-	// would tell a guesser how long to wait between guesses, which is the opposite of what the control is for.
+	// A retry hint on any other answer would tell a guesser how long to wait between guesses.
 	if failureClass != "RATE_LIMITED" {
 		retryAfterSeconds = 0
 	}
-	// EVERY other case — including a VERIFIED outcome that somehow carries no session, which is a server
-	// problem the guest must not be told about — is a failure carrying one of the permitted sentences.
+	// Every other case, including VERIFIED with no session (a server problem), is one permitted sentence.
 	return http.StatusOK, guestPMSResponse{
 		OK:                false,
 		Message:           messageForClass(failureClass, retryAfterSeconds),
@@ -183,9 +128,8 @@ func buildGuestPMSResponse(outcome pmsOutcome, reasonCode, failureClass, session
 	}, audit
 }
 
-// writeGuestPMSResponse writes the body. The status code is deliberately 200 for a failed verification too:
-// a distinct status is itself a signal, and network observers or scripted probes should not be able to
-// separate "wrong details" from "PMS unreachable" by status alone.
+// The status is 200 for a failed verification too: a distinct status would let probes tell "wrong details"
+// from "PMS unreachable".
 func writeGuestPMSResponse(w http.ResponseWriter, status int, body guestPMSResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -193,23 +137,19 @@ func writeGuestPMSResponse(w http.ResponseWriter, status int, body guestPMSRespo
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// leaksDetail reports whether a guest-facing body would disclose anything beyond the uniform message. It is
-// used by the tests as an explicit contract, and by callers as a cheap last-line assertion.
+// leaksDetail reports whether a body discloses anything beyond the uniform message.
 func leaksDetail(body guestPMSResponse) bool {
 	if body.OK {
-		return false // a successful verification legitimately names the guest's own session
+		return false
 	}
 	if body.SessionID != "" || body.RedirectTo != "" {
 		return true
 	}
-	// The rate-limited sentence is generated, so it is checked by REGENERATING it from the number the body
-	// itself carries. That keeps the closed set closed while letting exactly one sentence vary, and it also
-	// catches a body whose printed wait and whose machine-readable wait disagree.
+	// The rate-limited sentence is regenerated from the body's own number, which also catches a printed wait
+	// that disagrees with the machine-readable one.
 	if body.Message == guestAuthRateLimitedMessage(body.RetryAfterSeconds) {
 		return false
 	}
-	// Everything else must be one of the fixed sentences. Anything else is a sentence somebody wrote at a
-	// call site, which is exactly how a message that names a room or a PMS eventually ships.
 	for _, m := range guestAuthMessages {
 		if body.Message == m {
 			return false
@@ -218,14 +158,12 @@ func leaksDetail(body guestPMSResponse) bool {
 	return true
 }
 
-// forbiddenGuestTerms are words that must never appear in a guest-facing failure body. They name the things
-// an attacker would learn from a leaky message: the vendor, the mechanics, or how close the guess was.
+// forbiddenGuestTerms must never appear in a guest-facing failure body.
 var forbiddenGuestTerms = []string{
 	"pms", "protel", "opera", "fias", "interface", "candidate", "ambiguous", "indeterminate",
 	"stale", "unavailable", "no_match", "throttle", "reservation id", "folio", "room exists",
 }
 
-// bodyMentionsForbiddenTerm is the test-facing check that the uniform message itself stays clean.
 func bodyMentionsForbiddenTerm(body guestPMSResponse) string {
 	hay := strings.ToLower(body.Message)
 	for _, t := range forbiddenGuestTerms {

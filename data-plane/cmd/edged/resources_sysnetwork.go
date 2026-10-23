@@ -1,10 +1,7 @@
 package main
 
-// Hotel Admin — appliance WAN/LAN (system) network settings. These proxy to the
-// privileged netd daemon (edged never touches netplan itself). RBAC: the
-// "network" resource key gates read (network.view/history/diagnostics) vs write
-// (network.change/apply/rollback). Apply and rollback additionally require the
-// operator to re-enter their password (Part 7 re-authentication).
+// Appliance WAN/LAN system network settings, proxied to netd (edged never touches netplan).
+// RBAC key "network": read = view/history/diagnostics; write = change/apply/rollback, with apply and rollback requiring a password step-up.
 
 import (
 	"context"
@@ -12,8 +9,6 @@ import (
 	"net/http"
 	"time"
 )
-
-// reauth (the password step-up, throttled and audited) lives in operator_signin.go.
 
 func (s *server) sysNetGet(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodGet, "/v1/system-network", nil)
@@ -56,10 +51,7 @@ func (s *server) sysNetConfirm(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
 	body := map[string]any{"Actor": sess.Email, "ActorID": sess.OperatorID, "SourceIP": clientIP(r)}
 	s.audit(r, "network.system.confirm", "system_network", "", nil)
-	// A confirmed system-network change may have moved the management IP. Trigger an
-	// idempotent Hotel Admin cert renewal (no-op if the IP/SAN are unchanged) so the
-	// certificate's IP SAN tracks the new management IP. Detached from the request so
-	// it outlives the response; the manager handles validation/rollback safely.
+	// A confirmed change may have moved the management IP: trigger an idempotent Hotel Admin cert renewal, detached from the request so it outlives the response.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 		defer cancel()

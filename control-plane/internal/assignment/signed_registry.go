@@ -8,13 +8,9 @@ import (
 	"time"
 )
 
-// SignedRegistry is a versioned, signed envelope around the assignment trust
-// registry. The plain JSON registry was unauthenticated — anyone who could write
-// the file could add a key and forge assignments. This envelope binds the key
-// list to a monotonic registry_version and validity window, and is signed by a
-// registry ROOT-OF-TRUST key whose public half is baked into the appliance at
-// manufacture (a trust anchor, distinct from the assignment-signing keys it
-// authorises).
+// SignedRegistry binds the key list to a monotonic registry_version and validity window, signed by the registry
+// root key whose public half is baked into the appliance at manufacture. The plain registry was unauthenticated:
+// anyone able to write the file could add a key and forge assignments.
 type SignedRegistry struct {
 	RegistryVersion int64        `json:"registry_version"`
 	IssuedAt        int64        `json:"issued_at"`
@@ -41,14 +37,11 @@ func regSigningBytes(sr *SignedRegistry) []byte {
 	return b
 }
 
-// SignRegistry signs the envelope with the registry root key.
 func SignRegistry(priv ed25519.PrivateKey, sr *SignedRegistry) {
 	sr.SignerKeyID = KeyID(priv.Public().(ed25519.PublicKey))
 	sr.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, regSigningBytes(sr)))
 }
 
-// VerifyRegistry checks the envelope signature against the registry root public
-// key and its validity window.
 func VerifyRegistry(rootPub ed25519.PublicKey, sr *SignedRegistry, now time.Time) string {
 	if sr == nil {
 		return "no registry"
@@ -69,13 +62,10 @@ func VerifyRegistry(rootPub ed25519.PublicKey, sr *SignedRegistry, now time.Time
 	return ""
 }
 
-// Registry returns the inner key registry (for AcceptForRegistry).
 func (sr *SignedRegistry) Registry() *Registry {
 	return &Registry{Keys: sr.Keys}
 }
 
-// LoadRootPub reads the registry root public key (raw 32-byte Ed25519) trust
-// anchor baked into the appliance.
 func LoadRootPub(path string) (ed25519.PublicKey, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// ---- C1: eligibility + tiers (pure) ----
-
 func TestCommerceConfigFailClosed(t *testing.T) {
 	if err := DefaultCommerceConfig().Validate(); err != nil {
 		t.Fatalf("all-off must be valid: %v", err)
@@ -54,13 +52,11 @@ func TestEligibilityTypedRules(t *testing.T) {
 		{"subject kind allowed", []EligibilityRule{{RuleSubjectKind, map[string]any{"kinds": []any{"ACCOUNT"}}}}, base, true},
 		{"site network allowed", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-1"}}}}, base, true},
 		{"site network denied", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-2"}}}}, base, false},
-		// A CLIENT NETWORK THAT WAS REPLACED KEEPS ITS LOGICAL IDENTITY. The rule names the network the operator
-		// chose; the device is on the successor the appliance built when a VLAN id or a port changed. Matching
-		// only the live id made every PINNED revision stop matching -- including the one an unused printed
-		// voucher redeems -- the moment a cable moved.
+		// A replaced client network keeps its logical identity: matching only the live id would stop every
+		// pinned revision (including an unused printed voucher's) matching once a VLAN id or port changed.
 		{"site network allowed through lineage", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-OLD"}}}},
 			EligibilitySubject{Now: now, AuthMethod: MethodVoucher, Kind: SubjectVoucher, GuestNetworkID: "gn-new", GuestNetworkLineage: []string{"gn-old"}}, true},
-		// ...and only BACKWARD. A rule naming some other network is not satisfied by having a lineage at all.
+		// Lineage only matches backward, never an unrelated network.
 		{"lineage does not widen to an unrelated network", []EligibilityRule{{RuleSiteNetwork, map[string]any{"guest_network_ids": []any{"gn-elsewhere"}}}},
 			EligibilitySubject{Now: now, AuthMethod: MethodVoucher, Kind: SubjectVoucher, GuestNetworkID: "gn-new", GuestNetworkLineage: []string{"gn-old"}}, false},
 		{"prior required, absent", []EligibilityRule{{RulePriorPurchase, map[string]any{"requires_prior": true}}}, base, false},
@@ -106,8 +102,6 @@ func TestGrantTierFirstMatchDeterministic(t *testing.T) {
 		t.Fatalf("PMS tier must not match; fallback to 2, got %+v ok=%v", got, ok)
 	}
 }
-
-// ---- money safety (free-only) ----
 
 func TestIsFreePackage(t *testing.T) {
 	ok, _ := IsFreePackage(MoneySpec{PriceMinor: 0, Currency: "USD", CurrencyExponent: 2, SettlementMethods: []string{"NOT_REQUIRED"}})

@@ -1,8 +1,6 @@
 /**
- * Assisted guest data requests (migration 0146). A device address, a room, a reservation credential or a shared device
- * does not show who a person is. Staff verify the requester and state what they saw; the database sorts every record in
- * the range into a class and only the ones established as the requester's can be handed over or anonymised. These are
- * the words for those classes, reasons and refusals, kept in step with the database by test/guest-data-assisted-words.
+ * Words for assisted guest-data classes, reasons and refusals; kept in step with the database by
+ * test/guest-data-assisted-words.
  */
 
 export type RecordClass = "ATTRIBUTABLE" | "CLAIMABLE" | "SHARED" | "CONFLICTING" | "UNVERIFIABLE";
@@ -35,7 +33,6 @@ export const CLASS_WORDS: Record<RecordClass, { label: string; tone: "ok" | "inf
   },
 };
 
-/** Why a record is in its class: the database's reason codes. */
 export const REASON_WORDS: Record<string, string> = {
   own_account_or_identity: "Made with the requester’s own account or sign-in identity.",
   access_of_the_stated_context: "The access of the reservation or account the requester named, on an address no one else has used.",
@@ -53,7 +50,6 @@ export const REASON_WORDS: Record<string, string> = {
   device_has_records_outside_the_request: "The device has other records outside this range or address list, so its identity row cannot be anonymised.",
 };
 
-/** Why an erasure cannot run on a record now. */
 export const BLOCK_WORDS: Record<string, string> = {
   recent: "Less than a day old: the sign-in protection may still count it. Try again tomorrow.",
   live: "Still in use (a live entitlement, session or restriction). Try again when it has ended.",
@@ -70,7 +66,6 @@ export const KIND_WORDS: Record<string, string> = {
   device: "Device identity",
 };
 
-/** What the server says when it refuses, by its code. */
 export const REFUSAL_WORDS: Record<string, string> = {
   closed: "This request is already closed.",
   changed: "The records changed after you reviewed them. They have been reloaded: review them again before confirming.",
@@ -99,7 +94,6 @@ export const PURPOSE_WORDS: Record<string, string> = {
 
 export const STATUS_TONE: Record<string, "ok" | "neutral" | "info"> = { OPEN: "info", COMPLETED: "ok", CANCELLED: "neutral" };
 
-/** Device addresses, one per line or separated by commas, spaces or semicolons. */
 export function parseAddresses(text: string): { ok: string[]; bad: string[] } {
   const ok: string[] = [];
   const bad: string[] = [];
@@ -135,7 +129,6 @@ function bytes(n: unknown): string {
   return `${(v / 1024 ** 3).toFixed(2)} GB`;
 }
 
-/** One line saying what a record would disclose, so staff review the exact records. */
 export function describeDetail(kind: string, d: Record<string, unknown> | null | undefined): string {
   if (!d) return "";
   const parts: (string | undefined | null | false)[] = [];
@@ -168,7 +161,6 @@ export function describeDetail(kind: string, d: Record<string, unknown> | null |
   return parts.filter(Boolean).join(" · ");
 }
 
-/** The wording of what handing over or anonymising does, for the confirmation dialogs. */
 export const ASSISTED_EXPORT_NOTE =
   "Only the selected records are written to the file, with the request’s reference. Records of other people, shared access and anything not selected are not included. The request stays open until you close it.";
 

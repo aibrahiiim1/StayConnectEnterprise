@@ -1,18 +1,7 @@
 package main
 
-// CHOOSE A DEVICE TO REPLACE (docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md, migration 0118).
-//
-// A client signs in on a new device, and the package they hold already has all its devices in use. Until now the
-// answer was a sentence -- "Disconnect another device and try again" -- with nothing to disconnect it with: the
-// slot of a device that had signed out was still held, so the client was stuck. This page lists the package's
-// devices and lets the client choose the one this device replaces. scd takes that device off the network and moves
-// its slot to this one in one transaction (client_devices.go); the package's time, data and owner do not change.
-//
-// The proof is the client's fresh sign-in on THIS device (the commerce session's auth context, which never leaves
-// the server); the only thing the browser sends is which of the listed devices to replace.
-//
-//	GET  /devices/replace   the choice
-//	POST /devices/replace   device_id=<one of the listed ids>
+// Choose a device to replace when all of the package's devices are in use; scd moves the slot atomically (client_devices.go).
+// Proof is the fresh sign-in on this device; the browser sends only the device_id to replace (GET shows the choice, POST replaces).
 
 import (
 	"bytes"
@@ -30,8 +19,8 @@ type replaceRow struct {
 	ID       string
 	Name     string
 	Online   bool
-	LastSeen string // RFC 3339, rendered by the page's script in the device's own clock
-	Label    string // the button's accessible name
+	LastSeen string
+	Label    string
 }
 
 type replaceView struct {
@@ -47,7 +36,6 @@ type replaceView struct {
 
 func fillWord(s, key, val string) string { return strings.ReplaceAll(s, "{"+key+"}", val) }
 
-// scdDevices calls one of scd's client device routes over the trusted socket.
 func (h *handler) scdDevices(r *http.Request, path string, body map[string]string) (scdDeviceResp, bool) {
 	var out scdDeviceResp
 	raw, _ := json.Marshal(body)
@@ -68,7 +56,6 @@ func (h *handler) scdDevices(r *http.Request, path string, body map[string]strin
 	return out, json.Unmarshal(b, &out) == nil
 }
 
-// replaceDeviceIdentity is the request's device and fresh sign-in, or a refusal already rendered.
 func (h *handler) replaceDeviceIdentity(w http.ResponseWriter, r *http.Request) (commerceSession, map[string]string, bool) {
 	sess, ok := h.resolveCommerceSession(r)
 	if !ok {
@@ -88,7 +75,6 @@ func (h *handler) replaceDeviceIdentity(w http.ResponseWriter, r *http.Request) 
 	return sess, map[string]string{"ip": ipString(ip), "mac": mac.String(), "auth_context_id": sess.authContextID}, true
 }
 
-// replacePage serves GET /devices/replace.
 func (h *handler) replacePage(w http.ResponseWriter, r *http.Request) {
 	sess, dev, ok := h.replaceDeviceIdentity(w, r)
 	if !ok {
@@ -121,23 +107,19 @@ func (h *handler) renderReplace(w http.ResponseWriter, r *http.Request, sess com
 	if errKey != "" {
 		v.Error = p.T[errKey]
 	}
-	// THE SAME NUMBERS AS "YOUR DEVICES" (audit P-28): a device is numbered by its place in the package's list,
-	// the order the online page's panel uses, so "Device 2" here is "Device 2" there. This device is skipped, not
-	// renumbered around.
+	// Devices are numbered by place in the package's list, as on the online page, so "Device 2" matches; this device is skipped, not renumbered around.
 	for i, d := range list.Devices {
 		if d.ThisDevice {
 			continue
 		}
 		name := fillWord(p.T["dev.name"], "n", strconv.Itoa(i+1))
 		v.Devices = append(v.Devices, replaceRow{ID: d.ID, Name: name, Online: d.Online, LastSeen: d.LastSeen,
-			// One accessible name per button (audit P-24): "Device 2 — Use this device instead", not the same
-			// words on every row.
+			// One accessible name per button.
 			Label: name + " — " + p.T["rep.btn"]})
 	}
 	_ = replaceTmpl.Execute(w, v)
 }
 
-// replaceDevice serves POST /devices/replace.
 func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 	sess, dev, ok := h.replaceDeviceIdentity(w, r)
 	if !ok {
@@ -152,10 +134,7 @@ func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 		h.renderReplace(w, r, sess, dev, "dev.refused")
 		return
 	}
-	// ONE CHANGE, HOWEVER MANY TAPS (audit P-10). Once scd has moved a place to this device, the change is done:
-	// what can still fail is only bringing this device online. A second tap -- the page shown again after that
-	// failure, a reload, a double tap -- retries the activation on the place this device already holds instead of
-	// replacing (and disconnecting) another device and spending a second of the day's changes.
+	// One change however many taps: once scd moved a place to this device, a retry activates on that place instead of replacing and disconnecting another device.
 	ent := sess.replacedEntitlement
 	if ent == "" {
 		body := map[string]string{"ip": dev["ip"], "mac": dev["mac"], "auth_context_id": dev["auth_context_id"], "device_id": target}
@@ -199,8 +178,7 @@ func (h *handler) replaceDevice(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
 }
 
-// toReplace sends a client refused at the device limit to the choice, keeping their sign-in for it. token is the
-// commerce session's cookie value when it is being issued in this same response ("" when the cookie exists).
+// toReplace sends a client refused at the device limit to the choice, keeping their sign-in; token is the commerce cookie value when issued in this same response.
 func (h *handler) toReplace(w http.ResponseWriter, r *http.Request, sess commerceSession, token string, asJSON bool) {
 	if token != "" && h.commerceSessions != nil {
 		h.commerceSessions.put(token, sess)

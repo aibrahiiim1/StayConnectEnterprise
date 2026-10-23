@@ -2,22 +2,9 @@
 
 package pmsresolve
 
-// REPLAY IS A PROPERTY OF SUCCESS.
-//
-// A resolution request id exists so that ONE identity proof cannot become two: a double tap, or a reply the
-// guest's phone never received, must converge on the one recorded resolution and the one Auth Context. That
-// is a statement about a proof that SUCCEEDED.
-//
-// It was also being applied to refusals, and there it was wrong in a way that reached real guests. The portal
-// carried one id for a whole page, so a guest who mistyped a surname and corrected it submitted the corrected
-// value under the id that already carried their typo. The resolver replayed the stored NO_MATCH without
-// probing anything, the portal rendered the single uniform failure sentence, and the correction was never
-// compared against the mirror at all. Nothing looked broken from either end.
-//
-// These assert the corrected rule directly at the resolver, where it is enforced: a stored success is
-// replayed and never re-probed; a stored refusal is re-evaluated and never replayed; and a refusal that the
-// re-evaluation would turn into a success fails closed, because the record is append-only and access whose
-// authority cannot be written down is access this system does not grant.
+// Replay applies to success only: a stored success is replayed and never re-probed; a stored refusal is
+// re-evaluated (a corrected typo shares the page's request id); a refusal re-evaluation would turn into a
+// success fails closed, since the record is append-only.
 
 import (
 	"context"
@@ -25,10 +12,7 @@ import (
 	"testing"
 )
 
-// A REFUSED REQUEST ID IS RE-EVALUATED, NOT REPLAYED.
-//
-// The counter is the whole assertion. "Refused again" is the same answer either way, so the only way to tell
-// a genuine evaluation from a replayed record is whether the probes actually ran.
+// The probe counter is the assertion: "refused again" looks the same replayed or re-evaluated.
 func TestIntegration_ARefusedResolutionIsReEvaluatedNotReplayed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -62,19 +46,15 @@ func TestIntegration_ARefusedResolutionIsReEvaluatedNotReplayed(t *testing.T) {
 	if second.Resolution != ResNoMatch {
 		t.Fatalf("second resolution = %s, want the freshly evaluated NO_MATCH", second.Resolution)
 	}
-	// Re-evaluation does not duplicate the record: the id already has its row, and the append-only table keeps it.
+	// Re-evaluation does not duplicate the record.
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.auth_resolutions
 		 WHERE tenant_id=$1 AND site_id=$2 AND resolution_request_id=$3`, f.tenant, f.site, req); n != 1 {
 		t.Fatalf("resolutions recorded for one request id = %d, want 1", n)
 	}
 }
 
-// A SPENT ID CANNOT BE PROMOTED INTO A SUCCESS.
-//
-// scd holds INSERT on iam_v2.auth_resolutions and deliberately not UPDATE, so the refusal already recorded
-// under this id cannot be corrected. Answering VERIFIED anyway would admit a guest whose authority no row
-// records. No conforming caller reaches this — one deliberate submission carries one id — so it is the
-// signature of a client re-using a spent id, and it fails closed.
+// A spent id cannot become a success: scd has no UPDATE on iam_v2.auth_resolutions, so answering VERIFIED
+// would admit a guest whose authority no row records.
 func TestIntegration_ASpentRefusalCannotBecomeASuccess(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -107,7 +87,7 @@ func TestIntegration_ASpentRefusalCannotBecomeASuccess(t *testing.T) {
 	if second.Resolution != ResIndeterminate || second.Reason != ReasonSpentOnRefusal {
 		t.Fatalf("outcome=%s reason=%s, want INDETERMINATE/%s", second.Resolution, second.Reason, ReasonSpentOnRefusal)
 	}
-	// The original record is untouched, and no second row was written under the same id.
+	// The original record is untouched and no second row was written.
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.auth_resolutions
 		 WHERE tenant_id=$1 AND site_id=$2 AND resolution_request_id=$3
 		   AND outcome_code='NO_MATCH' AND resolved_stay_id IS NULL`, f.tenant, f.site, req); n != 1 {
@@ -115,9 +95,7 @@ func TestIntegration_ASpentRefusalCannotBecomeASuccess(t *testing.T) {
 	}
 }
 
-// AND THE SUCCESS SIDE STILL HOLDS. A stored VERIFIED resolution is replayed verbatim, with no probe re-run
-// and no second row — the property that stops a retry becoming a second Auth Context. Asserted here beside
-// its opposite so the two rules are read together and neither can be relaxed on its own.
+// A stored VERIFIED resolution is replayed verbatim with no probe and no second row, so a retry can't become a second Auth Context.
 func TestIntegration_ASuccessfulResolutionIsStillReplayed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

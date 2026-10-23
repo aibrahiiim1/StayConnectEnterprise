@@ -14,18 +14,14 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// RegistryBase builds, signs and serves the SIGNED assignment trust registry.
-// The registry lists every assignment-signing key + its state; it is signed by
-// the registry ROOT key (a manufacture-time trust anchor on the appliance) and
-// versioned so the edge can reject rollbacks and forgeries.
+// RegistryBase builds, signs and serves the assignment trust registry: every signing key and its state, signed by
+// the root key and versioned so the edge can reject rollbacks and forgeries.
 type RegistryBase struct {
 	*Base
 	RootKey ed25519.PrivateKey
 }
 
-// Rebuild reads the current assignment-signing keys, mints the NEXT registry
-// version, signs it with the root key and stores it as the current registry.
-// Call it after any key-state change (new key, verify_only, revoke) and on boot.
+// Rebuild mints the next registry version. Call it after any key-state change and on boot.
 func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.SignedRegistry, error) {
 	if b.RootKey == nil {
 		return nil, nil // registry signing disabled
@@ -57,7 +53,7 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 		RegistryVersion: ver,
 		IssuedAt:        now.Unix(),
 		NotBefore:       now.Add(-5 * time.Minute).Unix(), // clock-skew tolerance
-		NotAfter:        0,                                // durable — no upper bound
+		NotAfter:        0,
 		Keys:            keys,
 	}
 	assignment.SignRegistry(b.RootKey, sr)
@@ -85,7 +81,6 @@ func (b *RegistryBase) Rebuild(ctx context.Context, reason string) (*assignment.
 	return sr, nil
 }
 
-// Serve returns the current signed registry to an appliance (mTLS).
 func (b *RegistryBase) Serve(w http.ResponseWriter, r *http.Request) {
 	if ident := auth.ApplianceFromContext(r.Context()); ident == nil {
 		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "appliance identity required")

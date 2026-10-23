@@ -2,19 +2,12 @@
 
 package posting
 
-// PHASE-0 AMENDMENT A1 (D46), on the FULL appliance schema: a room charge targets the RESERVATION (RN + G#).
+// A room charge targets the reservation: G# is pinned at purchase, RN is refreshed before each attempt;
+// pmsd refuses a command whose room no longer matches (NOT_SENT); a PA is "not posted" only for a
+// vendor-confirmed code, else UNKNOWN; one unresolved charge per stay.
 //
-//   - G# is stable and pinned at purchase; RN is mutable and refreshed immediately before each attempt;
-//   - pmsd's authorisation refuses a command whose room is no longer the reservation's (NOT_SENT, not a failure);
-//   - once written, an attempt is immutable: its PA or timeout decides, and nothing is resent automatically;
-//   - a PA is "not posted" only for a code the vendor confirmed on the interface, otherwise UNKNOWN;
-//   - confirmed NP / NG / NR block the stay as the contract says, NA / RY do not, and no operator can lift a
-//     Protel block; UNKNOWN blocks until its review;
-//   - one unresolved room charge per stay; terminal charges do not prevent the next purchase;
-//   - a stay that stops being postable before sending ends the charge as definitely not posted.
-//
-// Set ROOMCHARGE_TEST_DSN to a database built by scripts/sitedb-dev.sh. No test here reaches a PMS: every
-// transport is an in-process script, and the one that plays pmsd asks the database exactly what pmsd asks.
+// Set ROOMCHARGE_TEST_DSN to a database built by scripts/sitedb-dev.sh. No test reaches a PMS: transports
+// are in-process scripts.
 
 import (
 	"context"
@@ -30,10 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ---- helpers -------------------------------------------------------------------------------------------
-
-// rcWorker is the pool the posting engine runs on: the real least-privilege worker login (svc_posting) when
-// ROOMCHARGE_WORKER_DSN is set, so these tests prove the worker's grants suffice; the admin pool otherwise.
+// rcWorker returns the least-privilege svc_posting pool when ROOMCHARGE_WORKER_DSN is set (proving its
+// grants suffice), else the admin pool.
 func rcWorker(t *testing.T, admin *pgxpool.Pool) *pgxpool.Pool {
 	t.Helper()
 	if os.Getenv("ROOMCHARGE_WORKER_DSN") == "" {
@@ -49,7 +40,7 @@ func confirmAnswer(t *testing.T, p *pgxpool.Pool, s rcScope, code string) {
 		s.tenant, s.site, s.iface, code, s.op)
 }
 
-// moveRoom is what an applied GC does to the stay: the SAME reservation, a new current room.
+// moveRoom models an applied GC: the same reservation, a new current room.
 func moveRoom(t *testing.T, p *pgxpool.Pool, s rcScope, room string) {
 	t.Helper()
 	rcGuarded(t, p, "stay", `UPDATE iam_v2.stays SET normalized_room_number=$2 WHERE id=$1 RETURNING id::text`, s.stay, room)
@@ -59,7 +50,7 @@ func moveRoom(t *testing.T, p *pgxpool.Pool, s rcScope, room string) {
 	}
 }
 
-// freshEvidence is what an applied guest record (or resync record) stamps: new occupancy evidence, now.
+// freshEvidence stamps new occupancy evidence, as an applied guest or resync record does.
 func freshEvidence(t *testing.T, p *pgxpool.Pool, s rcScope) {
 	t.Helper()
 	rcGuarded(t, p, "stay", `UPDATE iam_v2.stays SET occupancy_evidence_at = clock_timestamp(), occupancy_ingested_at = now(),
@@ -123,10 +114,9 @@ func attempts(t *testing.T, p *pgxpool.Pool, posting string) []attemptRow {
 	return out
 }
 
-// pmsdLike is a transport that behaves as pmsd does at the first-byte boundary: before "writing", it runs an
-// optional hook (e.g. the PMS moving the guest), then asks the database the exact question pmsd asks
-// (p4_posting_command_authorised). A refusal is answered NOT_TRANSMITTED with pmsd's reason; an authorised
-// command is "written" and answered by answer (nil answer = no PA: UNKNOWN).
+// pmsdLike mimics pmsd at the first-byte boundary: it runs an optional hook, then asks the database
+// (p4_posting_command_authorised). A refusal is NOT_TRANSMITTED; an authorised command is "written" and
+// answered by answer (nil answer = no PA: UNKNOWN).
 type pmsdLike struct {
 	db       *pgxpool.Pool
 	iface    string
@@ -179,15 +169,12 @@ func answerWith(as string) func(int64) (*PA, error) {
 	return func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: as}, nil }
 }
 
-// ---- E14 / E5: posting permission is evaluated by the database ------------------------------------------
-
 func TestA1_PostingPermissionIsEvaluatedNotAssumed(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
 	if ok, reason := stayPermission(t, admin, s); !ok || reason != "" {
 		t.Fatalf("an in-house stay with a reservation and no block is postable: %v %q", ok, reason)
 	}
-	// ADMIN_BLOCK is the only block an operator sets or clears.
 	if r := scan1[string](t, admin, `SELECT iam_v2.p4_admin_posting_block($1,$2,$3,'SET','front desk hold',$4)`,
 		s.tenant, s.site, s.stay, s.op); r != "SET" {
 		t.Fatalf("set: %s", r)
@@ -208,9 +195,8 @@ func TestA1_PostingPermissionIsEvaluatedNotAssumed(t *testing.T) {
 	}
 }
 
-// THE OFFER-TIME FRESHNESS READER (migrations 0101/0102). scd asks it, as svc_scd, before offering Room charge:
-// true for a fresh, onboarded interface, false once the feed is not fresh. The first version read "no block"
-// (NULL) as a block, so Room charge was never offered on PRE-LIVE.
+// scd asks the freshness reader, as svc_scd, before offering Room charge: true only for a fresh, onboarded
+// interface. A NULL "no block" must not be read as a block.
 func TestA1_OfferFreshnessReaderAnswersFreshAndStale(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -226,10 +212,7 @@ func TestA1_OfferFreshnessReaderAnswersFreshAndStale(t *testing.T) {
 	}
 }
 
-// ---- E18 room-move races -------------------------------------------------------------------------------
-
-// Case 1: the room moves BEFORE the purchase. The posting pins the reservation; the attempt carries the room
-// the reservation has now.
+// The room moves before the purchase: the posting pins the reservation, the attempt carries the current room.
 func TestA1_RoomMoveBeforePurchase(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -247,8 +230,7 @@ func TestA1_RoomMoveBeforePurchase(t *testing.T) {
 	}
 }
 
-// Case 2: the room moves AFTER the purchase and BEFORE the attempt is created. The purchase is NOT failed; the
-// attempt is built with the new room and the same reservation.
+// A room move after the purchase but before the attempt does not fail the purchase.
 func TestA1_RoomMoveAfterPurchaseBeforeAttempt(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -268,9 +250,8 @@ func TestA1_RoomMoveAfterPurchaseBeforeAttempt(t *testing.T) {
 	}
 }
 
-// Case 3: the attempt is built for RN1421/G#, then the guest moves (GC) to RN205 before the socket write.
-// pmsd refuses the prepared command (ROOM_CHANGED): the RN1421 PS is never written, the attempt is NOT_SENT,
-// and the next attempt carries RN205 and the same G#. That is not a retry: nothing was transmitted.
+// The guest moves between attempt creation and the socket write: pmsd refuses the command (ROOM_CHANGED),
+// the attempt is NOT_SENT, and the next attempt carries the new room. Not a retry: nothing was transmitted.
 func TestA1_RoomMoveAfterAttemptBeforeWrite(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -311,8 +292,8 @@ func TestA1_RoomMoveAfterAttemptBeforeWrite(t *testing.T) {
 	}
 }
 
-// Case 5: the PS is written, then the guest moves and no PA arrives. RN205 is never sent automatically; the
-// original attempt stays authoritative (UNKNOWN), and UNKNOWN blocks any new room charge until review.
+// PS written, guest moves, no PA: the new room is never sent automatically, the original attempt stays
+// UNKNOWN, and UNKNOWN blocks any new room charge until review.
 func TestA1_RoomMoveAfterWriteBeforePA(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -346,7 +327,7 @@ func TestA1_RoomMoveAfterWriteBeforePA(t *testing.T) {
 	}
 }
 
-// Case 6: after the PA, a room move changes nothing about the posted attempt; a later purchase uses the new room.
+// After the PA, a room move changes nothing about the posted attempt; a later purchase uses the new room.
 func TestA1_RoomMoveAfterPAAndSequentialPurchase(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -370,8 +351,6 @@ func TestA1_RoomMoveAfterPAAndSequentialPurchase(t *testing.T) {
 	}
 }
 
-// ---- E16: one unresolved room charge per stay ------------------------------------------------------------
-
 func TestA1_OneUnresolvedChargePerStay(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -392,8 +371,6 @@ func TestA1_OneUnresolvedChargePerStay(t *testing.T) {
 	}
 	createRoomCharge(t, admin, s)
 }
-
-// ---- E15 / E17: the answer decides, conservatively --------------------------------------------------------
 
 func TestA1_UnconfirmedRefusalIsUnknown(t *testing.T) {
 	for _, code := range []string{"NP", "NG", "NR", "NA", "RY", "UR"} {
@@ -474,8 +451,8 @@ func TestA1_ConfirmedAnswersHaveTheirStayEffect(t *testing.T) {
 	}
 }
 
-// No operator can lift a Protel block to permit another charge (A1 rule 9). NP is cleared only by explicit
-// Protel data (the feed carries none, so it stays); NG/NR data-suspect is cleared by FRESH valid data.
+// No operator can lift a Protel block. NP is cleared only by explicit Protel data (the feed carries
+// none); NG/NR data-suspect clears on fresh valid data.
 func TestA1_ProtelBlocksAreNotOperatorClearable(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -518,8 +495,6 @@ func TestA1_DataSuspectClearsOnFreshValidData(t *testing.T) {
 	}
 }
 
-// ---- E4: the stay stops being postable before sending ----------------------------------------------------
-
 func TestA1_AbortBeforeSendWhenTheStayIsNoLongerPostable(t *testing.T) {
 	for name, change := range map[string]func(t *testing.T, p *pgxpool.Pool, s rcScope){
 		"checked out": func(t *testing.T, p *pgxpool.Pool, s rcScope) {
@@ -556,8 +531,7 @@ func TestA1_AbortBeforeSendWhenTheStayIsNoLongerPostable(t *testing.T) {
 	}
 }
 
-// A charge that may have been transmitted is never aborted: a reviewed retry whose stay then checks out goes
-// back to review instead.
+// A possibly-transmitted charge is never aborted; a reviewed retry whose stay checks out goes back to review.
 func TestA1_ReviewedRetryIsNeverAbortedAfterTransmission(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -618,8 +592,8 @@ func TestA1_ReviewedRetryIsNotBlockedByItsOwnUnresolvedBlock(t *testing.T) {
 	}
 }
 
-// pmsd's authorisation, directly: a command whose stay checked out, or whose reservation or room no longer
-// matches, is refused before any byte (it is what makes case 3 true in production).
+// pmsd's authorisation refuses, before any byte, a command whose stay checked out or whose reservation
+// or room no longer matches.
 func TestA1_PmsdAuthorisationFollowsTheReservation(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)

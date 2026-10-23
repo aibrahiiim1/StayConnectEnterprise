@@ -1,11 +1,8 @@
 package signinattempt
 
-// THE NETWORK PAUSE (migration 0136; GDPR audit 2026-10-19, A4).
-//
-// The per-device rule is defeated by changing the MAC address, so wrong room sign-ins are also counted per
-// guest NETWORK, whichever devices they came from. When a network reaches its threshold, room sign-in there is
-// paused for a while; staff can end the pause, or confirm a genuine guest's device so it may try again. The
-// thresholds and every decision live in the database functions; this file calls them.
+// The per-device rule is defeated by changing MAC, so wrong room sign-ins are also counted per guest
+// network. At the threshold, room sign-in there pauses; staff can end the pause or confirm a genuine
+// guest's device. Thresholds and decisions live in the database functions.
 
 import (
 	"context"
@@ -17,15 +14,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// NetworkPolicy is a site's network-pause settings.
 type NetworkPolicy struct {
 	MaxFailures   int // wrong room sign-ins on one network
 	WindowSeconds int // within this rolling window
 	PauseSeconds  int // pause room sign-in there for this long
 }
 
-// The accepted bounds, matching the CHECK of migration 0136. The lower threshold keeps a busy network's
-// ordinary typing mistakes from pausing it; the upper bounds keep a mistyped setting from pausing for a day.
+// Bounds match the database CHECK. The lower threshold keeps ordinary typing mistakes on a busy network from
+// pausing it; the upper bounds keep a mistyped setting from pausing for a day.
 const (
 	MinNetworkFailures      = 10
 	MaxNetworkFailures      = 1000
@@ -35,12 +31,10 @@ const (
 	MaxNetworkPauseSeconds  = 3600
 )
 
-// NetworkDefaults are the approved defaults: 30 wrong room sign-ins in 10 minutes pause it for 15 minutes.
 func NetworkDefaults() NetworkPolicy {
 	return NetworkPolicy{MaxFailures: 30, WindowSeconds: 600, PauseSeconds: 900}
 }
 
-// Validate reports why the settings are unacceptable, or nil.
 func (p NetworkPolicy) Validate() error {
 	if p.MaxFailures < MinNetworkFailures || p.MaxFailures > MaxNetworkFailures {
 		return fmt.Errorf("wrong room sign-ins before a pause must be between %d and %d (got %d)",
@@ -80,8 +74,6 @@ func (s *ProtectionStore) CheckNetwork(ctx context.Context, tenantID, siteID, ne
 	return g, nil
 }
 
-// NoteNetworkFailure reports one wrong room sign-in on a network, after its attempt row is written, and says
-// whether it started a pause.
 func (s *ProtectionStore) NoteNetworkFailure(ctx context.Context, tenantID, siteID, networkID, networkName string) (pausedNow bool, expiresAt *time.Time, count int, err error) {
 	if s == nil || s.pool == nil || networkID == "" {
 		return false, nil, 0, nil

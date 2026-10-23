@@ -1,18 +1,8 @@
 package mail
 
-// SendGrid v3 Mail API — REST-only, no SDK needed.
-//
-// Endpoint: POST https://api.sendgrid.com/v3/mail/send
-// Auth:     Authorization: Bearer <api_key>
-// Body:     application/json (per https://docs.sendgrid.com/api-reference/mail-send/mail-send)
-//
-// Successful sends respond with 202 Accepted and an empty body. Errors
-// arrive as 4xx/5xx with a {errors:[{message,field}]} JSON body — we
-// surface the first message verbatim so operators don't need to parse.
-//
-// Tracking is switched off on every message (GDPR plan F4): otherwise the SendGrid account's defaults decide,
-// and click tracking rewrites the verification and reset links while open tracking reports when a guest read
-// the mail.
+// SendGrid v3 Mail API over REST (POST /v3/mail/send, Bearer auth). Success is 202; errors surface the first
+// {errors:[{message}]} message verbatim. Tracking is switched off on every message: click tracking rewrites the
+// verification and reset links and open tracking reports when a guest read the mail.
 
 import (
 	"bytes"
@@ -35,8 +25,7 @@ type SendGrid struct {
 	HTTPClient  *http.Client // optional override; defaults to a 10s-timeout client
 }
 
-// NewSendGrid wires a sender. apiKey, fromAddress are required; fromName
-// is optional (SendGrid renders just the address otherwise).
+// NewSendGrid wires a sender; fromName is optional.
 func NewSendGrid(apiKey, fromAddress, fromName string) (*SendGrid, error) {
 	if apiKey == "" || fromAddress == "" {
 		return nil, errors.New("sendgrid: api_key and from_address are required")
@@ -86,8 +75,7 @@ func (s *SendGrid) Send(ctx context.Context, m Message) error {
 	if resp.StatusCode == http.StatusAccepted {
 		return nil
 	}
-	// Best-effort error extraction; cap body read to avoid OOM on huge
-	// responses (shouldn't happen but defensive).
+	// Best-effort error extraction; the body read is capped.
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	var e sgError
 	if json.Unmarshal(b, &e) == nil && len(e.Errors) > 0 {

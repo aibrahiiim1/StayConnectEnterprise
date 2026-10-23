@@ -1,10 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
-// THE ONEGATE TYPE ROLES ARE FONT SIZES, AND tailwind-merge MUST BE TOLD SO. Out of the box it reads any
-// unknown `text-*` as a text COLOUR, so `cn("text-caption", "text-muted-foreground")` silently dropped the size
-// and kept the colour -- the role never reached the page. Registering the roles in the font-size group makes
-// a size and a colour coexist, and two sizes resolve to the last one, as they should.
+// tailwind-merge reads unknown `text-*` as a colour, so the type roles are registered as font sizes or `cn` drops the
+// size.
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
@@ -36,9 +34,7 @@ export function formatDate(s: string): string {
   }
 }
 
-// errMsg turns any thrown value into a string, appending the server trace id
-// from ApiError when present. Use this when storing errors as plain strings;
-// use <ErrorBanner err={...} /> when you can store the raw error.
+// errMsg turns any thrown value into a string, appending the ApiError trace id when present.
 import type { ApiError } from "./api";
 export function errMsg(e: unknown): string {
   if (!e) return "";

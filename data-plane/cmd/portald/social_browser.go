@@ -1,13 +1,8 @@
 package main
 
-// "OPEN IN YOUR BROWSER" (contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5).
-//
-// Google and Facebook refuse to sign anyone in inside an Android WebView -- the old captive-portal login
-// window, whose user agent carries "; wv)". Sending a guest there produces the provider's own refusal page
-// ("disallowed_useragent") with no way back. So for exactly those two providers in exactly that window the
-// portal does not start an attempt at all: it shows the portal's address, a button to copy it, and the way
-// back to the other sign-in methods. Apple and Microsoft sign in fine in a WebView and proceed as usual; so
-// does every provider in a real browser or an Android Custom Tab (whose user agent is Chrome's, without wv).
+// Google and Facebook refuse sign-in inside an Android WebView (the captive-portal login window, user agent with "; wv)"),
+// leaving the guest on a dead-end refusal. For those two providers there, no attempt starts: the page shows the portal
+// address to copy and the way back. Other providers and real browsers or Custom Tabs proceed as usual.
 
 import (
 	"html/template"
@@ -16,15 +11,14 @@ import (
 	"strings"
 )
 
-// isAndroidWebView reports the Android WebView marker. Chrome Custom Tabs and the Chrome app do not carry it.
+// Chrome Custom Tabs and the Chrome app do not carry the WebView marker.
 func isAndroidWebView(ua string) bool { return strings.Contains(ua, "; wv)") }
 
-// refusesEmbeddedBrowser names the providers that refuse sign-in inside a WebView.
 func refusesEmbeddedBrowser(provider string) bool {
 	return provider == "google" || provider == "facebook"
 }
 
-// providerDisplayName is the provider's own name; it is a brand and never translated.
+// Provider names are brands and never translated.
 func providerDisplayName(provider string) string {
 	switch provider {
 	case "google":
@@ -39,11 +33,8 @@ func providerDisplayName(provider string) string {
 	return provider
 }
 
-// portalAddress is the address a guest should open in their own browser: https://<canonical>/ while HTTPS is
-// active, from portald's own view of scd's portal state (portal_https.go). While that view says HTTPS is not
-// active there is no HTTPS address to give. A handler with no view at all (tests' literal handlers) falls back
-// to the host this request arrived on over TLS -- the guest is evidently reaching the portal by that name. Over
-// plain HTTP the page shows only its instructions and the way back.
+// portalAddress is https://<canonical>/ while HTTPS is active; with no view at all (tests' literal handlers) it falls
+// back to the host this TLS request arrived on. Over plain HTTP with HTTPS inactive there is no address to give.
 func (h *handler) portalAddress(r *http.Request) string {
 	if h != nil && h.portalTLS != nil {
 		st := h.tlsState()
@@ -64,8 +55,7 @@ func (h *handler) portalAddress(r *http.Request) string {
 	return ""
 }
 
-// validHostname accepts a DNS name (not an address) of letters, digits, hyphens and dots. Anything else -- a
-// Host header a client invented -- is not repeated back on the page.
+// validHostname: anything else (a Host header a client invented) is not repeated back on the page.
 func validHostname(h string) bool {
 	if h == "" || len(h) > 253 || net.ParseIP(h) != nil || !strings.Contains(h, ".") {
 		return false
@@ -86,7 +76,6 @@ type openBrowserView struct {
 
 var openBrowserTmpl = template.Must(template.New("open-browser").Parse(compactMarkup(openBrowserHTML)))
 
-// renderOpenInBrowser draws the interstitial. 200: nothing failed; the guest is being told where to go.
 func (h *handler) renderOpenInBrowser(w http.ResponseWriter, r *http.Request, provider string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

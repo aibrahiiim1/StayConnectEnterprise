@@ -11,10 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// FLEET READS: the appliance row, the appliance detail, the licence list and the overview. Every appliance
-// state in them comes from DeriveState over facts read by queryAppliances — one query, one function.
+// Every appliance state in the fleet reads comes from DeriveState over facts read by queryAppliances.
 
-// LicenseSummary is the licence block of an appliance row.
 type LicenseSummary struct {
 	ID                        *string    `json:"id"`
 	State                     string     `json:"state"`
@@ -26,7 +24,6 @@ type LicenseSummary struct {
 	Modules                   []string   `json:"modules"` // null with no licence; [] = core only
 }
 
-// ApplianceRow is the row shape every appliance list returns (§6).
 type ApplianceRow struct {
 	ID           string         `json:"id"`
 	Serial       string         `json:"serial"`
@@ -46,18 +43,14 @@ type ApplianceRow struct {
 	RegisteredAt time.Time      `json:"registered_at"`
 	ActivatedAt  *time.Time     `json:"activated_at"`
 	OpenAlerts   int            `json:"open_alerts"`
-	// HoldsCustomerID is the customer whose data the appliance reported still holding at its last registration
-	// (null = none reported); it can be activated only for that customer. HoldsCustomerName is null when that
-	// customer is no longer in Central.
+	// HoldsCustomerID is the customer whose data the appliance reported holding at its last registration; it
+	// activates only for that customer. HoldsCustomerName is null when that customer is gone from Central.
 	HoldsCustomerID   *string `json:"holds_customer_id"`
 	HoldsCustomerName *string `json:"holds_customer_name"`
-	// OfflineRequestPending: an imported offline activation request is on file and not yet consumed, so an
-	// activation package CAN be generated. Without one the package endpoint refuses, so the console offers it
-	// only when this is true.
+	// OfflineRequestPending: an unconsumed offline activation request is on file; without one the package endpoint refuses.
 	OfflineRequestPending bool `json:"offline_request_pending"`
-	// ActivatingOn says what an "activating" appliance still lacks, so the console can say it plainly:
-	// "certificate_reissue" (its certificate was revoked for reissue and the appliance has not yet sent the
-	// new CSR), "certificate" (it never held one), "license" (no licence yet). Empty in every other state.
+	// ActivatingOn says what an "activating" appliance lacks: "certificate_reissue" (revoked for reissue, new CSR
+	// not yet sent), "certificate" (never held one) or "license". Empty in every other state.
 	ActivatingOn string `json:"activating_on,omitempty"`
 
 	lifecycle          string
@@ -211,7 +204,6 @@ func filterAppliances(rows []ApplianceRow, siteID, activation, connection, licen
 	return out
 }
 
-// loadOne returns one appliance the caller may see, or writes 404.
 func (b *Base) loadOne(w http.ResponseWriter, r *http.Request, scope Scope, id string) (*ApplianceRow, bool) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
@@ -322,11 +314,6 @@ func (b *Base) applianceEvents(ctx context.Context, id string) []map[string]any 
 	return out
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Licences
-// ---------------------------------------------------------------------------------------------------------
-
-// LicenseRow is one licence in the licence list and the appliance's licence history.
 type LicenseRow struct {
 	ID                        string     `json:"id"`
 	ApplianceID               *string    `json:"appliance_id"`
@@ -344,7 +331,7 @@ type LicenseRow struct {
 	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
 	LicenseVersion            int64      `json:"license_version"`
 	IssuedAt                  time.Time  `json:"issued_at"`
-	// Modules are the module ids the signed licence authorises; empty = core only (and every legacy row).
+	// Modules are the module ids the licence authorises; empty = core only.
 	Modules []string `json:"modules"`
 }
 
@@ -429,11 +416,6 @@ func (b *Base) listLicenses(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Overview
-// ---------------------------------------------------------------------------------------------------------
-
-// Attention is one item that needs an operator.
 type Attention struct {
 	Kind         string    `json:"kind"`
 	ApplianceID  *string   `json:"appliance_id"`

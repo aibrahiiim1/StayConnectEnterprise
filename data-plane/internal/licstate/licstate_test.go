@@ -48,9 +48,8 @@ func (f *fixture) envelope(t *testing.T, idFpr string, version int64) []byte {
 	return raw
 }
 
-// F4: the hardware/identity binding is checked on EVERY evaluation, not only at install. A licence already on
-// disk that belongs to another appliance (a copied licence directory, or an identity replaced under it) must be
-// refused after a reboot -- which is exactly what a fresh Manager + Load is.
+// The binding is checked on every evaluation: a licence on disk belonging to another appliance is refused after a
+// reboot (a fresh Manager + Load).
 func TestBindingIsCheckedAtLoad(t *testing.T) {
 	f := newFixture(t)
 	mine := lic.LocalIdentity{IdentityKeyFingerprint: "aaaa", Serial: "SC-1"}
@@ -64,7 +63,6 @@ func TestBindingIsCheckedAtLoad(t *testing.T) {
 		t.Fatalf("a licence bound to this appliance must be usable: state=%s", m.State())
 	}
 
-	// "Reboot" as a different identity over the same licence directory.
 	rebooted := New(nil, "", f.dir, f.pubPath, true)
 	rebooted.SetLocalIdentity(lic.LocalIdentity{IdentityKeyFingerprint: "bbbb", Serial: "SC-1"})
 	rebooted.Load(context.Background())
@@ -78,7 +76,6 @@ func TestBindingIsCheckedAtLoad(t *testing.T) {
 		t.Fatal("a refused licence must grant no capacity and no feature")
 	}
 
-	// Same licence, the right identity again: usable, and the periodic Load clears the refusal.
 	rebooted.SetLocalIdentity(mine)
 	rebooted.Load(context.Background())
 	if rebooted.WrongHardware() != "" || !rebooted.AllowsNewSessions() {
@@ -164,11 +161,10 @@ func TestFetchLoopFastPollAndKick(t *testing.T) {
 		t.Fatal("fetch outcomes must reach the observer")
 	}
 
-	// Slow cadence: only a Kick can trigger the next fetch within the test window.
 	m.mu.Lock()
 	m.fastEvery = time.Hour
 	m.mu.Unlock()
-	time.Sleep(50 * time.Millisecond) // let the loop settle on an hour-long timer
+	time.Sleep(50 * time.Millisecond)
 	before := calls.Load()
 	m.Kick()
 	deadline = time.Now().Add(2 * time.Second)

@@ -1,12 +1,5 @@
 package pmsd
 
-// THE POLLED REST ADAPTER AGAINST THE SINK CONTRACT.
-//
-// A scripted provider client and a recording sink prove the adapter drives the SAME barrier / resync /
-// publish / live-admission sequence the FIAS adapter drives: nothing LIVE before a published roster, a full
-// roster staged under its own generation, GI for a check-in, GC for a change (room move), GO for a check-out,
-// nothing for an unchanged re-read, and bounded failure behaviour.
-
 import (
 	"context"
 	"encoding/json"
@@ -19,8 +12,6 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsrest"
 )
-
-// ---------- recording sink ----------
 
 type sinkEvent struct {
 	staged bool
@@ -108,8 +99,6 @@ func (s *recSink) live() []Event {
 	return out
 }
 
-// ---------- scripted provider client ----------
-
 type fakeClient struct {
 	probeErr      error
 	snapshots     []pmsrest.Snapshot
@@ -163,8 +152,6 @@ func (f *fakeClient) Lookup(_ context.Context, ids []string) ([]pmsrest.Reservat
 	return out, nil
 }
 
-// ---------- harness ----------
-
 const (
 	tIface = "6d5f0000-0000-4000-8000-00000000a001"
 	tTen   = "6d5f0000-0000-4000-8000-00000000a002"
@@ -191,8 +178,7 @@ func restRevision(kind string) Revision {
 	}
 }
 
-// runREST dials a REST conn with the scripted client and serves it. steps[i] runs before poll i+1; when the
-// steps are exhausted the context is cancelled.
+// runREST serves a REST conn with the scripted client; steps[i] runs before poll i+1, then the context is cancelled.
 func runREST(t *testing.T, fc *fakeClient, sink *recSink, rev Revision, steps ...func(now time.Time)) error {
 	t.Helper()
 	now := time.Date(2026, 9, 24, 8, 0, 0, 0, time.UTC)
@@ -235,8 +221,6 @@ func res(id, room, last string, st pmsrest.State, stamp string) pmsrest.Reservat
 	return pmsrest.Reservation{ID: id, Room: room, LastName: last, FirstName: "F", Arrival: "260923",
 		Departure: "260927", State: st, Stamp: stamp}
 }
-
-// ---------- tests ----------
 
 func TestRESTAdapter_RefusedCredentialNeverReportsConnected(t *testing.T) {
 	sink := &recSink{}

@@ -2,10 +2,8 @@ package namenorm
 
 import "testing"
 
-// THE ONE PROPERTY THAT MATTERS: whatever the PMS stores and whatever the guest types must land on the same
-// value. Every case below is written as that round trip rather than as "f(x) == literal", because the literal
-// form is what let the old code look correct in isolation -- each side was individually sensible and only the
-// PAIR was wrong.
+// Whatever the PMS stores and whatever the guest types must land on the same value; cases are written as that round
+// trip rather than f(x) == literal, since each side alone looked correct.
 func TestStoredAndTypedAgree(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -13,29 +11,24 @@ func TestStoredAndTypedAgree(t *testing.T) {
 		guestTypes  string // what the guest enters at the portal
 		shouldMatch bool
 	}{
-		// The incident: a mixed-case surname from the PMS could never equal an upper-cased input.
 		{"mixed-case surname from PMS", "Anderson", "ANDERSON", true},
 		{"mixed-case both sides", "Anderson", "anderson", true},
 		{"lower stored, mixed typed", "anderson", "AnDeRsOn", true},
 		{"already upper", "ANDERSON", "anderson", true},
 
-		// Whitespace, on either side.
 		{"trailing space in feed", "Anderson  ", "ANDERSON", true},
 		{"leading space in feed", "   Anderson", "anderson", true},
 		{"guest pads the field", "Anderson", "  Anderson  ", true},
 		{"non-breaking space around feed value", " Anderson ", "ANDERSON", true},
 
-		// Names that are not ASCII must still round-trip.
 		{"accented surname", "Müller", "MÜLLER", true},
 		{"accented, guest types lower", "Müller", "müller", true},
 		{"cyrillic", "Иванов", "иванов", true},
 
-		// Two-word and hyphenated surnames keep their internal structure: this normalizer does NOT collapse
-		// or strip internal separators, and a change there would alter who can authenticate.
+		// Internal separators are not collapsed or stripped; changing that would alter who can authenticate.
 		{"space-separated surname", "Van Der Berg", "van der berg", true},
 		{"hyphenated", "Smith-Jones", "SMITH-JONES", true},
 
-		// Genuinely different people must still not match.
 		{"different surname", "Anderson", "Andersen", false},
 		{"prefix is not a match", "Anderson", "Anders", false},
 		{"internal space is significant", "Van Der Berg", "VanDerBerg", false},
@@ -44,8 +37,8 @@ func TestStoredAndTypedAgree(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			stored := Name(c.fromPMS)   // write path
-			typed := Name(c.guestTypes) // read path
+			stored := Name(c.fromPMS)
+			typed := Name(c.guestTypes)
 			if got := stored == typed; got != c.shouldMatch {
 				t.Fatalf("stored %q vs typed %q: match=%v, want %v (stored normalized to %q, typed to %q)",
 					c.fromPMS, c.guestTypes, got, c.shouldMatch, stored, typed)
@@ -54,7 +47,6 @@ func TestStoredAndTypedAgree(t *testing.T) {
 	}
 }
 
-// Rooms are the same contract. They hid the defect because one property numbers its rooms with digits.
 func TestRoomStoredAndTypedAgree(t *testing.T) {
 	cases := []struct {
 		stored, typed string
@@ -62,7 +54,7 @@ func TestRoomStoredAndTypedAgree(t *testing.T) {
 	}{
 		{"412", "412", true},
 		{"412", " 412 ", true},
-		{"a12", "A12", true}, // the case the old trim-only write path could never match
+		{"a12", "A12", true},
 		{"12b", "12B", true},
 		{"ph1", "PH1", true},
 		{"412", "413", false},
@@ -75,9 +67,7 @@ func TestRoomStoredAndTypedAgree(t *testing.T) {
 	}
 }
 
-// IDEMPOTENCE IS WHAT MAKES THE BACKFILL SAFE. The migration rewrites stored values in place; if normalizing
-// an already-normalized value changed it, a second run would keep changing rows and the migration could never
-// be proven a no-op.
+// Idempotence makes the migration backfill safe: re-normalizing a normalized value must not change it.
 func TestIdempotent(t *testing.T) {
 	for _, in := range []string{"Anderson", "  müller ", "VAN DER BERG", "", "a12", "Иванов", " x "} {
 		once := Name(in)
@@ -91,12 +81,10 @@ func TestIdempotent(t *testing.T) {
 	}
 }
 
-// The SQL backfill must reproduce exactly what Go does, or the two drift again the moment either is touched.
-// upper(btrim(x)) is Postgres's equivalent; this pins the pairs the migration will be asserted against.
+// The SQL backfill must match Go: upper(btrim(x)) is the Postgres equivalent; this pins the pairs.
 func TestMatchesSQLSemantics(t *testing.T) {
-	// btrim() removes the ASCII whitespace class by default; strings.TrimSpace removes the wider Unicode set.
-	// Values whose only difference is a non-ASCII space therefore normalize identically in Go but NOT in SQL,
-	// which is why the migration trims with a character class rather than relying on bare btrim().
+	// btrim() removes only ASCII whitespace by default while strings.TrimSpace removes Unicode spaces, so the
+	// migration trims with a character class.
 	if Name(" Anderson") == " ANDERSON" {
 		t.Fatal("Name must strip a non-breaking space; SQL side must use an equivalent trim")
 	}

@@ -1,16 +1,8 @@
 package payment
 
-// SEALED PROVIDER CREDENTIALS.
-//
-// A provider account's secrets (API keys, secret keys) are sealed with AES-256-GCM under the appliance's
-// payment key (/etc/stayconnect/secrets/payment_dek.key, created by keybootstrap, 0600) and stored only as
-// ciphertext in iam_v2.payment_provider_secret_generations. The additional authenticated data binds each
-// ciphertext to its exact owner -- tenant, site, account and generation -- so a row copied onto another
-// account, site or generation fails authentication instead of decrypting. The pattern is the PMS interface
-// secret's (internal/pmsd/secret.go) with its own domain string.
-//
-// Plaintext exists only in memory, for the duration of one provider call, and is never logged, returned by
-// an API or sent to Central.
+// Provider secrets are sealed with AES-256-GCM under the appliance payment key and stored only as ciphertext. The AAD
+// binds each ciphertext to tenant, site, account and generation, so a copied row fails authentication. Plaintext exists
+// only in memory for one provider call and is never logged, returned by an API or sent to Central.
 
 import (
 	"crypto/aes"
@@ -22,20 +14,17 @@ import (
 	"errors"
 )
 
-// CredentialCipherVersion is the only sealing format.
 const CredentialCipherVersion = 1
 
 // ErrCredentialSeal is the single, deliberately undetailed sealing/opening failure.
 var ErrCredentialSeal = errors.New("payment: credential seal/open failed")
 
-// PaymentKey is the appliance payment key, identified by a stable id derived from the key itself (so a
-// replaced key file is detected rather than silently used on old rows).
+// The key id derives from the key itself, so a replaced key file is detected rather than silently used on old rows.
 type PaymentKey struct {
 	ID  string
 	key []byte
 }
 
-// NewCredentialKey wraps a 32-byte key.
 func NewPaymentKey(k []byte) (PaymentKey, error) {
 	if len(k) != 32 {
 		return PaymentKey{}, ErrCredentialSeal
@@ -44,10 +33,8 @@ func NewPaymentKey(k []byte) (PaymentKey, error) {
 	return PaymentKey{ID: "pdek-" + hex.EncodeToString(sum[:8]), key: append([]byte(nil), k...)}, nil
 }
 
-// Present reports whether a usable key is loaded.
 func (k PaymentKey) Present() bool { return len(k.key) == 32 }
 
-// SealedCredentials is one generation ready to be stored.
 type SealedCredentials struct {
 	GenerationID  string
 	Ciphertext    []byte
@@ -71,8 +58,7 @@ func credentialAAD(tenantID, siteID, accountID, generationID string) []byte {
 	return b
 }
 
-// SealCredentials seals c for exactly one (tenant, site, account, generation). generationID must be the id
-// the row is stored under.
+// generationID must be the id the row is stored under.
 func SealCredentials(k PaymentKey, tenantID, siteID, accountID, generationID string, c Credentials) (SealedCredentials, error) {
 	if !k.Present() || generationID == "" || accountID == "" {
 		return SealedCredentials{}, ErrCredentialSeal
@@ -101,7 +87,7 @@ func SealCredentials(k PaymentKey, tenantID, siteID, accountID, generationID str
 		CipherVersion: CredentialCipherVersion}, nil
 }
 
-// OpenCredentials opens one stored generation. A key-id mismatch, a moved row or tampering all fail the same.
+// A key-id mismatch, a moved row or tampering all fail the same.
 func OpenCredentials(k PaymentKey, tenantID, siteID, accountID, generationID, keyID string, nonce, ciphertext []byte) (Credentials, error) {
 	if !k.Present() || keyID != k.ID {
 		return nil, ErrCredentialSeal

@@ -12,8 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GDPR final check D2 (audit H-7): a reservation number, with the room the room sign-in credential, is not shown
-// to a role without pms-stay-identity on the PMS reconciliation lists either.
+// A reservation number, with the room the room sign-in credential, is hidden from roles without pms-stay-identity on the PMS reconciliation lists.
 func TestIntegration_ReconciliationHidesReservationNumbersFromTheViewer(t *testing.T) {
 	f := newAPI(t, "site_viewer")
 	res := "R-PAST-" + fmt.Sprint(time.Now().UnixNano())

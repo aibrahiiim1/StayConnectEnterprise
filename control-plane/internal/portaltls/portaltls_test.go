@@ -62,7 +62,6 @@ func TestParseAndCheckCSR(t *testing.T) {
 		"not PEM":         "hello",
 		"certificate PEM": strings.Replace(good, "CERTIFICATE REQUEST", "CERTIFICATE", -1),
 	}
-	// A CSR whose signature does not verify: flip a byte inside the signature.
 	block, _ := pem.Decode([]byte(good))
 	der := append([]byte{}, block.Bytes...)
 	der[len(der)-3] ^= 0xff
@@ -218,11 +217,9 @@ func TestWeeklyCap(t *testing.T) {
 	if ok || !at.Equal(now.Add(-6*day).Add(7*day)) {
 		t.Errorf("3 of 3 used: wait until the oldest ages out; got %v %v", ok, at)
 	}
-	// Older than the window does not count.
 	if ok, _ := WeeklyCap(1, []time.Time{now.Add(-8 * day)}, now); !ok {
 		t.Error("an issuance 8 days ago no longer counts")
 	}
-	// Over the cap (the limit was lowered): wait for enough to age out.
 	ok, at = WeeklyCap(2, []time.Time{now.Add(-1 * day), now.Add(-5 * day), now.Add(-3 * day), now.Add(-4 * day)}, now)
 	if ok || !at.Equal(now.Add(-3*day).Add(7*day)) {
 		t.Errorf("4 counted, limit 2: three must age out; got %v %v", ok, at)
@@ -241,8 +238,7 @@ func TestBackoff(t *testing.T) {
 	}
 }
 
-// RFC 9773 §4.1 example: AKI 69:88:5B:6B:87:46:40:41:E1:B3:7B:84:7B:A0:AE:2C:DE:01:C8:D4, serial
-// 00:87:65:43:21 -> "aYhba4dGQEHhs3uEe6CuLN4ByNQ.AIdlQyE".
+// The vector is the RFC 9773 §4.1 example.
 func TestARICertIDRFCExample(t *testing.T) {
 	aki, _ := hex.DecodeString("69885B6B87464041E1B37B847BA0AE2CDE01C8D4")
 	serial, _ := new(big.Int).SetString("0087654321", 16)
@@ -264,7 +260,7 @@ func TestARICertIDRFCExample(t *testing.T) {
 	}
 }
 
-// fakeDoH answers the DNS-over-HTTPS JSON API from a table: name|type -> answers.
+// fakeDoH serves a DoH JSON table keyed name|type.
 func fakeDoH(t *testing.T, table map[string][]dohAnswer) *httptest.Server {
 	var mu sync.Mutex
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +287,6 @@ func TestCheckDomain(t *testing.T) {
 		t.Fatalf("all records published: %v", err)
 	}
 
-	// The second resolver disagrees (a stale cache without the token): not verified.
 	stale := map[string][]dohAnswer{}
 	for k, v := range good {
 		stale[k] = v
@@ -321,7 +316,6 @@ func TestCheckDomain(t *testing.T) {
 		}
 		srv.Close()
 	}
-	// A CAA on the name itself overrides its parent's (the first name with CAA decides).
 	override := map[string][]dohAnswer{}
 	for k, v := range good {
 		override[k] = v
@@ -392,8 +386,7 @@ func TestSettingsValidate(t *testing.T) {
 	}
 }
 
-// A fake Cloudflare API: enough of /zones and /dns_records to prove upsert, CAA preservation and that the
-// token travels only in the Authorization header.
+// fakeCF fakes /zones and /dns_records; the token is accepted only in the Authorization header.
 type fakeCF struct {
 	mu      sync.Mutex
 	records map[string]cfRecord
@@ -509,7 +502,6 @@ func TestCloudflare(t *testing.T) {
 	if f.records["oldle"].Data["value"] != issue {
 		t.Errorf("the existing letsencrypt.org record is updated in place: %v", f.records["oldle"].Data)
 	}
-	// Applying again changes nothing.
 	before := len(f.records)
 	if _, err := cf.ApplyCAA(ctx, issue); err != nil || len(f.records) != before {
 		t.Errorf("ApplyCAA is idempotent: %v %d->%d", err, before, len(f.records))

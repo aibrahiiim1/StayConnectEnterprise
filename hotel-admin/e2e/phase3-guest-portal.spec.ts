@@ -1,45 +1,19 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { portalHTML as renderLanding } from "./portal-page";
 
-// PHASE-3 GUEST PORTAL, in a real browser, running the REAL client JS.
-//
-// The landing page is served by the Go `portald`, so the template is extracted from the source it is served
-// from (no second copy that can drift) and the client script executes exactly as a guest's phone would run
-// it. What is under test is the part of the contract that lives in the browser:
-//
-//   * every non-success renders the SAME message, whatever the server said;
-//   * a single offer connects the guest without a second decision;
-//   * several offers become a real choice, and choosing one connects them;
-//   * the page never renders a stay, a room, an interface, a reason code or a server error string.
-//
-// The SERVER half — resolution, the one-time Auth Context, the atomic grant, the uniform scd response — is
-// proven separately against a real PostgreSQL in data-plane/cmd/scd/phase3_auth_integration_test.go and
-// data-plane/cmd/portald/pms_phase3_handlers_test.go. Neither half proves the other, which is why both exist.
+// Every server refusal produces the same guest-visible response without revealing stay or room details.
 
 const UNIFORM_MESSAGE =
   "We could not verify your stay. Please check your details or contact the site team for assistance.";
 
-// What the page shows when the server never answered at all (err.service, operator-editable in Portal Settings).
 const TRANSPORT_MESSAGE = "Something went wrong. Please try again.";
-
-// renderLanding comes from ./portal-page now.
-//
-// IT USED TO BE A COPY IN THIS FILE, one of five, each ending `.replace(/\{\{[^}]*\}\}/g, "")` -- strip every
-// Go action and hope the rest is HTML. That worked while the only actions were the two client-address
-// conditionals, whose empty branch is a legitimate rendering. It stopped working the moment the shipped
-// wording moved out of the template into languages.go: `var LANGS = {{.Languages}};` became `var LANGS = ;`,
-// a syntax error that killed the entire script block, and thirty-one tests across four files failed with as
-// many symptoms and one cause. The shared helper RENDERS the actions and refuses a page that still contains
-// one.
 
 type Call = { path: string; body: Record<string, unknown> };
 
-/** serve renders the real page and answers the two endpoints its script talks to. */
 async function serve(
   page: Page,
   opts: {
     phase3: boolean;
-    /** answers for POST /auth/pms/phase3, in order */
     answers: unknown[];
     calls: Call[];
   },
@@ -69,7 +43,6 @@ async function serve(
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(answer) });
   });
 
-  // the guest never leaves the origin in these tests; stub the destination so a redirect is observable
   await page.route("**/success*", (r: Route) =>
     r.fulfill({ status: 200, contentType: "text/html", body: "<h1>You are online</h1>" }));
 }
@@ -95,9 +68,8 @@ test("one offer connects the guest without asking a second question", async ({ p
   await expect(page.getByRole("heading", { name: "You are online" })).toBeVisible();
   expect(calls).toHaveLength(1);
   expect(calls[0].path).toBe("/auth/pms/phase3");
-  // the page must send a request id, or a double tap would record two resolutions
   expect(String(calls[0].body.request_id ?? "")).not.toBe("");
-  // and it must NOT send any identity — that is derived by the server
+  // Device identity comes from the server, never a guest-supplied claim.
   expect(calls[0].body).not.toHaveProperty("ip");
   expect(calls[0].body).not.toHaveProperty("mac");
   expect(calls[0].body).not.toHaveProperty("stay_id");
@@ -128,7 +100,6 @@ test("several offers become a real choice, and choosing one connects the guest",
   await expect(choices).toHaveCount(2);
   await expect(choices.first()).toContainText("STANDARD");
   await expect(choices.nth(1)).toContainText("PREMIUM");
-  // the choice step must not disclose anything about the stay it belongs to
   await expect(page.locator("#pms-choices")).not.toContainText("412");
   await expect(page.locator("#pms-choices")).not.toContainText("Okonkwo");
 
@@ -141,8 +112,7 @@ test("several offers become a real choice, and choosing one connects the guest",
 });
 
 test("every failure looks identical to the guest", async ({ page }) => {
-  // Four different server realities. The page must render one message for all of them — and must not render
-  // any of the detail the server happened to include.
+  // Normalize varied server details into one refusal to prevent enumeration.
   const answers = [
     { ok: false, message: UNIFORM_MESSAGE },
     { ok: false, message: UNIFORM_MESSAGE },
@@ -157,12 +127,8 @@ test("every failure looks identical to the guest", async ({ page }) => {
 
     const err = page.locator("#pms-err");
     await expect(err).toHaveText(UNIFORM_MESSAGE);
-    // still on the form: nothing was granted
     await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
-    // and nothing leaked
-    // The forbidden list is the set of words that can only appear if server detail leaked. "stay" and
-    // "reservation" are deliberately NOT on it: they are part of the legitimate copy the guest is meant to
-    // read, and listing them would make this assertion fail on correct behaviour.
+    // Legitimate copy uses stay and reservation; only detail-specific words indicate leakage.
     const shown = (await page.locator("#panel-pms").innerText()).toLowerCase();
     for (const forbidden of [
       "ambiguous", "indeterminate", "unavailable", "interface", "protel", "opera", "fias",
@@ -173,14 +139,7 @@ test("every failure looks identical to the guest", async ({ page }) => {
   }
 });
 
-// A REQUEST THAT NEVER REACHED THE SERVER IS NOT A GUEST WHO TYPED THE WRONG THING.
-//
-// This case used to assert the uniform CREDENTIAL sentence for an aborted request, on the anti-enumeration
-// reasoning that every non-success must look alike. Product-Owner decision (2026-10-03) reverses that for this
-// one case, and the reasoning does not reach it anyway: with no server response there is nothing about this
-// guest, this room or this property to leak, and the outcome is identical for everyone in the building at that
-// moment whatever they typed. Meanwhile the cost was real -- a guest whose phone had dropped off the Wi-Fi was
-// told to re-check a room number and family name that were correct, and telling them again would not help.
+// A failed network request reveals no guest facts, so it may show a technical retry message.
 test("a request that never reaches the server shows a connection error, not credential advice", async ({ page }) => {
   const calls: Call[] = [];
   const html = renderLanding();
@@ -189,22 +148,16 @@ test("a request that never reaches the server shows a connection error, not cred
   await page.route("**/api/auth-methods", (r: Route) =>
     r.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true }) }));
-  // the request simply fails — the network dropped, or portald is not there
   await page.route("**/auth/pms/**", (r: Route) => r.abort("failed"));
 
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
-  // The technical/retry sentence, and explicitly NOT the one that sends a correct guest back to their details.
   await expect(page.locator("#pms-err")).toHaveText(TRANSPORT_MESSAGE);
   await expect(page.locator("#pms-err")).not.toHaveText(UNIFORM_MESSAGE);
   expect(calls).toHaveLength(0);
 });
 
-// PMS ROOM SIGN-IN MUST NOT DRAG POST-STAY IN WITH IT.
-//
-// The Post-Stay tab used to be pushed inside the PMS branch, so enabling room sign-in put a PIN form in
-// front of every guest — on an appliance with Phase 5 off, backed by routes that are not mounted. They are
-// separate capabilities and now have separate gates.
+// PMS room sign-in and post-stay PIN access have independent capability gates.
 test("enabling PMS does not expose the Post-Stay tab", async ({ page }) => {
   const html = renderLanding();
   await page.route("**/portal", (r: Route) =>
@@ -212,28 +165,18 @@ test("enabling PMS does not expose the Post-Stay tab", async ({ page }) => {
   await page.route("**/api/auth-methods", (r: Route) =>
     r.fulfill({
       status: 200, contentType: "application/json",
-      // PMS on, post-stay absent — the current PRE-LIVE shape.
       body: JSON.stringify({ voucher: { enabled: true }, pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true }),
     }));
   await page.goto("/portal");
   await expect(page.locator("#panel-pms")).toBeAttached();
-  // The portal now presents two GROUPS rather than one tab per method: "am I staying here" and "I have a
-  // code". Post-stay lives inside the guest group and must still not be reachable when Phase 5 is off, so the
-  // claim is unchanged -- it is asserted on the PANEL that would serve it rather than on a tab that no longer
-  // exists per method.
-  // Since the one-journey landing (contract §6.2) the ways in are chips under "Or sign in with": exactly one
-  // for the room, one for the code, and NONE for post-stay.
   await expect(page.locator('#alt-methods button[data-tab="pms"]')).toHaveCount(1);
   await expect(page.locator('#alt-methods button:is([data-tab="account"],[data-tab="voucher"])')).toHaveCount(1);
   await expect(page.locator('#alt-methods button[data-tab="poststay"]')).toHaveCount(0);
   await expect(page.locator('#panel-pms.active')).toHaveCount(1);
-  // Nothing offers post-stay: it is not the group's first member and no alternative links to it.
   await expect(page.locator('#alt-methods')).not.toContainText("Post-stay");
 });
 
 test("with Phase 3 off the page keeps using the legacy endpoint", async ({ page }) => {
-  // A dark site must behave exactly as it does today. If the page could be talked into the Phase-3 endpoint
-  // by anything other than the server's own flag, "dark" would depend on the client.
   const calls: Call[] = [];
   await serve(page, {
     phase3: false,
@@ -243,9 +186,7 @@ test("with Phase 3 off the page keeps using the legacy endpoint", async ({ page 
   await page.goto("http://localhost/portal");
   await submitStay(page, "412", "Okonkwo");
 
-  // WAIT FOR THE CALL, do not assume it has landed. submitStay clicks and returns; the request is in flight.
-  // Every other test in this file polls for exactly this reason, and this one did not -- so it passed on a
-  // quiet workstation and failed on a loaded CI runner, which reads as a product regression and is not one.
+  // Wait for the request; submitStay returns before the network call completes.
   await expect.poll(() => calls.length, { timeout: 10_000 }).toBe(1);
   expect(calls[0].path).toBe("/auth/pms/verify");
   expect(calls[0].body).not.toHaveProperty("request_id");

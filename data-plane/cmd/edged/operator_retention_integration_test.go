@@ -9,16 +9,11 @@ import (
 	"time"
 )
 
-// GDPR audit B4 (migration 0138): a disabled staff account is anonymised once it has been disabled for longer
-// than the appliance's setting; the setting is bounded, needs a reason and the password, and is audited; an
-// anonymised account cannot be enabled again; and staff addresses kept outside the activity log are cleared
-// once older than its period.
 func TestIntegration_StaffRetention_AnonymisesDisabledAccounts(t *testing.T) {
 	admin := newSigninAPI(t, "site_admin")
 	ctx := context.Background()
 	ip := testIP()
 
-	// The setting.
 	if r := admin.call(t, "GET", "/operators/account-retention", ip, admin.sessTok, nil, nil); r.code != 200 {
 		t.Fatalf("get = %d %s", r.code, r.raw)
 	}
@@ -38,7 +33,6 @@ func TestIntegration_StaffRetention_AnonymisesDisabledAccounts(t *testing.T) {
 		_, _ = admin.pool.Exec(context.Background(), `SELECT public.operator_account_retention_set(730,'test','restore the default')`)
 	})
 
-	// Two colleagues: one disabled 100 days ago, one 10 days ago.
 	sfx := fmt.Sprint(time.Now().UnixNano())
 	seed := func(email string) string {
 		var id string
@@ -69,7 +63,6 @@ func TestIntegration_StaffRetention_AnonymisesDisabledAccounts(t *testing.T) {
 	if _, err := admin.pool.Exec(ctx, `UPDATE public.operators SET disabled_at = now() - interval '10 days' WHERE id=$1`, recent); err != nil {
 		t.Fatal(err)
 	}
-	// A staff address on a network change three years ago, and one from today.
 	var oldNet, newNet string
 	for _, c := range []struct {
 		dst *string

@@ -1,33 +1,15 @@
-// Package paymob is the Paymob Intention API + Unified Checkout adapter for OneGate's hosted Card
-// payment (payment.HostedCheckoutProvider).
-//
-// Card data never reaches OneGate: the client pays on Paymob's hosted Unified Checkout page. The adapter
-// creates one payment intention and later asks Paymob, outbound and authenticated, what happened.
-//
-// Provider-API assumptions and their sources (checked 2026-09-28):
-//   - Create: POST {base}/v1/intention/ with "Authorization: Token <secret_key>" and a JSON body of amount
-//     (minor units), currency, payment_methods (integration ids), items, billing_data, special_reference,
-//     redirection_url, expiration, extras; the 201 response carries id, client_secret and
-//     intention_order_id. Source: developers.paymob.com "Create Intention" and the PaymobAccept
-//     API-Postman-Collections repository.
-//   - billing_data: Paymob requires the object; fields that do not apply are sent as "NA" (Paymob's own
-//     integration guidance for anonymous checkout). OneGate sends no guest data to the provider.
-//   - Redirect: {base}/unifiedcheckout/?publicKey=<public_key>&clientSecret=<client_secret>.
-//   - Status: POST {base}/api/auth/tokens {"api_key"} returns a short-lived token; POST
-//     {base}/api/ecommerce/orders/transaction_inquiry with "Authorization: Bearer <token>" and
-//     {"order_id"} or {"merchant_order_id"} returns the order's transaction (PaymobAccept Transaction
-//     Inquiry collection). The intention's special_reference is assumed to be the created order's
-//     merchant_order_id; the adapter prefers the order id returned at creation and uses
-//     merchant_order_id only to resolve an ambiguous creation.
-//   - Key mode: Paymob keys are "<country>_<sk|pk>_<test|live>_…" with country egy, sau, are, omn, pak. The
-//     prefix is what Paymob's own checkout page uses to route a key to its region backend
-//     (eg.checkout.paymob.com page source), so it is treated as reliable and enforced.
-//
-// Paymob has no documented Idempotency-Key header. Duplicate protection for an ambiguous create rests on
-// the engine never re-creating (it resolves by QueryStatus on the ClientRef) and on special_reference,
-// which Paymob documents as a unique reference.
-//
-// Money never moves as a result of anything this package sends. There is no refund, void or capture call.
+// Package paymob is the Paymob Intention API + Unified Checkout adapter (payment.HostedCheckoutProvider). Card data
+// never reaches OneGate and no refund, void or capture call is sent.
+// Create: POST {base}/v1/intention/ with "Authorization: Token <secret_key>"; billing_data is required and inapplicable
+// fields are "NA" (no guest data is sent). Redirect:
+// {base}/unifiedcheckout/?publicKey=<public_key>&clientSecret=<client_secret>.
+// Status: POST {base}/api/auth/tokens {"api_key"} yields a short-lived token for transaction_inquiry by order_id or
+// merchant_order_id; the adapter prefers the order id returned at creation and uses merchant_order_id only to resolve
+// an ambiguous creation.
+// Keys are <country>_<sk|pk>_<test|live>_... (egy, sau, are, omn, pak); the prefix routes a key to its region backend
+// and is enforced.
+// Paymob has no Idempotency-Key header: duplicate protection rests on the engine never re-creating (it resolves by
+// QueryStatus on the ClientRef) and on special_reference.
 package paymob
 
 import (
@@ -55,8 +37,7 @@ import (
 
 const (
 	defaultTimeout = 20 * time.Second
-	// Intention lifetime bounds (seconds sent as "expiration"). The lower bound keeps a checkout
-	// usable; the upper bound matches Stripe's 24h ceiling so both providers behave alike.
+	// Intention lifetime bounds in seconds; the upper bound matches Stripe's 24h ceiling.
 	minExpiry = 5 * time.Minute
 	maxExpiry = 24 * time.Hour
 	// expiryGrace absorbs clock skew before a paymentless checkout is declared EXPIRED.
@@ -70,19 +51,13 @@ var clientRefRE = regexp.MustCompile(`^sc_[0-9a-f]{32}$`)
 type Region struct {
 	Name    string
 	BaseURL string
-	Prefix  string // key country prefix
-	// Domains are what the client must reach to pay: the regional API host (the unifiedcheckout redirect
-	// and the page's intention/payment calls) and the regional checkout page host it redirects to.
-	// Source: the 302 from {base}/unifiedcheckout/ and the connect-src of the checkout page's
-	// Content-Security-Policy (observed 2026-09-28). Google Fonts, analytics, Sentry and wallet domains
-	// are excluded: the card form completes without them. Issuer 3-D Secure ACS pages are hosted by the
-	// card issuer (the page's CSP is frame-src https:) and cannot be enumerated here.
+	Prefix  string
+	// Domains the client must reach to pay: the regional API host and the checkout page host. Google Fonts, analytics,
+	// Sentry and wallet domains are excluded; issuer 3-D Secure pages cannot be enumerated.
 	Domains []string
 }
 
-// Regions Paymob documents. Pakistan (pakistan.paymob.com) is not included: its checkout host could not
-// be verified, and a region whose hosted-page domains are unknown cannot be given a least-privilege
-// allowlist.
+// Pakistan is excluded: its checkout host is unverified, so no least-privilege allowlist can be given.
 var Regions = map[string]Region{
 	"egypt": {Name: "egypt", BaseURL: "https://accept.paymob.com", Prefix: "egy", Domains: []string{"accept.paymob.com", "eg.checkout.paymob.com"}},
 	"ksa":   {Name: "ksa", BaseURL: "https://ksa.paymob.com", Prefix: "sau", Domains: []string{"ksa.paymob.com", "ksa.checkout.paymob.com"}},
@@ -90,12 +65,10 @@ var Regions = map[string]Region{
 	"oman":  {Name: "oman", BaseURL: "https://oman.paymob.com", Prefix: "omn", Domains: []string{"oman.paymob.com", "om.checkout.paymob.com"}},
 }
 
-// currencyExponent lists the currencies this adapter will send and the minor-unit exponent Paymob's
-// "amount in cents" means for them. OMR is deliberately absent: whether Paymob's amount is in baisa
-// (exponent 3) or hundredths is not verified, and guessing would mis-scale money by 10x.
+// OMR is absent: whether Paymob's amount is baisa (exponent 3) or hundredths is unverified, and guessing would
+// mis-scale money 10x.
 var currencyExponent = map[string]int16{"EGP": 2, "SAR": 2, "AED": 2, "USD": 2, "EUR": 2, "GBP": 2}
 
-// Adapter is a Paymob hosted-checkout adapter for one region. It holds no credentials.
 type Adapter struct {
 	client  *http.Client
 	region  Region
@@ -106,30 +79,22 @@ type Adapter struct {
 
 var _ payment.HostedCheckoutProvider = (*Adapter)(nil)
 
-// Option configures an Adapter.
 type Option func(*Adapter)
 
-// WithHTTPClient sets the HTTP client used for every call.
 func WithHTTPClient(c *http.Client) Option { return func(a *Adapter) { a.client = c } }
 
-// WithRegion selects the regional deployment ("egypt" default, "ksa", "uae", "oman"). An unknown name
-// makes New return an error.
 func WithRegion(name string) Option {
 	return func(a *Adapter) { a.region = Region{Name: strings.ToLower(strings.TrimSpace(name))} }
 }
 
-// WithBaseURL overrides the region's API base URL (tests use an httptest server). Hosted domains stay
-// the region's.
+// WithBaseURL overrides the API base (tests); hosted domains stay the region's.
 func WithBaseURL(u string) Option { return func(a *Adapter) { a.baseURL = strings.TrimRight(u, "/") } }
 
-// WithTimeout bounds every individual provider call.
 func WithTimeout(d time.Duration) Option { return func(a *Adapter) { a.timeout = d } }
 
-// WithClock overrides the clock (tests).
 func WithClock(now func() time.Time) Option { return func(a *Adapter) { a.now = now } }
 
-// New builds an Adapter. RequiredHostedDomains takes no credentials, so the region (and therefore the
-// allowlist) is fixed per adapter instance; a credential "region" that disagrees is refused per call.
+// The region (and so the allowlist) is fixed per adapter; a credential "region" that disagrees is refused per call.
 func New(opts ...Option) (*Adapter, error) {
 	a := &Adapter{client: &http.Client{}, region: Regions["egypt"], timeout: defaultTimeout, now: time.Now}
 	for _, o := range opts {
@@ -152,13 +117,10 @@ func New(opts ...Option) (*Adapter, error) {
 	return a, nil
 }
 
-// Name is stored as the provider name.
 func (a *Adapter) Name() string { return "paymob" }
 
-// RequiredHostedDomains returns the region's hosted-page domains.
 func (a *Adapter) RequiredHostedDomains() []string { return append([]string(nil), a.region.Domains...) }
 
-// CredentialKeys names what the Admin Console collects.
 func (a *Adapter) CredentialKeys() []payment.CredentialKey {
 	return []payment.CredentialKey{
 		{Key: "secret_key", Label: "Secret key (creates payment intentions)", Secret: true, Required: true},
@@ -170,20 +132,15 @@ func (a *Adapter) CredentialKeys() []payment.CredentialKey {
 	}
 }
 
-// ---------------------------------------------------------------- errors (never carry secrets)
-
 func notCreated(format string, args ...any) error {
 	return fmt.Errorf("paymob: "+format+": %w", append(args, payment.ErrCheckoutNotCreated)...)
 }
 
 func errf(format string, args ...any) error { return fmt.Errorf("paymob: "+format, args...) }
 
-// ---------------------------------------------------------------- credentials and mode
-
 var keyRE = regexp.MustCompile(`^([a-z]{3})_(sk|pk)_(test|live)_[A-Za-z0-9]+$`)
 
-// checkKey verifies a secret/public key's kind, region and mode from its prefix. An unrecognised format is
-// refused: the mode cannot be proven.
+// An unrecognised key format is refused: the mode cannot be proven.
 func (a *Adapter) checkKey(name, kind string, mode payment.Mode, v string) error {
 	m := keyRE.FindStringSubmatch(v)
 	if m == nil || m[2] != kind {
@@ -252,8 +209,6 @@ func (a *Adapter) creds(mode payment.Mode, c payment.Credentials, needCreate, ne
 	}
 	return out, nil
 }
-
-// ---------------------------------------------------------------- transport
 
 type transportError struct {
 	kind    string
@@ -350,8 +305,6 @@ func refusedWithoutObject(status int) bool {
 	return false
 }
 
-// ---------------------------------------------------------------- provider session reference
-
 // sessionRef is the ProviderSessionRef: "<intention id>|<order id>|<expiry unix seconds>". The order id
 // is what the status query asks about; the expiry is what lets a paymentless checkout become EXPIRED
 // (Paymob's inquiry answers about transactions, not about the intention's lifetime).
@@ -377,8 +330,6 @@ func parseSessionRef(v string) (sessionRef, error) {
 	}
 	return sessionRef{intentionID: p[0], orderID: oid, expiresAt: time.Unix(exp, 0).UTC()}, nil
 }
-
-// ---------------------------------------------------------------- create
 
 type billingData struct {
 	FirstName   string `json:"first_name"`
@@ -420,8 +371,7 @@ type intentionResp struct {
 	SpecialReference *string     `json:"special_reference"`
 }
 
-// CreateCheckout creates one payment intention and returns the Unified Checkout redirect. No
-// notification_url is sent: OneGate is outbound-only and learns the outcome by QueryStatus.
+// No notification_url is sent: OneGate is outbound-only and learns the outcome by QueryStatus.
 func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest) (payment.Checkout, error) {
 	if !clientRefRE.MatchString(r.ClientRef) {
 		return payment.Checkout{}, notCreated("client reference is not a OneGate reference")
@@ -507,8 +457,6 @@ func (a *Adapter) CreateCheckout(ctx context.Context, r payment.CheckoutRequest)
 	return payment.Checkout{ProviderSessionRef: ref.String(), RedirectURL: redirect, ExpiresAt: expiresAt.UTC()}, nil
 }
 
-// ---------------------------------------------------------------- status
-
 type transaction struct {
 	ID                  int64  `json:"id"`
 	Pending             bool   `json:"pending"`
@@ -552,19 +500,11 @@ func (a *Adapter) authToken(ctx context.Context, apiKey string) (string, error) 
 
 var codeRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 
-// QueryStatus authenticates and asks Paymob's transaction inquiry about the order. It never creates,
-// voids, captures or refunds anything and is safe to repeat.
-//
-// Mapping (conservative):
-//   - pending → OPEN.
-//   - success, not pending, not voided, not auth-only → CAPTURED (ProviderTxnRef = transaction id), with
-//     refunds reported as events. A later refund does not un-capture: the capture happened.
-//   - success=false, not pending → DECLINED only once the checkout has expired; before that the client can
-//     retry on the same Unified Checkout, so it stays OPEN (reason "declined_retryable").
-//   - no transaction → OPEN until expiry, then EXPIRED; NOT_FOUND when the reference is unknown and no
-//     session reference exists (an ambiguous create whose client_secret never reached the client).
-//   - voided, auth-only, or an order that records a paid amount the transaction does not explain → error
-//     (manual review), never a guess.
+// QueryStatus never creates, voids, captures or refunds and is safe to repeat. Mapping: pending is OPEN; success and
+// not pending, voided or auth-only is CAPTURED (a later refund does not un-capture); a failure is DECLINED only once
+// the checkout has expired, since before that the client can retry (OPEN, reason declined_retryable); no transaction is
+// OPEN until expiry, then EXPIRED, or NOT_FOUND when no session reference exists; voided, auth-only or an unexplained
+// paid amount is an error for manual review, never a guess.
 func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payment.StatusResult, error) {
 	if !clientRefRE.MatchString(q.ClientRef) {
 		return payment.StatusResult{}, errf("client reference is not a OneGate reference")
@@ -636,9 +576,8 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 	case t.Success && t.IsAuth:
 		return payment.StatusResult{}, errf("transaction %s is authorised but not captured; manual review required", txnRef)
 	case t.Success && !strings.EqualFold(strings.TrimSpace(t.SourceData.Type), "card"):
-		// The integration ids are configured by an operator as CARD integrations, but nothing at Paymob stops
-		// a wallet or kiosk integration being entered. Money taken by a method that is not approved never
-		// grants by itself: it stays unresolved and, after the grace, goes to financial review.
+		// Operators configure card integrations but nothing stops a wallet or kiosk one: money taken by an unapproved
+		// method never grants by itself and goes to financial review after the grace.
 		return payment.StatusResult{State: payment.CheckoutOpen, ReasonCode: "payment_method_not_approved"}, nil
 	case t.Success:
 		res := payment.StatusResult{
@@ -648,10 +587,8 @@ func (a *Adapter) QueryStatus(ctx context.Context, q payment.StatusQuery) (payme
 			Currency:       strings.ToUpper(t.Currency),
 		}
 		if t.RefundedAmountCents > 0 {
-			// Paymob's inquiry exposes only the cumulative refunded amount, not individual refund ids. The
-			// event id is therefore stable per cumulative total, and AmountMinor is that CUMULATIVE total
-			// as of this observation: a later partial refund yields a new event whose amount supersedes
-			// (does not add to) the earlier one.
+			// Paymob exposes only the cumulative refunded amount, so the event id is stable per cumulative total and
+			// AmountMinor is that total; a later refund supersedes the earlier event rather than adding to it.
 			res.Events = []payment.ProviderEvent{{
 				EventID:     "refund:" + txnRef + ":" + strconv.FormatInt(t.RefundedAmountCents, 10),
 				Kind:        "REFUND",
@@ -681,11 +618,7 @@ func responseCode(raw json.RawMessage) string {
 	return "declined"
 }
 
-// ---------------------------------------------------------------- test connection
-
-// TestConnection checks every configured key's region and mode, the integration ids, and that Paymob
-// issues an auth token for the api_key. Paymob exposes no non-financial call authenticated by the secret
-// key, so the secret key is validated by format only.
+// The secret key is validated by format only: Paymob has no non-financial call authenticated by it.
 func (a *Adapter) TestConnection(ctx context.Context, mode payment.Mode, merchantAccount string, c payment.Credentials) error {
 	cr, err := a.creds(mode, c, true, true)
 	if err != nil {
@@ -695,9 +628,6 @@ func (a *Adapter) TestConnection(ctx context.Context, mode payment.Mode, merchan
 	return err
 }
 
-// ---------------------------------------------------------------- redirect HMAC (sanity only)
-
-// hmacFields is Paymob's documented concatenation order for the transaction HMAC.
 var hmacFields = []string{
 	"amount_cents", "created_at", "currency", "error_occured", "has_parent_transaction", "id",
 	"integration_id", "is_3d_secure", "is_auth", "is_capture", "is_refunded", "is_standalone_payment",
@@ -705,9 +635,8 @@ var hmacFields = []string{
 	"success",
 }
 
-// VerifyRedirectHMAC checks the hmac parameter Paymob appends to the return redirect. It is a SANITY
-// check for the portal's display only and is never financial proof: the only proof is QueryStatus.
-// It returns false when hmacSecret is empty or the parameter is absent.
+// VerifyRedirectHMAC is a display-only sanity check, never financial proof; false when hmacSecret is empty or the
+// parameter absent.
 func VerifyRedirectHMAC(q url.Values, hmacSecret string) bool {
 	got := strings.ToLower(q.Get("hmac"))
 	if hmacSecret == "" || got == "" {

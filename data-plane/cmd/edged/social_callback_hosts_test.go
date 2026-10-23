@@ -66,8 +66,7 @@ func TestSocialOffered(t *testing.T) {
 	}
 }
 
-// An older client still sends redirect_uri. Its shape is checked as before and its host becomes the callback
-// host; the URL itself is never stored.
+// A legacy redirect_uri is shape-checked and only its host becomes the callback host; the URL is never stored.
 func TestLegacyRedirectURIBecomesACallbackHost(t *testing.T) {
 	in := socialWriteReq{RedirectURI: sp("https://wifi.nilehotel.com/auth/social/callback")}
 	hosts, msg := resolveCallbackHosts(&in, twoHostnames)
@@ -90,8 +89,7 @@ func TestLegacyRedirectURIBecomesACallbackHost(t *testing.T) {
 	}
 }
 
-// The secret goes to scd, sealed there; edged sends it once, to the documented path, and reports scd's reason
-// when scd refuses -- never the secret itself.
+// The secret goes to scd once; on refusal edged reports scd's reason, never the secret.
 func TestSocialSecretIsForwardedToSCD(t *testing.T) {
 	rec := &callRecorder{}
 	refuse := false
@@ -138,10 +136,9 @@ func TestSocialReloadCallsSCD(t *testing.T) {
 	if len(calls) != 1 || calls[0].Method != http.MethodPost || calls[0].Path != "/v1/social/reload" {
 		t.Fatalf("scd calls = %+v", calls)
 	}
-	(&server{}).reloadSocial() // no scd client: a no-op, not a panic
+	(&server{}).reloadSocial()
 }
 
-// The response shape carries what the page needs and nothing secret.
 func TestSocialProviderResponseShape(t *testing.T) {
 	p := edgeSocialProvider{Provider: "facebook", Enabled: true, CallbackHosts: []string{"abcd1234.gw.onegate.work"}, SecretSet: true}
 	decorateSocial(&p, twoHostnames)

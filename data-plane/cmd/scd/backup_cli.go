@@ -1,13 +1,7 @@
 package main
 
-// COMMAND-LINE ACCESS TO THE ONE BACKUP SYSTEM.
-//
-//	scd backup-now --reason "<what is about to change>" [--by <name>]
-//	scd backup-restore --name <backup> --identity-file <key file> [--by <name>]
-//
-// These are not a second engine: each is a request to the running scd on its private socket, which is reachable only by root and
-// the service group, and each is answered by the same code that serves Hotel Admin. backup-now is what a controlled migration or
-// deployment runs first (scripts/edge-migrate.sh); backup-restore is the way to restore when Hotel Admin itself cannot be used.
+// scd backup-now and backup-restore are requests to the running scd on its private socket, answered by the same code as Hotel Admin.
+// backup-now runs before controlled migrations; backup-restore works when Hotel Admin cannot be used.
 
 import (
 	"bytes"
@@ -51,7 +45,6 @@ func scdCall(method, path string, body any, timeout time.Duration) (int, []byte,
 	return resp.StatusCode, b, nil
 }
 
-// backupNowMain takes a pre-change backup and exits 0 only when it is complete, encrypted and proven restorable.
 func backupNowMain(args []string) int {
 	fs := flag.NewFlagSet("backup-now", flag.ContinueOnError)
 	reason := fs.String("reason", "", "what is about to change (required)")
@@ -81,7 +74,6 @@ func backupNowMain(args []string) int {
 	return 0
 }
 
-// backupRestoreMain starts a restore and waits for its recorded outcome.
 func backupRestoreMain(args []string) int {
 	fs := flag.NewFlagSet("backup-restore", flag.ContinueOnError)
 	name := fs.String("name", "", "the backup to restore (a name from the Backups screen)")

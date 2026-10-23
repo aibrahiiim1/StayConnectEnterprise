@@ -1,8 +1,6 @@
-// The one-line rule summary of a client group, for the table. Lives beside the page rather than in it:
-// a Next page file may export only page members, and this is shared with the tests.
+// Beside the page because a Next page file may export only page members.
 import type { ClientGroupRule } from "@/lib/api";
 
-/** "company.com, company.ae · Microsoft tenant" — the group's rules in one line for the table. */
 export function ruleSummary(rules: ClientGroupRule[] | null | undefined): string {
   if (!rules || rules.length === 0) return "No rules — matches nobody";
   return rules.map((r) => {

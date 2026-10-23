@@ -9,14 +9,11 @@ import (
 	"time"
 )
 
-// A RESTORE REAPPLIES RETENTION TO THE END OF THE BACKLOG, and says so when it could not (review finding: the bounded hourly run
-// returned no error, so a restore with more expired rows than one tick takes was reported as fully applied).
 func TestRetentionPassesWorkTheBacklogOffAndReportFailures(t *testing.T) {
 	old := dataRetentionPassFn
 	defer func() { dataRetentionPassFn = old }()
 	s := &server{}
 
-	// a backlog of 45 batches in one function: the bounded run stops at its limit, the complete run goes to the end
 	left := 45
 	dataRetentionPassFn = func(_ *server, _ context.Context, fn string) (int, error) {
 		if fn != "iam_v2.run_data_retention" || left == 0 {
@@ -33,7 +30,6 @@ func TestRetentionPassesWorkTheBacklogOffAndReportFailures(t *testing.T) {
 		t.Fatalf("the complete run did not reach the end: complete=%v err=%v left=%d", complete, err, left)
 	}
 
-	// a failing function is reported, the others still finish
 	var ran int
 	dataRetentionPassFn = func(_ *server, _ context.Context, fn string) (int, error) {
 		if fn == "public.run_data_retention_public" {
@@ -50,7 +46,6 @@ func TestRetentionPassesWorkTheBacklogOffAndReportFailures(t *testing.T) {
 		t.Fatalf("a failing function must be reported and must not stop the others: complete=%v err=%v ran=%d", complete, err, ran)
 	}
 
-	// the context ends a run that cannot finish
 	dataRetentionPassFn = func(_ *server, ctx context.Context, _ string) (int, error) {
 		<-ctx.Done()
 		return 0, ctx.Err()
@@ -62,7 +57,6 @@ func TestRetentionPassesWorkTheBacklogOffAndReportFailures(t *testing.T) {
 	}
 }
 
-// A BACKUP WHOSE VERIFICATION MARKER CANNOT BE WRITTEN IS NOT A RECOVERY POINT: the failure is returned, not logged and forgotten.
 func TestAVerificationMarkerThatCannotBeWrittenIsAnError(t *testing.T) {
 	restore := scdBackupDirForTest(t, t.TempDir())
 	defer restore()
@@ -97,7 +91,6 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-// A CRASHED BACKUP'S PARTIAL FILES ARE SWEPT FROM THE ACTIVE BACKUP FOLDER (review finding: only unrelated folders were visited).
 func TestTheLeftoverSweepVisitsTheActiveBackupFolder(t *testing.T) {
 	dir := t.TempDir()
 	restore := scdBackupDirForTest(t, dir)

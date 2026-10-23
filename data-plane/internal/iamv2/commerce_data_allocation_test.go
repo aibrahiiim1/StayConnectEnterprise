@@ -1,10 +1,7 @@
 package iamv2
 
-// THE APPROVED PER-STAY-NIGHT ALLOWANCE.
-//
-// The worked example the Product Owner approved is 1 GB a night, a 5 GB floor and a 20 GB ceiling. Every
-// number in it is asserted below, because the clamp order is the part that is easy to get subtly wrong: the
-// floor lifts short stays and the ceiling caps long ones, and swapping them turns a 25-night stay into 25 GB.
+// The approved example is 1 GB a night, a 5 GB floor and a 20 GB ceiling; the clamp order matters (swapping
+// floor and ceiling turns a 25-night stay into 25 GB).
 
 import (
 	"errors"
@@ -49,15 +46,14 @@ func TestApprovedPerStayNightExample(t *testing.T) {
 }
 
 func TestFixedIsUnchangedAndSnapshotsNothing(t *testing.T) {
-	// A FIXED package must not write a per-entitlement quota at all: the entitlement goes on reading the
-	// pinned plan revision, which is what every entitlement granted before this existed does.
+	// FIXED writes no per-entitlement quota; the entitlement keeps reading the pinned plan revision.
 	for _, p := range []DataAllocationPolicy{{Mode: AllocFixed}, {}} {
 		b, snap, err := EffectiveDataQuotaBytes(p, stayOfNights(9))
 		if err != nil || snap || b != 0 {
 			t.Fatalf("FIXED produced bytes=%d snapshot=%v err=%v; want 0,false,nil", b, snap, err)
 		}
 	}
-	// ...and an absent policy IS fixed, which is what every existing revision carries.
+	// An absent policy is FIXED.
 	got, err := ParseDataAllocationPolicy(nil)
 	if err != nil || got.Mode != AllocFixed {
 		t.Fatalf("an absent policy must read as FIXED, got %+v (%v)", got, err)
@@ -92,14 +88,12 @@ func TestPerStayNightFailsClosedWithoutAuthoritativeDates(t *testing.T) {
 
 func TestClampEdges(t *testing.T) {
 	max := 20.0
-	// A zero-night (same-day) stay is a known length, not a missing one, so it gets the floor rather than a
-	// refusal -- and never a zero-byte grant, which would be exhausted the moment it was created.
+	// A zero-night stay is a known length: it gets the floor, never a zero-byte grant.
 	b, _, err := EffectiveDataQuotaBytes(
 		DataAllocationPolicy{Mode: AllocPerStayNight, GBPerNight: 1, MinGB: 5, MaxGB: &max}, stayOfNights(0))
 	if err != nil || b != 5*bytesPerGB {
 		t.Fatalf("a same-day stay got %d bytes (%v); want the 5 GB floor", b, err)
 	}
-	// No ceiling configured: the calculation runs on.
 	b, _, err = EffectiveDataQuotaBytes(
 		DataAllocationPolicy{Mode: AllocPerStayNight, GBPerNight: 2, MinGB: 5}, stayOfNights(30))
 	if err != nil || b != 60*bytesPerGB {

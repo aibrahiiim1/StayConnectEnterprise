@@ -1,22 +1,9 @@
 package payment
 
-// CARD PAYMENT CHECKOUT ENGINE.
-//
-// The flow, and who holds which authority at each step:
-//
-//	purchase AWAITING_SETTLEMENT + settlement ONLINE_PAYMENT/REQUIRED     (commerce, in scd, as svc_scd)
-//	-> intent: payment_transactions CHARGE CREATED, client ref sc_...      (runtime role: svc_payment)
-//	-> begin_payment_execution: txn PENDING, settlement IN_PROGRESS        (runtime role)
-//	-> provider hosted checkout, idempotency key = client ref              (outbound HTTPS, no money moves)
-//	-> the client pays ON THE PROVIDER'S PAGE
-//	-> QueryStatus, outbound and authenticated, repeated safely             (return URL and reconciler)
-//	-> p4_apply_provider_outcome                                            (outcome role: svc_payment_outcome)
-//	-> settlement SETTLED -> p4_grant_paid_entitlement                      (runtime role)
-//
-// Nothing the browser says is proof. A checkout is created at most once per settlement (the unique live-charge
-// index), and an ambiguous creation is resolved by querying the client reference, never by creating again. A
-// still-unresolved outcome after the checkout expiry plus the reconciliation grace becomes UNKNOWN, which the
-// ledger routes to manual review; it is never retried.
+// Hosted card checkout. Nothing the browser says is proof: a checkout is created at most once per settlement, an
+// ambiguous creation is resolved by querying the client reference, and an outcome still unresolved after expiry plus
+// grace becomes UNKNOWN for manual review, never retried. The runtime role (svc_payment) starts and executes; only the
+// outcome role (svc_payment_outcome) records provider outcomes.
 
 import (
 	"context"
@@ -33,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Checkout errors a caller can act on.
 var (
 	ErrLiveNotAllowed      = errors.New("payment: LIVE-mode provider accounts are not authorised on this appliance")
 	ErrNoAdapter           = errors.New("payment: no adapter for the configured provider")
@@ -43,16 +29,15 @@ var (
 	ErrNotConfigured       = errors.New("payment: card payment is not configured on this appliance")
 )
 
-// CheckoutSettings are the site's operational card-payment settings (card_payment_settings_get).
 type CheckoutSettings struct {
 	Expiry         time.Duration
 	ReconcileGrace time.Duration
 }
 
-// CheckoutEngine runs hosted checkouts. Runtime and Outcome are separate credentials by design.
+// CheckoutEngine runs hosted checkouts; Runtime and Outcome are separate credentials by design.
 type CheckoutEngine struct {
-	Runtime     *pgxpool.Pool // svc_payment (sc_payment_runtime)
-	Outcome     *pgxpool.Pool // svc_payment_outcome (sc_payment_outcome)
+	Runtime     *pgxpool.Pool
+	Outcome     *pgxpool.Pool
 	Adapters    map[string]HostedCheckoutProvider
 	Key         PaymentKey
 	LiveAllowed bool
@@ -67,12 +52,10 @@ func (e *CheckoutEngine) now() time.Time {
 	return time.Now()
 }
 
-// Configured reports whether the engine has both credentials and a key.
 func (e *CheckoutEngine) Configured() bool {
 	return e != nil && e.Runtime != nil && e.Outcome != nil && e.Key.Present()
 }
 
-// ResolvedAccount is the site's ACTIVE default account with its opened credentials.
 type ResolvedAccount struct {
 	ID          string
 	Provider    string
@@ -82,7 +65,6 @@ type ResolvedAccount struct {
 	Credentials Credentials
 }
 
-// ResolveAccount reads the default account and opens its current credential generation.
 func (e *CheckoutEngine) ResolveAccount(ctx context.Context, tenantID, siteID string) (ResolvedAccount, error) {
 	if !e.Configured() {
 		return ResolvedAccount{}, ErrNotConfigured
@@ -128,7 +110,6 @@ func (e *CheckoutEngine) openCredentials(ctx context.Context, tenantID, siteID, 
 	return c, nil
 }
 
-// Settings reads the site's card payment settings (defaults when unset).
 func (e *CheckoutEngine) Settings(ctx context.Context, tenantID, siteID string) CheckoutSettings {
 	s := CheckoutSettings{Expiry: 30 * time.Minute, ReconcileGrace: 60 * time.Minute}
 	if e.Runtime == nil {
@@ -143,8 +124,7 @@ func (e *CheckoutEngine) Settings(ctx context.Context, tenantID, siteID string) 
 	return s
 }
 
-// adapterFor returns the adapter for an account, refusing LIVE mode unless authorised and refusing a key whose
-// declared mode disagrees (the adapters enforce key prefixes too).
+// adapterFor refuses LIVE mode unless authorised, and a key whose declared mode disagrees.
 func (e *CheckoutEngine) adapterFor(a ResolvedAccount) (HostedCheckoutProvider, error) {
 	if a.Mode == ModeLive && !e.LiveAllowed {
 		return nil, ErrLiveNotAllowed
@@ -164,15 +144,13 @@ func (e *CheckoutEngine) adapterFor(a ResolvedAccount) (HostedCheckoutProvider, 
 	return ad, nil
 }
 
-// CheckoutStart is what the portal needs to send the client to the provider.
 type CheckoutStart struct {
 	TransactionID string
 	ClientRef     string
 	RedirectURL   string
 }
 
-// StartCheckout creates the intent, begins execution and creates the provider checkout for a REQUIRED
-// ONLINE_PAYMENT settlement. The returnURL must carry nothing the portal will trust.
+// StartCheckout: the returnURL must carry nothing the portal will trust.
 func (e *CheckoutEngine) StartCheckout(ctx context.Context, tenantID, siteID, settlementID, description, returnURL, cancelURL string) (CheckoutStart, error) {
 	acct, err := e.ResolveAccount(ctx, tenantID, siteID)
 	if err != nil {
@@ -194,7 +172,6 @@ func (e *CheckoutEngine) StartCheckout(ctx context.Context, tenantID, siteID, se
 	var amount int64
 	var currency string
 	var exponent int16
-	// Intent + execution start + checkout row: one transaction on the runtime credential.
 	err = pgx.BeginFunc(ctx, e.Runtime, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `
 INSERT INTO iam_v2.payment_transactions
@@ -245,9 +222,8 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 		out.RedirectURL = co.RedirectURL
 		return out, nil
 	case errors.Is(cerr, ErrCheckoutNotCreated):
-		// PROVABLY nothing exists at the provider: no money can move. The outcome authority records FAILED.
-		// The adapter's message names the provider's refusal by type and code only (never a credential or a
-		// card detail), and it is the one thing an operator needs to fix the configuration.
+		// Provably nothing exists at the provider, so the outcome authority records FAILED. The adapter's message names
+		// the refusal by type and code only, never a credential or card detail.
 		slog.Warn("card checkout not created by the provider", "provider", acct.Provider, "currency", strings.TrimSpace(currency), "reason", cerr.Error())
 		e.Health.Record(acct.ID, false)
 		_, _ = e.Runtime.Exec(ctx, `UPDATE iam_v2.payment_checkouts SET creation_outcome='NOT_CREATED' WHERE transaction_id=$1`, out.TransactionID)
@@ -261,11 +237,8 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 	}
 }
 
-// FailUnstartedPurchases fails, through the audited definer (migration 0121), every card purchase still
-// AWAITING_SETTLEMENT whose settlement never got a payment transaction and is older than the checkout expiry
-// plus the reconcile grace. Such a purchase cannot be paid -- nothing exists at any provider -- and it held the
-// stay's one purchase of that package, so the package stayed hidden for the rest of the stay. A purchase with a
-// payment transaction is never touched: the reconciler and the provider own it.
+// FailUnstartedPurchases fails card purchases that never got a payment transaction within checkout expiry plus grace;
+// otherwise the package stays hidden for the rest of the stay. A purchase with a transaction is left to the reconciler.
 func (e *CheckoutEngine) FailUnstartedPurchases(ctx context.Context, tenantID, siteID string) (int, error) {
 	if e.Outcome == nil {
 		return 0, nil
@@ -283,10 +256,8 @@ func (e *CheckoutEngine) FailUnstartedPurchases(ctx context.Context, tenantID, s
 	return n, nil
 }
 
-// applyOutcome records a provider-verified outcome through the OUTCOME credential only.
 func (e *CheckoutEngine) applyOutcome(ctx context.Context, clientRef, eventID, eventType, status, providerTxnRef, reason string) error {
-	// Only the ledger's allowed evidence keys (p4_callback_evidence_safe); how the outcome was learned goes in
-	// provider_message.
+	// Only the ledger's allowed evidence keys; how the outcome was learned goes in provider_message.
 	evidence, _ := json.Marshal(map[string]string{"provider_status": status, "provider_reason_code": reason,
 		"provider_message": "outbound status query"})
 	var ptr any
@@ -302,9 +273,8 @@ func (e *CheckoutEngine) applyOutcome(ctx context.Context, clientRef, eventID, e
 	return nil
 }
 
-// ReconcileResult reports where one checkout stands.
 type ReconcileResult struct {
-	TransactionStatus string // PENDING, CAPTURED, FAILED, UNKNOWN, ...
+	TransactionStatus string
 	SettlementStatus  string
 	PurchaseState     string
 	EntitlementID     string
@@ -338,9 +308,8 @@ func (e *CheckoutEngine) loadTxn(ctx context.Context, tenantID, siteID, txnID st
 	return t, nil
 }
 
-// Reconcile asks the provider what happened to one checkout and applies a conclusive answer. It is safe to
-// call any number of times, from the return URL and from the background reconciler concurrently: status
-// queries are read-only, outcome application is deduplicated by event id, and the grant is idempotent.
+// Reconcile is safe to call concurrently (return URL and background reconciler): status queries are read-only, outcome
+// application is deduplicated by event id, and the grant is idempotent.
 func (e *CheckoutEngine) Reconcile(ctx context.Context, tenantID, siteID, txnID string) (ReconcileResult, error) {
 	t, err := e.loadTxn(ctx, tenantID, siteID, txnID)
 	if err != nil {
@@ -419,7 +388,7 @@ func (e *CheckoutEngine) queryAndApply(ctx context.Context, t txnRow) error {
 			return e.applyOutcome(ctx, t.clientRef, "status:"+t.clientRef+":not_found", "NOT_FOUND", "FAILED", "", "not_found")
 		}
 		return errStillOpen
-	default: // OPEN
+	default:
 		if now.After(deadline) {
 			return e.applyOutcome(ctx, t.clientRef, "status:"+t.clientRef+":open_after_grace", "OPEN_AFTER_GRACE",
 				"UNKNOWN", "", "open_after_grace")
@@ -476,12 +445,11 @@ func (e *CheckoutEngine) grant(ctx context.Context, tenantID, siteID, settlement
 	return eid, nil
 }
 
-// recordSettlementReport records, once, what the provider says it settled the captured charge as (contract §9,
-// migration 0112): presentment as quoted, and the provider's settlement currency, gross, rate, fee, net and
-// balance reference exactly as reported. Never computed here: no rate, no FX.
+// Recorded once: presentment as quoted and the provider's settlement figures exactly as reported. Never computed here:
+// no rate, no FX.
 func (e *CheckoutEngine) recordSettlementReport(ctx context.Context, t txnRow, r *SettlementReport) {
-	// Nothing reported yet: record nothing (the table is append-only, so a NOT_REPORTED row would stand in the
-	// way of the real report). For a card charge Stripe books the balance transaction at capture.
+	// Record nothing until reported: the table is append-only, so a NOT_REPORTED row would block the real report.
+	// Stripe books a card charge's balance transaction at capture.
 	if e.Outcome == nil || r == nil || r.Currency == "" {
 		return
 	}
@@ -499,11 +467,9 @@ func (e *CheckoutEngine) recordSettlementReport(ctx context.Context, t txnRow, r
 	}
 }
 
-// recordReversals records provider-originated refunds and chargebacks on a captured charge, opens a review case
-// for a dispute, and then applies the refund policy to the charge (migration 0115): a confirmed FULL refund ends
-// only the access that charge paid for; a partial refund changes nothing; a chargeback or dispute never ends
-// access by itself -- it is a case an operator resolves. OneGate never initiates a reversal and never retries
-// money; it records what the provider reports so the ledger is true.
+// recordReversals records provider refunds and chargebacks and applies the refund policy: a confirmed full refund ends
+// only the access that charge paid for, a partial refund changes nothing, a chargeback or dispute opens a case an
+// operator resolves. OneGate never initiates a reversal or retries money.
 func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events []ProviderEvent) {
 	touched := false
 	for _, ev := range events {
@@ -551,8 +517,6 @@ func (e *CheckoutEngine) recordReversals(ctx context.Context, t txnRow, events [
 	}
 }
 
-// SweepReversals asks the provider about recently captured charges and records any refund or chargeback it
-// reports. Read-only towards the provider.
 func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID string, since time.Duration, limit int) {
 	rows, err := e.Runtime.Query(ctx, `
 		SELECT pt.id::text FROM iam_v2.payment_transactions pt
@@ -597,7 +561,6 @@ func (e *CheckoutEngine) SweepReversals(ctx context.Context, tenantID, siteID st
 	}
 }
 
-// PendingTransactions lists open checkouts for the reconciler, least recently checked first.
 func (e *CheckoutEngine) PendingTransactions(ctx context.Context, tenantID, siteID string, limit int) ([]string, error) {
 	rows, err := e.Runtime.Query(ctx, `
 		SELECT pt.id::text FROM iam_v2.payment_transactions pt
@@ -619,7 +582,6 @@ func (e *CheckoutEngine) PendingTransactions(ctx context.Context, tenantID, site
 	return out, rows.Err()
 }
 
-// CapturedStillUngranted lists captured charges whose grant has not happened (crash recovery).
 func (e *CheckoutEngine) CapturedStillUngranted(ctx context.Context, tenantID, siteID string) []string {
 	rows, err := e.Runtime.Query(ctx, `
 		SELECT pt.id::text FROM iam_v2.payment_transactions pt
@@ -665,7 +627,6 @@ func (e *CheckoutEngine) state(ctx context.Context, t txnRow) (ReconcileResult, 
 	return r, nil
 }
 
-// TransactionForPurchase returns the charge of a purchase, if one was started.
 func (e *CheckoutEngine) TransactionForPurchase(ctx context.Context, tenantID, siteID, purchaseID string) (string, error) {
 	var id string
 	err := e.Runtime.QueryRow(ctx, `
@@ -679,23 +640,17 @@ func (e *CheckoutEngine) TransactionForPurchase(ctx context.Context, tenantID, s
 	return id, nil
 }
 
-// ---- provider health (readiness) ------------------------------------------------------------------------
-
-// ProviderHealth tracks recent provider call outcomes per account. Card payment is not offered for NEW
-// purchases while an account's provider keeps failing; configuration, history and reconciliation are
-// unaffected.
+// Card payment is not offered for new purchases while an account's provider keeps failing.
 type ProviderHealth struct {
 	mu   sync.Mutex
 	fail map[string]int
 	last map[string]time.Time
 }
 
-// NewProviderHealth builds an empty tracker.
 func NewProviderHealth() *ProviderHealth {
 	return &ProviderHealth{fail: map[string]int{}, last: map[string]time.Time{}}
 }
 
-// Record notes one call outcome.
 func (h *ProviderHealth) Record(account string, ok bool) {
 	if h == nil {
 		return
@@ -720,10 +675,7 @@ func (h *ProviderHealth) Healthy(account string) bool {
 	return h.fail[account] < 3 || time.Since(h.last[account]) > 5*time.Minute
 }
 
-// ---- account management (called by scd for the Admin Console) -------------------------------------------
-
-// SaveAccount creates or updates an account through the audited definer function, and seals new credentials
-// when any are supplied. Secrets are write-only: blank values keep the stored generation.
+// Secrets are write-only: blank values keep the stored generation.
 func SaveAccount(ctx context.Context, db *pgxpool.Pool, k PaymentKey, tenantID, siteID, id, provider, merchantRef,
 	displayName, currency string, mode Mode, status string, isDefault bool, creds Credentials, operator, reason string) (string, error) {
 	var newID string
@@ -731,9 +683,8 @@ func SaveAccount(ctx context.Context, db *pgxpool.Pool, k PaymentKey, tenantID, 
 	if id != "" {
 		idArg = id
 	}
-	// ONE TRANSACTION. The account change and its credential rotation commit together or not at all: saved
-	// separately, a failed seal or secret write left the metadata committed -- an account made default with
-	// missing or incompatible credentials, and the working default demoted -- while the API reported failure.
+	// One transaction: saved separately, a failed seal left an account made default with missing credentials while the
+	// API reported failure.
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT iam_v2.payment_account_save($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)::text`,
 			tenantID, siteID, idArg, provider, merchantRef, displayName, currency, string(mode), status, isDefault,
@@ -761,8 +712,6 @@ func SaveAccount(ctx context.Context, db *pgxpool.Pool, k PaymentKey, tenantID, 
 	return newID, nil
 }
 
-// MergeCredentials returns the stored credentials with every non-blank supplied value replacing its key, so an
-// operator can rotate one secret without retyping the others.
 func MergeCredentials(stored, supplied Credentials) Credentials {
 	out := Credentials{}
 	for k, v := range stored {
@@ -776,7 +725,6 @@ func MergeCredentials(stored, supplied Credentials) Credentials {
 	return out
 }
 
-// OpenStoredCredentials opens an account's current generation with the scd pool (svc_scd holds SELECT).
 func OpenStoredCredentials(ctx context.Context, db *pgxpool.Pool, k PaymentKey, tenantID, siteID, accountID string) (Credentials, bool, error) {
 	var gen, keyID string
 	var nonce, ct []byte
@@ -796,7 +744,6 @@ func OpenStoredCredentials(ctx context.Context, db *pgxpool.Pool, k PaymentKey, 
 	return c, true, nil
 }
 
-// newUUID returns a random (version 4) UUID string.
 func newUUID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -807,8 +754,7 @@ func newUUID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
-// AdapterKey selects the adapter instance for a provider account. Paymob adapters are bound to one region, so
-// a Paymob account whose "region" credential names another region uses that region's instance.
+// Paymob adapters are bound to one region; the account's "region" credential selects the instance.
 func AdapterKey(provider string, c Credentials) string {
 	if provider == "paymob" {
 		if r := strings.ToLower(strings.TrimSpace(c["region"])); r != "" && r != "egypt" {

@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// fakeSCDModules serves /v1/modules on a unix socket, the way scd does, and returns a client for it.
 func fakeSCDModules(t *testing.T, status int, body any) *scdClient {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "og")
@@ -94,11 +93,7 @@ func TestNotReadyStaysManageable(t *testing.T) {
 	}
 }
 
-// A SITE THAT IS NOT A HOTEL DOES NOT LOOK LIKE ONE -- AND KEEPS ITS HISTORY.
-//
-// Hospitality no longer licensed, but the site ran a PMS (scd reports manageable through its records probe):
-// day-to-day hotel screens (PMS connection, sign-in protection, grace, routing) are gone; stays, PMS activity,
-// sign-in history, reconciliation and alerts stay reachable.
+// With Hospitality unlicensed but PMS records present, day-to-day hotel screens are gone while history stays reachable.
 func TestUnlicensedModuleKeepsOnlyItsHistory(t *testing.T) {
 	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
 		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true, Reasons: []string{"NOT_LICENSED"}},
@@ -123,8 +118,7 @@ func TestUnlicensedModuleKeepsOnlyItsHistory(t *testing.T) {
 	}
 }
 
-// THE API REFUSES WHAT THE SCREEN DOES NOT OFFER: a site without Hospitality cannot be given Room sign-in (or
-// any optional method it is not licensed for) by a direct call; switching a method off always works.
+// A direct call cannot switch on a method the site is not licensed for; switching off always works.
 func TestAuthMethodsRefuseSwitchingOnAnUnlicensedMethod(t *testing.T) {
 	s := &server{modCache: &moduleCache{}, scd: fakeSCDModules(t, 200, report(map[string]moduleState{
 		"hospitality":  {ID: "hospitality", Deployed: true, Licensed: false},

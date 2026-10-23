@@ -1,11 +1,5 @@
-// Package opsignin signs a test operator in to ctrlapi through both steps (password, then authenticator code;
-// migration 0052) for the TEST tools: cmd/acceptance, cmd/pkitest and the regression scripts through cmd/regtest.
-// It is never part of the production runtime.
-//
-// A tool plays the operator's authenticator app, so it needs the operator's TOTP secret. Central shows that
-// secret once, at set-up, and stores it encrypted, so the tool keeps the secrets of the operators it set up in a
-// keyring file of its own (0600). An operator who set up an authenticator elsewhere cannot be signed in by a tool;
-// the error names the reset that hands it back.
+// Package opsignin signs a test operator in through both steps for test tools only, never production.
+// Central shows the TOTP secret once, so the tool keeps the secrets of operators it set up in its own keyring (0600).
 package opsignin
 
 import (
@@ -26,7 +20,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/totp"
 )
 
-// KeyringEnv overrides where the keyring lives.
 const KeyringEnv = "OPERATOR_TOTP_KEYRING"
 
 type entry struct {
@@ -34,15 +27,12 @@ type entry struct {
 	LastStep int64  `json:"last_step"`
 }
 
-// Keyring holds the TOTP secrets of the test operators this machine's tools set up, by email.
 type Keyring struct {
 	path string
 	mu   sync.Mutex
 	m    map[string]*entry
 }
 
-// DefaultKeyringPath is $OPERATOR_TOTP_KEYRING, else stayconnect/test-operator-totp.json in the user's config
-// directory.
 func DefaultKeyringPath() string {
 	if p := os.Getenv(KeyringEnv); p != "" {
 		return p
@@ -54,7 +44,6 @@ func DefaultKeyringPath() string {
 	return filepath.Join(dir, "stayconnect", "test-operator-totp.json")
 }
 
-// Open reads the keyring at path; a missing file is an empty keyring.
 func Open(path string) (*Keyring, error) {
 	k := &Keyring{path: path, m: map[string]*entry{}}
 	b, err := os.ReadFile(path)
@@ -84,8 +73,6 @@ func (k *Keyring) save() error {
 
 func key(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
-// SignIn takes cl (which must carry a cookie jar) through both sign-in steps; on success the jar holds the
-// session cookie.
 func (k *Keyring) SignIn(cl *http.Client, base, email, password string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -109,7 +96,7 @@ func (k *Keyring) SignIn(cl *http.Client, base, email, password string) error {
 		}
 		e = &entry{Secret: en.Secret}
 		k.m[key(email)] = e
-		// Kept before the code is confirmed: once confirmed, Central never shows this secret again.
+		// Save before confirming: Central never shows this secret again.
 		if err := k.save(); err != nil {
 			return fmt.Errorf("keyring %s: %w", k.path, err)
 		}
@@ -136,9 +123,8 @@ func (k *Keyring) SignIn(cl *http.Client, base, email, password string) error {
 	return nil
 }
 
-// nextStep is the step whose code to send. Central accepts the steps either side of now and refuses a step at or
-// before the last one it accepted (replay), so a second sign-in inside one step uses the next step's code, and a
-// third waits for the clock.
+// nextStep is the step whose code to send: Central refuses a step at or before the last accepted (replay), so
+// repeat sign-ins use the next step and wait for the clock once past the skew window.
 func nextStep(last int64, now time.Time, sleep func(time.Duration)) int64 {
 	cur := totp.Step(now)
 	s := last + 1
@@ -174,8 +160,7 @@ func call(cl *http.Client, u string, in any, out any) error {
 	return nil
 }
 
-// WriteCurlJar writes the client's cookies for base in the Netscape format curl reads with -b/-c, so a shell
-// script can carry on with the session a SignIn opened.
+// WriteCurlJar writes the client's cookies in the Netscape format curl reads.
 func WriteCurlJar(cl *http.Client, base, path string) error {
 	u, err := url.Parse(base)
 	if err != nil {

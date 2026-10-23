@@ -10,23 +10,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// PHASE-6 OPERATOR SURFACE — AUTHORIZATION, through the ACTUAL router and session middleware.
-//
-// The decoder tests next door prove what the wire type accepts. They are not authorization proof and must
-// not be read as one: a request can be perfectly well-formed and still come from somebody with no business
-// changing a guest-facing appliance capability.
-//
-// The defect these close is precise. The routes were first registered directly inside requireAuth, so every
-// authenticated operator -- including read-only desk roles -- could flip the setting. AUTHENTICATION IS NOT
-// AUTHORIZATION, and the difference is invisible until somebody with a read-only login changes something.
-//
-// They are mounted through mountResource now, which is the same path every other management surface takes,
-// so the role matrix in auth.go decides. These tests drive that real stack: chi router, requireAuth,
-// resourcePermission, and the handler.
+// Authorization for the Phase-6 setting through the real router and session middleware. The routes are
+// mounted via mountResource so the auth.go role matrix decides; authentication alone must not allow a write.
 
-// phase6RBACRouter builds the same shape main.go mounts: requireAuth in front, mountResource around the
-// resource. The handler bodies are not exercised here -- a request that reaches them has already passed the
-// boundary this test is about, and reaching them is exactly what must not happen for the denied cases.
+// phase6RBACRouter mirrors main.go: requireAuth in front, mountResource around the resource.
 func phase6RBACRouter(s *server) http.Handler {
 	reached := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) }
 	r := chi.NewRouter()
@@ -42,7 +29,6 @@ func phase6RBACRouter(s *server) http.Handler {
 	return r
 }
 
-// loginAs creates a real session for a set of roles and returns its cookie value.
 func loginAs(t *testing.T, s *server, roles []string) string {
 	t.Helper()
 	return s.sessions.create(&session{
@@ -67,7 +53,6 @@ func newPhase6RBACServer() *server {
 	return &server{sessions: newSessionStore(30 * time.Minute)}
 }
 
-// Unauthenticated requests never reach the resource.
 func TestPhase6SettingRequiresAuthentication(t *testing.T) {
 	s := newPhase6RBACServer()
 	h := phase6RBACRouter(s)
@@ -78,8 +63,7 @@ func TestPhase6SettingRequiresAuthentication(t *testing.T) {
 	}
 }
 
-// THE DEFECT, ASSERTED. An authenticated operator whose role holds no permission on this resource must be
-// refused -- not merely unable to do harm by luck of what the handler checks afterwards.
+// A role with no permission on this resource must be refused before the handler.
 func TestPhase6SettingRefusesARoleWithNoPermission(t *testing.T) {
 	s := newPhase6RBACServer()
 	h := phase6RBACRouter(s)
@@ -96,8 +80,7 @@ func TestPhase6SettingRefusesARoleWithNoPermission(t *testing.T) {
 	}
 }
 
-// A READ role may read and must not write. This is the case the original wiring got wrong: the desk roles
-// are authenticated, and without resourcePermission they could have changed the setting.
+// A read role may read and must not write.
 func TestPhase6SettingReadRoleCannotWrite(t *testing.T) {
 	s := newPhase6RBACServer()
 	h := phase6RBACRouter(s)
@@ -116,8 +99,7 @@ func TestPhase6SettingReadRoleCannotWrite(t *testing.T) {
 	}
 }
 
-// The intended management roles can perform the operation, or the refusals above would prove only that the
-// resource is unreachable by everyone.
+// The management roles can perform the operation (else the refusals above prove nothing).
 func TestPhase6SettingWriteRolesCanWrite(t *testing.T) {
 	s := newPhase6RBACServer()
 	h := phase6RBACRouter(s)
@@ -132,9 +114,7 @@ func TestPhase6SettingWriteRolesCanWrite(t *testing.T) {
 	}
 }
 
-// A role list that contains a permitted role alongside an unrelated one still works: the matrix is a union
-// over the operator's roles, and asserting it here stops a later "simplification" from making it an
-// intersection.
+// Permissions are a union over the operator's roles, not an intersection.
 func TestPhase6SettingRolesAreAUnion(t *testing.T) {
 	s := newPhase6RBACServer()
 	h := phase6RBACRouter(s)

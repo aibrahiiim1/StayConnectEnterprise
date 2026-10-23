@@ -2,13 +2,8 @@
 
 package pmsd
 
-// THE OPERATOR COMMAND CHANNEL, AGAINST A REAL POSTGRESQL.
-//
-// The claim is one UPDATE whose WHERE clause carries the entire safety model — exactly-once, no stale
-// execution, no parallel DR. A fake repository can be made to agree with any of those by construction, so the
-// claim is tested here against the real statement and the real CHECK constraints instead.
-//
-// No PMS traffic is involved and none is possible: this exercises the row, not the socket.
+// The claim's WHERE clause is the whole safety model (exactly-once, no stale execution, no parallel DR), which
+// a fake repository can't prove, so it runs against real PostgreSQL. Exercises the row only; no PMS traffic.
 
 import (
 	"context"
@@ -18,8 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// requestCommand writes an operator command the way edged does, including binding it to the runtime's own
-// generation. Kept as SQL rather than calling edged so this suite tests the row contract both processes share.
+// requestCommand writes the command as edged does, as SQL so the suite tests the row contract both processes share.
 func requestCommand(t *testing.T, pool *pgxpool.Pool, ax axisBase, reason string) string {
 	t.Helper()
 	var id string
@@ -39,10 +33,7 @@ func requestCommand(t *testing.T, pool *pgxpool.Pool, ax axisBase, reason string
 	return id
 }
 
-// A REQUEST IS CLAIMED EXACTLY ONCE, and the second claim finds nothing.
-//
-// This is the duplicate-click case. Two claims in a row model two workers racing, and one operator clicking
-// twice reaches the same place: the command row can only be consumed once, so only one DR can result.
+// A request is claimed exactly once (models racing workers and a double click).
 func TestIntegration_ResyncCommand_ClaimedExactlyOnce(t *testing.T) {
 	p, repo, ax, _, _ := newResyncFixture(t)
 
@@ -66,18 +57,13 @@ func TestIntegration_ResyncCommand_ClaimedExactlyOnce(t *testing.T) {
 	}
 }
 
-// A COMMAND ISSUED AGAINST A REPLACED WORKER IS NEVER EXECUTED.
-//
-// The operator asked a specific worker on a specific socket. By the time a replacement exists, that
-// instruction is about a connection the operator never saw, and the replacement has its own initial sync to
-// perform anyway.
+// A command issued against a replaced worker is never executed.
 func TestIntegration_ResyncCommand_StaleGenerationIsRefused(t *testing.T) {
 	p, repo, ax, rev, sg := newResyncFixture(t)
 	requestCommand(t, p, ax, "SUPPORT_REQUEST")
 
-	// A new owner allocates a fresh runtime generation — exactly what worker replacement does. The transport
-	// is dropped first because pir_connected_pins requires a CONNECTED runtime to carry its pins, and taking
-	// over an interface necessarily means the previous owner's socket is gone.
+	// A new owner allocates a fresh generation. The transport is dropped first because pir_connected_pins
+	// requires a CONNECTED runtime to carry its pins.
 	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
 		SET transport_status='DISCONNECTED', disconnected_since=now(), updated_at=now()
 		WHERE pms_interface_id=$1`, ax.PMSInterfaceID); err != nil {
@@ -100,9 +86,7 @@ func TestIntegration_ResyncCommand_StaleGenerationIsRefused(t *testing.T) {
 	}
 }
 
-// A RESYNC ALREADY IN PROGRESS BLOCKS THE CLAIM, so a command cannot open a second staging window over an
-// open one. The command is left on the row rather than discarded — the operator's request is not lost, it is
-// simply not run yet.
+// A resync in progress blocks the claim; the command stays on the row, not lost, just not run yet.
 func TestIntegration_ResyncCommand_RefusedWhileResyncing(t *testing.T) {
 	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
@@ -133,10 +117,7 @@ func TestIntegration_ResyncCommand_RefusedWhileResyncing(t *testing.T) {
 	}
 }
 
-// THE STAGE VOCABULARY IS CLOSED, enforced by the database rather than by convention.
-//
-// These words are rendered to hotel staff. An unbounded column is how an internal token reaches a screen, so
-// the CHECK is the guard and this proves it is really there.
+// The stage vocabulary is closed by a database CHECK, since these words are rendered to hotel staff.
 func TestIntegration_ResyncCommand_StageVocabularyIsEnforced(t *testing.T) {
 	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
@@ -155,8 +136,7 @@ func TestIntegration_ResyncCommand_StageVocabularyIsEnforced(t *testing.T) {
 	}
 }
 
-// PROGRESS WRITES ARE GUARDED BY OWNERSHIP. A worker that has lost the interface cannot keep writing progress
-// for a socket someone else now owns.
+// A worker that lost the interface cannot keep writing progress.
 func TestIntegration_ResyncCommand_StaleWorkerCannotWriteProgress(t *testing.T) {
 	_, repo, ax, _, _ := newResyncFixture(t)
 	stale := ax
@@ -168,7 +148,7 @@ func TestIntegration_ResyncCommand_StaleWorkerCannotWriteProgress(t *testing.T) 
 	}
 }
 
-// COUNTERS ARE REPLACED, NEVER INCREMENTED, so a retried write cannot inflate the number an operator watches.
+// Counters are replaced, never incremented, so a retried write can't inflate them.
 func TestIntegration_ResyncCommand_CountersAreIdempotent(t *testing.T) {
 	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
@@ -191,8 +171,7 @@ func TestIntegration_ResyncCommand_CountersAreIdempotent(t *testing.T) {
 	}
 }
 
-// A CLAIM RESETS THE COUNTERS, so a new sync starts from zero rather than continuing the previous roster's
-// total. Without this the second sync of the day would appear to begin at whatever the first one ended on.
+// A claim resets the counters so a new sync starts from zero.
 func TestIntegration_ResyncCommand_ClaimResetsCounters(t *testing.T) {
 	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
@@ -221,8 +200,6 @@ func TestIntegration_ResyncCommand_ClaimResetsCounters(t *testing.T) {
 	}
 }
 
-// newResyncFixture builds one ACTIVE, CONNECTED interface with a runtime row, and returns the axis a worker
-// would hold while serving it.
 func newResyncFixture(t *testing.T) (*pgxpool.Pool, Repo, axisBase, string, string) {
 	t.Helper()
 	p := integPool(t)

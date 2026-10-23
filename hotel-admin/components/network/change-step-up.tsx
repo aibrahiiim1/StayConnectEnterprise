@@ -1,11 +1,6 @@
 "use client";
 
-// APPLY, KEEP AND ROLL BACK A CLIENT-NETWORK CHANGE ASK FOR THE OPERATOR'S PASSWORD.
-//
-// These three change what every client network on the appliance forwards, so the server requires the
-// operator's password for each (edged netApply / confirmRevision / rollbackRevision), exactly as it already did
-// for a WAN / LAN change. The password is typed into a masked field inside a confirmation that says what will
-// happen -- never a browser prompt. One hook, so every Networking screen asks the same way.
+// Applying, keeping, and rolling back client-network changes require operator password step-up.
 
 import * as React from "react";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -13,7 +8,7 @@ import { errMsg } from "@/lib/utils";
 
 export type NetworkChangeKind = "apply" | "confirm" | "rollback";
 
-/** A refused password (401 reauth_required): the dialog stays open and says so; nothing was changed. */
+/** Keep the dialog open when password step-up is refused; no change was made. */
 export function isReauth(e: unknown): boolean {
   const x = e as { status?: number; code?: string; body?: { error?: string } } | null;
   return !!x && x.status === 401 && (x.code === "reauth_required" || x.body?.error === "reauth_required");

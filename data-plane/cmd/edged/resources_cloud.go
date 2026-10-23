@@ -1,16 +1,7 @@
 package main
 
-// Hotel Admin <-> Central (docs/CENTRAL_CONTROL_PLANE.md section 8).
-//
-//	GET  /edge/v1/central/status           activation, licence and Central connection -- one document
-//	POST /edge/v1/central/refresh          Check now: register if needed, ask Central now, run diagnostics
-//	GET  /edge/v1/central/offline-request  the offline activation request this appliance emits
-//	POST /edge/v1/central/offline-package  an activation package, or an offline licence package
-//	POST /edge/v1/license                  Upload licence file (common.go)
-//
-// scd computes every state (cmd/scd/central.go); edged authenticates, authorises, rate-limits and audits.
-// This file replaces the Cloud Connection page backend, the setup-wizard proxies and the enrollment-token
-// submission (enrollment tokens no longer exist), which each reported their own version of these states.
+// Hotel Admin <-> Central (docs/CENTRAL_CONTROL_PLANE.md section 8). scd computes every state
+// (cmd/scd/central.go); edged authenticates, authorises, rate-limits and audits.
 
 import (
 	"context"
@@ -21,7 +12,6 @@ import (
 	"time"
 )
 
-// actionLimiter is a small in-memory fixed-window rate limiter for operator actions that reach Central.
 type actionLimiter struct {
 	mu     sync.Mutex
 	hits   map[string][]time.Time
@@ -51,16 +41,13 @@ func (l *actionLimiter) allow(key string, now time.Time) bool {
 	return true
 }
 
-// Check now: 6 per source per minute is ample for a person pressing a button, and bounds what one browser tab
-// can make the appliance ask of Central.
+// Check now: 6 per source per minute bounds what one browser tab can make the appliance ask of Central.
 var checkNowLim = newActionLimiter(6, time.Minute)
 
-// centralStatus proxies the section 8 status. Readable by anyone who can read the licence.
 func (s *server) centralStatus(w http.ResponseWriter, r *http.Request) {
 	s.scd.proxy(w, r, http.MethodGet, "/v1/central/status", nil)
 }
 
-// centralRefresh is Check now.
 func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 	if !checkNowLim.allow(clientIP(r), time.Now()) {
 		jsonErr(w, http.StatusTooManyRequests, "rate_limited", "Checked a moment ago — wait a minute and try again.")
@@ -70,8 +57,7 @@ func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 	s.scd.proxy(w, r, http.MethodPost, "/v1/central/refresh", nil)
 }
 
-// centralOfflineRequest returns the offline activation request (the appliance generates its identity key
-// locally if it has none; the file carries only the public half).
+// The offline request carries only the public half of the locally generated identity key.
 func (s *server) centralOfflineRequest(w http.ResponseWriter, r *http.Request) {
 	st, raw, err := s.scd.call(r.Context(), http.MethodGet, "/v1/central/offline-request", nil)
 	if err != nil {
@@ -86,8 +72,7 @@ func (s *server) centralOfflineRequest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-// centralOfflinePackage forwards an uploaded package to scd, which decides by shape whether it is a first
-// activation package or an offline licence package and verifies it on its own terms. Every outcome is audited.
+// centralOfflinePackage forwards an uploaded package to scd, which classifies and verifies it. Every outcome is audited.
 func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil || len(raw) == 0 || !json.Valid(raw) {
@@ -110,9 +95,7 @@ func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp)
 }
 
-// requireAnyWrite admits an operator holding WRITE on any of the given resources. Offline activation changes
-// what the appliance is licensed for (the "license" key) and was, until now, gated as a setup action on the
-// "network" key; both keep the power they had.
+// requireAnyWrite admits an operator holding WRITE on any of the given resources.
 func (s *server) requireAnyWrite(resources ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +113,7 @@ func (s *server) requireAnyWrite(resources ...string) func(http.Handler) http.Ha
 	}
 }
 
-// licenceSummary is the small licence fact the dashboard health and the overview show, derived from the SAME
-// scd computation as /central/status. ok=false when scd could not be read.
+// licenceSummary is derived from the same scd computation as /central/status.
 type licenceSummary struct {
 	Activation  string
 	State       string // section 8 licence state

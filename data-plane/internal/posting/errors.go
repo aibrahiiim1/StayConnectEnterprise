@@ -2,20 +2,15 @@ package posting
 
 import "errors"
 
-// Code is a deterministic, non-sensitive classification for a financial refusal.
-//
-// Every code below names a reason a posting was NOT executed. That is the point: an operator has to be able
-// to read the refusal and know which onboarding step, which pinned object or which review decision is
-// missing, without anyone having to reconstruct it from a stack trace. None of these values ever carries an
-// amount, a guest identifier, a room number or a secret.
+// Code is a non-sensitive classification of why a posting was not executed; it never carries an amount, guest
+// identifier, room number or secret.
 type Code string
 
 const (
 	ErrConfig Code = "config"
 	ErrRepo   Code = "repository"
 
-	// ---- fail-closed creation gate (all of these happen BEFORE any side effect) ----
-	// ErrPostingTargetUnset: the pinned interface revision's posting_target_model is UNSET (Amendment A1).
+	// Fail-closed creation gate; all happen before any side effect.
 	ErrPostingTargetUnset  Code = "posting_target_unset"
 	ErrReservationMismatch Code = "reservation_mismatch"
 	ErrStayChargeOpen      Code = "stay_room_charge_unresolved"
@@ -37,7 +32,6 @@ const (
 	ErrFIASExponent        Code = "fias_exponent_unsupported"
 	ErrReversalDisabled    Code = "programmatic_reversal_disabled"
 
-	// ---- execution / protocol ----
 	ErrDarkNoEgress     Code = "dark_no_egress"
 	ErrAlreadyInFlight  Code = "already_in_flight"
 	ErrRetryNotAuthed   Code = "retry_not_authorized"
@@ -50,12 +44,11 @@ const (
 	ErrReviewConflict   Code = "review_conflict"
 	ErrReviewStale      Code = "review_version_stale"
 	ErrWireFieldInvalid Code = "wire_field_invalid"
-	// ErrTransportUnavailable: the hand-off to pmsd (decision D45) did not produce a matched PA. Whether that
-	// means "not sent" or UNKNOWN is carried by ErrNotTransmitted / ErrTransmittedNoAnswer, never by this code.
+	// ErrTransportUnavailable: the hand-off to pmsd gave no matched PA; "not sent" vs UNKNOWN is carried by ErrNotTransmitted / ErrTransmittedNoAnswer, never by this code.
 	ErrTransportUnavailable Code = "transport_unavailable"
 )
 
-// Error is a deterministic typed error. Msg must never contain secrets, card data, guest PII or amounts.
+// Msg must never contain secrets, card data, guest PII or amounts.
 type Error struct {
 	Code Code
 	Msg  string
@@ -68,7 +61,6 @@ func (e *Error) Error() string {
 	return "posting: " + string(e.Code) + ": " + e.Msg
 }
 
-// CodeOf returns the classification of an error, or "" if it is not an *Error.
 func CodeOf(err error) Code {
 	var e *Error
 	if errors.As(err, &e) {

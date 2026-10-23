@@ -1,13 +1,7 @@
-// Package pmsrest holds the HTTPS clients for the polled REST PMS connectors (Mews, Apaleo, OPERA Cloud).
-//
-// Every client reduces its provider's reservation model to the ONE shape the connector admits: a reservation
-// id, the room it occupies, the primary guest's names, its arrival and departure as property-local calendar
-// dates in the FIAS "YYMMDD" form the Stay Engine parses, an in-house / checked-out / other state, and an
-// opaque change stamp. Nothing else leaves this package, and nothing here writes to a PMS: every call is a
-// read.
-//
-// Errors are TYPED and carry no response body, URL or credential, so they can be classified into bounded
-// runtime codes without anything the provider sent reaching a log line or a database column.
+// Package pmsrest holds the read-only HTTPS clients for the polled REST connectors (Mews, Apaleo, OPERA
+// Cloud). Each reduces its reservation model to one normalised shape and nothing else leaves the package.
+// Errors are typed and carry no response body, URL or credential, so nothing the provider sent reaches a
+// log line or database column.
 package pmsrest
 
 import (
@@ -25,7 +19,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
-// State is the connector-relevant reservation state.
 type State int
 
 const (
@@ -44,7 +37,6 @@ func (s State) String() string {
 	return "OTHER"
 }
 
-// Guest is one occupant of a reservation as the provider reports it.
 type Guest struct {
 	ExternalID string
 	FirstName  string
@@ -52,7 +44,6 @@ type Guest struct {
 	Primary    bool
 }
 
-// Reservation is the normalised reservation every provider client produces.
 type Reservation struct {
 	ID        string // provider reservation id (the external reservation id)
 	State     State
@@ -62,45 +53,34 @@ type Reservation struct {
 	Arrival   string // YYMMDD in the property's time zone ("" when unknown)
 	Departure string // YYMMDD in the property's time zone ("" when unknown)
 	Stamp     string // provider change marker (e.g. UpdatedUtc); opaque
-	// Sharers lists every occupant the provider names, the primary included. Nil when the provider exposes
-	// no occupant list beyond the primary guest.
+	// Sharers lists every named occupant, primary included; nil when none beyond the primary is exposed.
 	Sharers []Guest
 }
 
-// Snapshot is a complete in-house roster.
 type Snapshot struct {
 	Reservations []Reservation
-	// Rooms is every room the provider enumerates for the property (occupied or not), or nil when the provider
-	// cannot enumerate rooms. RoomsKnown distinguishes "no rooms" from "cannot tell".
+	// Rooms is every enumerated room, or nil when the provider can't enumerate; RoomsKnown tells "no rooms" from "can't tell".
 	Rooms      []string
 	RoomsKnown bool
 }
 
-// Probe is the outcome of a bounded test read.
 type Probe struct {
 	SampleReservations int
 	Property           string
 }
 
-// Client is one provider connection. Implementations are safe for use by one goroutine at a time.
+// Client is not safe for concurrent use.
 type Client interface {
-	// Snapshot pages through every in-house reservation.
 	Snapshot(ctx context.Context) (Snapshot, error)
-	// SupportsChanges reports whether Changes is implemented; when false the connector finds changes by
-	// comparing successive snapshots.
+	// SupportsChanges false means the connector diffs successive snapshots instead.
 	SupportsChanges() bool
-	// Changes returns reservations modified in [since, until) in any connector-relevant state.
+	// Changes returns reservations modified in [since, until) in any state.
 	Changes(ctx context.Context, since, until time.Time) ([]Reservation, error)
-	// Lookup returns the current state of specific reservations (used to confirm a departure when a
-	// reservation disappears from the in-house list). Unknown ids are simply absent from the result.
+	// Lookup confirms departures of reservations that left the in-house list; unknown ids are absent.
 	Lookup(ctx context.Context, ids []string) ([]Reservation, error)
-	// Probe authenticates and performs ONE bounded read (page size 1).
 	Probe(ctx context.Context) (Probe, error)
 }
 
-// ---------- errors ----------
-
-// ErrKind is the bounded classification of a provider failure.
 type ErrKind string
 
 const (
@@ -113,7 +93,7 @@ const (
 	KindConfig          ErrKind = "CONFIG"           // unusable configuration or credential
 )
 
-// Error is a provider failure. It deliberately carries no body, URL or credential.
+// Error deliberately carries no body, URL or credential.
 type Error struct {
 	Kind   ErrKind
 	Status int    // HTTP status, 0 when none
@@ -129,7 +109,6 @@ func (e *Error) Error() string {
 }
 func (e *Error) Unwrap() error { return e.cause }
 
-// KindOf returns the classification of err, or "" when it is not a provider error.
 func KindOf(err error) ErrKind {
 	var pe *Error
 	if errors.As(err, &pe) {
@@ -138,7 +117,6 @@ func KindOf(err error) ErrKind {
 	return ""
 }
 
-// IsTokenOp reports whether err happened while obtaining an access token (as opposed to reading data).
 func IsTokenOp(err error) bool {
 	var pe *Error
 	return errors.As(err, &pe) && (pe.Op == "connect/token" || pe.Op == "oauth/tokens")
@@ -148,21 +126,17 @@ func perr(kind ErrKind, op string, status int, cause error) *Error {
 	return &Error{Kind: kind, Op: op, Status: status, cause: cause}
 }
 
-// ---------- HTTP plumbing ----------
-
-// Options are the injectable effects every client uses.
 type Options struct {
 	HTTP     *http.Client
 	Now      func() time.Time
 	Location *time.Location // the property's time zone
-	// Sleep waits between retries; tests inject a recorder so no test waits real time.
+	// Sleep is injectable so tests don't wait.
 	Sleep func(ctx context.Context, d time.Duration) error
-	// Retries bounds the attempts per request for 429 / 5xx / timeouts (default 3).
+	// Retries bounds attempts per request for 429 / 5xx / timeouts (default 3).
 	Retries int
 	// MaxRetryAfter caps an honoured Retry-After (default 60s).
 	MaxRetryAfter time.Duration
-	// UserAgent identifies this client to the provider.
-	UserAgent string
+	UserAgent     string
 }
 
 func (o *Options) defaults() {
@@ -200,9 +174,8 @@ func (o *Options) defaults() {
 
 const maxBody = 32 << 20
 
-// do sends a request built by mk (called once per attempt so bodies can be re-sent) and decodes a JSON
-// response into out. It honours 429 Retry-After and retries 408/5xx/network timeouts with bounded
-// exponential backoff. A 204 leaves out untouched and returns (204, nil).
+// do calls mk once per attempt so bodies can be re-sent. It honours 429 Retry-After and retries
+// 408/5xx/timeouts with bounded exponential backoff; a 204 leaves out untouched.
 func (o *Options) do(ctx context.Context, op string, mk func() (*http.Request, error), out any) (int, error) {
 	backoff := time.Second
 	var last error
@@ -294,7 +267,7 @@ func (o *Options) do(ctx context.Context, op string, mk func() (*http.Request, e
 	return 0, last
 }
 
-// parseRetryAfter reads either delta-seconds or an HTTP-date (RFC 9110 §10.2.3).
+// parseRetryAfter reads delta-seconds or an HTTP-date.
 func parseRetryAfter(v string, now time.Time) time.Duration {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -309,10 +282,7 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 	return 0
 }
 
-// ---------- normalisation helpers ----------
-
-// localDate renders an instant as the property's calendar date in the FIAS YYMMDD form the Stay Engine
-// parses (stayengine.parseYYMMDD reads "060102" as a naive date). A zero time yields "".
+// localDate renders the property's calendar date as FIAS YYMMDD, the form stayengine.parseYYMMDD reads.
 func localDate(t time.Time, loc *time.Location) string {
 	if t.IsZero() {
 		return ""
@@ -320,7 +290,6 @@ func localDate(t time.Time, loc *time.Location) string {
 	return t.In(loc).Format("060102")
 }
 
-// parseInstant accepts RFC 3339 with or without fractional seconds; "" or unparseable yields zero.
 func parseInstant(s string) time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -332,8 +301,7 @@ func parseInstant(s string) time.Time {
 	return time.Time{}
 }
 
-// dateOnly converts an ISO calendar date (YYYY-MM-DD, possibly followed by a time) to YYMMDD WITHOUT any
-// time-zone arithmetic: a provider that reports a calendar date already reports the property's date.
+// dateOnly does no time-zone arithmetic: a provider's calendar date is already the property's date.
 func dateOnly(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) < 10 {
@@ -346,8 +314,6 @@ func dateOnly(s string) string {
 	return t.Format("060102")
 }
 
-// New builds the client for a REST connector kind from its stored provider configuration and decrypted
-// credential JSON. The credential bytes are parsed here and not retained beyond the client's fields.
 func New(kind string, provider map[string]any, secret []byte, o Options) (Client, error) {
 	o.defaults()
 	var cred map[string]string

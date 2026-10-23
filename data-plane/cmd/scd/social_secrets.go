@@ -1,24 +1,9 @@
 package main
 
-// SOCIAL SIGN-IN, OPERATED LIKE A PRODUCT: contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5.
-//
-// Three things the boot-time loader could not do, as for the notification senders (notify_admin.go):
-//   1. SEAL. A provider's client secret (or Apple .p8 key) is sealed by scd with AES-256-GCM under
-//      social_dek.key, the AAD binding it to (tenant, provider row, generation), into
-//      iam_v2.social_provider_secret_generations; social_oauth_providers.client_secret is then NULL. edged
-//      forwards the secret once (PUT /v1/social/providers/{id}/secret) and never reads it back. A row that
-//      still holds a plaintext secret -- written before 0116, or by an edged that predates this endpoint -- is
-//      sealed and cleared at start-up and on every reload, so the plaintext column empties itself.
-//   2. NEVER PLAINTEXT AFTER SEALING. Providers are built from opened sealed secrets ONLY. Without the key,
-//      nothing is sealed and nothing is built (logged loudly); there is no fallback to the column.
-//   3. RELOAD. The registry is rebuilt on POST /v1/social/reload (edged after a provider write) and whenever a
-//      cheap fingerprint of the configuration changes, checked every 60 s. The new registry is swapped in
-//      atomically; an attempt already past start keeps the provider it resolved.
-//
-// And the rule that decides whether a provider is OFFERED at all (§4, §5): only while the portal is served
-// over HTTPS and the canonical hostname is one of the callback hosts the hotel registered in its own app. Every
-// real provider accepts HTTPS callbacks only, and a callback host the provider does not know is a sign-in that
-// fails at the provider's own error page.
+// Provider client secrets (or Apple .p8 keys) are sealed by scd with AES-256-GCM under social_dek.key, the AAD binding tenant, provider row and
+// generation, into iam_v2.social_provider_secret_generations; client_secret is then NULL. Providers are built from opened sealed secrets ONLY,
+// never the plaintext column. The registry is rebuilt on POST /v1/social/reload or a fingerprint change (checked every 60 s) and swapped atomically.
+// A provider is OFFERED only while the portal is served over HTTPS and the canonical hostname is a callback host the hotel registered; real providers accept HTTPS callbacks only.
 
 import (
 	"context"
@@ -45,15 +30,13 @@ const (
 	socialKeyFile = "social_dek.key"
 	socialDomain  = "social-secret-aead:v1"
 
-	// socialReloadEvery is how often scd compares the configuration fingerprint. The comparison is one small
-	// query; a rebuild happens only when something changed.
+	// How often scd compares the configuration fingerprint; a rebuild happens only on change.
 	socialReloadEvery = 60 * time.Second
 
 	socialCallbackPath = "/auth/social/callback"
 )
 
-// Reason codes for a provider that is not offered. They reach edged (status line) and portald's log; a guest
-// sees the translated social failure page, never these.
+// Reason codes for a provider that is not offered; they reach edged and the portald log, never a guest.
 const (
 	reasonHTTPFallback       = "social_unavailable_http_fallback"
 	reasonCallbackNotRegd    = "social_callback_not_registered"
@@ -61,20 +44,15 @@ const (
 	reasonProviderNotEnabled = "social_provider_not_enabled"
 )
 
-// portalHosts is the portal's HTTPS state: whether HTTPS is active and the canonical hostname (§4). It is
-// computed by the portal-TLS subsystem; this file only consumes it. Until that accessor is wired in main.go,
-// the default reports "not active", which hides every real provider -- the approved HTTP fallback.
+// The portal HTTPS state (active, canonical hostname) from the portal-TLS subsystem; the default reports not active, which hides every real provider (the HTTP fallback).
 type portalHosts interface {
 	PortalTLS() (httpsActive bool, canonical string)
 }
 
-// noPortalHTTPS is the fallback state: HTTPS not active, no canonical hostname.
 type noPortalHTTPS struct{}
 
 func (noPortalHTTPS) PortalTLS() (bool, string) { return false, "" }
 
-// PortalTLS makes the certificate agent the social sign-in's view of the portal (nil-safe: a nil agent is the
-// fallback).
 func (a *portalTLSAgent) PortalTLS() (bool, string) {
 	st := a.State()
 	return st.HTTPSActive, st.Canonical
@@ -92,7 +70,6 @@ func (s *server) portalHTTPS() (bool, string) {
 	return true, canonical
 }
 
-// socialSet is one generation of the provider registry, swapped whole.
 type socialSet struct {
 	reg   *social.Registry
 	hosts map[string][]string // provider -> registered callback hosts (normalised)
@@ -100,7 +77,6 @@ type socialSet struct {
 	fp    string              // configuration fingerprint this set was built from
 }
 
-// currentSocial returns the live registry generation; never nil.
 func (s *server) currentSocial() *socialSet {
 	if cur := s.socialSet.Load(); cur != nil {
 		return cur
@@ -109,10 +85,7 @@ func (s *server) currentSocial() *socialSet {
 	return &socialSet{reg: l.Registry, hosts: l.CallbackHosts, real: l.Real}
 }
 
-// ---- the key ----------------------------------------------------------------------------------------------
-
-// initSocialKey loads the sealing key. Without it no secret can be sealed or opened, so no real provider is
-// built (the methods are then not offered); every other sign-in method is unaffected.
+// Without the key no secret can be sealed or opened, so no real provider is built; other sign-in methods are unaffected.
 func (s *server) initSocialKey(secretsDir string) {
 	raw, err := localkeys.LoadExistingKey(filepath.Join(secretsDir, socialKeyFile))
 	if err != nil {
@@ -127,9 +100,7 @@ func (s *server) initSocialKey(secretsDir string) {
 	s.socialKey = k
 }
 
-// sealSocial and openSocial are the whole cryptographic contract: the AAD names the tenant, the provider row
-// and the generation, so a ciphertext copied to another row, another tenant or another generation number does
-// not open.
+// The AAD names tenant, provider row and generation, so a ciphertext copied elsewhere does not open.
 func sealSocial(k sealbox.Key, tenant, providerID string, gen int, secret string) (sealbox.Sealed, error) {
 	return k.Seal([]byte(secret), tenant, providerID, strconv.Itoa(gen))
 }
@@ -142,7 +113,6 @@ func openSocial(k sealbox.Key, tenant, providerID string, gen int, sl sealbox.Se
 	return string(plain), nil
 }
 
-// openSocialSecret is the loader's SecretOpener: the current generation of one provider row, opened.
 func (s *server) openSocialSecret(ctx context.Context, providerID string) (string, bool) {
 	if !s.socialKey.Present() || s.db == nil {
 		return "", false
@@ -166,11 +136,9 @@ func (s *server) openSocialSecret(ctx context.Context, providerID string) (strin
 	return plain, true
 }
 
-// sealSocialSecretTx writes a new current generation for one provider row inside tx and supersedes the old
-// one. The caller clears the plaintext column in the same transaction.
+// Supersedes the old generation; the caller clears the plaintext column in the same transaction.
 func (s *server) sealSocialSecretTx(ctx context.Context, tx pgx.Tx, providerID, secret string) (int, error) {
-	// One writer per provider row at a time; the partial unique index spsg_one_current would refuse a second
-	// concurrent current generation anyway, this just makes the loser wait instead of fail.
+	// One writer per provider row; the partial unique index would refuse a second current generation anyway, this makes the loser wait instead of fail.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('social-secret:' || $1, 0))`, providerID); err != nil {
 		return 0, fmt.Errorf("lock: %w", err)
 	}
@@ -195,10 +163,8 @@ func (s *server) sealSocialSecretTx(ctx context.Context, tx pgx.Tx, providerID, 
 	return next, nil
 }
 
-// sealPlaintextSocialSecrets seals every plaintext secret still in social_oauth_providers.client_secret and
-// clears the column. The clear is CONDITIONAL on the value it sealed: if edged wrote a newer plaintext in the
-// meantime, nothing is cleared, the transaction rolls back, and the next pass seals the newer one -- an
-// operator's latest secret is never overwritten by an older one.
+// Clears the plaintext only if it still equals the value sealed: if edged wrote a newer one meanwhile, the transaction rolls back and the next
+// pass seals it, so a newer secret is never overwritten.
 func (s *server) sealPlaintextSocialSecrets(ctx context.Context) {
 	if s.db == nil || s.tenID == "" {
 		return
@@ -242,7 +208,6 @@ func (s *server) sealOnePlaintext(ctx context.Context, id, secret string) error 
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	// An empty string is not a secret; it is cleared without becoming a generation.
 	if strings.TrimSpace(secret) != "" {
 		if _, err := s.sealSocialSecretTx(ctx, tx, id, secret); err != nil {
 			return err
@@ -259,9 +224,8 @@ func (s *server) sealOnePlaintext(ctx context.Context, id, secret string) error 
 	return tx.Commit(ctx)
 }
 
-// socialFingerprint summarises everything a rebuild depends on: each provider row's configuration columns and
-// updated_at, its current sealed generation, whether a plaintext is still waiting, and whether the key loaded.
-// No secret enters it.
+// Everything a rebuild depends on: provider config columns and updated_at, current sealed generation, whether plaintext is waiting, whether the
+// key loaded. No secret enters it.
 func (s *server) socialFingerprint(ctx context.Context) (string, error) {
 	var fp string
 	err := s.db.QueryRow(ctx, `
@@ -278,9 +242,7 @@ func (s *server) socialFingerprint(ctx context.Context) (string, error) {
 	return fmt.Sprintf("key=%t;%s", s.socialKey.Present(), fp), nil
 }
 
-// reloadSocial seals waiting plaintext, then rebuilds and swaps the registry when the fingerprint changed (or
-// always, with force). A failed read keeps the current registry: a database hiccup must not unconfigure a
-// working sign-in method.
+// A failed read keeps the current registry: a database hiccup must not unconfigure a working sign-in method.
 func (s *server) reloadSocial(ctx context.Context, force bool) error {
 	s.socialMu.Lock()
 	defer s.socialMu.Unlock()
@@ -317,8 +279,6 @@ func (s *server) reloadSocial(ctx context.Context, force bool) error {
 	return err
 }
 
-// socialReloadLoop picks up a change edged did not (or could not) signal, and seals plaintext written by an
-// older edged, within a minute.
 func (s *server) socialReloadLoop(ctx context.Context) {
 	t := time.NewTicker(socialReloadEvery)
 	defer t.Stop()
@@ -332,9 +292,6 @@ func (s *server) socialReloadLoop(ctx context.Context) {
 	}
 }
 
-// ---- offering -----------------------------------------------------------------------------------------------
-
-// socialOffer is the decision for one provider at one moment.
 type socialOffer struct {
 	ok          bool
 	reason      string
@@ -343,8 +300,7 @@ type socialOffer struct {
 	stub        bool
 }
 
-// offerSocial decides whether provider may be offered/started now. devRedirect is the portal's own view of its
-// callback URL, used ONLY for the development stub on plain HTTP (it never reaches a real provider).
+// devRedirect is the portal's own callback URL, used ONLY for the development stub on plain HTTP; it never reaches a real provider.
 func (s *server) offerSocial(provider, devRedirect string) socialOffer {
 	set := s.currentSocial()
 	p, err := set.reg.Get(provider)
@@ -353,7 +309,6 @@ func (s *server) offerSocial(provider, devRedirect string) socialOffer {
 	}
 	active, canonical := s.portalHTTPS()
 	if _, isStub := p.(*social.Stub); isStub && !set.real[provider] {
-		// Development build only (the stub is never registered in production): allowed over HTTP as before.
 		redirect := strings.TrimSpace(devRedirect)
 		if active {
 			redirect = "https://" + canonical + socialCallbackPath
@@ -379,13 +334,10 @@ func (s *server) offerSocial(provider, devRedirect string) socialOffer {
 	return socialOffer{ok: true, provider: p, redirectURI: "https://" + canonical + socialCallbackPath}
 }
 
-// ---- edged's surface (admin socket routes, registered in main.go) -----------------------------------------
-
 const maxSocialSecretBytes = 64 << 10 // an Apple .p8 key is ~250 bytes; anything this large is not a secret
 
 // socialSecretStore: PUT /v1/social/providers/{id}/secret {"secret": "..."} -> {"ok":true,"generation":N}.
-// Seals the secret as a new current generation, supersedes the previous one, clears the plaintext column and
-// reloads. edged has already authorised the operator; this socket is not reachable from the network.
+// Seals the secret as a new current generation, supersedes the previous one, clears the plaintext column and reloads. edged has authorised the operator.
 func (s *server) socialSecretStore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req struct {
@@ -430,7 +382,6 @@ func (s *server) socialSecretStore(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "seal failed")
 		return
 	}
-	// The plaintext column is retired for this row: the sealed generation is now the only secret.
 	if _, err := tx.Exec(ctx, `UPDATE social_oauth_providers SET client_secret = NULL WHERE id=$1::uuid AND tenant_id=$2`, id, s.tenID); err != nil {
 		httpErr(w, http.StatusInternalServerError, "clear")
 		return

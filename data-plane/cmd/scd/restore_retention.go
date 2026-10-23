@@ -9,31 +9,15 @@ import (
 	"time"
 )
 
-// RESTORE STEP 3d: RETENTION IS APPLIED TO THE STAGING DATA, TO THE END, BEFORE IT CAN BE LIVE.
-//
-// A backup is older than the hotel's retention periods say it may be. Two things make restoring it unsafe unless both are dealt with:
-//
-//  1. The backup carries every record the retention run had anonymised since it was taken. Anonymising them again used to happen
-//     AFTER the swap, so a retention run that failed, timed out or was interrupted left the restored data serving expired personal data
-//     (the restore said so in a step, and went on). Now the run happens on the staging database, while the live database is untouched,
-//     and a run that does not reach the end stops the restore with NOTHING replaced.
-//  2. The retention periods themselves live in the database, so restoring an old backup brings back the OLD periods. A hotel that had
-//     shortened a period since would have its data judged by the longer one and kept past the period it now promises. The periods in force
-//     on THIS appliance are carried into the staging data first, exactly like the backup key holders and the secondary storage setting:
-//     they belong to the appliance, not to the backup. The settings' change history is carried with them.
-//
-// Nothing here changes what retention does or when; only where the restore runs it and what it refuses to do without it.
+// Restore step 3d: retention runs on the staging data to the end, before it can be live. The backup holds expired data and the OLD
+// retention periods, so this appliance's periods are carried into staging first; a run that does not finish stops the restore with nothing replaced.
 
-// retentionGuestFns are the guest-data retention functions, run in batches until a whole pass changes nothing.
 var retentionGuestFns = []string{"iam_v2.run_data_retention", "public.run_data_retention_public", "iam_v2.run_staff_note_retention"}
 
-// restoreRetentionDeadline bounds the whole step. The appliance is stopped while it runs, so it is generous (a backlog of a year of stays
-// is minutes) but not endless.
+// Bounds the whole step; the appliance is stopped meanwhile, so it is generous but not endless.
 var restoreRetentionDeadline = 60 * time.Minute
 
-// The restore as a whole has one deadline that CONTAINS the retention budget: the steps before it (safety backup, load, key holders,
-// ledger) keep their 45 minutes, retention keeps its own, and the steps after it (quiesce, swap, privileges, integrity, services) keep 30
-// more -- a deadline that ran out between the renames would be worse than no deadline.
+// The overall deadline contains the retention budget: one that ran out between the renames would be worse than none.
 const (
 	restoreBeforeRetentionBudget = 45 * time.Minute
 	restoreAfterRetentionBudget  = 30 * time.Minute
@@ -43,8 +27,7 @@ func restoreOverallDeadline() time.Duration {
 	return restoreBeforeRetentionBudget + restoreRetentionDeadline + restoreAfterRetentionBudget
 }
 
-// retentionContext gives the step its own budget out of what the restore has left, and never so much that the steps after it have
-// less than restoreAfterRetentionBudget. enough=false means there is not enough time left to run it safely.
+// Gives the step its own budget but leaves restoreAfterRetentionBudget for the later steps; enough=false means too little time remains.
 func retentionContext(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	budget := restoreRetentionDeadline
 	if dl, has := ctx.Deadline(); has {
@@ -61,10 +44,9 @@ func retentionContext(ctx context.Context) (context.Context, context.CancelFunc,
 
 var uuidLiteral = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// retentionPolicyTables are the tables that hold the periods and the history of their changes. rows says how to select this site's rows.
 var retentionPolicyTables = []struct {
 	table, key, where string // where is a format with %[1]s tenant and %[2]s site; empty = every row
-	history           string // the append-only history table and its key
+	history           string
 	historyKey        string
 	historyWhere      string
 }{
@@ -73,7 +55,6 @@ var retentionPolicyTables = []struct {
 	{"public.operator_account_retention", "id", "", "public.operator_account_retention_changes", "id", ""},
 }
 
-// retentionPassFn is one batch of one function against a database; a var so a test can stand in for it.
 var retentionPassFn = func(ctx context.Context, db, tenant, site, fn string) (int, error) {
 	out, err := execPsql(ctx, db, fmt.Sprintf(
 		`SELECT o_category || '|' || o_anonymised FROM %s('%s'::uuid,'%s'::uuid,%d)`, fn, tenant, site, dataRetentionBatch))
@@ -83,7 +64,6 @@ var retentionPassFn = func(ctx context.Context, db, tenant, site, fn string) (in
 	return sumPassOutput(out)
 }
 
-// retentionStaffPassFn is one pass of the staff retention (accounts, audit addresses, assisted requests).
 var retentionStaffPassFn = func(ctx context.Context, db, tenant, site string) (int, error) {
 	out, err := execPsql(ctx, db, fmt.Sprintf(
 		`SELECT COALESCE(sum(v::int),0) FROM jsonb_each_text(public.run_staff_retention('%s'::uuid,'%s'::uuid)) AS e(k,v)`, tenant, site))
@@ -117,9 +97,7 @@ func sumPassOutput(out string) (int, error) {
 	return total, nil
 }
 
-// runRetentionToEnd runs every function in turn until one whole pass over all of them changes nothing. UNLIKE THE HOURLY RUN, ANY FAILURE
-// ENDS IT: a function that cannot run is a backlog that was not worked off, and the restore must not go on without it. Only ctx ends it
-// otherwise. It returns the number of records anonymised and the passes it took.
+// Unlike the hourly run, ANY failure ends it: a function that cannot run is an unworked backlog and the restore must not go on without it.
 func runRetentionToEnd(ctx context.Context, pass func(ctx context.Context, fn string) (int, error), staff func(ctx context.Context) (int, error)) (records, passes int, err error) {
 	for {
 		if cerr := ctx.Err(); cerr != nil {
@@ -146,15 +124,8 @@ func runRetentionToEnd(ctx context.Context, pass func(ctx context.Context, fn st
 	}
 }
 
-// retentionRulesFingerprint identifies the retention RULES a database holds: the definition of every function that decides what is
-// anonymised and how (the retention runs, the anonymisation they call, the scrubbing, the assisted-request expiry) and the shape of the
-// tables holding the periods. A backup whose schema is older still HAS functions of those names, but older implementations of them --
-// 0143's run_data_retention, for one, never anonymises a device with no first/last seen, which 0144 and 0147 fixed -- so restoring it
-// would serve identifiers the rules in force would have removed.
-//
-// The comparison is against the LIVE database, which is what is in force here, and not against a schema version: the migration ledger is
-// empty on an appliance built from the factory-clean baseline, so it cannot be the authority, and a definition-level comparison needs no
-// number to be kept up to date when the rules change.
+// Identifies the retention RULES a database holds (function definitions and the period tables' shape). Older schemas have same-named but older
+// functions, so the comparison is against the LIVE database, not a schema version: the migration ledger is empty on factory-clean appliances.
 func retentionRulesFingerprint(ctx context.Context, db string) (string, error) {
 	out, err := execPsql(ctx, db, `SELECT md5(
   coalesce((SELECT string_agg(pg_get_functiondef(p.oid), E'\n' ORDER BY n.nspname, p.proname, pg_get_function_identity_arguments(p.oid))
@@ -172,9 +143,7 @@ func retentionRulesFingerprint(ctx context.Context, db string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// retentionFunctionsPresent says whether the staging database can run every retention function. A backup older than the retention
-// programme cannot: restoring it would put back data no retention was ever applied to, so it is refused (the schema must be brought forward
-// first, which is a deployment, not a restore from the screen).
+// A backup older than the retention programme lacks the functions and is refused: restoring it would put back data no retention was applied to.
 func retentionFunctionsPresent(ctx context.Context, db string) (bool, error) {
 	out, err := execPsql(ctx, db, `SELECT to_regprocedure('iam_v2.run_data_retention(uuid,uuid,integer)') IS NOT NULL
  AND to_regprocedure('public.run_data_retention_public(uuid,uuid,integer)') IS NOT NULL
@@ -188,9 +157,7 @@ func retentionFunctionsPresent(ctx context.Context, db string) (bool, error) {
 	return strings.TrimSpace(out) == "t", nil
 }
 
-// carryRetentionPolicy copies the periods in force and their history from the live database into staging. The live row wins outright: if
-// the live site has no row (defaults apply there) the staging row is removed so the same defaults apply; otherwise it replaces the
-// backup's. History rows the backup does not have are added (the history is append-only; none is changed or removed).
+// The live row wins outright: if the live site has none the staging row is removed so defaults apply; missing history rows are added (append-only).
 func carryRetentionPolicy(ctx context.Context, live, staging, tenant, site string) (string, error) {
 	var carried []string
 	for _, t := range retentionPolicyTables {
@@ -235,7 +202,7 @@ func lastLine(s string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-// restoreRetention is the restore step. ok=false stops the restore with nothing replaced.
+// ok=false stops the restore with nothing replaced.
 func (s *server) restoreRetention(ctx context.Context, staging string) (detail string, ok bool) {
 	tenant, site := s.tenID, s.siteID
 	if !uuidLiteral.MatchString(tenant) || !uuidLiteral.MatchString(site) {

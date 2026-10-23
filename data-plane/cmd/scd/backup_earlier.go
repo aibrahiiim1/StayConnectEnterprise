@@ -1,21 +1,8 @@
 package main
 
-// THE EARLIER BACKUPS: WHAT THE RETIRED MECHANISMS LEFT, PRESERVED UNTIL AN ADMINISTRATOR SAYS OTHERWISE.
-//
-// Before there was one backup system there were two:
-//
-//   - the nightly site backup (a pg_dump -Fc of the database and a tar of /etc/stayconnect, written to /var/backups/stayconnect by a
-//     systemd timer), and
-//   - on-demand dumps on the Backups screen, made before backups had notes (and the restore safety dumps), in the same folder as
-//     today's backups.
-//
-// The first is retired. Both are recovery material the hotel may still need, so nothing here deletes them on its own: rotation and
-// the retention sweep only ever touch backups that carry a note. They are listed on the Backups screen as earlier backups, with
-// whether this appliance can restore them, and they go only when an administrator removes them -- and only once a verified backup
-// of the new kind exists, so removing the old never leaves the hotel with less than it had.
-//
-// A nightly set is a pg_dump custom-format archive, which the restore on the Backups screen cannot load; it is kept for the
-// documented manual restore (docs/BACKUP_AND_RESTORE.md, "Earlier backups") until it is removed.
+// Earlier backups (the retired nightly site backup, and on-demand and safety dumps made before notes) are recovery material kept
+// until an administrator removes them, and only once a verified engine backup exists. Rotation and the retention sweep never touch them.
+// A nightly set is a pg_dump custom-format archive the Backups screen cannot restore (docs/BACKUP_AND_RESTORE.md, "Earlier backups").
 
 import (
 	"encoding/json"
@@ -43,10 +30,8 @@ type earlierSet struct {
 
 var reNightly = regexp.MustCompile(`^site-([0-9]{8}-[0-9]{6})(-etc\.tgz|\.dump|\.dump\.meta\.json)(\.age)?$`)
 
-// earlierSets finds every earlier backup, newest first. Nothing is read from inside a file.
 func earlierSets() []earlierSet {
 	var out []earlierSet
-	// nightly sets: group the dump, its configuration archive and its note by stamp
 	groups := map[string]*earlierSet{}
 	if entries, err := os.ReadDir(nightlyBackupDir); err == nil {
 		for _, e := range entries {
@@ -106,7 +91,6 @@ func earlierSets() []earlierSet {
 	return out
 }
 
-// earlierBackups summarises them for the screen.
 func earlierBackups() map[string]any {
 	sets := earlierSets()
 	var bytes int64
@@ -170,8 +154,7 @@ func removeEarlierBackups() (int, int64, error) {
 	return removedSets, removedBytes, nil
 }
 
-// earlierBackupsRemove serves POST /v1/backup/earlier/remove. edged has already asked for the password, the typed confirmation and
-// written the audit entry; this is the filesystem half.
+// earlierBackupsRemove serves POST /v1/backup/earlier/remove; edged has already done the password, confirmation and audit entry.
 func (s *server) earlierBackupsRemove(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		By string `json:"by"`

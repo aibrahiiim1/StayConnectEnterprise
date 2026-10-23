@@ -2,20 +2,8 @@
 
 package main
 
-// THE ALLOWANCE ON THE SCREEN MUST BE THE ALLOWANCE BEING ENFORCED.
-//
-// The reported defect: a guest on a seven-night stay was granted 7 GB by a PER_STAY_NIGHT package and the
-// Active Sessions list showed "1.2 GB of 100 MB" — usage from the Entitlement, limit from the service plan
-// underneath it. It reads as a guest hugely over their allowance who has somehow not been cut off, and it
-// sends an operator looking for a broken enforcer that is working correctly.
-//
-// The cause was one expression in sessionCols, which is shared by the list AND the single-session read. The
-// fix reads COALESCE(e.data_quota_bytes, spr.data_quota_bytes) — character-for-character what enforce.go and
-// checkout.go decide the limit from.
-//
-// This runs the REAL shared projection against a REAL database rather than asserting on a string, because
-// the thing that regresses is the SQL, and a test that inspected the constant would pass against SQL that no
-// longer parses.
+// The allowance on the screen must be the one being enforced: sessionCols reads COALESCE(e.data_quota_bytes, spr.data_quota_bytes),
+// matching enforce.go and checkout.go. This runs the real shared projection against a real database; a string assertion would pass against SQL that no longer parses.
 
 import (
 	"context"
@@ -24,9 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// seedAllowanceSession creates a plan revision with planQuota, an entitlement whose own frozen quota is
-// entQuota (nil = none, the pre-PER_STAY_NIGHT shape), consumed bytes, and one active session bound to it.
-// It returns the session id.
+// seedAllowanceSession creates a plan revision with planQuota, an entitlement with its own frozen quota entQuota (nil = none),
+// consumed bytes and one active session; it returns the session id.
 func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuota *int64, consumed int64, mac string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -65,10 +52,7 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		t.Fatalf("seed purchase: %v", err)
 	}
 
-	// An entitlement needs exactly one subject. A guest ACCOUNT is used rather than a stay because the
-	// allowance projection is subject-agnostic — it joins the entitlement to its plan revision and reads the
-	// quota — and an account needs no PMS interface, stay or roster to exist. Fewer moving parts between the
-	// fixture and the expression under test.
+	// A guest ACCOUNT is the subject: the projection is subject-agnostic and needs no PMS interface, stay or roster.
 	var account string
 	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.guest_access_accounts
 		(tenant_id, site_id, username, password_hash)
@@ -77,10 +61,7 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		t.Fatalf("seed guest account: %v", err)
 	}
 
-	// THE INSERT AND ITS FIRST TRANSITION ARE ONE TRANSACTION. The status column is backed by an append-only
-	// transition history and a deferred constraint checks the two agree at COMMIT, so an entitlement that
-	// appeared without its history would not be storable — by design, and the fixture obeys it rather than
-	// working around it.
+	// The insert and its first transition are one transaction: a deferred constraint checks the append-only history at COMMIT.
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +79,7 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		Scan(&ent); err != nil {
 		t.Fatalf("seed entitlement: %v", err)
 	}
-	// The status column is backed by an append-only transition history and refuses to be set directly. The
-	// fixture goes through the sanctioned writer for the same reason production does.
+	// The status column refuses direct sets; go through the sanctioned writer.
 	if _, err := tx.Exec(ctx,
 		`SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now() - interval '1 minute','ADMIN_GRANT')`,
 		ent); err != nil {
@@ -115,9 +95,7 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 		f.tenant, f.site, mac).Scan(&device); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
-	// On the full appliance schema a session is only storable for a device that holds an authorization
-	// binding on its entitlement (the device_auth family); the fixture seeds that binding the way the
-	// product's device authorizer records it.
+	// On the full schema a session needs a device authorization binding on its entitlement (device_auth family).
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
 		(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
 		VALUES ($1,$2,$3,$4,'AUTHORIZED',now(),now())`, f.tenant, f.site, ent, device); err != nil {
@@ -141,7 +119,6 @@ func seedAllowanceSession(t *testing.T, f *apiFixture, planQuota *int64, entQuot
 	return sess
 }
 
-// readProjectedAllowance runs the EXACT shared projection the list and the detail read both use.
 func readProjectedAllowance(t *testing.T, f *apiFixture, sessionID string) (quota *int64, used *int64) {
 	t.Helper()
 	var row edgeSessionRow
@@ -156,8 +133,7 @@ func readProjectedAllowance(t *testing.T, f *apiFixture, sessionID string) (quot
 func TestSessionAllowance_ShowsTheEntitlementsOwnFrozenQuota(t *testing.T) {
 	f := newAPI(t)
 
-	// The reported case, in its own numbers: a seven-night stay at 1 GB a night on a plan whose own figure
-	// is 100 MB. Before the fix this row reported 100 MB.
+	// A seven-night stay at 1 GB a night on a plan whose own figure is 100 MB.
 	sevenGB := int64(7_000_000_000)
 	hundredMB := int64(100_000_000)
 	sess := seedAllowanceSession(t, f, &hundredMB, &sevenGB, 1_200_000_000, "02:00:00:00:00:01")
@@ -169,8 +145,6 @@ func TestSessionAllowance_ShowsTheEntitlementsOwnFrozenQuota(t *testing.T) {
 	if *quota != sevenGB {
 		t.Errorf("allowance = %d, want %d (the entitlement's frozen grant, not the plan's 100 MB)", *quota, sevenGB)
 	}
-	// THE TWO HALVES OF THE METER MUST DESCRIBE THE SAME THING. Usage was always the Entitlement's; the fix
-	// is what makes the limit beside it the Entitlement's too.
 	if used == nil || *used != 1_200_000_000 {
 		t.Errorf("usage = %v, want the entitlement's consumed bytes", used)
 	}
@@ -182,8 +156,7 @@ func TestSessionAllowance_ShowsTheEntitlementsOwnFrozenQuota(t *testing.T) {
 func TestSessionAllowance_FallsBackToThePlanWhenTheEntitlementHasNoneOfItsOwn(t *testing.T) {
 	f := newAPI(t)
 
-	// Every entitlement granted before PER_STAY_NIGHT existed carries NULL, which is why nothing was
-	// backfilled. Those must still report the pinned plan revision's figure.
+	// Entitlements granted before PER_STAY_NIGHT carry NULL and must report the pinned plan revision's figure.
 	fiveHundredMB := int64(500_000_000)
 	sess := seedAllowanceSession(t, f, &fiveHundredMB, nil, 10_000_000, "02:00:00:00:00:02")
 
@@ -193,15 +166,10 @@ func TestSessionAllowance_FallsBackToThePlanWhenTheEntitlementHasNoneOfItsOwn(t 
 	}
 }
 
-// UNLIMITED MUST STAY UNLIMITED. NULL on both sides means "no data limit", and COALESCE of two NULLs is
-// NULL — but a regression that substituted a zero would render as "0 B" and read as a guest with no
-// allowance at all, which is the opposite of the truth.
+// Unlimited must stay unlimited: COALESCE of two NULLs is NULL; a substituted zero would render as a guest with no allowance.
 func TestSessionAllowance_UnlimitedStaysUnlimited(t *testing.T) {
 	f := newAPI(t)
 
-	// No limit on either side. COALESCE of two NULLs is NULL, and NULL is what "unlimited" means here — a
-	// regression that substituted a zero would render as "0 B" and read as a guest with no allowance at all,
-	// which is the opposite of the truth.
 	sess := seedAllowanceSession(t, f, nil, nil, 42, "02:00:00:00:00:03")
 
 	quota, used := readProjectedAllowance(t, f, sess)
@@ -213,11 +181,7 @@ func TestSessionAllowance_UnlimitedStaysUnlimited(t *testing.T) {
 	}
 }
 
-// THE SAME ANSWER AS THE ENFORCER, FROM THE SAME EXPRESSION.
-//
-// This is the assertion that makes the screen trustworthy rather than merely different: the projection and
-// the enforcement predicate must agree about a guest's limit for every shape of entitlement. They are
-// written in different files, so this compares them directly.
+// The projection and the enforcement predicate, written in different files, must agree on a guest's limit for every entitlement shape.
 func TestSessionAllowance_AgreesWithWhatIsEnforced(t *testing.T) {
 	f := newAPI(t)
 

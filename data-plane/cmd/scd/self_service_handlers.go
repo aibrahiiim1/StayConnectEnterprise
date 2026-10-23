@@ -1,23 +1,8 @@
 package main
 
-// EMAIL ACCOUNTS: THE ROUTES (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §7).
-//
-// Guest routes, called by portald only, with the device as portald derives it from the kernel (ip, mac):
-//
-//	POST /v1/auth/account/register  {email,password,ip,mac,lang}  -> 200 sign-in result + account_token + account
-//	POST /v1/auth/account/status    {account_token,ip,mac}         -> 200 {account}
-//	POST /v1/auth/account/resend    {account_token,ip,mac}         -> 202 | 409 already_verified | 429 resend_*
-//	POST /v1/auth/account/grace     {email,password,ip,mac}        -> 200 sign-in result | 409 | 401
-//	POST /v1/auth/account/verify    {token}                        -> 200 {verified:true} | 410 invalid_or_used
-//	POST /v1/auth/account/forgot    {email,ip,mac}                 -> 202, always
-//	POST /v1/auth/account/reset     {token,password}               -> 200 {reset:true} | 410 | 422 weak_password
-//
-// Administrative, edged only (after its own permission check):
-//
-//	POST /v1/admin/accounts/{id}/resend-verification               -> 202 | 404 | 409 | 429
-//
-// Replies never contain a password, a hash or an emailed token. Errors are {"error": "<code>"} with the codes
-// the contract names.
+// Email accounts: the routes. /v1/auth/account/{register,status,resend,grace,verify,forgot,reset} are called by portald only, with the device as
+// portald derives it from the kernel; /v1/admin/accounts/{id}/resend-verification by edged only. Replies never contain a password, a hash or an
+// emailed token.
 
 import (
 	"context"
@@ -39,7 +24,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
-// decodeSelfServiceBody bounds the body: these are small JSON documents from portald, never uploads.
 func decodeSelfServiceBody(r *http.Request, dst any) error {
 	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<10)).Decode(dst)
 }
@@ -48,8 +32,7 @@ func ssErr(w http.ResponseWriter, code int, errCode string) {
 	writeJSON(w, code, map[string]any{"error": errCode})
 }
 
-// guestDevice parses the device portald derived. Both are required: an Email account is registered, granted
-// grace and resent FROM a device, and the account token is bound to it.
+// Both ip and mac are required: the account token is bound to the device.
 func guestDevice(ipText, macText string) (net.IP, net.HardwareAddr, bool) {
 	ip := net.ParseIP(strings.TrimSpace(ipText))
 	mac, err := net.ParseMAC(strings.TrimSpace(macText))
@@ -59,15 +42,13 @@ func guestDevice(ipText, macText string) (net.IP, net.HardwareAddr, bool) {
 	return ip, mac, true
 }
 
-// emailLocal / emailDomainLabel are deliberately conservative: an address the portal accepts is one every mail
-// server we hand it to accepts, and it is the account's username for life.
+// Deliberately conservative: an address the portal accepts is one every mail server accepts, and it is the username for life.
 var (
 	emailLocal       = regexp.MustCompile(`^[a-z0-9!#$%&'*+/=?^_{|}~.-]{1,64}$`)
 	emailDomainLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
-// normalizeAccountEmail is lower(trimmed email) when it is a plausible address, "" otherwise. The username of a
-// self-service account IS this value (the 0117 CHECK insists on the lowercase, trimmed form).
+// lower(trimmed email) when plausible, else empty; the username of a self-service account IS this value (the database CHECK insists on it).
 func normalizeAccountEmail(raw string) string {
 	e := strings.ToLower(strings.TrimSpace(raw))
 	if len(e) < 6 || len(e) > 254 || strings.Count(e, "@") != 1 {
@@ -94,9 +75,8 @@ func normalizeAccountEmail(raw string) string {
 	return e
 }
 
-// selfServiceThrottle charges the existing in-memory login limiter and the durable throttle under the ACCOUNT
-// method, with the identity namespaced by the action so a registration storm and a sign-in storm on one address
-// are counted apart but each is bounded exactly as a sign-in is. false = refused (the reply is written).
+// Charges the in-memory login limiter and the durable throttle under the ACCOUNT method, namespaced by action so registration and sign-in
+// storms on one address count apart. false = refused (reply written).
 func (s *server) selfServiceThrottle(w http.ResponseWriter, r *http.Request, action, identity string, ip net.IP, mac net.HardwareAddr) bool {
 	id := action + ":" + identity
 	if s.loginRL != nil && !s.loginRL.allow(id, ip.String(), mac.String()) {
@@ -111,31 +91,26 @@ func (s *server) selfServiceThrottle(w http.ResponseWriter, r *http.Request, act
 	return true
 }
 
-// ---- register -----------------------------------------------------------------------------------------------------
-
 var (
 	errEmailTaken        = errors.New("email taken")
 	errRegistrationLimit = errors.New("registration limit")
 )
 
-// accountRegister creates a self-service account and signs the device in with it. Registration is entirely
-// local -- the row, the sign-in and the package step -- so it works with the appliance offline; the verification
-// email is queued for the outbox and never waited for.
+// Registration is entirely local (row, sign-in, package step), so it works offline; the verification email is queued, never waited for.
 func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 		IP       string `json:"ip"`
 		MAC      string `json:"mac"`
-		// Lang is accepted for the portal's sake; the messages are English until the portal's catalogue has
-		// the email texts.
+		// Lang is accepted for the portal; messages are English until its catalogue has the email texts.
 		Lang string `json:"lang"`
 	}
 	if err := decodeSelfServiceBody(r, &req); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad body")
 		return
 	}
-	// Email accounts are the email_otp licence module, whose meaning is now "email sign-in".
+	// Email accounts are licensed as the email_otp module (meaning "email sign-in").
 	if !s.licenseGate(w, licstate.FeatEmailOTP) {
 		return
 	}
@@ -174,8 +149,7 @@ func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	set, err := s.selfServiceSettingsRead(r.Context())
 	if err != nil {
-		// The per-device cap and the deadline come from here; registering without them would be registering
-		// under rules nobody chose.
+		// Registering without these would mean registering under rules nobody chose.
 		slog.Error("email accounts: settings unreadable; refusing registration", "err", err)
 		ssErr(w, http.StatusServiceUnavailable, "SETTINGS_UNAVAILABLE")
 		return
@@ -188,8 +162,7 @@ func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		// One registration at a time per device on this site: the cap is count-then-insert, and two parallel
-		// requests from one device must not both see the last free slot.
+		// One registration at a time per device: the cap is count-then-insert, so parallel requests could both take the last slot.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('self_service_register'), hashtext($1))`,
 			s.siteID+"|"+mac.String()); err != nil {
 			return err
@@ -235,7 +208,6 @@ func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, errEmailTaken):
-		// The client cannot proceed without being told; the answer offers sign-in and reset, nothing else.
 		ssErr(w, http.StatusConflict, "email_taken")
 		return
 	case errors.Is(err, errRegistrationLimit):
@@ -247,15 +219,11 @@ func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kickSelfServiceOutbox()
-	// SIGNED IN AT ONCE, through the one ACCOUNT authority: the same auth context, device and network pinning a
-	// returning client gets, so the package step that follows cannot tell a new account from a returning one.
+	// Signed in at once through the one ACCOUNT authority (same auth context, device and network pinning as a returning client).
 	s.authorizeViaIAMv2(w, r, iamv2.MethodAccount, iamv2.Request{Username: email, Secret: req.Password,
 		Credential: iamv2.CredentialEmailAccount, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
-// ---- status and resend --------------------------------------------------------------------------------------------
-
-// accountFromToken resolves the account an account token names for this device, or writes 401.
 func (s *server) accountFromToken(w http.ResponseWriter, r *http.Request, tok, ipText, macText string) (selfServiceAccountRow, net.IP, net.HardwareAddr, bool) {
 	ip, mac, ok := guestDevice(ipText, macText)
 	if !ok {
@@ -319,7 +287,6 @@ func (s *server) accountResend(w http.ResponseWriter, r *http.Request) {
 	s.writeResendOutcome(w, s.resendVerification(r.Context(), a.ID))
 }
 
-// resendOutcome is the answer of one resend request, shared by the guest route and the operator's.
 type resendOutcome struct {
 	code       int
 	err        string
@@ -343,9 +310,7 @@ func (s *server) writeResendOutcome(w http.ResponseWriter, o resendOutcome) {
 	}
 }
 
-// resendVerification queues a fresh VERIFY message for an unverified self-registered account of this site,
-// under the site's cooldown and rolling daily allowance. Checked and queued in one transaction, serialised per
-// account, so two clicks cannot both pass the cooldown.
+// Cooldown and daily allowance are checked and queued in one transaction, serialised per account, so two clicks cannot both pass.
 func (s *server) resendVerification(ctx context.Context, accountID string) resendOutcome {
 	set, err := s.selfServiceSettingsRead(ctx)
 	if err != nil {
@@ -398,17 +363,14 @@ func (s *server) resendVerification(ctx context.Context, accountID string) resen
 	return out
 }
 
-// adminAccountResendVerification: POST /v1/admin/accounts/{id}/resend-verification (edged only). The operator
-// asks for the same message the client could ask for, under the same cooldown and daily allowance -- staff help
-// is not a way around the limits that keep a mailbox from being flooded.
+// Staff help is not a way around the limits that keep a mailbox from being flooded: same cooldown and daily allowance as the client.
 func (s *server) adminAccountResendVerification(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if !uuidShape.MatchString(id) {
 		ssErr(w, http.StatusNotFound, "unknown_account")
 		return
 	}
-	// {"operator": "<email or id>"}: edged has authenticated and authorised the operator and writes the audit
-	// record; the label is logged here so scd's own log says who asked. An empty body is accepted.
+	// Optional {"operator": ...} is logged here; edged authenticates the operator and writes the audit record. An empty body is accepted.
 	var req struct {
 		Operator string `json:"operator"`
 	}
@@ -435,11 +397,7 @@ func (s *server) adminAccountResendVerification(w http.ResponseWriter, r *http.R
 
 var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// ---- grace ----------------------------------------------------------------------------------------------------------
-
-// accountGrace grants the one-time grace hour to a suspended account whose owner proves the password AGAIN (fresh
-// authentication, not the account token). It lifts only the verification gate: no entitlement is created,
-// extended or restored, so an expired or exhausted package stays exactly so. The reply is a normal sign-in.
+// Grace requires the password AGAIN (not the account token) and lifts only the verification gate: no entitlement is created, extended or restored.
 func (s *server) accountGrace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
@@ -512,8 +470,7 @@ func (s *server) accountGrace(w http.ResponseWriter, r *http.Request) {
 		Credential: iamv2.CredentialEmailAccount, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
-// verifySelfServicePassword checks a self-registered account's password with the same rules the ACCOUNT
-// authority applies (enabled, validity, lockout) and the same constant work for every refusal.
+// Same rules as the ACCOUNT authority (enabled, validity, lockout) and the same constant work for every refusal.
 func (s *server) verifySelfServicePassword(ctx context.Context, email, password string) (selfServiceAccountRow, bool) {
 	var a selfServiceAccountRow
 	var hash string
@@ -538,10 +495,7 @@ func (s *server) verifySelfServicePassword(ctx context.Context, email, password 
 	return a, true
 }
 
-// ---- verify, forgot, reset ------------------------------------------------------------------------------------------
-
-// consumeEmailToken marks a token used, once, if it is this site's, of this purpose, unused, not superseded and
-// unexpired. "" when it is none of those -- one answer for every reason, so a link reveals nothing.
+// Marks a token used once if it is this site, this purpose, unused, not superseded and unexpired. One empty answer for every reason, so a link reveals nothing.
 func (s *server) consumeEmailToken(ctx context.Context, tx pgx.Tx, token, purpose string) (string, error) {
 	key := s.selfServiceKey(accountEmailTokenDomain)
 	if key == nil || token == "" || len(token) > 128 {
@@ -558,8 +512,7 @@ func (s *server) consumeEmailToken(ctx context.Context, tx pgx.Tx, token, purpos
 	return accountID, err
 }
 
-// accountVerify: the button on the page a VERIFY link opens. Verifying restores normal status at once; the
-// package's time, data and ownership are untouched, and a live connection is never interrupted.
+// Verifying restores normal status at once; the package and any live connection are untouched.
 func (s *server) accountVerify(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
@@ -611,9 +564,8 @@ func (s *server) accountVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"verified": true})
 }
 
-// accountForgot ALWAYS answers 202: unknown address, Personal account, switched-off method, throttled, cooldown,
-// daily allowance spent -- all the same answer, so the route cannot be used to learn who has an account. Only a
-// real, enabled self-service account of this site gets a RESET message, within the resend limits.
+// ALWAYS answers 202 (unknown address, Personal account, switched-off method, throttle, cooldown, spent allowance), so the route cannot reveal
+// who has an account.
 func (s *server) accountForgot(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -679,9 +631,8 @@ func (s *server) accountForgot(w http.ResponseWriter, r *http.Request) {
 	accepted()
 }
 
-// accountReset completes a password reset. Completing it PROVES CONTROL OF THE ADDRESS, so it also marks the
-// address verified, revokes every outstanding link of the account and ends the account's live sessions: a
-// squatter who registered someone else's address loses the account and the connection at once (contract §5).
+// Completing a reset PROVES CONTROL OF THE ADDRESS: it marks the address verified, revokes every outstanding link and ends the account live
+// sessions, so a squatter on an address that is not theirs loses account and connection at once.
 func (s *server) accountReset(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token    string `json:"token"`

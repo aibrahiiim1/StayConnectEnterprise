@@ -2,7 +2,6 @@ package iamv2
 
 import "testing"
 
-// The properties the contract requires, asserted rather than assumed.
 func TestVoucherCodecKeySeparationAndOwnerBinding(t *testing.T) {
 	kr := MapVoucherKeyring{"dek-1": make([]byte, 32)}
 	ten, site := "t1", "s1"

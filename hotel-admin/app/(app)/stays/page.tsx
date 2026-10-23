@@ -1,34 +1,8 @@
 "use client";
 
-// STAYS — who the property management system says is in the building.
-//
-// The list used to identify a stay by its reservation string and room number only, which meant an operator
-// looking for "the party in 412" or "Mr Andersen" had to open rows until they found the right one. Arrival
-// and departure were already in the API and shown nowhere; the primary guest's name was already on the
-// detail view but not in the list; and posting_allowed rendered as "closed" with no way to learn why.
-//
-// It is now a list an operator can scan and search, plus a detail view for one stay. Guest names appear
-// because operating a hotel front desk requires them — but they are treated as what they are: they are not
-// written to logs or diagnostics, and the search runs entirely in the browser over rows the operator is
-// already authorised to see.
-//
-// TWO THINGS CHANGED IN THIS PASS.
-//
-//   1. WHICH INTERNET THIS ROOM HAS. "Which package is room 412 on?" was a question the product could not
-//      answer from any screen: Stays knew the room, Internet packages knew the packages, and nothing joined
-//      them. edged now projects the live entitlement's package and service plan onto the stay, so it is a
-//      column here and a block in the detail — including how many of the allowed devices are currently online,
-//      which is the answer to "the family says they can't connect their fourth phone".
-//
-//   2. THE DETAIL IS A DIALOG. It used to append a card BELOW the table: on a full hotel the operator clicked
-//      View and nothing appeared to happen, because the detail had opened several screens further down.
-//
-// ROOM CHARGE ON A STAY (Phase-0 Amendment A1). A room charge targets the reservation (room number +
-// reservation number); there are no folios to list. The stay says whether room charge is allowed, why not, who
-// decided it, and the history of its posting blocks. Only ADMIN_BLOCK is an operator's: a site administrator on
-// an appliance where room charge is licensed can set or remove it (reason + password). PMS_NO_POST and
-// PMS_DATA_SUSPECT clear only from fresh Protel data, POSTING_UNRESOLVED only from the charge's manual review —
-// the page never offers to lift them and says who does.
+// Guest names are PII: never write them to logs or diagnostics.
+// Only ADMIN_BLOCK is an operator's (site administrator, reason + password); PMS_NO_POST and PMS_DATA_SUSPECT
+// clear only from fresh Protel data and POSTING_UNRESOLVED only from manual review, so the page never offers to lift them.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -57,8 +31,6 @@ import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
 import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star } from "lucide-react";
 
-// Operator wording for the lifecycle. The wire values are unchanged; nobody outside the domain should have
-// to read SCREAMING_SNAKE to find out whether a guest is in the building.
 const STATUS_LABELS: Record<string, string> = {
   IN_HOUSE: "In house",
   RESERVED: "Arriving",
@@ -76,7 +48,7 @@ const PAGE_SIZES = [25, 50, 100, 200];
 
 const label = (s: string) => STATUS_LABELS[s] ?? s.replace(/_/g, " ").toLowerCase();
 
-/** A date the operator reads, not an ISO timestamp. Arrival/departure are dates in the PMS, not instants. */
+/** Arrival/departure are dates in the PMS, not instants. */
 function shortDate(v?: string | null): string {
   if (!v) return "—";
   const d = new Date(v);
@@ -85,7 +57,7 @@ function shortDate(v?: string | null): string {
 }
 
 export default function StaysPage() {
-  const [status, setStatus] = useState("IN_HOUSE"); // the question an operator asks by default
+  const [status, setStatus] = useState("IN_HOUSE");
   const [q, setQ] = useState("");
   const [vipOnly, setVipOnly] = useState(false);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
@@ -98,8 +70,7 @@ export default function StaysPage() {
   const toast = useToast();
   const roles = useOperatorRoles();
   const caps = useCapabilities();
-  // The administrative block is a site administrator's, and only where room charge is licensed and its
-  // surface is served here. Anything unknown fails closed: no button.
+  // Site administrator only, and only where room charge is licensed and served; unknown fails closed.
   const canManageRoomCharge =
     (roles?.includes("site_admin") ?? false) &&
     surfaceAvailable(caps, "pms-financial-onboarding") &&
@@ -108,17 +79,10 @@ export default function StaysPage() {
   const [blockBusy, setBlockBusy] = useState(false);
   const [blockErr, setBlockErr] = useState<string | null>(null);
 
-  // A new question starts at its first page.
   useEffect(() => { setOffset(0); }, [status, q, vipOnly, pageSize]);
 
-  // PAGED AND SEARCHED ON THE SERVER. The list used to stop at 200 rows and search only those in the browser,
-  // so a property with 400 rooms in house saw half of them and its counters counted that half. The search text
-  // goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
-  //
-  // ONLY THE LATEST QUESTION MAY ANSWER. A filter changed on page 3 fires the old offset's request and then the
-  // reset's page-1 request; quick typing fires one per pause. Responses can return in any order, so each request
-  // takes a number and a response is applied only if no newer request has started since -- otherwise an old page
-  // could land last and show rows and totals for a question the controls no longer ask.
+  // The search text goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
+  // Responses can arrive out of order, so only the newest request's response is applied.
   const latest = useRef(0);
   const load = useCallback(async () => {
     const mine = ++latest.current;
@@ -133,7 +97,7 @@ export default function StaysPage() {
       const needle = q.trim();
       const r = await api.get<StaysPageResp>(
         "/pms-stays?" + params.toString(),
-        // Percent-encoded: a browser refuses non-Latin-1 text (an Arabic or Cyrillic name) in a header.
+        // Percent-encoded: browsers refuse non-Latin-1 text in a header.
         needle ? { "X-Stay-Search": encodeURIComponent(needle) } : undefined,
       );
       if (mine !== latest.current) return; // superseded
@@ -151,7 +115,7 @@ export default function StaysPage() {
 
   const filtered = rows;
 
-  // Totals over EVERY stay that matches, from the server -- not over the page on screen.
+  // Server totals over every matching stay, not just the page on screen.
   const summary = useMemo(() => {
     const s = resp?.summary;
     const list = rows ?? [];
@@ -442,8 +406,6 @@ export default function StaysPage() {
                 : <Badge tone="default">Room charge not allowed</Badge>}
             </div>
 
-            {/* THE INTERNET BLOCK. First, because it is the reason a front-desk operator opens a stay in this
-                product at all — everything else here they can read in the PMS. */}
             <section className="rounded-md border border-border bg-surface/40 p-4">
               <h3 className="mb-3 text-sm font-semibold">Internet for this room</h3>
               {detail.access_status ? (
@@ -506,8 +468,7 @@ export default function StaysPage() {
                     ? formatRelative(detail.occupancy_evidence_at)
                     : "No confirmation recorded",
                 },
-                // Rendered ONLY when the connector supplied them. A permanent row of dashes would suggest the
-                // PMS is failing to send something, when in fact this feed was never asked for it.
+                // Only when the connector supplied them; dashes would suggest the PMS failed to send them.
                 ...(detail.room_type ? [{ label: "Room type", value: detail.room_type }] : []),
                 ...(detail.rate_plan ? [{ label: "Rate plan", value: detail.rate_plan }] : []),
                 ...(detail.travel_agent ? [{ label: "Travel agent", value: detail.travel_agent }] : []),
@@ -565,7 +526,6 @@ export default function StaysPage() {
   );
 }
 
-/** One posting block, in words: what it is, where it came from, since when, and (for an active one) who clears it. */
 function BlockLine({ b }: { b: StayPostingBlock }) {
   const active = !b.cleared_at;
   return (
@@ -590,7 +550,6 @@ function BlockLine({ b }: { b: StayPostingBlock }) {
   );
 }
 
-/** Whether room charge is allowed on this stay, why not, and the posting-block history. */
 function RoomChargeSection({
   stay, canManage, onBlock, onUnblock,
 }: {
@@ -682,7 +641,6 @@ function RoomChargeSection({
   );
 }
 
-/** The package this room is on, or the honest absence of one. */
 function AccessCell({ stay }: { stay: Stay }) {
   if (!stay.access_status) {
     return (
@@ -710,9 +668,7 @@ function AccessCell({ stay }: { stay: Stay }) {
   );
 }
 
-// THE DEVICE LIMIT COUNTS PLACES, NOT SESSIONS (audit H-14). A device keeps its place on the package after it
-// signs out, so "at the limit" is the devices holding a place, which may be more than those online. An older
-// appliance that does not report places falls back to the online count.
+// The device limit counts places, not sessions: a device keeps its place after signing out. Older appliances fall back to the online count.
 function placesHeld(s: Stay): number {
   return s.access_authorized_devices ?? s.access_active_devices ?? 0;
 }

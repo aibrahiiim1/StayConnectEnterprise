@@ -1,11 +1,7 @@
 package main
 
-// USAGE BY ACCESS SOURCE — what can be proved without a database.
-//
-// Every query the usage explorer runs is checked against the PRODUCTION BASELINE and the Gate-P grant files
-// with the same checker the package-activity view uses (commerce_activity_test.go): each iam_v2 table must be
-// one svc_edged may SELECT, and each alias.column must exist. An ungranted table is otherwise a 500 on the
-// appliance while every unit test passes.
+// Usage by access source, without a database: every query is checked against the production baseline and Gate-P grants
+// (as commerce_activity_test.go does), since an ungranted table is a 500 on the appliance while unit tests pass.
 
 import (
 	"net/http"
@@ -19,7 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// usageSQLUnderTest is every statement the usage explorer's access-source views run.
 func usageSQLUnderTest() map[string]string {
 	out := map[string]string{
 		"source list":    usageSourceListSQL(51, 50),
@@ -51,8 +46,7 @@ func TestUsageSourceSQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 	}
 }
 
-// THE SOURCES WHOSE IDENTIFYING DATA svc_edged MAY NOT READ ARE NOT OFFERED. If one of these ever becomes
-// granted, this test is where the decision to add the source type gets made on purpose.
+// Sources whose identifying data svc_edged may not read are not offered; if one becomes granted, this test is where adding it gets decided.
 func TestTheUngrantedSourcesStayUngranted(t *testing.T) {
 	grants := edgedSelectGrants(t)
 	for _, table := range []string{"vouchers", "guest_principals", "guest_principal_identities"} {

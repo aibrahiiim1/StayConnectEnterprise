@@ -1,14 +1,7 @@
 package main
 
-// THE ONE ANSWER TO "IS THIS APPLIANCE ACTIVATED, LICENSED AND TALKING TO CENTRAL".
-//
-// docs/CENTRAL_CONTROL_PLANE.md section 8. Hotel Admin used to assemble this from four endpoints that each
-// computed their own version of it -- setup status, cloud info, licence status and the dashboard health -- and
-// they disagreed: one said "unlicensed", another expected "Unlicensed"; one called a factory-clean appliance
-// "Active"; the activation word came from the RAW assignment file rather than the verified one; and every poll
-// of the setup screen fired a DNS lookup and three TCP dials at Central. computeCentralStatus is now the only
-// place these states are derived, and everything that shows them -- /v1/central/status, the dashboard health
-// summary and the overview -- reads it.
+// computeCentralStatus is the one place the activation, licence and Central-link states are derived
+// (docs/CENTRAL_CONTROL_PLANE.md section 8); every endpoint that shows them reads it.
 
 import (
 	"bytes"
@@ -37,7 +30,6 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// Section 8 vocabularies.
 const (
 	activationNotRegistered = "not_registered"
 	activationWaiting       = "waiting"
@@ -56,9 +48,7 @@ const (
 
 	centralConnected   = "connected"
 	centralUnreachable = "unreachable"
-	// centralCredentialRefused: Central is answering (a recent successful call) but refuses this appliance's
-	// certificate on its mTLS calls -- typically after "Reissue certificate", until the new one is installed.
-	// It is not "unreachable", and saying so sent operators looking for a network fault that did not exist.
+	// centralCredentialRefused: Central answers but refuses this appliance's certificate (e.g. after Reissue certificate); not "unreachable".
 	centralCredentialRefused = "credential_refused"
 	centralNotConfigured     = "not_configured"
 )
@@ -66,27 +56,19 @@ const (
 // expiringWithin is when an active licence starts being reported as "expiring" (section 3: <= 30 days).
 const expiringWithin = 30 * 24 * time.Hour
 
-// connectedWithin is how recent the last successful authenticated answer from Central must be for the link to
-// count as connected. Every agent that talks to Central does so at least every five minutes while it has work
-// (assignment poll 30 s; licence poll 60 s while unlicensed; certificate bootstrap <= 5 min; hello 5 min), so
-// three of the slowest intervals without a single answer is a link that is down, not one that is idle.
+// connectedWithin: three of the slowest agent intervals (5 min) without an answer is a down link, not an idle one.
 const connectedWithin = 15 * time.Minute
 
-// ---- Central contact tracking ------------------------------------------------------------------------------
-
-// centralContact remembers the last time Central answered an authenticated call, and the last failure, in words
-// an operator can act on. It is fed by every agent that talks to Central.
+// centralContact remembers the last time Central answered an authenticated call, and the last failure; every Central agent feeds it.
 type centralContact struct {
-	mu       sync.Mutex
-	lastOK   time.Time
-	lastFail time.Time
-	lastErr  string
-	// lastFailCode is the HTTP status of the last failure (0 when it was not an HTTP answer).
+	mu           sync.Mutex
+	lastOK       time.Time
+	lastFail     time.Time
+	lastErr      string
 	lastFailCode int
 }
 
-// record notes one call's outcome. Central answering "nothing for you yet" (no licence, certificate pending) is
-// a successful conversation.
+// record: Central answering "nothing for you yet" is a successful conversation.
 func (c *centralContact) record(err error, now time.Time) {
 	if c == nil {
 		return
@@ -102,7 +84,6 @@ func (c *centralContact) record(err error, now time.Time) {
 	c.lastFailCode = httpCodeOf(err)
 }
 
-// httpCodeOf returns the HTTP status an error carries, or 0.
 func httpCodeOf(err error) int {
 	var se *identity.StatusError
 	var he *licstate.HTTPError
@@ -136,13 +117,11 @@ func (c *centralContact) snapshot() (ok, fail time.Time, lastErr string) {
 	return c.lastOK, c.lastFail, c.lastErr
 }
 
-// httpStatusErr is Central answering an appliance call with an unexpected status.
 type httpStatusErr struct{ code int }
 
 func (e *httpStatusErr) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
-// describeCentralErr turns a transport or protocol error into one short sentence for the Hotel Admin screen.
-// It never includes URLs, keys or response bodies.
+// describeCentralErr never includes URLs, keys or response bodies.
 func describeCentralErr(err error) string {
 	code := 0
 	var se *identity.StatusError
@@ -188,9 +167,6 @@ func describeCentralErr(err error) string {
 	return "Could not reach OneGate Central."
 }
 
-// ---- the computation ----------------------------------------------------------------------------------------
-
-// licSnapshot is the licence as the manager evaluates it locally.
 type licSnapshot struct {
 	Installed     bool // a signed licence document is installed (whatever its state or binding)
 	WrongHardware string
@@ -228,7 +204,6 @@ type centralInputs struct {
 	IdentityFpr, WANMAC, LANMAC, Endpoint string
 	Version, PermissiveBlocked            string
 
-	// Removed: Central deleted this appliance after it held a customer (removed_from_central.go).
 	Removed bool
 }
 
@@ -239,8 +214,7 @@ type centralLicense struct {
 	DaysLeft      *int       `json:"days_left"`
 	MaxGuests     *int64     `json:"max_concurrent_online_guests"` // null: no licence, or unlimited
 	CurrentGuests *int64     `json:"current_online_guests"`
-	// HardwareNotice is set when the WAN network adapter differs from the one the licence names. The licence
-	// stays in force (there is no time limit); a rebind issues a corrected one.
+	// HardwareNotice: the WAN adapter differs from the one the licence names; the licence stays in force and a rebind issues a corrected one.
 	HardwareNotice string `json:"hardware_notice,omitempty"`
 }
 
@@ -259,20 +233,16 @@ type centralDetails struct {
 	WANMAC                 string     `json:"wan_mac"`
 	LANMAC                 string     `json:"lan_mac"`
 	CentralEndpoint        string     `json:"central_endpoint"`
-	// Additive, for support: the verified assignment outcome, so "waiting" caused by an assignment the appliance
-	// refused is distinguishable from "waiting" because nothing was ever sent.
+	// Lets support tell "waiting" caused by a refused assignment from nothing ever sent.
 	AssignmentStatus  string `json:"assignment_status"`
 	LicenseID         string `json:"license_id,omitempty"`
 	SoftwareVersion   string `json:"software_version,omitempty"`
 	BuildProfile      string `json:"build_profile,omitempty"`
 	PermissiveBlocked string `json:"permissive_blocked,omitempty"`
-	// Reason qualifies a "retired" activation. "removed_from_central": Central deleted this appliance after it
-	// had held a customer; it keeps its data, serves no new guests and will not register again until it is
-	// factory-reset and activated anew.
+	// Reason qualifies "retired": "removed_from_central" means Central deleted the appliance; it keeps its data, serves no new guests and needs a factory reset to activate anew.
 	Reason string `json:"reason,omitempty"`
 }
 
-// CentralStatus is the section 8 document.
 type CentralStatus struct {
 	Activation   string  `json:"activation"`
 	Serial       string  `json:"serial"`
@@ -385,7 +355,7 @@ func licenseView(in centralInputs) centralLicense {
 	return out
 }
 
-// computeCentralStatus derives every section 8 state from its inputs. Pure: no I/O, no clock.
+// computeCentralStatus derives every section 8 state; pure, no I/O or clock.
 func computeCentralStatus(in centralInputs) CentralStatus {
 	link := centralLinkState(in)
 	licv := licenseView(in)
@@ -421,29 +391,23 @@ func computeCentralStatus(in centralInputs) CentralStatus {
 		out.SiteType = strPtr(in.SiteType)
 		switch {
 		case !in.Lic.Installed:
-			// Assigned, licence not collected yet.
 			out.Activation = activationActivating
 		case in.CertRequired && !in.CertReady && link.State == centralConnected:
-			// Licence in, certificate still being collected while Central is answering. An offline-activated
-			// appliance that cannot reach Central is NOT held here: it is fully operational without one.
+			// Licence in, certificate still being collected; an offline-activated appliance that cannot reach Central is NOT held here.
 			out.Activation = activationActivating
 		default:
 			out.Activation = activationActivated
 		}
 	default:
-		// Registered, and no verified granting assignment: absent, refused, or returned to inventory.
 		out.Activation = activationWaiting
 	}
 	if in.Removed {
-		// Whatever the assignment on disk says, Central no longer knows this appliance and it will not
-		// register again: to the operator it is retired, with the reason that tells them what to do.
+		// Central no longer knows this appliance and it will not register again: retired, with a reason.
 		out.Activation = activationRetired
 		out.Details.Reason = removedFromCentralCode
 	}
 	return out
 }
-
-// ---- gathering the inputs -----------------------------------------------------------------------------------
 
 func (s *server) licSnapshot() licSnapshot {
 	if s.lic == nil {
@@ -461,8 +425,7 @@ func (s *server) licSnapshot() licSnapshot {
 	return out
 }
 
-// resolveOwnAssignment is the verified assignment, exactly as boot resolves it. No logger: this runs on every
-// status poll, and boot already logged why a document was refused.
+// resolveOwnAssignment is the verified assignment as boot resolves it; no logger, since this runs on every poll.
 func (s *server) resolveOwnAssignment(now time.Time) (assignment.Resolution, *assignment.Document) {
 	if s.applID == "" {
 		return assignment.Resolution{Outcome: assignment.OutcomeAbsent}, nil
@@ -511,17 +474,12 @@ func (s *server) centralInputs(ctx context.Context) centralInputs {
 	return in
 }
 
-// ---- handlers -----------------------------------------------------------------------------------------------
-
-// centralStatus: GET /v1/central/status. Local facts only -- it never contacts Central, so polling it costs
-// nothing outside the appliance.
+// centralStatus serves local facts only; it never contacts Central.
 func (s *server) centralStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, computeCentralStatus(s.centralInputs(r.Context())))
 }
 
-// centralRefresh: POST /v1/central/refresh -- Check now. Registers if the appliance is not registered yet;
-// otherwise asks Central now (hello), and wakes the certificate, assignment and licence agents so they do not
-// wait out their backoff. Network diagnostics run HERE, on request, and nowhere else.
+// centralRefresh (Check now) registers if needed, else says hello and wakes the agents; network diagnostics run only here.
 func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
@@ -565,8 +523,7 @@ func (s *server) centralRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// networkChecks probes Central reachability without leaking secrets: DNS resolution and the HTTPS / mutual-TLS
-// ports. It is run only by Check now -- it used to run on every five-second poll of the setup screen.
+// networkChecks probes DNS and the HTTPS/mTLS ports without leaking secrets; run only by Check now.
 func (s *server) networkChecks(ctx context.Context) map[string]any {
 	out := map[string]any{"clock": time.Now().UTC()}
 	host, port := "", "443"
@@ -602,8 +559,7 @@ func (s *server) networkChecks(ctx context.Context) map[string]any {
 	return out
 }
 
-// hello is the signed liveness call (GET /v1/appliance/hello). It records Central contact and returns the
-// status so the orphan detector can act on a definitive "unknown appliance".
+// hello is the signed liveness call; it records Central contact and returns the status so the orphan detector can act on "unknown appliance".
 func (s *server) hello(ctx context.Context) error {
 	_, _, err := s.helloRaw(ctx)
 	return err
@@ -637,10 +593,7 @@ func (s *server) helloRaw(ctx context.Context) (int, []byte, error) {
 	return resp.StatusCode, body, nil
 }
 
-// centralOfflinePackage: POST /v1/central/offline-package. One upload for both files an operator may carry in:
-// a FIRST-ACTIVATION package (answers this appliance's activation request: signed assignment + trust + licence)
-// or an offline LICENCE package for an appliance that is already activated. The appliance tells them apart by
-// shape and verifies each on its own terms.
+// centralOfflinePackage takes one upload for either a first-activation package or an offline licence package, told apart by shape and verified on its own terms.
 func (s *server) centralOfflinePackage(w http.ResponseWriter, r *http.Request) {
 	if s.refuseWhileRemoved(w) {
 		return

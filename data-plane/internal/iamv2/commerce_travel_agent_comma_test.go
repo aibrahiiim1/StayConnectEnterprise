@@ -2,11 +2,8 @@ package iamv2
 
 import "testing"
 
-// A TRAVEL-AGENT NAME IS ONE NAME, COMMAS AND ALL.
-//
-// The PMS names agents as the hotel wrote them, and "Sun Tours, Ltd" is a real shape. The rule has always stored
-// a JSON list, so a comma inside one entry is part of that name: it must match that agent (case and surrounding
-// spaces aside) and must not match an agent called only "Sun Tours" or "Ltd".
+// A comma inside a travel-agent name is part of the name ("Sun Tours, Ltd"): it matches that agent (case and
+// surrounding spaces aside) and not "Sun Tours" or "Ltd" alone.
 func TestTravelAgentRuleKeepsACommaInsideOneName(t *testing.T) {
 	rule := []EligibilityRule{{RuleTravelAgent, map[string]any{"travel_agents": []any{"Sun Tours, Ltd"}}}}
 	for agent, want := range map[string]bool{

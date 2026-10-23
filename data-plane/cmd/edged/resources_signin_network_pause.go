@@ -1,17 +1,9 @@
 package main
 
-// THE NETWORK PAUSE — the operator surface (migration 0136; GDPR audit 2026-10-19, A4).
-//
-// Many wrong room sign-ins on one guest network pause room sign-in there. Staff see the pause and may:
-//
-//   - END it early, when it is a false alarm (a tour group mistyping, a PMS change mid-evening);
-//   - CONFIRM a genuine guest's device, picked from the devices that tried on that network: that device may try
-//     again at once, and its own device restriction ends.
-//
-// Both are under guest-signin-restrictions, the desk's release permission: they decide who may ATTEMPT, never
-// who is let in. Neither creates an entitlement or a session; the guest still signs in with their own details.
-// Both need a reason and are audited. The three numbers are under guest-signin-protection, with the password,
-// like the per-device policy.
+// Network pause operator surface: many wrong room sign-ins on one guest network pause room sign-in there.
+// Staff may END a pause early or CONFIRM a genuine guest's device (it may try again at once and its device restriction ends).
+// Both sit under guest-signin-restrictions and only permit another attempt: no entitlement or session is created.
+// Both need a reason and are audited. The three numbers sit under guest-signin-protection, with the password.
 
 import (
 	"context"
@@ -53,7 +45,6 @@ func (s *server) networkPolicy(ctx context.Context) (networkPolicyOut, error) {
 	return out, err
 }
 
-// GET /guest-signin-protection/network
 func (s *server) getNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -136,7 +127,6 @@ type networkPauseOut struct {
 	ConfirmedDevices int       `json:"confirmed_devices"`
 }
 
-// GET /guest-signin-restrictions/network-pauses: the pauses running now.
 func (s *server) listNetworkPauses(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -165,9 +155,8 @@ func (s *server) listNetworkPauses(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"pauses": out})
 }
 
-// GET /guest-signin-restrictions/network-pauses/{id}/devices: the devices that tried room sign-in on that
-// network around the pause, so staff can pick the guest in front of them. The room is what was typed,
-// unverified; nothing else of what was typed is returned.
+// GET .../network-pauses/{id}/devices: devices that tried room sign-in on that network around the pause.
+// The room is unverified typed text; nothing else typed is returned.
 func (s *server) listNetworkPauseDevices(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	ctx, cancel := dbCtx(r)
@@ -198,7 +187,6 @@ func (s *server) listNetworkPauseDevices(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"devices": out})
 }
 
-// pauseActionInput is the body of both staff actions: a reason, and for a confirmation the device.
 type pauseActionInput struct {
 	Reason    string `json:"reason"`
 	DeviceMAC string `json:"device_mac"`
@@ -223,7 +211,6 @@ func (s *server) pauseAction(w http.ResponseWriter, r *http.Request) (id, reason
 	return id, reason, actor, in, true
 }
 
-// pauseNetwork names the paused network for the audit record, or reports that there is no running pause.
 func (s *server) pauseNetwork(ctx context.Context, id string) (string, error) {
 	var name string
 	err := s.db.QueryRow(ctx, `SELECT COALESCE(guest_network_name,'') FROM iam_v2.guest_signin_network_pauses

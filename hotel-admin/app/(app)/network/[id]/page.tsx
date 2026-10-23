@@ -43,7 +43,6 @@ export default function EditGuestNetworkPage() {
   const [replaced, setReplaced] = useState<ReplaceResult | null>(null);
   const toast = useToast();
 
-  // editable form state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ssidLabel, setSsidLabel] = useState("");
@@ -61,7 +60,6 @@ export default function EditGuestNetworkPage() {
   const [nat, setNat] = useState(true);
   const [clientIsolation, setClientIsolation] = useState(false);
 
-  // reservation dialogs
   const [adding, setAdding] = useState(false);
   const [editRes, setEditRes] = useState<Reservation | null>(null);
   const [removing, setRemoving] = useState<Reservation | null>(null);
@@ -213,7 +211,6 @@ export default function EditGuestNetworkPage() {
         )
       ) : (
         <>
-          {/* read-only topology + status */}
           {replaced && (
             <Callout tone="success" title="Change recorded — nothing has changed yet">
               <p>
@@ -229,9 +226,7 @@ export default function EditGuestNetworkPage() {
                   kept and you are told which package and why.
                 </p>
               )}
-              {/* THE QUESTION AN OPERATOR WOULD OTHERWISE HAVE TO GUESS. A printed voucher is pinned to the
-                  package revision it was issued against, so the obvious fear is that a cabling change kills
-                  every card in the drawer. It does not: the replacement continues this network's identity. */}
+              {/* Replacement preserves network identity, so printed vouchers remain valid. */}
               <p className="mt-1">
                 Vouchers already printed for those packages keep working. The replacement counts as this same
                 client network, so there is nothing to reissue.
@@ -277,7 +272,6 @@ export default function EditGuestNetworkPage() {
             />
           )}
 
-          {/* editable settings */}
           <form
             id={FORM_ID}
             onSubmit={(e) => { e.preventDefault(); if (writable) void onSave(); }}
@@ -380,7 +374,6 @@ export default function EditGuestNetworkPage() {
             </Card>
           </form>
 
-          {/* reservations */}
           <Card>
             <CardHeader>
               <div className="space-y-1">

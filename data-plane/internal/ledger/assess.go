@@ -6,20 +6,18 @@ import (
 	"strings"
 )
 
-// Copy is one stored copy of the ledger, as it was found.
 type Copy struct {
 	Name    string // "local" or "external"
-	Present bool   // the storage answered and holds a ledger
-	Reach   error  // why the storage could not be asked (unreachable, no key, ...); nil when it answered
-	Parse   *Parse // what could be read of it (nil when not Present)
+	Present bool
+	Reach   error // why the storage could not be asked (unreachable, no key, ...); nil when it answered
+	Parse   *Parse
 }
 
-// Intact is true for a copy that is a valid chain. An unfinished last line (a write that was interrupted, so never
-// acknowledged to anyone) does not make it damaged: the fragment is ignored.
+// Intact is true for a valid chain; an unfinished last line (an unacknowledged interrupted write) is ignored.
 func (c Copy) Intact() bool { return c.Present && c.Parse != nil && c.Parse.Err == nil }
 
-// Witness is something independent of the copies that says how far the ledger had reached: the ledger inside the database
-// being restored, the live database, the head recorded with a backup. Hash may be "" when only the number is known.
+// Witness is an independent statement of how far the ledger had reached (the restored database, the live
+// database, a backup's head). Hash may be "" when only the number is known.
 type Witness struct {
 	Source string
 	Ledger string // "" when unknown
@@ -27,26 +25,21 @@ type Witness struct {
 	Hash   string
 }
 
-// Verdict is the decision about which copy may drive a restore, and why.
 type Verdict struct {
-	// Best is the copy to restore from; nil when none may be trusted.
 	Best *Copy
-	// Complete is true only when Best is intact AND independently shown to reach everything the available witnesses say
-	// was ever committed.
+	// Complete is true only when Best is intact and reaches everything the available witnesses say was committed.
 	Complete bool
 	// Heal lists the copies that are absent, damaged or behind and must be rewritten from Best once Best is trusted.
-	Heal []string
-	// Reasons explain the decision in words an administrator can act on. Always non-empty.
+	Heal    []string
 	Reasons []string
-	// Conflict is true when the evidence contradicts itself (two copies that fork, a witness whose hash the copy does not
-	// have): the restore must not proceed on guesses.
+	// Conflict is true when the evidence contradicts itself (forked copies, a witness hash the copy lacks); restore must not guess.
 	Conflict bool
 }
 
 func (v *Verdict) say(f string, a ...any) { v.Reasons = append(v.Reasons, fmt.Sprintf(f, a...)) }
 
-// Assess decides whether a restore may rely on the ledger. It needs ONE trustworthy, complete copy and does not need the
-// other: a copy that cannot be reached is simply not a witness.
+// Assess decides whether a restore may rely on the ledger. One trustworthy, complete copy suffices; an unreachable
+// copy is simply not a witness.
 //
 //   - Both intact and one is the other's prefix (or they are equal): the longer one; each vouches for the other.
 //   - Both intact but they disagree (a fork): conflict, nothing proceeds.

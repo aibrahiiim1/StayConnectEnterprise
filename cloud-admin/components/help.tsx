@@ -4,17 +4,7 @@ import { Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTrigger } from "@/components/ui/sheet";
 
-/*
-  HELP LIVES BEHIND A LIGHTBULB.
-
-  Screens used to carry their explanations as always-visible paragraphs and callouts. The explanations were
-  worth keeping; reading them every time was not. A page or a section now shows a small lightbulb beside its
-  title, and the explanation opens in a drawer when somebody wants it.
-
-  WHAT MUST NOT MOVE IN HERE: a warning about a consequence (what an action will do, what cannot be undone, why a
-  control is disabled right now) stays on the page, next to the thing it is about. This drawer is for "what is
-  this and how does it work", never for "be careful".
-*/
+// Keep action consequences and disabled-state warnings beside the control, outside optional help.
 
 export function HelpTip({
   title,
@@ -23,10 +13,8 @@ export function HelpTip({
   children,
   className,
 }: {
-  /** The drawer title, usually the page or section name. */
   title: React.ReactNode;
   eyebrow?: React.ReactNode;
-  /** Accessible name for the button; defaults to "Tips: <title>" when the title is a string. */
   label?: string;
   children: React.ReactNode;
   className?: string;
@@ -57,7 +45,6 @@ export function HelpTip({
   );
 }
 
-/** A titled block inside a help drawer. */
 export function HelpSection({ title, children }: { title?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="space-y-1.5">
@@ -69,7 +56,6 @@ export function HelpSection({ title, children }: { title?: React.ReactNode; chil
   );
 }
 
-/** A tidy bullet list for help content. */
 export function HelpList({ items }: { items: React.ReactNode[] }) {
   return (
     <ul className="list-disc space-y-1 pl-5 marker:text-muted-foreground/60">

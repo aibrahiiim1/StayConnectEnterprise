@@ -1,16 +1,10 @@
 "use client";
 
-// DATA CONTROLS — the pieces every list screen was building for itself.
-//
-// Search boxes of three different heights, state filters as native <select>s on one screen and as buttons on the
-// next, "Load more" on vouchers and nothing on guest activity. These are the one version of each.
-
 import * as React from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 
-/** A search field with a leading icon and a clear button. Debounces onChange by `delay` ms when given. */
 export function SearchInput({
   value,
   onChange,
@@ -22,7 +16,6 @@ export function SearchInput({
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  /** Accessible name. Defaults to the placeholder. */
   label?: string;
   delay?: number;
   className?: string;
@@ -71,14 +64,7 @@ export function SearchInput({
   );
 }
 
-/**
- * ResultsCount — says how many rows a search or a filter produced, to a screen reader (WCAG 4.1.3).
- *
- * Sighted operators see the table change; a screen-reader user who typed a query heard nothing at all. The region
- * is always rendered (a live region that appears together with its text is often not announced), is visually
- * hidden, and is polite, so it waits for the operator to stop typing rather than interrupting. `count` null means
- * "no answer yet" and says nothing. `more` marks a page that is not the whole result ("50 or more").
- */
+/** Keep the result-count live region mounted before search answers arrive so screen readers announce changes. */
 export function ResultsCount({
   count,
   noun = "result",
@@ -103,11 +89,6 @@ export function ResultsCount({
   );
 }
 
-/**
- * FilterChips — a single-choice filter with counts ("All 214 · Unused 180 · Used 30 · Cancelled 4").
- *
- * A count on each option answers "is there anything there?" before the click, which a <select> cannot.
- */
 export function FilterChips<T extends string>({
   value,
   onChange,
@@ -129,8 +110,6 @@ export function FilterChips<T extends string>({
   };
   const onKeyDown = useRadioKeys(options.map((o) => o.value), value, onChange);
   return (
-    // A radiogroup is one tab stop on its CHECKED radio (roving tabIndex), never the group itself, which is the
-    // ARIA pattern; jsx-a11y reads the container role as a control.
     // eslint-disable-next-line jsx-a11y/interactive-supports-focus
     <div role="radiogroup" aria-label={label} onKeyDown={onKeyDown}
       className={cn("flex flex-wrap items-center gap-1.5", className)}>
@@ -142,7 +121,7 @@ export function FilterChips<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
-            // Roving tabindex: the group is ONE tab stop (the checked chip), and the arrows move within it.
+            // The checked chip is the group's tab stop; arrows move within it.
             tabIndex={active || (!options.some((x) => x.value === value) && o === options[0]) ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
@@ -172,14 +151,7 @@ export function FilterChips<T extends string>({
   );
 }
 
-/**
- * useRadioKeys — the ARIA radiogroup keyboard contract for a group of role="radio" buttons.
- *
- * Arrow Right/Down selects the next option, Left/Up the previous (both wrap), Home the first, End the last, and
- * focus follows the selection. A group of buttons marked role="radio" promises exactly this to a screen-reader
- * user, and without it the promise was a lie: each chip was its own tab stop and the arrows did nothing.
- * Attach the returned handler to the radiogroup element; the radios must render in `values` order.
- */
+/** Keep radio keyboard order aligned with the rendered values. */
 export function useRadioKeys<T extends string>(values: readonly T[], value: T, onChange: (v: T) => void) {
   return React.useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
@@ -213,7 +185,6 @@ export function useRadioKeys<T extends string>(values: readonly T[], value: T, o
   );
 }
 
-/** Pagination — "Showing 201–400 of 1,204" with previous/next. `total` may be unknown (null). */
 export function Pagination({
   offset,
   limit,
@@ -225,10 +196,9 @@ export function Pagination({
 }: {
   offset: number;
   limit: number;
-  /** How many rows the current page actually holds. */
   shown: number;
   total?: number | null;
-  /** The server's meta.has_more, for a list it pages. Decides "Next" where no total is known. */
+  /** Enables Next when the total is unknown. */
   hasMore?: boolean;
   onChange: (offset: number) => void;
   className?: string;
@@ -262,7 +232,6 @@ export function Pagination({
   );
 }
 
-/** KeyValueGrid — a compact two-column fact sheet for a record. Values may be any node. */
 export function KeyValueGrid({
   items,
   columns = 2,
@@ -286,10 +255,6 @@ export function KeyValueGrid({
   );
 }
 
-/**
- * MetricStrip — a row of small figures inside a card header or hero ("12 in house · 3 arriving · 2 departing").
- * Lighter than a row of StatCards when the figures belong to one object.
- */
 export function MetricStrip({
   items,
   className,
@@ -315,7 +280,6 @@ export function MetricStrip({
   );
 }
 
-/** Timeline — a vertical list of dated events (publications, lifecycle changes, audit entries). */
 export function Timeline({
   items,
   className,
@@ -361,10 +325,7 @@ export function Timeline({
   );
 }
 
-/**
- * Stepper — the progress header of a multi-step flow (add a PMS connection, issue vouchers).
- * Steps before `current` are complete; the operator can click back to one, never forward past validation.
- */
+/** Steps before current are complete; forward navigation waits for validation. */
 export function Stepper({
   steps,
   current,
@@ -415,11 +376,7 @@ export function Stepper({
   );
 }
 
-/**
- * OptionCard — a large selectable card for a choice that deserves a description (a PMS provider, a portal
- * template, a voucher format). Radio semantics, so the group is one tab stop with arrow-key navigation left to
- * the browser's native radio behaviour through the hidden input.
- */
+/** Native radio inputs provide one tab stop and arrow navigation for the card group. */
 export function OptionCard({
   name,
   value,

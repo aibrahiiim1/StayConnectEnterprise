@@ -1,11 +1,6 @@
 package main
 
-// A CLIENT'S DEVICES, IN EVERY SHIPPED LANGUAGE (device_pages.go, docs/architecture/ONEGATE_DEVICE_MANAGEMENT.md).
-//
-// The online page's "Your devices" panel (its older dev.* words live in languages_pages.go) and the page a client
-// reaches when a package's devices are all in use: choose the device this one replaces. {n}, {max} are numbers.
-// These join builtinStrings at start-up like the other dictionaries, so the page renders them, /api/languages
-// serves them, and Hotel Admin offers every key for override.
+// A client's devices in every shipped language (device_pages.go). {n} and {max} are numbers.
 var deviceStrings = map[string]map[string]string{
 	"en": {
 		"dev.slots":          "{n} of {max} devices in use",

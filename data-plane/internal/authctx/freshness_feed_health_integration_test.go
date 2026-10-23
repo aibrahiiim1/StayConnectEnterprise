@@ -2,16 +2,8 @@
 
 package authctx
 
-// PMS SIGN-IN ELIGIBILITY FOLLOWS FEED HEALTH, NOT THE AGE OF THE LAST EVENT ABOUT ONE GUEST.
-//
-// The rule these tests pin replaced one that was wrong in both directions at once. It required each Stay's own
-// occupancy evidence to be younger than max_auth_cache_age_seconds — unset everywhere, so 300 seconds. A PMS
-// says nothing about a guest who is simply staying in their room, so a real guest could sign in for five
-// minutes after check-in and never again. And when the link died, every Stay kept its stored timestamp and
-// stayed eligible for five more minutes with no feed behind it at all.
-//
-// Both halves are asserted here, because a change that fixed only the first would look correct in a demo and
-// would quietly hand out access on a dead interface.
+// PMS sign-in eligibility follows feed health, not the age of one guest's last event: a PMS says nothing about a
+// guest simply staying, and a dead link must not leave stale Stays eligible. Both halves are asserted.
 
 import (
 	"context"
@@ -21,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// authorizable asks the shared predicate exactly as the auth path does.
 func authorizable(t *testing.T, p *pgxpool.Pool, s fixture) bool {
 	t.Helper()
 	var ok bool
@@ -33,14 +24,10 @@ func authorizable(t *testing.T, p *pgxpool.Pool, s fixture) bool {
 	return ok
 }
 
-// setFeed drives the runtime axes to a named state.
 func setFeed(t *testing.T, p *pgxpool.Pool, s fixture, transport, sync, continuity string, live time.Time) {
 	t.Helper()
-	// updated_at is GREATEST(now(), $5) because pir_heartbeat_not_future requires last_heartbeat_at to be no
-	// later than updated_at, and the heartbeat here comes from the Go clock while now() comes from the
-	// database. Even microseconds of skew between the two violated the CHECK, which made this helper — and so
-	// every test using it — fail intermittently in the gate for a reason that had nothing to do with the
-	// behaviour under test.
+	// updated_at is GREATEST(now(), $5): pir_heartbeat_not_future needs the heartbeat (Go clock) no later than
+	// updated_at (database clock), and microseconds of skew violated the CHECK intermittently.
 	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
 		SET transport_status=$2, sync_status=$3, continuity_status=$4,
 		    last_connected_at=$5, last_heartbeat_at=$5, updated_at=GREATEST(now(), $5)
@@ -49,11 +36,8 @@ func setFeed(t *testing.T, p *pgxpool.Pool, s fixture, transport, sync, continui
 	}
 }
 
-// setEvidenceAge backdates the Stay's occupancy evidence.
-//
-// The version is incremented because p3_stay_lifecycle_guard requires it: moving occupancy_evidence_at is a
-// MATERIAL evidence change and must advance the version by exactly one. A helper that tried to age the
-// timestamp quietly would be rejected by the database, which is the guard doing its job.
+// setEvidenceAge backdates occupancy evidence; the version must advance by exactly one
+// (p3_stay_lifecycle_guard treats it as a material change).
 func setEvidenceAge(t *testing.T, p *pgxpool.Pool, s fixture, at time.Time) {
 	t.Helper()
 	if _, err := gexec(context.Background(), p, "stay", `UPDATE iam_v2.stays
@@ -63,8 +47,7 @@ func setEvidenceAge(t *testing.T, p *pgxpool.Pool, s fixture, at time.Time) {
 	}
 }
 
-// THE BUG THE PRODUCT OWNER HIT. A guest who checked in yesterday, on a healthy feed, must still sign in.
-// Under the old rule this was false after five minutes and Room sign-in was unusable for every real guest.
+// A guest who checked in yesterday, on a healthy feed, must still sign in.
 func TestIntegration_HealthyFeedAuthorisesAnUnchangedOvernightStay(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -80,13 +63,8 @@ func TestIntegration_HealthyFeedAuthorisesAnUnchangedOvernightStay(t *testing.T)
 	}
 }
 
-// The other half, as far as it still goes. A feed that is unhealthy WHILE CONNECTED authorises nobody, and a
-// transport failure authorises nobody when there is no trustworthy mirror behind it.
-//
-// This test originally read "a dead feed authorises NOBODY, immediately", full stop. The Product Owner's
-// local-first rule superseded that: transport availability and mirror trust are different properties, and a
-// dropped socket alone no longer denies a guest whose Stay is mirrored coherently. What survives unchanged is
-// every case where the mirror itself cannot be trusted, which is what the cases below now pin.
+// A feed unhealthy while connected authorises nobody, and a transport failure authorises nobody without a
+// trustworthy mirror. A dropped socket alone does not deny a coherently mirrored Stay (local-first).
 func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -98,27 +76,19 @@ func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 		transport, syncSt, continuitySt string
 		live                            time.Time
 	}{
-		// These two are transport failures on a mirror that has NEVER completed a sync — the fixture leaves
-		// last_complete_sync_at NULL. They are refused because there is no local guest list to fall back on,
-		// NOT because the socket is down: since the local-first rule, a disconnected interface whose mirror IS
-		// established authorises normally, which mirror_trust_integration_test.go asserts directly. Seeding a
-		// complete sync here would flip both of these to authorised, and that would be correct.
+		// Transport failures on a mirror that never completed a sync (last_complete_sync_at NULL): refused for
+		// lack of a local guest list, not because the socket is down. Seeding a complete sync would authorise both.
 		{"disconnected, mirror never synchronised", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", now},
 		{"transport error, mirror never synchronised", "ERROR", "IN_SYNC", "CONTINUOUS", now},
 		{"resync required", "CONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now},
 		{"resync in progress", "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now},
 		{"sync failed", "CONNECTED", "SYNC_FAILED", "CONTINUOUS", now},
 		{"gap detected", "CONNECTED", "IN_SYNC", "GAP_DETECTED", now},
-		// UNKNOWN is the value a runtime row is BORN with — continuity never established. It was briefly
-		// accepted alongside CONTINUOUS, which read a missing positive signal as an absent negative one.
 		{"continuity never established", "CONNECTED", "IN_SYNC", "UNKNOWN", now},
-		// Connected and in sync on paper, but nothing has been heard for far longer than the heartbeat
-		// timeout: a hung socket that never reported an error must not pass as a healthy feed.
+		// A hung socket that never reported an error must not pass as healthy.
 		{"silent beyond heartbeat timeout", "CONNECTED", "IN_SYNC", "CONTINUOUS", now.Add(-2 * time.Hour)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Only the FEED varies. The evidence stays exactly as seeded — fresh, coherent, revision-matched —
-			// so each refusal below is attributable to feed health and nothing else.
 			setFeed(t, p, s, tc.transport, tc.syncSt, tc.continuitySt, tc.live)
 			if authorizable(t, p, s) {
 				t.Fatalf("a guest was authorised on a %s feed, with no live PMS behind the answer", tc.name)
@@ -127,16 +97,8 @@ func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 	}
 }
 
-// UNKNOWN CONTINUITY IS NOT A HEALTHY STATE, and this asserts it against the state machine's own claim rather
-// than against the word.
-//
-// continuity_status is NOT NULL DEFAULT 'UNKNOWN', so it is what a runtime row carries before the interface
-// has done anything. The only transitions to CONTINUOUS are PublishResyncGeneration — which sets it in the
-// same UPDATE as IN_SYNC — and the admission of a LIVE event. Nothing returns to UNKNOWN.
-//
-// Two consequences are pinned here. An interface that never established continuity authorises nobody even
-// with perfect evidence and a live socket; and, because publishing a resync sets both columns at once,
-// requiring CONTINUOUS costs a healthy interface nothing — IN_SYNC already implies it.
+// UNKNOWN continuity (the column default) is not healthy: an interface that never established it authorises
+// nobody, while requiring CONTINUOUS costs a healthy interface nothing because IN_SYNC implies it.
 func TestIntegration_UnknownContinuityNeverAuthorises(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -150,8 +112,6 @@ func TestIntegration_UnknownContinuityNeverAuthorises(t *testing.T) {
 			"signal that has never arrived")
 	}
 
-	// The same interface, once continuity is genuinely established, does authorise — so the refusal above is
-	// the continuity term and not some unrelated part of the fixture being wrong.
 	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 	if !authorizable(t, p, s) {
 		t.Fatal("established continuity must authorise; the UNKNOWN refusal above proves nothing if the " +
@@ -159,8 +119,7 @@ func TestIntegration_UnknownContinuityNeverAuthorises(t *testing.T) {
 	}
 }
 
-// The absolute ceiling still exists. A Stay the PMS has silently stopped carrying must not authorise forever
-// just because the interface is healthy for other guests.
+// A Stay the PMS silently stopped carrying must not authorise forever on an otherwise healthy interface.
 func TestIntegration_EvidenceOlderThanASyncCadenceStopsAuthorising(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -168,8 +127,7 @@ func TestIntegration_EvidenceOlderThanASyncCadenceStopsAuthorising(t *testing.T)
 	now := time.Now().UTC()
 	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 
-	// The fixture config sets no complete_sync_ms, so the 24-hour default applies, plus the heartbeat
-	// allowance. An absent key must produce that default rather than an unbounded window.
+	// No complete_sync_ms is set, so the 24-hour default plus heartbeat allowance applies (not an unbounded window).
 	setEvidenceAge(t, p, s, now.Add(-23*time.Hour))
 	if !authorizable(t, p, s) {
 		t.Fatal("evidence within one complete-sync cadence must still authorise on a healthy feed")
@@ -181,8 +139,7 @@ func TestIntegration_EvidenceOlderThanASyncCadenceStopsAuthorising(t *testing.T)
 	}
 }
 
-// An explicit operator-set bound still wins, and a malformed one still fails closed to the default rather
-// than widening the window.
+// An explicit bound wins; a malformed one falls back to the default rather than widening the window.
 func TestIntegration_ExplicitCacheAgeOverridesAndMalformedFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -191,15 +148,15 @@ func TestIntegration_ExplicitCacheAgeOverridesAndMalformedFailsClosed(t *testing
 	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
-	// Revisions are immutable, so each variant is its own fixture rather than an edit.
-	explicit := seedCacheAge(t, p, `600`) // ten minutes, explicitly chosen
+	// Revisions are immutable, so each variant is its own fixture.
+	explicit := seedCacheAge(t, p, `600`)
 	setFeed(t, p, explicit, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 	setEvidenceAge(t, p, explicit, now.Add(-2*time.Hour))
 	if authorizable(t, p, explicit) {
 		t.Fatal("an explicit max_auth_cache_age_seconds must override the derived ceiling")
 	}
 
-	malformed := seedCacheAge(t, p, `"not-a-number"`) // must NOT widen anything, and must not reject everything
+	malformed := seedCacheAge(t, p, `"not-a-number"`)
 	setFeed(t, p, malformed, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 	setEvidenceAge(t, p, malformed, now.Add(-2*time.Hour))
 	if !authorizable(t, p, malformed) {

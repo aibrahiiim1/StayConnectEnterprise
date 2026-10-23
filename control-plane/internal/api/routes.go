@@ -8,13 +8,12 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// CloudRoutes is the whole operator API, mounted at /cloud/v1 behind the sc_session cookie
-// (docs/CENTRAL_CONTROL_PLANE.md §6). Nothing else is mounted.
+// CloudRoutes is the whole operator API, mounted at /cloud/v1 behind the sc_session cookie.
 //
-// Authorization happens in two places, both server-side:
-//   - route level: RequirePermission for platform-only writes, RequireReauth for step-up (SU) writes;
-//   - handler level: readScope pins every read to the caller's customer unless the caller holds fleet.view,
-//     and customer-level writes (sites, users) check canManageForCustomer against the target customer.
+// Authorization is server-side in two places:
+//   - route level: RequirePermission for platform-only writes, RequireReauth for step-up writes;
+//   - handler level: readScope pins reads to the caller's customer unless it holds fleet.view, and
+//     customer-level writes check canManageForCustomer against the target customer.
 //
 // off may be nil (no vendor signing key): the offline routes then answer 503.
 func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
@@ -24,7 +23,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 
 	r.Get("/overview", b.overview)
 
-	// Customers.
 	r.Get("/customers", b.listCustomers)
 	r.With(perm(auth.PermCustomersManage)).Post("/customers", b.postCustomer)
 	r.Get("/customers/{id}", b.getCustomer)
@@ -33,7 +31,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(perm(auth.PermCustomersManage)).Post("/customers/{id}/restore", b.setCustomerStatus("active"))
 	r.With(perm(auth.PermCustomersManage), su).Delete("/customers/{id}", b.deleteCustomer)
 
-	// Sites (customer-level writes: platform or the customer's own admins).
 	r.Get("/customers/{id}/sites", b.listSites)
 	r.Post("/customers/{id}/sites", b.postSite)
 	r.Patch("/sites/{id}", b.patchSite)
@@ -41,7 +38,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.Post("/sites/{id}/restore", b.setSiteStatus("active"))
 	r.With(su).Delete("/sites/{id}", b.deleteSite)
 
-	// Customer users (customer-level writes).
 	r.Get("/customers/{id}/users", b.listCustomerUsers)
 	// Every change to who can sign in to Central, or with what, re-confirms the operator's password.
 	r.With(su).Post("/customers/{id}/users", b.postCustomerUser)
@@ -49,7 +45,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(su).Delete("/customers/{id}/users/{uid}", b.deleteCustomerUser)
 	r.With(su).Post("/customers/{id}/users/{uid}/mfa-reset", b.customerUserMFAReset)
 
-	// Appliances.
 	r.Get("/appliances", b.listAppliances)
 	r.Get("/appliances/{id}", b.getAppliance)
 	am := r.With(perm(auth.PermAppliancesManage), su)
@@ -61,7 +56,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	am.Post("/appliances/{id}/reissue-certificate", b.reissueCertificate)
 	am.Delete("/appliances/{id}", b.deleteAppliance)
 
-	// Licences.
 	r.Get("/licenses", b.listLicenses)
 	r.Get("/modules", b.listModules)
 	lm := r.With(perm(auth.PermLicensesManage), su)
@@ -70,7 +64,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	lm.Post("/licenses/{id}/resume", b.licenseAction("resume"))
 	lm.Post("/licenses/{id}/revoke", b.licenseAction("revoke"))
 
-	// Offline files.
 	if off != nil {
 		r.With(perm(auth.PermAppliancesManage)).Post("/offline-activation/requests", off.importRequest)
 		am.Post("/appliances/{id}/offline-activation-package", off.activationPackage)
@@ -82,7 +75,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 		lm.Post("/appliances/{id}/offline-license", na)
 	}
 
-	// System.
 	r.Get("/security-alerts", b.listSecurityAlerts)
 	r.With(perm(auth.PermSecurityManage)).Patch("/security-alerts/{id}", b.patchSecurityAlert)
 	r.With(perm(auth.PermFleetView)).Get("/trust", b.trust)
@@ -94,7 +86,7 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	tm.Delete("/team/{id}", b.deleteTeam)
 	tm.Post("/team/{id}/password", b.teamPassword)
 	tm.Post("/team/{id}/mfa-reset", b.teamMFAReset)
-	// One user's data, Team member or customer user, for the platform to hand over (GDPR audit B5).
+	// One user's data (team member or customer user), for the platform to hand over.
 	tm.Post("/users/{id}/data-export", b.userDataExport)
 	r.With(perm(auth.PermFleetView)).Get("/backup-health", b.BackupHealthHandler)
 	r.With(perm(auth.PermFleetView)).Get("/settings/security", b.getSecuritySettings)
@@ -102,7 +94,6 @@ func (b *Base) CloudRoutes(off *OfflineBase) http.Handler {
 	r.With(perm(auth.PermFleetView)).Get("/settings/retention", b.getRetentionSettings)
 	tm.Patch("/settings/retention", b.patchRetentionSettings)
 
-	// Portal hostnames and certificates (portal_tls.go).
 	b.portalTLSRoutes(r)
 
 	return r

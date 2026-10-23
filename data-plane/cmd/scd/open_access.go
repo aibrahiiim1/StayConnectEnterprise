@@ -1,10 +1,8 @@
 package main
 
-// OPEN PACKAGE SELECTION ("Choose a package without signing in"): the portal entry point.
-//
-// The switch is the Sign-in methods screen's "open" key (default off). The subject is an opaque anonymous
-// access subject (internal/iamv2/open_access.go) -- never the device's MAC. The MAC and IP are server-derived
-// from the connection by portald; the body carries only the client's own resume token or recovery code.
+// Open package selection ("Choose a package without signing in"). The switch is the Sign-in methods "open" key (default off).
+// The subject is an opaque anonymous access subject (internal/iamv2/open_access.go), never the MAC; portald derives MAC and IP
+// from the connection, and the body carries only the client's resume token or recovery code.
 
 import (
 	"encoding/json"
@@ -24,8 +22,7 @@ import (
 
 const anonymousAccessKeyFile = "anonymous_access.key"
 
-// initOpenAccess loads the anonymous-access HMAC key. Without it open selection is unavailable (never degraded
-// to a weaker scheme); every other sign-in method is unaffected.
+// initOpenAccess loads the anonymous-access HMAC key; without it open selection is unavailable (never degraded to a weaker scheme).
 func (s *server) initOpenAccess(secretsDir string) {
 	key, err := localkeys.LoadExistingKey(filepath.Join(secretsDir, anonymousAccessKeyFile))
 	if err != nil {
@@ -36,8 +33,7 @@ func (s *server) initOpenAccess(secretsDir string) {
 	s.openLimiter = &recoveryLimiter{hits: map[string][]time.Time{}}
 }
 
-// recoveryLimiter bounds recovery-code guesses per device: 5 per 10 minutes. Codes carry about 50 bits, so this
-// makes guessing hopeless rather than merely slow.
+// recoveryLimiter bounds recovery-code guesses per device to 5 per 10 minutes; codes carry about 50 bits.
 type recoveryLimiter struct {
 	mu   sync.Mutex
 	hits map[string][]time.Time
@@ -58,8 +54,7 @@ func (l *recoveryLimiter) allow(mac string) bool {
 		return false
 	}
 	l.hits[mac] = append(kept, now)
-	// Bounded by PRUNING what has aged out, never by wiping the map: a wipe reset every device's count at once,
-	// so filling the map with addresses was a way to clear one's own limit (portal audit P-19).
+	// Bounded by pruning aged entries, never by wiping the map: a wipe reset every device's count, so flooding the map would clear one's own limit.
 	if len(l.hits) > 20000 {
 		for k, ts := range l.hits {
 			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= 10*time.Minute {
@@ -77,7 +72,6 @@ type openAuthReq struct {
 	RecoveryCode string `json:"recovery_code,omitempty"`
 }
 
-// openEnabled reads the Sign-in methods switch.
 func (s *server) openEnabled(r *http.Request) bool {
 	var cfg *tenantcfg.AuthMethods
 	var err error
@@ -89,7 +83,6 @@ func (s *server) openEnabled(r *http.Request) bool {
 	return err == nil && cfg != nil && cfg.Open != nil && cfg.Open.Enabled
 }
 
-// authorizeOpen serves POST /v1/sessions/authorize-open.
 func (s *server) authorizeOpen(w http.ResponseWriter, r *http.Request) {
 	var req openAuthReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {

@@ -1,15 +1,8 @@
 package pmsd
 
-// TLS ON THE FIAS LINK (GDPR remediation plan C8, decision D-C8).
-//
-// The guest list (names, rooms, reservation numbers) crosses the hotel network on this socket. A revision with
-// tls.enabled wraps it in TLS 1.2 or later; there is no fallback to plain TCP, so a failed handshake leaves the
-// link down rather than sending guest data in the clear. Off by default: whether a property's Protel interface
-// speaks TLS, and turning it on, is the hotel's decision.
-//
-// A hotel's PMS rarely has a publicly trusted certificate. With a pinned SHA-256 fingerprint the appliance
-// accepts exactly that certificate and nothing else; without one the certificate must chain to a system
-// authority and match the host in the PMS address.
+// TLS on the FIAS link: guest data crosses the hotel network here, so there is no fallback to plain TCP; a failed
+// handshake leaves the link down. With a pinned SHA-256 fingerprint exactly that certificate is accepted,
+// otherwise it must chain to a system authority and match the PMS host.
 
 import (
 	"context"
@@ -52,8 +45,6 @@ func fiasTLSConfig(rev Revision) (*tls.Config, error) {
 	return cfg, nil
 }
 
-// fiasTLS completes the TLS handshake on an open connection, within the revision's dial timeout. On any failure
-// the connection is closed.
 func fiasTLS(ctx context.Context, raw net.Conn, rev Revision) (net.Conn, error) {
 	cfg, err := fiasTLSConfig(rev)
 	if err != nil {

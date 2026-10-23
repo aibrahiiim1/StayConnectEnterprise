@@ -1,7 +1,5 @@
 package main
 
-// THE DESIGNER'S TEMPLATES, THE CONTENT-SECURITY-POLICY, AND THE DESIGN AS A GUEST RECEIVES IT.
-
 import (
 	"context"
 	"encoding/json"
@@ -16,13 +14,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
-// designHandler is a portald handler whose scd answers /v1/tenant/branding with the given design.
 func designHandler(t *testing.T, design map[string]any) *handler {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v1/sessions/status" {
-			// The device these pages are drawn for is online: "You're online" is looked up, not read from its URL.
 			_, _ = w.Write([]byte(`{"ip":"10.77.0.42","session_id":"sess-1","active":true}`))
 			return
 		}
@@ -65,8 +61,7 @@ func get(t *testing.T, h *handler, path string) *httptest.ResponseRecorder {
 	return w
 }
 
-// Everything the sign-in script and the two plain-HTML forms depend on. A template is presentation: if any of
-// these went missing under one layout, a sign-in method would silently stop working there.
+// Everything the sign-in script and plain-HTML forms depend on; a missing one silently kills a sign-in method.
 var functionalIDs = []string{
 	"lang", "brand-logo", "brand-name", "brand-welcome", "access-ended", "site-notice", "tabs",
 	"panel-accountlogin", "use-personal", "form-voucher", "voucher", "form-credentials", "ga-username", "ga-password",
@@ -108,7 +103,7 @@ func TestEveryTemplateRendersEveryFunctionalElement(t *testing.T) {
 func TestEveryTemplateHasItsLayoutAndTheScriptKnowsIt(t *testing.T) {
 	for _, tp := range portaldesign.Templates {
 		if tp.ID == "classic" {
-			continue // the original layout: the base stylesheet, untouched
+			continue // the base stylesheet
 		}
 		if !strings.Contains(landingHTML, `[data-template="`+tp.ID+`"]`) {
 			t.Errorf("template %s has no CSS in the portal", tp.ID)
@@ -126,7 +121,7 @@ func TestEveryTemplateHasItsLayoutAndTheScriptKnowsIt(t *testing.T) {
 }
 
 func TestAnUnknownOrMissingDesignRendersClassic(t *testing.T) {
-	// No scd at all (the tests' literal handler), an empty design, and a template this build does not have.
+	// No scd at all, an empty design, and a template this build does not have.
 	w := httptest.NewRecorder()
 	tmpl, _ := template.New("land").Parse(landingHTML)
 	(&handler{tmplLand: tmpl}).landing(w, httptest.NewRequest(http.MethodGet, "/", nil), "")
@@ -188,8 +183,8 @@ func TestTheSuccessPageCarriesTheSamePolicy(t *testing.T) {
 }
 
 func TestBrandingIsSanitisedAgainOnTheWayToTheGuest(t *testing.T) {
-	// A design that reached the database without passing edged -- written before the allowlist existed,
-	// restored from a backup -- must still reach a guest only in its safe form.
+	// A design that reached the database without passing edged (old, or restored from backup) must still reach
+	// a guest only in its safe form.
 	h := designHandler(t, map[string]any{
 		"hotel_name":  "Semantics Demo Hotel",
 		"terms_url":   "javascript:alert(1)",
@@ -240,10 +235,8 @@ func TestBrandingFailsOpenToTheDefaults(t *testing.T) {
 	}
 }
 
-// THE CASCADE THE GUARD DEPENDS ON. The portal's own styling and the templates are layered, the hotel's CSS
-// goes into a layer above them, and the guard sheet is unlayered and comes after both -- so a normal hotel
-// rule can restyle anything but hide none of the sign-in controls. Asserted on the served text; the browser
-// test (hotel-admin/e2e/portal-templates.spec.ts) proves the effect.
+// Asserts the cascade on the served text (portal and templates layered, hotel layer above, unlayered guard
+// after both); the browser test hotel-admin/e2e/portal-templates.spec.ts proves the effect.
 func TestTheGuardSheetOutranksTheHotelsLayer(t *testing.T) {
 	html := landingHTML
 	order := []string{
@@ -267,12 +260,10 @@ func TestTheGuardSheetOutranksTheHotelsLayer(t *testing.T) {
 	if strings.Contains(rules, "@layer") {
 		t.Error("the guard sheet must be unlayered")
 	}
-	// The guard must LOSE to the sign-in script's own inline styles, which show and hide its forms; an
-	// !important here would beat them and break the voucher/personal-account switch.
+	// !important would beat the script's inline styles and break the voucher/personal-account switch.
 	if strings.Contains(rules, "!important") {
 		t.Error("the guard uses !important")
 	}
-	// And the page wraps the hotel's sheet in its layer, with !important removed a second time.
 	for _, frag := range []string{`'@layer hotel {\n' + css + '\n}'`, `replace(/!\s*important/gi, '')`} {
 		if !strings.Contains(html, frag) {
 			t.Errorf("the hotel stylesheet is not applied as designed (missing %q)", frag)
@@ -280,8 +271,7 @@ func TestTheGuardSheetOutranksTheHotelsLayer(t *testing.T) {
 	}
 }
 
-// The package-selection page runs no script, but it is still a guest-facing page reached without a proxy, and
-// its forms must only ever post back to this portal.
+// The package page runs no script but is still reached without a proxy; its forms must post back to this portal.
 func TestThePolicyHelperSetsEveryHeaderAGuestPageNeeds(t *testing.T) {
 	w := httptest.NewRecorder()
 	nonce := setPortalCSP(w)

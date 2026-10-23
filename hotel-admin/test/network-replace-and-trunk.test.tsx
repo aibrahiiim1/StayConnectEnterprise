@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-// CHANGING A NETWORK'S VLAN OR PORT, AND LAYING OUT A WHOLE TRUNK IN THE ONE WIZARD.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver ??= ResizeObserverStub;
 
@@ -81,10 +79,8 @@ describe("Change VLAN or port", () => {
     expect(await screen.findByText(/Change recorded — nothing has changed yet/)).toBeTruthy();
     expect(screen.getByText(/1 PMS route/)).toBeTruthy();
     expect(screen.getByText(/moved onto the\s+replacement automatically when you confirm/)).toBeTruthy();
-    // THE QUESTION THE OPERATOR WOULD OTHERWISE ANSWER WRONGLY. A printed voucher is pinned to the package
-    // revision it was issued against, so the reasonable fear is that moving a port kills every card in the
-    // drawer. It does not — the successor continues the same logical client network — and the screen says so,
-    // because an operator who assumes the worst reissues codes for nothing.
+    // A printed voucher is pinned to the package revision, not the port; the successor continues the same client
+    // network, and the screen says so.
     expect(screen.getByText(/Vouchers already printed .* keep working/)).toBeTruthy();
     expect(screen.getByText(/nothing to reissue/)).toBeTruthy();
   });
@@ -129,7 +125,6 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     expect(await screen.findByText(/What ens192 already carries/)).toBeTruthy();
     expect(screen.getByText(/Existing lobby/)).toBeTruthy();
 
-    // untagged is the default, and this port already has one
     fireEvent.click(screen.getByRole("button", { name: /Next/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/already carries an untagged client network/i);
   });
@@ -143,7 +138,6 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     fireEvent.change(screen.getByLabelText("VLAN 2 id"), { target: { value: "112" } });
     fireEvent.click(screen.getByRole("button", { name: /^Next$/ }));
 
-    // Addressing: a distinct subnet per VLAN, avoiding the one already in use.
     const s1 = (await screen.findByLabelText("VLAN 1 subnet")) as HTMLInputElement;
     const s2 = screen.getByLabelText("VLAN 2 subnet") as HTMLInputElement;
     expect(s1.value).not.toBe("10.111.0.0/24");
@@ -151,7 +145,6 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     expect(s1.value).not.toBe(s2.value);
     expect(screen.getByRole("radio", { name: /Configure each VLAN separately/i })).toBeTruthy();
 
-    // Walk to review and apply.
     fireEvent.click(screen.getByRole("button", { name: /^Next$/ }));
     fireEvent.click(await screen.findByRole("button", { name: /^Next$/ }));
     fireEvent.click(await screen.findByRole("button", { name: /^Next$/ }));
@@ -164,7 +157,6 @@ describe("New client network: one wizard for one network or a whole trunk", () =
     });
     fireEvent.click(screen.getByRole("button", { name: /Continue to apply/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Create, validate & apply/i }));
-    // Applying a network change needs the operator's password (audit N-15), typed into the dialog.
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "s3cret-pass" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Apply changes" }));

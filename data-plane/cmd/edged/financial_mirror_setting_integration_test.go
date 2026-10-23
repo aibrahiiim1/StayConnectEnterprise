@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// THE FINANCIAL MIRROR MAXIMUM AGE (D48) IS AN AUDITED OPERATIONAL SETTING: the list shows the 4-hour default,
-// a change needs a site administrator's step-up, and every change is logged with its author.
 func TestIntegrationFinancialMirrorSetting_DefaultStepUpAndAudit(t *testing.T) {
 	f := newAPI(t, "site_admin")
 	ctx := context.Background()

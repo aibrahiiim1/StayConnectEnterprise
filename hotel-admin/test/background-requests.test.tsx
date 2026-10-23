@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 
-// A poll is not the operator doing something. edged extends the idle limit on every request except those
-// carrying X-OneGate-Background, so every request a poll makes -- including one after an await inside it --
-// must carry it, and an operator's own request must not.
+// Every request a poll makes (even after an await) must carry X-OneGate-Background; an operator's own request must not.
 
 import { api, inBackground, BACKGROUND_HEADER } from "@/lib/api";
 import { usePoll } from "@/lib/use-poll";

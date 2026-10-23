@@ -1,27 +1,10 @@
 package main
 
-// WHICH CUSTOMER'S DATA THIS APPLIANCE STILL HOLDS.
-//
-// Product-Owner rule: changing an appliance's customer goes through retire -> FACTORY-CLEAN -> new activation.
-// No path may let an appliance that still holds customer A's local data be activated for customer B.
-//
-// The identity key is not that proof. A support identity reset (docs/VENDOR_BREAKGLASS_RUNBOOK.md) wipes
-// /etc/stayconnect/identity but keeps the site database, and scd then generates a new key and registers
-// token-less -- to Central indistinguishable from a factory-clean box. So every registration (online and the
-// offline activation request) carries `holds_customer_id`: the customer whose data the local site database
-// still holds. It is inside the signed body, so it is covered by the identity key's signature, and Central
-// refuses to activate the appliance for any other customer (control-plane activate, 409
-// holds_other_customer_data). A factory-clean appliance holds none and omits the field.
-//
-// Sources, both authoritative for "this box has held that customer":
-//   - public.tenants: every tenant-scoped row on the appliance references it by foreign key, and scd mirrors
-//     the assigned tenant into it on adoption and on every boot (seedTenantSiteMirror). No migration seeds it.
-//   - a granting or terminal signed assignment still on disk (current or previous), which survives a wiped
-//     database.
-//
-// More than one customer means a cross-customer transition never completed (the purge is gated and fails
-// closed). That appliance cannot be described by one customer, so it does not register at all until it is
-// factory-reset; the refusal is recorded as the last Central error, which Hotel Admin shows.
+// Which customer's data this appliance still holds. Changing customer goes retire -> factory-clean -> new activation; an appliance holding
+// customer A's data must never be activated for B. An identity reset keeps the site database, so every registration carries holds_customer_id
+// inside the signed body, and Central refuses activation for any other customer (409 holds_other_customer_data).
+// Sources: public.tenants (mirrored on adoption and every boot) and a granting or terminal assignment still on disk.
+// More than one customer means a cross-customer transition never completed: the appliance does not register until factory-reset.
 
 import (
 	"context"
@@ -33,14 +16,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// errHoldsSeveralCustomers refuses registration for an appliance whose local data belongs to more than one
-// customer. The text is what Hotel Admin shows as the last Central error.
+// errHoldsSeveralCustomers refuses registration; its text is shown in Hotel Admin as the last Central error.
 var errHoldsSeveralCustomers = errors.New("this appliance holds local data of more than one customer; " +
 	"it will not register with OneGate Central until it is factory-reset")
 
-// localHeldCustomers returns, sorted and de-duplicated, every customer (tenant) id whose data this appliance
-// holds: the site database's tenants and the tenant of any granting or terminal assignment on disk. An error
-// means "cannot tell"; the caller must not register on it.
+// localHeldCustomers returns every customer id whose data this appliance holds (site database tenants and any granting or terminal
+// assignment on disk); an error means cannot tell and the caller must not register.
 func localHeldCustomers(ctx context.Context, db *pgxpool.Pool, assignmentDir string) ([]string, error) {
 	seen := map[string]bool{}
 	if assignmentDir != "" {
@@ -78,8 +59,6 @@ func localHeldCustomers(ctx context.Context, db *pgxpool.Pool, assignmentDir str
 	return out, nil
 }
 
-// singleHeldCustomer reduces the held set to what a registration may carry: "" for none, the id for one,
-// errHoldsSeveralCustomers for more.
 func singleHeldCustomer(ids []string) (string, error) {
 	switch len(ids) {
 	case 0:
@@ -91,7 +70,6 @@ func singleHeldCustomer(ids []string) (string, error) {
 	}
 }
 
-// heldCustomerID is the value of holds_customer_id for this appliance right now.
 func heldCustomerID(ctx context.Context, db *pgxpool.Pool, assignmentDir string) (string, error) {
 	ids, err := localHeldCustomers(ctx, db, assignmentDir)
 	if err != nil {

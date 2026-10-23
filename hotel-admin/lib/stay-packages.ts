@@ -1,16 +1,6 @@
-// STAY-LENGTH TIERS AND STAY-DERIVED ALLOWANCES.
-//
-// Two operator-facing ideas that both hang off the same fact: how many nights the guest is staying.
-//
-//   1-7 nights -> Package A, 8-10 -> Package B, 11+ -> Package C
-//   1 GB a night, at least 5 GB, at most 20 GB
-//
-// Neither is arithmetic the operator should have to check by hand. Ranges that overlap produce two eligible
-// packages and a chooser where the operator meant a single answer; ranges that leave a gap produce a guest
-// who is offered nothing at all. Both are warnings rather than corrections — the operator may genuinely want
-// a choice, and silently rewriting somebody's eligibility rules is not a thing this screen gets to do.
+// Stay-length tiers and stay-derived allowances. Overlaps and gaps are warnings, never silent rewrites of the
+// operator's rules.
 
-/** A stay-length bound as the rules carry it. Either end may be absent, meaning "open". */
 export type StayLengthRange = { min?: number; max?: number };
 
 export type PackageStayRange = {
@@ -20,7 +10,6 @@ export type PackageStayRange = {
   range: StayLengthRange | null; // null = no stay-length rule, so it does not participate
 };
 
-/** readStayLength pulls the bounds out of a package's eligibility rules, or null when it has no such rule. */
 export function readStayLength(
   rules: { type?: string; value?: Record<string, unknown> }[] | null | undefined,
 ): StayLengthRange | null {
@@ -33,7 +22,6 @@ export function readStayLength(
   return { min, max };
 }
 
-/** Whether two closed/open night ranges share at least one night. */
 export function rangesOverlap(a: StayLengthRange, b: StayLengthRange): boolean {
   const aLo = a.min ?? 0, bLo = b.min ?? 0;
   const aHi = a.max ?? Number.POSITIVE_INFINITY, bHi = b.max ?? Number.POSITIVE_INFINITY;
@@ -50,14 +38,8 @@ export function describeRange(r: StayLengthRange): string {
 }
 
 /**
- * stayLengthWarnings reports overlapping night ranges between packages that are BOTH enabled and current.
- *
- * Only enabled packages are compared: a disabled package is offered to nobody, so an overlap with it is not a
- * situation any guest can reach, and warning about it trains the operator to ignore the warning.
- *
- * This warns; it never edits. Overlapping ranges are legitimate when the operator wants the guest to choose,
- * and the product already supports exactly that — so the wording says what WILL happen rather than calling it
- * a mistake.
+ * Reports overlapping night ranges between packages that are BOTH enabled and current (a disabled one is unreachable).
+ * It warns and never edits: overlap is legitimate when the guest should choose.
  */
 export function stayLengthWarnings(packages: PackageStayRange[]): string[] {
   const withRange = packages.filter((p) => p.active && p.range !== null);
@@ -76,9 +58,6 @@ export function stayLengthWarnings(packages: PackageStayRange[]): string[] {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// THE DATA ALLOWANCE.
-
 export type AllocationMode = "FIXED" | "PER_STAY_NIGHT";
 
 export type AllocationForm = {
@@ -93,7 +72,6 @@ export const ALLOCATION_MODE_LABELS: Record<AllocationMode, string> = {
   PER_STAY_NIGHT: "An allowance per night of the stay",
 };
 
-/** allocationFromPolicy turns a stored policy back into form fields. An absent policy is FIXED. */
 export function allocationFromPolicy(policy: Record<string, unknown> | null | undefined): AllocationForm {
   const empty: AllocationForm = { mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" };
   if (!policy || (policy.mode ?? "FIXED") === "FIXED") return empty;
@@ -107,12 +85,7 @@ export function allocationFromPolicy(policy: Record<string, unknown> | null | un
   };
 }
 
-/**
- * validateAllocation returns an operator-readable error, or null.
- *
- * A ceiling below the floor is refused rather than reordered: the two numbers describe an intent, and quietly
- * swapping them publishes a package the operator did not design onto a revision they cannot edit.
- */
+/** Reject a ceiling below the floor rather than swapping values in an immutable revision. */
 export function validateAllocation(a: AllocationForm): string | null {
   if (a.mode !== "PER_STAY_NIGHT") return null;
   const per = Number(a.gb_per_night);
@@ -126,11 +99,9 @@ export function validateAllocation(a: AllocationForm): string | null {
     if (!Number.isFinite(max) || max <= 0) return "The maximum allowance must be greater than zero.";
     if (max < min) return "The maximum allowance is below the minimum, so no stay could satisfy both.";
   }
-  // A per-night rate with no floor and no ceiling is legitimate, so nothing is required beyond the rate.
   return null;
 }
 
-/** serializeAllocation produces the wire policy, or undefined for FIXED (which sends no policy at all). */
 export function serializeAllocation(a: AllocationForm): Record<string, unknown> | undefined {
   if (a.mode !== "PER_STAY_NIGHT") return undefined;
   const out: Record<string, unknown> = { mode: "PER_STAY_NIGHT", gb_per_night: Number(a.gb_per_night) };
@@ -139,14 +110,7 @@ export function serializeAllocation(a: AllocationForm): Record<string, unknown> 
   return out;
 }
 
-/**
- * previewAllocation is the operator's proof that the numbers do what they meant.
- *
- * The clamp order is not obvious from three input boxes, and the revision it publishes is immutable, so the
- * screen shows the actual result for a few stay lengths before the operator commits to it. Deliberately the
- * SAME arithmetic as the server, expressed the same way, so a disagreement would show up here rather than in
- * a guest's entitlement.
- */
+/** Shows the actual result for a few stay lengths before commit; deliberately the SAME arithmetic as the server. */
 export function previewAllocation(a: AllocationForm, nights: number[]): { nights: number; gb: number }[] {
   if (a.mode !== "PER_STAY_NIGHT" || validateAllocation(a) !== null) return [];
   const per = Number(a.gb_per_night);
@@ -160,20 +124,10 @@ export function previewAllocation(a: AllocationForm, nights: number[]): { nights
   });
 }
 
-// ---------------------------------------------------------------------------
-// WHICH ALLOWANCE ACTUALLY APPLIES.
-//
-// A package can carry a per-night allowance while the Service Plan it uses carries a flat one, and both
-// numbers are visible on the same screen. Nothing on that screen said which of them a guest would actually
-// receive, so the honest reading was a coin toss: the plan is the technical service, the package is the offer,
-// and either could plausibly win.
-//
-// The rule is not a preference, it is a consequence of where the number is written. A PER_STAY_NIGHT package
-// computes its allowance at grant time and FREEZES it onto the entitlement, and every quota reader takes the
-// entitlement's own value when it has one. So for guests on that package the package allowance wins -- and the
-// Service Plan is not modified in any way, so packages using FIXED go on receiving the plan's quota exactly as
-// before. Both halves matter: an operator who reads only the first will think editing the package changed the
-// plan.
+// Which allowance applies: a PER_STAY_NIGHT package computes its allowance at grant time and FREEZES it onto the
+// entitlement,
+// and quota readers prefer the entitlement's value, so the package wins. The Service Plan is not modified; FIXED
+// packages keep the plan's quota.
 
 export type AllowanceNoticeKind =
   | "PER_STAY_NIGHT_OVERRIDES_PLAN"
@@ -183,27 +137,21 @@ export type AllowanceNoticeKind =
 
 export type AllowanceNotice = {
   kind: AllowanceNoticeKind;
-  /** Emphasised when the two allowances disagree and the package's wins. */
   emphasis: boolean;
   planQuotaGB?: number;
   gbPerNight?: number;
   minGB?: number;
   maxGB?: number;
-  /** A worked example, so the clamp order is visible rather than inferred. */
   exampleNights?: number;
   exampleGB?: number;
 };
 
-/** The stay length the worked example uses. Eight nights sits above a typical floor and below a ceiling, so
- *  the example shows the CALCULATION rather than a clamp — the clamps are visible in the preview row. */
+/** Eight nights sits above a typical floor and below a ceiling, so the example shows the calculation, not a clamp. */
 export const NOTICE_EXAMPLE_NIGHTS = 8;
 
 /**
- * allowanceNotice decides which notice the Data allowance section should show, or null when there is nothing
- * truthful to say yet (no plan chosen, or a per-night allowance not yet filled in).
- *
- * It never claims an override when the plan sets no quota of its own: there is nothing to override, and
- * saying otherwise would teach the operator a rule that does not exist.
+ * Which notice the Data allowance section shows, or null when nothing truthful can be said. Never claims an override
+ * when the plan sets no quota.
  */
 export function allowanceNotice(
   alloc: AllocationForm,
@@ -220,7 +168,6 @@ export function allowanceNotice(
       ? { kind: "FIXED_PLAN_HAS_NO_QUOTA", emphasis: false }
       : { kind: "FIXED_USES_PLAN", emphasis: false, planQuotaGB: planGB };
   }
-  // Per-night, but the numbers are not usable yet: say nothing rather than something wrong.
   if (validateAllocation(alloc) !== null) return null;
 
   const per = Number(alloc.gb_per_night);

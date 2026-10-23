@@ -3,9 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-// GDPR audit B4 (migration 0138): how long a disabled staff account is kept before it is anonymised. Read by
-// everyone who can open Operators, changed by the site admin with a reason and the password.
-
 vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };

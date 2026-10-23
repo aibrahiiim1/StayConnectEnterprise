@@ -1,20 +1,12 @@
-// THE PACKAGE FORM'S STANDING PROPERTIES.
-//
-// A package is the guest OFFER and a service plan is the technical SERVICE. The form must make that
-// relationship explicit — the operator chooses a plan by name and sees what it grants — while the revision
-// underneath stays invisible. An earlier version hid the plan itself and silently authored plan revisions
-// from this screen, which let a package change technical settings belonging to a plan other packages share.
-//
-// The older properties are unchanged and still guarded: deterministic tier order and no revision id anywhere
-// in the normal flow. The price section replaced "free-only by construction"; its own properties are in
-// package-acquisition.test.tsx, and here a new package is still Free unless the operator says otherwise.
+// The form makes the plan/package relationship explicit: the operator chooses a plan by name and sees what it grants;
+// revisions stay invisible.
+// A new package is still Free unless the operator says otherwise.
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PackageForm, type PlanOption } from "@/app/(app)/internet-packages/package-form";
 import { CONTRADICTORY_PRIOR_PURCHASE, FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES, SPEED_STEPS_REFUSAL } from "@/lib/commerce-form";
 
-// The Free access device switch is a Radix Switch, which measures itself; jsdom has no ResizeObserver.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -47,7 +39,6 @@ describe("PackageForm", () => {
     const labels = Array.from(sel.options).map((o) => o.textContent);
     expect(labels).toContain("Gold");
     expect(labels).toContain("Silver");
-    // chosen by name — the option VALUE is a plan, never a revision
     expect(Array.from(sel.options).map((o) => o.value)).toContain("plan-gold");
     expect(Array.from(sel.options).map((o) => o.value)).not.toContain("rev-gold-4");
   });
@@ -57,7 +48,6 @@ describe("PackageForm", () => {
     fireEvent.change(screen.getByTestId("service-plan"), { target: { value: "plan-gold" } });
     expect(screen.getByTestId("plan-summary").textContent)
       .toBe("10 Mbps down · 5 Mbps up · 100 MB · 1 device");
-    // ...and the technical values are NOT editable here
     for (const gone of ["down-mbps", "up-mbps", "data-gb", "time-hours", "devices", "speed-allocation"]) {
       expect(screen.queryByTestId(gone)).toBeNull();
     }
@@ -69,14 +59,11 @@ describe("PackageForm", () => {
     fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
 
-    // Nothing is saved, so nothing downstream can create a Service Plan from a Package.
     expect(onSave).not.toHaveBeenCalled();
-    // The field itself is what refuses: it is required and currently invalid.
     const sel = screen.getByTestId("service-plan") as HTMLSelectElement;
     expect(sel.required).toBe(true);
     expect(sel.checkValidity()).toBe(false);
 
-    // ...and choosing one makes the same click succeed, so the refusal is about the plan and nothing else.
     fireEvent.change(sel, { target: { value: "plan-gold" } });
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -122,14 +109,10 @@ describe("PackageForm", () => {
     fireEvent.click(screen.getByText("Add condition"));
     const typeSelect = screen.getByTestId("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
-    // The audience is a dedicated control, not a row; every other supported type is a row.
     expect(offered.sort()).toEqual([...SUPPORTED_RULE_TYPES].filter((t) => t !== "CLIENT_GROUP").sort());
     for (const pms of FORBIDDEN_RULE_TYPES) expect(offered).not.toContain(pms);
   });
 
-  // THE AUDIENCE AND THE FREE ALLOWANCE (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §4, §5). Each is one
-  // ordinary eligibility rule presented as a named control, and each must round-trip through Edit: a stored
-  // audience read back, shown, and republished unchanged by a rename.
   describe("Audience", () => {
     const groups = [
       { id: "g-emp", name: "Employees", enabled: true, priority: 10 },
@@ -146,7 +129,6 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("everyone");
       ready();
       fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-      // No audience rule; the only rule is the new package's default free allowance (once per client).
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
         { type: "PRIOR_PURCHASE", value: { forbids_prior: true, also_by_device: true } },
       ]);
@@ -202,8 +184,6 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("audience") as HTMLSelectElement).value).toBe("groups_public");
       expect((screen.getByTestId("audience-group-g-emp") as HTMLInputElement).checked).toBe(true);
       expect((screen.getByTestId("audience-group-g-par") as HTMLInputElement).checked).toBe(true);
-      // The audience is not also a generic condition row; the sign-in condition is the ONLY row (rows are
-      // numbered by what is visible, so it is row 0 whatever its place in the stored list).
       expect((screen.getByTestId("rule-type-0") as HTMLSelectElement).value).toBe("AUTH_METHOD");
       expect(screen.queryByTestId("rule-type-1")).toBeNull();
       fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
@@ -230,8 +210,7 @@ describe("PackageForm", () => {
     it("Once per client, ever publishes forbids_prior and counts the device on a Free package", () => {
       const onSave = vi.fn();
       render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-      // A NEW PACKAGE STARTS AT "ONCE PER CLIENT": a free package with no limit was handed out again every time
-      // the same client's allowance ran out. "No limit" remains a choice, never the default.
+      // A new package starts at "once per client"; "No limit" remains a choice, never the default.
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("once");
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "unlimited" } });
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "once" } });
@@ -258,8 +237,6 @@ describe("PackageForm", () => {
     });
 
     it("refuses a window outside one hour to one year", () => {
-      // The field carries the bounds itself, so the browser refuses before the form does (and the message the
-      // form would give is held in commerce-form.test.ts, validateRule).
       const onSave = vi.fn();
       render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
       fireEvent.change(screen.getByTestId("free-access"), { target: { value: "every" } });
@@ -285,15 +262,13 @@ describe("PackageForm", () => {
       expect((screen.getByTestId("free-access") as HTMLSelectElement).value).toBe("every");
       expect((screen.getByTestId("free-access-hours") as HTMLInputElement).value).toBe("24");
       expect(screen.getByRole("switch", { name: "Count the device too" })).toHaveAttribute("aria-checked", "false");
-      // The allowance is a dedicated control, not a row; the requires_prior rule is the only row (row 0).
       expect((screen.getByTestId("rule-mode-0") as HTMLSelectElement).value).toBe("requires_prior");
       expect(screen.queryByTestId("rule-type-1")).toBeNull();
-      // THE PAIR IS A CONTRADICTION (audit O-9): "only clients with no earlier purchase" AND "only clients with
-      // one" offers the package to nobody. It is read back so it can be fixed, but saving it is refused.
+      // "No earlier purchase" AND "only clients with one" offers the package to nobody: read back, but saving is
+      // refused.
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave).not.toHaveBeenCalled();
       expect(screen.getByRole("alert").textContent).toBe(CONTRADICTORY_PRIOR_PURCHASE);
-      // Removing the requires-prior row makes it saveable, with the allowance exactly as stored.
       fireEvent.click(screen.getByTestId("remove-rule-0"));
       fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
       expect(onSave.mock.calls[0][0].payload.eligibility_rules).toEqual([
@@ -302,8 +277,6 @@ describe("PackageForm", () => {
     });
 
     it("a stored allowance that never named the device switch is republished without pinning one", () => {
-      // The server's default (true on a free package) stays the server's: the form shows it as on, and does
-      // not write a value the operator never set.
       const onSave = vi.fn();
       render(<PackageForm mode="edit" plans={plans} onSave={onSave} initial={{
         ...initial, rules: [{ type: "PRIOR_PURCHASE", mode: "forbids_prior" }],
@@ -317,7 +290,6 @@ describe("PackageForm", () => {
     });
   });
 
-  // A SITE WITHOUT HOSPITALITY IS NOT OFFERED HOTEL CONDITIONS OR A PER-NIGHT ALLOWANCE.
   it("without Hospitality: no hotel conditions and no per-night allowance", () => {
     render(<PackageForm mode="add" plans={plans} onSave={() => {}} modules={{ modules: {} }} />);
     fireEvent.click(screen.getByText("Add condition"));
@@ -332,7 +304,6 @@ describe("PackageForm", () => {
   it("a new package starts Free, and saving it untouched publishes a Free package", () => {
     const onSave = vi.fn();
     render(<PackageForm mode="add" plans={plans} onSave={onSave} />);
-    // No Paid access here, so there is no price to set.
     expect(screen.queryByLabelText("Price")).toBeNull();
     expect((screen.getByTestId("method-check-NOT_REQUIRED") as HTMLInputElement).checked).toBe(true);
     fireEvent.change(screen.getByTestId("code"), { target: { value: "X" } });
@@ -351,7 +322,6 @@ describe("PackageForm", () => {
       rules: [{ type: "AUTH_METHOD", methods: "pms, voucher" }],
       tiers: [{ order: 10, down_kbps: 5000 }, { order: 5, down_kbps: 1000 }],
     }} />);
-    // Speed steps were never applied (audit O-5): the form says so, and will not save them.
     expect(screen.getByTestId("speed-steps-notice").textContent).toContain(SPEED_STEPS_REFUSAL);
     fireEvent.change(screen.getByTestId("name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -366,14 +336,11 @@ describe("PackageForm", () => {
       { type: "AUTH_METHOD", value: { methods: ["pms", "voucher"] } },
     ]);
     expect(payload.grant_tiers).toEqual([{ order: 5, grant: {} }]);
-    // A package loaded with no price section is Free, and is saved as Free.
     expect(payload.acquisition_methods).toEqual(["NOT_REQUIRED"]);
     expect(payload.price_minor).toBe(0);
   });
 });
 
-// AUDIT O-4: the per-night allowance is given only to clients who signed in with their room, and such a
-// package is not offered to other clients nor issued as vouchers. The copy says exactly that.
 describe("PackageForm — the per-night allowance says who receives it", () => {
   it("states that only room sign-ins receive it, and warns when Voucher is ticked", () => {
     render(<PackageForm mode="edit" plans={plans} onSave={() => {}} initial={{

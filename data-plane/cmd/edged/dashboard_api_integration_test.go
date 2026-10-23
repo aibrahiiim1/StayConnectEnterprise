@@ -2,27 +2,12 @@
 
 package main
 
-// THE DASHBOARD SNAPSHOT AND THE ROUTING MUTATIONS, AGAINST A REAL ROUTER AND A REAL DATABASE.
+// Authorization: /reports/dashboard goes through mountResource, so it inherits requireAuth and the `reports`
+// row; wiring silently regresses when a route is moved, so the real middleware chain is asserted (401 / 403).
 //
-// Two things are proved here that no browser test and no unit test can reach, and both are the reason this file
-// exists rather than being covered by the UI suite:
-//
-//   AUTHORIZATION — /reports/dashboard is a new read surface. It is mounted through mountResource, so it
-//   inherits requireAuth and the `reports` row of the role matrix; that is an ASSERTION about wiring, and wiring
-//   is exactly what silently regresses when a route is moved. An unauthenticated caller must get 401 and a role
-//   with no claim on `reports` must get 403 — from the real middleware chain, not from a mock.
-//
-//   SITE CONFINEMENT — the endpoint aggregates eight different tables. Tenant scoping alone is not the contract:
-//   a multi-property customer has several sites under ONE tenant, so a tenant-only WHERE clause would let one
-//   property's dashboard count another property's guests, stays, PMS messages and packages. Every assertion
-//   below seeds a SECOND site under the SAME tenant and requires the first site's figures to ignore it. This is
-//   the case a single-site fixture cannot fail on, which is precisely why it is written this way.
-//
-// The routing mutations get the same treatment from the other direction: they are the one WRITE this delivery
-// added, edged confines them to site_admin, and a guest network belonging to another site must be refused rather
-// than silently mapped.
-//
-// Nothing here touches an appliance, a production database, a PMS or any live service.
+// Site confinement: the dashboard aggregates eight tables and a tenant-only WHERE would leak one property's
+// counts into another under the same tenant, so every assertion seeds a second site under the same tenant,
+// which a single-site fixture can never fail on.
 
 import (
 	"context"
@@ -34,9 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// seedSiteActivity fills one site with one of everything the dashboard counts. The point is always "does the
-// OTHER site see it", never the ids; it returns only the guest network's bridge name, which on the shared
-// production-shaped database is derived from the network's uuid (bridge names are globally unique).
+// seedSiteActivity fills one site with one of everything the dashboard counts and returns the guest network's
+// bridge name (derived from the network's uuid; bridge names are globally unique).
 func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -50,7 +34,7 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 	}
 
 	var stay string
-	// posting_allowed is computed by the database (IN_HOUSE + a reservation => postable); not set by hand.
+	// posting_allowed is computed by the database.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,
@@ -62,12 +46,8 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 		t.Fatalf("seed stay: %v", err)
 	}
 
-	// A PMS message on this site's feed, so the PMS block has something to count.
-	//
-	// INSERTED AS PENDING WITH NO stay_id, because iam_v2.p3_stay_event_appendonly enforces exactly that: an
-	// event arrives unprocessed and unresolved, and only the applier may move it on. A fixture that wrote
-	// 'APPLIED' with a pre-resolved stay_id was rejected by the trigger -- correctly, and the test is corrected
-	// rather than the rule being worked around, because that rule is the Stay domain's append-only guarantee.
+	// Inserted PENDING with no stay_id: iam_v2.p3_stay_event_appendonly requires events to arrive unprocessed and
+	// unresolved; only the applier may move them on.
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 		INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,external_event_identity,
@@ -79,10 +59,7 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 		t.Fatalf("seed stay event: %v", err)
 	}
 
-	// A guest network and a successful sign-in check, so the sign-in block has something too.
-	// Seeded with its ADDRESSING, not just a name: the dashboard reports the subnet and counts devices by bridge,
-	// and a name-only stub would exercise neither. It also pins the COALESCE fix -- before it, a network missing
-	// these columns was silently dropped from the response.
+	// Seeded with addressing, not just a name: the dashboard reports the subnet and counts devices by bridge.
 	gn, bridge := seedGuestNetwork(t, f.pool, f.tenant, f.site, "Guest VLAN "+roomNumber, "10."+roomNumber[:1]+".0.0/24")
 	if err := controlled(ctx, f.pool, []string{"auth_resolution"}, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
@@ -97,7 +74,6 @@ func seedSiteActivity(t *testing.T, f *apiFixture, roomNumber string) string {
 	return bridge
 }
 
-// body is `do` with the status asserted, for the reads whose status is not the thing under test.
 func (f *apiFixture) body(t *testing.T, method, path string, payload any) map[string]any {
 	t.Helper()
 	code, b := f.do(t, method, path, payload)
@@ -129,16 +105,11 @@ func num(t *testing.T, m map[string]any, section, key string) float64 {
 	return v
 }
 
-// THE SNAPSHOT IS CONFINED TO ONE SITE, even when another site of the SAME customer is busy.
-//
-// A tenant-only WHERE clause passes a single-site fixture and fails here, which is the whole point: a hotel group
-// on one appliance estate would see its sister property's occupancy, PMS traffic and sign-ins folded into its own
-// dashboard, and every number on the screen would be wrong in a way nobody could explain.
+// The snapshot is confined to one site even when another site of the same customer is busy.
 func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 	a := newAPI(t)
 	seedSiteActivity(t, a, "101")
 
-	// A second site under the SAME tenant, with its own interface, stay, event, network and resolution.
 	b := newAPIIn(t, a.tenant)
 	if b.tenant != a.tenant {
 		t.Fatalf("fixture did not reuse the tenant: %s vs %s", a.tenant, b.tenant)
@@ -151,7 +122,6 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 
 	got := a.dashboard(t)
 
-	// Occupancy: site A has exactly its own one in-house stay, never site B's two.
 	if v := num(t, got, "occupancy", "in_house"); v != 1 {
 		t.Fatalf("occupancy.in_house = %v; site B's stays have leaked into site A", v)
 	}
@@ -159,9 +129,7 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 		t.Fatalf("occupancy.arrivals_today = %v; want 1", v)
 	}
 
-	// The PMS block counts this site's feed only. The seeded events are PENDING (the domain admits them no other
-	// way), so `applied` is legitimately zero -- asserting that too keeps the test honest about what was seeded
-	// instead of quietly passing on a number it did not create.
+	// Seeded events are PENDING, so `applied` is legitimately zero.
 	if v := num(t, got, "pms", "events_today"); v != 1 {
 		t.Fatalf("pms.events_today = %v; site B's PMS traffic has leaked into site A", v)
 	}
@@ -173,7 +141,6 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 		t.Fatalf("pms.interfaces has %d entries; site B's interfaces are visible on site A", len(ifaces))
 	}
 
-	// Sign-in checks are site-confined too.
 	if v := num(t, got, "sign_in_checks", "total"); v != 1 {
 		t.Fatalf("sign_in_checks.total = %v; site B's attempts have leaked into site A", v)
 	}
@@ -181,7 +148,7 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 		t.Fatalf("sign_in_checks.verified = %v; want 1", v)
 	}
 
-	// ...and the other direction, so the test cannot pass by the endpoint simply returning zeros.
+	// The other direction, so the test cannot pass on an endpoint that returns zeros.
 	other := b.dashboard(t)
 	if v := num(t, other, "occupancy", "in_house"); v != 2 {
 		t.Fatalf("site B's own dashboard shows in_house = %v; want its own 2", v)
@@ -191,9 +158,8 @@ func TestIntegration_API_DashboardCountsOnlyItsOwnSite(t *testing.T) {
 	}
 }
 
-// Guest networks are read from public.guest_networks, which is the one table in this snapshot that is NOT in the
-// iam_v2 schema. It gets its own assertion for that reason: a missing site term there leaks the estate's network
-// topology, which is a different and more sensitive disclosure than a count.
+// public.guest_networks is the one snapshot table outside iam_v2; a missing site term there leaks network
+// topology, a more sensitive disclosure than a count.
 func TestIntegration_API_DashboardNetworksAreSiteConfined(t *testing.T) {
 	a := newAPI(t)
 	wantBridge := seedSiteActivity(t, a, "301")
@@ -208,24 +174,19 @@ func TestIntegration_API_DashboardNetworksAreSiteConfined(t *testing.T) {
 	if name, _ := first["name"].(string); name != "Guest VLAN 301" {
 		t.Fatalf("networks[0].name = %q; the wrong site's network is being reported", name)
 	}
-	// The addressing travels too. Asserting it here is what stops the COALESCE above from being satisfied by a
-	// response that renders every network as blanks.
 	if cidr, _ := first["subnet_cidr"].(string); cidr != "10.3.0.0/24" {
 		t.Fatalf("networks[0].subnet_cidr = %q; the network's addressing was not reported", cidr)
 	}
-	// The bridge name is derived from the network's uuid (bridge names are globally unique on the shared
-	// production-shaped database); the assertion is unchanged in substance: it is THIS site's network's bridge.
 	if br, _ := first["bridge_name"].(string); br != wantBridge {
 		t.Fatalf("networks[0].bridge_name = %q", br)
 	}
 }
 
-// The package block joins four tables and is the easiest place for a scope term to be forgotten, because the
-// outermost WHERE looks scoped while the two sub-selects are where the counting actually happens.
+// The package block joins four tables; the outer WHERE looks scoped while the sub-selects do the counting.
 func TestIntegration_API_DashboardPackagesAreSiteConfined(t *testing.T) {
 	a := newAPI(t)
 	b := newAPIIn(t, a.tenant)
-	// is_system packages are excluded from the operator catalogue, so seed non-system ones here.
+	// is_system packages are excluded from the operator catalogue, so seed non-system ones.
 	mkPkg := func(f *apiFixture, code string) {
 		t.Helper()
 		if _, err := f.pool.Exec(context.Background(), `WITH
@@ -259,15 +220,13 @@ func TestIntegration_API_DashboardPackagesAreSiteConfined(t *testing.T) {
 	}
 }
 
-// UNAUTHENTICATED IS 401, NOT AN EMPTY SNAPSHOT. A read surface that answers 200 with zeros to an anonymous
-// caller looks healthy in a browser and is an unauthenticated disclosure of the property's operational shape.
+// Unauthenticated is 401, not an empty snapshot: a 200 with zeros would still disclose the property's shape.
 func TestIntegration_API_DashboardRefusesAnonymousCallers(t *testing.T) {
 	f := newAPI(t)
 	req, err := http.NewRequest(http.MethodGet, f.srv.URL+"/edge/v1/reports/dashboard", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately NO session cookie.
 	resp, err := f.srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -278,30 +237,21 @@ func TestIntegration_API_DashboardRefusesAnonymousCallers(t *testing.T) {
 	}
 }
 
-// A role with no claim on `reports` is refused by the same middleware that gates every other resource. This is
-// the assertion that fails if the route is ever moved out of mountResource onto a bare router.
+// Fails if the route is ever moved out of mountResource onto a bare router.
 func TestIntegration_API_DashboardRequiresTheReportsPermission(t *testing.T) {
-	// `no_such_role` is in no row of rolePerms, so permFor answers false for every resource. It stands in for
-	// any future role that has not been granted reports.
-	// It was `no_such_role`; the production operator_roles CHECK refuses an unknown role, so the fixture uses
-	// `billing`, a role the database accepts but which has no row in rolePerms -- the same "no claim" case.
+	// operator_roles' CHECK refuses an unknown role, so use `billing`: accepted by the database, no row in rolePerms.
 	f := newAPI(t, "billing")
 	code, _ := f.do(t, http.MethodGet, "/reports/dashboard", nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("a role with no reports claim read the dashboard with status %d; want 403", code)
 	}
 
-	// ...and a role that legitimately holds reports:read does get it, so the refusal above is the permission
-	// check and not a broken route.
+	// A role holding reports:read gets it, so the refusal above is the permission check, not a broken route.
 	v := newAPI(t, "site_viewer")
 	if code, _ := v.do(t, http.MethodGet, "/reports/dashboard", nil); code != http.StatusOK {
 		t.Fatalf("site_viewer could not read the dashboard: status %d", code)
 	}
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// NETWORK ROUTING — the one write this delivery added.
-// ---------------------------------------------------------------------------------------------------------
 
 func (f *apiFixture) seedNet(t *testing.T, name string) string {
 	t.Helper()
@@ -309,11 +259,7 @@ func (f *apiFixture) seedNet(t *testing.T, name string) string {
 	return id
 }
 
-// WRITE IS site_admin ONLY, and that is enforced by the server rather than by the button being hidden.
-//
-// edged's rolePerms gives `pms-routing` permRead to hotel_it_manager, the two desk roles and the viewer, and
-// permWrite to nobody but site_admin. The UI hides the controls for those roles; this proves the API refuses them
-// even when the UI is bypassed, which is the only version of that claim that means anything.
+// Routing write is site_admin only, enforced by the server rather than by hiding the button.
 func TestIntegration_API_RoutingWriteIsRefusedToEveryNonAdminRole(t *testing.T) {
 	for _, role := range []string{"hotel_it_manager", "front_office_operator", "guest_relations_operator", "site_viewer"} {
 		t.Run(role, func(t *testing.T) {
@@ -329,8 +275,6 @@ func TestIntegration_API_RoutingWriteIsRefusedToEveryNonAdminRole(t *testing.T) 
 			if code, _ := f.do(t, http.MethodDelete, "/pms-routing/"+gn, nil); code != http.StatusForbidden {
 				t.Fatalf("%s cleared a mapping with status %d; want 403", role, code)
 			}
-			// ...and the read they DO hold still works, so the refusals above are about the method and not
-			// about the resource being unreachable for them.
 			if code, _ := f.do(t, http.MethodGet, "/pms-routing", nil); code != http.StatusOK {
 				t.Fatalf("%s could not read the routing list: status %d", role, code)
 			}
@@ -338,8 +282,7 @@ func TestIntegration_API_RoutingWriteIsRefusedToEveryNonAdminRole(t *testing.T) 
 	}
 }
 
-// The happy path, with the mapping read back through the API rather than out of the table — a write that lands
-// somewhere the read cannot see is not a working feature.
+// The mapping is read back through the API, not the table.
 func TestIntegration_API_SiteAdminCanSetAndClearARoute(t *testing.T) {
 	f := newAPI(t) // site_admin
 	iface, _, _ := f.seedInterface(t)
@@ -367,9 +310,8 @@ func TestIntegration_API_SiteAdminCanSetAndClearARoute(t *testing.T) {
 	}
 }
 
-// A PMS interface belonging to ANOTHER SITE of the same customer must be refused. Accepting it would point one
-// property's Wi-Fi at a different property's guest list — the exact failure the routing screen warns about, and
-// one that reports healthy on every other surface.
+// Another site's PMS interface must be refused: it would point one property's Wi-Fi at another's guest list
+// while every other surface reports healthy.
 func TestIntegration_API_RoutingRefusesAnotherSitesInterface(t *testing.T) {
 	a := newAPI(t)
 	b := newAPIIn(t, a.tenant)
@@ -390,7 +332,6 @@ func TestIntegration_API_RoutingRefusesAnotherSitesInterface(t *testing.T) {
 	}
 }
 
-// A guest network belonging to another site cannot be mapped either, from the other direction.
 func TestIntegration_API_RoutingRefusesAnotherSitesGuestNetwork(t *testing.T) {
 	a := newAPI(t)
 	b := newAPIIn(t, a.tenant)

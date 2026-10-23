@@ -1,14 +1,10 @@
-// API client — talks to /api/* which Next.js rewrites to ctrlapi (/api/v1/* and /api/cloud/* only).
-// Cookies flow naturally same-origin; no credentials: 'include' needed.
-//
-// The shapes below are the contract in docs/CENTRAL_CONTROL_PLANE.md §6. The console never derives an appliance
-// or license state itself: ctrlapi returns `activation`, `connection` and `license.state` on every row (§3).
+// Central supplies appliance and license states; the console displays them without deriving new states.
 
 export class ApiError extends Error {
   status: number;
-  code: string;          // machine-readable, e.g. "reauth_required"
-  traceId?: string;      // server request id for support tickets
-  body: any;             // full envelope
+  code: string;
+  traceId?: string;
+  body: any;
   constructor(status: number, body: any) {
     const code = (typeof body === "object" && typeof body?.error === "string") ? body.error : "http_error";
     const msg  = (typeof body === "object" && typeof body?.message === "string") ? body.message
@@ -22,18 +18,12 @@ export class ApiError extends Error {
   }
 }
 
-// ------- An ended sign-in -------
-//
-// Any 401 from an authenticated route means the sign-in has ended (idle, lifetime, or access changed). The app shell
-// registers what happens then: back to the sign-in page, saying why. The sign-in routes themselves answer 401 for a
-// wrong password or code, and so does the step-up re-authentication; those are the form's to report, not an ended
-// sign-in.
+// A 401 on a sign-in or reauthentication route belongs to its form, not the expired-session handler.
 type UnauthorizedHandler = (err: ApiError) => void;
 let unauthorizedHandler: UnauthorizedHandler | null = null;
 
 const NOT_AN_ENDED_SIGNIN = ["/v1/auth/login", "/v1/auth/reauth", "/v1/auth/logout"];
 
-/** Registers what an ended sign-in does. Returns an unregister function. */
 export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): () => void {
   unauthorizedHandler = fn;
   return () => {
@@ -41,22 +31,15 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): () => vo
   };
 }
 
-/** True when a 401 on `path` means the sign-in has ended. */
 export function isEndedSignIn(status: number, path: string): boolean {
   if (status !== 401) return false;
   const bare = path.split("?")[0];
   return !NOT_AN_ENDED_SIGNIN.some((p) => bare === p || bare.startsWith(p + "/"));
 }
 
-// ------- Background requests -------
-//
-// A request the console makes on its own, from a timer (a list refreshing itself, the sign-in-ending check), is
-// not something the person did, so it must not keep the sign-in alive: Central's idle limit would never fire with
-// a screen left open. Such requests carry X-OneGate-Background: 1 (the same header as the appliance's Admin
-// Console) and ctrlapi does not count them as activity (control-plane internal/auth/middleware.go).
+// Timer requests must carry this header so an unattended screen cannot extend an idle session.
 export const BACKGROUND_HEADER = "X-OneGate-Background";
 export type RequestOptions = { background?: boolean };
-/** Pass to api.get for a request sent from a timer rather than by the person. */
 export const BACKGROUND: RequestOptions = Object.freeze({ background: true });
 
 async function request<T>(method: string, path: string, body?: any, opts?: RequestOptions): Promise<T> {
@@ -87,15 +70,13 @@ export const api = {
   del:   <T>(path: string, body?: any) => request<T>("DELETE", path, body),
 };
 
-/** A list endpoint answers `{items:[…]}` (§6). */
 export type Items<T> = { items: T[] };
 
-/** The rows of a list answer. Tolerates the pre-redesign `{data:[…]}` envelope so a half-deployed API still reads. */
+/** Accept either envelope during staggered API deployments. */
 export function itemsOf<T>(r: { items?: T[] | null; data?: T[] | null } | null | undefined): T[] {
   return r?.items ?? r?.data ?? [];
 }
 
-/** Builds `?a=1&b=2` from the non-empty entries. */
 export function qs(params: Record<string, string | number | undefined | null>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
@@ -103,11 +84,7 @@ export function qs(params: Record<string, string | number | undefined | null>): 
   return s ? `?${s}` : "";
 }
 
-// ------- Step-up re-authentication -------
-//
-// License and activation writes (every §6 route marked SU) need a recent password re-entry: without one the
-// server replies 403 { error: "reauth_required" }. withStepUp() asks for the password in a designed dialog
-// (components/step-up.tsx), re-authenticates and retries once.
+// The server requires recent password confirmation for sensitive writes; retry once after reauthentication.
 
 export async function reauth(password: string): Promise<void> {
   await api.post("/v1/auth/reauth", { password });
@@ -116,7 +93,6 @@ export async function reauth(password: string): Promise<void> {
 type StepUpPrompter = (message: string) => Promise<string | null>;
 let stepUpPrompter: StepUpPrompter | null = null;
 
-/** Registers the password-confirmation dialog. Returns an unregister function. */
 export function setStepUpPrompter(fn: StepUpPrompter | null): () => void {
   stepUpPrompter = fn;
   return () => {
@@ -124,7 +100,6 @@ export function setStepUpPrompter(fn: StepUpPrompter | null): () => void {
   };
 }
 
-/** Runs fn; on a server step-up demand, asks for the password, re-authenticates and retries once. */
 export async function withStepUp<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -139,8 +114,6 @@ export async function withStepUp<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// ------- Types (§6) -------
-
 export type Whoami = {
   operator_id: string;
   email: string;
@@ -150,11 +123,10 @@ export type Whoami = {
   customer_id?: string | null;
   customer_name?: string | null;
   permissions?: string[];
-  /** When the sign-in ends without further activity (ISO time). Absent from an older Central. */
+  /** Optional for older Central versions. */
   idle_expires_at?: string | null;
-  /** When the sign-in ends however active the person is (ISO time). */
   absolute_expires_at?: string | null;
-  /** The server's clock when it answered, to correct for this browser's. */
+  /** Corrects browser clock drift when displaying session deadlines. */
   server_time?: string | null;
 };
 
@@ -205,7 +177,7 @@ export type Site = {
   name: string;
   timezone: string;
   country?: string | null;
-  /** Descriptive only (lib/site-types.ts); "UNSPECIFIED" when nobody classified the site. Grants nothing. */
+  /** Site type is descriptive and grants no capabilities. */
   site_type?: string;
   status: "active" | "archived" | string;
   appliances: number;
@@ -217,10 +189,10 @@ export type ApplianceLicense = {
   valid_until?: string | null;
   grace_ends_at?: string | null;
   max_concurrent_online_guests?: number | null;
-  /** The current license's grace period in days; 0 = no grace. */
+  /** Days; zero means no grace. */
   grace_period_days?: number | null;
   license_version?: number | null;
-  /** Module ids the current license authorises; [] = core only; null with no license. */
+  /** Empty means core only; null means no license. */
   modules?: string[] | null;
 };
 
@@ -243,13 +215,10 @@ export type ApplianceRow = {
   registered_at?: string | null;
   activated_at?: string | null;
   open_alerts?: number;
-  /** The customer whose data the appliance reported still holding when it registered; it can be activated only
-   *  for that customer. The name is null when that customer is no longer in Central. */
+  /** Activation is restricted to the customer whose data remains on the appliance. */
   holds_customer_id?: string | null;
   holds_customer_name?: string | null;
-  /** An imported offline activation request is on file and unconsumed: an activation package can be generated. */
   offline_request_pending?: boolean;
-  /** What an "activating" appliance still lacks: certificate_reissue | certificate | license. */
   activating_on?: "certificate_reissue" | "certificate" | "license" | string;
 };
 
@@ -270,7 +239,7 @@ export type LicenseRow = {
   max_concurrent_online_guests?: number | null;
   license_version?: number | null;
   issued_at?: string | null;
-  /** Module ids the license authorises; [] = core only. */
+  /** Empty means core only. */
   modules?: string[];
 };
 
@@ -307,13 +276,13 @@ export type ApplianceDetail = ApplianceRow & {
   retirement?: { state: string; deadline?: string | null } | null;
 };
 
-/** The license terms an operator chooses (Activate and Set license). Exactly one of valid_days / valid_until. */
+/** Exactly one of valid_days and valid_until is supplied. */
 export type LicenseTerms = {
   max_concurrent_online_guests: number;
   valid_days?: number;
   valid_until?: string;
   grace_period_days: number;
-  /** Module ids (GET /cloud/v1/modules). [] = core only. */
+  /** Empty means core only. */
   modules: string[];
 };
 
@@ -336,8 +305,6 @@ export type AuditEntry = {
 
 export type AuditPage = { items?: AuditEntry[]; data?: AuditEntry[]; next_cursor?: string | null };
 
-// ------- Portal hostnames and certificates (docs/CENTRAL_CONTROL_PLANE.md §9) -------
-
 export type PortalTLSSettings = {
   acme_directory: "staging" | "production";
   contact_email: string;
@@ -349,14 +316,12 @@ export type PortalTLSSettings = {
   caa_applied_at?: string | null;
   updated_at?: string;
   updated_by?: string;
-  /** The ACME directory URL in use (a test override shows here). */
   directory_url: string;
-  /** Whether a DNS API token is stored. The token itself is never returned. */
+  /** The token itself is never returned. */
   token_set: boolean;
   dns_provider: string;
   available: boolean;
   unavailable_reason?: string;
-  /** TEST-ONLY environment overrides in force on this Central; empty in production. */
   test_overrides: string[];
 };
 
@@ -378,7 +343,6 @@ export type PortalCert = {
   renew_after?: string | null;
   revoked: boolean;
   acme_directory_url?: string | null;
-  /** staging | production | other (a test CA) */
   acme_directory?: string;
   error?: string | null;
 };
@@ -410,7 +374,6 @@ export type PortalTLSEvent = {
   detail?: Record<string, unknown> | null;
 };
 
-/** A Central sign-in: a platform operator (Team) or a customer's user. */
 export type CentralUser = {
   id: string;
   email: string;
@@ -419,6 +382,6 @@ export type CentralUser = {
   roles: string[];
   created_at?: string;
   last_login_at?: string | null;
-  /** An authenticator app is set up (0052); without one, the next sign-in sets one up. */
+  /** Without enrollment, the next sign-in starts authenticator setup. */
   two_step_enrolled?: boolean;
 };

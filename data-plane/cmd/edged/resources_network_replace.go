@@ -13,45 +13,32 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// CLIENT NETWORKS: ONE INSERT, MANY NETWORKS AT ONCE, AND A SAFE WAY TO CHANGE TOPOLOGY.
-//
-// TOPOLOGY STAYS IMMUTABLE IN PLACE (immutableTopologyChange): the apply diff is keyed on the bridge, so a
-// network whose VLAN or port changed underneath its bridge would be rendered as one thing while the live bridge
-// carried another. What an operator moving a LAN from untagged to a VLAN trunk actually needs is a REPLACEMENT:
-// a new network with the new topology, carrying everything configured on the old one, while the old one is
-// disabled (kept as history -- sign-ins and device appearances name it). Both are drafts until the operator
-// applies them through the same validate -> apply -> confirm pipeline, with the same health checks and the same
-// automatic rollback (which now also rebuilds a bridge the failed apply removed).
-//
-// MANY VLANS ON ONE TRUNK are many networks, each with its own subnet and its own DHCP scope -- never one
-// overlapping scope. The batch endpoint creates them in one transaction (all or none) and refuses overlap up
-// front, so an operator can lay out a trunk in one step and apply it once.
+// Topology is immutable in place (immutableTopologyChange): the apply diff is keyed on the bridge, so changing VLAN
+// or port under it would render one thing while the live bridge carried another. Changing topology is a
+// replacement: a new network carrying the old one's config while the old one is disabled (kept as history).
+// Many VLANs on one trunk are separate networks, each with its own subnet and DHCP scope; the batch endpoint
+// creates them in one transaction and refuses overlap up front.
 
 type createdNetwork struct {
 	ID, Bridge, PortalURL string
 	VLAN                  int
 }
 
-// errSubnetConflict reports an enabled network whose subnet overlaps the one being created.
 type errSubnetConflict struct{ subnet, other string }
 
 func (e errSubnetConflict) Error() string {
 	return fmt.Sprintf("subnet %s overlaps client network %q; every client network needs its own, non-overlapping subnet", e.subnet, e.other)
 }
 
-// errNameConflict: two ENABLED client networks may not share a name (audit N-14). A disabled network kept as
-// history keeps its name; it does not block a new one, because it is not served and nobody picks it from a list
-// of live networks.
+// Two enabled client networks may not share a name; a disabled network keeps its name without blocking a new one.
 type errNameConflict struct{ name string }
 
 func (e errNameConflict) Error() string {
 	return fmt.Sprintf("an enabled client network is already called %q; give this one a different name", e.name)
 }
 
-// enabledConflict checks a network AS IT IS NOW STORED (inside tx, after an update) against every other enabled
-// network: an overlapping subnet or the same name. A disabled network conflicts with nothing. It used to be
-// checked only at create, so an edit or an Enable could put two live networks on one subnet, or two with one
-// name, and the conflict surfaced only at the next apply (or, for the name, never).
+// Checks a stored network against every other enabled network for subnet overlap or the same name; run after
+// updates too, otherwise an edit or Enable could put two live networks on one subnet.
 func (s *server) enabledConflict(ctx context.Context, tx pgx.Tx, id string) error {
 	var otherName, subnet string
 	var overlap bool
@@ -75,7 +62,6 @@ func (s *server) enabledConflict(ctx context.Context, tx pgx.Tx, id string) erro
 	return errNameConflict{name: otherName}
 }
 
-// nameTaken returns whether an enabled network (other than those in exclude) already has this name.
 func (s *server) nameTaken(ctx context.Context, tx pgx.Tx, name string, exclude []string) (bool, error) {
 	if exclude == nil {
 		exclude = []string{}
@@ -119,10 +105,8 @@ func writeNetworkInsertErr(w http.ResponseWriter, err error) {
 	jsonErr(w, http.StatusBadRequest, "bad_request", pgErr(err))
 }
 
-// uniqueBridgeName keeps the readable br-g<vlan> while it is free and otherwise derives a stable suffix from the
-// network id. br-g<vlan> used to be the only choice, so a disabled VLAN-20 network (kept as history) blocked every
-// new VLAN 20 -- on its own port or another -- with a raw constraint error. Names stay <= 15 characters (IFNAMSIZ)
-// and keep the br-g prefix netd recognises as its own.
+// Keeps br-g<vlan> while free, else derives a stable suffix from the network id (a disabled network keeps its
+// bridge name and would otherwise block a new one). Names stay <= 15 characters (IFNAMSIZ) with the br-g prefix netd recognises.
 func uniqueBridgeName(ctx context.Context, tx pgx.Tx, networkType string, vlan int, id string) (string, error) {
 	base := netcfg.BridgeNameFor(networkType, vlan, id)
 	candidates := []string{base}
@@ -145,7 +129,6 @@ func uniqueBridgeName(ctx context.Context, tx pgx.Tx, networkType string, vlan i
 	return "", errors.New("no free bridge name for this network; contact support")
 }
 
-// subnetOverlap returns the name of an enabled network (other than those in exclude) whose subnet overlaps.
 func (s *server) subnetOverlap(ctx context.Context, tx pgx.Tx, subnet string, exclude []string) (string, error) {
 	if exclude == nil {
 		exclude = []string{}
@@ -160,8 +143,7 @@ func (s *server) subnetOverlap(ctx context.Context, tx pgx.Tx, subnet string, ex
 	return name, err
 }
 
-// insertGuestNetwork inserts one network (and its pools) inside tx. exclude lists networks that will not be
-// enabled alongside it (the one a replacement retires), for the overlap check.
+// exclude lists networks that will not be enabled alongside it (the one a replacement retires), for the overlap check.
 func (s *server) insertGuestNetwork(ctx context.Context, tx pgx.Tx, in guestNetworkInput, exclude []string) (createdNetwork, error) {
 	vlan := 0
 	if in.VLANID != nil {
@@ -206,8 +188,8 @@ func (s *server) insertGuestNetwork(ctx context.Context, tx pgx.Tx, in guestNetw
 		in.GatewayIP, in.SubnetCIDR,
 		in.DHCPMode, in.DNSMode, dnsRaw, in.DomainName, in.LeaseDefault, in.LeaseMin,
 		in.LeaseMax, boolOr(in.CaptiveEnabled, true), boolOr(in.InternetEnabled, true), boolOr(in.NATEnabled, true),
-		// A new network with a captive portal isolates its clients unless told otherwise (GDPR audit 2026-10-19,
-		// A3): one guest must not reach another's device. A replacement carries its predecessor's value.
+		// A captive-portal network isolates its clients unless told otherwise: one guest must not reach another's
+		// device. A replacement carries its predecessor's value.
 		boolOr(in.ClientIsolation, boolOr(in.CaptiveEnabled, true)), portalURL); err != nil {
 		return createdNetwork{}, err
 	}
@@ -228,13 +210,10 @@ func jsonOrEmptyArray(v []string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-// ---------------------------------------------------------------------------------------- batch create ------
-
 const maxBatchNetworks = 32
 
-// createGuestNetworkBatch creates several networks -- typically several VLANs on one trunk -- in ONE transaction.
-// Each keeps its own subnet and DHCP scope; overlap with each other or with any enabled network is refused, and so
-// is a VLAN repeated on the same port. Nothing is created unless everything is.
+// Several networks in ONE transaction: overlap with each other or with any enabled network is refused, as is a
+// repeated VLAN on the same port. Nothing is created unless everything is.
 func (s *server) createGuestNetworkBatch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Networks []guestNetworkInput `json:"networks"`
@@ -294,9 +273,7 @@ func (s *server) createGuestNetworkBatch(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, map[string]any{"networks": out})
 }
 
-// loadPoolsTx reads a network's DHCP pools. IT REPORTS FAILURE, because returning nil meant a replacement
-// carried the original's addressing with NO POOL -- a live subnet whose gateway answers and whose DHCP hands out
-// nothing, created silently by a read error on the common (non-readdressing) path.
+// Reports failure: returning nil would let a replacement carry the addressing with no pool, a live subnet whose DHCP hands out nothing.
 func (s *server) loadPoolsTx(ctx context.Context, tx pgx.Tx, id string) ([]netcfg.Pool, error) {
 	rows, err := tx.Query(ctx, `SELECT host(start_ip), host(end_ip) FROM dhcp_pools WHERE guest_network_id=$1 ORDER BY sort_order`, id)
 	if err != nil {

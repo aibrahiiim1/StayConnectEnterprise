@@ -9,10 +9,8 @@ import (
 	"time"
 )
 
-// THE REFUND POLICY (Product Owner 2026-10-12, migration 0115) against the full production schema, through the
-// real engine and the real outcome role. Runs under scripts/phase4-pg-integration.sh.
+// Refund policy (migration 0115) through the real engine and outcome role. Runs under scripts/phase4-pg-integration.sh.
 
-// capturedChain starts and captures one card purchase, returning its charge id and entitlement id.
 func capturedChain(t *testing.T) (scope, *CheckoutEngine, *scriptedHosted, string, string) {
 	t.Helper()
 	s, e, prov, admin := cardFixture(t, ModeTest)
@@ -42,7 +40,7 @@ func entStatus(t *testing.T, ent string) (string, string) {
 func TestCardRefundPolicy_AFullRefundEndsOnlyTheAccessItPaidFor(t *testing.T) {
 	ctx := context.Background()
 	s, e, prov, charge, ent := capturedChain(t)
-	_, _, _, _, other := capturedChain(t) // an unrelated purchase that must never be touched
+	_, _, _, _, other := capturedChain(t)
 	admin := pool(t)
 	sweep := func(total int64) {
 		prov.status.Events = []ProviderEvent{{EventID: "refund:" + charge + ":" + strconv.FormatInt(total, 10),
@@ -50,7 +48,6 @@ func TestCardRefundPolicy_AFullRefundEndsOnlyTheAccessItPaidFor(t *testing.T) {
 		e.SweepReversals(ctx, s.tenant, s.site, 24*time.Hour, 10)
 	}
 
-	// A PARTIAL refund changes nothing about access.
 	sweep(300)
 	if st, _ := entStatus(t, ent); st != "ACTIVE" {
 		t.Fatalf("a partial refund must not end access: %s", st)
@@ -59,7 +56,6 @@ func TestCardRefundPolicy_AFullRefundEndsOnlyTheAccessItPaidFor(t *testing.T) {
 		t.Fatal("no evidence for a partial refund")
 	}
 
-	// The FULL refund ends exactly that entitlement, with evidence.
 	sweep(s.amount)
 	if st, why := entStatus(t, ent); st != "TERMINATED" || why != "REVOKED" {
 		t.Fatalf("a full refund ends the access it paid for: %s/%s", st, why)
@@ -76,7 +72,6 @@ func TestCardRefundPolicy_AFullRefundEndsOnlyTheAccessItPaidFor(t *testing.T) {
 		t.Fatalf("its sessions end with it, %d left", n)
 	}
 
-	// Idempotent, and nothing is ever initiated towards the provider.
 	sweep(s.amount)
 	if n := count1(t, admin, `SELECT count(*) FROM iam_v2.refund_access_terminations WHERE entitlement_id=$1`, ent); n != 1 {
 		t.Fatalf("one evidence row, got %d", n)
@@ -84,7 +79,6 @@ func TestCardRefundPolicy_AFullRefundEndsOnlyTheAccessItPaidFor(t *testing.T) {
 	if prov.creates != 1 {
 		t.Fatal("the refund policy never touches checkout creation")
 	}
-	// The evidence is append-only.
 	if _, err := admin.Exec(ctx, `UPDATE iam_v2.refund_access_terminations SET refunded_minor=refunded_minor+1 WHERE entitlement_id=$1`, ent); err == nil {
 		t.Fatal("refund termination evidence must be append-only")
 	}
@@ -98,7 +92,6 @@ func TestCardRefundPolicy_DisputesAndChargebacksAreReviewedNeverAutomatic(t *tes
 	s, e, prov, charge, ent := capturedChain(t)
 	admin := pool(t)
 
-	// An OPEN dispute: a case, no money, access unchanged.
 	prov.status.Events = []ProviderEvent{{EventID: "dispute:dp_open", Kind: "DISPUTE", AmountMinor: s.amount, ProviderRef: "dp_open"}}
 	e.SweepReversals(ctx, s.tenant, s.site, 24*time.Hour, 10)
 	e.SweepReversals(ctx, s.tenant, s.site, 24*time.Hour, 10) // twice: one case
@@ -108,8 +101,6 @@ func TestCardRefundPolicy_DisputesAndChargebacksAreReviewedNeverAutomatic(t *tes
 	if n := count1(t, admin, `SELECT count(*) FROM iam_v2.payment_transactions WHERE parent_transaction_id=$1`, charge); n != 0 {
 		t.Fatal("a dispute records no money")
 	}
-	// A LOST dispute: the chargeback is recorded (the settlement is reversed), a case is opened, access is NOT
-	// ended automatically.
 	prov.status.Events = []ProviderEvent{{EventID: "dp_lost", Kind: "CHARGEBACK", AmountMinor: s.amount, ProviderRef: "ch_x"}}
 	e.SweepReversals(ctx, s.tenant, s.site, 24*time.Hour, 10)
 	var ss string

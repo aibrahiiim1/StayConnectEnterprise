@@ -1,8 +1,6 @@
 package main
 
-// EMAIL ACCOUNTS (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md): the settings' bounds and
-// refusals, the suspended rule the accounts list shows, staff password refusal for self-service accounts, the
-// auth-methods key change and the resend relay. The database half is in self_service_settings_integration_test.go.
+// Email accounts: settings bounds and refusals, the suspended rule, staff password refusal, the auth-methods key change and the resend relay.
 
 import (
 	"encoding/json"
@@ -32,7 +30,6 @@ func validSelfServiceBody(over map[string]any) string {
 	return string(b)
 }
 
-// The defaults and bounds are the contract's §6 table, number for number.
 func TestSelfServiceDefaultsAndBoundsAreTheContracts(t *testing.T) {
 	d := defaultSelfServiceSettings
 	if !d.VerificationRequired || d.VerificationDeadlineHours != 24 || d.SuspensionPolicy != "SUSPEND" ||
@@ -152,7 +149,6 @@ func TestSelfServicePutRefusals(t *testing.T) {
 	}
 }
 
-// Without a site nothing is saved, but the screen still gets the defaults and the bounds.
 func TestSelfServiceGetBeforeAssignmentShowsDefaults(t *testing.T) {
 	s := &server{}
 	rec := httptest.NewRecorder()
@@ -273,7 +269,6 @@ func TestAuthMethodsEmailAccountKey(t *testing.T) {
 	if err := validateAuthMethodsPatch(patch(t, `{"portal":{"primary_method":"email"}}`)); err == nil {
 		t.Fatal("the retired email primary method was accepted")
 	}
-	// The mail-service allowlist is gone: its keys are no longer validated as such (and no longer typed).
 	if m, ok := authMethodModules["email_account"]; !ok || m.module != "email_otp" {
 		t.Fatalf("email_account is not gated by the email_otp module: %+v", m)
 	}
@@ -282,7 +277,6 @@ func TestAuthMethodsEmailAccountKey(t *testing.T) {
 	}
 }
 
-// The mail-provider presets route is removed with the mail-service allowlist.
 func TestAuthMethodsMailProvidersRouteIsRemoved(t *testing.T) {
 	s := &server{}
 	rec := httptest.NewRecorder()

@@ -1,18 +1,9 @@
 package main
 
-// THE HOTEL'S COLOURS, MADE READABLE.
-//
-// A hotel picks a brand colour, a darker shade and a text colour. Each of them ends up behind or in front of
-// words a guest has to read: the Login label sits on the brand colour, the same label sits on the darker shade
-// while a finger is on it, links are drawn in the darker shade, and the page's text is drawn in the text
-// colour. None of the three is checked when it is chosen, so the page checks at render time and quietly
-// corrects what would be unreadable -- a yellow brand gets dark button text, a pale link shade is darkened,
-// a pale text colour gives way to the portal's own ink. Nothing here refuses a design; it only derives the
-// values the stylesheet reads (--sc-on-brand, --sc-on-brand-dark, --sc-link, --sc-on-hero, --sc-hero-shade).
-//
-// The sign-in page's script carries the same derivation (deriveColours in templates.go), because the admin
-// preview hands it an unsaved design that never passes through this file. The two must agree; the tests in
-// portal_colour_test.go pin this side, and the script is a line-for-line port of it.
+// Hotel colours are not checked when chosen, so they are corrected at render time (never refused): this
+// derives --sc-on-brand, --sc-on-brand-dark, --sc-link, --sc-on-hero and --sc-hero-shade. The sign-in page's
+// script ports this line for line (deriveColours in templates.go) for unsaved admin previews; keep them in
+// agreement.
 
 import (
 	"fmt"
@@ -22,19 +13,15 @@ import (
 	"strings"
 )
 
-// The portal's own values (portal_css.go), which a design that leaves a colour unset falls back to.
+// Defaults from portal_css.go, used when a design leaves a colour unset.
 const (
 	defaultBrand     = "#1773bd"
 	defaultBrandDark = "#125c97"
 	inkDark          = "#14161a"
-	// minTextContrast is WCAG AA for body text. The button label is 16px/600, which is not "large" text, so
-	// the 3:1 the old check used was not enough.
+	// minTextContrast is WCAG AA for body text; the 16px/600 button label is not "large" text.
 	minTextContrast = 4.5
-	// minPhotoOverlay is the least darkening a photograph gets under the hero's white text: a hotel that set
-	// 0% would otherwise put white words straight onto a bright sky. It is sized for the worst photograph, a
-	// white one: black at alpha a over white leaves rgb(255·(1-a)), and white text on that reaches 4.5:1 from
-	// a = 0.54. The welcome line is drawn at 0.95 opacity, which costs a little contrast, so the floor is 0.56
-	// (4.6:1 for that line, 4.8:1 for the name). The default darkening (0.35) is raised to it too.
+	// minPhotoOverlay is the least photo darkening under the hero's white text, sized for a white photograph:
+	// white text reaches 4.5:1 from alpha 0.54, and the 0.95-opacity welcome line needs 0.56.
 	minPhotoOverlay = 0.56
 	// defaultOverlay is --sc-overlay's value in portal_css.go.
 	defaultOverlay = 0.35
@@ -127,9 +114,8 @@ func hex(c colour) string {
 	return fmt.Sprintf("#%02x%02x%02x", r(c.r), r(c.g), r(c.b))
 }
 
-// inkOn answers which text colour belongs on the opaque surfaces given: white when it reads on all of them,
-// otherwise whichever of white and the dark ink reads better on the worst of them. The answer is "" for white
-// (the stylesheet's default) and the dark ink otherwise.
+// inkOn returns "" for white (the stylesheet default) when it reads on all surfaces, else the better of white
+// and the dark ink on the worst surface.
 func inkOn(surfaces ...colour) string {
 	worst := func(ink colour) float64 {
 		m := math.Inf(1)
@@ -163,9 +149,8 @@ func readableOnWhite(c colour) string {
 	return inkDark
 }
 
-// derivedColours is what the stylesheet needs beyond the colours the hotel chose, as custom properties in a
-// fixed order; a property the defaults already get right is left out. overlay is the photo darkening the
-// page will use (the stylesheet's default when the design sets none), photo whether any photograph is shown.
+// derivedColours returns custom properties in a fixed order, omitting those the defaults already get right.
+// overlay is the photo darkening in use; photo is whether any photograph is shown.
 func derivedColours(brand, brandDark, text string, overlay float64, photo bool) [][2]string {
 	var out [][2]string
 	set := func(prop, v string) {
@@ -194,8 +179,7 @@ func derivedColours(brand, brandDark, text string, overlay float64, photo bool) 
 	if t, ok := parseColour(text); ok && contrast(over(t, white), white) >= minTextContrast {
 		set("--sc-ink", text)
 	}
-	// With no photograph, the hero's words sit on the brand gradient under the darkening; the ink is chosen for
-	// both ends of it. A photograph keeps white, over at least minPhotoOverlay of darkening.
+	// Without a photograph the ink is chosen for both ends of the gradient; a photograph keeps white.
 	if !photo && (bOK || bdOK) {
 		if ink := inkOn(shade(b, overlay), shade(bd, overlay)); ink != "" {
 			set("--sc-on-hero", ink)

@@ -8,26 +8,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Pinned is the exact financial evidence a Posting is created against. Every field is an identifier or a
-// value that was decided ONCE, at creation, and is then never re-derived.
-//
-// This is the whole of C1 and C2 in one struct. A retry, a restart, a recovery or a manual-review-authorized
-// second attempt all read these values back from the durable posting row; none of them re-resolves "the
-// current stay", "the current revision" or "today's price". If the property changed its posting code or
-// published a new interface revision after the charge was authorized, the charge that was authorized is
-// still the charge that gets sent.
+// Pinned is the financial evidence a Posting is created against, decided once at creation and never re-derived.
+// Retries, recovery and reviewed second attempts read it back from the durable row, so a later posting-code or
+// revision change cannot alter the charge that was authorized.
 type Pinned struct {
 	TenantID string
 	SiteID   string
 
 	PMSInterfaceID string
-	// AuthInterfaceRevisionID is the revision that authenticated the guest. It is pinned separately from
-	// the posting revision because they are genuinely allowed to differ: authentication happened earlier.
+	// AuthInterfaceRevisionID may differ from the posting revision: authentication happened earlier.
 	AuthInterfaceRevisionID string
-	// PostingInterfaceRevisionID is the revision whose financial configuration authorizes THIS posting —
-	// the posting target model and the financial base currency both come from it.
+	// PostingInterfaceRevisionID supplies the posting target model and financial base currency.
 	PostingInterfaceRevisionID string
-	// SecretGenerationID is pinned when the connector used a credential; empty when it did not.
+	// SecretGenerationID is empty when the connector used no credential.
 	SecretGenerationID string
 
 	StayID string
@@ -41,32 +34,26 @@ type Pinned struct {
 	Currency         string
 	CurrencyExponent int16
 
-	// G# is the reservation the posting targets: pinned at creation (pms_postings.g_number) and never
-	// re-resolved. RN is MUTABLE targeting data: the reservation's current room, re-read from the pinned stay
-	// immediately before each attempt is built (Phase-0 Amendment A1, contract section 9a rule 7). Neither is
-	// the posting's business identity (IdempotencyKey), and the protocol reference is the P# of the attempt.
+	// G# is pinned at creation and never re-resolved. RN is mutable: the reservation's current room, re-read
+	// from the pinned stay just before each attempt is built. Neither is the business identity (IdempotencyKey).
 	RN      string
 	GNumber string
 
-	// PostingCode is the property-configured charge code from the pinned settlement mapping. It becomes the
-	// bounded CT field on the wire; it is configuration, not free text from a caller.
+	// PostingCode comes from the pinned settlement mapping and becomes the bounded CT field.
 	PostingCode string
 
 	IdempotencyKey string
 
-	// PostingID is set once the posting exists (execution). Posting permission is then evaluated FOR THIS
-	// CHARGE: its own POSTING_UNRESOLVED block (from an UNKNOWN a reviewer has since authorised to retry)
-	// does not stop it; every other block does.
+	// PostingID is set once the posting exists; permission is then evaluated for this charge, so its own
+	// POSTING_UNRESOLVED block (an UNKNOWN a reviewer authorised to retry) does not stop it.
 	PostingID string
 
-	// Expectations the caller read when it decided to charge. If the database disagrees at creation time,
-	// the evidence is stale and the posting is refused rather than silently created against newer facts.
+	// If the database disagrees with these expectations at creation, the evidence is stale and the posting is refused.
 	ExpectStayLifecycleVersion *int
 	ExpectPurchaseState        string
 }
 
-// Snapshot is what the database says about the pinned objects, read in ONE consistent statement so no two
-// halves of the gate can see different worlds.
+// Snapshot is read in one statement so the halves of the gate cannot see different worlds.
 type Snapshot struct {
 	InterfaceLifecycleState  string
 	InterfaceCurrentRevision string
@@ -85,39 +72,28 @@ type Snapshot struct {
 	StayStatus           string
 	StayPostingAllowed   bool
 	StayLifecycleVersion int
-	// The PMS's own targeting values for the PINNED stay, as the database knows them NOW: its reservation
-	// number (G#) and its current, normalized room. The posting's G# must equal the reservation; the RN an
-	// attempt carries is this room (A1 rule 7), so a room move before the attempt re-targets the room and never
-	// the reservation.
+	// The stay's current reservation number and normalized room. The posting's G# must equal the reservation;
+	// the attempt's RN is this room, so a room move re-targets the room, never the reservation.
 	StayRoomNumber  string
 	StayReservation string
 
 	SettlementMappingRetired bool
 
-	// ConnectorKind decides which WIRE rules apply. protel-fias is exponent-2-only by contract section 9a.
+	// ConnectorKind decides the wire rules; protel-fias is exponent-2 only.
 	ConnectorKind string
-	// FreshnessBlock is the code of the FIRST failed PMS runtime axis, or "" when all four are green. It is
-	// computed by iam_v2.p4_interface_freshness_block -- the SAME function migration 0012 enforces with, so
-	// the gate and the database cannot disagree about what "fresh" means, and there is exactly ONE
-	// freshness model rather than a Go copy of a SQL one.
+	// FreshnessBlock is the first failed PMS runtime axis, or "". It comes from the same SQL function the
+	// database enforces with, so the gate and the database cannot disagree about "fresh".
 	FreshnessBlock string
 }
 
-// Querier is the read surface the gate needs. Both *pgxpool.Pool and pgx.Tx satisfy it.
 type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// ErrEvidenceNotResolvable is returned when the pinned set does not resolve as one coherent, in-scope whole.
 var ErrEvidenceNotResolvable = errors.New("pinned financial evidence does not resolve within one tenant/site/interface")
 
-// LoadSnapshot reads every pinned object in a single statement.
-//
-// Every join below is COMPOSITE-pinned on (tenant, site, interface). That is not decoration: it means a
-// stay or revision belonging to a different property cannot be read at all, so cross-scope evidence
-// fails as "not resolvable" instead of quietly passing a field-by-field comparison. The database enforces
-// the same thing again through composite foreign keys when the row is written; this is the check that
-// happens BEFORE anything is written.
+// LoadSnapshot joins every object on (tenant, site, interface), so evidence from another property cannot be read
+// and fails as "not resolvable" before anything is written (composite foreign keys enforce it again on write).
 func LoadSnapshot(ctx context.Context, q Querier, p Pinned) (Snapshot, error) {
 	var s Snapshot
 	const sql = `
@@ -174,9 +150,7 @@ SELECT i.lifecycle_state,
 	return s, nil
 }
 
-// wireUnsafe reports whether a value carries a byte that FIAS framing or field separation would eat.
-// Rejecting here rather than escaping later is deliberate: an escaping bug in one sender is a money defect,
-// and there is no legitimate room number containing a pipe or a control character.
+// wireUnsafe rejects bytes FIAS framing would eat; rejecting beats escaping, since an escaping bug is a money defect.
 func wireUnsafe(v string) bool {
 	for i := 0; i < len(v); i++ {
 		c := v[i]

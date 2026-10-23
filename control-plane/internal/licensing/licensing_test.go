@@ -11,8 +11,6 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// F8: a WAN-MAC rebind (and suspend/resume) re-signs the licence with the SAME terms. It used to re-issue
-// with cap 0 (unlimited) and a fresh 365-day term.
 func TestPreservedTermsKeepEveryTerm(t *testing.T) {
 	until := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	from := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
@@ -46,7 +44,6 @@ func TestPreservedTermsKeepEveryTerm(t *testing.T) {
 	}
 }
 
-// Modules survive every preserved-terms re-issue (suspend, resume, rebind, move), and the copy is independent.
 func TestPreservedTermsKeepModules(t *testing.T) {
 	cur := IssueParams{ApplianceID: "a", Modules: []string{"hospitality", "paid_access"}}
 	got := PreservedTerms(cur, "op")
@@ -57,7 +54,7 @@ func TestPreservedTermsKeepModules(t *testing.T) {
 	if cur.Modules[0] != "hospitality" {
 		t.Fatal("re-issue terms alias the stored modules")
 	}
-	// A legacy licence stored with no modules re-issues as core only: nothing is invented.
+	// A legacy licence with no modules re-issues as core only.
 	if legacy := PreservedTerms(IssueParams{ApplianceID: "a"}, "op"); len(legacy.Modules) != 0 {
 		t.Fatalf("legacy re-issue invented modules: %v", legacy.Modules)
 	}
@@ -78,7 +75,7 @@ func TestModuleTermsProjectFeatures(t *testing.T) {
 	if f != want {
 		t.Fatalf("features %+v, want the modules projection %+v", f, want)
 	}
-	// Core only: an explicit empty map (a nil map would not verify as v4) and all-false features.
+	// A nil map would not verify as v4.
 	m, f, ids, err = ModuleTerms(nil)
 	if err != nil || m == nil || len(m) != 0 || f != (lic.Features{}) || ids == nil || len(ids) != 0 {
 		t.Fatalf("core only: %v %+v %v %v", m, f, ids, err)
@@ -100,7 +97,6 @@ func TestModuleTermsRejectUnknownAndUnmet(t *testing.T) {
 	}
 }
 
-// The document IssueTx signs verifies on the appliance side for both a moduled and a core-only licence.
 func TestModuleTermsDocumentsVerify(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer := lic.NewSigner(priv)

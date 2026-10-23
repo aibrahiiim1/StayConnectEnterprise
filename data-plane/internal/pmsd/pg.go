@@ -13,15 +13,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// pgRepo is the PostgreSQL-backed, assignment-scoped typed PMS repository (iam_v2). It uses ONE pool for its
-// whole lifetime (no pool-per-operation). Constructed only when the connector is ON.
+// pgRepo is the assignment-scoped PMS repository (iam_v2); one pool for its whole lifetime.
 type pgRepo struct {
 	pool *pgxpool.Pool
 	owns bool // true if Close should close the pool (false when the daemon shares one pool across scopes)
 }
 
-// NewPgRepo opens a single OWNED pool and returns the typed repository (Close closes the pool). Used by
-// integration tests and single-scope callers.
+// NewPgRepo opens an owned pool (Close closes it).
 func NewPgRepo(ctx context.Context, dsn string) (*pgRepo, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -30,8 +28,7 @@ func NewPgRepo(ctx context.Context, dsn string) (*pgRepo, error) {
 	return &pgRepo{pool: pool, owns: true}, nil
 }
 
-// NewPgRepoFromPool wraps a SHARED pool (Close is a no-op). The daemon owns the pool once and shares it
-// across assignment scopes + the dedicated-connection lockers, so re-scoping never churns the pool.
+// NewPgRepoFromPool wraps a shared pool (Close is a no-op) so re-scoping never churns the pool.
 func NewPgRepoFromPool(pool *pgxpool.Pool) *pgRepo { return &pgRepo{pool: pool, owns: false} }
 
 // Pool exposes the pool so the daemon can build a dedicated-connection locker from it (no second pool).
@@ -45,11 +42,8 @@ func (r *pgRepo) Close() error {
 	return nil
 }
 
-// ListActiveInterfaces returns the ACTIVE interfaces, plus every DRAINING one that still has room charges to
-// finish (audit H-8). Contract section 10: DRAINING is "no new auth/purchases/postings; outbox drains", so a
-// wind down that dropped the link at once stranded charges that were already authorized -- it behaved like a
-// stop, not a drain. Once iam_v2.pms_interface_has_undrained_postings (0123) answers false the interface leaves
-// this list and its worker stops as before. The Stay-Event applier keeps to ACTIVE interfaces only.
+// ListActiveInterfaces returns ACTIVE interfaces plus DRAINING ones with undrained room charges (dropping the
+// link at once would strand authorized charges). The Stay-Event applier keeps to ACTIVE only.
 func (r *pgRepo) ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error) {
 	rows, err := r.pool.Query(ctx, `SELECT tenant_id::text, site_id::text, id::text, connector_kind,
 		lifecycle_state, COALESCE(current_revision_id::text,'') FROM iam_v2.pms_interfaces
@@ -149,8 +143,7 @@ func msDur(ms *int64) time.Duration {
 	return time.Duration(*ms) * time.Millisecond
 }
 
-// AllocateRuntimeGeneration atomically sets runtime_generation = stored+1 and pins the revision + secret
-// generation, returning the new generation. First allocation for a fresh row is 1.
+// AllocateRuntimeGeneration atomically sets runtime_generation = stored+1 and pins the revision and secret generation.
 func (r *pgRepo) AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error) {
 	var gen int64
 	credMode := req.CredentialMode
@@ -171,8 +164,7 @@ func (r *pgRepo) AllocateRuntimeGeneration(ctx context.Context, req GenerationRe
 	return gen, err
 }
 
-// cas runs an axis UPDATE guarded by the EXACT expected generation. Zero rows affected => a newer owner
-// exists => ErrStaleGeneration.
+// cas guards an axis UPDATE by the exact generation; zero rows means a newer owner (ErrStaleGeneration).
 func (r *pgRepo) cas(ctx context.Context, sql string, args ...any) error {
 	tag, err := r.pool.Exec(ctx, sql, args...)
 	if err != nil {
@@ -205,22 +197,10 @@ func (r *pgRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error
 		string(u.Status), u.LastValidEventAt, u.DiscontinuityAt, u.LastResyncMarkerAt, u.LastEventCursor)
 }
 
-// UpdateSync moves the sync axis under the exact runtime-generation CAS.
-//
-// DECLARING RESYNC_REQUIRED CLEARS resync_started_at, and that is not optional. pir_resync_coherent requires
-// resync_started_at >= resync_requested_at, so writing a fresh requested_at while an older started_at from an
-// abandoned DS…DE window is still on the row produces a row the CHECK rejects.
-//
-// This is how a PRE-LIVE interface wedged itself permanently. A resync was interrupted between DS and DE on
-// 22 Aug, leaving resync_started_at set and its generation unpublished. From then on every reconnect called
-// RequireInitialResync, wrote a new requested_at against that stale started_at, and was rejected by the CHECK
-// about four milliseconds after connecting — so the link dropped, retried, and failed again, thousands of
-// times. Nothing downstream could recover: LIVE admission stays barred until a complete generation publishes,
-// so the event backlog simply grew and no Stay could gain occupancy evidence.
-//
-// MarkGapAndRequireResync already reset started_at for exactly this reason and says so in its comment. The
-// invariant was understood on that path and missed on this one. Keying the reset off the STATUS rather than
-// fixing the single caller means any future path that declares RESYNC_REQUIRED is coherent by construction.
+// UpdateSync moves the sync axis under the runtime-generation CAS. Declaring RESYNC_REQUIRED must clear
+// resync_started_at: pir_resync_coherent requires started_at >= requested_at, so a stale started_at from an
+// abandoned DS..DE window makes the CHECK reject the row and the link wedges in a reconnect loop. Keyed off the
+// status so every path declaring RESYNC_REQUIRED stays coherent.
 func (r *pgRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
 		sync_status=$5, resync_requested_at=COALESCE($6,resync_requested_at),
@@ -232,12 +212,9 @@ func (r *pgRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 		string(u.Status), u.ResyncRequestedAt, u.ResyncStartedAt, u.LastCompleteSyncAt, u.SyncCursor, u.FailureCode.String())
 }
 
-// MarkGapAndRequireResync atomically moves BOTH the continuity axis (→GAP_DETECTED) and the sync axis
-// (→RESYNC_REQUIRED) in ONE transaction, guarded by the exact runtime_generation. It is a single-row UPDATE
-// (inherently all-or-none) wrapped in an explicit transaction. resync_started_at is reset to NULL because a
-// fresh RESYNC_REQUIRED abandons any in-progress resync — and leaving a past resync_started_at alongside a
-// new resync_requested_at would violate the pir_resync_coherent CHECK. Transport columns are untouched.
-// Zero rows affected ⇒ a newer owner exists ⇒ ErrStaleGeneration. Every DB error is returned.
+// MarkGapAndRequireResync moves the continuity (→GAP_DETECTED) and sync (→RESYNC_REQUIRED) axes in one
+// transaction under the exact runtime_generation. resync_started_at is reset to NULL (see UpdateSync).
+// Zero rows means a newer owner (ErrStaleGeneration).
 func (r *pgRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -259,7 +236,6 @@ func (r *pgRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncReque
 	return tx.Commit(ctx)
 }
 
-// AllocateResyncGeneration bumps resync_generation_seq by 1 under the exact runtime-generation CAS.
 func (r *pgRepo) AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error) {
 	var g int64
 	err := r.pool.QueryRow(ctx, `UPDATE iam_v2.pms_interface_runtime
@@ -276,8 +252,7 @@ func (r *pgRepo) AllocateResyncGeneration(ctx context.Context, req ResyncScope) 
 	return g, nil
 }
 
-// insertInboxRow appends one stay_events inbox row inside a transaction that FIRST proves the caller still
-// owns the exact runtime generation (SELECT ... FOR ... the runtime row), then inserts. Returns the row id.
+// insertInboxRow first proves, in the same transaction, that the caller still owns the runtime generation, then inserts.
 func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -343,8 +318,7 @@ func (r *pgRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, er
 	return r.insertInboxRow(ctx, row)
 }
 
-// PublishResyncGeneration advances the publication boundary in ONE atomic row update and marks the interface
-// IN_SYNC + CONTINUOUS. The generation must not exceed the allocated seq (guarded here + by the CHECK).
+// PublishResyncGeneration atomically advances the publication boundary and marks IN_SYNC + CONTINUOUS; the generation must not exceed the allocated seq.
 func (r *pgRepo) PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime SET
 		published_resync_generation=$5,
@@ -362,8 +336,7 @@ func (r *pgRepo) PublishResyncGeneration(ctx context.Context, req ResyncScope, g
 	return nil
 }
 
-// pgLocker is a session-level single-owner advisory lock on a DEDICATED connection acquired from the shared
-// repository pool (no pool-per-lock). Close releases the lock + the connection deterministically.
+// pgLocker holds a session-level advisory lock on a dedicated pooled connection; Close releases both.
 type pgLocker struct {
 	conn *pgxpool.Conn
 	lost chan struct{}
@@ -373,7 +346,6 @@ type pgLocker struct {
 	stop chan struct{}
 }
 
-// NewPgLocker acquires ONE dedicated connection from the shared pool for a single-owner advisory lock.
 func NewPgLocker(ctx context.Context, pool *pgxpool.Pool) (*pgLocker, error) {
 	c, err := pool.Acquire(ctx)
 	if err != nil {
@@ -428,27 +400,18 @@ func (l *pgLocker) Close() error {
 	return nil
 }
 
-// ClaimResyncCommand takes an operator's pending full-resync request, if there is one this worker may run.
+// ClaimResyncCommand takes an operator's pending full-resync request in ONE statement (separate read and clear
+// would let two workers both see it). The WHERE clause is the whole safety model:
 //
-// ONE STATEMENT DOES ALL OF IT, and that is deliberate. Reading the command and clearing it in separate
-// statements would leave a window where two workers both see it, and the obvious fix — a transaction — buys
-// nothing here that the CAS does not already provide. The UPDATE's WHERE clause is the entire safety model:
+//	runtime_generation=$4          this worker still owns the interface
+//	resync_command_generation=$4   the command was issued against THIS worker
+//	sync_status<>'RESYNC_IN_PROGRESS'  no second DR can be opened
 //
-//	runtime_generation=$4          this worker still owns the interface (the same guard as every other write)
-//	resync_command_generation=$4   the command was issued against THIS worker, not one it replaced
-//	sync_status<>'RESYNC_IN_PROGRESS'  a resync is not already running, so no second DR can be opened
-//
-// Zero rows means "nothing to do", which covers all three refusals identically. The caller cannot tell them
-// apart and does not need to: in every case the correct behaviour is to carry on reading frames.
-//
-// Returning the command AFTER clearing it means a worker that dies between the claim and the DR loses the
-// request rather than repeating it. That is the safe direction — a lost click is a click away from being
-// fixed, and a duplicated DR mid-roster is not.
+// Zero rows means nothing to do, for any of the three reasons. A worker dying between claim and DR loses the
+// request instead of repeating it: a duplicated DR mid-roster is worse than a lost click.
 func (r *pgRepo) ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error) {
 	var c ResyncCommand
-	// The CTE reads the command BEFORE the UPDATE overwrites it. UPDATE ... RETURNING yields the NEW row, so
-	// a naive version returns the NULLs it just wrote — the command id would come back empty and the DR would
-	// be attributed to nothing. FOR UPDATE on the same row makes the read and the clear one atomic step.
+	// The CTE reads the command before the UPDATE clears it: RETURNING yields the NEW row (NULLs).
 	err := r.pool.QueryRow(ctx, `
 		WITH claim AS (
 		  SELECT resync_command_id AS id,
@@ -482,12 +445,8 @@ func (r *pgRepo) ClaimResyncCommand(ctx context.Context, req ResyncScope) (*Resy
 	return &c, nil
 }
 
-// UpdateSyncStage records where a sync currently is. Guarded by the same CAS as everything else, so a worker
-// that has lost ownership cannot keep writing progress for a socket someone else now owns.
-//
-// Every counter is REPLACED rather than incremented. An increment would make this write non-idempotent, and
-// the one place that matters is exactly where retries happen — a transient error between staging a record and
-// reporting the count would otherwise inflate the number an operator is watching.
+// UpdateSyncStage records sync progress under the CAS. Counters are replaced, not incremented, so retries
+// don't inflate the number an operator watches.
 func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
 	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
 		sync_stage=$5, sync_stage_at=$6,
@@ -501,9 +460,7 @@ func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
 		string(u.Stage), u.At, u.RecordsReceived, u.RecordsSkipped, u.FailureCode, u.InHouseCount)
 }
 
-// RecordResyncCoverage stores what one completed sweep OBSERVED. It goes through the definer function
-// rather than an INSERT, so svc_pmsd holds no write on the table and a coverage row with no sweep behind it
-// is not expressible.
+// RecordResyncCoverage goes through the definer function, not an INSERT, so svc_pmsd has no table write and a coverage row without a sweep is inexpressible.
 func (r *pgRepo) RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64,
 	rooms []string, roster, vacant, conflicts int) error {
 	_, err := r.pool.Exec(ctx,
@@ -512,12 +469,9 @@ func (r *pgRepo) RecordResyncCoverage(ctx context.Context, req ResyncScope, gene
 	return err
 }
 
-// ReconcileRoster runs the authoritative reconciliation for a published generation, applying it.
-//
-// A REFUSAL IS NOT AN ERROR HERE. Incomplete coverage, a superseded generation, an unhealthy link -- each is
-// a decision the function records in its own run ledger and returns as an outcome. Returning them as errors
-// would make the caller log a failure every few minutes for a system that is behaving exactly as designed,
-// and would bury the one case that IS a fault: the call not completing at all.
+// ReconcileRoster applies the reconciliation for a published generation. A refusal (incomplete coverage,
+// superseded generation, unhealthy link) is an outcome recorded in the run ledger, not an error; only the call
+// not completing is a fault.
 func (r *pgRepo) ReconcileRoster(ctx context.Context, req ResyncScope, generation int64) (ReconcileOutcome, error) {
 	var o ReconcileOutcome
 	err := r.pool.QueryRow(ctx,
@@ -532,13 +486,8 @@ func (r *pgRepo) ReconcileRoster(ctx context.Context, req ResyncScope, generatio
 	return o, err
 }
 
-// LoadConnectionSettings reads THIS INTERFACE'S reconnect bounds. Absence of a row yields the approved
-// defaults from the definer function, so a freshly created interface reconnects sensibly before anyone has
-// configured it.
-//
-// Scoped to the interface, not the site: a property running two connections -- a second PMS, or an old and
-// a new one side by side during a migration -- is exactly where one flaky link needs patient backoff while
-// the healthy one must not be slowed to match. Keyed by site, tuning either tuned both.
+// LoadConnectionSettings reads this interface's reconnect bounds (defaults from the definer function when no
+// row exists). Scoped per interface, not site: a flaky link's backoff must not slow a healthy sibling.
 func (r *pgRepo) LoadConnectionSettings(ctx context.Context, tenantID, siteID, interfaceID string) (ConnectionSettings, error) {
 	var minMs, maxMs, stableS int
 	err := r.pool.QueryRow(ctx,

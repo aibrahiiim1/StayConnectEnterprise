@@ -1,32 +1,16 @@
 package main
 
-// WHO MAY CALL WHICH NETD ROUTE.
-//
-// netd's socket is root:stayconnect 0660, and the stayconnect group is not one caller: portald holds it as a
-// supplementary group (it needs scd's socket for guest sign-in), so before this file every netd route except the
-// Phase-3 plan submission answered the captive portal's runtime identity -- guest-network apply, confirm and
-// rollback, and the system-network (WAN/LAN) apply with an actor the caller typed into the body (audit B-2,
-// confirmed live: /v1/health and /v1/leases answered stayconnect-portald).
-//
-// Every route now names the callers it serves, as the KERNEL reports them (SO_PEERCRED, the same mechanism the
-// Phase-3 producer check uses -- phase3_control.go), and anything else is refused with 403. The lists come from
-// the unit's environment and FAIL CLOSED: a list that is unset, empty or names an account that does not resolve
-// admits nobody.
-//
-// THE INVENTORY, FROM THE CODE (2026-10-16):
+// Who may call which netd route. netd's socket is root:stayconnect 0660 and portald holds that group, so every route names the callers
+// it serves, as the kernel reports them (SO_PEERCRED, as phase3_control.go does); anything else gets 403.
+// The lists come from the unit's environment and fail closed: unset, empty or unresolvable admits nobody.
 //
 //	edged   (User=stayconnect)  every guest-network, DHCP-lease, interface, portal-address and system-network route
-//	                             (cmd/edged/resources_network.go, resources_sysnetwork.go, resources_overview.go,
-//	                             client_devices_admin.go, resources_portal_https.go, health_checks.go)
-//	acctd   (User=root)          /v1/phase3/shaping and /v1/phase3/shaping/epochs, authenticated separately against
-//	                             NETD_PHASE3_PRODUCER_UID (phase3_control.go)
-//	scd     (User=root)          /v1/flows/end, the kernel half of a staff disconnect (cmd/scd/main.go denyAtGate)
-//	scripts (root)               scripts/phase19-*.sh drive validate/apply/confirm/rollback/leases as root
-//	portald, pmsd, hotel-admin   NOTHING. portald never dials netd; neither does pmsd or the console process.
+//	acctd   (User=root)          /v1/phase3/shaping and /v1/phase3/shaping/epochs, authenticated separately against NETD_PHASE3_PRODUCER_UID
+//	scd     (User=root)          /v1/flows/end, the kernel half of a staff disconnect
+//	scripts (root)               scripts/phase19-*.sh
+//	portald, pmsd, hotel-admin   NOTHING
 //
-// Root is named explicitly where it is admitted (NETD_ADMIN_CALLERS=stayconnect,root in the shipped unit) rather
-// than being a silent exception: a root process can rewrite netd's environment anyway, so excluding it buys
-// nothing, but admitting it is a decision the unit file states.
+// Root is named explicitly where admitted (NETD_ADMIN_CALLERS=stayconnect,root in the shipped unit) so the decision is stated in the unit file.
 
 import (
 	"context"
@@ -39,7 +23,6 @@ import (
 	"strings"
 )
 
-// routeClass is a set of routes that serve the same callers.
 type routeClass string
 
 const (
@@ -49,17 +32,14 @@ const (
 	classFlows routeClass = "flows"
 )
 
-// callerPolicy is the resolved per-class allowlist plus the one identity whose body-supplied actor is believed.
 type callerPolicy struct {
 	allowed map[routeClass]map[int]bool
 	// edgedUID is the console backend. Only edged authenticates operators, so only edged's statement of WHO
 	// asked for a change is recorded as the actor. -1 = unknown: no caller's body actor is believed.
 	edgedUID int
-	// problems explains every name that did not resolve, for the startup log.
 	problems []string
 }
 
-// lookupUID resolves an account name or a numeric uid. Replaceable in tests.
 var lookupUID = func(name string) (int, error) {
 	if n, err := strconv.Atoi(name); err == nil {
 		if n < 0 {
@@ -120,13 +100,11 @@ func loadCallerPolicy(getenv func(string) string) callerPolicy {
 	return p
 }
 
-// callerFrom returns the kernel-verified caller of this request.
 func callerFrom(ctx context.Context) (producerIdentity, bool) {
 	id, ok := ctx.Value(peerConnKey{}).(producerIdentity)
 	return id, ok
 }
 
-// gate wraps a handler so only the class's callers reach it.
 func (p callerPolicy) gate(class routeClass, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := callerFrom(r.Context())
@@ -147,10 +125,8 @@ func (p callerPolicy) gate(class routeClass, h http.HandlerFunc) http.HandlerFun
 	}
 }
 
-// changeCtx is the context a network CHANGE runs under: the request's values (the caller identity) without its
-// cancellation or deadline. An apply, confirm or rollback that has started must finish -- or roll itself back --
-// whatever happens to the connection that asked for it; a cancelled context reaching exec.CommandContext would
-// kill netplan or a Kea reload half-way (audit N-3). Each step inside keeps its own bounded timeout.
+// changeCtx keeps the request's values (caller identity) but not its cancellation: an apply, confirm or rollback that has started must finish
+// or roll itself back, and a cancelled context would kill netplan or a Kea reload half-way. Each step keeps its own timeout.
 func changeCtx(r *http.Request) context.Context { return context.WithoutCancel(r.Context()) }
 
 // actorFor decides what an audit row records as the actor of a change. edged authenticated an operator and

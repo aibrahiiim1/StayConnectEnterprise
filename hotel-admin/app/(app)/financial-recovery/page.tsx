@@ -1,8 +1,6 @@
 "use client";
 
-// Route shell for the Phase-4 (DARK) financial recovery screen. The view is given an explicit permission so
-// it can be rendered read-only in tests; edged enforces the real gate, and every action additionally
-// requires a password step-up.
+// edged enforces the real gate; every action requires a password step-up.
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";

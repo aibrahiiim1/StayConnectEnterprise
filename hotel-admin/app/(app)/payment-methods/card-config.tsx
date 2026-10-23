@@ -1,18 +1,7 @@
 "use client";
 
-// CARD PAYMENT CONFIGURATION — provider accounts, the provider payment pages clients may reach before signing
-// in, the two card payment timings, and the history of changes to all three.
-//
-// Rendered by Payment methods only once the Card payment module is MANAGEABLE (licensed for this site). Before
-// that there is nothing here an operator could usefully set, and every request would 403 or 409.
-//
-// EVERY CHANGE IS A STEP-UP. Accounts, domains and timings each take a reason and the operator's password,
-// because each one decides where clients' card payments go or how long they wait. The reason lands in the change
-// history at the bottom of this section, which is also where an auditor starts.
-//
-// NOTHING HERE MOVES MONEY. "Test connection" asks the provider whether the stored credentials are accepted; it
-// charges nothing. Refunds and chargebacks are not started from OneGate at all: when the provider reports one
-// it is recorded in Settlements.
+// Rendered only once the Card payment module is manageable. Every change takes a reason and the operator's
+// password and lands in the change history. Nothing here moves money: "Test connection" charges nothing.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -39,8 +28,8 @@ import { Globe, Pencil, Plus, PlugZap, Trash2 } from "lucide-react";
 const MAX_EXTRA_DOMAINS = 20;
 
 /**
- * Why a typed domain is refused, or null when it is acceptable. The server validates again; this only saves a
- * round trip. A domain name only — never an IP address, never a path — with no wildcard (the garden opens the addresses a name resolves to, and a wildcard names no host).
+ * Why a typed domain is refused, or null. The server validates again. Names only: no IP, path or wildcard
+ * (the garden opens the addresses a name resolves to, and a wildcard names no host).
  */
 export function domainProblem(raw: string): string | null {
   const s = raw.trim().toLowerCase();
@@ -69,14 +58,9 @@ type PackageCurrencyRow = {
 };
 
 /**
- * CurrencyMismatchNotice — names the live card-priced packages clients will NOT be offered by card, by the rule
- * scd applies (lib/card-currency): only the DEFAULT active account settles, in its own currency, or in one its
- * provider converts when it is marked provider-converts. Found live: a GBP test account and a USD package, and
- * the client told "card payment is not available" after choosing.
- *
- * The package list does not carry how a package is acquired, so the methods of each live priced package are
- * read from its current configuration -- the list's rows never had a `settlement_methods` field, and the
- * filter that used to rely on one matched nothing, so this notice never appeared (audit O-12).
+ * Names the live card-priced packages that will not be offered by card, by scd's rule (lib/card-currency):
+ * only the default active account settles, in its own currency or one its provider converts. The package list
+ * carries no `settlement_methods`, so each live priced package's methods are read from its current configuration.
  */
 export function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | null }) {
   const [pkgs, setPkgs] = useState<{ name: string; currency: string }[] | null>(null);
@@ -93,7 +77,7 @@ export function CurrencyMismatchNotice({ accounts }: { accounts: AccountsResp | 
             return (cur?.settlement_methods ?? []).includes("ONLINE_PAYMENT")
               ? { name: p.name || p.code, currency: ((cur?.currency ?? p.currency) ?? "").trim().toUpperCase() }
               : null;
-          } catch { return null; /* unreadable: no claim about it */ }
+          } catch { return null; }
         }));
         if (live) setPkgs(byCard.filter((x): x is { name: string; currency: string } => x !== null));
       } catch { if (live) setPkgs([]); }
@@ -149,7 +133,7 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
     if (p.status === "fulfilled") setProviders(p.value); else setErr(p.reason);
     if (a.status === "fulfilled") setAccounts(a.value); else setErr(a.reason);
     if (s.status === "fulfilled") setSettings(s.value); else setErr(s.reason);
-    // The history is evidence, not a control: a failure to read it must not stop the rest being managed.
+    // A failure to read the history must not stop the rest being managed.
     setChanges(c.status === "fulfilled" ? c.value.changes ?? [] : []);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -158,7 +142,7 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
     try {
       const c = await api.get<{ changes: PaymentChange[] }>("/payment-providers/changes");
       setChanges(c.changes ?? []);
-    } catch { /* the save itself succeeded; the history refreshes on the next load */ }
+    } catch { /* the save succeeded; the history refreshes on the next load */ }
   }, []);
 
   return (
@@ -202,10 +186,6 @@ export function CardPaymentConfig({ writable }: { writable: boolean }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* Accounts                                                                                                */
-/* ------------------------------------------------------------------------------------------------------ */
 
 function AccountsCard({
   providers, accounts, writable, onChanged, toastSuccess,
@@ -303,8 +283,7 @@ function AccountsCard({
                       {a.conversion_supported ? (
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={a.provider_converts ? "ok" : "default"}>{a.provider_converts ? "Provider converts" : "Not converted"}</Badge>
-                          {/* ONLY THE DEFAULT ACCOUNT TAKES CARD CHECKOUTS, so conversion on any other account would
-                              change nothing a client sees; the server refuses it (audit O-24). */}
+                          {/* Only the default account takes card checkouts; the server refuses conversion elsewhere. */}
                           {writable && (
                             <Button size="sm" variant="ghost" disabled={!a.is_default} onClick={() => setConverting(a)}
                               aria-describedby={!a.is_default ? `convert-default-only-${a.id}` : undefined}>
@@ -394,10 +373,6 @@ function AccountsCard({
     </Card>
   );
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* Hosted payment domains                                                                                  */
-/* ------------------------------------------------------------------------------------------------------ */
 
 function DomainsCard({
   providers, extra, writable, onSaved,
@@ -550,10 +525,6 @@ function DomainsCard({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* Timings                                                                                                 */
-/* ------------------------------------------------------------------------------------------------------ */
-
 function SettingsCard({
   settings, writable, onSaved,
 }: {
@@ -671,10 +642,6 @@ function SettingsCard({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* History                                                                                                 */
-/* ------------------------------------------------------------------------------------------------------ */
-
 function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
   return (
     <Card>
@@ -719,10 +686,8 @@ function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
 }
 
 /**
- * ConversionDialog — marks an account PROVIDER-CONVERTS (migration 0112). The client is charged the package's
- * own price in the package's own currency; the provider settles into the account's currency at its own rate,
- * and OneGate records the provider's report of what it settled. OneGate never sets or computes a rate. A
- * financial setting: the reason and the operator's password are the step-up the server requires.
+ * Marks an account provider-converts: the client pays the package's own price and currency, the provider
+ * settles at its own rate, and OneGate only records the provider's report (it never sets or computes a rate).
  */
 function ConversionDialog({ account, providerName, onClose, onSaved }: { account: PaymentAccount | null; providerName: string; onClose: () => void; onSaved: () => void | Promise<void> }) {
   const [reason, setReason] = useState("");

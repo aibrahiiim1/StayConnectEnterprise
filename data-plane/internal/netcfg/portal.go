@@ -1,12 +1,8 @@
 package netcfg
 
-// THE PORTAL ADDRESS AND THE PORTAL'S PUBLIC NAMES (contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md
-// §2.1, §4, §6).
-//
-// The portal is served over HTTPS under a publicly trusted name -- <label>.gw.onegate.work, or the hotel's own
-// verified domain -- whose public A record is ONE private /32 that exists only inside this appliance. Everything
-// in this file is pure: it decides what that address may be, what DHCP option 114 says, and what the guest
-// resolver answers for the portal names. netd owns the side effects.
+// The portal address and the portal's public names. The portal is served over HTTPS under <label>.gw.onegate.work or
+// the hotel's verified domain, whose public A record is one private /32 that exists only inside this appliance.
+// Everything here is pure; netd owns the side effects.
 
 import (
 	"fmt"
@@ -15,16 +11,15 @@ import (
 	"strings"
 )
 
-// HostAddr is one IPv4 address the appliance carries right now, on any interface (WAN, management, a guest
-// bridge, a Docker bridge...). The portal address must not fall inside any of their subnets.
+// HostAddr is one IPv4 address the appliance carries on any interface; the portal address must not fall inside any
+// of their subnets.
 type HostAddr struct {
 	Iface string `json:"iface"`
-	CIDR  string `json:"cidr"` // "172.17.0.1/16"
+	CIDR  string `json:"cidr"`
 }
 
-// rfc1918 are the only blocks the portal address may come from. The documentation blocks (RFC 5737) "are not for
-// local use" -- that is why the old 192.0.2.1 was replaced -- and a public address would be routed off the
-// appliance by every guest's resolver answer.
+// rfc1918 are the only blocks the portal address may come from: documentation blocks (RFC 5737) are not for local
+// use, and a public address would be routed off the appliance.
 var rfc1918 = []*net.IPNet{mustCIDR("10.0.0.0/8"), mustCIDR("172.16.0.0/12"), mustCIDR("192.168.0.0/16")}
 
 func mustCIDR(s string) *net.IPNet {
@@ -55,22 +50,16 @@ func ParsePortalIP(s string) net.IP {
 	return ip.To4()
 }
 
-// ValidatePortalIP decides whether vip may be the portal address on an appliance carrying these guest networks
-// and these host addresses. "" is valid: it means "no portal address", and the HTTP fallback is all there is.
+// ValidatePortalIP decides whether vip may be the portal address given these guest networks and host addresses;
+// "" is valid (HTTP fallback only). Rules:
+//   - IPv4 /32 only (the A record has no AAAA; guest IPv6 is refused).
+//   - RFC 1918 only.
+//   - Not inside any guest network subnet, enabled or not: a disabled network is one click from enabled, and the
+//     address would be handed out by DHCP or answered by ARP.
+//   - Not inside any subnet on any interface (WAN, management, Docker, guest bridge): a /32 on the dummy interface
+//     wins every local route and would steal an address from a real network. The dummy interface itself is excluded.
 //
-// THE RULES, AND WHY EACH ONE EXISTS:
-//
-//   - IPv4 /32 only. The public A record has no AAAA, and guest IPv6 is refused outright.
-//   - RFC 1918 only. Anything else is either "not for local use" (RFC 5737) or somebody else's public address.
-//   - not inside ANY guest network's subnet, enabled or not. A disabled network is one click from enabled, and
-//     the moment it is, a client could be handed the portal address by DHCP or the gateway would answer ARP for
-//     it on that bridge.
-//   - not inside any subnet the appliance carries on ANY interface -- the WAN, the management side, a Docker
-//     bridge (172.17.0.0/16 by default), a guest bridge. A /32 on the dummy interface wins every local route, so
-//     an overlap would silently steal one address from a real network: a container, the upstream gateway, a
-//     management host. The dummy interface itself is excluded, or the address would always overlap itself.
-//
-// Every failure carries code portal_ip_* on field portal_ip, so edged can show it against the setting.
+// Every failure carries code portal_ip_* on field portal_ip.
 func ValidatePortalIP(vip string, nets []GuestNetwork, host []HostAddr) []Issue {
 	var r ValidationResult
 	r.OK = true
@@ -95,8 +84,7 @@ func ValidatePortalIP(vip string, nets []GuestNetwork, host []HostAddr) []Issue 
 		return r.Issues
 	}
 	if ip[3] == 0 || ip[3] == 255 {
-		// Not wrong for a /32 in itself, but a .0 or .255 is what a resolver, a captive helper or a human reads
-		// as a network or broadcast address. Refusing it costs nothing and removes a class of confusion.
+		// A .0 or .255 reads as a network or broadcast address to resolvers and humans; refusing it is free.
 		r.add("portal_ip", "portal_ip_invalid", fmt.Sprintf("portal address %s ends in .0 or .255; choose a host address", ip))
 	}
 	for _, n := range nets {
@@ -125,22 +113,16 @@ func ValidatePortalIP(vip string, nets []GuestNetwork, host []HostAddr) []Issue 
 	return r.Issues
 }
 
-// hostnameRE is a lower-case DNS name with at least two labels and an alphabetic TLD. The names come from the
-// database (written by scd from Central's answers); they are rendered into a URL handed to every guest and into
-// the resolver's configuration, so anything that is not plainly a hostname is treated as absent rather than
-// quoted into either.
+// hostnameRE is a lower-case DNS name with at least two labels and an alphabetic TLD. Names are rendered into a URL
+// handed to every guest and into the resolver config, so anything not plainly a hostname is treated as absent.
 var hostnameRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 
-// ValidHostname reports whether s is safe to render as a portal hostname.
 func ValidHostname(s string) bool {
 	return len(s) >= 4 && len(s) <= 253 && hostnameRE.MatchString(s)
 }
 
-// captiveAPIURL is the RFC 8908 captive API URL while HTTPS is active, and whether HTTPS may be advertised at all.
-//
-// THREE CONDITIONS, ALL REQUIRED: scd says HTTPS is active, the canonical hostname is a real hostname, and this
-// render carries a portal address. The last one is netd's own fact: the canonical name resolves to the portal
-// address, so with no portal address there is nothing for the https URL to reach.
+// captiveAPIURL is the RFC 8908 captive API URL while HTTPS is active. It requires scd saying HTTPS is active, a real
+// canonical hostname, and a portal address in this render (the name resolves to it).
 func captiveAPIURL(topo Topology) (string, bool) {
 	p := topo.PortalTLS
 	if !p.HTTPSActive || !ValidHostname(p.CanonicalHostname) || ParsePortalIP(topo.PortalVIP) == nil {
@@ -149,9 +131,8 @@ func captiveAPIURL(topo Topology) (string, bool) {
 	return "https://" + p.CanonicalHostname + "/captive-portal/api", true
 }
 
-// CaptivePortalURL is what DHCP option 114 carries for one network: the captive API on the canonical hostname
-// while the portal's HTTPS is active, otherwise the plain-HTTP portal on that network's own gateway -- exactly
-// the URL every earlier release handed out, so the fallback is today's behaviour, unchanged.
+// CaptivePortalURL is what DHCP option 114 carries: the captive API on the canonical hostname while HTTPS is active,
+// otherwise the plain-HTTP portal on the network's gateway.
 func CaptivePortalURL(gatewayIP string, topo Topology) string {
 	if u, ok := captiveAPIURL(topo); ok {
 		return u
@@ -183,21 +164,13 @@ func PortalHostnames(p PortalTLS) []string {
 	return out
 }
 
-// RenderUnboundPortal produces the SEPARATE resolver fragment (stayconnect-portal.conf) that answers the portal's
-// public names with the portal address from the appliance's own resolver.
-//
-// WHY THE APPLIANCE ANSWERS A NAME PUBLIC DNS ALREADY ANSWERS. Before sign-in a guest may only reach the
-// resolvers in the walled garden, and a public resolver's answer for a private address can be withheld by
-// DNS-rebinding protection (contract §10). Answering locally makes the portal name work for every guest that
-// uses the appliance's DNS, whatever its upstream does with private answers.
-//
-// `static` makes the zone authoritative for exactly these names: an A query gets the portal address, an AAAA
-// query gets NODATA (there is no IPv6 portal, and NODATA -- unlike NXDOMAIN -- does not tell the client the
-// name does not exist), and nothing under the name is forwarded upstream.
-//
-// It is a separate file from the guest fragment on purpose: it changes at runtime when scd learns a hostname,
-// with no network revision, and rewriting it must never be able to disturb the listener and access-control
-// configuration the guest fragment carries. With no portal address or no names it is a header and nothing else.
+// RenderUnboundPortal produces the separate resolver fragment (stayconnect-portal.conf) answering the portal's public
+// names with the portal address. The appliance answers locally because a public resolver's private answer can be
+// withheld by DNS-rebinding protection (contract section 10).
+// `static` makes the zone authoritative for these names: A gets the portal address, AAAA gets NODATA (NXDOMAIN would
+// say the name does not exist), and nothing is forwarded upstream.
+// It is a separate file because it changes at runtime without a network revision and must not disturb the guest
+// fragment's listener and access-control config. With no portal address or names it is a header only.
 func RenderUnboundPortal(vip string, p PortalTLS) []byte {
 	var b strings.Builder
 	b.WriteString("# StayConnect generated -- portal hostnames -> portal address. Do not edit by hand.\n")

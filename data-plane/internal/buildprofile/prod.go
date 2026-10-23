@@ -1,15 +1,9 @@
 //go:build !devlicense
 
-// Package buildprofile carries the COMPILE-TIME licensing profile. The default
-// build (no build tags) is PRODUCTION: permissive unlicensed-dev mode is
-// physically absent from the binary and cannot be enabled by any environment
-// variable, config file, or runtime flag. A development/test build must be
-// produced explicitly with `-tags devlicense` (see dev.go), which is the only
-// way to obtain a binary that can run without a real signed license.
+// Package buildprofile is the compile-time licensing profile. The default build is production: unlicensed-dev
+// mode is absent from the binary and cannot be enabled by env, config or flag; only `-tags devlicense` enables it.
 package buildprofile
 
-// Production is true in the default (production) build.
 const Production = true
 
-// Name identifies the build profile for logs and the licence status.
 const Name = "production"

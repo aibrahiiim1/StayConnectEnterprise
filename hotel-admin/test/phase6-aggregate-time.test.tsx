@@ -1,8 +1,3 @@
-// Phase 6 (DARK) — the online-time budget view.
-//
-// The risk on this screen is not a crash, it is a confident wrong number read out to a guest. So the tests
-// are about truthfulness: both clocks present, an ended budget not shown as if it still had time, internal
-// cause codes never displayed raw, and no guest identity anywhere.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -37,7 +32,6 @@ describe("online-time budgets", () => {
     render(<AggregateTimeView />);
     expect(await screen.findByTestId("remaining")).toHaveTextContent("30 min");
     expect(screen.getByTestId("expiry")).not.toHaveTextContent("No end date");
-    // The two-clocks explanation lives behind the page's lightbulb.
     await userEvent.setup().click(screen.getByRole("button", { name: "Tips: Online-time budgets" }));
     const tips = await screen.findByRole("dialog");
     expect(within(tips).getByText(/counts down only while a device is actually connected/i)).toBeInTheDocument();

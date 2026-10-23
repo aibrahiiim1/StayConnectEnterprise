@@ -1,12 +1,7 @@
 package main
 
-// GUEST-DATA RETENTION RUN (migration 0127; GDPR remediation plan C1; Product-Owner decisions D-C1, D-C1a, D-C3).
-//
-// Hourly, scd asks the database to anonymise the guest personal data that has outlived the site's retention
-// settings (Hotel Admin -> Backups -> Data retention). All the deciding happens in the two definer functions --
-// what is old enough, what is still live and must be left alone, what each column becomes -- so this loop only
-// calls them in batches until a pass changes nothing, and logs what changed. Same shape as the sign-in-attempt
-// purge beside it: the owning service runs its own bounded job on a ticker.
+// Hourly, scd asks the database to anonymise guest personal data that has outlived the site's retention settings. The definer
+// functions decide what is old enough and what is live; this loop only calls them in batches until a pass changes nothing.
 
 import (
 	"context"
@@ -45,12 +40,10 @@ func (s *server) runDataRetention(ctx context.Context) {
 	s.runLeftovers(ctx)
 }
 
-// dataRetentionPassFn is the pass the loops call; a var so a test can stand in for the database.
 var dataRetentionPassFn = func(s *server, ctx context.Context, fn string) (int, error) { return s.dataRetentionPass(ctx, fn) }
 
-// retentionPasses runs the three retention functions in batches until a whole pass changes nothing, or maxPasses passes have run
-// (maxPasses <= 0: no limit, only ctx ends it). complete says the backlog is gone; err lists the functions that failed. ONE FAILING
-// FUNCTION DOES NOT STOP THE OTHERS (GDPR audit C10): it is left out for the rest of the run and logged.
+// retentionPasses runs the three retention functions in batches until a pass changes nothing or maxPasses passes have run (<= 0: only ctx ends it).
+// One failing function does not stop the others: it is left out for the rest of the run and logged.
 func (s *server) retentionPasses(ctx context.Context, maxPasses int) (complete bool, err error) {
 	failed := map[string]bool{}
 	var failures []string
@@ -92,8 +85,7 @@ func errorsFrom(msgs []string) []error {
 	return out
 }
 
-// runStaffRetention anonymises staff accounts disabled for longer than the appliance's setting and clears staff
-// addresses older than the activity-log period (migration 0138, GDPR audit B4). One call: it is bounded itself.
+// runStaffRetention anonymises staff accounts disabled longer than the setting and clears staff addresses older than the activity-log period.
 func (s *server) runStaffRetention(ctx context.Context) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -115,7 +107,6 @@ func (s *server) runStaffRetention(ctx context.Context) {
 	}
 }
 
-// dataRetentionPass runs one batch of fn in its own transaction and logs each category it changed.
 func (s *server) dataRetentionPass(ctx context.Context, fn string) (int, error) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

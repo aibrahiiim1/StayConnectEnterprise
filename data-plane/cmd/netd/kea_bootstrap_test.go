@@ -12,13 +12,10 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// --- (3) IS KEA ACTUALLY HOLDING A DHCP SOCKET? -----------------------------------------------------
-//
-// status-get answered "healthy" from a Kea that held no socket at all. These assert the check that replaced
-// it, against the /proc/net/udp text verbatim.
+// status-get can answer "healthy" from a Kea holding no socket; these assert the /proc/net/udp check instead.
 
 func TestKeaListeningExactBind(t *testing.T) {
-	// /proc/net/udp renders local_address little-endian: 192.168.77.1 -> 014DA8C0, port 67 -> 0043.
+	// /proc/net/udp is little-endian: 192.168.77.1 -> 014DA8C0, port 67 -> 0043.
 	proc := "  sl  local_address rem_address   st tx_queue rx_queue\n" +
 		"  123: 014DA8C0:0043 00000000:0000 07 00000000:00000000 00:00000000 00000000   116\n"
 	if !keaListeningIn(proc, "192.168.77.1") {
@@ -37,7 +34,7 @@ func TestKeaListeningWildcardBind(t *testing.T) {
 	}
 }
 
-// THE FAILURE THIS EXISTS FOR: Kea running, answering, configured — and holding nothing on udp/67.
+// Kea running, answering and configured but holding nothing on udp/67.
 func TestKeaAcceptedConfigButServesNothing(t *testing.T) {
 	proc := "  sl  local_address rem_address\n" +
 		"  7: 0100A8C0:0035 00000000:0000 07\n" + // :53, not :67 — DNS, not DHCP
@@ -50,7 +47,6 @@ func TestKeaAcceptedConfigButServesNothing(t *testing.T) {
 
 func TestGatewaysNotListeningSkipsRelayedAndDisabled(t *testing.T) {
 	a := &applier{}
-	// No /proc entry will match, so every network that IS expected to listen must be reported.
 	managed := []netcfg.GuestNetwork{
 		{Name: "local-on", Enabled: true, DHCPMode: netcfg.DHCPLocal, GatewayIP: "192.168.77.1"},
 		{Name: "local-off", Enabled: false, DHCPMode: netcfg.DHCPLocal, GatewayIP: "192.168.78.1"},
@@ -62,10 +58,7 @@ func TestGatewaysNotListeningSkipsRelayedAndDisabled(t *testing.T) {
 	}
 }
 
-// --- (1) THE BOOTSTRAP, AND (its) ROLLBACK ----------------------------------------------------------
-
-// newBootstrapApplier builds an applier whose shell calls are recorded, with Kea's config and the snapshot
-// redirected into a temp dir.
+// newBootstrapApplier records shell calls and redirects Kea's config and snapshot into a temp dir.
 func newBootstrapApplier(t *testing.T) (*applier, *[]string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -73,32 +66,30 @@ func newBootstrapApplier(t *testing.T) (*applier, *[]string) {
 	a := &applier{
 		generatedDir: dir,
 		keaConfFile:  filepath.Join(dir, "kea-dhcp4.conf"),
-		keaSocket:    filepath.Join(dir, "no-such-socket"), // never present => "Kea is stopped"
+		keaSocket:    filepath.Join(dir, "no-such-socket"),
 		runFn: func(_ context.Context, name string, args ...string) error {
 			calls = append(calls, name+" "+strings.Join(args, " "))
 			return nil
 		},
 		outFn: func(_ context.Context, name string, args ...string) ([]byte, error) {
-			// systemctl is-enabled / is-active on a factory-clean appliance
 			return []byte("disabled\n"), nil
 		},
 	}
 	return a, &calls
 }
 
-// A factory-clean appliance must come back factory-clean: stopped, disabled, and with no config of ours.
+// A factory-clean appliance comes back factory-clean: stopped, disabled, no config of ours.
 func TestBootstrapRollbackRestoresFactoryClean(t *testing.T) {
 	a, calls := newBootstrapApplier(t)
 
 	err := a.bootstrapKeaIfStopped(context.Background(), "rev-1", []byte(`{"Dhcp4":{}}`))
-	// The socket never appears in a unit test, so the bootstrap reports that honestly.
 	if err == nil {
 		t.Fatal("expected the bootstrap to fail when no control socket ever appears")
 	}
 	if !strings.Contains(err.Error(), "no control socket appeared") {
 		t.Fatalf("the error must name what it waited for, got: %v", err)
 	}
-	// It must still have recorded how to undo itself BEFORE starting anything.
+	// The undo snapshot must be recorded before anything is started.
 	if _, ok := a.readKeaSnapshot(); !ok {
 		t.Fatal("no pre-apply snapshot was written; a failed bootstrap could never be rolled back")
 	}
@@ -123,8 +114,7 @@ func TestBootstrapRollbackRestoresFactoryClean(t *testing.T) {
 	}
 }
 
-// An appliance that was ALREADY running Kea must not be stopped or disabled by a rollback, and its previous
-// configuration must come back byte for byte.
+// A rollback must not stop or disable a Kea that was already running, and restores its config byte for byte.
 func TestBootstrapRollbackRestoresPreviousConfig(t *testing.T) {
 	a, calls := newBootstrapApplier(t)
 	a.outFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -155,8 +145,7 @@ func TestBootstrapRollbackRestoresPreviousConfig(t *testing.T) {
 	}
 }
 
-// Confirming keeps the bootstrap: a LATER rollback to a different revision must not return a confirmed,
-// serving appliance to stopped-and-disabled.
+// Confirming keeps the bootstrap: a later rollback must not return a serving appliance to stopped-and-disabled.
 func TestConfirmDiscardsBootstrapSnapshot(t *testing.T) {
 	a, _ := newBootstrapApplier(t)
 	if err := a.writeKeaSnapshot(keaBootstrapState{WasEnabled: false, WasActive: false}); err != nil {
@@ -166,7 +155,6 @@ func TestConfirmDiscardsBootstrapSnapshot(t *testing.T) {
 	if _, ok := a.readKeaSnapshot(); ok {
 		t.Fatal("confirm must discard the snapshot")
 	}
-	// And a rollback afterwards must then do nothing to Kea.
 	var calls []string
 	a.runFn = func(_ context.Context, name string, args ...string) error {
 		calls = append(calls, name+" "+strings.Join(args, " "))
@@ -178,8 +166,7 @@ func TestConfirmDiscardsBootstrapSnapshot(t *testing.T) {
 	}
 }
 
-// The bootstrap is a NO-OP once Kea answers, so every later apply goes through the control socket exactly as
-// before. Proven by pointing keaSocket at a real listening socket.
+// The bootstrap is a no-op once Kea answers (a real listening socket stands in).
 func TestBootstrapIsNoOpWhenKeaAnswers(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "kea.sock")
@@ -230,5 +217,4 @@ func TestKeaSnapshotRoundTrips(t *testing.T) {
 	}
 }
 
-// listenUnix is a tiny helper so the no-op test can present a socket that really accepts.
 func listenUnix(path string) (net.Listener, error) { return net.Listen("unix", path) }

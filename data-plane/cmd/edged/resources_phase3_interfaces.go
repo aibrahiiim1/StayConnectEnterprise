@@ -1,31 +1,9 @@
 package main
 
-// Phase-3 Hotel-Admin surface: THE PMS INTERFACE ITSELF.
-//
-// resources_phase3.go covers what the interface produces — Stays, events, resolutions, alerts. This file
-// covers the interface as a configured thing: which connector a property runs, which Revision of its
-// configuration is published, which guest networks route to it, whether its secret has been rotated, whether
-// it is actually connected, and how far behind it is.
-//
-// Four rules shape all of it, and each exists because the alternative is a specific bad afternoon:
-//
-//	REVISIONS ARE IMMUTABLE. A Revision is never edited. Changing configuration means creating the next
-//	Revision and publishing it, so "what was this interface configured as when that Stay resolved?" always
-//	has an answer. Every Stay, resolution and Auth Context pins the exact Revision it was decided under; if
-//	Revisions could be edited, those pins would point at text that no longer says what it said.
-//
-//	PUBLISHING IS A SEPARATE, DELIBERATE ACT. Creating a Revision changes nothing. Publishing it changes
-//	what every subsequent guest is resolved against, so it takes a step-up, an expected version, and a
-//	reason — and it refuses rather than overwrite a publication somebody else made while this operator was
-//	looking at the form.
-//
-//	SECRETS ARE WRITE-ONLY. The credential can be set and rotated; it can never be read back, not even by
-//	the operator who typed it. There is no endpoint that returns it, no field that carries it, and the list
-//	surfaces show only the generation number and when it was superseded.
-//
-//	HEALTH IS DERIVED, NEVER STORED AS A VERDICT. The runtime row carries facts — last heartbeat, last
-//	valid event, resync state. The words "healthy" and "degraded" are computed from those facts at read
-//	time. A stored verdict is a claim that keeps its value after it stops being true.
+// The PMS interface as a configured thing: connector, published Revision, guest-network routing, secret rotation, health.
+// Revisions are immutable (stays, resolutions and auth contexts pin the exact Revision they were decided under);
+// publishing is separate and needs step-up, expected version and reason, and refuses to overwrite a concurrent
+// publication; secrets are write-only and never read back; health is derived from runtime facts at read time, never stored as a verdict.
 
 import (
 	"context"
@@ -45,36 +23,24 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
-// ---------- interfaces ----------
-
 type pmsInterfaceRow struct {
 	ID                string `json:"id"`
 	ConnectorKind     string `json:"connector_kind"`
 	DisplayLabel      string `json:"display_label"`
 	LifecycleState    string `json:"lifecycle_state"`
 	CurrentRevisionID string `json:"current_revision_id,omitempty"`
-	// CurrentRevisionNo is what an operator actually recognises; the id is for the machine.
-	CurrentRevisionNo *int `json:"current_revision_no,omitempty"`
-	RevisionCount     int  `json:"revision_count"`
-	// Published says whether this interface has a published Revision at all. An interface without one
-	// resolves nothing, and that is worth stating plainly rather than leaving as an empty field.
-	Published bool `json:"published"`
-	// SecretGeneration is the CURRENT credential generation number — never the credential.
+	CurrentRevisionNo *int   `json:"current_revision_no,omitempty"`
+	RevisionCount     int    `json:"revision_count"`
+	// An interface without a published Revision resolves nothing.
+	Published        bool       `json:"published"`
 	SecretGeneration *int       `json:"secret_generation,omitempty"`
 	SecretRotatedAt  *time.Time `json:"secret_rotated_at,omitempty"`
 
-	// WHAT THIS INTERFACE IS ACTUALLY POINTED AT, from its published Revision.
-	//
-	// The list could say an interface was published as revision #4 of 7 and nothing about WHERE it dials, so
-	// answering "which PMS is this and on what port" meant opening the revision history and reading a config
-	// blob. These are projections of the published Revision — read-only, and the Revision itself is
-	// unchanged and still immutable.
+	// What the interface is pointed at, projected read-only from its published Revision.
 	Endpoint       *string `json:"endpoint,omitempty"`
 	SourceTimezone *string `json:"source_timezone,omitempty"`
 	BaseCurrency   *string `json:"financial_base_currency,omitempty"`
 
-	// From the provider registry (GET /pms-providers), for the row's connector kind. Empty for a kind the
-	// registry does not list.
 	ProviderLabel string `json:"provider_label"`
 	Transport     string `json:"transport"`
 	Verification  string `json:"verification"`
@@ -82,43 +48,29 @@ type pmsInterfaceRow struct {
 
 func (s *server) pmsInterfacesRoutes() http.Handler {
 	r := chi.NewRouter()
-	// A malformed id is "no such interface", never a uuid cast error surfacing as HTTP 500 (audit H-22).
 	r.Use(rejectMalformedRouteID)
 	r.Get("/", s.listPMSInterfaces)
 	r.Get("/{id}", s.getPMSInterface)
 	r.Get("/{id}/revisions", s.listPMSInterfaceRevisions)
 	r.Get("/{id}/health", s.getPMSInterfaceHealth)
-	// RECOVERY BOUNDS BELONG TO THE CONNECTION THEY GOVERN, so they are addressed as part of it. They were
-	// reachable only at a site-level reconciliation route, which is both where an operator would never look
-	// and -- until the key gained the interface -- the honest shape of a setting that really was site-wide.
+	// Recovery bounds belong to the connection they govern, so they are addressed as part of it.
 	r.Get("/{id}/connection-settings", s.getInterfaceConnectionSettings)
 	r.Put("/{id}/connection-settings", s.updateInterfaceConnectionSettings)
-	// Creating an interface and authoring its configuration. Both were absent, which left the endpoint the
-	// connector dials -- and every timeout, bound and mode it reads -- unreachable from the product.
 	r.Post("/", s.createPMSInterface)
 	r.Post("/{id}/revisions", s.authorPMSInterfaceRevision)
 	r.Post("/{id}/publish", s.publishPMSInterfaceRevision)
 	r.Post("/{id}/full-resync", s.requestFullResync)
 	r.Post("/{id}/secret", s.rotatePMSInterfaceSecret)
-	// A bounded, read-only credential + reachability check for REST connectors (never dials a FIAS socket).
 	r.Post("/{id}/test-connection", s.testPMSConnection)
-	// THE LIFECYCLE TRANSITION. An interface is created AUTH_DISABLED and publishing a revision does not
-	// change that — deliberately, because publishing decides WHAT the connector would dial and activating
-	// decides WHETHER it dials at all, and collapsing the two means the moment an operator finishes typing
-	// a configuration is the moment a socket opens to the property's PMS.
-	//
-	// What was missing is the second act. pmsd selects `WHERE lifecycle_state='ACTIVE'`, and nothing in the
-	// product could produce that state, so a fully created and published interface was never picked up by
-	// the connector and never would be. The symptom is the worst kind: every screen reports success and
-	// nothing connects.
+	// The lifecycle transition: an interface is created AUTH_DISABLED and publishing does not change that, because
+	// publishing decides what the connector would dial and activating decides whether it dials at all. pmsd selects
+	// `WHERE lifecycle_state='ACTIVE'`.
 	r.Post("/{id}/lifecycle", s.setPMSInterfaceLifecycle)
 	return r
 }
 
-// rejectMalformedRouteID answers 404 for /{id}/... when the first path segment is not a uuid.
 func rejectMalformedRouteID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// RoutePath is the path left for THIS sub-router (chi sets it on Mount): "" or "/" is the collection.
 		rctx := chi.RouteContext(r.Context())
 		rest := ""
 		if rctx != nil {
@@ -142,23 +94,16 @@ type setLifecycleReq struct {
 	Password   string `json:"password"`
 }
 
-// pmsLifecycleTransitions is the allowed transition map. The schema's CHECK constraint lists the four legal
-// values; it cannot say which moves between them make sense, and that is what this encodes.
-//
-// DECOMMISSIONED is terminal and is NOT reachable here. Retiring an interface has consequences this route
-// does not handle — Stays and events keep referencing it, and the authoring path already refuses to
-// configure one — so it needs its own deliberate operation rather than an option in a dropdown.
+// The allowed transitions. DECOMMISSIONED is terminal and not reachable here: Stays and events keep referencing
+// it and authoring refuses it, so retiring needs its own deliberate operation.
 var pmsLifecycleTransitions = map[string]map[string]bool{
 	"ACTIVE":        {"AUTH_DISABLED": true, "DRAINING": true},
 	"AUTH_DISABLED": {"ACTIVE": true},
 	"DRAINING":      {"AUTH_DISABLED": true, "ACTIVE": true},
 }
 
-// setPMSInterfaceLifecycle activates, disables or drains a PMS Interface.
-//
-// Step-up and a reason code are required in both directions. Activating opens a live connection to the
-// property's PMS; disabling stops resolving every guest on every network mapped to it. Neither is a change
-// anybody should be able to make by mis-clicking, and Phase-3 §25 asks for step-up on exactly this surface.
+// Step-up and a reason code are required in both directions: activating opens a live connection to the PMS and
+// disabling stops resolving every guest on every network mapped to it.
 func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request) {
 	var in setLifecycleReq
 	if err := decodeJSON(r, &in); err != nil {
@@ -200,7 +145,6 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if cur == want {
-		// Idempotent, and reported as such rather than as a change that did not happen.
 		writeJSON(w, http.StatusOK, map[string]any{"id": id, "lifecycle_state": cur, "changed": false})
 		return
 	}
@@ -212,9 +156,7 @@ func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusConflict, "conflict", "cannot move a PMS interface from "+cur+" to "+want)
 		return
 	}
-	// ACTIVATION REQUIRES A PUBLISHED REVISION. Without one there is no endpoint, no timeout and no
-	// timezone, so pmsd would select the interface, find nothing to dial, and report an error the operator
-	// has no way to connect back to a missing step.
+	// Activation requires a published Revision: otherwise pmsd finds nothing to dial and the operator cannot connect the error to the missing step.
 	if want == "ACTIVE" && currentRev == "" {
 		jsonErr(w, http.StatusConflict, "validation",
 			"publish a revision before activating: an interface with no published revision has no endpoint to dial")
@@ -298,8 +240,7 @@ func (s *server) getPMSInterface(w http.ResponseWriter, r *http.Request) {
 		WHERE i.tenant_id=$1 AND i.site_id=$2 AND i.id=$3::uuid`,
 		s.tenantID, s.siteID, chi.URLParam(r, "id")), &e)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Scoped to this site, so an interface belonging to another site is indistinguishable from one that
-		// does not exist. A different answer would confirm which sites a neighbouring property runs.
+		// Scoped to this site, so another site's interface is indistinguishable from a missing one and does not reveal which sites a neighbour runs.
 		jsonErr(w, http.StatusNotFound, "not_found", "no such PMS interface")
 		return
 	}
@@ -308,8 +249,6 @@ func (s *server) getPMSInterface(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The guest networks that route to this interface belong on its detail: "which guests does this reach?"
-	// is the question an operator has when they are about to publish or rotate anything.
 	routes, err := s.routesForInterface(r, e.ID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -318,8 +257,6 @@ func (s *server) getPMSInterface(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"interface": e, "guest_networks": routes})
 }
 
-// ---------- revisions ----------
-
 type pmsRevisionRow struct {
 	ID                   string `json:"id"`
 	RevisionNo           int    `json:"revision_no"`
@@ -327,33 +264,23 @@ type pmsRevisionRow struct {
 	PostingTargetModel   string `json:"posting_target_model"`
 	NormalizationVersion int    `json:"normalization_version"`
 	SourceFingerprint    string `json:"source_fingerprint,omitempty"`
-	// The currency pair is a revision COLUMN, not a config key; the console reads it to carry it through an
-	// edit (audit H-3), because a draft authored without it silently drops it.
+	// A revision column, not a config key; the console carries it through an edit because a draft without it drops it.
 	FinancialBaseCurrency *string `json:"financial_base_currency,omitempty"`
 	FinancialCurrencyExp  *int    `json:"financial_base_currency_exponent,omitempty"`
-	// Config is the Revision's declarative configuration, REDACTED before it leaves the process — see
-	// redactRevisionConfig. A Revision's config is operator-authored and can acquire anything over time.
+	// Config is REDACTED before it leaves the process (redactRevisionConfig); operator-authored JSON can acquire anything over time.
 	Config json.RawMessage `json:"config"`
-	// PROVENANCE, READ FROM THE AUDIT LOG AND NOWHERE ELSE.
-	//
-	// pms_interface_revisions stores no timestamp, no author and no reason -- it holds the configuration and
-	// nothing about how it came to exist. The audit log does hold all three, so the History view is built
-	// from it. Where the log has no entry these stay empty and the UI says so, because a version whose
-	// origin was never recorded must read as unknown rather than as something plausible.
+	// Provenance comes from the audit log only; pms_interface_revisions stores no timestamp, author or reason. Where
+	// the log has no entry these stay empty and the UI says so, so an unrecorded origin reads as unknown.
 	AuthoredAt  *time.Time `json:"authored_at,omitempty"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 	ActorID     string     `json:"actor_id,omitempty"`
 	ActorLabel  string     `json:"actor_label,omitempty"`
 	ReasonCode  string     `json:"reason_code,omitempty"`
-	// Published marks the ONE Revision this interface currently resolves against. It is derived from the
-	// interface's current_revision_id, never from "the highest revision number" — a property can publish an
-	// older Revision to roll back, and then the highest number is exactly the wrong answer.
+	// Marks the one Revision currently resolved against, derived from current_revision_id, never the highest number (a rollback publishes an older one).
 	Published bool `json:"published"`
 }
 
-// secretishKeys are config keys whose VALUE must never be rendered to an operator. The Revision config is
-// operator-authored JSON, so it will eventually contain a credential somebody pasted into the wrong field —
-// and an admin page is precisely where that becomes a screenshot in a support ticket.
+// Config keys whose value must never be rendered: operator-authored JSON can contain a credential pasted into the wrong field.
 var secretishKeys = []string{"password", "secret", "token", "key", "credential", "apikey", "api_key", "auth"}
 
 func redactRevisionConfig(raw []byte) json.RawMessage {
@@ -362,8 +289,7 @@ func redactRevisionConfig(raw []byte) json.RawMessage {
 	}
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		// Unparseable config is not rendered at all. Passing it through would defeat the redaction below,
-		// and an operator cannot act on malformed JSON anyway.
+		// Unparseable config is not rendered at all: passing it through would defeat the redaction below.
 		return json.RawMessage(`{"unreadable":true}`)
 	}
 	redactMap(m)
@@ -374,9 +300,8 @@ func redactRevisionConfig(raw []byte) json.RawMessage {
 	return out
 }
 
-// notSecretConfigKeys are configuration settings whose NAME happens to contain a secret-ish word but whose value
-// is a plain operational number. max_auth_cache_age_seconds contains "auth", so it was redacted on every read --
-// and the console, which never saves "[redacted]", then dropped it from every edited draft (audit H-3).
+// Settings whose name contains a secret-ish word but whose value is an operational number (max_auth_cache_age_seconds
+// contains "auth"); redacting them made the console drop them from edited drafts.
 var notSecretConfigKeys = map[string]bool{"max_auth_cache_age_seconds": true}
 
 func redactMap(m map[string]any) {
@@ -402,11 +327,8 @@ func redactMap(m map[string]any) {
 	}
 }
 
-// WHERE A SAVED VERSION CAME FROM, read from the audit log because that is the only place it is written.
-//
-// Named rather than inlined so a test can execute this exact text -- see the note at its call site. The
-// `public.` qualifiers are load-bearing for that test, which retargets the statement at a schema built with
-// production column types; keep them.
+// Read from the audit log, the only place provenance is written. Named so a test can execute this exact text;
+// the `public.` qualifiers are load-bearing for that test, which retargets the statement at a schema with production column types.
 const pmsRevisionProvenanceSQL = `
 	SELECT COALESCE(a.payload->>'revision_id', p.payload->>'revision_id') AS rev_id,
 	       min(a.ts) AS authored_at, min(p.ts) AS published_at,
@@ -430,11 +352,8 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	id := chi.URLParam(r, "id")
-	// THE CONFIGURATION COMES FROM THE CONFIGURATION TABLES, AND NOTHING ELSE.
-	//
-	// Provenance lives in the audit log, which is a different concern and -- as a Phase-3 gate proved -- not
-	// present in every schema this endpoint must serve. Joining it here made the whole read fail where the
-	// audit tables are absent, taking the configuration down with it. It is fetched separately below.
+	// The configuration comes from the configuration tables only; joining the audit log would take the configuration
+	// down where audit tables are absent. Provenance is fetched separately below.
 	rows, err := s.db.Query(ctx, `
 		SELECT rev.id::text, rev.revision_no, rev.source_timezone, rev.posting_target_model,
 		       rev.normalization_version, COALESCE(rev.source_fingerprint,''), rev.config,
@@ -468,27 +387,12 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	// PROVENANCE, LAYERED ON AND ALLOWED TO BE MISSING.
-	//
-	// A failure here leaves every version listed with empty provenance, which the UI renders as "how this
-	// version came to be saved was not recorded" -- the truthful reading when the audit trail cannot be
-	// consulted. It must never cost an operator the configuration itself.
-	//
-	// THAT TOLERANCE IS ALSO THIS QUERY'S ONE HAZARD, and it has already been paid for once: the join
-	// originally compared operators.id (uuid) to audit_log.actor_id (text), PostgreSQL rejected the
-	// statement outright, and because the error is discarded here the endpoint answered 200 with every
-	// version reading "not recorded". Nothing was down, so nothing complained. The query therefore lives
-	// in a named constant that TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes
-	// executes verbatim against production column types -- a silent failure needs a test that looks for
-	// silence. (The Integration_API_ prefix is load-bearing: the gate selects with `-run Integration`, so a
-	// test named anything else is compiled, reported as part of a passing package, and never executed.)
-	//
-	// FIXING THE CAST DID NOT FIX THE BLINDNESS. The next such failure would be just as silent, because
-	// "the audit trail says nothing" and "the audit trail could not be read" still rendered identically.
-	// So the outcome is now REPORTED rather than merely survived: the failure is logged with the error, and
-	// the response carries provenance_status so the screen, a diagnostic and an operator all see the
-	// difference. What does NOT change is that the configuration still arrives -- the read is still allowed
-	// to fail, it is just no longer allowed to fail quietly.
+	// Provenance is layered on and allowed to be missing: a failure leaves empty provenance rather than costing the
+	// operator the configuration. Because the error is tolerated it is the query's one hazard (a uuid/text join once
+	// failed silently), so the query lives in a named constant that
+	// TestIntegration_API_PmsRevisionProvenanceSQLRunsAgainstProductionColumnTypes executes against production column
+	// types. The Integration_API_ prefix is load-bearing: the gate selects with `-run Integration`. The failure is
+	// logged and the response carries provenance_status, so "says nothing" and "could not be read" differ.
 	provenanceStatus := "AVAILABLE"
 	if len(out) > 0 {
 		prov, err := s.db.Query(ctx, pmsRevisionProvenanceSQL)
@@ -512,9 +416,7 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 					byID[revID] = e
 				}
 			}
-			// rows.Err() is the half that a `for rows.Next()` loop silently swallows: a connection dropped
-			// mid-iteration ends the loop exactly like a clean finish, leaving a PARTIAL map that would be
-			// served as though it were the whole truth.
+			// rows.Err() catches a connection dropped mid-iteration, which would otherwise serve a partial map as the whole truth.
 			if e := prov.Err(); e != nil {
 				scanErr = e
 			}
@@ -534,10 +436,7 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// A PARTIAL read is not served as a whole one. If the query succeeded but produced nothing for any
-	// version, that is still reported as available-and-empty rather than as a failure: a property whose
-	// audit log genuinely holds no entry for these versions is a real, honest state, and calling it broken
-	// would be the mirror-image mistake of the one being fixed.
+	// A query that succeeded but found nothing for any version is reported as available-and-empty, not as a failure.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"revisions":         out,
 		"provenance_status": provenanceStatus,
@@ -546,15 +445,13 @@ func (s *server) listPMSInterfaceRevisions(w http.ResponseWriter, r *http.Reques
 
 type publishRevisionReq struct {
 	RevisionID string `json:"revision_id"`
-	// ExpectedRevisionID is the Revision the operator BELIEVED was published when they opened the form. It is
-	// the optimistic check: if somebody else published in the meantime, this refuses rather than silently
-	// reverting their change. An empty string means "I believe nothing is published yet".
+	// The Revision the operator believed was published: the optimistic check, so a concurrent publication is refused
+	// rather than reverted. Empty means "nothing published yet".
 	ExpectedRevisionID string `json:"expected_revision_id"`
 	ReasonCode         string `json:"reason_code"`
 	Password           string `json:"password"`
-	// ConfirmRoomChargeReset must be true to publish a revision that would take room charge off this
-	// connection: the published revision carries an onboarded posting target and the new one does not
-	// (audit H-3). Without it the publish is refused with room_charge_reset_unconfirmed and nothing changes.
+	// Must be true to publish a revision that would take room charge off this connection (the published revision
+	// carries an onboarded posting target and the new one does not); otherwise room_charge_reset_unconfirmed.
 	ConfirmRoomChargeReset bool `json:"confirm_room_charge_reset"`
 }
 
@@ -573,7 +470,6 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 			"a bounded reason code is required: publishing changes what every subsequent guest is resolved against")
 		return
 	}
-	// Step-up, for the same reason the reason code is required.
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
@@ -595,8 +491,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Lock the interface before reading its published Revision, so the compare-and-set below cannot be
-	// interleaved by a concurrent publication of a different Revision.
+	// Lock the interface so the compare-and-set below cannot be interleaved by a concurrent publication.
 	var current string
 	err = tx.QueryRow(ctx, `SELECT COALESCE(current_revision_id::text,'')
 		FROM iam_v2.pms_interfaces WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid FOR UPDATE`,
@@ -610,8 +505,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if current != strings.TrimSpace(in.ExpectedRevisionID) {
-		// 409 with the current value, so the UI can show what actually changed rather than asking the
-		// operator to guess why their publication was refused.
+		// 409 with the current value, so the UI can show what changed.
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":               "revision_conflict",
 			"message":             "another operator published a different revision while this form was open",
@@ -620,9 +514,7 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// The Revision must belong to THIS interface. Without this check an operator could publish another
-	// interface's Revision, and every subsequent resolution would be decided against a configuration written
-	// for a different PMS.
+	// The Revision must belong to THIS interface; otherwise guests would be resolved against a configuration written for a different PMS.
 	var revNo int
 	var newTarget string
 	err = tx.QueryRow(ctx, `SELECT revision_no, COALESCE(posting_target_model,'') FROM iam_v2.pms_interface_revisions
@@ -637,11 +529,8 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// ROOM CHARGE WOULD BE SWITCHED OFF (audit H-3). Room charge is onboarded ON A REVISION: financial
-	// onboarding records its posting target there, and a revision authored in the console always starts at
-	// UNSET. Publishing such a revision over an onboarded one therefore takes room charge off the connection
-	// until it is onboarded again -- silently, until now. It is still allowed, but only once the operator has
-	// been told and has confirmed.
+	// Room charge would be switched off: it is onboarded on a revision and a console-authored revision starts at
+	// UNSET, so publishing over an onboarded one disables it until re-onboarded. Allowed only after the operator confirms.
 	var curTarget string
 	if current != "" {
 		_ = tx.QueryRow(ctx, `SELECT COALESCE(posting_target_model,'') FROM iam_v2.pms_interface_revisions
@@ -681,35 +570,22 @@ func (s *server) publishPMSInterfaceRevision(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"current_revision_id": strings.TrimSpace(in.RevisionID), "revision_no": revNo})
 }
 
-// ---------- secret rotation (write-only) ----------
-
 type rotateSecretReq struct {
-	// Secret is a JSON string for protel-fias (stored exactly as before). For a REST connector it is a JSON
-	// object of the provider's credential fields -- e.g. Mews {"client_token":"…","access_token":"…"},
-	// Apaleo {"client_id":"…","client_secret":"…"}, OPERA Cloud {"client_id":"…","client_secret":"…",
-	// "app_key":"…"} -- or a JSON string containing such an object. It is sealed and never echoed back.
+	// A JSON string for protel-fias; for a REST connector, an object of the provider's credential fields (or a string containing one). Sealed, never echoed.
 	Secret     json.RawMessage `json:"secret"`
 	ReasonCode string          `json:"reason_code"`
 	Password   string          `json:"password"`
 }
 
-// rotatePMSInterfaceSecret stores a NEW credential generation and supersedes the previous one.
-//
-// There is deliberately no corresponding GET. The credential exists to be presented to the PMS, not to be
-// read by people; an endpoint that returned it would turn every operator session, browser cache and support
-// screenshot into a place the property's PMS credential lives.
-//
-// The response says only which generation number now applies. That is enough to answer "did my rotation take
-// effect?" without ever echoing what was typed.
+// There is deliberately no GET: an endpoint returning the credential would make every session, cache and
+// screenshot a place the PMS credential lives. The response says only which generation now applies.
 func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request) {
 	var in rotateSecretReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	// The secret's JSON shape. A string is what this endpoint always took and is stored exactly as before; an
-	// object is accepted only for a connector whose registry entry declares credential fields. Anything else
-	// is the same malformed-body refusal a non-string always produced.
+	// A string is stored as before; an object is accepted only for a connector whose registry entry declares credential fields.
 	rawSecret := []byte(strings.TrimSpace(string(in.Secret)))
 	var secretStr string
 	secretIsObject := false
@@ -748,9 +624,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	id := chi.URLParam(r, "id")
 
-	// The keyring is the appliance's, not the request's. If it is not configured, rotation is refused rather
-	// than stored in the clear — a credential written unencrypted "for now" is a credential written
-	// unencrypted forever, and nothing downstream would ever notice.
+	// The keyring is the appliance's, not the request's; if unset, rotation is refused rather than storing plaintext.
 	keyID, keyring := s.pmsSecretKeyring()
 	if keyID == "" || keyring == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "encryption_unavailable",
@@ -765,8 +639,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Lock the interface so two concurrent rotations cannot both compute the same next generation number and
-	// leave two rows claiming to be current.
+	// Lock the interface so two concurrent rotations cannot compute the same next generation.
 	var connectorKind string
 	err = tx.QueryRow(ctx, `SELECT connector_kind FROM iam_v2.pms_interfaces
 		WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid FOR UPDATE`,
@@ -779,9 +652,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	// The plaintext that is sealed. For protel-fias (and any connector without declared credential fields) it
-	// is the string exactly as submitted, as it always was. For a REST connector it is the canonical JSON of
-	// its credential fields, validated against the registry; the values never appear in a response or error.
+	// The plaintext that is sealed: the string as submitted, or for a REST connector the canonical JSON of its credential fields; values never appear in a response or error.
 	plaintext := []byte(secretStr)
 	if prov, ok := pmsprovider.Get(connectorKind); ok && prov.IsREST() {
 		raw := json.RawMessage(rawSecret)
@@ -805,9 +676,8 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The row id is chosen HERE because it is part of the AEAD's additional authenticated data: the ciphertext
-	// is bound to the exact (tenant, site, interface, generation) it belongs to, so a row copied to another
-	// interface fails authentication instead of decrypting into the wrong PMS.
+	// The row id is chosen here because it is part of the AEAD's additional authenticated data: the ciphertext is
+	// bound to its (tenant, site, interface, generation), so a copied row fails authentication.
 	var generationID string
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&generationID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -821,9 +691,7 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Supersede the previous generation and append the new one in ONE transaction. The order matters only in
-	// that both must be true together: a moment with two live generations is a moment where which credential
-	// the connector uses is decided by an ORDER BY.
+	// Supersede the previous generation and append the new one in ONE transaction: two live generations would leave the choice to an ORDER BY.
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interface_secret_generations
 		SET superseded_at = now()
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3::uuid AND superseded_at IS NULL`,
@@ -844,25 +712,15 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The audit records THAT a rotation happened and by whom. It does not record the credential, and it does
-	// not record a hash of it either: a hash of a short operator-chosen string is not much of a secret.
+	// The audit records that a rotation happened and by whom, never the credential or a hash of it (a hash of a short chosen string is weak).
 	s.audit(r, "pms_interface.secret_rotated", "pms_interface", id, map[string]any{
 		"generation_no": generation, "reason_code": strings.TrimSpace(in.ReasonCode),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"generation_no": generation})
 }
 
-// ---------- health ----------
-
-// interfaceHealth is the DERIVED operational picture. Every field is computed from the runtime facts at read
-// time; none of it is stored. The four dimensions are separate because they fail separately and an operator
-// acts differently on each: transport is "is it connected", continuity is "did we miss anything", sync is
-// "are we mid-resync", occupancy is "is what we hold about the property still current".
-// roomAuth* are the CLOSED set of reasons Room authentication cannot currently be served by an interface.
-//
-// Bounded codes rather than sentences: this is a machine field, the wording belongs to whichever surface
-// renders it, and a free-text reason built from runtime state is how PMS detail leaks into places nobody
-// audited. Each maps to one clause of the server's own feed-health rule.
+// The CLOSED set of reasons Room authentication cannot currently be served by an interface. Bounded codes, not
+// sentences: free text built from runtime state is how PMS detail leaks; each maps to one clause of the server's feed-health rule.
 const (
 	roomAuthNotActive      = "INTERFACE_NOT_ACTIVE"
 	roomAuthNoRevision     = "NO_PUBLISHED_REVISION"
@@ -872,46 +730,25 @@ const (
 	roomAuthFeedSilent     = "FEED_SILENT"
 	roomAuthRevisionUnpin  = "REVISION_NOT_PINNED"
 
-	// THE MIRROR HAS NEVER BEEN FILLED. Distinct from NOT_IN_SYNC, which describes a mirror that exists and is
-	// momentarily behind. This one means no complete sync has ever finished, so there is nothing local to fall
-	// back to while the transport is down — the tables would answer "no such Stay" for a hotel full of guests.
+	// The mirror has never been filled: no complete sync ever finished, so there is nothing local to fall back to while the transport is down.
 	roomAuthNeverSynced = "MIRROR_NEVER_SYNCHRONIZED"
 
-	// A COMPLETE SYNC IS PARTWAY THROUGH. Kept as a known code for older consoles; it is no longer a readiness
-	// REASON (audit H-12): a resync builds an unpublished generation, the published roster keeps answering, and
-	// p3_feed_authorizes (0060) authorises from it while the transport is down.
+	// Kept as a known code for older consoles; no longer a readiness reason, since a resync builds an unpublished
+	// generation while the published roster keeps answering (p3_feed_authorizes).
 	roomAuthResyncInFlight = "RESYNC_IN_FLIGHT"
 
-	// THE GUEST LIST IS ARRIVING, not absent. Distinct from NOT_IN_SYNC on purpose: the feed is healthy and a
-	// generation is published, but the applier has not finished writing it into iam_v2.stays yet, so Room
-	// sign-in is briefly and correctly closed. Seconds, not an outage, and the operator should be told which.
+	// The guest list is arriving: a generation is published but not yet written into iam_v2.stays, so Room sign-in is briefly closed.
 	roomAuthMaterializing = "MATERIALIZATION_BEHIND"
 )
 
 type interfaceHealth struct {
 	InterfaceID string `json:"pms_interface_id"`
 
-	// ROOM-AUTH FEED READINESS, decided here rather than by whoever is displaying it.
-	//
-	// Phase 3 mints a PMS Auth Context on EITHER a live feed or a trusted local mirror, so this answer must
-	// not be derived from the socket alone. A client cannot evaluate the live branch's bound anyway: it lives
-	// in the Revision's config, and Hotel Admin was hardcoding the 300-second DEFAULT as though it were the
-	// rule. An interface configured with a different timeout would then be described to an operator using a
-	// number that interface does not use.
-	//
-	// TRANSPORT DOWN IS NO LONGER A REASON ON ITS OWN. Telling staff "guests cannot sign in" because the
-	// socket dropped was false whenever the mirror was intact, and false in the worst direction: it invites
-	// the front desk to start handing out workarounds for a problem the guests do not have. When the
-	// transport is down the readiness answer comes from the mirror instead — has a complete sync ever
-	// finished, and is one in flight right now — which is exactly the offline branch of
-	// iam_v2.p3_feed_authorizes. The transport's own state is still reported in full alongside this, in
-	// Transport/DisconnectedSince/TransportError, so an operator sees both facts and they no longer contradict
-	// each other.
-	//
-	// So the same runtime and the same active Revision that Phase 3 reads answer the question here, and the
-	// client renders the answer. What is deliberately EXCLUDED is the Stay-specific half of
-	// iam_v2.p3_feed_authorizes — occupancy evidence, its age and its revision pin — because that is a
-	// property of one guest's Stay, not of the feed, and this endpoint is about the interface.
+	// Room-auth feed readiness is decided here, not by the display: a PMS Auth Context is minted on either a live
+	// feed or a trusted local mirror, and the live bound lives in the Revision config. Transport down is not a
+	// reason on its own: with an intact mirror guests can still sign in, so readiness then comes from the mirror
+	// (has a complete sync ever finished, is one in flight), the offline branch of iam_v2.p3_feed_authorizes. The
+	// Stay-specific half (occupancy evidence, age, revision pin) is deliberately excluded.
 	RoomAuthReady  bool   `json:"room_auth_ready"`
 	RoomAuthReason string `json:"room_auth_reason,omitempty"`
 
@@ -931,15 +768,11 @@ type interfaceHealth struct {
 	LastCompleteSyncAt  *time.Time `json:"last_complete_sync_at,omitempty"`
 	LastSyncFailureCode string     `json:"last_sync_failure_code,omitempty"`
 
-	// Occupancy is what the interface currently believes about the property, and is the dimension an
-	// operator can sanity-check against reality by walking the corridor.
 	InHouseStays  int        `json:"in_house_stays"`
 	LastStayEvent *time.Time `json:"last_stay_event_at,omitempty"`
 
-	// SYNCHRONIZATION, as an operator experiences it. Stage is a closed vocabulary the database enforces, and
-	// the counts are real: RecordsReceived is what has actually been staged under the open generation, and
-	// there is deliberately no total, percentage or remaining count beside it, because FIAS provides no total
-	// before DE and every such number would be invented.
+	// Synchronization: Stage is a closed vocabulary the database enforces. There is deliberately no total,
+	// percentage or remaining count, because FIAS provides no total before DE.
 	MaterializationReady bool       `json:"materialization_ready"`
 	SyncStage            string     `json:"sync_stage,omitempty"`
 	SyncStageAt          *time.Time `json:"sync_stage_at,omitempty"`
@@ -950,9 +783,7 @@ type interfaceHealth struct {
 	ResyncRequestedBy    string     `json:"resync_command_reason,omitempty"`
 	ResyncCommandAt      *time.Time `json:"resync_command_requested_at,omitempty"`
 
-	// Backlog is the ingestion queue: events admitted but not yet applied, and how old the oldest is. A
-	// backlog that is merely large is a busy morning; a backlog whose OLDEST item is hours old is a stuck
-	// processor, and the two need different responses.
+	// The ingestion queue. A large backlog is a busy morning; an hours-old oldest item is a stuck processor.
 	PendingEvents   int        `json:"pending_events"`
 	ReviewEvents    int        `json:"review_events"`
 	OldestPendingAt *time.Time `json:"oldest_pending_at,omitempty"`
@@ -1058,16 +889,8 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		&h.RoomAuthReason)
 	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
 
-	// REFINE "review" FROM RECORDED TO OUTSTANDING, where the schema can answer that.
-	//
-	// The query above counts every MANUAL_REVIEW row, which is all a Phase-3-era schema can offer and is
-	// what this gate's disposable fixture builds. Once the disposition ledger exists the honest number is
-	// how many still need an ANSWER -- and getting that wrong is not cosmetic: this field feeds the PMS
-	// connection row and the Property-management card, both of which reported 13 717 decisions waiting when
-	// 13 716 of them had already been answered.
-	//
-	// A failure here leaves the raw count in place rather than reporting zero. A stale-but-honest number
-	// beats a reassuring wrong one, which is the same rule the dashboard follows.
+	// Refines "review" from recorded to outstanding where the disposition ledger exists: this field feeds the PMS
+	// connection row and Property-management card. A failure keeps the raw count rather than reporting zero.
 	if err == nil {
 		var outstanding int
 		if e2 := s.db.QueryRow(ctx,
@@ -1078,8 +901,6 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 	}
 	return h, err
 }
-
-// ---------- guest-network routing ----------
 
 type guestNetworkRoute struct {
 	GuestNetworkID   string `json:"guest_network_id"`
@@ -1093,18 +914,9 @@ type guestNetworkRoute struct {
 func (s *server) pmsRoutingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listPMSRouting)
-	// THE WRITE PATH. This surface used to be read-only, on the reasoning that which PMS a VLAN resolves
-	// against is a network-topology decision and therefore belongs where the networks are configured. The
-	// reasoning is sound; the problem was that the guest-network API has no PMS field, so the conclusion in
-	// practice was that the mapping could not be set ANYWHERE. It existed only as a row inserted by
-	// integration-test fixtures, which meant a real deployment reached "PMS connected, Stays ingested,
-	// nothing authenticates" with no product action available to fix it.
-	//
-	// So the write lives here, next to the read that already explains the mapping, and it is deliberately
-	// explicit rather than casual: one guest network at a time, named in the path, with the interface
-	// validated against this site and required to be publishable. Wiring it into the guest-network revision
-	// pipeline instead would couple a network apply/confirm/rollback cycle to PMS configuration — a much
-	// larger change that makes a routing typo a network outage.
+	// The write path lives here, next to the read that explains the mapping: one guest network at a time, named in
+	// the path, with the interface validated against this site and required to be publishable. Wiring it into the
+	// network revision pipeline would make a routing typo a network outage.
 	r.Put("/{guest_network_id}", s.setPMSRoute)
 	r.Delete("/{guest_network_id}", s.clearPMSRoute)
 	return r
@@ -1112,18 +924,12 @@ func (s *server) pmsRoutingRoutes() http.Handler {
 
 type setPMSRouteReq struct {
 	InterfaceID string `json:"pms_interface_id"`
-	// RoutingMode is MAPPED (this network resolves against exactly this interface) or
-	// ALL_ACTIVE_INTERFACES (it fans out across every active interface at the site). Defaults to MAPPED:
-	// a single named interface is the answer that cannot surprise anyone.
+	// MAPPED (resolves against exactly this interface) or ALL_ACTIVE_INTERFACES (not implemented). Defaults to MAPPED.
 	RoutingMode string `json:"routing_mode"`
 }
 
-// setPMSRoute maps one guest network to one PMS Interface.
-//
-// It is an upsert on (guest_network_id, pms_interface_id) and it also REPLACES any other interface mapped to
-// the same guest network. Accumulating mappings would be the more literal reading of an upsert, but a guest
-// network resolving against two properties' PMS at once is not a configuration anyone wants and not one the
-// resolver can make sense of — so setting a route means setting it, not adding to it.
+// Maps one guest network to one PMS Interface. An upsert that also REPLACES any other interface mapped to the
+// network: a network resolving against two properties' PMS at once is not a valid configuration.
 func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
 	if !uuidRe.MatchString(gnID) {
@@ -1148,15 +954,8 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = "MAPPED"
 	}
-	// ALL_ACTIVE_INTERFACES IS NOT IMPLEMENTED, SO IT IS NOT OFFERED.
-	//
-	// The column has always allowed it and the screen used to present it as "Every active PMS", but no
-	// resolver ever read routing_mode: internal/pmsresolve selects candidates with mapped(), which returns the
-	// interfaces this network is MAPPED to and nothing else. A site that chose it got MAPPED behaviour under a
-	// name promising a fan-out -- the worst kind of configuration, one that reads as deliberate. Implementing a
-	// multi-PMS resolution is a product decision (STRICT candidate rules, ambiguity, the candidate cap), not a
-	// validation change, so until that decision the option is refused rather than mis-sold. Rows that already
-	// carry it keep working: they resolve against their mapped interface, which is what they always did.
+	// ALL_ACTIVE_INTERFACES is not offered: no resolver reads routing_mode (internal/pmsresolve uses mapped()), so
+	// it would behave as MAPPED under a name promising fan-out. Existing rows keep resolving against their mapped interface.
 	if mode != "MAPPED" {
 		jsonErr(w, http.StatusBadRequest, "validation",
 			"routing_mode must be MAPPED. Routing a client network to every active PMS is not implemented: "+
@@ -1173,9 +972,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Both sides are checked against THIS site rather than trusted from the path/body. The foreign keys would
-	// catch a cross-site id too, but as a 23503 that reaches the operator as "internal" — and "which property
-	// does this VLAN belong to" deserves an answer, not a 500.
+	// Both sides are checked against THIS site rather than trusted: a cross-site id would otherwise surface as an "internal" 23503.
 	var gnName string
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(name,'') FROM public.guest_networks
 	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, gnID, s.tenantID, s.siteID).Scan(&gnName); err != nil {
@@ -1184,11 +981,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	var ifaceLabel, lifecycle string
 	var published bool
-	// PUBLICATION IS `current_revision_id`, not a per-revision timestamp. An earlier draft of this query
-	// tested `pms_interface_revisions.published_at`, a column that does not exist — so the query errored,
-	// the error was indistinguishable from "no such row", and a correctly published interface was rejected
-	// as "not found at this site". A missing column reported as a missing interface sends the operator to
-	// look at the wrong thing entirely.
+	// Publication is `current_revision_id`, not a per-revision timestamp (pms_interface_revisions.published_at does not exist).
 	if err := tx.QueryRow(ctx, `
 	    SELECT COALESCE(i.display_label,''), COALESCE(i.lifecycle_state,''),
 	           i.current_revision_id IS NOT NULL
@@ -1198,24 +991,20 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "PMS interface not found at this site")
 		return
 	}
-	// An interface with no published revision has no endpoint, so a network mapped to it resolves against
-	// nothing. Refusing here turns a silent dead end into a message naming the missing step.
+	// An interface with no published revision has no endpoint; refuse with a message naming the missing step.
 	if !published {
 		jsonErr(w, http.StatusConflict, "validation",
 			"PMS interface has no published revision — publish one before routing a client network to it")
 		return
 	}
 
-	// Replace, don't accumulate: drop any other interface currently mapped to this network.
 	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
 	     WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3 AND pms_interface_id <> $4`,
 		s.tenantID, s.siteID, gnID, ifaceID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "route replace failed")
 		return
 	}
-	// is_default=true: with exactly one mapping per network it IS the default, and the partial unique index
-	// gnpm_one_default permits one per network. The DELETE above runs first in the same transaction, so the
-	// index cannot see two.
+	// is_default=true: with exactly one mapping per network it is the default; the DELETE above runs first so the gnpm_one_default index sees one.
 	if _, err := tx.Exec(ctx, `
 	    INSERT INTO iam_v2.guest_network_pms_map
 	      (tenant_id, site_id, guest_network_id, pms_interface_id, is_default, routing_mode)
@@ -1238,9 +1027,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// clearPMSRoute unmaps a guest network. The network then resolves against nothing, which is a legitimate
-// state (a staff VLAN has no business consulting the PMS) and is reported as such by listPMSRouting's
-// unmapped_guest_networks — so removal is not a hole, it is an answer.
+// Unmaps a guest network; resolving against nothing is legitimate (a staff VLAN) and listPMSRouting reports it as unmapped_guest_networks.
 func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
 	if !uuidRe.MatchString(gnID) {
@@ -1260,26 +1047,16 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
 }
 
-// listPMSRouting answers "which guest networks resolve against which PMS interface?".
-//
-// The mapping decides which property's PMS a device on a given VLAN is checked against, so getting it wrong
-// resolves a guest against a neighbouring property's occupancy — the guest simply cannot get online while every
-// other screen reports healthy.
-//
-// THIS COMMENT USED TO SAY THE SURFACE WAS READ-ONLY "on purpose", on the reasoning that the mapping is a
-// network-topology decision and belongs where the networks are configured. That reasoning is sound and the
-// conclusion was wrong, because no such control existed: the guest-network API carries no PMS field, so the
-// mapping could be set NOWHERE in the product and existed only as a row written by test fixtures. The write
-// path (setPMSRoute / clearPMSRoute) lives beside this read for that reason, and both are confined to
-// site_admin by the `pms-routing` permWrite entry in rolePerms — every other role reads it.
+// The mapping decides which property's PMS a device on a VLAN is checked against; getting it wrong resolves a
+// guest against a neighbouring property's occupancy. Writes (setPMSRoute / clearPMSRoute) are confined to
+// site_admin by the `pms-routing` permWrite entry in rolePerms.
 func (s *server) listPMSRouting(w http.ResponseWriter, r *http.Request) {
 	routes, err := s.routesForInterface(r, "")
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	// A guest network with no mapping at all is the interesting case: devices on it resolve against nothing,
-	// and the absence is invisible in a list that only shows what IS mapped.
+	// A guest network with no mapping resolves against nothing, and the absence is invisible in a list of mapped ones.
 	unmapped, err := s.unmappedGuestNetworks(r)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -1345,8 +1122,6 @@ func (s *server) unmappedGuestNetworks(r *http.Request) ([]map[string]string, er
 	return out, rows.Err()
 }
 
-// ---------- source conflicts ----------
-
 type sourceConflictRow struct {
 	ID              string `json:"id"`
 	InterfaceA      string `json:"interface_a"`
@@ -1355,10 +1130,8 @@ type sourceConflictRow struct {
 	InterfaceBLabel string `json:"interface_b_label,omitempty"`
 	Severity        string `json:"severity,omitempty"`
 	Resolution      string `json:"resolution,omitempty"`
-	// Detected: derived now from the connections' own published configuration -- two connections whose
-	// published versions dial the same source (equal source fingerprints) -- rather than read from a stored
-	// record. Nothing ever wrote pms_source_conflicts, so the page listed nothing while a duplicate could exist
-	// (audit H-11); detection from facts already recorded needs no writer and cannot go stale.
+	// Derived now from the connections' published configuration (equal source fingerprints), not read from a
+	// stored record: nothing ever wrote pms_source_conflicts.
 	Detected bool `json:"detected,omitempty"`
 }
 
@@ -1368,11 +1141,7 @@ func (s *server) pmsSourceConflictsRoutes() http.Handler {
 	return r
 }
 
-// listSourceConflicts shows where two interfaces claim authority over the same source.
-//
-// This is the condition that makes a resolution AMBIGUOUS for reasons the guest cannot fix and the front desk
-// cannot explain: two interfaces both say room 412 is occupied, by different people. The operator's job is to
-// decide which one owns it; this surface exists so the question is visible before a guest asks it.
+// Where two interfaces claim authority over the same source, which makes a resolution AMBIGUOUS for reasons the guest cannot fix.
 func (s *server) listSourceConflicts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -1444,9 +1213,7 @@ func (s *server) listSourceConflicts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"conflicts": out})
 }
 
-// pmsSecretKeyring returns the appliance's credential-encryption key id and keyring, loaded from the same
-// environment pmsd loads them from — one source, so a rotation performed here is decryptable by the connector
-// that has to use it. An unset key means rotation is refused, never that it silently stores plaintext.
+// Loaded from the same environment pmsd uses, so a rotation here is decryptable by the connector. An unset key means rotation is refused, never plaintext.
 func (s *server) pmsSecretKeyring() (string, pmsd.Keyring) {
 	keyID := strings.TrimSpace(os.Getenv("PMSD_SECRET_KEY_ID"))
 	if keyID == "" {
@@ -1459,18 +1226,6 @@ func (s *server) pmsSecretKeyring() (string, pmsd.Keyring) {
 	return keyID, pmsd.MapKeyring{keyID: kb}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// CONNECTION RECOVERY, PER INTERFACE.
-//
-// These bounds say how ONE link retries after a drop and how long a problem may last before somebody is
-// told. They used to be keyed by site, which was true enough with one connection and became a trap the
-// moment there could be two: the page had to warn the operator, in as many words, that a setting shown on
-// this connection also governed the other one.
-//
-// The connector READS these and never writes them. An operator changes them here; pmsd picks the new values
-// up on its next reconnect cycle without a restart.
-// ---------------------------------------------------------------------------------------------------------
-
 type interfaceConnectionSettings struct {
 	BackoffMinMs         int   `json:"backoff_min_ms"`
 	BackoffMaxMs         int   `json:"backoff_max_ms"`
@@ -1478,16 +1233,12 @@ type interfaceConnectionSettings struct {
 	LinkDownAlertSeconds int   `json:"link_down_alert_seconds"`
 	BlockedAfterRefusals int   `json:"blocked_after_refusals"`
 	ConfigVersion        int64 `json:"config_version"`
-	// IsDefault distinguishes "nobody has configured this connection" from "somebody configured it to the
-	// same numbers the defaults happen to use". The screen says so, because an operator deciding whether to
-	// touch a value is entitled to know whether anyone already did.
+	// Distinguishes "nobody configured this" from "configured to the same numbers as the defaults".
 	IsDefault bool `json:"is_default"`
 }
 
-// interfaceBelongsToSite refuses an id that is not this site's before it reaches the settings functions.
-// The definer function enforces this too -- that is the authority -- but answering here turns a 400 with a
-// database error string into a clean 404, and keeps one site from discovering another's interface ids by
-// watching which ones produce a different error.
+// Refuses an id that is not this site's before it reaches the settings functions (the definer function is the
+// authority); this gives a clean 404 and stops one site probing another's interface ids by error differences.
 func (s *server) interfaceBelongsToSite(ctx context.Context, id string) bool {
 	var ok bool
 	if err := s.db.QueryRow(ctx,
@@ -1520,9 +1271,7 @@ func (s *server) getInterfaceConnectionSettings(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, c)
 }
 
-// updateInterfaceConnectionSettings changes the bounds of ONE interface. Every field is optional so a
-// partial change touches nothing else, and the definer function records who, why, and what the values were
-// before -- against this interface, so a property with two connections gets two separate histories.
+// Every field is optional so a partial change touches nothing else; the definer function records who, why and the previous values.
 func (s *server) updateInterfaceConnectionSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -1559,8 +1308,7 @@ func (s *server) updateInterfaceConnectionSettings(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusBadRequest, "settings_rejected", err.Error())
 		return
 	}
-	// The audit target is the INTERFACE. Recording these against a site-wide subject would make two
-	// connections' changes indistinguishable in the log, which is the same confusion the key just fixed.
+	// The audit target is the interface, so two connections' changes stay distinguishable.
 	s.audit(r, "pms_connection_settings.update", "pms_interface", id, map[string]any{
 		"config_version": version,
 	})

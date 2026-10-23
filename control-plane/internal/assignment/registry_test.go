@@ -16,9 +16,7 @@ func trusted(pub ed25519.PublicKey, state string) TrustedKey {
 	}
 }
 
-// Key separation: an assignment must be accepted ONLY when signed by a key in the
-// appliance's assignment trust registry. The license / command / update / CA keys
-// are never in that registry, so documents they sign are rejected as unknown signer.
+// Only a key in the assignment trust registry is accepted; the license, command and update keys are rejected as unknown signers.
 func TestKeySeparation(t *testing.T) {
 	now := time.Now()
 	assignPub, assignPriv, _ := ed25519.GenerateKey(rand.Reader)
@@ -47,10 +45,6 @@ func TestKeySeparation(t *testing.T) {
 	}
 }
 
-// The three-state lifecycle is what makes rotation non-stranding:
-//   active      -> may sign + verify
-//   verify_only -> must NOT sign, but STILL verifies already-issued documents
-//   revoked     -> never verifies
 func TestKeyLifecycleStates(t *testing.T) {
 	now := time.Now()
 	oldPub, oldPriv, _ := ed25519.GenerateKey(rand.Reader)
@@ -60,7 +54,6 @@ func TestKeyLifecycleStates(t *testing.T) {
 	reg.AddOrRotate(trusted(oldPub, KeyActive))
 	sign := func(priv ed25519.PrivateKey) *Document { d := mkDoc(); Sign(priv, d); return d }
 
-	// capability matrix
 	if !CanSign(KeyActive) || !CanVerify(KeyActive) {
 		t.Fatal("active must sign and verify")
 	}
@@ -74,13 +67,11 @@ func TestKeyLifecycleStates(t *testing.T) {
 		t.Fatal("revoked must neither sign nor verify")
 	}
 
-	// rotation overlap: both active
 	reg.AddOrRotate(trusted(newPub, KeyActive))
 	if r := AcceptForRegistry(reg, sign(oldPriv), "app-1", "SN-1", "fpr-1", 0, now); r != "" {
 		t.Fatalf("old key rejected during overlap: %s", r)
 	}
 
-	// old key -> verify_only: existing documents STILL verify (no stranding)
 	if !reg.VerifyOnly(KeyID(oldPub)) {
 		t.Fatal("VerifyOnly failed")
 	}
@@ -91,7 +82,6 @@ func TestKeyLifecycleStates(t *testing.T) {
 		t.Fatalf("new active key rejected: %s", r)
 	}
 
-	// revoked -> nothing signed by it verifies any more
 	if !reg.Revoke(KeyID(oldPub)) {
 		t.Fatal("Revoke failed")
 	}

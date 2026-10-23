@@ -1,23 +1,9 @@
-// Package shape owns the per-session HTB shaping classes and byte-accounting
-// counters for guest sessions, on each guest's ACTUAL network interfaces.
+// Package shape owns the per-session HTB shaping classes and byte counters on each guest bridge B.
+// Download is an HTB class + u32 dst-filter on B's egress root; upload is redirected from B's ingress to a
+// per-bridge IFB device (the WAN only sees the SNAT'd appliance IP) with a src-filter there.
 //
-// Topology, per guest bridge B (br-lan for legacy/untagged, br-g<vlan> for tagged):
-//
-//	DOWNLOAD (internet -> guest): egresses B with dst = guest IP.
-//	  -> HTB class + u32 dst-filter on B's egress root qdisc (handle 1:).
-//
-//	UPLOAD (guest -> internet): ingresses B with src = guest IP, then routes and
-//	is SNAT'd before leaving on the WAN, so the WAN egress only ever sees the
-//	appliance's IP. To measure the REAL guest src (pre-NAT) we redirect B's
-//	ingress to a per-bridge IFB device and shape/count there.
-//	  -> HTB class + u32 src-filter on ifb-<B>'s egress root qdisc (handle 1:).
-//
-// classid minor = 0x1000 + (((ip[2]&0x0f)<<8) | ip[3]) is derived from the IP
-// host bits, so it is unique within any guest subnet up to /20 (covers the /22
-// pools this product issues). The (device, minor) pair is globally unique
-// because each bridge/ifb serves exactly one guest network — which is what lets
-// acctd attribute traffic to the right session with no cross-network collision.
-// This removes the legacy assumption that all guests live on br-lan/10.10.0.0/24.
+// classid minor = 0x1000 + (((ip[2]&0x0f)<<8) | ip[3]) is unique within a guest subnet up to /20, and each
+// bridge/ifb serves one guest network, so (device, minor) is globally unique for acctd's attribution.
 package shape
 
 import (
@@ -35,12 +21,10 @@ import (
 
 const (
 	RootMajor      = "1"
-	RootParent     = "1:" // per-session classes hang directly off the root qdisc
+	RootParent     = "1:"
 	GuestMinorBase = 0x1000
 	GuestMinorMax  = 0x1fff
-	// SHARED-allocation group classes live in their own band, above every per-session minor, so a group and a
-	// session can never claim the same classid. A group is one HTB class at the entitlement's aggregate rate;
-	// the sessions that share it hang off it and borrow up to it.
+	// SHARED group classes use their own band above every per-session minor so classids never collide.
 	GroupMinorBase = 0x2000
 	GroupMinorMax  = 0x2fff
 )
@@ -49,9 +33,7 @@ type Client struct {
 	TCPath string
 	IPPath string
 
-	// exec runs one external command and returns its combined output. It is a field so the staged
-	// provisioning can be proven at the command level — that a re-rate is `class change` (counter-preserving)
-	// and not delete+add, that a prepared class has no filter — without a kernel. Production uses realExec.
+	// exec is a field so tests can assert the tc commands without a kernel.
 	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 	mu         sync.Mutex
@@ -73,8 +55,6 @@ func New() *Client {
 	}
 }
 
-// MinorForIP derives the collision-free HTB minor for a guest IP. Returns
-// (0,false) for non-IPv4.
 func MinorForIP(ip net.IP) (int, bool) {
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -84,7 +64,6 @@ func MinorForIP(ip net.IP) (int, bool) {
 	return GuestMinorBase + host, true
 }
 
-// ClassidForIP returns "1:<minor-hex>" for a guest IP, or "" for non-IPv4.
 func ClassidForIP(ip net.IP) string {
 	minor, ok := MinorForIP(ip)
 	if !ok {
@@ -93,19 +72,14 @@ func ClassidForIP(ip net.IP) string {
 	return fmt.Sprintf("%s:%x", RootMajor, minor)
 }
 
-// GroupMinorFor maps an entitlement id to its SHARED group class minor.
-//
-// The mapping is a hash rather than an allocation table because the applier must be able to name the group
-// from the plan alone, on the first pass after a restart, with no memory of what it called it last time. It is
-// stable, and a collision between two entitlements is handled where it matters: the applier refuses to install
-// a group whose class already belongs to a different entitlement, exactly as it refuses two sessions on one
-// class minor, rather than silently pooling two accounts' bandwidth.
+// GroupMinorFor hashes an entitlement id to its SHARED group minor so the applier can name the group from
+// the plan alone after a restart. On a collision the applier refuses to install a group whose class belongs
+// to another entitlement, rather than pooling two accounts' bandwidth.
 func GroupMinorFor(entitlementID string) (int, bool) {
 	id := strings.TrimSpace(entitlementID)
 	if id == "" {
 		return 0, false
 	}
-	// FNV-1a, 32-bit: small, dependency-free and stable across processes and architectures.
 	const (
 		offset32 = 2166136261
 		prime32  = 16777619
@@ -119,7 +93,6 @@ func GroupMinorFor(entitlementID string) (int, bool) {
 	return GroupMinorBase + int(h%span), true
 }
 
-// GroupClassid returns "1:<minor-hex>" for a SHARED group, or "" when there is no entitlement to group by.
 func GroupClassid(entitlementID string) string {
 	minor, ok := GroupMinorFor(entitlementID)
 	if !ok {
@@ -128,8 +101,7 @@ func GroupClassid(entitlementID string) string {
 	return fmt.Sprintf("%s:%x", RootMajor, minor)
 }
 
-// IFBName maps a guest bridge to its paired IFB device (upload measurement).
-// br-lan -> ifb-lan, br-g301 -> ifb-g301. Bounded to IFNAMSIZ (15).
+// IFBName maps br-lan -> ifb-lan, br-g301 -> ifb-g301, bounded to IFNAMSIZ (15).
 func IFBName(bridge string) string {
 	name := "ifb-" + strings.TrimPrefix(bridge, "br-")
 	if len(name) > 15 {
@@ -150,11 +122,8 @@ func (c *Client) lockBridge(bridge string) func() {
 	return m.Unlock
 }
 
-// EnsureBridgeInfra makes a guest bridge measurable: an HTB root on its egress
-// (download) and an IFB device fed by an ingress->egress redirect (upload).
-// Idempotent and safe to call on every authorize and on boot reconcile. It
-// never touches the bridge's egress root qdisc if one already exists (netd
-// primes it), so existing per-session download classes are preserved.
+// EnsureBridgeInfra is idempotent. It never replaces an existing egress root qdisc, so live per-session
+// download classes are preserved.
 func (c *Client) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	if bridge == "" {
 		return fmt.Errorf("empty bridge")
@@ -170,27 +139,18 @@ func (c *Client) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	}
 
 	ifb := IFBName(bridge)
-	// IFB device for upload measurement.
 	_ = c.ipRun(ctx, "link", "add", ifb, "type", "ifb") // ignore "exists"
 	if err := c.ipRun(ctx, "link", "set", ifb, "up"); err != nil {
 		return fmt.Errorf("ifb up %s: %w", ifb, err)
 	}
-	// Root HTB on the IFB. Use `add` (idempotent, ignore "exists") NOT `replace`:
-	// an IFB device and its qdisc persist across an scd restart, and `tc qdisc
-	// replace root htb` fails on an already-htb root ("Change operation not
-	// supported by specified qdisc"). `add` creates it on a fresh device and is a
-	// harmless no-op when it is already there — preserving any live classes.
+	// Use `add`, not `replace`: the IFB qdisc persists across restarts and `replace root htb` fails on an
+	// existing htb root, while `add` is a harmless no-op that preserves live classes.
 	_ = c.run(ctx, "qdisc", "add", "dev", ifb, "root", "handle", "1:", "htb", "default", "1")
-	// Bridge egress root for download classes — add only if absent (never replace: that would drop live
-	// per-session classes). THIS IS THE ONLY THING THAT PRIMES IT. An earlier oneshot unit
-	// (stayconnect-tc-setup) primed ens160 and br-lan for a shaping model scd used to own; it was retired
-	// because netd creates everything it needs here, idempotently, on every pass — so a boot with no tc
-	// state at all is fully rebuilt by the first submit.
+	// Bridge egress root: add only if absent (replacing would drop live per-session classes). Nothing else
+	// primes it, so a boot with no tc state is rebuilt by the first submit.
 	_ = c.run(ctx, "qdisc", "add", "dev", bridge, "root", "handle", "1:", "htb", "default", "1")
-	// Bridge ingress: rebuild cleanly so we hold EXACTLY ONE redirect filter,
-	// even across a daemon restart (duplicate redirects would double-count
-	// upload). Deleting the ingress qdisc drops only its own filters; the
-	// egress root and the IFB classes live elsewhere and are untouched.
+	// Rebuild ingress so exactly one redirect filter exists (duplicates would double-count upload); deleting
+	// it drops only its own filters.
 	_ = c.run(ctx, "qdisc", "del", "dev", bridge, "ingress")
 	if err := c.run(ctx, "qdisc", "add", "dev", bridge, "handle", "ffff:", "ingress"); err != nil {
 		return fmt.Errorf("ingress qdisc %s: %w", bridge, err)
@@ -207,8 +167,7 @@ func (c *Client) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	return nil
 }
 
-// AddSession creates the upload+download HTB classes & filters for ip on its
-// guest bridge. downKbps/upKbps of 0 or negative are treated as "no cap".
+// AddSession installs classes and filters in one call; downKbps/upKbps <= 0 mean "no cap".
 func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
@@ -217,10 +176,9 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 	if err := c.EnsureBridgeInfra(ctx, bridge); err != nil {
 		return err
 	}
-	// Remove any stale leaf (leftover from a crash) so we can re-add cleanly.
 	_ = c.DeleteSession(ctx, bridge, ip)
 
-	const unlimitedKbps = 1_000_000 // 1 Gbps ceiling if uncapped
+	const unlimitedKbps = 1_000_000
 	upRate := upKbps
 	if upRate <= 0 {
 		upRate = unlimitedKbps
@@ -231,11 +189,9 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 	}
 
 	ifb := IFBName(bridge)
-	// DOWNLOAD — bridge egress, dst = guest IP.
 	if err := c.addClassAndFilter(ctx, bridge, cid, downRate, "dst", ip); err != nil {
 		return fmt.Errorf("download add on %s: %w", bridge, err)
 	}
-	// UPLOAD — IFB egress (bridge ingress redirect), src = guest IP.
 	if err := c.addClassAndFilter(ctx, ifb, cid, upRate, "src", ip); err != nil {
 		_ = c.removeClassAndFilter(ctx, bridge, cid, ip)
 		return fmt.Errorf("upload add on %s: %w", ifb, err)
@@ -243,40 +199,18 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 	return nil
 }
 
-// ---- staged, accountable-before-forwarding provisioning ---------------------
-//
-// AddSession above installs the class AND its forwarding filter in one call, so the moment it returns the
-// guest's packets are already being classified into that class. That is wrong for a MANAGED Phase-3 class:
-// nothing may be forwarded through it until its counter series has a durable, authoritative accounting
-// origin. So the Phase-3 path (netd) never calls AddSession — it stages provisioning:
-//
-//	PrepareSession   creates the download and upload classes WITHOUT any forwarding filter. The classes exist
-//	                 and their absolute counters can be read, but no guest packet is classified into them —
-//	                 the guest's traffic still flows through the bridge's default class, exactly as it did
-//	                 before this session was ever prepared. This is the state an origin is registered against.
-//	ActivateSession  installs both forwarding filters, so from this instant the guest's traffic is classified
-//	                 into the (now accountable) class. It rolls the first filter back if the second fails, so a
-//	                 half-activated session never forwards in only one direction.
-//	AbortSession     removes filters and classes in both directions and PROVES they are gone, for the
-//	                 fail-closed path: anything that did not fully provision leaves nothing forwarding.
-//	RemoveClassification  the last-resort tc quarantine: strip the classification filters even if the classes
-//	                 cannot be removed, so a leftover class meters nothing. It does NOT deny internet access —
-//	                 only the nft authorization gate does that.
-//	ReRateSession    changes an already-active class's rate IN PLACE (`tc class change`, never delete+add), so
-//	                 an ordinary re-rate preserves the byte counters and the class keeps its generation.
+// Managed (netd) sessions never use AddSession: no packet may be classified into a class until its counter
+// series has a durable accounting origin, so provisioning is staged as Prepare (classes, no filters),
+// Activate (filters), Abort (remove and prove gone), RemoveClassification and ReRate.
 
-// PrepareSession creates the download+upload HTB classes for ip WITHOUT their guest forwarding filters. The
-// prepared classes carry no guest packets; they exist only to be read (for the accounting origin) and later
-// activated. It clears any stale leaf first so a crashed prior attempt cannot survive as a half-class.
+// PrepareSession creates the download and upload classes WITHOUT forwarding filters, after clearing any
+// stale leaf from a crashed attempt.
 func (c *Client) PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
 	return c.PrepareSessionIn(ctx, bridge, ip, downKbps, upKbps, "")
 }
 
-// PrepareSessionIn stages the accountable class, optionally inside a SHARED group.
-//
-// groupCid empty is PER_DEVICE: the class hangs off the root at its own rate, as it always has. Non-empty is
-// SHARED: the group must already exist (the caller creates it, because it is per entitlement and not per
-// session), and this session becomes a child of it with a small floor and the group's ceiling.
+// PrepareSessionIn: empty groupCid is PER_DEVICE (class off the root); non-empty is SHARED, where the
+// caller must have created the group and the session becomes a child with a small floor and the group's ceiling.
 func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
@@ -285,8 +219,7 @@ func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP,
 	if err := c.EnsureBridgeInfra(ctx, bridge); err != nil {
 		return err
 	}
-	// Remove any stale class+filter for this slot (a crashed prepare, or a different session that held the
-	// same minor) so preparation starts from nothing forwarding.
+	// Clear any stale class+filter for this slot so preparation starts from nothing forwarding.
 	_ = c.DeleteSession(ctx, bridge, ip)
 
 	const unlimitedKbps = 1_000_000
@@ -307,16 +240,15 @@ func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP,
 		return fmt.Errorf("prepare download class on %s: %w", bridge, err)
 	}
 	if err := c.addClassUnder(ctx, ifb, parent, cid, upFloor, upRate); err != nil {
-		// Roll the download class back so a failed prepare leaves no half-class behind.
+		// Roll back the download class so a failed prepare leaves no half-class.
 		c.removeClassByPref(ctx, bridge, cid, filterPrefFor(ip))
 		return fmt.Errorf("prepare upload class on %s: %w", ifb, err)
 	}
 	return nil
 }
 
-// ActivateSession installs the download and upload forwarding filters for an already-prepared class. Only
-// after this does the class carry guest packets. If the second filter fails, the first is removed, so a
-// session is never left forwarding in one direction only.
+// ActivateSession installs both forwarding filters; if the second fails the first is removed, so a session
+// never forwards in one direction only.
 func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
@@ -333,9 +265,8 @@ func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) 
 	return nil
 }
 
-// AbortSession removes both classes and both filters and then PROVES the class is gone on both devices. It is
-// the fail-closed cleanup: after it returns nil, nothing for this ip forwards or is countable. If it cannot
-// prove removal it returns an error, so the caller can escalate to RemoveClassification.
+// AbortSession removes classes and filters and proves the class is gone on both devices; an error means
+// removal is unproven and the caller should escalate to RemoveClassification.
 func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) error {
 	// Filters first, so forwarding stops even if a class delete later fails.
 	_ = c.removeFilter(ctx, bridge, ip)
@@ -358,14 +289,9 @@ func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	return nil
 }
 
-// RemoveClassification strips the u32 classification filters in both directions, so no guest packet is
-// classified into this class.
-//
-// IT DOES NOT DENY INTERNET ACCESS, and its name says so. A guest whose classification filter is gone keeps
-// forwarding through the bridge's DEFAULT class — unshaped and uncounted, but still online. Denying access is
-// solely the nft authorization gate's job (see cmd/netd/phase3_gate.go). This is the last-resort tc quarantine
-// used when AbortSession cannot prove the classes gone: it guarantees the leftover class meters nothing, and
-// is only ever called AFTER packet authorization has already been removed.
+// RemoveClassification strips the classification filters in both directions so a leftover class meters
+// nothing. It does NOT deny internet access: the guest keeps forwarding, unshaped and uncounted, through the
+// default class; only the nft authorization gate denies access. Call it only after packet authorization is removed.
 func (c *Client) RemoveClassification(ctx context.Context, bridge string, ip net.IP) error {
 	e1 := c.removeFilter(ctx, bridge, ip)
 	e2 := c.removeFilter(ctx, IFBName(bridge), ip)
@@ -375,9 +301,8 @@ func (c *Client) RemoveClassification(ctx context.Context, bridge string, ip net
 	return e2
 }
 
-// ReRateSession changes an already-active class's rate/ceil in place on both directions. It uses
-// `tc class change`, never delete+add, so the class's byte counters are preserved — an ordinary re-rate must
-// not look like a counter reset. It fails if the class is not already present (the caller then provisions).
+// ReRateSession uses `tc class change`, never delete+add, so byte counters are preserved and a re-rate does
+// not look like a counter reset. It fails if the class is absent.
 func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
@@ -400,12 +325,9 @@ func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, do
 	return nil
 }
 
-// cidClass is ClassidForIP but panics-free for callers that already validated ip.
 func cidClass(ip net.IP) string { return ClassidForIP(ip) }
 
-// SessionForwarding reports whether the guest forwarding filter is installed in BOTH directions — i.e. the
-// class is actually classifying packets, not merely prepared. It is the post-activation verification: a class
-// that exists but whose filter never took is a class that silently forwards nothing.
+// SessionForwarding reports whether the forwarding filter is installed in both directions (post-activation check).
 func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {
 	down, err := c.filterPresent(ctx, bridge, ip)
 	if err != nil {
@@ -418,19 +340,16 @@ func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP
 	return down && up, nil
 }
 
-// filterPresent reports whether the per-IP u32 filter (identified by its pref) is installed on a device.
 func (c *Client) filterPresent(ctx context.Context, dev string, ip net.IP) (bool, error) {
 	out, err := c.exec(ctx, c.TCPath, "filter", "show", "dev", dev, "parent", RootParent)
 	if err != nil {
-		// A missing device has no filters; that is a definite "not forwarding", not an error to propagate.
+		// A missing device has no filters: definitely not forwarding.
 		return false, nil
 	}
 	want := fmt.Sprintf("pref %d ", filterPrefFor(ip))
 	return bytes.Contains(out, []byte(want)), nil
 }
 
-// DeleteSession removes the classes & filters for ip on both directions
-// (no-op if absent).
 func (c *Client) DeleteSession(ctx context.Context, bridge string, ip net.IP) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
@@ -441,17 +360,11 @@ func (c *Client) DeleteSession(ctx context.Context, bridge string, ip net.IP) er
 	return nil
 }
 
-// DeleteSessionClass removes a managed class by MINOR, on both directions of a
-// bridge. It exists for reconciliation: a class left behind by a session that no
-// longer exists — after a crash, or a restart that lost the in-memory map — is
-// only identifiable by its minor, because the IP that produced it is no longer
-// known anywhere. Deleting by pref/classid needs no IP: the add path derives
-// both deterministically from the same minor.
+// DeleteSessionClass removes a managed class by minor, for reconciling classes whose session (and IP) is
+// no longer known.
 func (c *Client) DeleteSessionClass(ctx context.Context, bridge string, minor int) error {
 	if minor < GuestMinorBase || minor > GuestMinorMax {
-		// Refuse to touch anything outside the guest range. The root and default
-		// classes are appliance infrastructure, not per-session state, and a
-		// reconciliation that removed them would take the whole bridge down.
+		// The root and default classes are infrastructure; removing them would take the bridge down.
 		return fmt.Errorf("minor %d is outside the managed guest class range", minor)
 	}
 	cid := fmt.Sprintf("%s:%x", RootMajor, minor)
@@ -462,8 +375,6 @@ func (c *Client) DeleteSessionClass(ctx context.Context, bridge string, minor in
 	return nil
 }
 
-// removeClassByPref is removeClassAndFilter without needing the IP: the filter
-// pref and the classid are both functions of the minor alone.
 func (c *Client) removeClassByPref(ctx context.Context, ifc, cid string, pref int) {
 	_ = c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
 		"pref", strconv.Itoa(pref), "protocol", "ip", "u32")
@@ -471,8 +382,7 @@ func (c *Client) removeClassByPref(ctx context.Context, ifc, cid string, pref in
 	_ = c.run(ctx, "class", "del", "dev", ifc, "classid", cid)
 }
 
-// filterPrefFor returns a per-IP u32 filter pref, unique within a device
-// because each device serves one subnet and the minor is host-unique there.
+// filterPrefFor is unique within a device because each device serves one subnet.
 func filterPrefFor(ip net.IP) int {
 	minor, ok := MinorForIP(ip)
 	if !ok {
@@ -488,19 +398,14 @@ func (c *Client) addClassAndFilter(ctx context.Context, ifc, cid string, kbps in
 	return c.addFilter(ctx, ifc, cid, matchField, ip)
 }
 
-// addClass creates the HTB class and its leaf qdisc on a device, WITHOUT any classifying filter. A class with
-// no filter receives no packets, so this is the "prepared, non-forwarding" half of provisioning.
+// addClass creates the class and leaf qdisc without a filter, so it receives no packets.
 func (c *Client) addClass(ctx context.Context, ifc, cid string, kbps int) error {
 	return c.addClassUnder(ctx, ifc, RootParent, cid, kbps, kbps)
 }
 
-// addClassUnder creates a class under an explicit parent with an explicit rate and ceiling.
-//
-// The two-number form is what makes SHARED work. A PER_DEVICE class is rate == ceil: it may use its allowance
-// and no more. A SHARED session class is a SMALL rate (its guaranteed floor) with the GROUP's ceiling, so HTB
-// lends it every spare bit the other devices on the account are not using and takes them back the moment they
-// are. That is "allocated dynamically" expressed in the one mechanism the kernel already has for it — not a
-// division into fixed portions, which would leave a guest throttled while their own idle laptop held capacity.
+// addClassUnder takes separate rate and ceiling because SHARED depends on it: PER_DEVICE is rate == ceil,
+// while a SHARED session has a small guaranteed floor and the group's ceiling, so HTB lends spare capacity
+// dynamically instead of throttling a guest while their idle device holds a fixed slice.
 func (c *Client) addClassUnder(ctx context.Context, ifc, parent, cid string, rateKbps, ceilKbps int) error {
 	rate := fmt.Sprintf("%dkbit", rateKbps)
 	ceil := fmt.Sprintf("%dkbit", ceilKbps)
@@ -516,29 +421,21 @@ func (c *Client) addClassUnder(ctx context.Context, ifc, parent, cid string, rat
 	return nil
 }
 
-// EnsureGroupClass creates (or re-rates) the aggregate class a SHARED entitlement's sessions borrow from.
-//
-// It is idempotent by construction: `class add` on an existing classid fails, so an existing group is re-rated
-// in place instead — which also keeps its counters, exactly as an ordinary re-rate does. The group carries no
-// filter of its own and therefore classifies nothing directly; only the session classes under it do.
+// EnsureGroupClass creates or re-rates a SHARED group's aggregate class. `class add` fails on an existing
+// classid, so it re-rates in place, keeping counters. The group has no filter of its own.
 func (c *Client) EnsureGroupClass(ctx context.Context, ifc, groupCid string, kbps int) error {
 	if err := c.addClassUnder(ctx, ifc, RootParent, groupCid, kbps, kbps); err == nil {
 		return nil
 	}
-	// Already there (or unusable). Re-rate covers a plan revision whose aggregate changed and is a no-op
-	// otherwise; a genuinely broken class surfaces here rather than being papered over.
+	// Already there (or unusable): re-rate; a genuinely broken class surfaces here.
 	return c.run(ctx, "class", "change", "dev", ifc, "parent", RootParent,
 		"classid", groupCid, "htb", "rate", fmt.Sprintf("%dkbit", kbps), "ceil", fmt.Sprintf("%dkbit", kbps),
 		"burst", "32k")
 }
 
-// sharedFloorKbps is the guaranteed rate a single session gets inside a SHARED group.
-//
-// It is deliberately small and NOT the aggregate divided by the device count. HTB shares what nobody is using
-// in proportion to these floors, so a fixed small floor with the group ceiling gives every device an equal
-// claim on contention and the whole ceiling when it is alone — which is the product promise. Dividing by the
-// device count would instead reserve capacity per device and cap an active guest at their share while their
-// idle devices held the rest.
+// sharedFloorKbps is a session's guaranteed rate inside a SHARED group. It is deliberately small, NOT the
+// aggregate divided by device count: dividing would reserve capacity per device and cap an active guest at
+// their share while idle devices held the rest.
 func sharedFloorKbps(groupKbps int) int {
 	const floor = 64
 	if groupKbps <= floor {
@@ -550,16 +447,14 @@ func sharedFloorKbps(groupKbps int) int {
 	return floor
 }
 
-// changeClass adjusts an existing class's rate/ceil in place. `class change` preserves the class's byte
-// counters — unlike delete+add, which resets them — so an ordinary re-rate does not look like a series reset.
+// changeClass re-rates in place; `class change` preserves byte counters, delete+add would reset them.
 func (c *Client) changeClass(ctx context.Context, ifc, cid string, kbps int) error {
 	rate := fmt.Sprintf("%dkbit", kbps)
 	return c.run(ctx, "class", "change", "dev", ifc, "parent", RootParent,
 		"classid", cid, "htb", "rate", rate, "ceil", rate, "burst", "32k")
 }
 
-// addFilter installs the u32 classifying filter that directs the guest's packets into the class. This is the
-// step that makes a prepared class start forwarding.
+// addFilter installs the filter that makes a prepared class start carrying the guest's packets.
 func (c *Client) addFilter(ctx context.Context, ifc, cid, matchField string, ip net.IP) error {
 	pref := fmt.Sprintf("%d", filterPrefFor(ip))
 	return c.run(ctx, "filter", "add", "dev", ifc, "protocol", "ip",
@@ -567,8 +462,7 @@ func (c *Client) addFilter(ctx context.Context, ifc, cid, matchField string, ip 
 		"match", "ip", matchField, ip.String()+"/32", "flowid", cid)
 }
 
-// removeFilter deletes just the classifying filter (by its per-IP pref), leaving the class in place. Removing
-// the filter stops forwarding into the class without destroying its counters.
+// removeFilter deletes only the filter, stopping forwarding into the class while keeping its counters.
 func (c *Client) removeFilter(ctx context.Context, ifc string, ip net.IP) error {
 	pref := fmt.Sprintf("%d", filterPrefFor(ip))
 	return c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
@@ -576,8 +470,7 @@ func (c *Client) removeFilter(ctx context.Context, ifc string, ip net.IP) error 
 }
 
 func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, ip net.IP) error {
-	// Remove the filter first (otherwise class delete is EBUSY). We add with a
-	// deterministic pref per-IP so we can delete by pref without listing.
+	// Filter first, otherwise the class delete is EBUSY.
 	pref := fmt.Sprintf("%d", filterPrefFor(ip))
 	_ = c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
 		"pref", pref, "protocol", "ip", "u32")
@@ -586,32 +479,23 @@ func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, ip n
 	return nil
 }
 
-// ClassBytes is a point-in-time counter for one HTB class on one device.
 type ClassBytes struct {
 	Bytes   uint64
 	Packets uint64
 }
 
-// classHeaderRe matches the leading line of a tc class stanza:
-//
-//	"class htb 1:10cd parent 1: ..."
+// classHeaderRe matches e.g. "class htb 1:10cd parent 1: ...".
 var classHeaderRe = regexp.MustCompile(`^class htb (\w+):([0-9a-f]+)\b`)
 
-// sentRe matches the " Sent N bytes M pkt ..." line inside a class stanza.
 var sentRe = regexp.MustCompile(`^\s*Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\b`)
 
-// ReadClasses returns the byte/packet counters for every guest-session class on
-// a device (a bridge for download, an ifb for upload), keyed by full minor
-// (e.g. 0x1067). Non-guest classes and a missing device are ignored/empty.
-// Ubuntu 22.04's tc has no JSON for class stats, so we parse the text form.
+// ReadClasses returns counters for every guest-session class on a device, keyed by full minor. tc has no
+// JSON for class stats, so the text form is parsed.
 func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassBytes, error) {
 	out, err := c.exec(ctx, c.TCPath, "-s", "class", "show", "dev", device)
 	if err != nil {
-		// A device that does not exist yet (an IFB not created because the bridge has had no session) truly has
-		// no classes, and only that is answered as empty. ANY OTHER FAILURE IS AN ERROR (audit B-18): treating a
-		// failed read as "no classes" made reconciliation re-create every class -- a new epoch, a restarted
-		// counter series and the bytes since the last reading lost -- and made accounting see every counter at
-		// zero. Every caller already treats an error as "unknown, try next tick".
+		// Only an absent device means "no classes". Any other failure must be an error: treating it as empty
+		// made reconciliation re-create every class (new epoch, restarted counters, lost bytes).
 		if deviceAbsent(out) {
 			return map[int]ClassBytes{}, nil
 		}
@@ -656,8 +540,6 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 	return res, nil
 }
 
-// deviceAbsent reports whether tc's output says the network device does not exist (iproute2 prints
-// `Cannot find device "X"`).
 func deviceAbsent(out []byte) bool {
 	return bytes.Contains(out, []byte("Cannot find device"))
 }

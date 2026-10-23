@@ -15,7 +15,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// capture records what the bridge forwarded to scd.
 type capture struct {
 	called bool
 	method string
@@ -24,13 +23,10 @@ type capture struct {
 	body   map[string]any
 }
 
-// newBridgeHandler builds a portald handler whose scd client routes to a recording test server.
 func newBridgeHandler(t *testing.T, portalOn bool, cap *capture) (*handler, func()) {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The landing page reads the published portal design (to render its template on first paint). That
-		// read is not a commerce call and is answered without being recorded, so "the dark bridge never
-		// calls scd" keeps meaning exactly what it did.
+		// The landing page's design read is not a commerce call and is answered unrecorded.
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/tenant/branding" {
 			_, _ = w.Write([]byte(`{}`))
 			return
@@ -53,7 +49,7 @@ func newBridgeHandler(t *testing.T, portalOn bool, cap *capture) (*handler, func
 	}))
 	addr := ts.Listener.Addr().String()
 	cfg := iamv2.CommerceConfig{MasterEnabled: portalOn, PortalEnabled: portalOn}
-	th, err := newHandler(cfgVal()) // parse the real templates (NotFound renders the landing page)
+	th, err := newHandler(cfgVal())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +79,7 @@ func withSession(t *testing.T, h *handler, r *http.Request) {
 	r.AddCookie(&http.Cookie{Name: commerceCookie, Value: tok})
 }
 
-// Dark: commerce routes are not mounted, so a request falls through to the captive-portal landing and
-// the bridge never runs / never calls scd (no commerce JSON, no scd contact).
+// Dark: commerce routes are not mounted, so the bridge never runs or calls scd.
 func TestCommerceRoutesAbsentWhenDark(t *testing.T) {
 	cap := &capture{}
 	h, closeFn := newBridgeHandler(t, false, cap)
@@ -98,7 +93,6 @@ func TestCommerceRoutesAbsentWhenDark(t *testing.T) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		// unmatched -> landing page (HTML), never the bridge's JSON contract
 		if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 			t.Fatalf("dark route %s must not serve the commerce JSON contract", p)
 		}
@@ -111,7 +105,6 @@ func TestCommerceRoutesAbsentWhenDark(t *testing.T) {
 	}
 }
 
-// No trusted session -> generic unavailable, and scd is never called.
 func TestCommerceNoSessionUnavailable(t *testing.T) {
 	cap := &capture{}
 	h, closeFn := newBridgeHandler(t, true, cap)
@@ -127,8 +120,7 @@ func TestCommerceNoSessionUnavailable(t *testing.T) {
 	}
 }
 
-// The browser cannot substitute Auth Context / Device / Network / Tenant / Site: even when it injects
-// those fields, the bridge forwards ONLY the trusted session pins + the opaque package_id.
+// The browser cannot substitute Auth Context / Device / Network / Tenant / Site; the bridge forwards only trusted session pins and package_id.
 func TestCommerceBrowserCannotSubstitutePinsQuote(t *testing.T) {
 	cap := &capture{}
 	h, closeFn := newBridgeHandler(t, true, cap)
@@ -154,7 +146,6 @@ func TestCommerceBrowserCannotSubstitutePinsQuote(t *testing.T) {
 	if cap.body["package_id"] != "pkg-legit" {
 		t.Fatalf("package_id must be the browser's opaque id, got %v", cap.body["package_id"])
 	}
-	// browser-injected tenant/site must NOT be forwarded at all (scd is authoritative for them)
 	if _, ok := cap.body["tenant_id"]; ok {
 		t.Fatal("bridge must never forward a browser tenant_id")
 	}
@@ -163,7 +154,6 @@ func TestCommerceBrowserCannotSubstitutePinsQuote(t *testing.T) {
 	}
 }
 
-// Confirm forwards only the opaque quote_id + session device/network, never browser-substituted pins.
 func TestCommerceBrowserCannotSubstitutePinsConfirm(t *testing.T) {
 	cap := &capture{}
 	h, closeFn := newBridgeHandler(t, true, cap)
@@ -180,7 +170,6 @@ func TestCommerceBrowserCannotSubstitutePinsConfirm(t *testing.T) {
 	}
 }
 
-// Packages GET forwards session pins as query params (never browser-supplied ones).
 func TestCommercePackagesUsesSessionPins(t *testing.T) {
 	cap := &capture{}
 	h, closeFn := newBridgeHandler(t, true, cap)
@@ -194,9 +183,7 @@ func TestCommercePackagesUsesSessionPins(t *testing.T) {
 	}
 }
 
-// "You're online" offers nothing to buy, with the Phase-2 portal surface on or off (audit P-16): every device
-// there is online with its sign-in spent, and the panel that used to sit there sold a client what they had just
-// bought, labelled every quote free and confirmed without a method.
+// "You're online" offers nothing to buy, surface on or off: every device there is online with its sign-in spent.
 func TestSuccessPageOffersNoPackagePanel(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		cap := &capture{}

@@ -1,14 +1,7 @@
 package main
 
-// SESSION OPERATIONS OVER THE SINGLE SESSION AUTHORITY.
-//
-// These three operations -- count the active sessions, find the active session behind an IP, end it -- used
-// to be served by internal/session over public.sessions. That table was the superseded session domain and is
-// gone; iam_v2.sessions is the authority, so the operations move rather than disappear.
-//
-// They are deliberately thin. Ending a session because its ENTITLEMENT expired belongs to internal/enforce,
-// which also closes the entitlement's device authorizations; what lives here is the operator- or
-// network-initiated revocation of one device's access, which is a different act with a different reason.
+// Session operations over iam_v2.sessions, the single session authority. Ending a session because its ENTITLEMENT expired belongs to
+// internal/enforce (which also closes device authorizations); these are operator- or network-initiated revocations of one device's access.
 
 import (
 	"context"
@@ -20,8 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// activeSessionCount reports how many sessions are currently active for this site. Used by the operator
-// dashboard and the setup surface, both of which only ever displayed a number.
 func (s *server) activeSessionCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRow(ctx, `
@@ -30,8 +21,7 @@ func (s *server) activeSessionCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// findActiveSessionByIP resolves the active session behind a source IP. The IP is pinned on the session row
-// itself, so this needs no join and cannot pick up a stale device-to-address mapping.
+// findActiveSessionByIP: the IP is pinned on the session row, so no join and no stale device-to-address mapping.
 func (s *server) findActiveSessionByIP(ctx context.Context, ip net.IP) (string, bool, error) {
 	var id string
 	err := s.db.QueryRow(ctx, `
@@ -47,11 +37,8 @@ func (s *server) findActiveSessionByIP(ctx context.Context, ip net.IP) (string, 
 	return id, true, nil
 }
 
-// endActiveSessionByIP closes every live session behind an IP, through the controlled session-end writer
-// (endSessionControlled). It returns how many sessions it ended.
-//
-// It is idempotent: revoking an IP with no live session is not an error, because the caller's intent -- that
-// this address is not on the network -- is already satisfied.
+// endActiveSessionByIP closes every live session behind an IP through endSessionControlled and returns how many it ended.
+// Idempotent: an IP with no live session already satisfies the caller's intent.
 func (s *server) endActiveSessionByIP(ctx context.Context, ip net.IP, reason string) (int, error) {
 	rows, err := s.db.Query(ctx, `
         SELECT id::text FROM iam_v2.sessions
@@ -86,21 +73,13 @@ func (s *server) endActiveSessionByIP(ctx context.Context, ip net.IP, reason str
 	return n, nil
 }
 
-// sessionQuerier is what endSessionControlled needs: the pool, or a transaction it must join.
 type sessionQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// endSessionControlled ends ONE session through iam_v2.end_session_enforcement, the controlled session-end
-// writer netd already uses. It reports whether this call ended it (false: it had already ended).
-//
-// WHY NOT A RAW UPDATE. The sessions guard (p3_controlled_writer_only) refuses any non-owner write that moves a
-// session OUT of PENDING_ENFORCEMENT, so scd's raw `UPDATE ... SET state='ended'` raised for exactly the
-// sessions that most need ending: a grant whose enforcement never converged. The disconnect answered 500, the
-// row stayed PENDING_ENFORCEMENT and kept its licensed slot and its device place (audit B-4). The definer
-// function is allowed that transition, clamps `ended` to at least `started`, and is idempotent.
-//
-// The function takes a bounded upper-case machine code; sessionEndCode maps scd's reasons onto that form.
+// endSessionControlled ends ONE session through iam_v2.end_session_enforcement and reports whether this call ended it.
+// Not a raw UPDATE: the sessions guard (p3_controlled_writer_only) refuses non-owner writes out of PENDING_ENFORCEMENT, so a grant whose
+// enforcement never converged could not be ended and kept its licensed slot and device place (audit B-4).
 func (s *server) endSessionControlled(ctx context.Context, q sessionQuerier, sessionID, reason string) (bool, error) {
 	var out string
 	if err := q.QueryRow(ctx, `SELECT iam_v2.end_session_enforcement($1::uuid,$2::uuid,$3::uuid,$4)`,
@@ -110,10 +89,8 @@ func (s *server) endSessionControlled(ctx context.Context, q sessionQuerier, ses
 	return out == "ENDED", nil
 }
 
-// sessionEndCode turns a reason into the bounded machine code end_session_enforcement accepts
-// (^[A-Z][A-Z0-9_]{0,63}$): "admin" -> "ADMIN", "quota_bytes" -> "QUOTA_BYTES". Anything that still does not fit
-// (empty, punctuation, too long) is recorded as ADMIN, the operator disconnect it came from, rather than
-// failing the disconnect.
+// sessionEndCode maps a reason onto the bounded code end_session_enforcement accepts (^[A-Z][A-Z0-9_]{0,63}$);
+// anything that does not fit is recorded as ADMIN rather than failing the disconnect.
 func sessionEndCode(reason string) string {
 	c := strings.ToUpper(strings.TrimSpace(reason))
 	if !sessionEndCodeRe.MatchString(c) {
@@ -124,28 +101,13 @@ func sessionEndCode(reason string) string {
 
 var sessionEndCodeRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
-// reserveLicensedSlot admits one more concurrent guest on THIS APPLIANCE, or refuses.
-//
-// SCOPE IS THE APPLIANCE, NOT THE SITE AND NOT THE TENANT. One licence is issued per appliance -- it is bound
-// to that appliance's hardware serial and WAN MAC -- so two appliances under the same customer and the same
-// site must admit guests concurrently, each enforcing only its own limit, with no cross-appliance
-// serialization and no capacity leaking between them. The superseded session manager scoped and locked on the
-// appliance id for exactly this reason. The scope moved with the authority; it did not change.
-//
-// COUNTING INSIDE THE TRANSACTION IS NOT ENOUGH. Under READ COMMITTED two concurrent activations both read
-// the pre-insert count, both find the last slot free, and both insert -- which is precisely how a licensed
-// limit gets exceeded by the number of simultaneous logins. The advisory lock makes check-then-insert atomic.
-// It is taken on the APPLIANCE id, so contention is confined to one appliance's admissions, and it is a
-// transaction-scoped lock, so it is released on commit AND on rollback without any unlock path to forget.
-//
-// iam_v2.sessions carries no appliance_id; the DEVICE does, and a session's device is where the appliance
-// identity lives. The join is the accurate scope rather than a convenience.
-//
-// A non-positive limit means unlimited. Central Control Plane availability plays no part: the number comes
-// from the signed licence on disk, so guest admission stays local-first and survives an outage.
-//
-// It must be called INSIDE the same transaction that inserts the session. Called anywhere else it proves
-// nothing, because the lock would be gone before the row existed.
+// reserveLicensedSlot admits one more concurrent guest on THIS APPLIANCE or refuses. The scope is the appliance, not site or tenant:
+// a licence is bound to the appliance's hardware, so appliances of one customer admit concurrently with no cross-appliance serialization.
+// iam_v2.sessions has no appliance_id; the session's device carries it.
+// Counting alone is not enough: under READ COMMITTED two concurrent activations both see the last slot free, so a transaction-scoped
+// advisory lock on the appliance id makes check-then-insert atomic.
+// Call it INSIDE the transaction that inserts the session. A non-positive limit means unlimited; the limit comes from the signed
+// licence on disk, so admission stays local-first.
 func reserveLicensedSlot(ctx context.Context, tx pgx.Tx, applianceID string, limit int64) error {
 	if limit <= 0 {
 		return nil // unlimited

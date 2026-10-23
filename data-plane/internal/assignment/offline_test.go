@@ -7,9 +7,7 @@ import (
 	"time"
 )
 
-// The signed assignment is durable CONFIGURATION, not an auth token. A hotel must
-// keep serving guests through a Central outage, so passing expires_at must never
-// de-authorise the appliance — it only marks the assignment stale.
+// The signed assignment is durable CONFIGURATION, not an auth token: passing expires_at must never de-authorise the appliance, only mark it stale.
 func TestExpiryDoesNotUnassign(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Now()
@@ -18,7 +16,7 @@ func TestExpiryDoesNotUnassign(t *testing.T) {
 	reg.AddOrRotate(trusted(pub, KeyActive))
 
 	d := mkDoc()
-	d.ExpiresAt = now.Add(-24 * time.Hour).Unix() // long expired
+	d.ExpiresAt = now.Add(-24 * time.Hour).Unix()
 	Sign(priv, d)
 
 	if !IsExpired(d, now) {
@@ -28,7 +26,6 @@ func TestExpiryDoesNotUnassign(t *testing.T) {
 	if r := AcceptForRegistry(reg, d, "app-1", "SN-1", "fpr-1", 0, now); r != "" {
 		t.Fatalf("expired assignment was REJECTED (%s) — this would strand a hotel on a Central outage", r)
 	}
-	// And it still confers ownership.
 	if !Grants(d.State) {
 		t.Fatal("expired assigned document must still grant tenant/site")
 	}
@@ -59,7 +56,7 @@ func TestStoreOfflineSemantics(t *testing.T) {
 
 	v1 := mkDoc()
 	v1.Version = 1
-	v1.ExpiresAt = time.Now().Add(-time.Hour).Unix() // already expired
+	v1.ExpiresAt = time.Now().Add(-time.Hour).Unix()
 	Sign(priv, v1)
 	if err := s.Adopt(v1); err != nil {
 		t.Fatal(err)
@@ -101,7 +98,6 @@ func TestStoreOfflineSemantics(t *testing.T) {
 		t.Fatalf("v2 not current: v=%d stale=%q status=%s", r2.Version, r2.StaleSince, s.Status())
 	}
 
-	// An explicit signed unassign DOES clear ownership.
 	v3 := mkDoc()
 	v3.Version = 3
 	v3.State = StateUnassigned

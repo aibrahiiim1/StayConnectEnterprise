@@ -1,16 +1,7 @@
 package main
 
-// THE DEVICE LOOKUP MUST ACCEPT THE ADDRESS THE BROWSER ACTUALLY SENDS.
-//
-// Found on the appliance by an operator, not by a test. The Usage Explorer's per-stay view showed a device
-// with twelve sessions and 576 MB of traffic; searching for that same address in the per-device view
-// answered "this appliance has no record of that device".
-//
-// A MAC contains colons, a colon is reserved in a URL path, and the screen correctly escapes it with
-// encodeURIComponent -- so the server received 7e%3A58%3A… , chi handed back the raw escaped segment, and
-// `$1::macaddr` failed to cast. The client was right, the database was right, and the server was reading an
-// encoded string as though it were a literal one. The refusal then blamed the device, because a cast error
-// and an empty result had been given the same answer.
+// The device lookup must accept the address the browser sends: a MAC's colons are escaped (7e%3A58%3A...), chi returns the raw segment,
+// and `$1::macaddr` then failed to cast, reporting "no record of that device".
 
 import (
 	"context"
@@ -22,8 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// macRequest returns a request whose {mac} route parameter is the given raw path segment, exactly as chi
-// would present it to the handler after routing.
 func macRequest(segment string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/usage/devices/placeholder", nil)
 	rctx := chi.NewRouteContext()
@@ -55,8 +44,7 @@ func TestEveryFormAClientMightSendResolvesToOneAddress(t *testing.T) {
 }
 
 func TestSomethingThatIsNotAnAddressIsNotReportedAsAnUnknownDevice(t *testing.T) {
-	// "No record of that device" is a claim ABOUT A DEVICE. Saying it when the caller never named one is how
-	// the original defect stayed invisible: the message blamed the data for a fault in the request.
+	// "No record of that device" is a claim about a device; it must not be said when the caller never named one.
 	for _, bad := range []string{
 		"", "%20", "not-a-mac", "7a:1b:2c:3d:4e", "../../etc/passwd", "%zz", "7a:1b:2c:3d:4e:5g",
 	} {
@@ -67,15 +55,14 @@ func TestSomethingThatIsNotAnAddressIsNotReportedAsAnUnknownDevice(t *testing.T)
 }
 
 func TestAnEightByteAddressIsRefusedRatherThanFailingInPostgres(t *testing.T) {
-	// net.ParseMAC accepts EUI-64 and Infiniband addresses. PostgreSQL's macaddr holds six bytes, so one of
-	// those would parse here and fail the cast later -- which is the exact shape of the bug being fixed.
+	// net.ParseMAC accepts EUI-64/Infiniband addresses but macaddr holds six bytes, so those would parse and fail the cast later.
 	if got, ok := macFromPath(macRequest("7a:1b:2c:3d:4e:5f:60:71")); ok {
 		t.Errorf("an eight-byte address was accepted as %q; macaddr cannot store it", got)
 	}
 }
 
 func TestTheHandlerSeparatesItsThreeFailures(t *testing.T) {
-	// A malformed request, an absent row and a broken query are three different answers. They were one.
+	// A malformed request, an absent row and a broken query are three different answers.
 	src := readSourceFile(t, "resources_usage.go")
 	body := src[strings.Index(src, "func (s *server) getDeviceUsage("):]
 	if end := strings.Index(body, "\nfunc "); end > 0 {

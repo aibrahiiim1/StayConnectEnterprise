@@ -1,7 +1,6 @@
 package portaltls
 
-// END-TO-END against Pebble + pebble-challtestsrv + a migrated Central database. Skipped unless
-// PORTALTLS_PEBBLE=1; scripts/portaltls-pebble-test.sh starts everything and sets the variables.
+// End-to-end against Pebble; skipped unless PORTALTLS_PEBBLE=1 (scripts/portaltls-pebble-test.sh sets it up).
 
 import (
 	"context"
@@ -40,7 +39,6 @@ func pebbleEnvOrSkip(t *testing.T) pebbleEnv {
 	}
 }
 
-// mutableDoH is a DNS-over-HTTPS JSON endpoint whose answers the test sets as the "hotel" publishes records.
 type mutableDoH struct {
 	mu    sync.Mutex
 	table map[string][]dohAnswer
@@ -75,7 +73,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// A clean slate in the portal tables (events are append-only: a fresh database per run, see the script).
+	// Events are append-only, so the script gives each run a fresh database.
 	for _, q := range []string{
 		`DELETE FROM portal_certificate_orders`, `DELETE FROM portal_custom_domains`, `DELETE FROM portal_hostnames`,
 	} {
@@ -116,7 +114,6 @@ func TestPebbleEndToEnd(t *testing.T) {
 	if _, err := svc.UpdateSettings(ctx, SettingsUpdate{ContactEmail: str("ops@onegate.test"), WeeklyNewLimit: &limit}, "test"); err != nil {
 		t.Fatal(err)
 	}
-	// Only the TEST provider may be available without a token.
 	st, _ := LoadSettings(ctx, pool)
 	if ok, why := svc.Availability(st); !ok {
 		t.Fatalf("challtestsrv needs no token: %s", why)
@@ -128,11 +125,10 @@ func TestPebbleEndToEnd(t *testing.T) {
 	if _, err := svc.ApplyCAA(ctx, "test"); err != nil {
 		t.Fatalf("apply CAA: %v", err)
 	}
-	// Pebble's CA identity is pebble.letsencrypt.org, not letsencrypt.org: take the policy away again so it
-	// cannot stand between the test CA and the rest of the run.
+	// Pebble's CA identity is pebble.letsencrypt.org, so the CAA policy would block it; clear it.
 	_ = (&Challtestsrv{BaseURL: env.ctsURL}).post(ctx, "/clear-caa", map[string]any{"host": "onegate.work."})
 
-	// ---- 1. Hostname allocation and its A record.
+	// Hostname allocation and its A record.
 	sync1, err := svc.Sync(ctx, appA, SyncRequest{PortalIP: "10.255.255.1"})
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +148,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 	}
 	hostA := sync1.Hostname
 
-	// ---- 2. Order -> ISSUED, a valid chain for the CSR's key.
+	// Order -> ISSUED.
 	keyA1, csrA1 := newCSR(t, hostA)
 	acc, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: hostA, CSRPEM: csrA1})
 	if err != nil {
@@ -176,7 +172,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("a first certificate counts as new and records its directory: %v %q", countsNew, dir)
 	}
 
-	// ---- 3. Renewal: same hostname, new key -> not new; the previous one SUPERSEDED.
+	// Renewal.
 	keyA2, csrA2 := newCSR(t, hostA)
 	acc2, err := svc.CreateOrder(ctx, appA, OrderRequest{Hostname: hostA, CSRPEM: csrA2})
 	if err != nil {
@@ -191,7 +187,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("renewal: previous %s (want SUPERSEDED), counts_new %v (want false)", prevStatus, countsNew)
 	}
 
-	// ---- 4. Weekly cap (limit 2): B's first certificate is the second new one; C's must wait.
+	// Weekly cap of 2: B's first certificate is the second new one, so C's must wait.
 	syncB, _ := svc.Sync(ctx, appB, SyncRequest{PortalIP: "10.254.254.1"})
 	syncC, _ := svc.Sync(ctx, appC, SyncRequest{PortalIP: "10.253.253.1"})
 	keyB, csrB := newCSR(t, syncB.Hostname)
@@ -213,7 +209,6 @@ func TestPebbleEndToEnd(t *testing.T) {
 	if cStatus != "QUEUED" || cNext.Before(time.Now().Add(6*24*time.Hour)) {
 		t.Fatalf("over the weekly cap the order waits QUEUED until a slot frees (~7 days): %s %v", cStatus, cNext)
 	}
-	// Raising the limit lets it through at the next due time.
 	limit = 3
 	_, _ = svc.UpdateSettings(ctx, SettingsUpdate{WeeklyNewLimit: &limit}, "test")
 	_, _ = pool.Exec(ctx, `UPDATE portal_certificate_orders SET next_attempt_at=now() WHERE id::text=$1`, accC.OrderID)
@@ -224,7 +219,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("under the raised cap the order issues: %s", cStatus)
 	}
 
-	// ---- 5. Operator revocation: the CA confirms, and the appliance hears "revoked".
+	// Operator revocation.
 	n, err := svc.RevokeAppliance(ctx, appA, "", "operator@test", "suspected misuse")
 	if err != nil || n < 1 {
 		t.Fatalf("revoke: %d %v", n, err)
@@ -244,7 +239,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("sync tells the appliance its certificate is revoked: %+v", syncAfter.Certificates)
 	}
 
-	// ---- 6. Hotel domain, verified through two resolvers, issued through its delegated challenge name.
+	// Hotel domain: verified through two resolvers, issued via its delegated challenge name.
 	const hotel = "wifi.nilehotel.test"
 	dsync, err := svc.Sync(ctx, appB, SyncRequest{PortalIP: "10.254.254.1", CustomDomain: str(hotel)})
 	if err != nil || dsync.CustomDomain == nil || dsync.CustomDomain.Status != "PENDING" || len(dsync.CustomDomain.Records) != 3 {
@@ -264,7 +259,6 @@ func TestPebbleEndToEnd(t *testing.T) {
 		d.set(recs[1].Name, rrCNAME, recs[1].Value)
 		d.set(recs[2].Name, rrCNAME, recs[2].Value)
 	}
-	// The hotel's real DNS (challtestsrv here) carries the delegation the CA follows.
 	cts := &Challtestsrv{BaseURL: env.ctsURL}
 	if err := cts.post(ctx, "/set-cname", map[string]any{"host": dnsName(recs[2].Name), "target": recs[2].Value}); err != nil {
 		t.Fatal(err)
@@ -287,7 +281,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("a hotel-domain certificate is CUSTOM and never counts against the OneGate cap: %s %v", kind, countsNew)
 	}
 
-	// ---- 7. The lifecycle release: B is retired -> hostname released, A record deleted, certificates revoked.
+	// Lifecycle release of B.
 	tx, _ := pool.Begin(ctx)
 	if err := ReleaseAppliance(ctx, tx, appB, ActorSystem); err != nil {
 		t.Fatal(err)
@@ -313,7 +307,6 @@ func TestPebbleEndToEnd(t *testing.T) {
 		t.Fatalf("a retired appliance does not get its hostname back by syncing: %v", err)
 	}
 
-	// The fleet view tells staging, production and test-CA certificates apart.
 	fleet, err := svc.Fleet(ctx)
 	if err != nil || len(fleet) < 3 {
 		t.Fatalf("fleet: %d %v", len(fleet), err)
@@ -339,7 +332,7 @@ func TestPebbleEndToEnd(t *testing.T) {
 		}
 	}
 
-	// ---- 8. Review findings (PR #212). The zone cannot move under live hostnames.
+	// The zone cannot move under live hostnames.
 	if _, err := svc.UpdateSettings(ctx, SettingsUpdate{ZoneName: str("other-zone.test")}, "test"); !isRefusal(err, 409) {
 		t.Fatalf("a zone change with live hostnames must be refused (409): %v", err)
 	}
@@ -375,7 +368,6 @@ func TestPebbleEndToEnd(t *testing.T) {
 			t.Fatal("a certificate from the current directory keeps its renewal date")
 		}
 	}
-	// Deletion is refused before anything is revoked when Central cannot clean up afterwards.
 	unconfigured := New(pool, Options{SecretsDir: t.TempDir(), DNSProvider: ProviderCloudflare})
 	if err := unconfigured.CanRelease(ctx, appA); err == nil {
 		t.Fatal("an appliance with a live certificate and A record cannot be released by an unconfigured Central")
@@ -390,8 +382,7 @@ func isRefusal(err error, status int) bool {
 	return ok && r.Status == status
 }
 
-// mustIssued fetches the order as the appliance would and checks the chain: it names exactly host, carries
-// the CSR's key, chains to Pebble's root, and is currently valid.
+// mustIssued fetches the order as the appliance would and verifies the chain against Pebble's root.
 func mustIssued(t *testing.T, ctx context.Context, svc *Service, appID, orderID, host string, pub *ecdsa.PublicKey, env pebbleEnv) *OrderView {
 	t.Helper()
 	o, err := svc.GetOrder(ctx, appID, orderID)

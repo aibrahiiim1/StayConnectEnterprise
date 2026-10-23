@@ -11,9 +11,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 )
 
-// reexecSelf replaces the process image so acctd re-reads the appliance's
-// identity + signed assignment. Same PID, so the supervisor sees a normal
-// application transition rather than a crash.
+// reexecSelf replaces the process image (same PID, so the supervisor sees no crash) to re-read identity and assignment.
 func reexecSelf() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -24,16 +22,10 @@ func reexecSelf() {
 	}
 }
 
-// waitForAssignment parks an unassigned appliance's accounting daemon until a
-// signed assignment appears, then re-execs into the normal path. An appliance
-// with no customer must not attribute usage to anyone.
-//
-// assigned is the VERIFIED check (resolveAcctdScope), never the raw file: a document that cannot be verified
-// must not wake accounting up.
+// waitForAssignment parks accounting until a signed assignment appears: an appliance with no customer must
+// not attribute usage to anyone. assigned must be the VERIFIED check, never the raw file.
 func waitForAssignment(ctx context.Context, assigned func() bool) {
-	// Beat the liveness heartbeat while paused: acctd IS alive and doing its job
-	// (waiting for an assignment), so the health supervisor must see it as
-	// healthy-idle, not degraded. Beat immediately, then on a short cadence.
+	// Keep beating while paused so the health supervisor sees healthy-idle, not degraded.
 	livez.Touch("acctd")
 	beat := time.NewTicker(5 * time.Second)
 	defer beat.Stop()
@@ -54,9 +46,7 @@ func waitForAssignment(ctx context.Context, assigned func() bool) {
 	}
 }
 
-// watchAssignmentReexec re-execs acctd when the assignment version changes, so a
-// re-assigned appliance immediately bills the NEW customer instead of continuing
-// to attribute usage to the previous one.
+// watchAssignmentReexec re-execs on an assignment version change so usage is never billed to the previous customer.
 func watchAssignmentReexec(ctx context.Context, store *assignment.Store) {
 	baseline := int64(0)
 	if r, err := store.Load(); err == nil && r != nil {

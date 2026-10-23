@@ -1,24 +1,16 @@
 package main
 
-// THE PORTAL'S LOOK, AS ONE TOKEN SET.
-//
-// Every guest page -- sign-in, package choice, "You're online", the failure page -- is drawn from these two
-// sheets. The first is the default look: the OneGate palette, radius scale and type roles as CSS custom
-// properties (design-system/README.md, "Client Portal"), which the hotel's Portal settings override one
-// property at a time. The second arranges the SAME elements into the six layouts. A layout never introduces a
-// colour or a radius of its own; it reads the tokens, which is why each one stays coherent under any brand
-// colour and any photograph.
-//
-// The page is served to captive-portal mini-browsers and old phones, with no internet behind them. So: no
-// fonts to download (the platform's own, with Arabic-capable faces named for Arabic), no framework, and every
-// newer CSS feature has a plain fallback declared before it or degrades to something that still works.
+// The portal's default look as CSS custom properties (design-system/README.md, "Client Portal"), which hotel
+// settings override one property at a time; the layouts only read the tokens. Served to captive-portal
+// mini-browsers and old phones with no internet: no web fonts, no framework, and newer CSS always has a
+// fallback.
 //
 // Token map (hotel setting -> property):
 //   brand colour -> --sc-brand          darker shade -> --sc-brand-dark     text colour -> --sc-ink
 //   corner radius -> --sc-radius (cards; controls are 0.6 of it)            typeface -> font-family on <html>
 //   background photo -> --sc-bg         hero photo -> --sc-hero             photo darkening -> --sc-overlay
 //   heading typeface -> --sc-heading-font
-// Derived by the server from those colours so the words on them stay readable (portal_colour.go):
+// Derived by the server for readability (portal_colour.go):
 //   --sc-on-brand, --sc-on-brand-dark (button labels), --sc-link, --sc-on-hero and --sc-hero-shade.
 // Layout options arrive as attributes on <html>: data-template, data-density, data-panel, data-hero,
 // data-surface.
@@ -612,8 +604,7 @@ const portalBaseCSS = `
   }
 `
 
-// portalTemplateCSS: the six layouts, as rules over the same elements. Classic is the base sheet above.
-// Mobile first; each layout opens out at 900px.
+// portalTemplateCSS: the six layouts, mobile first, each opening out at 900px. Classic is the base sheet.
 const portalTemplateCSS = `
   .sc-hero { display: none; }
   .sc-hero-logo { display: block; max-height: 56px; max-width: 220px; margin: 0 0 16px; object-fit: contain; }
@@ -867,23 +858,13 @@ const portalTemplateCSS = `
   html[dir="rtl"][dir] *:not(input) { letter-spacing: 0; }
 `
 
-// portalGuardCSS -- why the hotel's stylesheet can restyle every control and hide none of them.
-//
-// The cascade has three tiers on the sign-in page, weakest first:
-//  1. @layer sc-base, sc-template   the portal's own look, and the template's
-//  2. @layer hotel                  the hotel's custom CSS: beats (1) whatever the specificity
-//  3. THIS SHEET, UNLAYERED         a normal declaration outside every layer beats every normal
-//     declaration inside one, whatever the specificity
-//
-// and above all of them the inline style="" the sign-in script sets to show and hide its own forms, which is
-// why nothing here uses !important: an important declaration here would beat the script too, and the
-// voucher/personal-account switch would stop working. The one way a layered rule CAN beat an unlayered one is
-// !important, so the portal removes !important from the hotel's stylesheet before serving it (see
-// internal/portaldesign).
-//
-// What is guarded is what a guest needs to sign in: the path from the page down to the fields, the fields,
-// their labels and buttons, the group tabs, and the messages the server or the sign-in script shows. Values
-// here match the portal's own, so on an unstyled page this sheet changes nothing.
+// portalGuardCSS lets the hotel's stylesheet restyle every sign-in control and hide none of them. Cascade,
+// weakest first: (1) @layer sc-base, sc-template; (2) @layer hotel, which beats (1); (3) this sheet,
+// unlayered, which beats every normal layered declaration. Above all sits the sign-in script's inline
+// style="", so nothing here uses !important (it would beat the script and break the voucher/account switch).
+// A layered rule can beat an unlayered one only with !important, so it is stripped from the hotel's CSS
+// (internal/portaldesign). Guarded: the path to the fields, fields, labels, buttons, group tabs and messages.
+// Values match the portal's own, so an unstyled page is unchanged.
 const portalGuardCSS = `
 html, body { display: block; visibility: visible; opacity: 1; }
 .page { display: flex; }
@@ -922,17 +903,11 @@ main.card { display: block; }
 #custom-html { position: relative; inset: auto; z-index: 0; contain: layout paint; transform: none; translate: none; }
 ` + guardFocusAndInkCSS
 
-// guardFocusAndInkCSS is the part of the guard that is about SEEING the page rather than reaching it, on every
-// guest page (both guard sheets carry it):
-//
-//   - THE FOCUS RING CANNOT BE TAKEN AWAY (WCAG 2.4.7, 2.4.11). "outline: none" on :focus in the hotel's layer
-//     loses to this unlayered rule. It is the portal's own ring; the ink is written out, not var(--sc-ink),
-//     because a hotel stylesheet can redefine the variable. Only the outline is held -- the white halo and
-//     anything else a hotel does on focus are left alone. It is a rule of its own so that a browser without
-//     :focus-visible drops only it, and keeps the base sheet's :focus ring.
-//   - THE WORDS IN A FIELD AND IN A MESSAGE STAY READABLE (WCAG 1.4.3). Fields keep dark ink on white; the
-//     refusal, advisory and information boxes keep their own pairs, each at least 4.5:1. Borders, radius, size
-//     and type stay the hotel's.
+// guardFocusAndInkCSS is the part of the guard about seeing the page, carried by both guard sheets:
+//   - The focus ring cannot be removed (WCAG 2.4.7, 2.4.11): "outline: none" in the hotel's layer loses to
+//     this unlayered rule. The ink is written out, not var(--sc-ink), which a hotel can redefine. Only the
+//     outline is held, in a rule of its own so a browser without :focus-visible keeps the base :focus ring.
+//   - Field and message text stays readable (WCAG 1.4.3): dark ink on white, message boxes at least 4.5:1.
 const guardFocusAndInkCSS = `
 a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible,
 summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid #14161a; outline-offset: 2px; }
@@ -945,14 +920,10 @@ textarea { color: #14161a; background-color: #fff; }
 .err.err--ok:not(:empty) { color: #1d4f7c; background-color: #eaf2f8; }
 `
 
-// portalPageGuardCSS is the same guarantee for the pages after sign-in -- package choice, "You're online", the
-// status page and the failure pages -- which carry the hotel's custom CSS too, in the same `@layer hotel` under
-// the same unlayered guard (guestHead in templates.go). What a guest needs on those pages is the path from the
-// page to the words and the buttons: the heading and the message (a refusal is role="alert"), the facts, the
-// actions (Disconnect, Back, Status), the package buttons, the device and package panels once they have
-// something to show, and the language pill. Values match the portal's own, so an unstyled page is unchanged.
-// Nothing here uses !important, for the same reason as above, and every rule that sets display respects the
-// hidden attribute, which is how the pages' own scripts show and hide their panels and buttons.
+// portalPageGuardCSS is the same guarantee for the pages after sign-in (guestHead in templates.go): the path
+// to the heading, message (a refusal is role="alert"), facts, actions, package buttons, panels and language
+// pill. No !important, and every rule that sets display respects the hidden attribute, which the pages'
+// scripts use to show and hide panels and buttons.
 const portalPageGuardCSS = `
 html, body { display: block; visibility: visible; opacity: 1; }
 .page { display: flex; }

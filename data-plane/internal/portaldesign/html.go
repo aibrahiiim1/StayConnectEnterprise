@@ -8,45 +8,23 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// THE CUSTOM HTML FRAGMENT: AN ALLOWLIST, APPLIED TO A PARSED TREE.
+// The custom HTML fragment is an allowlist applied to a tree parsed with the HTML5 algorithm (the tree a
+// guest's browser would build) and rebuilt from only what is allowed; a denylist over raw text loses to
+// spellings nobody thought of. Text is re-escaped on output.
 //
-// What this replaced was a regular expression listing spellings of "script". A denylist over raw text loses
-// to any spelling it did not think of, and HTML has a great many: <img/onerror=...> has no whitespace before
-// the handler, <base href> contains no script at all and re-points every relative form action on the page,
-// <button form=… formaction=…> submits the guest's own voucher form somewhere else, <meta http-equiv=refresh>
-// navigates away, and javascript&#58; is javascript: once the parser has decoded it.
-//
-// So the fragment is PARSED -- by the same HTML5 algorithm a browser uses, so the tree here is the tree a guest's
-// browser would build -- and then REBUILT from nothing but what is explicitly allowed. Anything not on the
-// lists below never reaches the output, whatever it is called, however it is spelled, and whether or not
-// anybody has thought of it yet. Text is re-escaped on the way out, so a string that decoded to "<script>"
-// leaves as &lt;script&gt;.
-//
-// THE CHOICES, AND WHY.
-//
-//   - Elements are the vocabulary of an amenities block: text, headings, lists, a figure, a table of opening
-//     hours, links and images. Tables are included because "Pool 08:00–20:00" is the single most common thing a
-//     hotel wants to add, and table markup can carry nothing a <div> cannot.
-//   - NO ids. The page's own elements are found by id (#form-voucher, #pms-room, #brand-name…); a fragment that
-//     declared a second id="form-voucher" would change which element the sign-in script talks to.
-//   - NO name. <img name="cookie"> replaces document.cookie for every script on the page (DOM clobbering), and
-//     the language preference is stored in exactly that.
-//   - NO data-* attributes. The sign-in script selects by data attributes (data-i18n, data-otp, data-stage); a
-//     fragment carrying them would be edited by the page's own code.
-//   - style IS allowed, through the same declaration rules as the custom stylesheet (see css.go). Refusing it
-//     would only move the same declarations into the stylesheet, where they are subject to exactly the same
-//     rules; and the fragment's container is paint-contained on the page, so an inline position:fixed cannot
-//     lift an element out over the sign-in forms.
-//   - Links go to https, this appliance, #anchors, mailto: or tel:, and a link that opens a new tab always
-//     carries rel="noopener noreferrer" so the page it opens cannot reach back into this one.
-//   - Images come from the hotel's uploads, https, or inline PNG/JPEG/GIF/WebP -- never SVG, which as a
-//     document can carry script.
-//   - Elements that are DANGEROUS are removed together with everything inside them (a <script>'s body is
-//     code, not text to keep). Elements that are merely UNSUPPORTED (<font>, <center>, a custom element) are
-//     unwrapped: the tag goes, the text inside stays.
+//   - Elements suit an amenities block (text, headings, lists, tables, links, images).
+//   - No ids: the sign-in script finds the page's elements by id, so a duplicate would redirect it.
+//   - No name: <img name="cookie"> clobbers document.cookie, where the language preference lives.
+//   - No data-*: the sign-in script selects by data attributes and would edit the fragment.
+//   - style is allowed through the same declaration rules as the stylesheet (css.go); the fragment container
+//     is paint-contained so an inline position:fixed can't cover the sign-in forms.
+//   - Links go to https, this appliance, #anchors, mailto: or tel:; new-tab links always get
+//     rel="noopener noreferrer".
+//   - Images: uploads, https, or inline PNG/JPEG/GIF/WebP; never SVG, which can carry script.
+//   - Dangerous elements are removed with their content; merely unsupported ones (<font>, custom elements)
+//     are unwrapped and their text kept.
 
-// MaxFragmentDepth bounds nesting. Nothing a hotel writes by hand is forty levels deep, and a pathological
-// document should cost a refusal rather than a deep recursion on every guest page load.
+// MaxFragmentDepth bounds recursion on every guest page load.
 const MaxFragmentDepth = 40
 
 var allowedElements = map[string]bool{
@@ -61,8 +39,7 @@ var allowedElements = map[string]bool{
 	"table": true, "caption": true, "thead": true, "tbody": true, "tfoot": true, "tr": true, "th": true, "td": true,
 }
 
-// Removed WITH their content. Their bodies are code, foreign markup, or controls -- none of it is text a
-// hotel meant a guest to read.
+// Removed with their content: bodies are code, foreign markup or controls, not text to keep.
 var droppedWithContent = map[string]string{
 	"script": "script is not allowed on the sign-in page",
 	"style":  "put styling in Custom CSS instead",
@@ -88,7 +65,6 @@ var droppedWithContent = map[string]string{
 	"portal": "not supported", "head": "not supported",
 }
 
-// Attributes allowed on every allowed element.
 var globalAttrs = map[string]bool{"class": true, "title": true, "lang": true, "dir": true, "role": true, "style": true}
 
 var (
@@ -101,8 +77,7 @@ var (
 
 var voidElements = map[string]bool{"br": true, "hr": true, "img": true}
 
-// SanitizeHTML returns the fragment rebuilt from allowed parts only, and a finding for everything that was
-// removed or changed. An empty issue list means the output says exactly what the input said.
+// SanitizeHTML: an empty issue list means the output says exactly what the input said.
 func SanitizeHTML(in string) (string, []Issue) {
 	return sanitizeHTMLField("custom_html", in)
 }
@@ -137,8 +112,7 @@ func writeNode(b *strings.Builder, n *html.Node, depth int, is *issueSet) {
 		b.WriteString(html.EscapeString(n.Data))
 		return
 	case html.CommentNode, html.DoctypeNode:
-		// Comments are dropped without comment: they are invisible, carry no behaviour once removed, and
-		// reporting them would make an operator fix something that was never a problem.
+		// Dropped silently: invisible, and reporting them would flag a non-problem.
 		return
 	case html.DocumentNode:
 		writeChildren(b, n, depth, is)
@@ -153,8 +127,7 @@ func writeNode(b *strings.Builder, n *html.Node, depth int, is *issueSet) {
 	}
 	tag := n.Data
 	if n.Namespace != "" {
-		// Parsed as SVG or MathML: foreign content has its own parsing rules and is where most mutation-XSS
-		// lives. None of it is needed for an amenities block.
+		// SVG/MathML have their own parsing rules, where most mutation-XSS lives.
 		is.errorf("removed <%s> (%s markup is not allowed)", tag, strings.ToUpper(n.Namespace))
 		return
 	}
@@ -196,13 +169,11 @@ func writeNode(b *strings.Builder, n *html.Node, depth int, is *issueSet) {
 		writeAttr(b, key, val)
 	}
 	if tag == "img" && !seen["alt"] {
-		// Served as written, but said: a screen reader reads an image with no alt by its file name (WCAG 1.1.1).
-		// alt="" is a decision -- the image is decoration -- and is not reported.
+		// Served as written but warned: alt="" (decoration) is a decision and is not reported.
 		is.warnf(`an <img> has no alt text: describe it in alt="…", or write alt="" if it is only decoration`)
 	}
 	if tag == "a" && (hasBlank || hasHref) {
-		// Whatever the operator wrote. A page opened from the sign-in page must not be able to navigate it
-		// (window.opener), and the guest's portal URL is nobody's referrer.
+		// Overrides whatever was written: an opened page must not reach window.opener or see the portal URL as referrer.
 		writeAttr(b, "rel", "noopener noreferrer")
 	}
 	b.WriteByte('>')
@@ -223,7 +194,6 @@ func writeAttr(b *strings.Builder, key, val string) {
 	b.WriteByte('"')
 }
 
-// checkAttr decides one attribute. It returns the value to emit (possibly rewritten) and whether to emit it.
 func checkAttr(tag, key, val string, is *issueSet) (string, bool) {
 	switch {
 	case strings.HasPrefix(key, "on"):
@@ -322,8 +292,7 @@ func checkAttr(tag, key, val string, is *issueSet) (string, bool) {
 		return capText(val, 256), true
 	}
 
-	// formaction, srcdoc, srcset, action, xlink:href, background, poster, ping, http-equiv… and anything
-	// else nobody has invented yet: not on the list, so not on the page.
+	// Anything unlisted (formaction, srcdoc, srcset, ping, http-equiv, ...) is dropped.
 	is.errorf("removed the %s attribute on <%s>: it is not an allowed attribute", key, tag)
 	return "", false
 }

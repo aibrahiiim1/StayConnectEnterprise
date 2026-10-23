@@ -2,20 +2,16 @@
 
 package main
 
-// Real HTTP + PostgreSQL contract tests for the Checkout-Grace PUBLICATION rules: a policy that would later be
-// judged invalid by the Checkout conversion must be refused while the operator is looking at it, not accepted
-// and silently degraded to Emergency Grace on the next departure.
+// A policy the Checkout conversion would later judge invalid must be refused at publication, not accepted and
+// silently degraded to Emergency Grace on the next departure.
 
 import (
 	"context"
 	"testing"
 )
 
-// seedGracePackage provisions the canonical grace catalog and returns the current CHECKOUT_GRACE package
-// revision together with the plan scalars it pins.
-// seedGracePackage creates an ORDINARY (non-emergency) system-owned Checkout-Grace package for this site and
-// returns the revision plus the plan scalars it pins. The reserved Emergency catalog is deliberately NOT used:
-// it is the fallback of last resort, not a policy an operator may adopt.
+// seedGracePackage creates an ordinary system-owned Checkout-Grace package and returns its revision and pinned
+// plan scalars. The reserved Emergency catalog is not used: it is a fallback, not a policy an operator may adopt.
 func (f *apiFixture) seedGracePackage(t *testing.T) (rev string, down, up, devLimit, duration int, quota int64, policy string) {
 	t.Helper()
 	ctx := context.Background()
@@ -45,8 +41,8 @@ func (f *apiFixture) seedGracePackage(t *testing.T) (rev string, down, up, devLi
 	return
 }
 
-// policyOnly is what an operator now publishes: TYPED POLICY, no package. The system derives the plan and
-// package revisions that express it exactly, in the publication's own transaction.
+// policyOnly is what an operator publishes: typed policy, no package. The system derives the plan and package
+// revisions in the publication's own transaction.
 func policyOnly(expected, duration, down, up, devLimit int, quota int64, devPolicy string) map[string]any {
 	p := policyFor("", expected, duration, down, up, devLimit, quota, devPolicy)
 	delete(p, "grace_package_revision_id")
@@ -70,13 +66,8 @@ func policyFor(rev string, expected, duration, down, up, devLimit int, quota int
 	}
 }
 
-// PUBLISHING A POLICY DERIVES ITS OWN PACKAGE, and that is the whole point of the operator workflow.
-//
-// This test used to assert the opposite -- that a policy with no package revision is refused -- and that was
-// right for as long as the operator was expected to choose one. It made the feature unusable: the checkout
-// validator demands exact equality between the typed policy and the pinned revision, so the only acceptable
-// package is one built from the policy, and the operator publisher refuses to create reserved system
-// packages. A site with none had no route to a policy at all. PRE-LIVE was in exactly that state.
+// Publishing a policy derives its own package: the checkout validator demands exact equality between policy
+// and pinned revision, and the operator publisher cannot create reserved system packages.
 func TestIntegration_API_GracePublicationDerivesItsOwnPackage(t *testing.T) {
 	f := newAPI(t)
 	status, body := f.do(t, "PUT", "/checkout-grace", policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE"))
@@ -87,10 +78,8 @@ func TestIntegration_API_GracePublicationDerivesItsOwnPackage(t *testing.T) {
 		t.Fatalf("first publication produced version %v, want 1", body["config_version"])
 	}
 
-	// THE DERIVED PACKAGE MUST SATISFY THE CHECKOUT VALIDATOR, asked with the same function the conversion
-	// uses. A publication that "succeeded" while leaving a package the validator refuses would fall back to
-	// Emergency Grace on the very next departure and raise an alert -- success on the screen, failure at the
-	// door.
+	// The derived package must satisfy the checkout validator, asked with the conversion's own function; otherwise
+	// the next departure falls back to Emergency Grace.
 	var rev string
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT grace_package_revision_id::text FROM iam_v2.site_checkout_grace_config
@@ -101,16 +90,14 @@ func TestIntegration_API_GracePublicationDerivesItsOwnPackage(t *testing.T) {
 		t.Fatalf("the DERIVED package is refused by the checkout validator: %s", got)
 	}
 
-	// The operator is never asked for a package, so offering one is a refusal rather than a silent ignore --
-	// an ignored field is how a caller comes to believe it chose something.
+	// Offering a package is a refusal, not a silent ignore: an ignored field makes a caller believe it chose something.
 	status, body = f.do(t, "PUT", "/checkout-grace",
 		policyFor(rev, 1, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE"))
 	if status != 400 || body["error"] != "package_not_accepted" {
 		t.Fatalf("supplying a package got %d %v, want 400/package_not_accepted", status, body)
 	}
 
-	// AND THE DATABASE GUARD IS UNCHANGED: the controlled operation still refuses a NULL package outright.
-	// The HTTP layer deriving one does not mean the boundary stopped requiring one.
+	// The controlled operation still refuses a NULL package outright.
 	var out int
 	if err := f.pool.QueryRow(context.Background(), `SELECT iam_v2.publish_checkout_grace_policy(
 		$1,$2,NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,1,$3::uuid,'DIRECT')`,
@@ -119,9 +106,8 @@ func TestIntegration_API_GracePublicationDerivesItsOwnPackage(t *testing.T) {
 	}
 }
 
-// A REFUSED PUBLICATION LEAVES NOTHING BEHIND -- no config row, no audit row, and no half-built grace catalog
-// claiming to be something nobody validated. Derivation happens inside the publication's transaction, so an
-// invalid policy must not leave a plan or package revision stranded.
+// A refused publication leaves nothing behind: derivation is in the publication's transaction, so no config row,
+// audit row, plan or package revision is stranded.
 func TestIntegration_API_RefusedGracePolicyLeavesNoDerivedCatalog(t *testing.T) {
 	f := newAPI(t)
 	p := policyOnly(0, 3600, 4000, 1500, 2, 524288000, "REJECT_NEW_DEVICE")
@@ -173,15 +159,8 @@ func TestIntegration_API_GracePackageSelector(t *testing.T) {
 	}
 }
 
-// DERIVATION IS EXACT FOR EVERY POLICY, not just the one the fixture happens to use.
-//
-// This replaces a poison test that mutated one published scalar at a time away from a hand-picked package and
-// asserted each was refused. That protected the operator against mistyping numbers the package could not
-// deliver -- a risk that no longer exists, because the operator does not choose a package and does not retype
-// its numbers. The guarantee that DOES still matter is the same one seen from the other side: whatever policy
-// is published, the package the system derives for it must satisfy the checkout validator exactly. If
-// derivation ever rounded, truncated or defaulted a field, the conversion would fall back to Emergency Grace
-// while the screen showed a published policy.
+// Derivation is exact for every policy: if it ever rounded, truncated or defaulted a field, the conversion
+// would fall back to Emergency Grace while the screen showed a published policy.
 func TestIntegration_API_EveryPublishedPolicyDerivesAnExactPackage(t *testing.T) {
 	f := newAPI(t)
 	expected := 0
@@ -212,18 +191,16 @@ func TestIntegration_API_EveryPublishedPolicyDerivesAnExactPackage(t *testing.T)
 			f.tenant, f.site).Scan(&rev, &gotDur, &gotDown, &gotUp, &gotQuota, &gotDev); err != nil {
 			t.Fatalf("%s: read back: %v", tc.name, err)
 		}
-		// What was stored is what was asked for -- no silent normalisation on the way through.
+		// No silent normalisation on the way through.
 		if gotDur != tc.duration || gotDown != tc.down || gotUp != tc.up || gotQuota != tc.quota || gotDev != tc.devLimit {
 			t.Fatalf("%s: stored %d/%d/%d/%d/%d, want %d/%d/%d/%d/%d",
 				tc.name, gotDur, gotDown, gotUp, gotQuota, gotDev,
 				tc.duration, tc.down, tc.up, tc.quota, tc.devLimit)
 		}
-		// And the derived package agrees, judged by the conversion's own matcher.
 		if reason := f.mismatchReason(t, rev, tc.duration, tc.down, tc.up, tc.quota, tc.devLimit, "REJECT_NEW_DEVICE"); reason != "" {
 			t.Fatalf("%s: the derived package is refused by the checkout validator: %s", tc.name, reason)
 		}
 	}
-	// Each publication is its own version, appended rather than overwritten.
 	if n := count(t, f.pool, `SELECT count(*) FROM iam_v2.checkout_grace_policy_publications WHERE tenant_id=$1`, f.tenant); n != 4 {
 		t.Fatalf("four publications produced %d ledger rows", n)
 	}
@@ -235,8 +212,7 @@ func TestIntegration_API_ControlledOperationsRefuseNullPreconditions(t *testing.
 	ctx := context.Background()
 	rev, down, up, devLimit, duration, quota, devPolicy := f.seedGracePackage(t)
 
-	// Published as an operator now does -- policy only. rev is still needed below, because the direct calls
-	// must be refused on their NULL precondition rather than on anything about the package they name.
+	// rev is needed so the direct calls are refused on their NULL precondition, not on the package they name.
 	if status, body := f.do(t, "PUT", "/checkout-grace",
 		policyOnly(0, duration, down, up, devLimit, quota, devPolicy)); status != 200 {
 		t.Fatalf("initial publication failed: %d %v", status, body)
@@ -275,9 +251,8 @@ func TestIntegration_API_ControlledOperationsRefuseNullPreconditions(t *testing.
 	}
 }
 
-// The reserved Emergency catalog is never selectable and never publishable as the ordinary policy: adopting it
-// would make "configured" and "emergency" indistinguishable and silence the alert that says the real policy is
-// broken.
+// The reserved Emergency catalog is never publishable as the ordinary policy: it would make "configured" and
+// "emergency" indistinguishable and silence the alert that the real policy is broken.
 func TestIntegration_API_EmergencyCatalogIsNotAnOrdinaryPolicy(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -296,19 +271,16 @@ func TestIntegration_API_EmergencyCatalogIsNotAnOrdinaryPolicy(t *testing.T) {
 			t.Fatal("the reserved Emergency catalog was offered as an ordinary policy choice")
 		}
 	}
-	// The matcher refuses it outright -- the reserved catalog is not a policy anyone can adopt, whatever the
-	// scalars say.
+	// The matcher refuses it whatever the scalars say.
 	if reason := f.mismatchReason(t, emergencyRev, 3600, 5000, 2000, 524288000, 1, "REJECT_NEW_DEVICE"); reason != "PACKAGE_IS_EMERGENCY_CATALOG" {
 		t.Fatalf("the emergency package's mismatch reason is %q, want PACKAGE_IS_EMERGENCY_CATALOG", reason)
 	}
-	// Naming it is refused before the question is even asked, because no package is accepted from a caller.
+	// No package is accepted from a caller, so naming it is refused up front.
 	if status, resp := f.do(t, "PUT", "/checkout-grace",
 		policyFor(emergencyRev, 0, 3600, 5000, 2000, 1, 524288000, "REJECT_NEW_DEVICE")); status != 400 {
 		t.Fatalf("naming a package got %d %v, want 400", status, resp)
 	}
-	// AND THE DERIVATION DOES NOT REACH FOR IT EITHER. Publishing the emergency catalog's OWN terms is the
-	// case most likely to make a shortcut look correct -- the numbers match it exactly -- so the site policy
-	// must still end up on the system package, not on the reserved one.
+	// Publishing the emergency catalog's own terms must still land on the system package, not the reserved one.
 	if status, resp := f.do(t, "PUT", "/checkout-grace",
 		policyOnly(0, 3600, 5000, 2000, 1, 524288000, "REJECT_NEW_DEVICE")); status != 200 {
 		t.Fatalf("publishing emergency-shaped terms was refused: %d %v", status, resp)

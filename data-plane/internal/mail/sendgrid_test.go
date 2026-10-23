@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// fakeSendGrid stands in for api.sendgrid.com — verifies the request shape
-// matches the v3 /mail/send contract and lets the test assert on it.
+// fakeSendGrid stands in for api.sendgrid.com and lets the test assert on the request.
 func fakeSendGrid(t *testing.T, status int, captured *sgRequest, gotAuth *string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +98,7 @@ func TestSendGridConstructorValidation(t *testing.T) {
 	}
 }
 
-// Every request carries tracking_settings with each tracker explicitly false: an omitted block, or an omitted
-// false, leaves the decision to the SendGrid account's defaults.
+// Every request carries tracking_settings with each tracker explicitly false; an omitted block defers to account defaults.
 func TestSendGridDisablesTracking(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

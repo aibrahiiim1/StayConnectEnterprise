@@ -11,12 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// VIP AND TRAVEL AGENT REACH THE STAY -- AND ONLY WHAT A RECORD STATES CHANGES IT.
-//
-// Package rules for VIP guests and for a travel agent's guests read iam_v2.stays.vip / travel_agent. Nothing
-// wrote them, so every such rule matched nobody. A record that does not state an attribute must leave it alone;
-// a record that states "no agent" clears it; a room move carries a change like any other GC.
-
 func withAttrs(payload, attrs string) string {
 	return strings.TrimSuffix(payload, "}") + "," + attrs + "}"
 }
@@ -44,14 +38,12 @@ func TestIntegration_GuestAttributesFollowWhatThePMSStates(t *testing.T) {
 		t.Fatalf("after GI: vip=%v agent=%v", vip, agent)
 	}
 
-	// A GC that does not state them leaves them alone.
 	insertLive(t, p, s, "a-gc1", "GC", pay(res, "2101", "Doe", "Janet", "", "260101", "260110"))
 	process(t, pr, s)
 	if vip, agent, _ := attrsOf(t, p, s, res); !vip.Bool || agent.String != "Sunny Tours" {
 		t.Fatalf("an unstated attribute changed: vip=%v agent=%v", vip, agent)
 	}
 
-	// A GC stating "not VIP" and "no agent" clears both.
 	insertLive(t, p, s, "a-gc2", "GC", withAttrs(pay(res, "2101", "Doe", "Janet", "", "260101", "260110"),
 		`"travel_agent":"","vip":false`))
 	process(t, pr, s)
@@ -59,7 +51,6 @@ func TestIntegration_GuestAttributesFollowWhatThePMSStates(t *testing.T) {
 		t.Fatalf("stated no-VIP/no-agent: vip=%v agent=%v", vip, agent)
 	}
 
-	// A room move carries its attributes too.
 	insertLive(t, p, s, "a-mv", "GC", withAttrs(pay(res, "2102", "Doe", "Janet", "", "260101", "260110"),
 		`"travel_agent":"Blue Sea","vip":true`))
 	process(t, pr, s)

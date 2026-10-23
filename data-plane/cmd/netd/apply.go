@@ -16,12 +16,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// applier owns the transactional apply/rollback of guest-network config. It
-// applies L2/L3 SURGICALLY with `ip` commands (additive, reversible, never
-// touching the management/WAN/legacy interfaces) and writes netplan only for
-// reboot persistence. nftables + Kea + Unbound are rendered from the DB and
-// swapped atomically. A watchdog auto-rolls-back if the operator does not
-// confirm within confirmWindow.
+// applier owns the transactional apply/rollback of guest-network config: L2/L3 applied surgically with `ip` (additive, reversible,
+// never touching management/WAN/legacy interfaces), netplan written only for reboot persistence, nftables + Kea + Unbound rendered
+// from the DB and swapped atomically; a watchdog rolls back if not confirmed within confirmWindow.
 type applier struct {
 	st            *store
 	kea           *keaClient
@@ -38,46 +35,32 @@ type applier struct {
 	legacyBridge string
 	dryRun       bool // pilot-safe: skip real ip/nft/kea side effects
 
-	// runFn/outFn are the ONLY places netd shells out. They are fields so a test can observe exactly which
-	// commands a reconciliation issued — including, for the steady-state case, that it issued none. A test
-	// that could only inspect the resulting ruleset could not tell "already correct, did nothing" apart from
-	// "rewrote it to the same thing", and those differ by whether a live guest keeps their authorization.
+	// runFn/outFn are the ONLY places netd shells out; as fields a test can observe which commands a reconciliation issued
+	// (including none in steady state, which differs from rewriting the same thing and affects live guests' authorization).
 	runFn func(ctx context.Context, name string, args ...string) error
 	outFn func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-	// discoverFn is the interface-discovery seam. Presence is observed live at decision time, so a test has
-	// to be able to say "this interface is gone now" without unplugging anything.
+	// discoverFn is the interface-discovery seam: presence is observed live at decision time.
 	discoverFn func(ctx context.Context) ([]Interface, error)
-	// knownFn / syncFn are the inventory seams beside it: what this appliance has EVER recorded, and the
-	// opportunistic refresh. Both are advisory to the decision -- presence does not depend on either -- so a
-	// test can state them, or leave them out entirely.
+	// knownFn / syncFn are advisory inventory seams (what was EVER recorded, and the opportunistic refresh); presence depends on neither.
 	knownFn func(ctx context.Context) (map[string]bool, error)
 	syncFn  func(ctx context.Context, ifaces []Interface) error
 
-	// activeIntentFn / prevIntentFn / eventFn are the database seams the lifecycle paths use. They exist so a
-	// test can state, without a database, exactly what the CONFIRMED active revision holds and what the
-	// mutable guest_networks rows hold — which is the whole question item 2 is about: a restart must
-	// reconstruct the confirmed revision, never an unapplied draft.
+	// activeIntentFn / prevIntentFn / eventFn are the database seams: a restart must reconstruct the CONFIRMED active revision, never an unapplied draft.
 	activeIntentFn func(ctx context.Context) (string, string, []netcfg.GuestNetwork, error)
 	prevIntentFn   func(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error)
 	eventFn        func(ctx context.Context, revID, kind string, ok bool, detail map[string]any)
 	prevBundleFn   func(ctx context.Context, exceptID string) (string, error)
 	markRolledFn   func(ctx context.Context, id, reason string) error
-	// revStateFn answers "what state is this revision in", which is what decides whether an
-	// OPERATOR-requested rollback has a target at all. See Rollback.
+	// revStateFn decides whether an operator-requested rollback has a target at all (see Rollback).
 	revStateFn func(ctx context.Context, id string) (string, error)
-	// liveBridgesFn answers which guest bridges exist right now (default: /sys/class/net). A seam so a test
-	// can state that a bridge the previous revision needs has been destroyed.
+	// liveBridgesFn answers which guest bridges exist now (default: /sys/class/net).
 	liveBridgesFn func() map[string]bool
-	// addrsFn answers which IPv4 CIDRs an interface carries right now (default: ip -o -4 addr show). A seam so
-	// a test can state that a live bridge still carries the addressing a revision has just changed.
+	// addrsFn answers which IPv4 CIDRs an interface carries now (default: ip -o -4 addr show).
 	addrsFn func(name string) []string
-	// memberFn answers which interface is enslaved to a bridge right now (default: /sys/class/net/<br>/brif). A
-	// seam so the "this bridge is attached to the wrong VLAN" refusal can be exercised without a kernel.
+	// memberFn answers which interface is enslaved to a bridge now (default: /sys/class/net/<br>/brif).
 	memberFn func(bridge string) string
 
-	// ---- the portal address and the portal's HTTPS state (portal.go) ----
-	//
 	// unboundPortalFrag is the SEPARATE resolver fragment for the portal's public names
 	// (/etc/unbound/unbound.conf.d/stayconnect-portal.conf). "" disables it.
 	unboundPortalFrag string
@@ -93,8 +76,7 @@ type applier struct {
 	nftMu sync.Mutex
 	// mgmtAddrFn reads an interface's primary IPv4 for NETD_MGMT_ADDR=auto (nft_watch.go). nil = the live system.
 	mgmtAddrFn func(iface string) string
-	// Seams: the configured portal address, the HTTPS state, the host's addresses, the portal link's state,
-	// the Kea control socket, and the editable intent (for the validate endpoint). Defaults read the database,
+	// Further seams (portal address, HTTPS state, host addresses, portal link, Kea socket, editable intent) default to the database,
 	// `ip -j -4 addr`, /sys/class/net and the real Kea socket.
 	portalIPFn   func(ctx context.Context) (string, error)
 	portalTLSFn  func(ctx context.Context) (netcfg.PortalTLS, error)
@@ -104,7 +86,6 @@ type applier struct {
 	intentFn     func(ctx context.Context) ([]netcfg.GuestNetwork, error)
 }
 
-// bridgeMemberOf is the bridge-membership seam with its default.
 func (a *applier) bridgeMemberOf(bridge string) string {
 	if a.memberFn != nil {
 		return a.memberFn(bridge)
@@ -112,7 +93,6 @@ func (a *applier) bridgeMemberOf(bridge string) string {
 	return bridgeMember(bridge)
 }
 
-// ifaceAddrsOf is the address seam with its default.
 func (a *applier) ifaceAddrsOf(name string) []string {
 	if a.addrsFn != nil {
 		return a.addrsFn(name)
@@ -120,7 +100,6 @@ func (a *applier) ifaceAddrsOf(name string) []string {
 	return ifaceAddrs(name)
 }
 
-// revisionState is the state seam for the operator rollback guard.
 func (a *applier) revisionState(ctx context.Context, id string) (string, error) {
 	if a.revStateFn != nil {
 		return a.revStateFn(ctx, id)
@@ -242,9 +221,8 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 		return out, nil
 	}
 
-	// THIS INTENT AND THIS PORTAL ADDRESS ARE NOW WHAT EVERY RENDER USES. Set before generating, so the bundle,
-	// the converge and the Kea push all describe the same thing; put back if nothing reaches the wire, and
-	// replaced by the rollback's own target if the apply fails after it has.
+	// This intent and portal address are now what every render uses; set before generating so bundle, converge and Kea push agree,
+	// restored if nothing reaches the wire.
 	before := a.snapshotInForce()
 	a.setInForce(intent, vip)
 
@@ -266,17 +244,9 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 		}
 	}
 
-	// THE CONFIRMATION WINDOW STARTS WHEN THE APPLY FINISHES, NOT WHEN IT BEGINS.
-	//
-	// This deadline used to be computed here and then handed to MarkPending unchanged, so the window was spent
-	// by applyBundle itself: waitBridgesRunning (up to 5s per bridge), the Kea socket wait (up to 20s), two
-	// systemctl restarts (20s each), netplan generate and the nft converge. On a factory-clean appliance
-	// bringing up several VLANs that plausibly exceeds the whole 120 seconds -- and MarkPending then wrote an
-	// ALREADY-PAST deadline, so the watchdog rolled the change back within five seconds of the operator seeing
-	// "applied", and their confirm came back 409. A correct change, torn down, with no way to keep it.
-	//
-	// MarkApplying still gets a deadline (it is what lets the watchdog reclaim an apply that died mid-flight);
-	// the operator's window is measured from the moment there is something to confirm.
+	// The confirmation window starts when the apply FINISHES: applyBundle can itself take minutes (bridge waits, Kea wait, restarts),
+	// and a deadline computed up front could already be past when MarkPending wrote it.
+	// MarkApplying still gets a deadline so the watchdog can reclaim an apply that died mid-flight.
 	if err := a.st.MarkApplying(ctx, id, bundle, actor, time.Now().Add(a.confirmWindow)); err != nil {
 		return nil, err
 	}
@@ -327,32 +297,13 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 	return nil
 }
 
-// Rollback restores the previous active revision on operator request.
-// errRollbackRefused marks a rollback the appliance declined on purpose, so the transport can distinguish it
-// from an infrastructure failure and answer 409 instead of 500.
+// errRollbackRefused marks a rollback the appliance declined on purpose, so the transport answers 409 instead of 500.
 var errRollbackRefused = errors.New("rollback refused")
 
-// Rollback is the OPERATOR-requested rollback. It is not the same operation as the automatic one.
-//
-// WHAT IT USED TO DO, AND WHY THAT WAS DANGEROUS. It called a.rollback directly, which looks for a target
-// with store.ActiveBundlePath(ctx, exceptID) -- `WHERE state='active' AND id<>$1`. That works while a
-// revision is PENDING CONFIRMATION, because the previous revision is then still the active one. Once a
-// revision is CONFIRMED there is exactly one active row and it is the revision itself, so the query returns
-// nothing, prevBundle is empty, and a.rollback takes its factory-clean branch: every guest bridge
-// destroyed, the netplan and unbound fragment deleted, Kea restored to stopped and disabled.
-//
-// So an operator pressing Rollback on the configuration currently in force took the entire guest network
-// down -- every guest offline, DHCP stopped -- and the endpoint answered {"state":"rolled_back"}. The
-// factory-clean branch is correct for what it was written for: the FIRST apply failing or expiring, where
-// coming back clean is the only right answer. It is not an answer to "undo the change I confirmed".
-//
-// This file already states the rule for this situation: "A rollback that cannot be done safely must stay
-// unfinished and say so." A confirmed revision has no stored predecessor to return to -- the previous one is
-// superseded, and network_config_revisions.previous_seq is never written -- so there is nothing to apply, and
-// the honest outcome is a refusal that names the supported path.
-//
-// The automatic rollback (a failed apply, a failed health check, an elapsed confirmation window) is
-// untouched: it calls a.rollback directly and always runs against a revision that is still mid-flight.
+// Rollback is the OPERATOR-requested rollback; the automatic one calls a.rollback directly.
+// a.rollback looks for a target with ActiveBundlePath(exceptID); once a revision is CONFIRMED it is the only active row, so that finds nothing
+// and takes the factory-clean branch (every guest bridge destroyed, Kea stopped). That is right only for a failed or expired FIRST apply, not for "undo what I confirmed".
+// A confirmed revision has no stored predecessor (previous_seq is never written), so the honest outcome is a refusal naming the supported path.
 func (a *applier) Rollback(ctx context.Context, id, actor string) error {
 	state, err := a.revisionState(ctx, id)
 	if err != nil {
@@ -360,9 +311,7 @@ func (a *applier) Rollback(ctx context.Context, id, actor string) error {
 		return fmt.Errorf("cannot determine the state of revision %s, so cannot determine whether a "+
 			"rollback has a target: %w -- refusing rather than guessing", id, err)
 	}
-	// Every refusal below wraps errRollbackRefused, so the transport can answer 409 rather than 500. A
-	// deliberate refusal reported as an internal error tells the operator the appliance is broken when what
-	// actually happened is that it protected their guest network.
+	// Every refusal wraps errRollbackRefused so the transport answers 409, not 500: the appliance protected the guest network.
 	switch state {
 	case "applying", "pending_confirmation":
 		// The real rollback window. The previous revision is still active and is a genuine target; if there
@@ -383,10 +332,8 @@ func (a *applier) Rollback(ctx context.Context, id, actor string) error {
 	}
 }
 
-// validateWithPortal is ValidateSet plus the portal address the apply would put in force. The address is read
-// from the setting AT THE MOMENT OF THE DECISION and checked against this intent and every address the appliance
-// carries now. FAIL CLOSED: a setting that cannot be read, or host addresses that cannot be listed, is an error,
-// not a pass -- the same rule presenceSets applies to interfaces.
+// validateWithPortal is ValidateSet plus the portal address the apply would put in force, read at the moment of the decision and checked
+// against this intent and every address the appliance carries. Fails closed: an unreadable setting or address list is an error, not a pass.
 func (a *applier) validateWithPortal(ctx context.Context, intent []netcfg.GuestNetwork, avail, known map[string]bool) (netcfg.ValidationResult, string, error) {
 	vip, err := a.loadPortalIP(ctx)
 	if err != nil {
@@ -414,7 +361,6 @@ func (a *applier) fail(ctx context.Context, id string, out *applyResult, reason 
 	out.Message = reason
 }
 
-// generate renders the full bundle to disk.
 func (a *applier) generate(bundle string, intent []netcfg.GuestNetwork) error {
 	if err := os.MkdirAll(bundle, 0o750); err != nil {
 		return err
@@ -479,34 +425,12 @@ func (a *applier) output(ctx context.Context, name string, args ...string) ([]by
 	return exec.CommandContext(cctx, name, args...).Output()
 }
 
-// presenceSets reads what the appliance HAS NOW and what it has EVER recorded.
-//
-// Two sets rather than one, because "this interface does not exist" and "this interface existed and is gone"
-// are different operator problems: the first is usually a typo, the second is a pulled card, an unloaded
-// driver or a destroyed bridge. Validation refuses both — a guest network cannot come up on either — but the
-// message says which.
+// presenceSets reads what the appliance HAS NOW and what it has EVER recorded; "never existed" (a typo) and "existed and is gone"
+// (pulled card, destroyed bridge) are both refused, but the message says which.
 func (a *applier) presenceSets(ctx context.Context) (present, known map[string]bool, err error) {
-	// PRESENCE IS OBSERVED AT THE MOMENT OF THE DECISION, FROM THE KERNEL.
-	//
-	// It used to be derived from the inventory: each row's last_seen_at compared against the newest one in
-	// the table. That is a RELATIVE reference, and it fails open in exactly the case that matters. If netd
-	// stops sweeping -- discovery broken, the database refusing writes, the process wedged -- the whole table
-	// freezes TOGETHER, every surviving row stays within the tolerance of the newest one, and an interface
-	// that vanished afterwards reads as present indefinitely. The stored observations stay internally
-	// consistent while being collectively wrong, which is the hardest kind of stale to notice.
-	//
-	// An absolute age bound on the stored observation cannot fix that either, because a sweep only happens at
-	// boot and on GET /v1/interfaces -- there is no periodic refresh. On a healthy appliance nobody has
-	// touched for a day, every stored observation is legitimately a day old, and any bound tight enough to
-	// catch a wedged netd would refuse applies on an appliance with nothing wrong with it.
-	//
-	// So the question is not asked of the database at all. netd is the process that can SEE the interfaces;
-	// it does not need to be told which ones exist. Discovering here removes the freshness problem rather
-	// than parameterising it: the observation is taken when the decision is made, so it cannot be stale.
-	//
-	// FAIL CLOSED. If discovery fails, presence cannot be established, and the error is returned rather than
-	// falling back to whatever the inventory last recorded. A fallback to stored data is precisely the
-	// fail-open this replaces.
+	// Presence is observed from the kernel at the moment of the decision, not derived from the inventory: a relative last_seen_at comparison
+	// fails open when netd stops sweeping (the whole table freezes together), and an absolute age bound would refuse applies on a healthy idle
+	// appliance (sweeps happen only at boot and on GET /v1/interfaces). Fail closed: if discovery fails the error is returned, never a fallback to stored data.
 	ifaces, err := a.discover(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot determine which interfaces are present: %w — refusing to "+
@@ -517,9 +441,8 @@ func (a *applier) presenceSets(ctx context.Context) (present, known map[string]b
 		present[f.Name] = true
 	}
 
-	// The inventory still answers a different question: what has this appliance EVER recorded. That is what
-	// lets the message separate a name the appliance has never had from one it had and lost. It is advisory
-	// -- if it cannot be read, the check still refuses an absent parent, it just cannot say which kind.
+	// The inventory still answers what the appliance has EVER recorded, which separates a never-had name from a lost one;
+	// advisory, so an unreadable inventory only loses that distinction.
 	known, err = a.knownIfaces(ctx)
 	if err != nil {
 		slog.Warn("interface inventory unreadable; an absent parent will still be refused, but the message "+
@@ -527,8 +450,7 @@ func (a *applier) presenceSets(ctx context.Context) (present, known map[string]b
 		known = nil
 	}
 
-	// Refresh the inventory opportunistically, since discovery just ran. A failure here does NOT affect the
-	// decision above -- presence no longer depends on this table -- so it is logged and carried on from.
+	// Refresh the inventory opportunistically; a failure does not affect the decision.
 	if err := a.syncInventory(ctx, ifaces); err != nil {
 		slog.Error("interface inventory refresh failed during validation; the decision is unaffected because "+
 			"presence is observed live, but the inventory is now stale for the UI and for audit", "err", err)

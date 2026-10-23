@@ -1,13 +1,5 @@
-// Package staygrant is the Phase-3 STAY-scoped access grant: it turns a verified PMS Auth Context into a
-// durable Entitlement in ONE physical transaction — Auth Context consumption, offer Quote, Purchase,
-// Entitlement + its initial lifecycle history, and the device authorization interval all commit or all roll
-// back together. There is no partially-granted state: a guest never ends up with a consumed context and no
-// access, or a Purchase with no Entitlement, or an Entitlement whose history does not back its status.
-//
-// SCOPE (deliberate, fail-closed): this phase grants INCLUDED (zero-price) package revisions only. Any
-// revision carrying a price, or not acquirable for free (NOT_REQUIRED absent from its methods), is refused with
-// ErrSettlementRequired — paid access and financial posting are out of scope and must never be silently
-// approximated by granting the package for free.
+// Package staygrant turns a verified PMS Auth Context into an Entitlement in one transaction. Only
+// INCLUDED (zero-price) revisions are granted; anything priced fails closed with ErrSettlementRequired.
 package staygrant
 
 import (
@@ -29,27 +21,20 @@ import (
 )
 
 var (
-	// ErrPackageNotGrantable — the package revision is not a grantable guest package in this scope (wrong
-	// tenant/site, a system/grace package, or not currently visible).
+	// ErrPackageNotGrantable: wrong tenant/site, a system/grace package, or not currently visible.
 	ErrPackageNotGrantable = errors.New("staygrant: package revision is not grantable in this scope")
-	// ErrSettlementRequired — the package is not INCLUDED (non-zero price, or not acquirable for free). Paid
-	// access is out of scope for this phase; the grant fails closed.
+	// ErrSettlementRequired: the package is priced or not acquirable for free.
 	ErrSettlementRequired = errors.New("staygrant: package requires settlement (paid access is out of scope)")
-	// ErrAlreadyEntitled — the Stay already holds a live (PENDING/ACTIVE/SUSPENDED) entitlement. The Stay
-	// lifecycle allows exactly one, so a second grant is refused rather than racing the unique index.
+	// ErrAlreadyEntitled: the Stay already holds a live entitlement; refused rather than racing the unique index.
 	ErrAlreadyEntitled = errors.New("staygrant: stay already holds a live entitlement")
-	// ErrDeviceLimit — the entitlement's plan does not allow another concurrent device.
-	ErrDeviceLimit = errors.New("staygrant: device limit reached")
-	// ErrStayLengthUnknown — a PER_STAY_NIGHT package cannot be granted because this Stay's arrival or
-	// departure is not authoritatively known, so the allowance it earns cannot be computed. Refusing is the
-	// only safe answer: every guess is either mean to a long stay or generous to a short one, and both are
-	// permanent once frozen onto an entitlement.
+	ErrDeviceLimit     = errors.New("staygrant: device limit reached")
+	// ErrStayLengthUnknown: a PER_STAY_NIGHT allowance cannot be computed without known arrival and departure,
+	// and any guess is permanent once frozen onto the entitlement.
 	ErrStayLengthUnknown = errors.New("staygrant: stay length is not authoritatively known")
 )
 
 // Store performs atomic stay grants.
 type Store struct {
-	// aggregateOnlineTime gates NEW acquisition of the Phase-6 time mode. See WithAggregateOnlineTime.
 	aggregateOnlineTime bool
 	pool                *pgxpool.Pool
 	ctxs                *authctx.Store
@@ -57,33 +42,21 @@ type Store struct {
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, ctxs: authctx.NewStore(pool)} }
 
-// WithAggregateOnlineTime declares whether this process may create NEW entitlements whose effective time
-// mode is AGGREGATE_ONLINE_TIME. Default OFF, and off means REFUSE the grant.
-//
-// The reason is not policy, it is arithmetic. Accrual itself is DATA-DRIVEN and deliberately not gated on
-// this flag -- an entitlement that already exists keeps being accounted for whatever the flag says, because
-// not accounting it is what would turn a finite budget unlimited. What the flag decides is whether a NEW one
-// may be created here at all: a build whose operator has not turned the mode on has not asked to serve it,
-// and creating access this deployment was never configured to offer is not a decision a grant path gets to
-// make. Refusing is free -- nothing durable is lost.
-//
-// It deliberately does NOT touch anything already durable. An immutable AGGREGATE_ONLINE_TIME plan revision
-// keeps existing and keeps its meaning; entitlements already granted under it are not reinterpreted,
-// re-moded or deleted. Only NEW acquisition is closed.
+// WithAggregateOnlineTime sets whether NEW entitlements in AGGREGATE_ONLINE_TIME mode may be created
+// (default off: the grant is refused). Accrual is data-driven and not gated by this flag; existing
+// entitlements keep being accounted for, or a finite budget would become unlimited.
 func (s *Store) WithAggregateOnlineTime(on bool) *Store {
 	s.aggregateOnlineTime = on
 	return s
 }
 
-// Request is what a guest-side grant needs. Everything that decides ACCESS is server-derived: the caller
-// supplies only the one-time Auth Context id, the presenter identity it must match, and which package was
-// selected. Price, policy, plan and duration are read from the pinned revision — never from the request.
+// Request carries only the Auth Context id, its presenter and the selected package; price, policy, plan and
+// duration are read from the pinned revision, never from the request.
 type Request struct {
 	AuthContextID string
 	Presenter     authctx.Presenter
 	PackageRevID  string
-	// QuoteTTLSeconds bounds the offer quote's life. The quote is created and consumed inside this same
-	// transaction, so the TTL exists for the durable record, not as a window the caller can widen.
+	// QuoteTTLSeconds is for the durable record only; the quote is created and consumed in this transaction.
 	QuoteTTLSeconds int
 }
 
@@ -96,12 +69,11 @@ type Result struct {
 	Stay          string
 	Interface     string
 	ActivatedAt   time.Time
-	// Joined: the Stay already held an ACTIVE entitlement and this device took one of its device slots; no
-	// quote, purchase or new entitlement was written.
+	// Joined: the Stay already held an ACTIVE entitlement and this device took a slot; nothing else written.
 	Joined bool
 }
 
-// Grant executes the whole chain in ONE transaction.
+// Grant executes the whole chain in one transaction.
 func (s *Store) Grant(ctx context.Context, tenant, site string, r Request) (Result, error) {
 	var res Result
 	tx, err := s.pool.Begin(ctx)
@@ -119,28 +91,24 @@ func (s *Store) Grant(ctx context.Context, tenant, site string, r Request) (Resu
 	return res, nil
 }
 
-// GrantTx runs the grant inside the caller's transaction (no nested transaction), so it can be composed with
-// whatever else must commit atomically with it.
+// GrantTx runs the grant inside the caller's transaction.
 func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r Request) (Result, error) {
 	var res Result
-	// The Quote and the Purchase are both capability-scoped; the grant declares that operation once for
-	// the whole chain it is about to write.
 	if err := writerguard.Open(ctx, tx, writerguard.CapCommerceIntent); err != nil {
 		return res, err
 	}
 	if r.QuoteTTLSeconds <= 0 {
 		r.QuoteTTLSeconds = 300
 	}
-	// (1) consume the Auth Context EXACTLY once against the full server pin set. This takes the L1 Stay lock
-	// first and yields the server-pinned Stay/Interface/Revision — the caller never names the Stay.
+	// Consume the Auth Context once; this takes the L1 Stay lock first and yields the server-pinned
+	// Stay/Interface/Revision (the caller never names the Stay).
 	consumed, err := s.ctxs.ConsumeTx(ctx, tx, r.AuthContextID, r.Presenter)
 	if err != nil {
 		return res, err
 	}
 	res.Stay, res.Interface = consumed.Stay, consumed.Interface
 
-	// (2) QUOTE from the pinned revision. Everything priced or policy-bearing is read here, under the same
-	// snapshot, so the Purchase and Entitlement cannot disagree with what was offered.
+	// Everything priced or policy-bearing is read once here so the Purchase and Entitlement match the offer.
 	var svcRev string
 	var priceMinor int64
 	var settlement []string
@@ -166,26 +134,20 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	if pkgType == "CHECKOUT_GRACE" {
 		return res, ErrPackageNotGrantable
 	}
-	// INCLUDED-only, fail closed: a priced package, or one that cannot be taken for free, is refused. A free
-	// package may ALSO accept vouchers (D44: price 0 allows {NOT_REQUIRED, PREPAID}); that does not make it paid,
-	// and this grant takes the free method.
+	// A free package may also accept vouchers (PREPAID); that does not make it paid.
 	if priceMinor != 0 || !slices.Contains(settlement, "NOT_REQUIRED") {
 		return res, ErrSettlementRequired
 	}
 
-	// (3) exactly one live entitlement per Stay — check explicitly so a second grant gets a typed error
-	// rather than a raw unique-index violation (the index remains the real guard).
+	// One live entitlement per Stay; checked explicitly for a typed error (the unique index is the real guard).
 	var live int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements
 		WHERE stay_id=$1 AND status IN ('PENDING','ACTIVE','SUSPENDED')`, res.Stay).Scan(&live); err != nil {
 		return res, err
 	}
 	if live > 0 {
-		// ANOTHER DEVICE OF A STAY THAT ALREADY HAS ACCESS JOINS IT. One live entitlement per Stay is the rule;
-		// per-entitlement device slots are how a family's second phone gets online (contract 6.3). This sign-in
-		// is already consumed above, so it admits this one device once; authorize_entitlement_device enforces
-		// the plan's device limit under the entitlement lock and raises MAX_DEVICES_REACHED beyond it. A live
-		// entitlement that is not ACTIVE (pending or suspended) still refuses, as before.
+		// Another device of a Stay with access joins its entitlement; authorize_entitlement_device enforces
+		// the device limit (MAX_DEVICES_REACHED). A live entitlement that is not ACTIVE still refuses.
 		var eid string
 		err := tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.entitlements
 			WHERE stay_id=$1 AND status='ACTIVE' AND (window_ends_at IS NULL OR window_ends_at > now())
@@ -204,9 +166,8 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		return res, nil
 	}
 
-	// (4) durable QUOTE pinned to the consumed context + revision, with a server-built grant snapshot.
-	// NOTE: the id parameters are passed separately in their uuid and text forms — reusing one placeholder as
-	// both a uuid column value and a ::text jsonb member makes PostgreSQL deduce two types for it (42P08).
+	// The id parameters are passed separately as uuid and text: one placeholder used as both makes
+	// PostgreSQL deduce two types (42P08).
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.offer_quotes
 		(tenant_id, site_id, auth_context_id, package_revision_id, pms_interface_id, price_minor,
 		 grant_snapshot, expires_at, consumed_at)
@@ -220,24 +181,21 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		return res, err
 	}
 
-	// (5) PURCHASE referencing that quote (the schema requires a GUEST_SELECTION purchase to carry one).
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id, site_id, package_revision_id, offer_quote_id, auth_context_id, pms_interface_id, stay_id,
 		 authentication_interface_revision_id, trigger, amount_minor, state)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'GUEST_SELECTION',0,'GRANTED')
 		RETURNING id::text`,
 		tenant, site, r.PackageRevID, res.QuoteID, r.AuthContextID, res.Interface, res.Stay, consumed.Revision).Scan(&res.PurchaseID); err != nil {
-		// The stay already took this package revision (purchase_once_per_stay). The offer set excludes it, so
-		// this is a race or a stale offer: refuse it as not grantable rather than surface a raw index error.
+		// purchase_once_per_stay: a race or stale offer; refuse as not grantable.
 		if strings.Contains(err.Error(), "purchase_once_per_stay") {
 			return res, ErrPackageNotGrantable
 		}
 		return res, err
 	}
 
-	// (6) ENTITLEMENT + its INITIAL history, in this same transaction. The deferred coherence constraint
-	// forbids an Entitlement committing without history, and apply_entitlement_transition is the only writer
-	// that may set its status — so the real grant path produces exactly the history a Checkout later reads.
+	// The deferred coherence constraint forbids an Entitlement without history, and
+	// apply_entitlement_transition is the only writer of its status.
 	endMode, windowSecs := grantShape(duration)
 	var window *time.Time
 	activatedAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -245,10 +203,7 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		w := activatedAt.Add(time.Duration(windowSecs) * time.Second)
 		window = &w
 	}
-	// FAIL CLOSED ON A MODE THIS DEPLOYMENT HAS NOT ENABLED. The revision is immutable and may legitimately
-	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on an appliance
-	// whose operator has not turned the mode on. (Anything ALREADY in that mode continues to be accounted
-	// for regardless of this flag -- see the accounting owner in acctd.)
+	// Fail closed on a time mode this deployment has not enabled (existing entitlements are still accounted in acctd).
 	{
 		var mode string
 		if err := tx.QueryRow(ctx,
@@ -256,19 +211,13 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 			svcRev).Scan(&mode); err != nil {
 			return res, err
 		}
-		// THE SHARED RULE, not a second copy of it. Two acquisition paths each carrying their own idea of
-		// what may be created is how they come to disagree.
+		// Shared rule, so the acquisition paths cannot disagree.
 		if why := iamv2.TimeModeAcquirable(mode, s.aggregateOnlineTime); why != "" {
 			return res, fmt.Errorf("refusing to grant plan revision %s: %s", svcRev, why)
 		}
 	}
-	// THE DERIVED ALLOWANCE IS RESOLVED ONCE, HERE, AND FROZEN.
-	//
-	// A PER_STAY_NIGHT package computes its byte allowance from the length of THIS stay. It is computed inside
-	// the same transaction that already holds the L1 Stay lock, from the same Stay row the context was pinned
-	// to, and written onto the entitlement -- so a later PMS update that extends or shortens the stay cannot
-	// reach back and change what this guest was granted. A FIXED package resolves to nothing and the
-	// entitlement goes on reading its pinned plan revision, exactly as every entitlement did before this.
+	// A PER_STAY_NIGHT allowance is resolved once here under the L1 Stay lock and frozen onto the
+	// entitlement, so later PMS changes to the stay cannot alter it. A FIXED package resolves to nil.
 	dataQuota, qErr := s.effectiveDataQuota(ctx, tx, tenant, site, res.Stay, allocPolicy)
 	if qErr != nil {
 		return res, qErr
@@ -292,8 +241,7 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	}
 	res.ActivatedAt = activatedAt
 
-	// (7) authorize the presenting device through the controlled operation, so the CURRENT view and the
-	// append-only interval history are written together and the plan's device limit is enforced atomically.
+	// The controlled operation writes the current view and interval history together and enforces the device limit.
 	if err := tx.QueryRow(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,$3)::text`,
 		res.EntitlementID, r.Presenter.Device, activatedAt).Scan(&res.DeviceAuthID); err != nil {
 		return res, err
@@ -301,8 +249,7 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	return res, nil
 }
 
-// grantShape derives the Entitlement's end mode + validity window from the revision's duration policy. An
-// unrecognized policy yields MANUAL_END with no window rather than an invented duration.
+// grantShape derives the end mode and validity window; an unrecognized policy yields MANUAL_END, no window.
 func grantShape(durationPolicy []byte) (string, int64) {
 	var p struct {
 		EndMode      string `json:"end_mode"`
@@ -326,22 +273,13 @@ func grantShape(durationPolicy []byte) (string, int64) {
 	return "MANUAL_END", 0
 }
 
-// effectiveDataQuota resolves the byte allowance to FREEZE onto this entitlement, or nil to leave the
-// entitlement reading its pinned service plan revision.
-//
-// nil is the answer for every package published before PER_STAY_NIGHT existed and for every package that
-// stays FIXED, which is why applying this feature changes nothing for them: the column stays NULL and every
-// quota reader falls through to the plan revision exactly as it always did.
-//
-// WHEN IT REFUSES. A PER_STAY_NIGHT package whose stay has no authoritative arrival or departure is NOT
-// granted. There is no defensible guess: assume one night and a three-week guest is cut off on day two;
-// assume the maximum and the allowance stops being derived from anything. The Stay row is read inside this
-// transaction, which already holds the L1 Stay lock taken when the Auth Context was consumed, so the dates
-// cannot move between being read here and the entitlement being written below.
+// effectiveDataQuota resolves the byte allowance to freeze onto the entitlement, or nil to leave it reading
+// the pinned plan revision (FIXED packages). A PER_STAY_NIGHT package with no authoritative arrival or
+// departure is refused: there is no defensible guess. The dates are read under the L1 Stay lock.
 func (s *Store) effectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site, stayID string,
 	rawPolicy []byte) (*int64, error) {
 	if len(rawPolicy) == 0 {
-		return nil, nil // no policy column value at all: FIXED
+		return nil, nil
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(rawPolicy, &raw); err != nil {
@@ -349,9 +287,7 @@ func (s *Store) effectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site,
 	}
 	policy, err := iamv2.ParseDataAllocationPolicy(raw)
 	if err != nil {
-		// A malformed policy on an IMMUTABLE revision cannot be corrected in place, so this refuses the grant
-		// rather than falling back to the plan quota -- silently granting different terms than the operator
-		// published is worse than refusing one package.
+		// Refuse rather than fall back to the plan quota: granting terms other than published is worse.
 		return nil, fmt.Errorf("%w: %v", ErrPackageNotGrantable, err)
 	}
 	if policy.Mode != iamv2.AllocPerStayNight {
@@ -376,8 +312,7 @@ func (s *Store) effectiveDataQuota(ctx context.Context, tx pgx.Tx, tenant, site,
 	return &bytes, nil
 }
 
-// GrantShape exposes the stay grant's end-mode rule, so a PAID stay purchase (room charge, card) freezes exactly
-// the shape a free stay grant would.
+// GrantShape exposes the end-mode rule so a paid stay purchase freezes the same shape as a free grant.
 func GrantShape(durationPolicy []byte) (string, int64) { return grantShape(durationPolicy) }
 
 // EffectiveDataQuota exposes the frozen PER_STAY_NIGHT allowance computation for the same reason.

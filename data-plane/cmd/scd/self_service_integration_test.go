@@ -2,14 +2,8 @@
 
 package main
 
-// EMAIL ACCOUNTS END TO END AGAINST THE FULL APPLIANCE SCHEMA (migration 0117), through the handlers scd serves.
-// Needs PHASE3_TEST_DSN (scripts/lib-fullschema-testdb.sh / scripts/sitedb-dev.sh); skipped otherwise.
-//
-// THE SERVER RUNS AS svc_scd. Its pool sets ROLE svc_scd on every connection, so each statement the product
-// issues -- registration, the outbox, the sweep, grace, verify, reset, activation -- is executed with exactly the
-// privileges Gate-P gives scd. A test that ran as the owner could not find a missing grant; this one fails on it.
-// Seeding (packages, entitlements, sessions) and the clock moves use a separate owner pool, and never a code
-// path under test.
+// Email accounts end to end against the full appliance schema, through the handlers scd serves. Needs PHASE3_TEST_DSN; skipped otherwise.
+// The server runs as svc_scd (its pool sets ROLE on every connection) so a missing grant fails here; seeding and clock moves use a separate owner pool.
 
 import (
 	"bytes"
@@ -227,7 +221,6 @@ func (f *ssFixture) sendAndTakeToken(t *testing.T, wantPath string) string {
 	return tok
 }
 
-// seedEntitlementSession gives the account an ACTIVE entitlement with one live session on a device of its own.
 func (f *ssFixture) seedEntitlementSession(t *testing.T, accountID, ip, mac string) (ent, device, session string) {
 	t.Helper()
 	ctx := context.Background()
@@ -475,8 +468,7 @@ func chi404(t *testing.T, s *server, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// A PASSWORD RESET TAKES THE ACCOUNT BACK: the owner of the address proves it, the squatter's password and
-// connection go, the address is verified, every outstanding link is revoked.
+// A password reset takes the account back: the squatter password and connection go, the address is verified, every link is revoked.
 func TestIntegration_PasswordResetTakesOverASquattedAccount(t *testing.T) {
 	f := newSSFixture(t)
 	s := f.s
@@ -542,7 +534,7 @@ func TestIntegration_PasswordResetTakesOverASquattedAccount(t *testing.T) {
 	}
 }
 
-// USERNAMES ARE UNIQUE PER SITE (0117), the device cap counts per device, and the switches govern their kinds.
+// Usernames are unique per site, the device cap counts per device, and the switches govern their kinds.
 func TestIntegration_PerSiteUniquenessDeviceCapAndSwitches(t *testing.T) {
 	f := newSSFixture(t)
 	s := f.s
@@ -595,8 +587,7 @@ func TestIntegration_PerSiteUniquenessDeviceCapAndSwitches(t *testing.T) {
 	}
 }
 
-// THE GRANTS, stated directly as svc_scd: what the product needs, and nothing that would let scd change an
-// account's enablement, validity or lockout, or write the settings without the audited setter.
+// The grants as svc_scd: what the product needs, and nothing that lets scd change enablement, validity or lockout, or write settings without the audited setter.
 func TestIntegration_SelfServiceGrantsAsSvcScd(t *testing.T) {
 	f := newSSFixture(t)
 	ctx := context.Background()
@@ -629,8 +620,7 @@ func TestIntegration_SelfServiceGrantsAsSvcScd(t *testing.T) {
 	}
 }
 
-// A MESSAGE THAT EXPIRED UNSENT IS RETIRED, never sent: a mail outage longer than a link's life must leave the
-// outbox holding only rows that can still go (the partial outbox index), not a backlog every poll skips.
+// A message that expired unsent is retired, never sent, so the outbox holds only rows that can still go.
 func TestIntegration_ExpiredUnsentMessageIsRetired(t *testing.T) {
 	f := newSSFixture(t)
 	ctx := context.Background()

@@ -1,26 +1,10 @@
 package main
 
-// THE OPERATOR POST-STAY SURFACE.
-//
-// Reads are ordinary. The two mutations are not, and both carry the full weight the contract puts on a
-// destructive guest-facing action: RBAC on the resource key, password step-up on top of the session, a
-// mandatory bounded reason, and an immutable audit row naming the operator from the SESSION rather than from
-// the request body.
-//
-// RESET AND REVOKE ARE DIFFERENT ACTS, and the difference is the whole model:
-//
-//	RESET/REISSUE  rotates the credential of an ACTIVE profile. The episode, the profile and the guest's
-//	               eligibility are untouched; only the secret changes, and the previous one stops working the
-//	               instant it commits. This is the answer to "the guest lost the PIN" — including the case
-//	               where the guest never received it, because a lost response is unrecoverable by design.
-//	REVOKE         is TERMINAL for this Stay episode. It is not a stronger reset and it cannot be undone: a
-//	               revoked profile is never reactivated, and the episode gets no second profile because the
-//	               unique index permits one. The next post-stay identity for that guest exists only after a
-//	               new episode.
-//
-// The PIN returned by a reset is shown ONCE, in that response. pin_revealed_at records that this server
-// RETURNED it; it is never evidence that the operator or the guest actually received it. If the response is
-// lost, the answer is another reset, not a second look at the same secret -- nothing can produce it again.
+// Reads are ordinary; both mutations are destructive guest-facing actions: RBAC on the resource key, password
+// step-up, a mandatory bounded reason, and an immutable audit row naming the operator from the SESSION.
+// Reset rotates the secret of an ACTIVE profile (the old PIN stops working at commit); revoke is TERMINAL for the
+// Stay episode and the episode never gets a second profile. The reset PIN is shown once; pin_revealed_at only
+// records that the server returned it, so a lost response means another reset.
 
 import (
 	"errors"
@@ -59,18 +43,15 @@ type postStayProfileRow struct {
 	RevokedAt     *string `json:"revoked_at"`
 	RevokeReason  *string `json:"revoke_reason"`
 	Authenticable bool    `json:"authenticable"`
-	// IdentityHidden: the reservation number and the revoke reason were withheld from a role without
-	// pms-stay-identity (audit H-7; GDPR final check D2).
+	// The reservation number and revoke reason are withheld from roles without pms-stay-identity.
 	IdentityHidden bool `json:"identity_hidden,omitempty"`
 }
 
-// hidePostStayIdentity withholds the room-credential field, and the staff note that may name the guest.
 func hidePostStayIdentity(v *postStayProfileRow) {
 	v.Reservation, v.RevokeReason, v.IdentityHidden = "", nil, true
 }
 
-// listPostStayProfiles shows the site's post-stay identities. There is no PIN column and no way to ask for
-// one: the operator screen shows WHETHER a profile can currently authenticate, never the secret.
+// There is no PIN column: the operator sees whether a profile can authenticate, never the secret.
 func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -145,18 +126,13 @@ func (s *server) getPostStayProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type postStayActionReq struct {
-	// Password is the step-up. There is deliberately no actor field: an audit record whose author comes from
-	// the request body is not an audit record.
+	// Password is the step-up. There is deliberately no actor field: the audit author must come from the session.
 	Password string `json:"password"`
 	Reason   string `json:"reason"`
-	// ExtendValidity, on a reset only: also restart the validity window (24 h from now). Absent or false keeps
-	// it as it was -- a reset rotates the PIN and nothing else unless asked (audit H-17).
+	// ExtendValidity (reset only) also restarts the validity window (24 h from now); otherwise a reset rotates the PIN only.
 	ExtendValidity bool `json:"extend_validity"`
 }
 
-// validReason (reason_bounds.go) bounds the mandatory justification, in characters.
-
-// resetPostStayPIN rotates the credential of an ACTIVE profile and returns the new PIN once.
 func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 	var in postStayActionReq
 	if err := decodeJSON(r, &in); err != nil {
@@ -186,8 +162,7 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, poststay.ErrNotAuthenticable):
-			// A revoked profile is terminal, and a missing one is not there. Both are "there is no ACTIVE
-			// profile here to rotate", which is a conflict rather than a server fault.
+			// A revoked or missing profile is a conflict, not a server fault.
 			jsonErr(w, http.StatusConflict, "not_active",
 				"no ACTIVE post-stay profile with that id; a revoked profile is terminal for its stay episode")
 		case errors.Is(err, poststay.ErrNotEligible):
@@ -198,8 +173,7 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// The audit records the ROTATION, never the secret. A PIN in an audit payload would outlive the one-time
-	// reveal it exists to bound.
+	// The audit records the rotation, never the secret, so a PIN cannot outlive its one-time reveal.
 	s.audit(r, "poststay.pin_reset", "post_stay_profile", id, map[string]any{
 		"reason": in.Reason, "valid_until": out.Expires.UTC().Format(time.RFC3339),
 		"validity_extended": in.ExtendValidity,
@@ -208,13 +182,11 @@ func (s *server) resetPostStayPIN(w http.ResponseWriter, r *http.Request) {
 		"profile_id":  id,
 		"pin":         out.PIN,
 		"valid_until": out.Expires.UTC().Format(time.RFC3339),
-		// Said in the response because the screen must say it too: this is the only time this value exists.
-		"notice": "This PIN is shown once. It is not stored and cannot be shown again — if it is lost, reset again.",
+		"notice":      "This PIN is shown once. It is not stored and cannot be shown again — if it is lost, reset again.",
 	})
 }
 
-// revokePostStayProfile ends post-stay access for this Stay episode. Terminal: not reversible, and the
-// episode gets no replacement profile.
+// Terminal: not reversible, and the episode gets no replacement profile.
 func (s *server) revokePostStayProfile(w http.ResponseWriter, r *http.Request) {
 	var in postStayActionReq
 	if err := decodeJSON(r, &in); err != nil {

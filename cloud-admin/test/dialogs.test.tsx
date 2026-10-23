@@ -37,7 +37,7 @@ describe("ConfirmDialog — typed confirmation", () => {
     expect(button).toBeDisabled();
 
     const typed = screen.getByLabelText(/Type the site code/);
-    await user.type(typed, "Demo-Hotel"); // case matters
+    await user.type(typed, "Demo-Hotel");
     await user.type(screen.getByLabelText(/Reason/), "closed property");
     expect(button).toBeDisabled();
 
@@ -107,7 +107,6 @@ describe("Password confirmation (step-up)", () => {
     const { calls } = mockFetch([
       { method: "POST", match: "/api/v1/auth/reauth", body: { ok: true } },
     ]);
-    // The action itself: 403 reauth_required the first time, then success.
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const routed = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

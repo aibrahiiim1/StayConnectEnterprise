@@ -1,10 +1,5 @@
 "use client";
 
-// THE SIGN-IN SCREEN — the first thing anyone sees, and the only screen outside the app shell.
-//
-// It has no sidebar and no top bar, so the theme control has to be here too: an operator whose appliance is set
-// to dark would otherwise meet a light login page and conclude the theme preference had not stuck.
-
 import { Suspense, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
@@ -29,8 +24,7 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  // Only a path on this console (lib/safe-next.ts): ?next=https://elsewhere is how a sign-in became a hand-off
-  // to another site.
+  // Only a path on this console: an external ?next= would hand the sign-in off to another site.
   const next = safeNextPath(params.get("next"));
   const expired = params.get("reason") === "expired";
 
@@ -38,7 +32,7 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
-  // The password is the first of two steps (0132): it answers which second step comes, and opens no session.
+  // The password is step one: it answers which second step comes and opens no session.
   const [second, setSecond] = useState<SecondStep | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
@@ -46,8 +40,6 @@ function LoginInner() {
     setErr(null);
     setLoading(true);
     try {
-      // POST /edge/v1/auth/login — local site operators only; the appliance
-      // has no org concept and no SSO.
       const r = await api.post<{ second_step?: SecondStep }>("/auth/login", { email, password });
       setPassword("");
       setSecond(r.second_step === "enrol" ? "enrol" : "code");
@@ -58,8 +50,7 @@ function LoginInner() {
     }
   }
 
-  // A weak or administrator-chosen password signs in to a session that can only replace it; the app layout
-  // shows that form whatever page it is asked for, so the destination is the same either way.
+  // A weak or admin-chosen password gets a session that can only replace it; the app layout shows that form on any page.
   const finish = useCallback(() => {
     router.replace(next);
     router.refresh();
@@ -71,11 +62,8 @@ function LoginInner() {
 
   return (
     <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-      {/* THE INVERSE PANEL. Desktop only: it carries the product identity and the one fact an operator needs
-          before typing a password here -- that this login belongs to this building. Phones get the form. */}
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground lg:flex">
-        {/* The wordmark, large, on its light tile: "Gate" is black on every surface, so on this dark panel the
-            mark sits on white rather than changing colour (components/brand.tsx). */}
+        {/* "Gate" is black on every surface, so the wordmark sits on a white tile on the dark panel. */}
         <div className="relative z-10 flex flex-col items-start gap-3">
           <span className="inline-flex items-center rounded-xl bg-white px-5 py-3 shadow-control ring-1 ring-black/5">
             <OneGateWordmark className="text-[2.25rem]" />
@@ -108,8 +96,7 @@ function LoginInner() {
                 <OneGateWordmark className="text-[1.75rem]" />
               </span>
               <div className="space-y-1.5">
-                {/* The wordmark above already says OneGate; the heading's accessible name keeps the full product
-                    name for assistive technology and for anything that finds the page by it. */}
+                {/* sr-only keeps the full product name in the heading's accessible name. */}
                 <h1 className="text-title">
                   <span className="sr-only">OneGate </span>Admin Console
                 </h1>
@@ -117,9 +104,7 @@ function LoginInner() {
               </div>
             </div>
 
-            {/* WHY THE OPERATOR IS HERE, when the console sent them (the idle limit, or a session the appliance no
-                longer knows). Polite: it is information, not an error, and must not cut off the page's own
-                announcement. After signing in they go back to where they were. */}
+            {/* role="status" (polite): informational, must not cut off the page's own announcement. */}
             <p role="status" className={expired ? "mb-4 rounded-lg border border-border bg-surface px-3.5 py-3 text-sm" : "sr-only"}>
               {expired ? "Your session ended because there was no activity for a while. Sign in again to continue where you left off." : ""}
             </p>
@@ -128,15 +113,12 @@ function LoginInner() {
               <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4" noValidate={false}>
-              {/* The banner is role="alert" itself; an aria-live wrapper around it made a screen reader read the
-                  error twice. */}
+              {/* The banner is role="alert"; an aria-live wrapper would make screen readers read it twice. */}
               <ErrorBanner err={err} className="mb-0" />
               <Field label="Email or username">
                 <Input
                   type="text"
                   required
-                  // The page exists only to take these two fields, and it is reached by choice or by a redirect
-                  // that the status line above explains, so starting in the first field skips nothing.
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   autoComplete="username"

@@ -1,36 +1,13 @@
 package social
 
-// Real Facebook Login provider.
+// Facebook Login is plain OAuth 2.0, not OIDC: there is no id_token. The token is exchanged by form POST
+// (so the app secret never appears in a URL a proxy or log could keep), and the Graph /me call carries
+// appsecret_proof = hex(HMAC-SHA256(app secret, access token)), which makes Graph refuse a token lifted
+// from elsewhere. That call establishes the identity.
 //
-// Flow:
-//   1. AuthorizeURL builds https://www.facebook.com/v19.0/dialog/oauth with
-//      our app id as client_id, redirect_uri, scope "email",
-//      state and response_type=code.
-//   2. Facebook redirects back to our callback with ?code=...&state=...
-//   3. Exchange POSTs the code to
-//      https://graph.facebook.com/v19.0/oauth/access_token (as a form, so the
-//      app secret never appears in a URL that a proxy or access log could
-//      keep) and receives a user access token.
-//   4. We GET https://graph.facebook.com/v19.0/me?fields=id,email
-//      with the token as a Bearer credential and
-//      appsecret_proof = hex(HMAC-SHA256(key=app secret, msg=access token)).
-//      The proof makes Graph refuse the call unless it comes from the holder
-//      of the app secret, so a token lifted from elsewhere is useless here.
-//
-// Facebook Login is plain OAuth 2.0, not OIDC: there is no id_token to verify
-// on this flow. The Graph call with the proof is what establishes the
-// identity (the contract's "verified profile").
-//
-// EMAIL VERIFICATION — Facebook returns no email_verified field. Graph
-//   returns `email` only when the user has a CONFIRMED primary address and
-//   granted the email permission; an unconfirmed address, a phone-only
-//   account or a declined permission all yield no `email` at all. So a
-//   returned email is treated as verified, and a missing one is
-//   ErrEmailUnverified (with UserInfo populated, as google.go does), which the
-//   portal shows as "email not verified by provider".
-//
-// Endpoints are overridable through unexported fields so the httptest fakes
-// in facebook_test.go can drive the implementation without reaching Facebook.
+// Facebook returns no email_verified. Graph returns `email` only for a confirmed primary address with the
+// email permission granted, so a returned email is treated as verified and a missing one is
+// ErrEmailUnverified (UserInfo populated, as in google.go).
 
 import (
 	"context"
@@ -51,7 +28,7 @@ const (
 	defaultFacebookAuthBase = "https://www.facebook.com/v19.0/dialog/oauth"
 	defaultFacebookTokenURL = "https://graph.facebook.com/v19.0/oauth/access_token"
 	defaultFacebookMeURL    = "https://graph.facebook.com/v19.0/me"
-	// email only (GDPR plan C9). Facebook grants public_profile to every app anyway; it is not asked for.
+	// email only; public_profile is granted anyway and not asked for.
 	defaultFacebookScope = "email"
 )
 
@@ -68,7 +45,6 @@ type Facebook struct {
 	meURL    string
 }
 
-// NewFacebook requires the app id + app secret. Scopes is optional.
 func NewFacebook(clientID, clientSecret, scopes string) (*Facebook, error) {
 	if clientID == "" || clientSecret == "" {
 		return nil, errors.New("facebook: client_id (App ID) and client_secret (App Secret) are required")
@@ -83,8 +59,7 @@ func NewFacebook(clientID, clientSecret, scopes string) (*Facebook, error) {
 
 func (f *Facebook) Name() string { return "facebook" }
 
-// Binding: none beyond `state`. Facebook Login on this flow issues no id_token for a nonce to bind, and the
-// Graph call is authenticated by appsecret_proof, which only the holder of the app secret can compute.
+// Binding is none beyond `state`: there is no id_token for a nonce, and appsecret_proof authenticates the Graph call.
 func (f *Facebook) Binding() Binding { return Binding{} }
 
 func (f *Facebook) AuthorizeURL(a AuthRequest) string {
@@ -102,7 +77,6 @@ func (f *Facebook) AuthorizeURL(a AuthRequest) string {
 	return u.String()
 }
 
-// appSecretProof is hex(HMAC-SHA256(app secret, access token)).
 func appSecretProof(accessToken, appSecret string) string {
 	mac := hmac.New(sha256.New, []byte(appSecret))
 	mac.Write([]byte(accessToken))
@@ -131,7 +105,7 @@ func (f *Facebook) Exchange(ctx context.Context, x ExchangeRequest) (*UserInfo, 
 		return nil, err
 	}
 	q := u.Query()
-	q.Set("fields", "id,email") // name and picture are not kept, so not fetched (GDPR plan C9)
+	q.Set("fields", "id,email") // name and picture are not kept, so not fetched
 	q.Set("appsecret_proof", appSecretProof(tk.AccessToken, f.ClientSecret))
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

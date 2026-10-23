@@ -10,8 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// THE LEDGER HALF OF THE OFFLINE RECONCILIATION, against a real edge_offline_packages: a package Central has
-// not confirmed is offered again on every pass, and one it confirmed is stamped once and never offered again.
+// Unconfirmed packages are offered again each pass; confirmed ones are stamped once and never offered again.
 func TestIntegration_OfflineReconcileLedger(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {
@@ -41,7 +40,7 @@ func TestIntegration_OfflineReconcileLedger(t *testing.T) {
 
 	s := &server{db: p}
 	rec := s.offlineReconcilerFor()
-	confirmed := map[string]bool{a: true} // Central confirms a; b keeps failing
+	confirmed := map[string]bool{a: true}
 	sent := map[string]int{}
 	rec.send = func(_ context.Context, id string) (bool, error) {
 		if id != a && id != b {

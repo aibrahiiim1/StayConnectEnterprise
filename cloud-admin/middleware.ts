@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Cookie sc_session is HttpOnly, so the browser middleware only sees its
-// presence. A real validity check happens via /v1/auth/whoami on the client.
+// The HttpOnly cookie's presence is only a hint; whoami verifies the session.
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("sc_session");
@@ -15,8 +14,7 @@ export function middleware(req: NextRequest) {
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
-  // reason=expired: the console found the sign-in ended, so the cookie (if the browser still has it) is stale and
-  // the sign-in page must show rather than bounce back into the app.
+  // Expired sessions stay on sign-in even while the browser still holds a stale cookie.
   if (hasSession && isLogin && req.nextUrl.searchParams.get("reason") !== "expired") {
     const url = req.nextUrl.clone();
     url.pathname = "/overview";

@@ -1,14 +1,7 @@
 "use client";
 
-// HISTORY — every save, and a way back.
-//
-// Each save already appends an immutable entry (who, when) to the design's history; that is how a bad change
-// is recovered and how the audit says who changed the page guests type their room number into. This shows it,
-// newest first, and lets an operator restore an earlier one. Restoring does not rewind anything: it saves that
-// earlier design again as a NEW entry, so the history still says what actually happened. It asks for the
-// operator's password, because it can change the custom CSS and HTML as much as any save can.
-//
-// The vocabulary is the hotel's -- "saved", "restore" -- not a release manager's.
+// Restoring saves the earlier design again as a new entry, so history stays truthful. It asks for the operator's
+// password because it can change custom CSS and HTML as much as any save.
 
 import { useState } from "react";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +15,7 @@ import { formatDate, formatRelative } from "@/lib/utils";
 import { History as HistoryIcon, RotateCcw } from "lucide-react";
 import { restoreRevision, type RevisionSummary } from "@/lib/api/portal-design";
 
-/** A server note, in the screen's words. The only note the server writes itself is the restore marker. */
+/** The only note the server writes itself is the restore marker. */
 function describe(note?: string) {
   const m = note?.match(/^rolled back to version (\d+)$/);
   if (m) return `Restored save #${m[1]}`;

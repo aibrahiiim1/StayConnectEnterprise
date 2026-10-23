@@ -1,28 +1,8 @@
 //go:build kernelgate
 
-// Package kerneltest is the REAL-KERNEL contract suite for Phase-3 enforcement.
-//
-// Everything else that tests this subsystem is a model. The netd suites model nft and tc as Go interfaces and
-// prove ordering; the nft and shape suites assert the command strings; the foundation suite applies commands
-// to a modelled ruleset. All of that is worth having, and none of it can answer the questions that only the
-// kernel decides:
-//
-//	does nftables actually accept a `ifname . ipv4_addr` element with a timeout?
-//	does an element with a lease actually DISAPPEAR when the lease elapses, with nothing running?
-//	does a repeated `add element` refresh that lease, or silently not?
-//	does a guest with no authorization element actually fail to reach the internet?
-//	and — the claim that mattered most and was wrong for the longest — does removing a tc classification
-//	filter deny that guest anything at all?
-//
-// So this suite runs the REAL `nft` and `tc` binaries against a REAL kernel, and it sends REAL packets between
-// three disposable network namespaces to see whether they arrive.
-//
-// It is not live evidence about an appliance. It contacts no appliance, no production database and no PMS; it
-// mutates nothing outside the namespaces the harness created and destroys them afterwards. It is evidence
-// about the KERNEL CONTRACT this design rests on, produced on a disposable machine.
-//
-// It is built behind the `kernelgate` tag and driven by scripts/ci/kernel-netns-suite.sh, which builds the
-// topology, points the clients at namespace-scoped wrappers, and proves the host's own ruleset is untouched.
+// Package kerneltest runs the real nft and tc binaries against a real kernel, sending real packets between three
+// disposable network namespaces. It touches nothing outside the namespaces the harness creates.
+// Built behind the kernelgate tag and driven by scripts/ci/kernel-netns-suite.sh.
 package kerneltest
 
 import (
@@ -39,16 +19,15 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
-// The harness passes the disposable topology in the environment. Nothing here has a default that could point
-// at a real system: an unset variable fails the suite rather than silently running somewhere else.
+// The harness passes the topology via the environment; an unset variable fails the suite rather than running elsewhere.
 var (
-	nftWrapper = mustEnv("KG_NFT") // runs nft INSIDE the router namespace
-	tcWrapper  = mustEnv("KG_TC")  // runs tc INSIDE the router namespace
-	ipWrapper  = mustEnv("KG_IP")  // runs ip INSIDE the router namespace
+	nftWrapper = mustEnv("KG_NFT")
+	tcWrapper  = mustEnv("KG_TC")
+	ipWrapper  = mustEnv("KG_IP")
 	guestNS    = mustEnv("KG_GUEST_NS")
 	guestIP    = mustEnv("KG_GUEST_IP")
 	wanIP      = mustEnv("KG_WAN_IP")
-	guestIface = mustEnv("KG_GUEST_IF") // the router-side interface guests arrive on
+	guestIface = mustEnv("KG_GUEST_IF")
 	ifbOK      = os.Getenv("KG_IFB") == "1"
 )
 
@@ -75,7 +54,6 @@ func shapeClient() *shape.Client {
 	return c
 }
 
-// run executes a command in the ROUTER namespace via the same wrappers the clients use.
 func run(t *testing.T, name string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command(name, args...).CombinedOutput()
@@ -85,11 +63,8 @@ func run(t *testing.T, name string, args ...string) string {
 	return string(out)
 }
 
-// reaches sends real packets from the guest namespace to the WAN address and reports whether they arrive.
-//
-// This is the only honest test of "is this guest on the internet". Every other formulation — an element is
-// present, a filter is installed, a row says active — is a proxy for it, and each of those proxies has at some
-// point been wrong in exactly the way that let traffic through.
+// reaches sends real packets from the guest namespace to the WAN address. It is the only honest test of "is this
+// guest on the internet"; an element, a filter or a row are proxies that have each been wrong.
 func reaches(t *testing.T) bool {
 	t.Helper()
 	cmd := exec.Command("ip", "netns", "exec", guestNS, "ping", "-c", "2", "-W", "1", "-i", "0.2", wanIP)
@@ -105,11 +80,8 @@ func mustIP(t *testing.T, s string) net.IP {
 	return ip
 }
 
-// ---- 1. the set itself -------------------------------------------------------
-
-// The Phase-3 set exists, is empty, and is a CONCATENATED (ifname, IPv4) set with timeouts enabled. Every
-// other property in this file depends on all three, and a set declared without `flags timeout` would accept
-// the element and silently ignore the lease.
+// The Phase-3 set is empty and concatenated (ifname, IPv4) with timeouts; without `flags timeout` the lease
+// would be silently ignored.
 func TestKernel_Phase3SetExistsEmptyAndSupportsLeases(t *testing.T) {
 	out := run(t, nftWrapper, "list", "set", "inet", "stayconnect", nft.Phase3AuthV4)
 	if !strings.Contains(out, "ifname . ipv4_addr") {
@@ -127,7 +99,6 @@ func TestKernel_Phase3SetExistsEmptyAndSupportsLeases(t *testing.T) {
 	}
 }
 
-// A real concatenated element goes in, is read back with its bridge and address intact, and comes out again.
 func TestKernel_AuthorizeReadBackAndRevoke(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -160,13 +131,11 @@ func TestKernel_AuthorizeReadBackAndRevoke(t *testing.T) {
 	}
 }
 
-// SET ISOLATION, against the real kernel. A legacy authorization is invisible to every Phase-3 operation, and
-// a Phase-3 revocation cannot remove it. This is the property that makes Phase-3 full-state reconciliation
-// safe to run beside a live legacy pipeline.
+// Set isolation: a legacy authorization is invisible to Phase-3 operations and a Phase-3 revocation cannot remove it.
 func TestKernel_LegacyAndPhase3SetsAreIsolated(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
-	if err := c.Allow(ctx(t), guestIface, ip, 0); err != nil { // legacy: permanent, as scd installs it
+	if err := c.Allow(ctx(t), guestIface, ip, 0); err != nil {
 		t.Fatalf("legacy allow: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Deny(context.Background(), guestIface, ip) })
@@ -178,7 +147,6 @@ func TestKernel_LegacyAndPhase3SetsAreIsolated(t *testing.T) {
 	if len(els) != 0 {
 		t.Fatalf("a legacy authorization is visible to Phase-3 enumeration: %+v", els)
 	}
-	// A Phase-3 revocation names only the Phase-3 set, so it cannot reach the legacy element.
 	if err := c.DenyIn(ctx(t), nft.Phase3AuthV4, guestIface, ip); err != nil {
 		t.Fatalf("phase-3 revoke of an absent element should be a no-op: %v", err)
 	}
@@ -191,9 +159,7 @@ func TestKernel_LegacyAndPhase3SetsAreIsolated(t *testing.T) {
 	}
 }
 
-// ---- 2. the lease, in the kernel ---------------------------------------------
-
-// THE PROPERTY THE WHOLE LEASE DESIGN RESTS ON: with nothing running, the element goes away by itself.
+// With nothing running, the element goes away by itself.
 func TestKernel_LeaseExpiresWithNothingRunning(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -203,14 +169,13 @@ func TestKernel_LeaseExpiresWithNothingRunning(t *testing.T) {
 	if ok, _ := c.AuthorizedIn(ctx(t), nft.Phase3AuthV4, guestIface, ip); !ok {
 		t.Fatal("the lease did not take")
 	}
-	time.Sleep(3500 * time.Millisecond) // nothing renews it; nothing else runs at all
+	time.Sleep(3500 * time.Millisecond)
 	if ok, _ := c.AuthorizedIn(ctx(t), nft.Phase3AuthV4, guestIface, ip); ok {
 		t.Fatal("the element outlived its lease: the kernel is not expiring it, so a dead daemon would leave the guest online")
 	}
 }
 
-// A REPEATED `add element` DOES NOT REFRESH THE LEASE. This is the exact assumption that would have made the
-// renewal mechanism a no-op — healthy-looking, and dropping every guest at the first lease boundary.
+// A repeated `add element` does not refresh the lease, so renewal needs the real refresh below.
 func TestKernel_RepeatedAddDoesNotRefreshTheLease(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -220,7 +185,6 @@ func TestKernel_RepeatedAddDoesNotRefreshTheLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(3 * time.Second)
-	// The naive "renewal": add the same element again with a full lease.
 	_ = c.AllowIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, 20*time.Second)
 	els, err := c.ListIn(ctx(t), nft.Phase3AuthV4)
 	if err != nil || len(els) != 1 {
@@ -232,8 +196,7 @@ func TestKernel_RepeatedAddDoesNotRefreshTheLease(t *testing.T) {
 	}
 }
 
-// THE REAL REFRESH DOES restart the lease, and does it without ever removing the guest's authorization: the
-// delete and the add are one transaction.
+// The real refresh restarts the lease without removing the authorization: delete and add are one transaction.
 func TestKernel_LeaseInRefreshesAnExistingElement(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -258,9 +221,6 @@ func TestKernel_LeaseInRefreshesAnExistingElement(t *testing.T) {
 	}
 }
 
-// ---- 3. what actually decides internet access --------------------------------
-
-// A guest with no authorization element does not reach the internet. Real packets, real forward chain.
 func TestKernel_NoElementMeansNoInternet(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -272,7 +232,6 @@ func TestKernel_NoElementMeansNoInternet(t *testing.T) {
 	}
 }
 
-// And an authorized one does — then stops, by itself, when the lease elapses.
 func TestKernel_Phase3ElementGrantsInternetAndTheLeaseTakesItBack(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -290,9 +249,8 @@ func TestKernel_Phase3ElementGrantsInternetAndTheLeaseTakesItBack(t *testing.T) 
 	}
 }
 
-// THE CLAIM THAT WAS WRONG. Removing the tc classification does NOT deny a guest anything: their packets fall
-// back to the bridge's default class and keep flowing. Any document that says otherwise is wrong, and this is
-// the test that says so in packets.
+// Removing the tc classification denies nothing: packets fall back to the bridge's default class. Only the nft
+// element denies.
 func TestKernel_RemovingTCClassificationDoesNotDenyAccess(t *testing.T) {
 	if !ifbOK {
 		t.Skip("KG_IFB=0: the ifb module is unavailable on this runner, so the staged tc surface cannot be driven; " +
@@ -322,7 +280,6 @@ func TestKernel_RemovingTCClassificationDoesNotDenyAccess(t *testing.T) {
 		t.Fatal("an authorized, classified guest could not reach the WAN")
 	}
 
-	// Strip the classification only. Nothing about authorization changes.
 	if err := sh.RemoveClassification(ctx(t), guestIface, ip); err != nil {
 		t.Fatalf("remove classification: %v", err)
 	}
@@ -333,7 +290,6 @@ func TestKernel_RemovingTCClassificationDoesNotDenyAccess(t *testing.T) {
 	t.Log("CONFIRMED: with the tc classification removed the guest is STILL ONLINE, now through the bridge's " +
 		"default class and metered by nothing")
 
-	// The nft element is what denies. Same guest, same (absent) classification.
 	if err := c.DenyIn(ctx(t), nft.Phase3AuthV4, guestIface, ip); err != nil {
 		t.Fatal(err)
 	}
@@ -342,10 +298,7 @@ func TestKernel_RemovingTCClassificationDoesNotDenyAccess(t *testing.T) {
 	}
 }
 
-// ---- 4. the staged tc surface, against real tc -------------------------------
-
-// A PREPARED class exists and carries nothing: no classification filter, so the guest's packets are not in it.
-// This is the accountable-before-forwarding window, in the kernel.
+// A prepared class carries nothing: no classification filter, so the guest's packets are not in it.
 func TestKernel_PrepareInstallsAClassThatClassifiesNothing(t *testing.T) {
 	if !ifbOK {
 		t.Skip("KG_IFB=0: ifb unavailable; see LIMITATIONS in the evidence artifact")
@@ -383,8 +336,7 @@ func TestKernel_PrepareInstallsAClassThatClassifiesNothing(t *testing.T) {
 	}
 }
 
-// A RE-RATE changes the class in place. The counters must survive it: a delete+add would restart the series
-// and the accounting checkpoint would be describing a class that no longer exists.
+// A re-rate changes the class in place; a delete+add would restart the counters the accounting checkpoint uses.
 func TestKernel_ReRatePreservesTheCounterSeries(t *testing.T) {
 	if !ifbOK {
 		t.Skip("KG_IFB=0: ifb unavailable; see LIMITATIONS in the evidence artifact")
@@ -411,7 +363,6 @@ func TestKernel_ReRatePreservesTheCounterSeries(t *testing.T) {
 	}
 	minor, _ := shape.MinorForIP(ip)
 
-	// Push real traffic so the class has counters worth preserving.
 	for i := 0; i < 3; i++ {
 		reaches(t)
 	}
@@ -440,16 +391,11 @@ func TestKernel_ReRatePreservesTheCounterSeries(t *testing.T) {
 	}
 }
 
-// ---- 5. the surgical live-dark foundation, on a POPULATED legacy set ----------
-
-// The whole point of the surgical install: real legacy guests are authorized, and after the install they are
-// still exactly as authorized as they were.
 func TestKernel_FoundationInstallPreservesAPopulatedLegacySet(t *testing.T) {
 	c := nftClient()
 	f := &nftfoundation.Foundation{NftPath: nftWrapper, Run: nftfoundation.ExecRunner}
 	ip := mustIP(t, guestIP)
 
-	// Two live legacy guests, one of them the one we can send packets as.
 	if err := c.Allow(ctx(t), guestIface, ip, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +410,7 @@ func TestKernel_FoundationInstallPreservesAPopulatedLegacySet(t *testing.T) {
 		t.Fatal("the legacy guest is not online before the install, so this proves nothing about preserving them")
 	}
 
-	// The suite's namespace already carries the Phase-3 set (the harness renders the current ruleset), so
-	// remove the foundation first: what has to be proven is an install onto a ruleset that lacks it.
+	// The harness already renders the Phase-3 set; remove the foundation first to test an install onto a ruleset lacking it.
 	if _, err := f.Rollback(ctx(t)); err != nil {
 		t.Fatalf("preparing a pre-foundation ruleset: %v", err)
 	}
@@ -488,12 +433,10 @@ func TestKernel_FoundationInstallPreservesAPopulatedLegacySet(t *testing.T) {
 			t.Fatalf("legacy element %d changed across the install: %s -> %s", i, rep.LegacyBefore[i], rep.LegacyAfter[i])
 		}
 	}
-	// AND THE GUEST NEVER NOTICED.
 	if !reaches(t) {
 		t.Fatal("a legacy guest lost internet access across the Phase-3 foundation install")
 	}
 
-	// Idempotent.
 	rep2, err := f.Install(ctx(t))
 	if err != nil {
 		t.Fatalf("second install: %v", err)
@@ -505,7 +448,6 @@ func TestKernel_FoundationInstallPreservesAPopulatedLegacySet(t *testing.T) {
 		t.Fatal("a legacy guest lost access across the second install")
 	}
 
-	// And the set it created authorizes nobody.
 	els, err := c.ListIn(ctx(t), nft.Phase3AuthV4)
 	if err != nil {
 		t.Fatal(err)
@@ -557,21 +499,8 @@ func TestKernel_FoundationRollbackPreservesLegacyAccess(t *testing.T) {
 	}
 }
 
-// A REBOOT, and what it does and does not preserve.
-//
-// nftables state is not persistent: a reboot brings the appliance up with whatever ruleset the unit renders,
-// and the authorization sets come back EMPTY. That is true of the legacy set as well, and it is not a defect —
-// scd re-establishes legacy authorizations from `public.sessions` on its own reconciliation, exactly as it
-// does today, and netd re-establishes Phase-3 leases from `iam_v2.sessions` when the flags are on.
-//
-// So the property a reboot has to have is not "the elements survive". It is:
-//
-//	the FOUNDATION comes back, so the cutover is still flag-only, and re-running the install afterwards is a
-//	no-op rather than a second set of rules;
-//	and the Phase-3 set comes back EMPTY, so a dark appliance authorizes nobody across a restart.
-//
-// This test models the reboot the way the appliance performs it — regenerating and re-applying the whole
-// ruleset — and then asserts both.
+// A reboot loses nft state: the authorization sets come back empty (scd and netd re-establish them). The foundation
+// must come back, re-running the install must be a no-op, and the Phase-3 set must be empty.
 func TestKernel_RebootRestoresTheFoundationEmptyAndKeepsInstallIdempotent(t *testing.T) {
 	c := nftClient()
 	f := &nftfoundation.Foundation{NftPath: nftWrapper, Run: nftfoundation.ExecRunner}
@@ -587,9 +516,7 @@ func TestKernel_RebootRestoresTheFoundationEmptyAndKeepsInstallIdempotent(t *tes
 		t.Fatal(err)
 	}
 
-	// THE REBOOT: the generated ruleset is re-applied in full. This is the `delete table` + recreate that the
-	// surgical install exists to avoid doing casually — here it is legitimate, because the unit is restarting
-	// and nothing is being preserved by anyone.
+	// The reboot: the generated ruleset is re-applied in full (delete table + recreate); valid as nothing is preserved.
 	rulesetPath := os.Getenv("KG_RULESET")
 	if rulesetPath == "" {
 		t.Skip("KG_RULESET not provided by the harness")
@@ -615,7 +542,6 @@ func TestKernel_RebootRestoresTheFoundationEmptyAndKeepsInstallIdempotent(t *tes
 		t.Fatalf("legacy authorizations survived a full ruleset re-apply (%d); if that is true of this kernel "+
 			"the runbook's description of what a reboot preserves is wrong", len(st.LegacyElements))
 	}
-	// And re-running the install after a reboot changes nothing.
 	rep, err := f.Install(ctx(t))
 	if err != nil {
 		t.Fatalf("post-reboot install: %v", err)
@@ -625,12 +551,8 @@ func TestKernel_RebootRestoresTheFoundationEmptyAndKeepsInstallIdempotent(t *tes
 	}
 }
 
-// ---- 6. the timeout REPRESENTATION, in the kernel ----------------------------
-
-// THE QUANTIZATION PROOF. A lease clamped to a guest's hard access boundary is only safe if the timeout the
-// kernel actually installs is never LATER than the lease that was asked for. nft's element timeout granularity
-// is whole seconds, so this is the test that says what the kernel really does with the values this design
-// produces — rather than what the Go code believes it does.
+// A lease clamped to a hard access boundary is safe only if the installed timeout is never later than requested;
+// nft timeouts are whole seconds.
 func TestKernel_InstalledTimeoutNeverExceedsTheRequestedLease(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -656,9 +578,8 @@ func TestKernel_InstalledTimeoutNeverExceedsTheRequestedLease(t *testing.T) {
 	}
 }
 
-// A sub-second lease is REFUSED before it reaches the kernel. There is no representable form of it that does
-// not overshoot, and `timeout 0s` — the other thing a naive conversion produces — is read by nft as no
-// timeout at all.
+// A sub-second lease is refused before the kernel: it cannot be represented without overshooting, and
+// `timeout 0s` means no timeout.
 func TestKernel_SubSecondLeaseIsRefusedAndInstallsNothing(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
@@ -676,16 +597,14 @@ func TestKernel_SubSecondLeaseIsRefusedAndInstallsNothing(t *testing.T) {
 	}
 }
 
-// AND THE CLAMPED LEASE REALLY EXPIRES BEFORE THE BOUNDARY. A 1.9s boundary becomes a 1s lease; a guest
-// leased that way is gone from the set well before 1.9 seconds have passed. This is the end-to-end form of
-// the invariant: not "the number is smaller" but "the kernel stopped forwarding in time".
+// A 1.9s boundary becomes a 1s lease and the guest is gone from the set before 1.9s: the kernel stops forwarding in time.
 func TestKernel_ClampedLeaseExpiresBeforeItsBoundary(t *testing.T) {
 	c := nftClient()
 	ip := mustIP(t, guestIP)
 	t.Cleanup(func() { _ = c.DenyIn(context.Background(), nft.Phase3AuthV4, guestIface, ip) })
 
 	boundary := 1900 * time.Millisecond
-	lease := time.Duration(int(boundary/time.Second)) * time.Second // what leaseFor would derive: 1s
+	lease := time.Duration(int(boundary/time.Second)) * time.Second
 	start := time.Now()
 	if err := c.LeaseIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, lease); err != nil {
 		t.Fatal(err)
@@ -693,7 +612,6 @@ func TestKernel_ClampedLeaseExpiresBeforeItsBoundary(t *testing.T) {
 	if !reaches(t) {
 		t.Fatal("the leased guest could not reach the WAN, so this proves nothing about expiry")
 	}
-	// Sleep to just inside the boundary. The element must already be gone.
 	time.Sleep(boundary - time.Since(start) - 100*time.Millisecond)
 	ok, err := c.AuthorizedIn(ctx(t), nft.Phase3AuthV4, guestIface, ip)
 	if err != nil {

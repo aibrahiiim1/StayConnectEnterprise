@@ -12,9 +12,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// recordingSink captures axis calls + domain events for protocol assertions.
-// coverageReport is what a sweep told the sink it OBSERVED, so a test can assert that vacant rooms are
-// counted as part of the building even though they are never admitted as departures.
+// coverageReport is what a sweep told the sink it observed, including vacant rooms that are never admitted.
 type coverageReport struct {
 	Rooms     []string
 	Roster    int
@@ -24,9 +22,7 @@ type coverageReport struct {
 
 type recordingSink struct {
 	mu sync.Mutex
-	// pendingCmd is handed out ONCE, the way a real claim behaves: the durable row is cleared by the claim
-	// itself, so a sink that kept returning the same command would let a test pass while the production path
-	// issued a DR on every frame.
+	// pendingCmd is handed out once, like a real claim, so a test cannot pass while production issues a DR on every frame.
 	pendingCmd        *ResyncCommand
 	skippedReports    []int64
 	coverage          []coverageReport
@@ -140,8 +136,6 @@ func testAdapter() *fiasAdapter {
 		identKey: k.IdentityKey, identKeyN: k.IdentityKeyVersion, profile: "protel-fias/v1", now: time.Now}
 }
 
-// mustEvent parses a record that is expected to be strictly well-formed, failing the test on a parse error.
-// (Validation of the typed Event contract is asserted separately by callers.)
 func mustEvent(t *testing.T, a *fiasAdapter, rec string) Event {
 	t.Helper()
 	ev, err := a.toEvent(rec)
@@ -151,8 +145,7 @@ func mustEvent(t *testing.T, a *fiasAdapter, rec string) Event {
 	return ev
 }
 
-// TestFIASFieldMap_Authoritative pins the binding Protel FIAS field map + timestamp semantics without any
-// network: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
+// Protel FIAS field map: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
 func TestFIASFieldMap_Authoritative(t *testing.T) {
 	a := testAdapter()
 	gi := mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
@@ -175,8 +168,6 @@ func TestFIASFieldMap_Authoritative(t *testing.T) {
 	}
 }
 
-// TestSourceFingerprint_DuplicateAndDistinct proves exact retransmission is idempotent and any meaningful
-// change is distinct (§1/§2).
 func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 	a := testAdapter()
 	base := "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|"
@@ -185,11 +176,9 @@ func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 	if !isHex64(baseFP) {
 		t.Fatalf("fingerprint must be 64-hex, got %q", baseFP)
 	}
-	// exact retransmission -> SAME (idempotent)
 	if fp(base) != baseFP {
 		t.Error("exact retransmission must produce the same fingerprint")
 	}
-	// reservation alone is not the identity
 	if baseFP == mustEvent(t, a, base).ReservationRef {
 		t.Error("reservation number alone must not be the fingerprint")
 	}
@@ -207,13 +196,11 @@ func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 			t.Errorf("%s must produce a DIFFERENT fingerprint", label)
 		}
 	}
-	// interface change -> different
 	a2 := testAdapter()
 	a2.iface = iface("i2")
 	if mustEvent(t, a2, base).SourceEventFingerprint == baseFP {
 		t.Error("interface change must produce a different fingerprint")
 	}
-	// normalization-version change -> different
 	a3 := testAdapter()
 	a3.rev.NormalizationVersion = 2
 	if mustEvent(t, a3, base).SourceEventFingerprint == baseFP {
@@ -236,7 +223,6 @@ func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
 	if fp != "" || ver != 0 {
 		t.Error("zero key version must fail closed")
 	}
-	// an event built with no identity key is rejected by Validate (domain event needs a 64-hex fingerprint)
 	a := testAdapter()
 	a.identKey = nil
 	if mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|").Validate() == nil {
@@ -244,9 +230,8 @@ func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
 	}
 }
 
-// TestStayResolutionCandidate_NonAuthoritative proves the connector's stay-resolution HINT is scoped by
-// reservation ONLY (room and arrival excluded), is distinct from the event fingerprint, and is NOT required
-// by Validate — the authoritative Stay/lifecycle resolution is Increment 4's job.
+// The stay-resolution candidate is a hint keyed by reservation only (room and arrival excluded), distinct from
+// the event fingerprint, and not required by Validate.
 func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 	a := testAdapter()
 	in := mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
@@ -264,12 +249,10 @@ func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 	if in.StayResolutionCandidate == in.SourceEventFingerprint {
 		t.Error("the candidate must be distinct from the event fingerprint")
 	}
-	// different reservation -> different candidate
 	other := mustEvent(t, a, "GI|RN1408|G#99999|GNSmith|GFJohn|GA260101|GD260105|")
 	if other.StayResolutionCandidate == in.StayResolutionCandidate {
 		t.Error("a different reservation must be a different candidate")
 	}
-	// the candidate is NOT a mandatory identity: an otherwise-valid event with no candidate still validates
 	ev := in
 	ev.StayResolutionCandidate = ""
 	if err := ev.Validate(); err != nil {
@@ -279,31 +262,24 @@ func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 
 func TestFIAS_MalformedAndOverlong(t *testing.T) {
 	a := testAdapter()
-	// missing G# (reservation) -> strict typed projection rejects (no Event produced)
 	if _, err := a.toEvent("GI|RN1408|GNSmith|GA260101|"); err == nil {
 		t.Error("GI without reservation (G#) must be rejected")
 	}
-	// missing RN (room) -> rejected
 	if _, err := a.toEvent("GI|G#12345|GNSmith|GA260101|"); err == nil {
 		t.Error("GI without room (RN) must be rejected")
 	}
 }
 
-// TestFIAS_OverlongFieldsRejectedNoTruncation proves §B: EVERY identity/evidence-bearing FIAS field, when
-// overlong, causes the record to be REJECTED (never silently truncated into a possibly-colliding value), and
-// that the full untruncated value the adapter carried is what the validator sees — so no shortened value can
-// slip through. It also drives the rejected event through the real BoundedQueue to prove no truncated (or
-// any) value reaches the queue/inbox: Enqueue returns EVENT_INVALID and capacity is untouched.
+// An overlong identity/evidence field must reject the record, never truncate into a possibly-colliding value,
+// and the rejected event must not reach the queue.
 func TestFIAS_OverlongFieldsRejectedNoTruncation(t *testing.T) {
 	a := testAdapter()
-	// base valid record (all required fields present, within bounds)
 	base := func() map[string]string {
 		return map[string]string{"RN": "1408", "G#": "12345", "GN": "Smith", "GF": "John", "FO": "F900", "GA": "260101", "GD": "260105"}
 	}
 	build := func(f map[string]string) string {
 		return "GI|RN" + f["RN"] + "|G#" + f["G#"] + "|GN" + f["GN"] + "|GF" + f["GF"] + "|FO" + f["FO"] + "|GA" + f["GA"] + "|GD" + f["GD"] + "|"
 	}
-	// sanity: the base record is a VALID event (so each failure below is attributable to the one overlong field)
 	if err := mustEvent(t, a, build(base())).Validate(); err != nil {
 		t.Fatalf("base record must be valid, got %v", err)
 	}
@@ -346,8 +322,7 @@ func TestFIAS_OverlongFieldsRejectedNoTruncation(t *testing.T) {
 	}
 }
 
-// TestWriteChokepoint_BlocksForbiddenAllowsReadOnly proves the guarded writer rejects PS/PA (and unknown
-// records) BEFORE any byte is written, and passes the verified read-only records.
+// The guarded writer must reject PS/PA and unknown records before any byte is written.
 func TestWriteChokepoint_BlocksForbiddenAllowsReadOnly(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
@@ -373,11 +348,9 @@ func TestWriteChokepoint_BlocksForbiddenAllowsReadOnly(t *testing.T) {
 				t.Fatalf("blocked record %q wrote %d bytes to the peer (must be zero)", bad, n)
 			}
 		case <-time.After(300 * time.Millisecond):
-			// timed out with no bytes → zero bytes written (correct)
 		}
 	}
 
-	// an allowed record reaches the peer intact
 	done := make(chan string, 1)
 	go func() {
 		_ = server.SetReadDeadline(time.Time{}) // clear the expired deadline left by the blocked-write loop
@@ -398,8 +371,6 @@ func TestWriteChokepoint_BlocksForbiddenAllowsReadOnly(t *testing.T) {
 	}
 }
 
-// TestAdapter_StartupDomainAndResync drives a fake PMS peer over net.Pipe and asserts the read-only
-// handshake, typed domain events (no raw frame bytes), resync transitions, and heartbeat.
 func TestAdapter_StartupDomainAndResync(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -462,7 +433,6 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 		t.Fatalf("expected 1 domain event, got %d", len(sink.events))
 	}
 	e := sink.events[0]
-	// AUTHORITATIVE Protel map: RN=room(1408), G#=reservation(12345), GN/GF=last/first, GA/GD dates
 	if e.RecordType != RecGI || e.RoomNumber != "1408" || e.ReservationRef != "12345" ||
 		e.GuestLastName != "Smith" || e.GuestFirstName != "John" || e.ArrivalRaw != "260101" || e.DepartureRaw != "260105" {
 		t.Errorf("typed event fields wrong (authoritative RN/G# map): %+v", e)
@@ -481,12 +451,8 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 	}
 }
 
-// TestAdapter_RosterSnapshotDepartureIsNotAnEvent pins the distinction that the review backlog was built on
-// missing: a GO inside a resync window with no reservation number is a roster snapshot mentioning a room, not
-// a departure the PMS announced, and it must never become a Stay event.
-//
-// The three cases below are the three the live link actually produces. Only the middle one used to be
-// handled correctly.
+// A GO inside a resync window with no reservation number is a roster snapshot mentioning a room, not a
+// departure, and must never become a Stay event.
 func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -501,14 +467,13 @@ func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
 			}
 		}
 		for _, rec := range []string{
-			// (1) inside the resync window, room only — the 14 125-record case. NOT an event.
+			// (1) inside the resync window, room only: not an event.
 			"GO|RN1408|",
 			// (2) inside the resync window, but it names a reservation — a real statement, admitted.
 			"GO|RN1409|G#777|",
 			"DS|",
 			"DE|",
-			// (3) LIVE and room only — a dormant safety net. No such frame has ever been observed (all 565
-			// live departures carried G#); it is kept for a PMS that might one day send one.
+			// (3) live and room only: never observed, kept for a PMS that might send one.
 			"GO|RN1410|",
 		} {
 			if err := pms.WriteFramedRecord(server, rec); err != nil {
@@ -546,16 +511,8 @@ func TestAdapter_RosterSnapshotDepartureIsNotAnEvent(t *testing.T) {
 	}
 }
 
-// TestAdapter_CoverageCountsTheBuildingNotTheAdmissions is the regression for the defect that the ingestion
-// fix created and live verification caught: completeness was measured by counting rooms in ADMITTED records,
-// and the fix stopped admitting the vacant-room records that made the sweep countable.
-//
-//	generation before the fix   439 occupied + 149 vacant = 587 rooms
-//	generation after the fix    424 occupied +   0 vacant = 423 rooms
-//
-// Reconciliation then refused REFUSED_ROSTER_INCOMPLETE for ever -- safe, and permanently useless. Coverage
-// is now taken at OBSERVATION, so the two rules stop interfering: the sweep below names four rooms, two of
-// them vacant, and must report four rooms while admitting exactly two events.
+// Coverage is taken at observation, not from admitted records: vacant rooms are never admitted but must still
+// count toward the building, or reconciliation refuses every roster as incomplete.
 func TestAdapter_CoverageCountsTheBuildingNotTheAdmissions(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -611,8 +568,7 @@ func TestAdapter_CoverageCountsTheBuildingNotTheAdmissions(t *testing.T) {
 	}
 }
 
-// TestAdapter_CoverageIsPerSweep proves the observation resets at DS. A counter that accumulated across
-// syncs would report a building larger than the property and refuse every roster as incomplete.
+// The observation resets at DS; accumulating across syncs would report a building larger than the property.
 func TestAdapter_CoverageIsPerSweep(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(32, time.Second)}
@@ -657,7 +613,6 @@ func TestAdapter_CoverageIsPerSweep(t *testing.T) {
 	}
 }
 
-// roomsOf renders a coverage report's identities for an assertion message.
 func (c coverageReport) has(room string) bool {
 	for _, r := range c.Rooms {
 		if r == room {
@@ -667,14 +622,8 @@ func (c coverageReport) has(room string) bool {
 	return false
 }
 
-// TestAdapter_RoomIdentityIsOneContract is the regression for a latent flaw found by read-only audit: the
-// vacant path keyed rooms on a trimmed value while the occupied path also lowercased. On a property whose
-// rooms are digits the two agree and nothing shows. On one with "A12" the same room counts TWICE, and
-// rooms_named comes out larger than the building -- which makes a PARTIAL sweep look complete, and
-// completeness is what licenses closing a guest's stay.
-//
-// Here one room is named "A12" while occupied and "a12" while vacant. That is one room and one
-// contradiction, never two rooms.
+// Occupied and vacant paths must normalize room identity the same way: counting "A12" twice makes a partial
+// sweep look complete, and completeness licenses closing a guest's stay.
 func TestAdapter_RoomIdentityIsOneContract(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -725,9 +674,7 @@ func TestAdapter_RoomIdentityIsOneContract(t *testing.T) {
 	}
 }
 
-// TestAdapter_ConflictingObservationIsReported proves a sweep that reports a room both occupied and empty
-// says so. Under a count this is invisible -- one room, two observations, totals still add up -- and
-// reconciliation would close stays on a building it cannot describe.
+// A room reported both occupied and empty in one sweep must be flagged; a plain count hides it.
 func TestAdapter_ConflictingObservationIsReported(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -773,9 +720,7 @@ func TestAdapter_ConflictingObservationIsReported(t *testing.T) {
 	}
 }
 
-// TestAdapter_SharersAreNotConflicts keeps the legitimate case working. Two reservations in one room is
-// ordinary hotel life -- it is what made a room-keyed departure undecidable in the first place -- and it
-// must never be mistaken for the contradiction above.
+// Two reservations sharing one room is legitimate and must not be flagged as a conflict.
 func TestAdapter_SharersAreNotConflicts(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -826,13 +771,8 @@ func TestAdapter_SharersAreNotConflicts(t *testing.T) {
 	}
 }
 
-// TestAdapter_InterruptedSweepPublishesNothing verifies the recovery guarantee that everything else rests
-// on: a socket lost MID-ROSTER must leave no trace. No coverage observation, so reconciliation cannot later
-// measure completeness against half a building; no publish, so the last known-good mirror keeps serving
-// guests untouched.
-//
-// This is the first half of the failure-to-recovery sequence and it is verification of EXISTING behaviour,
-// not new work -- written down because the guarantee was relied upon and never asserted.
+// A socket lost mid-roster must leave no trace: no coverage observation and no publish, so the last known-good
+// mirror keeps serving guests.
 func TestAdapter_InterruptedSweepPublishesNothing(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -874,10 +814,8 @@ func TestAdapter_InterruptedSweepPublishesNothing(t *testing.T) {
 	}
 }
 
-// TestAdapter_RecoversWithAFreshSweepAfterInterruption is the second half: after the interruption the
-// connector does not resume the broken roster, it asks for a whole new one. Recovery through the PMS's own
-// mechanism -- a DR, then a complete DS..DE -- and the observation that finally gets recorded describes the
-// WHOLE building, never the fragment that was in flight when the link died.
+// After an interruption the connector asks for a whole new roster (DR, then a complete DS..DE) and the recorded
+// observation describes the whole building, never the abandoned fragment.
 func TestAdapter_RecoversWithAFreshSweepAfterInterruption(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(32, time.Second)}
@@ -938,9 +876,7 @@ func TestAdapter_RecoversWithAFreshSweepAfterInterruption(t *testing.T) {
 	}
 }
 
-// TestAdapter_InitialResyncRequestsDR proves §G/§H: after the startup handshake the adapter raises the
-// barrier (RequireInitialResync) and sends the initial DR resync request through the single writer, before
-// any live admission.
+// After the startup handshake the adapter raises the barrier and sends the initial DR before any live admission.
 func TestAdapter_InitialResyncRequestsDR(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	adapter.rev.HeartbeatInterval = time.Hour
@@ -968,10 +904,8 @@ func TestAdapter_InitialResyncRequestsDR(t *testing.T) {
 	}
 }
 
-// TestAdapter_MalformedRecordFaultsNotSilentDrop proves §B at the Serve boundary: a GI record with an
-// identity-truncating overlong reservation is NOT silently skipped. The adapter drives a continuity fault
-// through the sink (OnContinuityFault) AND requests a verified resync (DR) — and admits ZERO events, so no
-// truncated value can reach the queue/inbox.
+// An overlong reservation must raise a continuity fault and request a resync (DR), never be skipped silently,
+// and admit zero events.
 func TestAdapter_MalformedRecordFaultsNotSilentDrop(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
@@ -1026,7 +960,6 @@ func TestAdapter_MalformedRecordFaultsNotSilentDrop(t *testing.T) {
 	}
 }
 
-// ClaimOperatorResync mirrors the real claim's single-shot behaviour.
 func (s *recordingSink) ClaimOperatorResync() *ResyncCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1036,8 +969,6 @@ func (s *recordingSink) ClaimOperatorResync() *ResyncCommand {
 	return c
 }
 
-// fullSyncRequested counts WAITING_FOR_PMS signals — one per DR the adapter puts on the wire, whether
-// automatic or operator-requested.
 func (s *recordingSink) OnFullSyncRequested() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1048,8 +979,7 @@ func (s *recordingSink) RecordSkipped(n int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.skippedSeen = n
-	// Every report is kept, not just the last, so a test can prove the counter RESTARTS at a new roster
-	// rather than merely ending on a plausible number.
+	// Every report is kept so a test can prove the counter restarts at a new roster.
 	s.skippedReports = append(s.skippedReports, n)
 }
 

@@ -12,9 +12,6 @@ import (
 	"time"
 )
 
-// GDPR plan F8 (D-F8), through the real router and a real database: opening one guest's record and searching a
-// guest list are recorded in the activity log, with who, when and from where; browsing an unsearched list and a
-// failed read are not; a typed search is one entry; and erasing the guest anonymises the entries about them.
 func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 	f := newAPI(t)
 	ctx, stop := context.WithCancel(context.Background())
@@ -90,8 +87,7 @@ func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 		t.Fatalf("recorded\n  %v\nwant\n  %v", got, want)
 	}
 
-	// B6: what was searched for is shown only to holders of guest-data-rights. A viewer sees that a search
-	// happened, and by whom, but not the text.
+	// The searched text is shown only to holders of guest-data-rights; a viewer sees that a search happened, not the text.
 	searchPayload := func(c *apiFixture) string {
 		t.Helper()
 		st, body := c.do(t, http.MethodGet, "/audit?action=guest_data.searched", nil)
@@ -109,7 +105,6 @@ func TestIntegration_GuestDataReads_AreRecorded(t *testing.T) {
 		t.Fatalf("a site viewer sees the search text: %s", p)
 	}
 
-	// Erasing the guest anonymises what the log says about them: the opened record and the search for them.
 	st, body := f.do(t, "POST", "/guest-data-rights/erase",
 		map[string]any{"kind": "account", "id": acct, "reason": "guest asked", "password": f.password})
 	if st != 200 {

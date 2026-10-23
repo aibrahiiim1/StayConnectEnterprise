@@ -1,14 +1,5 @@
-// pmsd — dedicated read-only PMS connector daemon (Phase 3, ADR-0001).
-//
-// Owns each PMS Interface connection under a DB advisory single-owner lock, one independent supervised
-// worker per Interface, persisting the interface-level freshness axes to iam_v2.pms_interface_runtime via
-// independent compare-and-set updates. Reuses the accepted FIAS protocol layer (internal/pms); emits no
-// financial Posting (PS/PA) record. Tenant/Site derive ONLY from the verified signed appliance assignment.
-//
-// DARK by default: with STAYCONNECT_PHASE3_PMS_CONNECTOR (and its master) OFF, pmsd loads no assignment,
-// opens no database connection, reads no secret, creates no worker, and opens no PMS socket, then exits
-// cleanly. The shared DB pool is created lazily on the first repository/lock use, so a flags-OFF run never
-// contacts PostgreSQL. The systemd unit uses Restart=on-failure so a clean flags-OFF exit does not storm.
+// pmsd is the dedicated read-only PMS connector daemon, one supervised worker per Interface under a DB advisory single-owner lock.
+// DARK by default: with the Phase-3 connector flags off it loads no assignment, opens no database or PMS socket, and exits cleanly (Restart=on-failure so it does not storm).
 package main
 
 import (
@@ -49,7 +40,6 @@ func main() {
 
 	dsn := os.Getenv("PMSD_DB_URL")
 
-	// lazily-created SHARED pool: never constructed while dark (Run returns before OpenRepo when flags OFF).
 	var (
 		poolOnce sync.Once
 		pool     *pgxpool.Pool
@@ -60,10 +50,7 @@ func main() {
 		return pool, poolErr
 	}
 
-	// ROOM CHARGE ON THE ONE FIAS LINK (decision D45). pmsd carries a posting command the financial path
-	// handed it -- verbatim, only after the database confirms exactly those bytes -- and returns the PA. The
-	// relay and its socket exist only when transmission is deployed on THIS process as well; otherwise there is
-	// no socket at all, and scd's hand-off finds nothing to reach (not transmitted).
+	// Room charge relay: pmsd carries a posting command verbatim once the database confirms exactly those bytes; the relay socket exists only when transmission is deployed on this process.
 	var relay *pmsd.FinancialRelay
 	if pmsd.RelayTransmitDeployed(os.Getenv) {
 		relay = pmsd.NewFinancialRelay(true, func(ctx context.Context, iface string, pn int64, sha string) (string, error) {
@@ -89,10 +76,7 @@ func main() {
 		}
 	}()
 
-	// The interface-secret keyring + evidence/identity keys. There is deliberately NO assignment-verification
-	// key here: pmsd does not carry its own trust root for scope. Tenant/site come from the canonical
-	// Central-signed assignment, verified against the registry anchored by the manufacture-time root — see
-	// pmsd.CentralAssignmentLoader.
+	// No assignment-verification key here: tenant/site come from the Central-signed assignment (pmsd.CentralAssignmentLoader), not a pmsd-local trust root.
 	keyring := pmsd.MapKeyring{}
 	if kid := os.Getenv("PMSD_SECRET_KEY_ID"); kid != "" {
 		if kb, err := hex.DecodeString(os.Getenv("PMSD_SECRET_KEY_HEX")); err == nil {
@@ -119,9 +103,7 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
-			// The boundary check lives HERE, on the path that opens the repository, rather than in main's
-			// preamble: while dark pmsd never reaches this point, so the check runs exactly when Phase-3
-			// writes become possible and never a moment before.
+			// The boundary check lives on the path that opens the repository so it runs exactly when Phase-3 writes become possible.
 			if err := writerguard.Verify(ctx, p, writerguard.Phase3Requirements()); err != nil {
 				return nil, err
 			}
@@ -141,22 +123,8 @@ func main() {
 			}
 			return pmsd.NewPgSecretDecryptor(p, keyring)(ctx, iface, rev, sg)
 		},
-		// The Stay-Event application owner: the real Stay Engine with the real Checkout Converter wired in, so
-		// a typed GO event's application and its whole conversion are ONE transaction. Constructed only when
-		// the ingest flag is on (Run gates the call), and never while dark.
-		//
-		// THE CHECKOUT CONVERTER IS GATED BY ITS OWN FLAG.
-		//
-		// It used to be wired unconditionally, so a GO event ran the whole checkout conversion — creating
-		// grace entitlements, purchases and session updates — while STAYCONNECT_PHASE3_CHECKOUT_GRACE
-		// reported OFF. An operator reading the flags would have concluded that surface was inert while it
-		// was in fact executing on every checkout, and the privilege grant needed to support it would have
-		// looked unexplainable next to a flag that said the feature was disabled.
-		//
-		// With the flag OFF the converter is absent, and stayengine refuses a GO with
-		// ErrCheckoutConverterRequired rather than inventing a Stay-only checkout. That refusal is the
-		// honest outcome: the event stays in the inbox, visible and replayable, instead of being applied
-		// under semantics nobody enabled.
+		// The Stay-Event owner wires the real Checkout Converter, constructed only when the ingest flag is on.
+		// The converter is gated by its own flag: with it OFF stayengine refuses a GO with ErrCheckoutConverterRequired, leaving the event in the inbox rather than applying it under semantics nobody enabled.
 		NewStayApplier: func(ctx context.Context, _ pmsd.Assignment) (pmsd.StayApplier, error) {
 			p, err := getPool(ctx)
 			if err != nil {
@@ -169,8 +137,6 @@ func main() {
 			}
 			return stayengine.NewProcessorWithCheckout(p, checkout.NewConverter(p)), nil
 		},
-		// The provider registry routes each interface to its adapter. protel-fias reaches exactly the FIAS dial
-		// it always used; the REST connectors (Mews, Apaleo, OPERA Cloud) reach the polled REST adapter.
 		Dial: pmsd.NewRegistryDial(
 			pmsd.NewFIASDialWithRelay(netDialer, pmsd.AdapterKeys{
 				IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
@@ -194,15 +160,12 @@ func main() {
 	log.Info("pmsd: stopped cleanly")
 }
 
-// envInt parses an integer env var (0 when unset/invalid; startup validation rejects a zero where required).
 func envInt(name string) int {
 	n, _ := strconv.Atoi(os.Getenv(name))
 	return n
 }
 
-// envOr reads an environment override, falling back to the packaged default. The assignment chain's paths are
-// deployment facts rather than policy, so they are overridable for tests and offline tooling — but never
-// absent, because a daemon that cannot find the canonical assignment must fail closed rather than invent one.
+// envOr: the assignment chain's paths are overridable for tests but never absent, since a daemon that cannot find the canonical assignment must fail closed.
 func envOr(name, def string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v

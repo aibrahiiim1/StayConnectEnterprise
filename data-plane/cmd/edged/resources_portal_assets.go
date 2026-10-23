@@ -1,23 +1,9 @@
 package main
 
-// PORTAL ASSETS — the hotel's own logo and photographs, held on the appliance.
-//
-// WHY URL-ONLY WAS NOT ENOUGH
-// ---------------------------
-// Branding accepted an https URL or an appliance path. The https option asks a hotel to find somewhere to
-// host its logo and makes the captive portal depend on the open internet to look right — on a page a guest
-// reaches precisely because they have no internet yet. The appliance-path option pointed at a directory
-// nothing served: /assets/logo.png returned 404, so the only workable answer was an external URL.
-//
-// Assets now live on the appliance, are uploaded through Hotel Admin, and are served by the portal from the
-// same origin as the page. Nothing about a guest's sign-in depends on reaching anything else.
-//
-// WHAT IS ACCEPTED, AND WHY IT IS NARROW
-// --------------------------------------
-// This directory is served unauthenticated to every device on the guest network before sign-in — it is the
-// most exposed surface the appliance has. So the content type is decided by INSPECTING THE BYTES rather than
-// trusting a filename or a client-supplied Content-Type, SVG is refused outright (it is a document format
-// that can carry script), and the stored name is generated here rather than taken from the upload.
+// The hotel's own logo and photographs, held on the appliance and served by the portal from the page's own
+// origin, so a guest's sign-in never depends on reaching anything else. This directory is served
+// unauthenticated to every guest device before sign-in, so the content type is decided by inspecting the
+// bytes, SVG is refused (it can carry script), and the stored name is generated here.
 
 import (
 	"bytes"
@@ -39,22 +25,15 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
-// portalAssetDir is created by deployment and owned by the service user; both edged (which writes) and
-// portald (which serves) run as it.
 const portalAssetDir = "/opt/stayconnect/portal-assets"
 
-// maxAssetBytes bounds one upload. A background photograph is the large case; anything beyond this is not a
-// hotel photograph, and the file is served to every guest device before they have signed in.
+// A background photograph is the large case; the file is served to every guest device before sign-in.
 const maxAssetBytes = 8 << 20 // 8 MB
 
-// regexpAssetName matches exactly what uploadPortalAsset generates, so delete can name nothing else.
 var regexpAssetName = regexp.MustCompile(`^[0-9a-f]{16}\.(png|jpg|webp|gif)$`)
 
-// sniffImage decides the type from the CONTENT, and returns "" for anything it does not positively recognise.
-//
-// SVG IS DELIBERATELY ABSENT. It is XML, it can carry <script> and event handlers, and browsers execute that
-// when it is loaded as a document. On a page that collects room numbers and voucher codes, an uploadable SVG
-// is a stored-XSS primitive wearing a picture's clothes.
+// Decides the type from the content; returns "" for anything not positively recognised. SVG is deliberately
+// absent: it can carry script and would be a stored-XSS primitive on a page that collects room numbers and vouchers.
 func sniffImage(b []byte) (ext, mime string) {
 	switch {
 	case len(b) > 8 && bytes.Equal(b[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}):
@@ -73,10 +52,8 @@ func (s *server) portalAssetRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listPortalAssets)
 	r.Post("/", s.uploadPortalAsset)
-	// The BYTES, for Hotel Admin. The portal serves these at /assets/<name> on the GUEST network; the admin is
-	// a different origin and that path resolves to nothing there -- which is why the branding screen's own
-	// thumbnail of the current logo was a broken image, and why the settings preview could not show one
-	// either. This is the same file, read back through the authenticated operator API.
+	// The bytes for Hotel Admin: the portal serves /assets/<name> on the guest network, which is a different origin
+	// from the admin, so thumbnails and previews read the file back through the authenticated operator API.
 	r.Get("/{name}/raw", s.rawPortalAsset)
 	r.Delete("/{name}", s.deletePortalAsset)
 	return r
@@ -92,8 +69,7 @@ type portalAsset struct {
 
 func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 	out := []portalAsset{}
-	// What the published design and the working draft point at, so the UI can refuse to delete something the
-	// portal is currently showing rather than discovering it afterwards.
+	// What the published design and draft point at, so the UI can refuse to delete a file the portal is showing.
 	used := map[string]bool{}
 	if doc, err := s.loadBranding(r); err == nil {
 		for _, d := range []map[string]any{doc.Design, doc.Draft} {
@@ -130,7 +106,6 @@ func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
-	// The body limit is enforced before anything is read into memory, not after.
 	r.Body = http.MaxBytesReader(w, r.Body, maxAssetBytes+1024)
 	if err := r.ParseMultipartForm(maxAssetBytes); err != nil {
 		jsonErr(w, http.StatusBadRequest, "too_large",
@@ -156,8 +131,7 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	data := buf[:n]
 
-	// THE BYTES DECIDE. A filename ending .png and a Content-Type of image/png are both things the uploader
-	// chose; neither says what the browser will do with the file.
+	// The bytes decide: neither the filename nor the client Content-Type says what a browser will do with the file.
 	ext, mime := sniffImage(data)
 	if ext == "" {
 		jsonErr(w, http.StatusBadRequest, "unsupported_image",
@@ -171,15 +145,12 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 			"the portal asset directory "+portalAssetDir+" is not writable by the appliance service account")
 		return
 	}
-	// The stored name is DERIVED, never the uploaded one: an operator's filename can contain anything, and
-	// content-addressing means uploading the same image twice does not accumulate copies.
+	// The stored name is derived, never the uploaded one; content-addressing dedupes repeated uploads.
 	sum := sha256.Sum256(data)
 	name := hex.EncodeToString(sum[:8]) + ext
 	dest := filepath.Join(portalAssetDir, name)
 	if err := os.WriteFile(dest, data, 0o644); err != nil {
-		// Name the path and the reason. "The image could not be stored" sent the first operator who hit this
-		// looking at disk space, when the cause was a read-only filesystem: edged runs under
-		// ProtectSystem=strict and this directory has to be on its allowlist.
+		// Name the path and reason: edged runs under ProtectSystem=strict, so this directory must be on its allowlist.
 		slog.Error("portal asset not stored", "path", dest, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "asset_dir_unavailable",
 			"the image could not be written to "+portalAssetDir+": "+err.Error())
@@ -194,11 +165,7 @@ func (s *server) uploadPortalAsset(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// rawPortalAsset streams one stored asset to an authenticated operator.
-//
-// It reads the type from the CONTENT for the same reason the upload does: the name on disk was generated from
-// a sniff, but a file is only what its bytes say it is, and re-deriving costs nothing. Anything that no longer
-// sniffs as an image is refused rather than served with a guessed type.
+// Re-derives the type from the content as the upload does; anything that no longer sniffs as an image is refused.
 func (s *server) rawPortalAsset(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if !regexpAssetName.MatchString(name) {
@@ -216,7 +183,7 @@ func (s *server) rawPortalAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", mime)
-	// Content-addressed by name, so it can be cached hard; and never sniffed by the browser into something else.
+	// Content-addressed, so cacheable; never sniffed by the browser into something else.
 	w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
@@ -225,13 +192,11 @@ func (s *server) rawPortalAsset(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deletePortalAsset(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	// Same shape this handler generates, so nothing else can be named.
 	if !regexpAssetName.MatchString(name) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such asset")
 		return
 	}
-	// REFUSE TO DELETE SOMETHING THE PORTAL IS SHOWING. Removing it would leave guests looking at a broken
-	// image on the sign-in page, and the operator would have no idea why.
+	// Refuse to delete what the portal is showing: guests would see a broken image on the sign-in page.
 	if doc, err := s.loadBranding(r); err == nil {
 		for _, d := range []map[string]any{doc.Design, doc.Draft} {
 			for _, k := range portaldesign.ImageFields() {

@@ -13,9 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GDPR plan C6 (migration 0130, decision D-C6): every sign-in records the privacy notice in force -- stamped by
-// the database, not by the writer, never changed afterwards -- and the guest export says which notices a guest
-// was shown and what they said.
+// Every sign-in records the privacy notice in force (stamped by the database, immutable), and the guest export
+// lists the notices a guest was shown.
 func TestIntegration_PrivacyNotice_EverySignInIsStampedAndExported(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -54,7 +53,6 @@ func TestIntegration_PrivacyNotice_EverySignInIsStampedAndExported(t *testing.T)
 		return s
 	}
 
-	// The notice in force is stamped.
 	setNotice(map[string]any{"privacy_text": "Notice one " + sfx, "terms_url": "https://hotel.example/terms"})
 	ctx1, v1 := signIn(nil)
 	if v1 == nil || text(*v1) != "Notice one "+sfx {
@@ -71,15 +69,14 @@ func TestIntegration_PrivacyNotice_EverySignInIsStampedAndExported(t *testing.T)
 		t.Fatalf("the same notice became a second version: %v vs %v", v2b, v2)
 	}
 
-	// With no notice of the hotel's own, the portal shows its short built-in one (privacy.default): that is what is
-	// recorded -- not "nothing shown".
+	// With no hotel notice, the built-in one (privacy.default) is shown and recorded.
 	setNotice(map[string]any{"hotel_name": "Hotel"})
 	_, v0 := signIn(nil)
 	if v0 == nil || !strings.HasPrefix(text(*v0), "[built-in notice]") {
 		t.Fatalf("a sign-in with no notice of the hotel's own was not recorded as the built-in notice: %v", v0)
 	}
 
-	// The stamp is a record: it cannot be changed, and versions cannot be edited or removed.
+	// Stamps and versions are immutable.
 	err := controlled(ctx, f.pool, []string{"auth_context"}, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE iam_v2.auth_contexts SET privacy_notice_version_id=$2::uuid WHERE id=$1::uuid`, ctx1, *v2)
 		return err

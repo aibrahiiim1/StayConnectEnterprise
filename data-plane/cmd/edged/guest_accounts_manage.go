@@ -1,27 +1,10 @@
 package main
 
-// MANAGING ONE CLIENT ACCOUNT: what it holds, and what staff may do to it.
-//
-// THE DEFECT THIS CLOSES. Delete was a bare DELETE. An account that had ever signed in is referenced by its
-// auth contexts (a foreign key with no ON DELETE action), so the delete failed and reached the operator as
-// "account not found"; an account a client had registered with their email could then never be cleared, and the
-// same address could never register again. Had the reference not been there, the entitlements' ON DELETE
-// CASCADE would have erased the package history instead -- the opposite failure.
-//
-// So removal has two outcomes, and the operator is told which one happened:
-//
-//   DELETED  the account was never used (no auth context, no entitlement): the row goes.
-//   REMOVED  the account has history: its devices are disconnected, it is disabled, and its username is moved to
-//            "<username>.removed-<id8>.invalid". The address (or username) is free again at once -- the per-site
-//            uniqueness compares usernames -- while every purchase, entitlement and session row keeps pointing
-//            at the account it belonged to. ".invalid" is the RFC 2606 reserved TLD, so no mail can ever be
-//            sent to a removed account's username, and validUsername refuses it for any live account.
-//
-// Mark verified and New verification period adjust a self-service account's verification state (contract
-// ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §3). Neither touches an entitlement: verification only gates Internet.
-//
-// Releasing a device's place on a package is the Devices surface's (client_devices_admin.go, migration 0118):
-// each device listed here carries its id for it.
+// Removal has two outcomes. DELETED: the account was never used, so the row goes. REMOVED: it has history, so
+// its devices are disconnected, it is disabled and its username moves to "<username>.removed-<id8>.invalid",
+// freeing the address while purchase, entitlement and session rows keep pointing at it. ".invalid" is the RFC
+// 2606 reserved TLD, so no mail is ever sent there, and validUsername refuses it for live accounts. A bare
+// DELETE would fail on the auth-context foreign key, or cascade-erase the package history.
 
 import (
 	"errors"
@@ -36,8 +19,7 @@ import (
 
 const removedUsernameTLD = ".invalid"
 
-// removedUsername is where a removed account's username moves: unique by the account id, recognisably the old
-// name, undeliverable as an address, and still a valid self-service username (lowercase, contains '@').
+// removedUsername is unique by account id, recognisably the old name and undeliverable.
 func removedUsername(username, id string) string {
 	short := strings.ReplaceAll(id, "-", "")
 	if len(short) > 8 {
@@ -46,13 +28,12 @@ func removedUsername(username, id string) string {
 	return fmt.Sprintf("%s.removed-%s%s", strings.ToLower(strings.TrimSpace(username)), short, removedUsernameTLD)
 }
 
-// isRemovedUsername reports whether a username carries the removal marker.
 func isRemovedUsername(u string) bool {
 	u = strings.ToLower(u)
 	return strings.HasSuffix(u, removedUsernameTLD) && strings.Contains(u, ".removed-")
 }
 
-// sqlRemoved is the same test in SQL, on alias a.
+// sqlRemoved is isRemovedUsername in SQL, on alias a.
 const sqlRemoved = `(NOT a.enabled AND lower(a.username) LIKE '%.removed-%.invalid')`
 
 type manageDevice struct {
@@ -81,7 +62,6 @@ type manageEntitlement struct {
 
 const manageEntitlementLimit = 10
 
-// getGuestAccountManage: the account, its verification state and its recent packages with their devices.
 func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -156,8 +136,7 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 	var total int
 	_ = s.db.QueryRow(ctx, `SELECT count(*)::int FROM iam_v2.entitlements
 	     WHERE tenant_id=$1 AND site_id=$2 AND guest_account_id=$3`, s.tenantID, s.siteID, id).Scan(&total)
-	// What Remove will do. An account with no package may still have sign-in history (auth contexts edged
-	// cannot read); the delete then finds that out and removes instead, and says so.
+	// An account with no package may still have sign-in history edged cannot read; the delete then removes instead.
 	removal := "delete"
 	if total > 0 || a.LoginCount > 0 {
 		removal = "remove"
@@ -168,16 +147,14 @@ func (s *server) getGuestAccountManage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// deleteGuestAccountIAMv2 deletes an account that was never used, and removes (retires) one with history.
-//
-// REMOVING CANNOT BE UNDONE, so it carries the password step-up, as cancelling a voucher does. The body is
-// {"password": "..."}.
+// deleteGuestAccountIAMv2 deletes an unused account and removes one with history. Removal is irreversible, so it
+// requires the password step-up.
 func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Password string `json:"password"`
 	}
-	// An empty body is answered as a missing password, not a malformed request.
+	// An empty body counts as a missing password.
 	if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
@@ -205,8 +182,7 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if ents == 0 {
-		// Never held a package. The row goes unless a sign-in recorded an auth context, which the foreign key
-		// reports; the account is then removed instead, keeping that history.
+		// A foreign-key violation means a sign-in recorded an auth context; remove instead, keeping that history.
 		tag, err := s.db.Exec(ctx, `DELETE FROM iam_v2.guest_access_accounts
 		     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID)
 		if err == nil && tag.RowsAffected() == 1 {
@@ -221,16 +197,13 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// HISTORY KEPT: disconnect first (a refusal leaves the account exactly as it was), then retire the row.
+	// Disconnect first: a refusal leaves the account exactly as it was.
 	res, st, code, msg := s.endAccountSessions(r, ctx, id, username)
 	if st != 0 {
 		jsonErr(w, st, code, msg)
 		return
 	}
-	// ITS DEVICES' PLACES ARE FREED. Nobody can sign in to a removed account again, so a place one of its live
-	// packages holds is held for nothing -- and a device showing "Holds a place" on a package no one can use is
-	// exactly the confusion this removes. The places go through the audited staff release (0118); the package and
-	// its history stay.
+	// Nobody can sign in to a removed account, so its devices' places are freed through the audited staff release.
 	opID, opLabel, ok := deviceActor(w, r)
 	if !ok {
 		return
@@ -257,7 +230,6 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// selfServiceTarget loads a live (not removed) self-registered account for the verification actions.
 func (s *server) selfServiceTarget(w http.ResponseWriter, r *http.Request, ctx contextT, id string) (username string, verified, ok bool) {
 	var selfReg, enabled bool
 	if err := s.db.QueryRow(ctx, `SELECT username, self_registered, enabled, email_verified_at IS NOT NULL
@@ -278,13 +250,9 @@ func (s *server) selfServiceTarget(w http.ResponseWriter, r *http.Request, ctx c
 	return username, verified, true
 }
 
-// markGuestAccountEmailVerified: staff vouch for the address (for example, the client showed it to the desk).
-// Restores normal status at once; the package is untouched.
-//
-// VOUCHING FOR AN ADDRESS IS THE code-reveal POWER, not the guest-accounts one. Both let staff stand in for proof
-// the client did not give (docs/ROLE_AND_SCOPE_MATRIX.md, code-reveal: "lets the desk vouch for an address the
-// client did not prove"), so this needs code-reveal WRITE -- which the voucher print station does not hold -- and,
-// like a code reveal, the operator's password and a bounded reason, recorded in the audit.
+// markGuestAccountEmailVerified lets staff vouch for an address. That is the code-reveal power, not the
+// guest-accounts one (the voucher print station lacks it), so it needs code-reveal WRITE, the operator's
+// password and a bounded reason, all audited.
 func (s *server) markGuestAccountEmailVerified(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !permFor(sessRoles(r), "code-reveal", permWrite) {
@@ -330,9 +298,7 @@ func (s *server) markGuestAccountEmailVerified(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"status": "verified"})
 }
 
-// restartGuestAccountVerification gives an unverified account a new verification period: the deadline moves to
-// now + the site's deadline setting and the grace hour is available again. Lifts a suspension; the package is
-// untouched.
+// restartGuestAccountVerification moves the deadline to now plus the site setting and restores the grace hour.
 func (s *server) restartGuestAccountVerification(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -367,8 +333,7 @@ func (s *server) restartGuestAccountVerification(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"status": "restarted", "verification_deadline": deadline})
 }
 
-// releaseAccountPlaces frees every place a device holds on the account's live packages (the account's sessions
-// are already ended). Returns how many were freed; one that cannot be freed is left as it is.
+// releaseAccountPlaces returns how many places were freed; one that cannot be freed is left as it is.
 func (s *server) releaseAccountPlaces(r *http.Request, ctx contextT, accountID, opID, opLabel string) int {
 	rows, err := s.db.Query(ctx, `SELECT ed.entitlement_id::text, ed.device_id::text
 	     FROM iam_v2.entitlement_devices ed JOIN iam_v2.entitlements e ON e.id = ed.entitlement_id

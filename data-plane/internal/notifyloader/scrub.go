@@ -1,13 +1,7 @@
 package notifyloader
 
-// PROVIDER ERRORS DO NOT CARRY THE RECIPIENT (GDPR audit B12).
-//
-// Twilio, SendGrid and SMTP servers often quote the address or number they refused ("RCPT TO <guest@...>
-// rejected", "The 'To' number +4477... is not a valid phone number"). That text is logged, stored in
-// notification_providers.last_error and shown to every role that reads the provider screen, so a guest's
-// contact would outlive the code that was sent to it. Every send error is scrubbed here, at the one place all
-// three channels pass through, before anything stores or logs it. The provider's own words are kept otherwise:
-// they are what an operator acts on.
+// Provider errors often quote the guest's address or number; scrubbing here, where all three channels pass, keeps
+// contacts out of logs, last_error and the provider screen.
 
 import (
 	"errors"
@@ -16,13 +10,11 @@ import (
 
 var (
 	emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
-	// A run of digits, optionally led by + and broken by spaces, dots, dashes or brackets; it is a phone number
-	// when it holds eight or more digits. Shorter runs are left alone: provider error codes (21211), SMTP
-	// replies (550 5.1.1), HTTP statuses and ports are what an operator needs to see.
+	// A phone number is a run of 8 or more digits (optional +, spaces, dots, dashes, brackets); shorter runs such as
+	// error codes, SMTP replies and ports stay visible.
 	phonePattern = regexp.MustCompile(`\+?\d[\d\s().\-]{6,}\d`)
 )
 
-// ScrubContacts replaces email addresses and phone numbers in s.
 func ScrubContacts(s string) string {
 	s = emailPattern.ReplaceAllString(s, "[email]")
 	return phonePattern.ReplaceAllStringFunc(s, func(m string) string {

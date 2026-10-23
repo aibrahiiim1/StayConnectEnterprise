@@ -38,7 +38,6 @@ type fixture struct {
 	stays                 []string
 }
 
-// seed builds a guest network mapped to n ACTIVE PMS interfaces, each with one IN_HOUSE Stay.
 func seed(t *testing.T, p *pgxpool.Pool, n int) fixture {
 	t.Helper()
 	ctx := context.Background()
@@ -53,8 +52,7 @@ func seed(t *testing.T, p *pgxpool.Pool, n int) fixture {
 		Scan(&f.tenant, &f.site, &f.network); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// Stays are a controlled-writer family on the production schema: the seed opens the 'stay' operation in
-	// the same transaction that writes them (postgres no longer owns the opener, so the owner shortcut is gone).
+	// Stays are a controlled-writer family: open the 'stay' operation in the transaction that writes them.
 	tx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
@@ -103,9 +101,6 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
-// TestIntegration_FanOutWaitsForTheWholeVector proves the resolver never short-circuits: a SLOW verified
-// candidate still wins over fast NO_MATCH answers, every mapped interface is probed exactly once, and the
-// outcome is recorded.
 func TestIntegration_FanOutWaitsForTheWholeVector(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -138,8 +133,6 @@ func TestIntegration_FanOutWaitsForTheWholeVector(t *testing.T) {
 	}
 }
 
-// TestIntegration_IndeterminateCandidateFailsClosed proves a probe that could not answer is UNAVAILABLE and
-// makes the whole resolution INDETERMINATE — "we could not ask" is never treated as "it said no".
 func TestIntegration_IndeterminateCandidateFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -173,7 +166,6 @@ func TestIntegration_IndeterminateCandidateFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_AmbiguousNeedsDiscriminator proves two VERIFIED interfaces resolve to AMBIGUOUS with no Stay.
 func TestIntegration_AmbiguousNeedsDiscriminator(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -194,8 +186,6 @@ func TestIntegration_AmbiguousNeedsDiscriminator(t *testing.T) {
 	}
 }
 
-// TestIntegration_ResolutionIsIdempotent proves a retry of the same request id replays the STORED outcome
-// without re-probing and without writing a second row — even when the probes would now answer differently.
 func TestIntegration_ResolutionIsIdempotent(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -234,8 +224,6 @@ func TestIntegration_ResolutionIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConcurrentResolutions proves >=24 concurrent resolutions of the SAME request id converge on
-// exactly one stored resolution and one identical answer for every caller, with no deadlock.
 func TestIntegration_ConcurrentResolutions(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -282,8 +270,6 @@ func TestIntegration_ConcurrentResolutions(t *testing.T) {
 	}
 }
 
-// TestIntegration_UnmappedNetworkFailsClosed proves a guest network with no mapped interface is INDETERMINATE
-// (there is nothing to trust), not NO_MATCH.
 func TestIntegration_UnmappedNetworkFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -299,8 +285,6 @@ func TestIntegration_UnmappedNetworkFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_VerifiedWithoutStayFailsClosed proves a VERIFIED verdict that cannot name a Stay is refused
-// rather than recorded as a success nothing can act on.
 func TestIntegration_VerifiedWithoutStayFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -321,7 +305,6 @@ func TestIntegration_VerifiedWithoutStayFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIntegration_MissingRequestIDFailsClosed proves an idempotent resolution requires a request id.
 func TestIntegration_MissingRequestIDFailsClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

@@ -1,8 +1,5 @@
-// Package phone normalizes user-typed phone numbers into E.164 form.
-//
-// E.164 ("+" + country code + national number, total 8–15 digits) is the
-// canonical wire form expected by SMS gateways (Twilio, MessageBird, etc.)
-// and is what we store in guests.phone / auth_otps.destination.
+// Package phone normalizes typed phone numbers into E.164 (+ country code and national number, 8-15 digits), the form
+// SMS gateways expect and the stored form.
 package phone
 
 import (
@@ -19,22 +16,18 @@ var (
 	ErrBadChars = errors.New("phone: contains non-digit characters after +")
 )
 
-// Normalize accepts free-form input like "+1 (555) 123-4567",
-// "+44 20-7946 0958", or "00 1 555 123 4567" and returns the E.164 form
-// "+15551234567". The leading "00" trunk prefix is treated as "+".
+// Normalize accepts free-form input and returns E.164; a leading "00" trunk prefix is treated as "+".
 func Normalize(in string) (string, error) {
 	s := strings.TrimSpace(in)
 	if s == "" {
 		return "", ErrEmpty
 	}
-	// Treat leading "00" as "+" (international trunk prefix used in EU/MENA).
 	if strings.HasPrefix(s, "00") {
 		s = "+" + s[2:]
 	}
 	if !strings.HasPrefix(s, "+") {
 		return "", ErrNoPlus
 	}
-	// Strip everything except digits from the number portion.
 	var b strings.Builder
 	b.Grow(len(s))
 	b.WriteByte('+')
@@ -43,7 +36,6 @@ func Normalize(in string) (string, error) {
 		case unicode.IsDigit(r):
 			b.WriteRune(r)
 		case r == ' ' || r == '\t' || r == '-' || r == '.' || r == '(' || r == ')':
-			// strip
 		default:
 			return "", ErrBadChars
 		}

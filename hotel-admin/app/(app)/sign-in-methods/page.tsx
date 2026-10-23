@@ -1,27 +1,7 @@
 "use client";
 
-// SIGN-IN METHODS — which ways a guest may prove who they are on the portal.
-//
-// This surface was missing entirely. `/edge/v1/auth-methods` and its RBAC resource existed, the portal read
-// the result on every render, and there was no screen: enabling PMS room sign-in meant editing a JSON column
-// by hand. An operator could commission a PMS end to end and still have no way to offer it to a guest.
-//
-// THESE ARE RUNTIME SETTINGS. The portal fetches /api/auth-methods when the landing page renders, so a change
-// saved here takes effect on the next guest page load — no rebuild, no redeploy, no environment variable.
-// That is the whole point of the screen: which methods a hotel offers is an operating decision that changes
-// with the season, not a deployment gate.
-//
-// EACH SWITCH SAVES IMMEDIATELY. There is no page-level Save: a switch that looks flipped but is not yet
-// applied is the one thing this screen must never show, so every change is a PATCH of that one key and a
-// refused change re-reads the server's state.
-//
-// A ROLE THAT CANNOT CHANGE THEM sees each method's state as a word, and no switch at all. The server refuses
-// the write regardless; offering a control that 403s on click is what this replaces.
-//
-// WHAT IS DELIBERATELY NOT HERE: any PMS interface, provider or connector selector. Which PMS a guest is
-// resolved against is decided by the guest network they are on, in Network routing. Putting it here would
-// give an operator two places to decide one thing, and would imply the guest picks a PMS — which they never
-// do.
+// Each switch saves immediately (no page-level Save) and a refused change re-reads server state.
+// No PMS interface selector here: the PMS is decided by the guest network, in Network routing.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -49,22 +29,16 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone, Route } from "lucide-react";
 
-// The auth_methods document. Only the keys this screen owns are typed; everything else is preserved
-// untouched by the server's merge, so an unknown future method cannot be deleted by saving here.
+// Only the keys this screen owns are typed; the server's per-key merge preserves the rest.
 type Method = { enabled?: boolean };
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
-// THE CLIENT JOURNEY (ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §2.3, §6.2): which method the portal leads
-// with, and how long a device that has verified a code or an identity provider is remembered.
 type PrimaryMethod = "" | "pms" | "email_account" | "sms" | "whatsapp" | "guest_account" | "voucher";
 type PortalJourney = { primary_method?: PrimaryMethod; remember_device_days?: number };
 type AuthMethods = {
   voucher?: Method;
   guest_account?: Method;
-  // Open package selection: the client picks an Internet package without any credential (Free or Card
-  // payment). The access is held by an anonymous access subject, never by the device's MAC address.
+  // Access is held by an anonymous access subject, never by the device's MAC address.
   open?: Method;
-  // EMAIL ACCOUNTS (self-service contract §1): the client registers with an email address and a password and
-  // signs in with them. Replaces the email one-time code ("email"), whose key no longer exists.
   email_account?: Method;
   sms?: Method;
   whatsapp?: Method;
@@ -73,7 +47,7 @@ type AuthMethods = {
   portal?: PortalJourney;
 };
 
-// Remember devices: the operational setting's default, unit and bounds (0 = always ask).
+// Remember-device days; 0 = always ask.
 const REMEMBER_DAYS_DEFAULT = 30;
 const REMEMBER_DAYS_MIN = 0;
 const REMEMBER_DAYS_MAX = 365;
@@ -85,16 +59,11 @@ const PRIMARY_LABELS: Record<Exclude<PrimaryMethod, "">, string> = {
 
 type SocialProvider = { provider: string; enabled: boolean };
 
-// WHAT THE GUEST TYPES BESIDES THE ROOM NUMBER IS NOT SET HERE. It depends on the PMS stay record, so it is
-// configured in the Hotel module, on Room sign-in (/room-sign-in). This card keeps only the method switch, so
-// the choice of methods stays in one place and the credential choice in another, with no duplicated setting.
-
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", apple: "Apple", facebook: "Facebook", microsoft: "Microsoft" };
 
 export default function SignInMethodsPage() {
   const toast = useToast();
-  // The role is read once and FAILS CLOSED while it loads: an editable field that appears and then turns
-  // read-only is worse than one that arrives read-only and unlocks. edged enforces the real gate either way.
+  // Read-only until the role loads; edged enforces the real gate.
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
@@ -102,12 +71,10 @@ export default function SignInMethodsPage() {
   const writable = roles === null ? false : canWrite("auth-methods", roles);
   const mayChangeProtection = roles === null ? false : canWrite("guest-signin-protection", roles);
 
-  // WHICH OPTIONAL METHODS EXIST HERE AT ALL. An optional method is shown only when its module is licensed on
-  // this appliance -- not merely because code for it exists -- and nothing is fetched for a module that is
-  // absent. Unknown module state hides every optional method (fail closed).
+  // Optional methods show only when their module is licensed; unknown module state hides them.
   const caps = useCapabilities();
   const hospitality = moduleLicensed(caps, "hospitality");
-  // The email_otp module now means "Email accounts" (self-service contract §1).
+  // The email_otp module gates "Email accounts".
   const emailMod = moduleLicensed(caps, "email_otp");
   const smsMod = moduleLicensed(caps, "sms_otp");
   const whatsappMod = moduleLicensed(caps, "whatsapp_otp");
@@ -117,12 +84,10 @@ export default function SignInMethodsPage() {
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
   const [social, setSocial] = useState<SocialProvider[]>([]);
-  // Whether the sign-in page is served over HTTPS yet (GDPR audit A3). null: unknown, nothing is shown.
+  // null: unknown, nothing is shown.
   const [httpsActive, setHttpsActive] = useState<boolean | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  // Whether Room sign-in can serve a guest right now. Only a one-line warning is shown here — the detail is on
-  // Hotel → Room sign-in — but an operator switching the method on during an outage must not miss it.
   const { readiness: pmsReadiness } = useRoomSignInReadiness(hospitality);
 
   const load = useCallback(async () => {
@@ -134,10 +99,7 @@ export default function SignInMethodsPage() {
       setErr(e);
       setCfg({});
     }
-    // Provider readiness is advisory: a failure here must not stop the methods themselves being managed. It is
-    // asked only for modules this site has.
-    // ...and only by a role that may read it: the desk roles manage methods they may see, and a request their
-    // role cannot make is a 403 in the console for nothing (PRE-LIVE acceptance, 2026-10-16).
+    // Readiness is advisory (failures must not block managing methods) and is requested only for licensed modules and readable roles.
     if ((emailMod || smsMod || whatsappMod) && roles !== null && canRead("notification-providers", roles)) {
       try {
         const n = await api.get<ListResp<NotifyProvider>>("/notification-providers");
@@ -159,8 +121,7 @@ export default function SignInMethodsPage() {
   }, [emailMod, smsMod, whatsappMod, socialMod, roles]);
   useEffect(() => { load(); }, [load]);
 
-  // A PATCH carrying only the key being changed. The server merges per top-level key, so this screen can
-  // never delete configuration it does not render.
+  // Sends only the changed key; the server merges per top-level key, so unrendered config is never deleted.
   const save = useCallback(async (patch: Partial<AuthMethods>, label: string) => {
     setBusy(label); setErr(null);
     try {
@@ -169,7 +130,7 @@ export default function SignInMethodsPage() {
       toast.success(`${label} saved`, "Clients see the change the next time the sign-in page loads.");
     } catch (e) {
       setErr(e);
-      await load(); // never leave a toggle showing a state the server did not accept
+      await load();
     } finally { setBusy(null); }
   }, [load, toast]);
 
@@ -177,8 +138,7 @@ export default function SignInMethodsPage() {
   const smsReady = useMemo(() => senderReady(notify, "sms"), [notify]);
   const whatsappReady = useMemo(() => senderReady(notify, "whatsapp"), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
-  // A provider whose switch is ON is listed even when its application is gone or disabled, so the switch can be
-  // turned OFF: it used to vanish from the list and stay on in the configuration with no way to clear it.
+  // A provider switched ON stays listed even if its app is gone or disabled, so it can be turned OFF.
   const socialListed = useMemo(() => {
     const on = Object.entries(cfg?.social ?? {}).filter(([, m]) => m?.enabled).map(([p]) => p);
     return Array.from(new Set([...socialReady, ...on]));
@@ -313,7 +273,6 @@ export default function SignInMethodsPage() {
 
         {hospitality && (
           <>
-        {/* Room sign-in spans the row so the grid of single methods below it stays even. */}
         <Card className="flex flex-col md:col-span-2">
           <CardHeader className="items-start border-b-0 pb-2">
             <MethodTitle icon={<Hotel />} title="Room sign-in" enabled={!!pms.enabled} />
@@ -330,7 +289,6 @@ export default function SignInMethodsPage() {
               The client enters their room number and one detail from their reservation, checked against the PMS.
             </p>
             {pms.enabled && roomSignInImpaired(pmsReadiness) && (
-              // One line, not the full callout: which networks are affected and why is on the Hotel screen.
               <p className="text-xs text-warning-subtle-foreground" role="status">
                 {pmsReadiness.state === "down"
                   ? "Not working at the moment — the PMS is not available."
@@ -357,8 +315,7 @@ export default function SignInMethodsPage() {
           busy={busy === "Email accounts"}
           writable={writable}
           onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
-          // Registration does not wait for the mail server, so a missing sender does not block the switch; it is
-          // said plainly, because without one no verification email is ever sent.
+          // A missing sender warns but does not block the switch.
           warning={emailReady ? undefined
             : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
           manageHref="/notifications"
@@ -431,7 +388,6 @@ export default function SignInMethodsPage() {
                             type="checkbox"
                             className="size-4 accent-primary"
                             checked={on}
-                            // Not ready: it can be switched OFF, never on.
                             disabled={busy === `Social (${p})` || (!ready && !on)}
                             onChange={(e) =>
                               save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
@@ -455,14 +411,10 @@ export default function SignInMethodsPage() {
         )}
       </div>
 
-      {/* EMAIL ACCOUNTS' TERMS (self-service contract §6): verification deadline, suspension, resend, grace. */}
       {emailMod && <EmailAccountsSettingsCard canEdit={writable} />}
 
-      {/* CODE REQUESTS: staff help for a client who cannot get their SMS or WhatsApp code (contract §6.7). */}
       {(smsMod || whatsappMod) && roles !== null && canRead("code-requests", roles) && <CodeRequestsCard roles={roles} />}
 
-      {/* THE JOURNEY. Which method leads, and whether a device is remembered, are decided once the methods
-          themselves are chosen -- so the card follows the grid rather than leading it. */}
       <ClientJourneyCard
         cfg={cfg}
         writable={writable}
@@ -471,22 +423,14 @@ export default function SignInMethodsPage() {
         onSave={(portal) => save({ portal }, "Client journey")}
       />
 
-      {/* The numbers are about guests signing in, and this is the screen an operator is already on when they
-          decide that five attempts is too few for their property. */}
-      {/* Sign-in protection counts wrong ROOM details (it is enforced on Room sign-in only), so it belongs to
-          Hospitality and is neither shown nor asked for on a site without it. */}
+      {/* Sign-in protection counts wrong ROOM details (Room sign-in only), so it needs Hospitality. */}
       {hospitality && <GuestSignInProtectionCard canWrite={mayChangeProtection} />}
       {hospitality && <NetworkPauseSettingsCard canWrite={mayChangeProtection} />}
     </PageShell>
   );
 }
 
-// ClientJourneyCard — the portal's primary method and the remembered-device window, saved together as the one
-// `portal` key (the server merges per top-level key, so nothing else on this screen is touched by the save).
-//
-// A FORM WITH A SAVE, unlike the switches above it: a number of days is typed, and saving every keystroke would
-// write "3", then "30", then "300" to the appliance. Nothing is sent until the operator says so, and the button
-// stays disabled until something actually changed.
+// Explicit Save, unlike the switches: saving per keystroke would write "3", "30", "300" for a typed day count.
 function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   cfg: AuthMethods; writable: boolean; busy: boolean; hospitality: boolean;
   onSave: (portal: PortalJourney) => void;
@@ -496,12 +440,9 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   const storedDays = typeof stored.remember_device_days === "number" ? stored.remember_device_days : REMEMBER_DAYS_DEFAULT;
   const [primary, setPrimary] = useState<PrimaryMethod>(storedPrimary);
   const [days, setDays] = useState(String(storedDays));
-  // Follow a save (or a refused one that re-read the server): the inputs show what the appliance holds.
   useEffect(() => { setPrimary(storedPrimary); setDays(String(storedDays)); }, [storedPrimary, storedDays]);
 
-  // Only a method that is switched on can lead: offering "Email account" first while it is off would show a form
-  // the client cannot use. A stored choice that has since been switched off is still listed, named as such,
-  // so the operator can see why the portal fell back to the automatic order.
+  // Only switched-on methods can lead; a stored choice since switched off stays listed so the fallback is explained.
   const enabledMethods = useMemo(() => {
     const on: Exclude<PrimaryMethod, "">[] = [];
     if (hospitality && cfg.pms?.enabled) on.push("pms");
@@ -534,8 +475,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
           onSubmit={(e) => {
             e.preventDefault();
             if (!daysValid || !writable) return;
-            // The whole `portal` key is replaced by the server's per-key merge, so anything else stored under
-            // it travels with this save rather than being dropped by it.
+            // The whole `portal` key is replaced, so spread the stored value to keep other fields.
             onSave({ ...stored, primary_method: primary, remember_device_days: n });
           }}
         >
@@ -594,7 +534,6 @@ function MethodTitle({ icon, title, enabled, extra }: {
   );
 }
 
-/** The switch, or nothing for a role that cannot change it (the On/Off badge beside the title still says the state). */
 function MethodSwitch({ label, enabled, busy, writable, disabled, onChange }: {
   label: string; enabled: boolean; busy: boolean; writable: boolean; disabled?: boolean; onChange: (v: boolean) => void;
 }) {
@@ -612,16 +551,14 @@ function MethodSwitch({ label, enabled, busy, writable, disabled, onChange }: {
   );
 }
 
-// MethodCard is one switchable method. A method whose provider is not ready is shown as unavailable and its
-// switch is disabled — presenting a working switch for something that cannot deliver a code is how an
-// operator turns a method on and only finds out at the front desk.
+// A method whose provider is not ready is shown unavailable with its switch disabled.
 function MethodCard({
   icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
   icon: React.ReactNode; title: string; description: string;
   enabled: boolean; busy: boolean; writable: boolean; onToggle: (v: boolean) => void;
   ready?: boolean; notReadyReason?: string;
-  /** A condition worth saying that does NOT block the switch. */
+  /** Does not block the switch. */
   warning?: string;
   manageHref?: string; manageLabel?: string;
 }) {
@@ -634,8 +571,7 @@ function MethodCard({
           enabled={enabled}
           extra={!ready ? <Badge tone="warn">Not available</Badge> : undefined}
         />
-        {/* NOT READY BLOCKS SWITCHING ON, NEVER SWITCHING OFF: a method whose sender was removed used to be stuck
-            on, with a disabled switch the operator could not use to turn it off. */}
+        {/* Not ready blocks switching on, never off. */}
         <MethodSwitch label={title} enabled={enabled} busy={busy} writable={writable} disabled={!ready && !enabled} onChange={onToggle} />
       </CardHeader>
       <CardBody className="flex flex-1 flex-col gap-2 pt-0">

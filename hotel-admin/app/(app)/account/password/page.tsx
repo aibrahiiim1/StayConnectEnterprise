@@ -1,8 +1,5 @@
 "use client";
 
-// CHANGE MY PASSWORD — reached from the account area at the foot of the sidebar. Every operator can change
-// their own password here; an administrator resetting someone else's is on the Operators screen.
-
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import { PageShell, PageHeader } from "@/components/ui/page";

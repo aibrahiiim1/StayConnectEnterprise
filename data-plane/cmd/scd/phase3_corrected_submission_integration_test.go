@@ -2,24 +2,9 @@
 
 package main
 
-// A CORRECTED SUBMISSION ON THE SAME PORTAL PAGE, through the handlers scd actually serves.
-//
-// THE DEFECT THESE EXIST FOR. The portal minted one resolution request id per attempt "key", and the key was
-// built from last_name / first_name / reservation_number. room_any -- the combined mode, and the one a real
-// property runs so the guest is never asked which KIND of identifier they are holding -- puts the typed value
-// in `verification`, which the key never read. Every submission from one page therefore carried the SAME id.
-// The server did exactly what an idempotency key says to do and replayed the resolution recorded under it, so
-// a guest who mistyped a surname and corrected it was answered by their own typo until they reloaded the page.
-// The uniform failure sentence -- correctly uniform, and a security property -- made that indistinguishable
-// from a name that was genuinely wrong, from either end.
-//
-// The correction has two halves and both are asserted here. The portal now mints an id per DELIBERATE
-// submission (the browser half is pinned in hotel-admin/e2e/portal-request-id.spec.ts, because the id is
-// generated in the guest's browser and nowhere else). And the resolver now replays only a SUCCESS: a recorded
-// refusal is re-evaluated rather than returned, so no stored non-success can freeze a later submission.
-//
-// THE BODIES HERE ARE THE ONES PORTALD SENDS, in the combined mode the defect lived in: `room`, one
-// `verification` value, a `request_id`, and a `device` the appliance derived.
+// A corrected submission on the same portal page. The portal mints a request id per deliberate submission
+// (browser half: hotel-admin/e2e/portal-request-id.spec.ts) and the resolver replays only a SUCCESS, so a
+// recorded refusal never freezes a later submission. Bodies match what portald sends in room_any mode.
 
 import (
 	"context"
@@ -27,8 +12,7 @@ import (
 	"testing"
 )
 
-// verifyBody is a room_any submission: ONE typed value, and the server compares it against surname, first
-// name and reservation number together. The portal deliberately does not inspect its shape.
+// verifyBody is a room_any submission: one typed value compared against surname, first name and reservation.
 func (f *authFixture) verifyBody(room, verification, reqID string) map[string]any {
 	return map[string]any{
 		"room": room, "verification": verification, "request_id": reqID,
@@ -36,9 +20,7 @@ func (f *authFixture) verifyBody(room, verification, reqID string) map[string]an
 	}
 }
 
-// reqID returns a distinct canonical uuid for each deliberate submission a test makes -- which is what the
-// corrected portal sends. Derived from the fixture's own tenant so a database that has run this suite before
-// carries no colliding row.
+// reqID returns a distinct uuid per submission, derived from the fixture's tenant to avoid colliding rows.
 func (f *authFixture) reqID(t *testing.T, n int) string {
 	t.Helper()
 	var id string
@@ -48,7 +30,7 @@ func (f *authFixture) reqID(t *testing.T, n int) string {
 	return id
 }
 
-// (1) WRONG VALUE, THEN THE CORRECT SURNAME, ON THE SAME PAGE. This is the Product Owner's acceptance walk.
+// (1) Wrong value, then the correct surname, on the same page.
 func TestIntegration_Phase3Auth_ACorrectedSurnameIsEvaluatedOnTheSamePage(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -58,8 +40,6 @@ func TestIntegration_Phase3Auth_ACorrectedSurnameIsEvaluatedOnTheSamePage(t *tes
 		t.Fatalf("a wrong verification value verified: %+v", wrong)
 	}
 
-	// No reload, no new page: the next deliberate submission, with its own request id, exactly as the
-	// corrected portal sends it.
 	_, corrected := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", f.reqID(t, 2)))
 	if corrected.Outcome != outcomeVerified || corrected.AuthContextID == "" {
 		t.Fatalf("the corrected surname was refused: %+v. Before this correction the page carried one request "+
@@ -75,8 +55,7 @@ func TestIntegration_Phase3Auth_ACorrectedSurnameIsEvaluatedOnTheSamePage(t *tes
 	}
 }
 
-// (2) THE SAME WALK ENDING ON A RESERVATION NUMBER. Combined mode compares the one typed value against the
-// surname and the reservation identifier together, so both corrections have to work and for the same reason.
+// (2) The same walk ending on a reservation number.
 func TestIntegration_Phase3Auth_ACorrectedReservationNumberIsEvaluatedOnTheSamePage(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -96,11 +75,7 @@ func TestIntegration_Phase3Auth_ACorrectedReservationNumberIsEvaluatedOnTheSameP
 	}
 }
 
-// (3) REPEATED WRONG SUBMISSIONS STAY REFUSED -- AND ARE GENUINELY EVALUATED.
-//
-// "Still refused" is the easy half and would also be true of the defect: a frozen replay refuses too. The half
-// that matters is that each attempt was actually decided, which is what makes the correction that follows it
-// possible. Each submission records its own resolution against its own id, so the count IS the evidence.
+// (3) Repeated wrong submissions stay refused and are each genuinely evaluated (one resolution per id).
 func TestIntegration_Phase3Auth_RepeatedWrongSubmissionsAreEachEvaluated(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -125,23 +100,16 @@ func TestIntegration_Phase3Auth_RepeatedWrongSubmissionsAreEachEvaluated(t *test
 		}
 	}
 
-	// ...and the page is not poisoned by any of them.
 	_, corrected := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", f.reqID(t, 9)))
 	if corrected.Outcome != outcomeVerified {
 		t.Fatalf("three refusals left the page unable to verify a correct value: %+v", corrected)
 	}
 }
 
-// (4) REPEATING AN ALREADY SUCCESSFUL REQUEST CANNOT DOUBLE-GRANT.
-//
-// Minting an id per submission means a determined guest CAN reach a second Auth Context, so the guard against
-// two grants must be the server's and not the page's. It is: a Stay holds exactly one live Entitlement.
-//
-// Three repeats are walked, because they fail differently and all three must hold:
-//   - the same context again from the same device returns the SAME session (a lost reply, recovered);
-//   - the same request id again replays the resolution rather than re-proving identity;
-//   - a NEW request id -- what the corrected portal sends on the next tap -- verifies again and is then
-//     refused a second grant, leaving the guest's existing access untouched.
+// (4) Repeating a successful request cannot double-grant; a Stay holds exactly one live Entitlement:
+//   - the same context from the same device returns the same session;
+//   - the same request id replays the resolution;
+//   - a new request id verifies again but is refused a second grant.
 func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -157,14 +125,12 @@ func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T)
 		t.Fatalf("setup: the grant produced no access: %+v", granted)
 	}
 
-	// (a) the same context, same device: the session that consumption already produced.
 	again := postGrant(t, f, res.AuthContextID, res.Offers[0].PackageRevisionID)
 	if again.Outcome != outcomeVerified || again.SessionID != granted.SessionID {
 		t.Fatalf("a retry from the same device against its own consumed context returned %+v, want the session "+
 			"the first grant created (%s)", again, granted.SessionID)
 	}
 
-	// (b) the same request id: the stored SUCCESS is replayed, so identity is not re-proved.
 	_, replayed := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", first))
 	if replayed.Outcome != outcomeVerified {
 		t.Fatalf("replaying a successful request id stopped verifying: %+v", replayed)
@@ -174,8 +140,6 @@ func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T)
 		t.Fatalf("a replayed success recorded %d resolutions, want 1", n)
 	}
 
-	// (c) a NEW id -- the next deliberate tap. It verifies (the guest really is that guest) and is then
-	// refused a second grant.
 	_, fresh := post(t, f.p3.resolveHandler, f.verifyBody("412", "Okonkwo", f.reqID(t, 2)))
 	if fresh.Outcome != outcomeVerified {
 		t.Fatalf("a fresh submission by an already-connected guest failed to verify: %+v", fresh)
@@ -185,7 +149,7 @@ func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T)
 		t.Fatalf("a second grant produced a NEW entitlement %s alongside %s", second.EntitlementID, granted.EntitlementID)
 	}
 
-	// THE INVARIANT, read from the database rather than from any response: one entitlement, one session.
+	// Read from the database, not a response: one entitlement, one session.
 	if n := countRows(t, f, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay); n != 1 {
 		t.Fatalf("entitlements for the stay = %d, want exactly 1", n)
 	}
@@ -197,9 +161,7 @@ func TestIntegration_Phase3Auth_RepeatingASuccessCannotDoubleGrant(t *testing.T)
 	_ = ctx
 }
 
-// (5) CORRECTING A MISTYPED VALUE WORKS WHILE THE PMS TRANSPORT IS DOWN, and only for a Stay the mirror
-// already holds. The correction is in the resolver and the portal, neither of which is supposed to care
-// whether a socket is open -- and an outage is exactly when a guest is most likely to be retyping.
+// (5) Correcting a mistyped value works while the PMS transport is down, for a Stay the mirror holds.
 func TestIntegration_Phase3Auth_ACorrectionIsEvaluatedWhileOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -219,12 +181,8 @@ func TestIntegration_Phase3Auth_ACorrectionIsEvaluatedWhileOffline(t *testing.T)
 	}
 }
 
-// (6) A STAY THE MIRROR DOES NOT HOLD IS STILL REFUSED WHILE OFFLINE, however many times it is submitted.
-//
-// This is the limit of what the correction can do, stated as a test so it is never mistaken for a defect in
-// it: room sign-in answers from locally mirrored Stay data, and a room created or changed in the PMS after
-// the last sync is not in that data. Retrying a correct value that the mirror has never seen is refused, and
-// correctly so -- the alternative is admitting someone on evidence nothing can vouch for.
+// (6) A Stay the mirror does not hold is refused while offline, however often submitted: admitting it
+// would rest on evidence nothing can vouch for.
 func TestIntegration_Phase3Auth_AStayAbsentFromTheMirrorStaysRefusedOffline(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -242,22 +200,14 @@ func TestIntegration_Phase3Auth_AStayAbsentFromTheMirrorStaysRefusedOffline(t *t
 	}
 }
 
-// (7) NOTHING OUTSIDE THIS GUEST'S TENANT, SITE OR MAPPED INTERFACE CAN BE MATCHED.
-//
-// Minting a fresh id per submission means an attacker can now submit as often as they like without the page
-// freezing on its own first refusal -- which is the correct behaviour and also the reason to restate the
-// confinement explicitly. Room numbers repeat constantly across properties; the only thing that stops room
-// 777 in another tenant, another site, or an interface this network is not mapped to from answering for this
-// guest is scope.
-//
-// Each decoy is asserted at the RESOLUTION, not just at the response: a determinate NO_MATCH naming no Stay
-// means the probe never saw it. A refusal that arrived later -- at eligibility, at the offer engine -- would
-// look identical to the guest and would mean the row had in fact been reachable.
+// (7) Nothing outside this guest's tenant, site or mapped interface can be matched. Each decoy is asserted
+// at the resolution (a determinate NO_MATCH naming no Stay), since a later refusal would look identical to
+// the guest while the row had in fact been reachable.
 func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
-	// (a) ANOTHER TENANT, complete with its own site, interface and network.
+	// (a) another tenant with its own site, interface and network
 	other := newAuthFixture(t)
 	if _, err := controlledExec(ctx, other.pool, "stay",
 		`UPDATE iam_v2.stays SET normalized_room_number='777' WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
@@ -265,9 +215,8 @@ func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *tes
 		t.Fatalf("seed the other tenant's decoy room: %v", err)
 	}
 
-	// (b) ANOTHER SITE under THIS tenant, and (c) another ACTIVE interface under this tenant AND site that is
-	// simply not mapped to this guest's network. Both hold room 777 with the same surname as the real stay,
-	// so the only difference between them and a match is scope.
+	// (b) another site of this tenant, (c) another active interface not mapped to this network; both hold room
+	// 777 with the same surname, so scope is the only difference.
 	if _, err := controlledExec(ctx, f.pool, "stay", `WITH
 	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT g, $1, g::text, 's' FROM gen_random_uuid() g RETURNING id,tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
@@ -313,7 +262,6 @@ func TestIntegration_Phase3Auth_ConfinedToTheTenantSiteAndMappedInterface(t *tes
 		}
 	}
 
-	// Nothing was granted anywhere, including in the other tenant.
 	if n := countRows(t, f, `SELECT count(*) FROM iam_v2.entitlements WHERE tenant_id IN ($1,$2)`,
 		f.tenant, other.tenant); n != 0 {
 		t.Fatalf("out-of-scope submissions produced %d entitlements", n)

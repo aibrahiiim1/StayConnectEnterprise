@@ -1,17 +1,7 @@
 "use client";
 
-// Phase 3 (DARK) — DUPLICATE SOURCES (PMS source conflicts).
-//
-// A source conflict is two PMS connections claiming authority over the same thing: both say room 412 is
-// occupied, by different people. The guest sees only that they cannot get online, and the front desk has no way
-// to explain it, because from every other surface both connections look perfectly healthy.
-//
-// The page exists so the question is visible before a guest asks it. Both connections are named by the labels
-// an operator recognises — a conflict rendered as two UUIDs is a conflict nobody resolves. The raw id is kept
-// only as a copyable chip, and only when there is no label to show.
-//
-// READ-ONLY FOR EVERY ROLE, and it says so: there is no action here. Which connection wins is decided on the
-// PMS connection itself.
+// Read-only for every role: which connection wins is decided on the PMS connection itself. The raw id is shown
+// only when there is no label.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -30,12 +20,10 @@ const SEVERITY: Record<string, { tone: "err" | "warn" | "info"; label: string }>
   HIGH: { tone: "err", label: "high" },
   MEDIUM: { tone: "warn", label: "medium" },
   LOW: { tone: "info", label: "low" },
-  // Detected from the connections' own published configuration (audit H-11): two connections whose live
-  // versions dial the same PMS source.
+  // Detected from published configuration: two connections whose live versions dial the same PMS source.
   DUPLICATE_SOURCE: { tone: "err", label: "same PMS source" },
 };
 
-// "UNRESOLVED" and friends, in words. An unknown value is de-underscored rather than hidden.
 const RESOLUTION_WORDS: Record<string, string> = {
   UNRESOLVED: "Not decided yet",
 };

@@ -8,20 +8,10 @@ import (
 
 func osGetenv(k string) string { return os.Getenv(k) }
 
-// productionProvider returns the real provider adapter for this build.
-//
-// It returns nil, and nil is the honest answer: no adapter has been written, none is authorized, and no
-// real provider endpoint may be contacted in this milestone.
-//
-// It deliberately does NOT return a placeholder adapter named "none". An earlier revision did, and the
-// consequence was that the runtime wrote provider='none' into the financial record -- inventing a managed
-// identity that does not exist, in the one table that must only ever describe real money. DARK means
-// configured financial identity with egress disabled; it does not mean fabricated state. With nil here, a
-// build with no adapter fails closed at intent creation instead.
-//
-// A future adapter is added HERE and must satisfy SupportsClientReference() -- an adapter that cannot carry
-// and return StayConnect's durable client reference cannot be correlated and must fail closed rather than
-// degrade to guessing which money a notification is about.
+// productionProvider returns nil on purpose: no adapter is authorized, and a placeholder named "none" once wrote
+// provider='none' into the financial record, inventing an identity. With nil, a build with no adapter fails closed at
+// intent creation.
+// A real adapter must satisfy SupportsClientReference(); otherwise correlation would be guessed.
 func productionProvider(cfg Config) (Provider, error) {
 	if cfg.ProviderOn() {
 		return nil, fail(ErrConfig,
@@ -30,11 +20,8 @@ func productionProvider(cfg Config) (Provider, error) {
 	return nil, nil
 }
 
-// providerGuard is the single chokepoint every provider call passes through.
-//
-// It refuses BEFORE delegating, so while DARK the adapter is never entered, no socket is touched and no
-// request exists. It also refuses an adapter that cannot satisfy the correlation capability, because an
-// uncorrelatable payment is one whose callbacks could be applied to the wrong money.
+// providerGuard is the single chokepoint: it refuses before delegating, so while DARK no socket is touched, and it
+// refuses adapters that cannot correlate (callbacks could be applied to the wrong money).
 type providerGuard struct {
 	cfg   Config
 	inner Provider
@@ -43,16 +30,8 @@ type providerGuard struct {
 	n  int
 }
 
-// preflight is the SIDE-EFFECT-FREE half of the guard.
-//
-// It answers one question -- could a provider request possibly be produced right now? -- by reading only
-// configuration and adapter capability. It opens no connection, sends nothing, and changes nothing, here
-// or at the provider. That is what makes it safe to run BEFORE the durable execution transition: a refusal
-// from preflight is provably NOT_SENT, so nothing needs to be recorded and no state may be left behind.
-//
-// Running these checks after crossing the durable boundary was a real defect: a DARK build left every
-// intent permanently PENDING with its Settlement stuck IN_PROGRESS, describing an execution that had not
-// begun and never would.
+// preflight is side-effect free: it reads configuration and adapter capability only, so a refusal is provably NOT_SENT
+// and it is safe to run before the durable execution transition.
 func (g *providerGuard) preflight() error {
 	if g.cfg.Dark() {
 		g.mu.Lock()
@@ -71,11 +50,8 @@ func (g *providerGuard) preflight() error {
 	return nil
 }
 
-// execute crosses the real adapter boundary. Everything preflight would refuse has already been refused.
-//
-// From the first line of this function onward the request MAY have left, so an adapter that fails to answer
-// is not an error to be retried -- it IS the UNKNOWN outcome, and the caller must treat it as money that
-// may have moved. That rule is unchanged and deliberately not weakened by the preflight split above.
+// From here the request MAY have left: an adapter that fails to answer is the UNKNOWN outcome, treated as money that
+// may have moved and never retried.
 func (g *providerGuard) execute(ctx context.Context, r Request) (Result, error) {
 	if err := g.preflight(); err != nil {
 		return Result{}, err

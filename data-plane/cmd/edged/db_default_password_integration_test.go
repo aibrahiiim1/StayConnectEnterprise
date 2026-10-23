@@ -10,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GDPR audit C5, against a real database: the probe finds a role that still has the default password, and stops
-// finding it once the password is changed.
 func TestIntegration_TheDefaultDatabasePasswordProbe(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {

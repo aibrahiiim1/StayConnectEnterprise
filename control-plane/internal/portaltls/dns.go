@@ -11,43 +11,35 @@ import (
 	"time"
 )
 
-// ZoneInfo is what a DNS provider reports about the zone Central manages. Non-secret.
 type ZoneInfo struct {
 	ID          string   `json:"zone_id"`
 	Name        string   `json:"zone_name"`
 	NameServers []string `json:"nameservers"`
 }
 
-// DNSProvider writes the records Central publishes in its own zone: the A record of each appliance hostname,
-// the temporary DNS-01 TXT records, and the zone's CAA policy. Every method acts on the configured zone only.
+// DNSProvider writes the records Central publishes in its own zone, and only that zone.
 type DNSProvider interface {
 	// UpsertA makes fqdn resolve to exactly ip (TTL 300, never proxied) and returns the record id.
 	UpsertA(ctx context.Context, fqdn, ip string) (string, error)
-	// DeleteRecord removes a record by id. A record that is already gone is not an error.
+	// DeleteRecord removes a record by id; one already gone is not an error.
 	DeleteRecord(ctx context.Context, recordID string) error
-	// SetTXT adds a TXT record (TTL 60) and returns its id. Other TXT values at the same name are kept:
-	// two orders may validate at the same time.
+	// SetTXT adds a TXT record (TTL 60), keeping other TXT values at the name: two orders may validate at once.
 	SetTXT(ctx context.Context, fqdn, value string) (string, error)
-	// ListAuthoritativeNS lists the zone's authoritative nameservers as host or host:port.
+	// ListAuthoritativeNS lists the zone's nameservers as host or host:port.
 	ListAuthoritativeNS(ctx context.Context) ([]string, error)
-	// ApplyCAA sets the apex `0 issue "<issueValue>"` and `0 issuewild ";"`, preserving every other record,
-	// and returns the issue values of OTHER CAs it found and left in place (an operator should know).
+	// ApplyCAA sets the apex `0 issue "<issueValue>"` and `0 issuewild ";"`, preserving other records, and
+	// returns the issue values of other CAs it left in place.
 	ApplyCAA(ctx context.Context, issueValue string) ([]string, error)
-	// Verify proves the credentials reach the zone and returns its facts.
+	// Verify proves the credentials reach the zone.
 	Verify(ctx context.Context) (ZoneInfo, error)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// challtestsrv (TEST-ONLY): Pebble's companion DNS server, driven through its management API, so the full
-// issuance chain can be exercised -- in CI and on a real Central host -- with no DNS credential at all.
-// ---------------------------------------------------------------------------------------------------------
-
-// Challtestsrv drives pebble-challtestsrv's management API. challtestsrv answers for any name, so "the zone"
-// is whatever name we write; its nameserver for propagation checks is CTRLAPI_PORTAL_DNS_CHECK_SERVERS.
+// Challtestsrv drives pebble-challtestsrv's management API (test only). It answers for any name, so the
+// zone is whatever name is written; propagation checks use CTRLAPI_PORTAL_DNS_CHECK_SERVERS.
 type Challtestsrv struct {
-	BaseURL     string   // management API, e.g. http://127.0.0.1:8055
-	Zone        string   // the zone name settings say we manage
-	NameServers []string // what ListAuthoritativeNS reports (host:port of challtestsrv's DNS listener)
+	BaseURL     string
+	Zone        string
+	NameServers []string // host:port of challtestsrv's DNS listener
 	HTTP        *http.Client
 }
 
@@ -101,8 +93,7 @@ func (c *Challtestsrv) DeleteRecord(ctx context.Context, recordID string) error 
 	return fmt.Errorf("challtestsrv: unknown record type %q", typ)
 }
 
-// SetTXT: challtestsrv holds one TXT value per name (set-txt replaces), which is enough for one validation
-// at a time -- the worker processes orders one by one.
+// SetTXT: challtestsrv holds one TXT value per name, enough because the worker validates one order at a time.
 func (c *Challtestsrv) SetTXT(ctx context.Context, fqdn, value string) (string, error) {
 	if err := c.post(ctx, "/set-txt", map[string]any{"host": dnsName(fqdn), "value": value}); err != nil {
 		return "", err
@@ -121,7 +112,6 @@ func (c *Challtestsrv) ApplyCAA(ctx context.Context, issueValue string) ([]strin
 }
 
 func (c *Challtestsrv) Verify(ctx context.Context) (ZoneInfo, error) {
-	// Any harmless management call proves the API answers.
 	if err := c.post(ctx, "/clear-txt", map[string]any{"host": dnsName("_onegate-probe." + c.Zone)}); err != nil {
 		return ZoneInfo{}, err
 	}

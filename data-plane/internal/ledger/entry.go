@@ -1,16 +1,10 @@
-// Package ledger is the GDPR erasure ledger: the append-only, hash-chained record of every erasure and of how every
-// data-protection request was closed, kept in TWO places outside the database's own tables (a local file on the appliance and
-// an independently stored external copy) so that a database restored from an older backup can be brought back to the state
-// the hotel had already promised the guest -- erased, and closed.
+// Package ledger is the GDPR erasure ledger: an append-only, hash-chained record of every erasure and closed
+// data-protection request, kept in two places outside the database (a local file and an external copy) so a
+// restored database can be brought back to what the guest was promised.
 //
-// The ledger holds no guest data. An entry names the kind and the id of a record that was anonymised, the reference given to the
-// guest, when, why not, and the counts; never a name, an address or a device address.
-//
-// WHAT MAKES A COPY TRUSTWORTHY. A file existing proves nothing. A copy is intact only if every entry parses, the sequence has no
-// gap, every entry names the hash of the one before it, and every hash is the hash of the entry itself (a chain, so one
-// altered, lost or reordered entry breaks everything after it). A copy is COMPLETE only if, besides being intact, it reaches
-// every independent witness that is available: the head of the database being restored, the head of the live database, the head
-// recorded with every backup, and the other copy. What cannot be proved is said so (assess.go); it is never assumed.
+// It holds no guest data: only record kinds and ids, the guest reference, timing and counts. A copy is intact only
+// if every entry parses, the sequence has no gap and each hash chains; it is complete only if it also reaches every
+// available independent witness (assess.go). What cannot be proved is never assumed.
 package ledger
 
 import (
@@ -24,13 +18,12 @@ import (
 	"strings"
 )
 
-// GenesisPrev is the "previous hash" of the first entry.
 var GenesisPrev = strings.Repeat("0", 64)
 
 const hashDomain = "stayconnect-ledger-v1"
 
-// Entry is one line of the ledger. Body is the exact text the database stored (a JSON document); it is carried verbatim and
-// never re-serialised, so the hash that covers it can be recomputed by the database and by this package alike.
+// Entry is one line of the ledger. Body is the exact stored JSON, carried verbatim so the database and this package
+// compute the same hash.
 type Entry struct {
 	Ledger string `json:"ledger"`
 	Seq    int64  `json:"seq"`
@@ -43,8 +36,8 @@ type Entry struct {
 	Hash   string `json:"hash"`
 }
 
-// ComputeHash is the hash of everything in the entry except the hash. The database computes the same value
-// (iam_v2.ledger_hash, migration 0148); the two must agree byte for byte.
+// ComputeHash covers everything except the hash; the database computes the same value (iam_v2.ledger_hash) and the
+// two must agree byte for byte.
 func (e Entry) ComputeHash() string {
 	s := strings.Join([]string{hashDomain, e.Ledger, strconv.FormatInt(e.Seq, 10), e.Prev, e.Kind, e.Tenant, e.Site,
 		strconv.FormatInt(e.AtUS, 10), e.Body}, "\x1f")
@@ -52,7 +45,7 @@ func (e Entry) ComputeHash() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Line is the entry as it is written: one JSON object and a newline. A line is complete only when its newline is there.
+// Line is one JSON object and a newline; a line is complete only when its newline is there.
 func (e Entry) Line() ([]byte, error) {
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -61,22 +54,16 @@ func (e Entry) Line() ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// Parse is what could be read of a ledger file.
 type Parse struct {
-	// Entries is the longest valid prefix.
 	Entries []Entry
-	// Intact is true when the whole input is that prefix: no damaged line, no torn tail.
-	Intact bool
-	// Torn is true when the input ended in a fragment without its newline (a write that was interrupted); the fragment is
-	// ignored, and the prefix before it is still a good ledger.
+	Intact  bool
+	// Torn is true when the input ended in a fragment without a newline (an interrupted write); it is ignored.
 	Torn bool
-	// Err says why the prefix ended, when it did not end at the end of the input.
-	Err error
+	Err  error
 	// ValidBytes is the length of the valid prefix, for truncating a torn file back to a good state.
 	ValidBytes int
 }
 
-// Head is the last valid entry, or zero values for an empty ledger.
 func (p *Parse) Head() (int64, string) {
 	if len(p.Entries) == 0 {
 		return 0, ""
@@ -85,7 +72,6 @@ func (p *Parse) Head() (int64, string) {
 	return h.Seq, h.Hash
 }
 
-// LedgerID is the identity of the ledger the entries belong to ("" when empty).
 func (p *Parse) LedgerID() string {
 	if len(p.Entries) == 0 {
 		return ""
@@ -93,10 +79,9 @@ func (p *Parse) LedgerID() string {
 	return p.Entries[0].Ledger
 }
 
-// ErrCorrupt describes a damaged ledger.
 var ErrCorrupt = errors.New("ledger is damaged")
 
-// ParseChain reads a ledger file. It never trusts the file: every line is parsed strictly and checked against the chain.
+// ParseChain reads a ledger file, trusting nothing: every line is parsed strictly and checked against the chain.
 func ParseChain(data []byte) *Parse {
 	p := &Parse{Intact: true}
 	rest := data
@@ -156,7 +141,6 @@ func checkLink(prev, e *Entry) error {
 	return nil
 }
 
-// Encode writes entries as a ledger file's content.
 func Encode(entries []Entry) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, e := range entries {

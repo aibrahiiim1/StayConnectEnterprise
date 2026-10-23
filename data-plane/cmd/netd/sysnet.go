@@ -1,13 +1,7 @@
 package main
 
-// System (WAN/LAN) network management — the appliance's OWN base networking.
-// This is distinct from the guest-VLAN overlay (apply.go/netcfg): here netd
-// reads and safely changes ens160 (WAN/management) and the br-lan bridge via
-// netplan, with backups, a confirm/auto-rollback window and a full audit trail.
-//
-// netd is the ONLY component that touches netplan; edged (unprivileged) proxies
-// operator requests here over the unix socket. A single in-process mutex plus an
-// on-disk lock file prevent concurrent system-network changes.
+// System (WAN/LAN) network management through netplan, with backups, a confirm/auto-rollback window and an audit trail.
+// netd is the only component that touches netplan; a mutex plus an on-disk lock file prevent concurrent changes.
 
 import (
 	"context"
@@ -33,14 +27,10 @@ const (
 	sysnetBackups  = "/root/backups/sysnet"
 	sysnetLockFile = "/run/stayconnect/sysnet.lock"
 	sysnetCommit   = "/run/stayconnect-net-committed"
-	// Pending marker is PERSISTENT (survives a netd restart/crash) so netd can
-	// reconcile an unconfirmed change on boot (carryover E). /run is tmpfs and
-	// would be lost on reboot, hiding a still-applied-but-unconfirmed change.
+	// The pending marker is persistent (/run is tmpfs) so a still-applied-but-unconfirmed change is reconciled on boot.
 	sysnetPendingFile = "/var/lib/stayconnect/sysnet-pending.json"
 )
 
-// pendingChange records an applied-but-unconfirmed system-network change so the
-// in-process watchdog and boot reconciler can act on it and audit it.
 type pendingChange struct {
 	RevisionID string `json:"revision_id"`
 	Deadline   int64  `json:"deadline"`
@@ -61,19 +51,14 @@ type sysNetMgr struct {
 	mgmtAddr      string
 	confirmWindow time.Duration
 	dryRun        bool
-	// afterNetplan runs after every `netplan apply` (apply and restore): the firewall's management pin follows
-	// the WAN address (nft_watch.go). nil = nothing to do.
+	// afterNetplan runs after every `netplan apply`: the firewall's management pin follows the WAN address. nil = nothing to do.
 	afterNetplan func(ctx context.Context)
-	// settle is how long an apply waits for links and routes before verifying. Zero in tests.
-	settle time.Duration
-	// Test seams: the files, the netplan runner, the current state and the post-apply verification.
-	files     *sysnetPaths
-	runFn     func(name string, args ...string) error
-	currentFn func(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig)
-	verifyFn  func(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool
+	settle       time.Duration
+	files        *sysnetPaths
+	runFn        func(name string, args ...string) error
+	currentFn    func(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig)
+	verifyFn     func(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool
 }
-
-// ---- state model returned to the UI ----
 
 type ifaceRuntime struct {
 	Name    string   `json:"name"`
@@ -133,8 +118,6 @@ type pendingSysNet struct {
 	BackupPath    string `json:"backup_path"`
 }
 
-// currentWANLAN returns the effective WAN/LAN config as sysnet types (for
-// merge/validate/render), read from the live runtime + DB.
 func (m *sysNetMgr) currentWANLAN(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig) {
 	w := sysnet.WANConfig{Interface: m.wanIface, Mode: "static"}
 	ip, plen := primaryV4(m.wanIface)
@@ -145,7 +128,6 @@ func (m *sysNetMgr) currentWANLAN(ctx context.Context) (sysnet.WANConfig, sysnet
 	l := sysnet.LANConfig{PhysicalInterface: m.lanPhys, Bridge: m.lanBr}
 	lip, lplen := primaryV4(m.lanBr)
 	l.IP, l.PrefixLen = lip, lplen
-	// DHCP config from the site DB (netd's source of truth for br-lan).
 	if m.st != nil {
 		m.st.db.QueryRow(ctx, `
             SELECT COALESCE(host(gateway_ip),''), COALESCE(lease_default_seconds,3600),
@@ -162,7 +144,7 @@ func (m *sysNetMgr) currentWANLAN(ctx context.Context) (sysnet.WANConfig, sysnet
              WHERE g.bridge_name=$1 LIMIT 1`, m.lanBr).Scan(&start, &end)
 		l.DHCPStart, l.DHCPEnd = start, end
 	}
-	l.DNS = []string{l.IP} // appliance (unbound) is the guest resolver
+	l.DNS = []string{l.IP}
 	return w, l
 }
 
@@ -218,8 +200,6 @@ func (m *sysNetMgr) connectivity(w sysnet.WANConfig) connState {
 	return c
 }
 
-// ---- validate ----
-
 func (m *sysNetMgr) current(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig) {
 	if m.currentFn != nil {
 		return m.currentFn(ctx)
@@ -231,11 +211,7 @@ func (m *sysNetMgr) validate(ctx context.Context, p sysnet.Proposal) (sysnet.Val
 	cw, cl := m.current(ctx)
 	w, l := sysnet.Merge(cw, cl, p)
 	res := sysnet.ValidateProposal(w, l, cl, p)
-	// THE LOCKOUT CHECK THAT MEANS SOMETHING. The old check accepted the change when the console process
-	// answered on loopback (127.0.0.1:3100), which is always true and says nothing about whether an operator can
-	// reach the console at the new address. What can lock an operator out is the firewall: a LITERAL
-	// NETD_MGMT_ADDR pins the console's port 443 to that one address, so moving the WAN away from it would leave
-	// the console reachable nowhere. NETD_MGMT_ADDR=auto follows the WAN (nft_watch.go) and is never refused.
+	// The lockout check is the firewall, not a loopback probe: a literal NETD_MGMT_ADDR pins console port 443 to one address, so moving the WAN away would leave the console unreachable. "auto" follows the WAN and is never refused.
 	if pin := strings.TrimSpace(m.mgmtAddr); pin != "" && pin != mgmtAddrAuto && p.WAN != nil && w.IP != pin {
 		res.OK = false
 		res.Issues = append(res.Issues, sysnet.Issue{Field: "wan.ip", Code: "management_pin_lockout",
@@ -245,11 +221,9 @@ func (m *sysNetMgr) validate(ctx context.Context, p sysnet.Proposal) (sysnet.Val
 	return res, w, l
 }
 
-// ---- apply / confirm / rollback ----
-
 type applySysResult struct {
 	OK            bool                    `json:"ok"`
-	State         string                  `json:"state"` // pending_confirmation | failed | rolled_back
+	State         string                  `json:"state"`
 	Validation    sysnet.ValidationResult `json:"validation"`
 	ManagementURL string                  `json:"management_url"`
 	BackupPath    string                  `json:"backup_path,omitempty"`
@@ -258,7 +232,6 @@ type applySysResult struct {
 	Verify        map[string]bool         `json:"verify,omitempty"`
 }
 
-// errNothingPending: a rollback was asked for with no applied-but-unconfirmed change to undo.
 var errNothingPending = errors.New("there is no unconfirmed WAN / LAN change to roll back")
 
 func (m *sysNetMgr) netplan(args ...string) error {
@@ -295,7 +268,7 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		return out, nil
 	}
 
-	// 1. backup -- including the fact that a file did NOT exist, so a restore can remove what this apply created.
+	// 1. Back up, recording that a file did not exist so a restore removes what this apply created.
 	stamp := time.Now().UTC().Format("20060102-150405")
 	bk := filepath.Join(ps.backups, stamp)
 	if err := os.MkdirAll(bk, 0o700); err != nil {
@@ -306,7 +279,6 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	out.BackupPath = bk
 	pc.Backup = bk
 
-	// 2. render + write netplan (structured serializer)
 	if p.WAN != nil {
 		if err := os.WriteFile(ps.wan, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
 			m.restoreFiles(bk)
@@ -320,7 +292,6 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		}
 	}
 
-	// 3. validate the generated config
 	if err := m.netplan("generate"); err != nil {
 		m.restoreFiles(bk)
 		out.State = "failed"
@@ -329,18 +300,13 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		return out, nil
 	}
 
-	// 4. THE PENDING MARKER IS WRITTEN BEFORE THE CHANGE TAKES EFFECT. It used to be written only after
-	// `netplan apply` and the post-apply verification, so a crash or a power cut in between left a live,
-	// unconfirmed change with no marker -- and nothing (neither the watchdog nor the boot reconcile) would ever
-	// roll it back. Persisted first, the worst case is a marker for a change that never took effect, whose
-	// rollback restores the files that are already in place.
+	// 4. The pending marker is written before the change takes effect: a crash after `netplan apply` would otherwise leave a live unconfirmed change that nothing rolls back.
 	m.removeCommit()
 	deadline := time.Now().Add(m.confirmWindow)
 	pc.Deadline = deadline.Unix()
 	m.writePending(pc)
 	m.auditEvent(ctx, revID, "network.apply.started", pc, "", bk)
 
-	// 5. apply
 	if err := m.netplan("apply"); err != nil {
 		m.restore(ctx, bk)
 		m.clearPendingFiles()
@@ -349,7 +315,7 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		m.auditEvent(ctx, revID, "network.apply.failed", pc, "netplan_apply: "+err.Error(), bk)
 		return out, nil
 	}
-	// The firewall follows the new address before anything checks reachability (NETD_MGMT_ADDR=auto).
+	// The firewall follows the new address before reachability is checked (NETD_MGMT_ADDR=auto).
 	if m.afterNetplan != nil {
 		m.afterNetplan(ctx)
 	}
@@ -357,7 +323,6 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		time.Sleep(m.settle)
 	}
 
-	// 6. verify — any critical failure => immediate in-process rollback
 	v := m.verifyNow(w, l)
 	out.Verify = v
 	critical := v["wan_ip"] && v["gateway"] && v["management_reachable"]
@@ -372,8 +337,7 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 		return out, nil
 	}
 
-	// 7. pending_confirmation, with the window measured from now: the operator's time starts when there is
-	// something to confirm, not when the apply began.
+	// 7. The confirm window starts when there is something to confirm, not when the apply began.
 	deadline = time.Now().Add(m.confirmWindow)
 	pc.Deadline = deadline.Unix()
 	m.writePending(pc)
@@ -385,7 +349,6 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	return out, nil
 }
 
-// writePendingLocked persists the marker (helper kept for symmetry/testing).
 func (m *sysNetMgr) writePendingLocked(pc pendingChange) { m.writePending(pc) }
 
 func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) error {
@@ -393,7 +356,6 @@ func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) e
 	if !ok {
 		return fmt.Errorf("no pending network change to confirm")
 	}
-	// commit: flag prevents any concurrent rollback; clear the pending marker.
 	_ = os.WriteFile(m.paths().commit, []byte(time.Now().String()), 0o644)
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
 	m.clearPendingFiles()
@@ -401,12 +363,7 @@ func (m *sysNetMgr) confirm(ctx context.Context, actor, actorID, srcIP string) e
 	return nil
 }
 
-// rollback undoes the PENDING change, and nothing else.
-//
-// With nothing pending it used to restore whatever backup directory sorted last -- a change that may have been
-// confirmed weeks ago, with everything applied since silently reverted by a button labelled "roll back".
-// A confirmed change is the configuration; going back from it is a new change, made and confirmed like any
-// other.
+// rollback undoes the pending change and nothing else: a confirmed change is the configuration, and going back from it is a new change.
 func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) error {
 	if !m.mu.TryLock() {
 		return fmt.Errorf("another network change is in progress")
@@ -428,10 +385,6 @@ func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) 
 	return nil
 }
 
-// sysnetWatchdog auto-rolls-back an applied-but-unconfirmed change once its
-// confirmation deadline passes (carryover D — in-process, fully audited). It
-// replaces the previous detached systemd-run script, which could not write
-// structured audit rows.
 func (m *sysNetMgr) sysnetWatchdog(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -451,16 +404,15 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 		return
 	}
 	if _, err := os.Stat(m.paths().commit); err == nil {
-		return // committed
+		return
 	}
 	if time.Now().Unix() < pc.Deadline {
-		return // still within window
+		return
 	}
 	if m.dryRun || !m.mu.TryLock() {
 		return
 	}
 	defer m.mu.Unlock()
-	// re-check under lock (a confirm may have raced)
 	if pc2, ok := m.readPending(); !ok || pc2.RevisionID != pc.RevisionID {
 		return
 	}
@@ -476,18 +428,14 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "confirmation_timeout", pc.Backup)
 }
 
-// ReconcileStalePendingOnBoot inspects a persistent pending marker on netd
-// startup (carryover E). If a change was applied but never confirmed (e.g. netd
-// crashed or the box rebooted during the window), it is safely rolled back and
-// the reconciliation is audited. A marker still within its window is left for
-// the watchdog. Committed/absent markers are cleaned up.
+// ReconcileStalePendingOnBoot rolls back a change that was applied but never confirmed (netd crashed or the box rebooted mid-window); a marker still within its window is left for the watchdog.
 func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 	pc, ok := m.readPending()
 	if !ok {
 		return
 	}
 	if _, err := os.Stat(m.paths().commit); err == nil {
-		m.clearPendingFiles() // was confirmed; just tidy the marker
+		m.clearPendingFiles()
 		return
 	}
 	if time.Now().Unix() < pc.Deadline {
@@ -508,8 +456,7 @@ func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "boot_reconcile", pc.Backup)
 }
 
-// backupFile copies src into the backup, or -- when src does not exist -- records that it did not, so a restore
-// removes the file the apply created instead of leaving it in force.
+// backupFile records a missing source as absent so a restore removes the file the apply created.
 func backupFile(src, dst string) {
 	if err := copyFile(src, dst); err != nil && os.IsNotExist(err) {
 		_ = os.WriteFile(dst+absentSuffix, []byte("did not exist before this change\n"), 0o600)
@@ -518,9 +465,7 @@ func backupFile(src, dst string) {
 
 const absentSuffix = ".absent"
 
-// restoreFiles puts the backed-up netplan files back, and REMOVES a file the backup records as absent. The old
-// restore only copied, so a file this change created survived every rollback and took effect at the next
-// `netplan apply` or reboot.
+// restoreFiles also removes files the backup records as absent; otherwise a file this change created would survive rollback and take effect at the next apply or reboot.
 func (m *sysNetMgr) restoreFiles(bk string) {
 	ps := m.paths()
 	for name, live := range map[string]string{"01-static.yaml": ps.wan, "02-lan-bridge.yaml": ps.lan} {
@@ -560,19 +505,14 @@ func (m *sysNetMgr) verify(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bo
 	v["dns"] = resolves("github.com")
 	v["lan_bridge"] = ifaceHasIP(l.Bridge, l.IP)
 	v["lan_member"] = ifaceMaster(l.PhysicalInterface) == l.Bridge
-	// THE CONSOLE ANSWERS AT THE ADDRESS THE OPERATOR WILL USE. This used to accept a loopback probe of the
-	// console process (127.0.0.1:3100), which is up whatever the network looks like, so the check could never
-	// fail. The new WAN address on 443 is what the operator's browser will reach (Caddy listens on every
-	// address; the firewall pin follows NETD_MGMT_ADDR=auto, re-asserted just before this check).
+	// The console must answer at the new WAN address on 443, which is what the operator's browser reaches; a loopback probe is up whatever the network looks like.
 	addr := w.IP
 	if addr == "" {
-		addr, _ = primaryV4(w.Interface) // DHCP: whatever the lease gave
+		addr, _ = primaryV4(w.Interface)
 	}
 	v["management_reachable"] = addr != "" && tcpProbe(addr+":443")
 	return v
 }
-
-// ---- audit ----
 
 func (m *sysNetMgr) audit(ctx context.Context, actor, actorID, srcIP, action, target string, prev any, val sysnet.ValidationResult, apply, confirm, rollback, failure, bk string) {
 	if m.st == nil {
@@ -616,8 +556,6 @@ func (m *sysNetMgr) history(ctx context.Context, limit int) []map[string]any {
 	return out
 }
 
-// ---- diagnostics (read-only, secrets sanitized) ----
-
 func (m *sysNetMgr) diagnostics() map[string]string {
 	d := map[string]string{}
 	d["ip_addr"] = cmdOut("ip", "-br", "addr")
@@ -629,8 +567,6 @@ func (m *sysNetMgr) diagnostics() map[string]string {
 	d["netplan_get"] = cmdOut("netplan", "get")
 	return d
 }
-
-// ---- HTTP handlers ----
 
 func (s *server) sysnetGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.sn.readState(r.Context()))
@@ -693,8 +629,6 @@ func (s *server) sysnetHistory(w http.ResponseWriter, r *http.Request) {
 func (s *server) sysnetDiagnostics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"diagnostics": s.sn.diagnostics()})
 }
-
-// ---- low-level helpers (runtime reads / exec) ----
 
 func changeTarget(p sysnet.Proposal) string {
 	switch {
@@ -817,7 +751,6 @@ func outboundIface() string {
 
 func ifaceDNS(iface string) []string {
 	out := cmdOut("resolvectl", "dns", iface)
-	// "Link 2 (ens160): 1.1.1.1 8.8.8.8"
 	if i := strings.Index(out, ":"); i >= 0 {
 		out = out[i+1:]
 	}
@@ -831,7 +764,6 @@ func ifaceDNS(iface string) []string {
 }
 
 func persistentWANIP(iface string) string {
-	// Ask netplan for the merged persistent intent.
 	out := cmdOut("netplan", "get", "ethernets."+iface+".addresses")
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(strings.Trim(strings.TrimPrefix(strings.TrimSpace(line), "-"), " \""))
@@ -888,14 +820,10 @@ func tcpProbe(hostport string) bool {
 }
 
 func sanitize(s string) string {
-	// no secrets in resolvectl, but keep the hook for future diagnostics.
 	return s
 }
 
-// --- persistent pending marker (survives netd restart for boot reconcile) ---
-
-// sysnetPaths are the files the system-network manager reads and writes. A field so a test can point them at a
-// temporary directory; the zero value is the appliance's real layout.
+// sysnetPaths is a field so tests can point the manager at a temporary directory.
 type sysnetPaths struct{ wan, lan, backups, pending, commit string }
 
 func (m *sysNetMgr) paths() sysnetPaths {
@@ -930,17 +858,13 @@ func (m *sysNetMgr) readPending() (pendingChange, bool) {
 
 func (m *sysNetMgr) removeCommit() { _ = os.Remove(m.paths().commit) }
 
-// clearPendingFiles removes BOTH the persistent pending marker and the commit flag —
-// called on every terminal outcome (confirm / manual rollback / auto rollback /
-// failed rollback / boot reconcile) so no stale marker is ever left behind
-// (carryover E).
+// clearPendingFiles removes the pending marker and the commit flag on every terminal outcome so no stale marker remains.
 func (m *sysNetMgr) clearPendingFiles() {
 	ps := m.paths()
 	_ = os.Remove(ps.pending)
 	_ = os.Remove(ps.commit)
 }
 
-// genUUID returns a random RFC-4122 v4 UUID (netd has no google/uuid dep).
 func genUUID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -949,8 +873,7 @@ func genUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// auditEvent writes one structured row of the system-network change lifecycle.
-// action is a network.* event name; rows sharing revisionID form the sequence.
+// auditEvent writes one row of the change lifecycle; rows sharing revisionID form the sequence.
 func (m *sysNetMgr) auditEvent(ctx context.Context, revID, action string, pc pendingChange, reason, backup string) {
 	if m.st == nil {
 		return

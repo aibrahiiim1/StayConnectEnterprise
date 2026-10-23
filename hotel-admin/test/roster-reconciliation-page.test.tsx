@@ -1,22 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-// ROSTER RECONCILIATION — that the screen offers no STATE-CHANGING action, and says the right thing about
-// the exception.
-//
-// The precise claim matters. This page is not inert: it refreshes, it navigates, and it links onward. What
-// it has none of is a control that closes a stay, disposes a case, or triggers a reconciliation by hand --
-// anything that would change guest or stay state, or turn an automatic process into a manual one. Saying it
-// "has no control at all" was over-broad and would have been falsified by the first link added to it.
-//
-// This page shipped with two action buttons and a count that contradicted the dashboard. An operator opened
-// it and saw "Close 0 stays", "Answer the snapshot cases", and "1 recorded departure are still waiting for
-// an answer" beside a dashboard demanding decisions about 424 messages. Every one of those numbers was
-// either already answered or not answerable here.
-//
-// So what is asserted is the absence: reconciliation runs itself, the snapshot artifacts were answered once
-// and cannot recur, and the ONLY control left is the settings the hotel may legitimately change. A test that
-// checked the happy path would not have caught any of it.
+// Reconciliation runs automatically; this screen must not expose state-changing repair actions.
 
 const get = vi.fn();
 const put = vi.fn();
@@ -100,15 +85,10 @@ describe("roster reconciliation offers no state-changing action", () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/what the last run decided/i)).toBeTruthy());
 
-    // The two repair buttons that used to be here. Matched loosely on purpose: any button whose label
-    // offers to close stays or answer cases is the thing being forbidden, whatever the wording.
     const buttons = screen.queryAllByRole("button").map((b) => b.textContent ?? "");
     expect(buttons.some((t) => /close\s+\d*\s*stay/i.test(t))).toBe(false);
     expect(buttons.some((t) => /answer the snapshot/i.test(t))).toBe(false);
 
-    // The recovery settings moved to PMS connection, where the link they govern is configured. What must
-    // never come back here is a control that changes state -- closing stays, disposing cases, or running a
-    // reconciliation by hand.
     expect(buttons.some((t) => /save recovery settings/i.test(t))).toBe(false);
     expect(screen.getByText(/configured with the connection itself/i)).toBeTruthy();
   });
@@ -123,7 +103,6 @@ describe("roster reconciliation offers no state-changing action", () => {
   it("reports zero outstanding snapshot artifacts rather than counting the external exception", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/none outstanding/i)).toBeTruthy());
-    // The historical exception is a BLOCKER, never a snapshot artifact waiting for a bulk answer.
     expect(screen.queryByText(/still to answer/i)).toBeNull();
   });
 
@@ -134,10 +113,7 @@ describe("roster reconciliation offers no state-changing action", () => {
     expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0);
   });
 
-  // THE CONTRADICTION THAT PROMPTED THIS. The exception's own text says it will not clear on its own, and
-  // three lines below it the card footer said "these clear themselves when the condition ends". Both were
-  // on screen together. The footer belongs to the operational blockers and must not appear under a
-  // historical one.
+  // Historical exceptions require intervention; only operational blockers may clear themselves.
   it("never tells the operator the historical exception will clear itself", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getAllByText(/HISTORICAL EXCEPTION/i).length).toBeGreaterThan(0));
@@ -148,12 +124,11 @@ describe("roster reconciliation offers no state-changing action", () => {
   it("says the page needs no manual action, and what it is for", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getAllByText(/happens on its own/i).length).toBeGreaterThan(0));
-    // The explanation of what the page is for lives behind the page's lightbulb.
     fireEvent.click(screen.getByRole("button", { name: "Tips: Roster reconciliation" }));
     expect(await screen.findByText(/no queue to work through/i)).toBeTruthy();
   });
 
-  // AUDIT H-13: opening the page used to run a dry run, which writes a run row. It must write nothing.
+  // Opening a read-only page must not create a reconciliation run row.
   it("opening the page runs nothing", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText(/what the last run decided/i)).toBeTruthy());
@@ -173,7 +148,6 @@ describe("roster reconciliation offers no state-changing action", () => {
     expect(await screen.findByText(/what a run would do now/i)).toBeTruthy();
   });
 
-  // AUDIT H-5: the settings carry the version on screen, a reason and the password.
   it("changing the trust settings sends the version, a reason and the password", async () => {
     roles = ["hotel_it_manager"];
     put.mockResolvedValue({ config_version: 1 });

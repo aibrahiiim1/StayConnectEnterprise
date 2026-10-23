@@ -1,11 +1,6 @@
 package pmsrest
 
-// APALEO CONTRACT TESTS.
-//
-// Shaped after the published Booking v1 and Inventory v1 OpenAPI documents
-// (https://api.apaleo.com/swagger/booking-v1/swagger.json, .../inventory-v1/swagger.json) and the
-// client-credentials guide (https://apaleo.dev/guides/oauth-connection/simple-client.html). No request here
-// reaches Apaleo.
+// Contract tests shaped after Apaleo's published Booking v1 / Inventory v1 OpenAPI and OAuth guide; nothing reaches Apaleo.
 
 import (
 	"encoding/base64"

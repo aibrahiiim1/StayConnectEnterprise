@@ -11,10 +11,10 @@ import { formatDateTime } from "@/lib/status";
 
 export type SecuritySettings = {
   operator_session_max_hours: number;
-  /** Signed out after this many minutes without activity (0052). */
+  /** Minutes without activity before sign-out. */
   operator_idle_minutes: number;
   idle_bounds: { default: number; min: number; max: number; unit: string };
-  /** This many wrong passwords or codes within the lock time lock the account for the lock time (0053). */
+  /** Wrong attempts within the lock window that trigger account lockout. */
   signin_lock_failures: number;
   signin_lock_failures_bounds: { default: number; min: number; max: number; unit: string };
   signin_lock_minutes: number;
@@ -27,10 +27,7 @@ export type SecuritySettings = {
   updated_by?: string | null;
 };
 
-/**
- * The absolute console sign-in lifetime (System → Team). A sign-in ends this many hours after it began, however
- * active the person is. Shortening it ends the sign-ins that are already older at their next request.
- */
+/** Shorter absolute lifetimes end already-older sessions at their next request. */
 export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
   const toast = useToast();
   const [s, setS] = useState<SecuritySettings | null>(null);
@@ -54,7 +51,6 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
 
   async function save() {
     if (!s) return;
-    // A value out of range is reported under its own field, which takes focus.
     const fail = (f: Parameters<typeof fields.fail>[0]) => { setErr(null); fields.fail(f); };
     const n = Number(hours);
     if (!/^\d+$/.test(hours.trim()) || n < s.min || n > s.max) {

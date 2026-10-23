@@ -5,16 +5,13 @@ import (
 	"strings"
 )
 
-// Observer receives redacted, non-sensitive events (metrics/logs). Implementations MUST NOT log
-// secrets — the Authenticator only ever passes reason codes and non-sensitive identifiers.
+// Observer receives redacted events; implementations must not log secrets.
 type Observer interface {
 	Event(name string, fields map[string]string)
 }
 
-// NopObserver discards events.
 type NopObserver struct{}
 
-// Event implements Observer.
 func (NopObserver) Event(string, map[string]string) {}
 
 var (
@@ -22,8 +19,7 @@ var (
 	digitsRe = regexp.MustCompile(`\d{3,}`)
 )
 
-// Redact scrubs values that must never appear in logs/evidence: emails, long digit runs (phone/OTP),
-// and anything resembling a MAC address. Used defensively when composing any human-facing string.
+// Redact scrubs emails, long digit runs (phone/OTP) and MAC-like strings from logs and evidence.
 func Redact(s string) string {
 	s = emailRe.ReplaceAllString(s, "«email»")
 	s = redactMAC(s)

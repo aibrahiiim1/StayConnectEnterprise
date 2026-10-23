@@ -16,26 +16,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Service is Central's portal hostname and certificate authority-of-record. One per ctrlapi process: the API
-// handlers call it, and Run is its worker.
+// Service is Central's portal hostname and certificate authority-of-record; one per ctrlapi process.
 type Service struct {
 	DB      *pgxpool.Pool
 	Opts    Options
 	Secrets Secrets
-	// HTTP is used for DNS-over-HTTPS checks and the DNS provider API (not for ACME, see Options).
+	// HTTP serves DoH checks and the DNS provider API, not ACME.
 	HTTP *http.Client
 
-	// NewProvider builds the DNS provider for the current settings; tests replace it.
 	NewProvider func(Settings) (DNSProvider, error)
 
-	// Overrides names the TEST-ONLY environment overrides in force (OptionsFromEnv); shown to operators.
+	// Overrides names the test-only environment overrides in force; shown to operators.
 	Overrides []string
 
 	acmeMu sync.Mutex // one ACME conversation at a time: orders, revocations, account registration
 	nudge  chan struct{}
 }
 
-// New returns a Service for the pool and options.
 func New(db *pgxpool.Pool, opts Options) *Service {
 	s := &Service{
 		DB: db, Opts: opts, Secrets: Secrets{Dir: opts.SecretsDir},
@@ -59,7 +56,7 @@ func (s *Service) defaultProvider(st Settings) (DNSProvider, error) {
 	}
 }
 
-// Nudge wakes the worker early (a new order, a revocation request). Never blocks.
+// Nudge wakes the worker early; never blocks.
 func (s *Service) Nudge() {
 	if s == nil || s.nudge == nil {
 		return
@@ -70,14 +67,14 @@ func (s *Service) Nudge() {
 	}
 }
 
-// Availability says whether Central can obtain certificates at all, and if not, what is missing. Appliances
-// see only the boolean (available=false -> they report NOT_CONFIGURED); operators see the reason.
+// Availability says whether Central can obtain certificates and, if not, what is missing. Appliances see only
+// the boolean; operators see the reason.
 func (s *Service) Availability(st Settings) (bool, string) {
 	if st.ContactEmail == "" {
 		return false, "no ACME contact email is set"
 	}
 	if s.Opts.DNSProvider == ProviderChalltestsrv {
-		return true, "" // TEST-ONLY provider: no token, no zone id
+		return true, ""
 	}
 	if !s.Secrets.TokenSet() {
 		return false, "no DNS API token is stored"
@@ -97,10 +94,6 @@ func (s *Service) available(ctx context.Context) (Settings, bool) {
 	return st, ok
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Refusals: what an appliance or operator request is refused with. The API layer turns them into HTTP.
-// ---------------------------------------------------------------------------------------------------------
-
 // Refusal is an expected, explained refusal (never an internal error).
 type Refusal struct {
 	Status  int
@@ -115,11 +108,6 @@ func refuse(status int, code, format string, a ...any) *Refusal {
 	return &Refusal{Status: status, Code: code, Message: fmt.Sprintf(format, a...)}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Events: the append-only audit trail of everything this package does (portal_tls_events).
-// ---------------------------------------------------------------------------------------------------------
-
-// Event kinds.
 const (
 	EvHostnameAllocated = "HOSTNAME_ALLOCATED"
 	EvHostnameRestored  = "HOSTNAME_RESTORED"
@@ -149,11 +137,10 @@ const (
 	EvRenewalForced     = "RENEWAL_FORCED"
 )
 
-// Actor for things the worker does by itself.
 const ActorSystem = "system"
 
-// AppendEvent writes one event. detail must never hold a secret (tokens, keys) -- only names, ids, states and
-// error text. A failure is logged, never returned: the audit trail must not be able to stop the work.
+// AppendEvent writes an audit event. detail must never hold a secret. A failure is logged, never returned: the
+// audit trail must not stop the work.
 func AppendEvent(ctx context.Context, db DB, applianceID, hostname, kind, actor string, detail map[string]any) {
 	if detail == nil {
 		detail = map[string]any{}
@@ -167,17 +154,12 @@ func AppendEvent(ctx context.Context, db DB, applianceID, hostname, kind, actor 
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Appliance identity checks
-// ---------------------------------------------------------------------------------------------------------
-
 type applianceFacts struct {
 	lifecycle   string
 	activatedAt *time.Time
 }
 
-// requireActive refuses an appliance that is not activated. Only an assigned (activated) appliance holds a
-// portal hostname; a waiting one has no customer yet, a retired one gave its name back.
+// requireActive refuses an appliance that is not activated: only an assigned one holds a portal hostname.
 func (s *Service) requireActive(ctx context.Context, applianceID string) (applianceFacts, error) {
 	var f applianceFacts
 	err := s.DB.QueryRow(ctx, `SELECT COALESCE(lifecycle_state,''), activated_at FROM appliances WHERE id=$1`, applianceID).
@@ -194,7 +176,6 @@ func (s *Service) requireActive(ctx context.Context, applianceID string) (applia
 	return f, nil
 }
 
-// hostRow is one portal_hostnames row.
 type hostRow struct {
 	Label       string
 	FQDN        string
@@ -216,7 +197,6 @@ func scanHost(row pgx.Row) (hostRow, error) {
 	return h, err
 }
 
-// DNSState is what the appliance is told about its A record.
 func (h hostRow) DNSState() string {
 	switch {
 	case h.DNSError != "":
@@ -233,9 +213,8 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pe) && pe.Code == "23505"
 }
 
-// allocateHostname gives the appliance its permanent hostname, once. A label is random, so a collision is
-// handled by drawing again; a label that was ever allocated (its event outlives a deleted appliance row) is
-// never drawn twice -- a name that once pointed at one hotel must never point at another.
+// allocateHostname gives the appliance its permanent hostname. A label ever allocated (its event outlives a
+// deleted appliance row) is never drawn again: a name that pointed at one hotel must never point at another.
 func (s *Service) allocateHostname(ctx context.Context, applianceID, zone string) (hostRow, error) {
 	for attempt := 0; attempt < 8; attempt++ {
 		label, err := NewLabel()
@@ -260,8 +239,7 @@ func (s *Service) allocateHostname(ctx context.Context, applianceID, zone string
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return hostRow{}, err
 		}
-		// Nothing inserted: either a concurrent sync allocated this appliance's name (use it) or the label
-		// collided (draw again).
+		// Nothing inserted: a concurrent sync allocated this appliance's name (use it) or the label collided.
 		if h, err := scanHost(s.DB.QueryRow(ctx, `SELECT `+hostCols+` FROM portal_hostnames WHERE appliance_id=$1`, applianceID)); err == nil {
 			return h, nil
 		}
@@ -269,24 +247,17 @@ func (s *Service) allocateHostname(ctx context.Context, applianceID, zone string
 	return hostRow{}, errors.New("could not allocate a unique portal hostname")
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// POST /v1/appliance/portal-tls/sync
-// ---------------------------------------------------------------------------------------------------------
-
-// SyncRequest is the appliance's report (contract §7).
 type SyncRequest struct {
 	PortalIP     string  `json:"portal_ip"`
 	CustomDomain *string `json:"custom_domain"`
 }
 
-// Record is a DNS record the hotel must publish.
 type Record struct {
 	Type  string `json:"type"`
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
-// DomainView is the hotel domain as the appliance sees it.
 type DomainView struct {
 	FQDN    string   `json:"fqdn"`
 	Status  string   `json:"status"`
@@ -294,7 +265,6 @@ type DomainView struct {
 	Error   *string  `json:"error"`
 }
 
-// CertView is one hostname's certificate state.
 type CertView struct {
 	Hostname   string     `json:"hostname"`
 	Kind       string     `json:"kind"`
@@ -307,7 +277,6 @@ type CertView struct {
 	Error      *string    `json:"error"`
 }
 
-// SyncResponse is the answer to sync (contract §7).
 type SyncResponse struct {
 	Available    bool        `json:"available"`
 	Hostname     string      `json:"hostname"`
@@ -316,8 +285,8 @@ type SyncResponse struct {
 	Certificates []CertView  `json:"certificates"`
 }
 
-// Sync is idempotent: it allocates the hostname once, records the portal address (and publishes it when it
-// changed), reconciles the hotel domain with what the appliance asks for, and reports the state of both.
+// Sync is idempotent: allocates the hostname once, records and publishes the portal address, reconciles the
+// hotel domain, and reports both.
 func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) (*SyncResponse, error) {
 	if _, err := s.requireActive(ctx, applianceID); err != nil {
 		return nil, err
@@ -341,10 +310,7 @@ func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) 
 	case err != nil:
 		return nil, err
 	case h.ReleasedAt != nil:
-		// RELEASED IS FOREVER. The hostname was released when the appliance was retired, and a released name is
-		// never handed out again -- not even to the same appliance row. (It used to be restored when the row
-		// was activated again; a retired box that registers again now gets a NEW appliance row, and with it a
-		// new name, so nothing legitimate needs a released name back.)
+		// A released name is never handed out again, not even to the same appliance row.
 		return nil, refuse(http.StatusForbidden, "retired", "this appliance's portal hostname was released when it was retired")
 	}
 
@@ -355,8 +321,7 @@ func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) 
 		}
 		AppendEvent(ctx, s.DB, applianceID, h.FQDN, EvPortalIPChanged, ActorSystem, map[string]any{"from": h.PortalIP, "to": ip.String()})
 		h.PortalIP, h.DNSError = ip.String(), ""
-		// Publish now when we can, so the appliance hears SYNCED on this answer rather than a cycle later;
-		// the worker retries whatever this does not finish.
+		// Publish now so this answer already says SYNCED; the worker retries what fails.
 		if available {
 			if prov, perr := s.NewProvider(st); perr == nil {
 				dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -377,9 +342,8 @@ func (s *Service) Sync(ctx context.Context, applianceID string, in SyncRequest) 
 	return &SyncResponse{Available: available, Hostname: h.FQDN, DNSState: h.DNSState(), CustomDomain: dom, Certificates: certs}, nil
 }
 
-// syncHostDNS brings one hostname's A record in line: published at its portal address while the hostname is
-// live, deleted once it is released. Returns the row as it now stands. Errors are recorded on the row (and as
-// an event when the error changes, so a provider outage is one event, not one every 30 seconds).
+// syncHostDNS publishes the A record while the hostname is live and deletes it once released. Errors are
+// recorded on the row, and as an event only when the error changes.
 func (s *Service) syncHostDNS(ctx context.Context, prov DNSProvider, h hostRow) hostRow {
 	if h.ReleasedAt != nil {
 		if h.RecordID == "" {
@@ -427,10 +391,6 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Hotel domains
-// ---------------------------------------------------------------------------------------------------------
-
 type domainRow struct {
 	ID             string
 	ApplianceID    string
@@ -461,7 +421,7 @@ func (s *Service) liveDomain(ctx context.Context, db DB, applianceID string) (*d
 	return &d, nil
 }
 
-// DomainRecords are the three records the hotel publishes (contract §3.1).
+// DomainRecords are the three records the hotel publishes.
 func DomainRecords(d domainRow, hostname, zone string) []Record {
 	return []Record{
 		{Type: "TXT", Name: "_onegate-verify." + d.FQDN, Value: d.VerifyToken},
@@ -479,9 +439,7 @@ func domainView(d domainRow, hostname, zone string) *DomainView {
 	return v
 }
 
-// domainCheckEvery bounds how often an appliance's sync re-checks a PENDING or FAILED domain: each check is
-// eight DNS-over-HTTPS queries at two public resolvers, and an appliance syncs far more often than a hotel's
-// IT publishes records.
+// domainCheckEvery bounds re-checks of a PENDING or FAILED domain: each costs eight DoH queries.
 const domainCheckEvery = 60 * time.Second
 
 func (s *Service) reconcileDomain(ctx context.Context, applianceID string, h hostRow, want *string, st Settings) (*DomainView, error) {
@@ -504,8 +462,7 @@ func (s *Service) reconcileDomain(ctx context.Context, applianceID string, h hos
 	}
 	fqdn, verr := ValidateCustomDomain(raw, st.ZoneName)
 	if verr != nil {
-		// Refused without a row: the name is not something anyone can claim. Whatever was claimed before
-		// stays as it was until the appliance asks for something valid (or for nothing).
+		// Refused without a row; any earlier claim stays until the appliance asks for something valid.
 		msg := verr.Error()
 		return &DomainView{FQDN: NormalizeFQDN(raw), Status: "FAILED", Records: []Record{}, Error: &msg}, nil
 	}
@@ -598,9 +555,8 @@ func (s *Service) checkAndRecordDomain(ctx context.Context, d *domainRow, hostna
 	return false
 }
 
-// RemoveDomain ends a hotel domain claim: REMOVED, its open orders cancelled, and every certificate issued
-// for it that is still valid queued for revocation (contract §3.1 "Removal revokes its certificate").
-// Idempotent.
+// RemoveDomain ends a hotel domain claim: open orders are cancelled and its valid certificates queued for
+// revocation. Idempotent.
 func RemoveDomain(ctx context.Context, db DB, d domainRow, why, actor string) error {
 	tag, err := db.Exec(ctx, `UPDATE portal_custom_domains SET status='REMOVED', removed_at=now() WHERE id=$1 AND status<>'REMOVED'`, d.ID)
 	if err != nil {
@@ -612,17 +568,15 @@ func RemoveDomain(ctx context.Context, db DB, d domainRow, why, actor string) er
 	return requestRevocation(ctx, db, d.ApplianceID, d.FQDN, RevokeCessation, actor, why, true)
 }
 
-// ACME revocation reasons Central uses (RFC 5280 CRLReason names). keyCompromise is deliberately absent:
-// Central never holds an appliance key, and Let's Encrypt accepts that reason only from the key itself.
+// keyCompromise is deliberately absent: Central never holds an appliance key, and Let's Encrypt accepts that
+// reason only from the key itself.
 const (
 	RevokeCessation  = "cessationOfOperation"
 	RevokeSuperseded = "superseded"
 )
 
-// requestRevocation marks every still-valid issued certificate of the appliance (one hostname, or all when
-// hostname is "") for revocation and, when cancelOpen, cancels its open orders (the name is going away; an
-// operator's revocation keeps them, since a fresh certificate is exactly what it wants). The worker performs
-// the revocation.
+// requestRevocation marks valid certificates (one hostname, or all when hostname is "") for revocation by the
+// worker. cancelOpen also cancels open orders; an operator's revocation keeps them, since it wants a fresh one.
 func requestRevocation(ctx context.Context, db DB, applianceID, hostname, reason, actor, why string, cancelOpen bool) error {
 	rows, err := db.Query(ctx, `
         UPDATE portal_certificate_orders
@@ -660,10 +614,8 @@ func requestRevocation(ctx context.Context, db DB, applianceID, hostname, reason
 	return err
 }
 
-// ReleaseAppliance is the portal-TLS half of the one central termination path (api.revokeApplianceBoundLicenses):
-// the hostname is released (its A record is deleted by the worker and the label is never reused), every valid
-// certificate is queued for revocation, open orders are cancelled and the hotel domain claim ends. Runs inside
-// the caller's transaction. Idempotent.
+// ReleaseAppliance releases the hostname (never reused), queues its certificates for revocation, cancels open
+// orders and ends the domain claim. Runs inside the caller's transaction. Idempotent.
 func ReleaseAppliance(ctx context.Context, db DB, applianceID, actor string) error {
 	var fqdn string
 	err := db.QueryRow(ctx, `UPDATE portal_hostnames SET released_at=now() WHERE appliance_id=$1 AND released_at IS NULL RETURNING fqdn`,
@@ -682,16 +634,11 @@ func ReleaseAppliance(ctx context.Context, db DB, applianceID, actor string) err
 	return requestRevocation(ctx, db, applianceID, "", RevokeCessation, actor, "appliance retired", true)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Certificate views
-// ---------------------------------------------------------------------------------------------------------
-
-// certViews reports, per hostname the appliance should serve, the newest order (what is in progress, or why
-// the last attempt failed) and the newest issued certificate (what it should have installed).
+// certViews reports, per hostname, the newest order and the newest issued certificate.
 func (s *Service) certViews(ctx context.Context, applianceID string, h hostRow, dom *DomainView) ([]CertView, error) {
 	type hk struct{ host, kind string }
 	hosts := []hk{{h.FQDN, KindOneGate}}
-	// A domain view without records is a refused name (no claim row): it has no certificate either.
+	// A domain view without records is a refused name: it has no certificate.
 	if dom != nil && len(dom.Records) > 0 {
 		hosts = append(hosts, hk{dom.FQDN, KindCustom})
 	}

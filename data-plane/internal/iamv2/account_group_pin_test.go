@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// An Email account client is placed in a Client Group by its VERIFIED address (audit C-6): EMAIL_DOMAIN rules
-// used to be evaluated for principal sign-ins only, so an Email account never matched a domain group.
-
 type emailAccountTx struct {
 	spyTx
 	email    string

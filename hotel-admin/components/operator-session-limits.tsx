@@ -1,12 +1,6 @@
 "use client";
 
-// ADMIN CONSOLE SESSION LIMITS — how long a signed-in session lasts (edged /operators/session-policy, migration
-// 0132, GDPR plan C10; docs/OPERATIONAL_SETTINGS_POLICY.md).
-//
-// Every role that can open Operators reads it; only a role that can change operators (site admin) edits it,
-// with a reason and the password, and every change is recorded. The bounds come from the appliance, so this
-// form cannot drift from what edged and the database accept. A change applies to every open session from its
-// next request.
+// Session bounds come from the appliance; a change affects open sessions on their next request.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, Timer } from "lucide-react";
@@ -36,7 +30,7 @@ export function OperatorSessionLimits({ writable }: { writable: boolean }) {
       if (!r?.settings || !Array.isArray(r.bounds)) return;
       setData(r);
       setEdits(Object.fromEntries(r.bounds.map((b) => [b.key, String(r.settings[b.key])])));
-    } catch { /* the section stays absent rather than breaking the Operators page */ }
+    } catch { /* Keep the Operators page usable if this setting cannot load. */ }
   }, []);
   useEffect(() => { load(); }, [load]);
 

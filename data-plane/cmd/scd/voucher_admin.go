@@ -1,24 +1,11 @@
 package main
 
-// THE VOUCHER ADMIN SURFACE, IN scd BECAUSE THE DEK IS IN scd.
-//
-// Issuance already lived here for that reason (voucher_issue_iamv2.go) and had no caller. These are the
-// rest of the operations an operator surface needs, and they live here for the same reason: recovering a
-// code requires the DEK, and the DEK belongs to the root, unix-socket-only process rather than to the
-// unprivileged one that serves HTTP.
-//
-// EVERY ROUTE HERE TRUSTS ITS CALLER FOR AUTHORIZATION AND FOR NOTHING ELSE. edged has already
-// authenticated the operator, checked the resource permission, and -- for reveal and export -- re-verified
-// the password and taken a bounded reason. This socket is not reachable from the network. What these
-// handlers must NOT do is invent any of that: the operator id and label arrive in the body because edged
-// resolved them from the SESSION, and every one of these handlers refuses a body that omits them rather
-// than substituting a default. An audit row whose author is optional is not an audit row.
-//
-// THE ASYMMETRY THAT SHAPES THE REVEAL. The post-stay PIN and the guest-account password are HASHED, so
-// "shown once" is enforced by arithmetic. A voucher code is encrypted and RECOVERABLE. Single-use therefore
-// cannot be enforced by the crypto and is not claimed to be: what makes a reveal safe is that it cannot
-// happen unseen. The audit row and the code recovery are written in ONE transaction, so there is no
-// ordering in which a code is produced without a record of it.
+// Voucher admin surface, in scd because the DEK is here: recovering a code needs the DEK, which belongs to the root, unix-socket-only process.
+// EVERY ROUTE TRUSTS ITS CALLER FOR AUTHORIZATION AND NOTHING ELSE: edged has authenticated the operator, checked permission and (reveal/export) re-verified
+// the password and taken a reason. Operator id and label arrive in the body from the SESSION and handlers refuse a body that omits them rather than
+// defaulting; an audit row with an optional author is not an audit row.
+// A voucher code is encrypted and RECOVERABLE, so single-use cannot be enforced by crypto; a reveal is safe because it cannot happen unseen: the audit row
+// and the code recovery are written in ONE transaction.
 
 import (
 	"context"
@@ -35,14 +22,13 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// voucherActor is the part of every mutating request that edged resolved from the session.
 type voucherActor struct {
 	OperatorID    string `json:"operator_id"`
 	OperatorLabel string `json:"operator_label"`
 	Reason        string `json:"reason"`
 }
 
-// validate refuses rather than defaulting. A missing actor is a caller defect, not a guest-facing one.
+// validate refuses rather than defaulting: a missing actor is a caller defect.
 func (a voucherActor) validate(needReason bool) error {
 	if strings.TrimSpace(a.OperatorID) == "" || strings.TrimSpace(a.OperatorLabel) == "" {
 		return errors.New("operator_id and operator_label are required: they are resolved by edged from the session")
@@ -67,17 +53,12 @@ type voucherRow struct {
 	ValidUntil        *string `json:"redemption_valid_until"`
 	Notes             *string `json:"notes"`
 	IssuedBy          *string `json:"issued_by"`
-	// EffectiveState is what the card IS right now, as opposed to what the row says. Nothing ever writes
-	// REDEMPTION_EXPIRED -- expiry is enforced at sign-in by voucherRedeemable, from the window columns -- so
-	// a card past its valid-until stays UNUSED in the table forever. Reading `state` alone, a screen shows
-	// "not used yet" and offers to cancel a card that can no longer be redeemed. This is computed from the
-	// same [from, until) rule the authenticator applies, at query time, and changes nothing stored.
+	// EffectiveState is what the card IS now: nothing writes REDEMPTION_EXPIRED (expiry is enforced at sign-in from the window columns), so an expired card
+	// stays UNUSED in the table. Computed at query time from the authenticator [from, until) rule; changes nothing stored.
 	EffectiveState string `json:"effective_state"`
 }
 
-// THE EFFECTIVE STATE, as SQL, in exactly one place. The window rule is voucherRedeemable's
-// (internal/iamv2/repo_pg.go): [from, until), NULL meaning unbounded. REDEMPTION_EXPIRED is still honoured
-// if anything ever writes it.
+// The effective state as SQL, in one place: the window rule is voucherRedeemable (internal/iamv2/repo_pg.go), [from, until), NULL unbounded.
 const voucherEffectiveStateSQL = `CASE
 	    WHEN state = 'REDEEMED' THEN 'redeemed'
 	    WHEN state = 'REVOKED'  THEN 'cancelled'
@@ -86,9 +67,8 @@ const voucherEffectiveStateSQL = `CASE
 	    WHEN redemption_valid_from  IS NOT NULL AND redemption_valid_from  >  now() THEN 'not_yet_valid'
 	    ELSE 'available' END`
 
-// voucherListFilterSQL is the WHERE clause the list, its total and the filtered summary share, so the page,
-// the count under it and the chip counts cannot disagree about what a filter means. Parameters:
-// $1 tenant, $2 site, $3 state, $4 batch_id, $5 effective, $6 last4, $7 package_revision_id.
+// The WHERE clause the list, its total and the filtered summary share, so they cannot disagree. Parameters: $1 tenant, $2 site, $3 state, $4 batch_id,
+// $5 effective, $6 last4, $7 package_revision_id.
 const voucherListFilterSQL = `
 	     WHERE tenant_id = $1 AND site_id = $2
 	       AND ($3 = '' OR state = $3)
@@ -97,8 +77,7 @@ const voucherListFilterSQL = `
 	       AND ($6 = '' OR strpos(upper(code_last4), $6) > 0)
 	       AND ($7 = '' OR package_revision_id::text = $7)`
 
-// voucherListFilters are the list filters. They are refused rather than ignored when malformed: a filter
-// the server silently dropped would present the whole inventory as the filtered one.
+// Malformed filters are refused, not ignored: a silently dropped filter would present the whole inventory as the filtered one.
 type voucherListFilters struct {
 	State, Batch, Effective, Last4, Package string
 }
@@ -121,8 +100,7 @@ func parseVoucherListFilters(q interface{ Get(string) string }) (voucherListFilt
 	default:
 		return f, errors.New("effective must be one of available, not_yet_valid, expired, redeemed, cancelled")
 	}
-	// The last four characters are the display hint the list already shows. Searching them is matching a card
-	// in somebody's hand, not reading a code -- and never more than those four characters.
+	// The last four characters are the display hint the list already shows; searching them matches a card in hand, never more than those four.
 	if len(f.Last4) > 4 {
 		return f, errors.New("last4 searches at most the last four characters of a code")
 	}
@@ -134,8 +112,7 @@ func parseVoucherListFilters(q interface{ Get(string) string }) (voucherListFilt
 	return f, nil
 }
 
-// listVouchers answers the operator list. It returns code_last4 and never a code: the list is the screen an
-// operator leaves open, and a code on it would be a reveal with no step-up, no reason and no audit row.
+// Returns code_last4, never a code: the list is left open on a screen, and a code on it would be a reveal with no step-up, reason or audit row.
 func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := 100
@@ -192,8 +169,7 @@ func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	// THE TOTAL, under the same filter. Without it a list can only say "there may be more", and an operator
-	// looking for one card in a 500-card batch cannot tell how far they have to page.
+	// The total under the same filter, so an operator can tell how far to page.
 	var total int64
 	if err := s.db.QueryRow(r.Context(), `SELECT count(*) FROM iam_v2.vouchers`+voucherListFilterSQL,
 		s.tenID, s.siteID, f.State, f.Batch, f.Effective, f.Last4, f.Package).Scan(&total); err != nil {
@@ -203,22 +179,16 @@ func (s *server) listVouchers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"authority": "iam_v2", "vouchers": out, "total": total})
 }
 
-// voucherSummary counts by state. This is what the dashboard tile reads: edged holds no privilege on
-// iam_v2.vouchers, which is why its own query could never have worked.
-//
-// The four stored-state counts are unchanged. The effective counts beside them answer what the stored ones
-// cannot: how many UNUSED cards can still actually be redeemed, how many have passed their valid-until
-// (nothing writes REDEMPTION_EXPIRED, so that stored count stays zero), and how many are not valid yet.
-// The batch, last4 and package filters of the list narrow the population counted, so a screen's filter
-// counts describe the filtered view rather than the whole property.
+// Counts by state for the dashboard tile (edged holds no privilege on iam_v2.vouchers). The effective counts say how many UNUSED cards can still be
+// redeemed, how many passed valid-until (REDEMPTION_EXPIRED is never written) and how many are not valid yet. The list batch, last4 and package filters
+// narrow the population counted.
 func (s *server) voucherSummary(w http.ResponseWriter, r *http.Request) {
 	f, ferr := parseVoucherListFilters(r.URL.Query())
 	if ferr != nil {
 		httpErr(w, http.StatusBadRequest, ferr.Error())
 		return
 	}
-	// A summary answers "how many in each state", so a state filter on it would be a question with one
-	// answer. Both state filters are ignored here on purpose.
+	// State filters are ignored here on purpose: a summary by state filtered by state has one answer.
 	f.State, f.Effective = "", ""
 	var unused, redeemed, revoked, expired int64
 	var available, expiredUnused, notYetValid, total, lastWeek, batches int64
@@ -249,8 +219,7 @@ func (s *server) voucherSummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// voucherBatchRow is one print run, aggregated. A batch is not a row of its own under iam_v2 -- it is the
-// set of vouchers sharing a batch_id -- so this is derived from the voucher table rather than stored.
+// One print run, aggregated: a batch is the set of vouchers sharing a batch_id, derived not stored.
 type voucherBatchRow struct {
 	BatchID           string  `json:"batch_id"`
 	PackageRevisionID string  `json:"package_revision_id"`
@@ -268,11 +237,7 @@ type voucherBatchRow struct {
 	ValidUntil        *string `json:"redemption_valid_until"`
 }
 
-// listVoucherBatches answers the batch list an export needs.
-//
-// Before this, the screen derived batches from whichever page of cards it had loaded, so a batch beyond the
-// loaded page did not exist on screen, and a batch half on screen was labelled with the half it could see
-// while the export pulled all of it. Read-only, no code material, and the same table the list already reads.
+// The batch list an export needs, so a batch beyond the loaded page of cards still exists on screen. Read-only, no code material.
 func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := 50
@@ -333,8 +298,7 @@ func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	// Cards printed before batches existed carry no batch_id. They are counted, not hidden: an export names a
-	// batch, so those cards cannot be exported, and the screen should be able to say why.
+	// Cards printed before batches existed carry no batch_id: counted, not hidden, because they cannot be exported by batch.
 	var total, unbatched int64
 	if err := s.db.QueryRow(r.Context(), `
 	    SELECT count(DISTINCT batch_id) FILTER (WHERE $3 = '' OR batch_id::text = $3),
@@ -355,9 +319,8 @@ func (s *server) openOneCode(ctx context.Context, tx pgx.Tx, kr iamv2.VoucherKey
 	voucherID string, a voucherActor, action string, count int, selection []byte) (string, error) {
 	var genID, keyID string
 	var ct, nonce []byte
-	// The AAD binds the voucher row id AND its generation, so the generation must come from the ROW rather
-	// than from whichever generation happens to be active now. A voucher issued before a rotation opens
-	// with the key it was sealed under or not at all.
+	// The AAD binds the voucher row id AND its generation, so the generation comes from the ROW, not the active one: a voucher issued before a rotation
+	// opens with its own key or not at all.
 	err := tx.QueryRow(ctx, `
 	    SELECT v.code_key_generation_id::text, g.encryption_key_id::text, v.code_ciphertext, v.code_nonce
 	      FROM iam_v2.vouchers v
@@ -372,8 +335,7 @@ func (s *server) openOneCode(ctx context.Context, tx pgx.Tx, kr iamv2.VoucherKey
 	if oerr != nil {
 		return "", oerr
 	}
-	// Written in the SAME transaction as the recovery. There is no ordering in which a code leaves this
-	// function without a row saying who took it and why.
+	// Written in the SAME transaction as the recovery, so no code leaves without a row saying who took it and why.
 	var vid any = voucherID
 	if action == "EXPORT" {
 		vid = nil
@@ -399,9 +361,8 @@ func nullIfEmptyBytes(b []byte) any {
 
 // revealVoucherCode returns ONE code, audited. edged has already taken the password and the reason.
 func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
-	// WHO IS CALLING. This route returns a guest credential in the clear, and the authorization and
-	// password step-up that permit that happen in edged -- so a caller that is not edged has not passed
-	// them. portald runs as the same user and is network-facing; it must not reach this.
+	// This route returns a guest credential in the clear and its authorization and step-up happen in edged; portald runs as the same user, is
+	// network-facing and must not reach it.
 	if !requireEdgedPeer(w, r) {
 		return
 	}
@@ -440,8 +401,7 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		// The code was recovered but the record was not written. Refusing to return it is the only honest
-		// outcome: an unrecorded reveal is exactly what this table exists to make impossible.
+		// Recovered but unrecorded: refusing to return it is the only honest outcome.
 		httpErr(w, http.StatusInternalServerError,
 			"reveal refused: the audit record could not be written, so the code is not returned")
 		return
@@ -455,9 +415,8 @@ func (s *server) revealVoucherCode(w http.ResponseWriter, r *http.Request) {
 
 // exportVoucherCodes returns a selection of codes, with ONE audit row naming the count and the selection.
 func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
-	// WHO IS CALLING. This route returns a guest credential in the clear, and the authorization and
-	// password step-up that permit that happen in edged -- so a caller that is not edged has not passed
-	// them. portald runs as the same user and is network-facing; it must not reach this.
+	// This route returns a guest credential in the clear and its authorization and step-up happen in edged; portald runs as the same user, is
+	// network-facing and must not reach it.
 	if !requireEdgedPeer(w, r) {
 		return
 	}
@@ -476,9 +435,7 @@ func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// A selection is REQUIRED. "Export everything" is not a selection an operator can be held to, and an
-	// unbounded export of every code a property has ever printed is the one request this surface should
-	// make somebody think about first.
+	// A selection is REQUIRED: an unbounded export of every code ever printed is the one request this surface should make somebody think about.
 	if strings.TrimSpace(in.BatchID) == "" {
 		httpErr(w, http.StatusBadRequest,
 			"batch_id is required: an export names a batch, because 'everything' is not a selection")
@@ -581,8 +538,7 @@ func (s *server) exportVoucherCodes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// revokeVoucher ends an UNUSED voucher through the kernel. svc_scd holds no UPDATE on iam_v2.vouchers, by
-// the same decision 0084 made about the redemption burn.
+// Ends an UNUSED voucher through the kernel; svc_scd holds no UPDATE on iam_v2.vouchers.
 func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	var in voucherActor
 	dec := json.NewDecoder(r.Body)
@@ -599,8 +555,7 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.db.Exec(r.Context(),
 		`SELECT iam_v2.voucher_revoke($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)`,
 		s.tenID, s.siteID, id, in.OperatorID, strings.TrimSpace(in.Reason)); err != nil {
-		// VOUCHER_NOT_REVOCABLE is a CONFLICT, not a fault: the voucher is already spent, already revoked,
-		// or is not this site's. "Nothing happened" and "it was already spent" are different answers.
+		// VOUCHER_NOT_REVOCABLE is a CONFLICT, not a fault (already spent, revoked or not this site).
 		if strings.Contains(err.Error(), "VOUCHER_NOT_REVOCABLE") {
 			httpErr(w, http.StatusConflict,
 				"no UNUSED voucher with that id: a redeemed voucher has already granted access, and ending "+
@@ -613,13 +568,7 @@ func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"voucher_id": id, "state": "REVOKED"})
 }
 
-// ----- key-generation rotation -----------------------------------------------------------------------
-
-// listVoucherKeyGenerations answers which code key generations exist and which one is active.
-//
-// No key material leaves this handler. hmac_key_ciphertext is the sealed blind-index key and the sealed
-// form is no more publishable than the clear one; what an operator needs is the generation number, when it
-// was created, whether it is active, and who retired it.
+// Which code key generations exist and which is active. No key material leaves: the sealed blind-index key is no more publishable than the clear one.
 func (s *server) listVoucherKeyGenerations(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(r.Context(), `
 	    SELECT g.id::text, g.generation_no,
@@ -661,13 +610,8 @@ func (s *server) listVoucherKeyGenerations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"generations": out})
 }
 
-// rotateVoucherKeyGeneration retires one generation. The NEXT issuance mints its successor.
-//
-// It does not create the replacement itself, and that is deliberate rather than lazy:
-// ensureVoucherKeyGeneration already mints max(generation_no)+1 when a site has no active generation, and
-// it does so inside the issuance path where the DEK is already open and the keyring already loaded. Minting
-// here as well would be a second place that creates key material, which is one more than a system should
-// have.
+// Retires one generation; the NEXT issuance mints its successor. Minting here too would be a second place creating key material:
+// ensureVoucherKeyGeneration already mints max(generation_no)+1 inside the issuance path where the DEK is open.
 func (s *server) rotateVoucherKeyGeneration(w http.ResponseWriter, r *http.Request) {
 	var in voucherActor
 	dec := json.NewDecoder(r.Body)

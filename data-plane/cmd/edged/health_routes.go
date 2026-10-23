@@ -12,26 +12,22 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// healthRoutes backs the Hotel Admin Health & Diagnostics page. Read endpoints
-// require the "health" resource read permission; operator actions require write;
-// the destructive Restart additionally requires password step-up + a reason and
-// is audited. No secrets, credentials, keys or guest PII are ever returned.
+// healthRoutes: restart additionally requires password step-up and a reason, and is audited.
+// No secrets, credentials, keys or guest PII are returned.
 func (s *server) healthRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/services", s.healthServices)
 	r.Get("/services/{name}", s.healthService)
 	r.Post("/services/{name}/recheck", s.healthRecheck)
 	r.Post("/services/{name}/restart", s.healthRestart)
-	// LOGS ARE FOR THE PEOPLE WHO FIX THINGS (audit N-22): diagnostics WRITE -- site_admin and the IT manager --
-	// not every role that can read the health page. Journal lines carry what services logged, which can include
-	// a guest's name or room, so they are redacted as well (sanitizeLog).
+	// Logs need diagnostics write (site_admin, IT manager), not just health read: journal lines can carry a guest's
+	// name or room, so they are also redacted (sanitizeLog).
 	r.With(s.requireRole("diagnostics", permWrite)).Get("/services/{name}/logs", s.healthLogs)
 	r.Get("/recovery-events", s.healthRecoveryEvents)
 	return r
 }
 
-// unitFor maps a health name to its systemd unit, enforcing the whitelist so an
-// operator action can never touch an arbitrary unit.
+// unitFor is a whitelist: an operator action can never touch an arbitrary unit.
 func (s *server) unitFor(name string) (string, bool) {
 	for _, sp := range s.services() {
 		if sp.Name == name {
@@ -55,9 +51,7 @@ func (s *server) healthServices(w http.ResponseWriter, r *http.Request) {
 				"boot_at": bootAt, "converged_at": convergedAt, "deadline_at": deadline}
 		}
 	}
-	// CHECKS that are not supervised services: today only portal_https, the administrator alert for the HTTP
-	// fallback (portal_https_health.go). They do not change `overall`, which describes the services; the page
-	// shows them beside it.
+	// Checks that are not supervised services (portal_https) do not change `overall`.
 	checks := []portalHTTPSCheck{}
 	if c, ok := s.portalHTTPSHealth(r.Context()); ok {
 		checks = append(checks, c)
@@ -114,8 +108,7 @@ func (s *server) healthRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "health.restart_requested", "service", name, map[string]any{"reason": in.Reason})
-	// Reset any start-limit wedge first, then restart. systemctl is gated by a
-	// polkit rule to only the whitelisted stayconnect/kea/unbound units.
+	// Reset a start-limit wedge first; polkit limits systemctl to the whitelisted units.
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	_ = exec.CommandContext(ctx, "systemctl", "reset-failed", unit).Run()
@@ -130,11 +123,10 @@ func (s *server) healthRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	reIP     = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
-	reEmail  = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+`)
-	reMAC    = regexp.MustCompile(`(?i)\b([0-9a-f]{2}:){5}[0-9a-f]{2}\b`)
-	reSecret = regexp.MustCompile(`(?i)(password|token|secret|authorization|api[_-]?key)\s*[=:]\s*\S+`)
-	// Guest identity in structured log fields: "room":"1203", room=1203, guest_name="..", last_name=.., etc.
+	reIP         = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
+	reEmail      = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+`)
+	reMAC        = regexp.MustCompile(`(?i)\b([0-9a-f]{2}:){5}[0-9a-f]{2}\b`)
+	reSecret     = regexp.MustCompile(`(?i)(password|token|secret|authorization|api[_-]?key)\s*[=:]\s*\S+`)
 	reGuestField = regexp.MustCompile(`(?i)("?\b(?:room(?:_?(?:number|no|num))?|rn|guest(?:_?name)?|(?:first|last|full|display|given|family|sur)_?name|surname|name|username|user|phone|msisdn|mobile|email|reservation(?:_?(?:id|number|no))?)"?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,}]+)`)
 	// FIAS records: RN room, GN guest name, GF first name, GT title, G# reservation, GS share flag, GV VIP.
 	reFIASField = regexp.MustCompile(`\|(RN|GN|GF|GT|G#|GV|GG|GL)[^|]*`)
@@ -142,8 +134,7 @@ var (
 	reRoomText = regexp.MustCompile(`(?i)\broom\s*#?\s*[0-9][0-9A-Za-z-]*`)
 )
 
-// sanitizeLog strips IPs, emails, MACs and secret-looking assignments from a log
-// line so recent logs can be shown in the UI without leaking guest PII/secrets.
+// sanitizeLog strips IPs, emails, MACs, secrets and guest identity so logs can be shown without leaking PII.
 func sanitizeLog(line string) string {
 	line = reSecret.ReplaceAllString(line, "$1=[redacted]")
 	line = reEmail.ReplaceAllString(line, "[email]")

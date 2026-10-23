@@ -1,16 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CAPABILITIES, capabilitiesFor, subjectFrom, type Capability } from "@/lib/permissions";
 
-/*
-  docs/CENTRAL_CONTROL_PLANE.md §7, written out as the console must read it. This table is the test's own
-  statement of the contract, independent of lib/permissions.ts: if either changes, they must be changed together.
-
-    platform_owner, platform_admin   everything
-    platform_support                 read everything
-    tenant_admin, tenant_owner       read their customer; manage its sites and users
-    tenant_auditor, viewer           read their customer
-    legacy roles                     nothing
-*/
+// Keep this role matrix independent of the UI map so permission drift fails the test.
 const ALL = Object.keys(CAPABILITIES) as Capability[];
 const PLATFORM_READ: Capability[] = ["fleet.read", "customers.list", "users.read", "system.read"];
 const CUSTOMER_READ: Capability[] = ["fleet.read", "users.read"];

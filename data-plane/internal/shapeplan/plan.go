@@ -1,19 +1,7 @@
-// Package shapeplan is the WIRE CONTRACT between the process that derives Phase-3 shaping (acctd) and the
-// only process allowed to apply it (netd, ADR-0002).
-//
-// It lives in one place on purpose. The two ends must agree byte-for-byte on what a desired state hashes to,
-// and two "obviously identical" implementations of a canonical encoding are how that stops being true — the
-// drift is invisible until a plan is silently refused in production. One definition, used by both binaries,
-// makes disagreement impossible rather than detectable.
-//
-// The envelope answers three questions a bare list of sessions cannot:
-//
-//	WHOSE state is this?      tenant/site/appliance/assignment — so a plan derived for one site can never be
-//	                          applied on another, even by mistake.
-//	IS IT STILL CURRENT?      plan generation + expiry — so a delayed or replayed plan cannot reinstate access
-//	                          that a newer plan removed.
-//	IS IT COMPLETE?           desired-state hash — so a truncated body is refused instead of being applied as
-//	                          a smaller desired state, which would look exactly like a mass revocation.
+// Package shapeplan is the wire contract between acctd (derives shaping) and netd (the only applier). It
+// is one shared definition so both ends hash a desired state identically. The envelope carries scope
+// (tenant/site/appliance/assignment), currency (generation + expiry, so a replay cannot reinstate removed
+// access) and completeness (hash, so a truncated body is not applied as a mass revocation).
 package shapeplan
 
 import (
@@ -25,60 +13,40 @@ import (
 	"time"
 )
 
-// ContractVersion is the wire contract. A producer speaking a different version is refused rather than
-// interpreted: a half-understood desired state is worse than none.
-// It is /2 because a session now carries its hard access boundary (AccessEndsAt), which the applier uses to
-// bound the kernel authorization lease. A /1 producer states no boundary, and an applier that assumed "no
-// boundary stated" meant "no boundary exists" would issue a full-length lease to a guest whose access ends in
-// a minute. Refusing the older contract outright is the only reading of that omission that cannot overshoot.
+// ContractVersion mismatches are refused, not interpreted. /2 added AccessEndsAt; a /1 producer states no
+// boundary, and reading that as "none exists" would grant a full-length lease to a guest whose access ends soon.
 const ContractVersion = "phase3-shaping/2"
 
 // Session is one session's desired treatment. Entitled=false means "must not be forwarded".
 type Session struct {
 	SessionID string `json:"session_id"`
-	// DeviceID travels with the session because the APPLIER registers the accounting origin for a class it
-	// creates, and a checkpoint is keyed by its whole source tuple — session, device, bridge, class. Without
-	// it the applier could not name the series it just created, and the origin would have to be inferred
-	// later by the producer, which is the gap that loses the first tick's traffic.
+	// DeviceID is needed because the applier registers the accounting origin, keyed by the full source
+	// tuple (session, device, bridge, class); inferring it later loses the first tick's traffic.
 	DeviceID string `json:"device_id"`
 	IP       string `json:"ip"`
 	Bridge   string `json:"bridge"`
 	DownKbps int    `json:"down_kbps"`
 	UpKbps   int    `json:"up_kbps"`
 	Entitled bool   `json:"entitled"`
-	// AccessEndsAt is the EARLIEST HARD BOUNDARY after which this session must not be forwarded — the
-	// entitlement's validity window end (a Grace conversion moves it, a revocation ends the session outright).
-	//
-	// It travels in the plan because the applier holds the kernel lease, and a lease is only safe if it can
-	// never outlive the access it represents. Deriving it at the applier is not possible: netd has no view of
-	// entitlements. Nil means "no wall-clock end is currently known", which is NOT "unbounded" — the applier
-	// still leases, bounded by the producer's own cadence.
+	// AccessEndsAt is the earliest hard boundary after which the session must not be forwarded (the
+	// entitlement's window end). It travels in the plan because the applier holds the kernel lease, which
+	// must never outlive the access, and netd has no view of entitlements. Nil means no wall-clock end is
+	// known, NOT unbounded: the lease is still bounded by the producer's cadence.
 	AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
-	// EndReason names WHY an un-entitled session is being torn down, as a bounded machine code, so the durable
-	// record says something truer than "enforcement was torn down". It is meaningful only when Entitled is
-	// false, and empty means the ordinary reason: this session's access ended.
-	//
-	// The one code the producer sets today is SUPERSEDED_ON_ADDRESS — a newer session took over the address,
-	// nothing failed, and the superseded session's entitlement is untouched. Recording that as a teardown
-	// failure would misdescribe a routine, deliberate handover in the one place an operator goes to look.
+	// EndReason is a bounded machine code for why an un-entitled session is torn down; meaningful only when
+	// Entitled is false, empty means its access ended. SUPERSEDED_ON_ADDRESS (a newer session took the
+	// address) must not be recorded as a teardown failure.
 	EndReason string `json:"end_reason,omitempty"`
-	// MAC is the device evidence the applier checks the address against.
-	//
-	// The applier authorizes an ADDRESS. Whether that address still belongs to this session's device is a
-	// question only DHCP can answer, and answering it needs the MAC the session was granted to. Without it the
-	// applier would keep renewing an address indefinitely on the producer's word — which is how an address
-	// reassigned to another guest stayed authorized under someone else's entitlement.
+	// MAC lets the applier ask DHCP whether the address still belongs to this device; without it a
+	// reassigned address stayed authorized under another guest's entitlement.
 	MAC string `json:"mac,omitempty"`
-	// EntitlementID groups the sessions that share one account. SHARED speed allocation is defined at the
-	// entitlement, so the applier has to know which sessions belong together before it can build the ceiling
-	// they share.
+	// EntitlementID groups the sessions sharing one account, so the applier can build the SHARED ceiling.
 	EntitlementID string `json:"entitlement_id,omitempty"`
-	// SpeedAllocation is PER_DEVICE or SHARED, from the entitlement's pinned plan revision. Empty means
-	// PER_DEVICE: every revision written before the column existed behaves exactly as it always did.
+	// SpeedAllocation is PER_DEVICE or SHARED; empty means PER_DEVICE.
 	SpeedAllocation string `json:"speed_allocation,omitempty"`
 }
 
-// Envelope is a COMPLETE, scoped, versioned statement of the Phase-3 managed state.
+// Envelope is a complete, scoped, versioned statement of the managed state.
 type Envelope struct {
 	ContractVersion string `json:"contract_version"`
 
@@ -86,33 +54,26 @@ type Envelope struct {
 	SiteID       string `json:"site_id"`
 	ApplianceID  string `json:"appliance_id"`
 	AssignmentID string `json:"assignment_id"`
-	// AssignmentGen is the signed assignment's version. A plan derived under an older assignment than the one
-	// the appliance now holds describes a tenancy that has since changed, and is refused.
+	// AssignmentGen older than the appliance's held assignment describes a changed tenancy and is refused.
 	AssignmentGen int64 `json:"assignment_generation"`
-	// ProducerRuntimeGen distinguishes one producer process from the next. Nothing gates on it; it is there so
-	// an operator reading two plans can tell "the same process re-derived" from "a new process took over".
+	// ProducerRuntimeGen is informational: it distinguishes one producer process from the next; nothing gates on it.
 	ProducerRuntimeGen int64 `json:"producer_runtime_generation"`
-	// PlanGeneration is monotonic and DURABLE across producer restarts.
+	// PlanGeneration is monotonic and durable across producer restarts.
 	PlanGeneration int64     `json:"plan_generation"`
 	GeneratedAt    time.Time `json:"generated_at"`
-	// ExpiresAt bounds how long this plan may be considered current. Its real job is on the applier's health:
-	// a plan that expired without a replacement means the producer went quiet and what is installed is no
-	// longer known to be correct.
+	// ExpiresAt bounds how long the plan is current; an expired plan with no replacement means the producer
+	// went quiet and the installed state is no longer known to be correct.
 	ExpiresAt time.Time `json:"expires_at"`
 
-	// ManagedBridges is the set of guest bridges this plan speaks for — NOT merely the ones a session
-	// happens to be on. Without it, a bridge whose last session has already ended and been forgotten would
-	// never appear in any plan again, so a class left behind on it could never be found: the applier would
-	// have nothing telling it to look there. Declaring the bridges separately from the sessions is what makes
-	// "remove everything not claimed" a statement the applier can actually act on.
+	// ManagedBridges are all bridges this plan speaks for, not just those with sessions. Otherwise a bridge
+	// whose last session ended would never appear again and a class left on it could never be found.
 	ManagedBridges []string `json:"managed_bridges"`
 
 	Sessions         []Session `json:"sessions"`
 	DesiredStateHash string    `json:"desired_state_hash"`
 }
 
-// Scope is the applier's OWN authoritative identity, resolved from its enrollment and signed assignment — never
-// from the envelope. An envelope can only be checked against it.
+// Scope is the applier's own identity from its enrollment and signed assignment, never from the envelope.
 type Scope struct {
 	TenantID    string
 	SiteID      string
@@ -120,8 +81,7 @@ type Scope struct {
 	AssignGen   int64
 }
 
-// Accepted is the minimum record of the last plan put in force, kept durably so a restart cannot be talked
-// into accepting a plan older than one already applied.
+// Accepted is the durable record of the last plan in force, so a restart cannot accept an older plan.
 type Accepted struct {
 	Generation int64     `json:"generation"`
 	Hash       string    `json:"hash"`
@@ -131,28 +91,21 @@ type Accepted struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
-// HashDesiredState is the canonical hash of a desired state: the managed bridges AND the sessions.
-// Order-independent (the producer's SQL ordering is not part of the meaning) and field-separated with control
-// characters that cannot occur in any of the fields, so "a|b" and "a" + "|b" cannot collide.
-//
-// The bridge list is inside the hash deliberately. It decides WHERE the applier will remove unclaimed
-// classes, so a body that lost it — or had it trimmed in transit — would silently stop reconciling those
-// bridges while still looking like a complete, valid plan.
+// HashDesiredState hashes the managed bridges and sessions, order-independent and separated by control
+// characters that cannot occur in fields. The bridge list is inside the hash because it decides where
+// unclaimed classes are removed; a trimmed list would silently stop reconciling those bridges.
 func HashDesiredState(bridges []string, sessions []Session) string {
 	rows := make([]string, 0, len(sessions)+len(bridges))
 	for _, b := range bridges {
 		rows = append(rows, "B\x1f"+b)
 	}
 	for _, s := range sessions {
-		// The access boundary is INSIDE the hash. It decides how long the applier may lease packet
-		// authorization for, so a body that lost it in transit — or had it rewritten — would still look like a
-		// complete, valid plan while asking for a longer lease than the guest's access justifies.
+		// The access boundary and end reason are hashed too: altered in transit they would still look like a
+		// valid plan while granting a longer lease or a different audit trail.
 		ends := ""
 		if s.AccessEndsAt != nil {
 			ends = s.AccessEndsAt.UTC().Format(time.RFC3339Nano)
 		}
-		// The end reason is hashed with everything else: it is written to the durable record, so a body that
-		// lost or altered it would produce a different audit trail while still looking like a complete plan.
 		rows = append(rows, strings.Join([]string{
 			"S", s.SessionID, s.DeviceID, s.IP, s.Bridge,
 			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled), ends,
@@ -164,8 +117,7 @@ func HashDesiredState(bridges []string, sessions []Session) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Refusal reasons. They are a closed set so the applier can report exactly why a plan was not put in force
-// without logging the plan itself.
+// Refusal reasons are a closed set so the applier can report why without logging the plan.
 const (
 	ReasonUnsupportedContract = "unsupported_contract"
 	ReasonWrongTenant         = "wrong_tenant"
@@ -180,8 +132,6 @@ const (
 	ReasonGenerationConflict  = "duplicate_generation_conflict"
 )
 
-// Validate checks an envelope against the applier's own scope and the last plan it accepted. It returns a
-// bounded reason and false when the plan must not be applied.
 func Validate(env Envelope, scope Scope, last Accepted, hasLast bool, now time.Time) (string, bool) {
 	switch {
 	case env.ContractVersion != ContractVersion:
@@ -199,8 +149,7 @@ func Validate(env Envelope, scope Scope, last Accepted, hasLast bool, now time.T
 	case env.ExpiresAt.IsZero() || !env.ExpiresAt.After(now):
 		return ReasonExpiredPlan, false
 	case len(env.ManagedBridges) == 0:
-		// A plan that names no bridges cannot express "remove what is not claimed" anywhere, so accepting it
-		// would silently turn full reconciliation into add-only.
+		// Accepting it would silently turn full reconciliation into add-only.
 		return ReasonNoManagedBridges, false
 	case env.DesiredStateHash != HashDesiredState(env.ManagedBridges, env.Sessions):
 		return ReasonHashMismatch, false
@@ -210,8 +159,7 @@ func Validate(env Envelope, scope Scope, last Accepted, hasLast bool, now time.T
 			return ReasonStaleGeneration, false
 		}
 		if env.PlanGeneration == last.Generation && env.DesiredStateHash != last.Hash {
-			// The same generation must mean the same desired state. Two different payloads under one
-			// generation means the producer's numbering is broken, and applying either would be a guess.
+			// Two payloads under one generation means the producer's numbering is broken.
 			return ReasonGenerationConflict, false
 		}
 	}

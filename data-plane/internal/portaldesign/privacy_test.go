@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// GDPR plan F1: the hotel's privacy notice is part of the design, checked like every other field.
 func TestThePrivacyNoticeIsCheckedAndServed(t *testing.T) {
 	d := map[string]any{
 		"privacy_text": "Who is responsible\nThe Hotel Ltd.",
@@ -35,7 +34,7 @@ func TestThePrivacyNoticeIsCheckedAndServed(t *testing.T) {
 	}
 }
 
-// An unfinished template is allowed (the hotel may save as it goes) but never silently.
+// An unfinished template is allowed so the hotel can save as it goes, but never silently.
 func TestAnUnfinishedNoticeIsAWarningNotARefusal(t *testing.T) {
 	issues := Validate(map[string]any{"privacy_text": "Contact: [[privacy contact email]]. Kept for [[period]]."})
 	if len(Errors(issues)) > 0 {
@@ -49,7 +48,7 @@ func TestAnUnfinishedNoticeIsAWarningNotARefusal(t *testing.T) {
 	}
 }
 
-// GDPR plan F7: every outside host the page would load from is named, and none of them blocks a save.
+// Every outside host the page would load from is named, and none blocks a save.
 func TestOutsideHostsAreNamed(t *testing.T) {
 	d := map[string]any{
 		"logo_url":       "https://cdn.example.com/logo.png",

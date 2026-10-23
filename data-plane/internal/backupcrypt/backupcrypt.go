@@ -1,13 +1,6 @@
-// Package backupcrypt encrypts the appliance's backups to the hotel's own keys (GDPR remediation plan C5,
-// Product-Owner decision D-C5).
-//
-// The format is age (https://age-encryption.org), X25519 recipients. A backup is encrypted to the public key of
-// every registered key holder, so any ONE holder can open it alone, and the appliance -- which holds only public
-// keys -- can write backups but never read them back. A private key reaches the appliance only inside a single
-// request (verify, restore, the restore test), is used in memory and is never written anywhere.
-//
-// The same code serves scd (on-demand dumps, verify, restore, the restore test), edged (generating a holder's
-// key) and the nightly shell backup (through `scd backup-crypt`), so there is one implementation of each step.
+// Package backupcrypt encrypts backups with age to every registered key holder's public key. The appliance
+// holds only public keys, so it can write backups but never read them; a private key is used in memory for one
+// request and never persisted.
 package backupcrypt
 
 import (
@@ -25,7 +18,6 @@ import (
 	"filippo.io/age"
 )
 
-// Suffix marks an encrypted backup file.
 const Suffix = ".age"
 
 var (
@@ -34,8 +26,8 @@ var (
 	ErrWrongKey     = errors.New("this key does not open this backup")
 )
 
-// ParseRecipients turns the holders' public keys into age recipients. Any malformed key fails the whole list:
-// a backup encrypted to fewer holders than the hotel registered is not the backup the hotel was promised.
+// ParseRecipients fails the whole list on any malformed key: a backup must never be encrypted to fewer holders
+// than are registered.
 func ParseRecipients(keys []string) ([]age.Recipient, error) {
 	if len(keys) == 0 {
 		return nil, ErrNoRecipients
@@ -51,7 +43,7 @@ func ParseRecipients(keys []string) ([]age.Recipient, error) {
 	return out, nil
 }
 
-// Encrypt returns a writer that encrypts to every recipient into dst. Close it to finish the file.
+// Encrypt returns a writer to dst; Close it to finish the file.
 func Encrypt(dst io.Writer, recipients []age.Recipient) (io.WriteCloser, error) {
 	if len(recipients) == 0 {
 		return nil, ErrNoRecipients
@@ -59,8 +51,7 @@ func Encrypt(dst io.Writer, recipients []age.Recipient) (io.WriteCloser, error) 
 	return age.Encrypt(dst, recipients...)
 }
 
-// ParseIdentity reads a private key from what an operator pasted or uploaded: the key file this package
-// produces (comments included), an age-keygen file, or the bare AGE-SECRET-KEY-1... line.
+// ParseIdentity accepts this package's key file, an age-keygen file, or a bare AGE-SECRET-KEY-1... line.
 func ParseIdentity(text string) (*age.X25519Identity, error) {
 	sc := bufio.NewScanner(strings.NewReader(text))
 	for sc.Scan() {
@@ -76,8 +67,7 @@ func ParseIdentity(text string) (*age.X25519Identity, error) {
 	return nil, ErrNoIdentity
 }
 
-// Decrypt opens an encrypted backup with one identity. A key that is not among the file's recipients is
-// ErrWrongKey, so the screen can say so rather than report a corrupt file.
+// Decrypt returns ErrWrongKey for a key outside the recipients, so callers do not report a corrupt file.
 func Decrypt(src io.Reader, id age.Identity) (io.Reader, error) {
 	r, err := age.Decrypt(src, id)
 	if err != nil {
@@ -90,7 +80,7 @@ func Decrypt(src io.Reader, id age.Identity) (io.Reader, error) {
 	return r, nil
 }
 
-// GenerateKey makes a new holder key pair. The secret goes to the hotel once; only the public key is kept.
+// GenerateKey: only the public key is kept; the secret goes to the hotel once.
 func GenerateKey() (secret, public string, err error) {
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -102,8 +92,7 @@ func GenerateKey() (secret, public string, err error) {
 // checkAlphabet has no 0/O, 1/I/L or 5/S, so the code survives being read off paper.
 const checkAlphabet = "ABCDEFGHJKMNPQRTUVWXYZ2346789"
 
-// NewCheckCode is the short code printed only in the key file and on the recovery sheet. Typing it back proves
-// the holder saved one of them before encryption depends on the key.
+// NewCheckCode is printed only in the key file and recovery sheet; typing it back proves the holder saved one.
 func NewCheckCode() (string, error) {
 	var b strings.Builder
 	for i := 0; i < 8; i++ {
@@ -119,7 +108,7 @@ func NewCheckCode() (string, error) {
 	return b.String(), nil
 }
 
-// CheckCodeHash is what the appliance stores: the code is normalised (case, spaces and dashes ignored).
+// CheckCodeHash is what the appliance stores; case, spaces and dashes are ignored.
 func CheckCodeHash(code string) string {
 	norm := strings.Map(func(r rune) rune {
 		switch {
@@ -134,8 +123,7 @@ func CheckCodeHash(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// KeyFile is the downloadable private key: an age identity file (age -d -i <file> opens a backup with it),
-// with the holder, the public key and the check code as comments.
+// KeyFile is an age identity file (usable with `age -d -i`) carrying holder, public key and check code as comments.
 func KeyFile(holder, site, secret, public, checkCode string, created time.Time) string {
 	return strings.Join([]string{
 		"# StayConnect backup key -- KEEP THIS FILE SECRET AND SAFE.",

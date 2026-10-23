@@ -17,11 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// THE REMEMBERED DEVICE, END TO END AGAINST THE DATABASE (contract §2.3). Needs PHASE3_TEST_DSN; skipped otherwise.
-//
-// What is pinned: a credential is bound to ONE device; presenting it from another device refuses AND revokes
-// it; the greeting names the Client only by a masked factor; sign-out forgets; a site that remembers for 0
-// days issues nothing.
+// The remembered device against the database; needs PHASE3_TEST_DSN.
 
 func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
@@ -35,10 +31,7 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	}
 	t.Cleanup(pool.Close) // registered first, so it runs after the row cleanup below
 	const tenant, site, appl = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333"
-	// ONLY THIS TEST'S ROWS. This package runs concurrently with the other packages of the integration step on one
-	// database; a TRUNCATE ... CASCADE here took exclusive locks on devices and principals and cascaded into rows
-	// other suites were using mid-test (FULL CHECK found it as acctd deadlocks and vanished usage). The cleanup
-	// is scoped to the device and the address this test creates, before and after.
+	// Clean up only this test's rows: a TRUNCATE ... CASCADE took locks and removed rows other concurrently running suites were using.
 	cleanup := func() {
 		tx, err := pool.Begin(ctx)
 		if err != nil {
@@ -91,7 +84,6 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if stored != 1 || expiresIn < 29*24*time.Hour || expiresIn > 31*24*time.Hour {
 		t.Fatalf("one live credential for the site's period, got %d expiring in %v", stored, expiresIn)
 	}
-	// Only the HMAC is stored: the token itself appears nowhere.
 	var leaked bool
 	_ = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.principal_device_credentials WHERE encode(secret_hmac,'base64') = $1 OR key_id = $1)`, tok).Scan(&leaked)
 	if leaked {
@@ -110,14 +102,12 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != true || out["identity_label"] != "a•••@example.com" || out["method"] != "OTP" {
 		t.Fatalf("the right device is greeted by a masked factor: %v", out)
 	}
-	// Presented from another device: refused, and the credential is gone for the right device too.
 	if out := peek("02:00:00:00:00:bb"); out["ok"] != false || out["reason"] != "other_device" {
 		t.Fatalf("another device must be refused: %v", out)
 	}
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != false || out["reason"] != "unknown" {
 		t.Fatalf("a credential seen on another device must be revoked: %v", out)
 	}
-	// A fresh credential replaces the old one (one live per device), and sign-out forgets it.
 	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != true {
 		t.Fatalf("a fresh credential works: %v", out)
@@ -128,7 +118,6 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != false {
 		t.Fatalf("sign-out must forget the device: %v", out)
 	}
-	// The method switched off: a remembered device is not let in either.
 	tok = s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP)
 	s.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
 		return &tenantcfg.AuthMethods{Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &days}}, nil
@@ -136,7 +125,6 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if out := peek("02:00:00:00:00:aa"); out["ok"] != false || out["reason"] != "method_off" {
 		t.Fatalf("a switched-off method must not resume: %v", out)
 	}
-	// Remember for 0 days: nothing is issued.
 	zero := 0
 	s.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
 		return &tenantcfg.AuthMethods{SMS: &tenantcfg.AuthMethod{Enabled: true}, Portal: &tenantcfg.PortalConfig{RememberDeviceDays: &zero}}, nil
@@ -144,7 +132,6 @@ func TestIntegration_RememberedDeviceIsBoundToOneDevice(t *testing.T) {
 	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodOTP, iamv2.CredentialEmailOTP); tok != "" {
 		t.Fatal("a site that does not remember devices must issue nothing")
 	}
-	// A voucher or account sign-in never earns one.
 	if tok := s.issueResumeCredential(ctx, pid, dev, iamv2.MethodVoucher, iamv2.CredentialVoucher); tok != "" {
 		t.Fatal("only a verified factor earns a credential")
 	}

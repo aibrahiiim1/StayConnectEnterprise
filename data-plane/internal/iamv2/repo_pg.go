@@ -12,15 +12,10 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// PgRepository is a SCRATCH/TEST iam_v2 Repository. It is provided only when a scratch/enabled run
-// supplies it; production never constructs or invokes it (flags OFF => Authenticator short-circuits
-// before any repository call).
 type PgRepository struct{ db *pgxpool.Pool }
 
-// NewPgRepository builds a scratch Repository over the given pool (a disposable iam_v2 database).
 func NewPgRepository(db *pgxpool.Pool) *PgRepository { return &PgRepository{db: db} }
 
-// WithTx runs fn in a single transaction.
 func (r *PgRepository) WithTx(ctx context.Context, fn func(Tx) error) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -60,20 +55,15 @@ func (t *pgTx) ResolveVoucherByHMAC(ctx context.Context, tenantID, siteID string
 	return id, voucherRedeemable(state, vf, vu, now) || voucherRejoinable(state, live), nil
 }
 
-// voucherRejoinable: a REDEEMED card whose own entitlement is still ACTIVE may sign a device in again -- to
-// rejoin THAT entitlement, within its device limit, never to purchase. Single use holds where it matters:
-// the grant kernel refuses any second redemption (VOUCHER_NOT_REDEEMABLE), so the card still yields exactly
-// one entitlement and no fresh quota. Without this a guest who disconnected, or whose phone changed its
-// address, could never get back online on access they still hold. Contract section 6.3: same-device
-// reconnect replaces its own session; other devices take the entitlement's remaining slots.
+// voucherRejoinable: a REDEEMED card whose own entitlement is still ACTIVE may sign a device in again, only
+// to rejoin that entitlement within its device limit, never to purchase (the grant kernel refuses a second
+// redemption, so no fresh quota). Same-device reconnect replaces its own session.
 func voucherRejoinable(state string, liveEntitlement bool) bool {
 	return state == "REDEEMED" && liveEntitlement
 }
 
-// voucherRedeemable implements the Phase 1B credential-validity rule for a voucher (pure; unit-tested).
-// Canonical states: UNUSED | REDEEMED | REVOKED | REDEMPTION_EXPIRED. Credential-valid only when the
-// state is exactly UNUSED and now is inside [redemption_valid_from, redemption_valid_until) — the
-// upper bound is EXCLUSIVE. Phase 1B does NOT redeem or grant (no state mutation).
+// voucherRedeemable: valid only when the state is exactly UNUSED and now is inside
+// [redemption_valid_from, redemption_valid_until); the upper bound is exclusive. It mutates nothing.
 func voucherRedeemable(state string, vf, vu *time.Time, now time.Time) bool {
 	if state != "UNUSED" {
 		return false
@@ -99,9 +89,8 @@ func (t *pgTx) LookupAccount(ctx context.Context, tenantID, siteID, username str
 	return id, passwordHash, enabled, vf, vu, locked, e
 }
 
-// AccountVerifiedEmail returns the PROVEN email address of a client account, or "" when it has none: the
-// username of a self-registered Email account whose owner verified it. A staff-created account's username is
-// whatever staff typed, and an unverified registration has proved nothing, so neither is evidence.
+// AccountVerifiedEmail returns the proven address (a verified self-registered account's username), or "". A
+// staff-typed username or an unverified registration is not evidence.
 func (t *pgTx) AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accountID string) (string, error) {
 	var email string
 	err := t.tx.QueryRow(ctx,
@@ -114,7 +103,6 @@ func (t *pgTx) AccountVerifiedEmail(ctx context.Context, tenantID, siteID, accou
 	return email, err
 }
 
-// resolveExistingPrincipal returns the principal for an existing identity, or "" if none.
 func (t *pgTx) resolveExistingPrincipal(ctx context.Context, tenantID, factorType, issuer, valueNorm string) (string, error) {
 	var pid string
 	err := t.tx.QueryRow(ctx,
@@ -127,30 +115,25 @@ func (t *pgTx) resolveExistingPrincipal(ctx context.Context, tenantID, factorTyp
 	return pid, err
 }
 
-// ResolvePrincipalByFactors finds or creates the Client for a verified primary factor and links the secondary
-// factors the same proof established (identity.go). The order is the contract's: the primary factor, then each
-// secondary, then a new Client. Concurrency-idempotent exactly as before: the new principal is created inside a
-// SAVEPOINT, the primary identity is inserted ON CONFLICT DO NOTHING, and a lost race discards the orphan and
-// returns the winner. A secondary factor that already belongs to ANOTHER Client is never moved and the two are
-// never merged: it is reported as a conflict and the Client continues with the factor they proved.
+// ResolvePrincipalByFactors finds the Client by primary factor, then each secondary, else creates one. It is
+// concurrency-idempotent: the new principal is created in a SAVEPOINT with the identity inserted ON CONFLICT
+// DO NOTHING, and a lost race discards the orphan and returns the winner. A secondary factor held by another
+// Client is never moved or merged; it is reported as a conflict.
 func (t *pgTx) ResolvePrincipalByFactors(ctx context.Context, tenantID string, primary FactorClaim, secondary []FactorClaim, now time.Time) (PrincipalResolution, error) {
 	primary.Value = normFactor(primary)
 	if primary.Type == "" || primary.Value == "" {
 		return PrincipalResolution{}, nil
 	}
-	// Serialise resolution per primary factor: two first sign-ins of the same new Client on two devices
-	// otherwise race between "find" and "create" and the savepoint below has to arbitrate.
+	// Serialise per primary factor so two first sign-ins of the same new Client do not race between find and create.
 	if _, err := t.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('principal_resolve'), hashtext($1))`,
 		tenantID+"|"+primary.Type+"|"+primary.Issuer+"|"+primary.Value); err != nil {
 		return PrincipalResolution{}, err
 	}
 	var rs PrincipalResolution
-	// 1. The factor just proven.
 	pid, err := t.resolveExistingPrincipal(ctx, tenantID, primary.Type, primary.Issuer, primary.Value)
 	if err != nil {
 		return PrincipalResolution{}, err
 	}
-	// 2. The secondary factors the same proof established (and the lookup-only legacy rows).
 	if pid == "" {
 		for _, sec := range secondary {
 			if pid, err = t.resolveExistingPrincipal(ctx, tenantID, sec.Type, sec.Issuer, normFactor(sec)); err != nil {
@@ -161,7 +144,6 @@ func (t *pgTx) ResolvePrincipalByFactors(ctx context.Context, tenantID string, p
 			}
 		}
 	}
-	// 3. Otherwise a new Client.
 	if pid == "" {
 		sp, err := t.tx.Begin(ctx) // nested tx == SAVEPOINT
 		if err != nil {
@@ -204,8 +186,8 @@ func (t *pgTx) ResolvePrincipalByFactors(ctx context.Context, tenantID string, p
 		return PrincipalResolution{}, nil
 	}
 	rs.PrincipalID = pid
-	// 4. Attach what is missing: the primary (when the Client was found through a secondary) and every
-	// insertable secondary. ON CONFLICT DO NOTHING; a factor held by another Client is a recorded conflict.
+	// Attach what is missing (the primary, if found through a secondary, and every insertable secondary); a
+	// factor held by another Client is a recorded conflict.
 	attach := func(f FactorClaim) error {
 		v := normFactor(f)
 		if f.LookupOnly || f.Type == "" || v == "" {
@@ -226,7 +208,7 @@ func (t *pgTx) ResolvePrincipalByFactors(ctx context.Context, tenantID string, p
 		if err != pgx.ErrNoRows {
 			return err
 		}
-		// Exists. Ours: refresh the verified claims (tid/hd can be learned later). Another Client's: conflict.
+		// Ours: refresh the verified claims (tid/hd can be learned later). Another Client's: conflict.
 		if owner, err = t.resolveExistingPrincipal(ctx, tenantID, f.Type, f.Issuer, v); err != nil {
 			return err
 		}
@@ -254,8 +236,8 @@ func (t *pgTx) ResolvePrincipalByFactors(ctx context.Context, tenantID string, p
 	return rs, nil
 }
 
-// normFactor applies the one normalisation the unique index relies on: a social subject is case-sensitive
-// (it is the provider's own identifier), everything else is lower-cased.
+// normFactor is the normalisation the unique index relies on: a social subject (the provider's own
+// identifier) is case-sensitive, everything else is lower-cased.
 func normFactor(f FactorClaim) string {
 	v := strings.TrimSpace(f.Value)
 	if f.Type != "SOCIAL_SUBJECT" {
@@ -272,7 +254,6 @@ func attrsJSON(m map[string]string) string {
 	return string(b)
 }
 
-// LoadPrincipalFactors returns every verified factor of a Client with its verified claims.
 func (t *pgTx) LoadPrincipalFactors(ctx context.Context, tenantID, principalID string) ([]FactorClaim, error) {
 	rows, err := t.tx.Query(ctx,
 		`SELECT factor_type, factor_issuer, factor_value_norm, COALESCE(attrs,'{}'::jsonb)::text
@@ -304,8 +285,7 @@ func (t *pgTx) LoadPrincipalFactors(ctx context.Context, tenantID, principalID s
 	return out, rows.Err()
 }
 
-// LoadClientGroups returns a site's groups with their rules, enabled and disabled alike (the evaluator skips
-// the disabled ones; the Admin Console shows both).
+// LoadClientGroups returns enabled and disabled groups alike (the evaluator skips the disabled ones).
 func (t *pgTx) LoadClientGroups(ctx context.Context, tenantID, siteID string) ([]ClientGroup, error) {
 	return loadClientGroups(ctx, t.tx, tenantID, siteID)
 }
@@ -314,7 +294,6 @@ type rowQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// loadClientGroups is shared with the commerce repository.
 func loadClientGroups(ctx context.Context, q rowQuerier, tenantID, siteID string) ([]ClientGroup, error) {
 	rows, err := q.Query(ctx,
 		`SELECT g.id::text, g.name, g.priority, g.enabled, r.id::text, r.rule_type, COALESCE(r.rule_value,'{}'::jsonb)::text
@@ -363,8 +342,7 @@ func (t *pgTx) UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, 
 		return "", err
 	}
 	if guestNetworkID != "" {
-		// A device-appearance failure must roll back the whole device/auth-context transaction — never
-		// return DecisionAllow with a partial device or auth_context.
+		// Roll back the whole transaction on an appearance failure; never allow with a partial device or auth_context.
 		if _, err := t.tx.Exec(ctx,
 			`INSERT INTO iam_v2.device_network_appearances (tenant_id, site_id, device_id, guest_network_id, first_seen, last_seen)
 			 VALUES ($1,$2,$3,$4,$5,$5)

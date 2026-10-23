@@ -1,25 +1,7 @@
 package main
 
-// WHAT A GUEST MET AT THE END OF A SUCCESSFUL SIGN-IN.
-//
-// Found by running Guest Internet as a controlled pilot on PRE-LIVE. A voucher issued through the real
-// issuance path authenticated correctly -- scd returned 200 -- and the guest was then redirected to
-// /packages, where scd answered 404 in fifteen microseconds. That 404 is correct: Phase-2 commerce is dark
-// on this appliance (master=false portal=false admin=false), so those routes are deliberately not mounted.
-//
-// The defect was on this side. tryIAMv2Auth already contained the right answer for exactly this case --
-// "Internet packages are not available right now. Please contact the site team for assistance." -- behind a check for
-// `commerceSessions == nil`. But newHandler built that store unconditionally, so the field was never nil,
-// the branch was unreachable, and its own comment ("the store is only constructed when the Phase-2 portal
-// surface is on") described something the code did not do. The guest was issued a commerce cookie, sent to
-// an empty page, and told to choose another package -- advice they could not act on.
-//
-// The scope is narrow and worth stating precisely: tryIAMv2Auth is reached only from the voucher and
-// guest-account handlers. Room/PMS sign-in does not pass through it, which is why every session this
-// appliance has ever recorded came from a stay.
-//
-// These tests pin the behaviour in both worlds, because a fix that made the OFF state honest by breaking
-// the ON state would be no fix at all.
+// With Phase-2 commerce dark, a successful voucher or guest-account sign-in must not redirect to the unmounted /packages nor issue a commerce cookie: tryIAMv2Auth's "unavailable" branch needs commerceSessions == nil, so newHandler must leave it nil when the surface is off.
+// Both the OFF and ON states are pinned.
 
 import (
 	"net/http"
@@ -40,11 +22,9 @@ func TestWithCommerceDarkTheGuestIsToldTheTruthInsteadOfBeingSentNowhere(t *test
 			"reply that carries no session and tell the guest they are online")
 	}
 
-	// The whole point: no redirect into a surface that does not exist.
 	if loc := rec.Header().Get("Location"); loc != "" {
 		t.Errorf("the guest was redirected to %q while commerce is dark; that page cannot serve them", loc)
 	}
-	// ...and no cookie, because there is no session store to put anything in.
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == commerceCookie {
 			t.Error("a commerce cookie was issued although there is no commerce surface to use it")
@@ -61,14 +41,7 @@ func TestWithCommerceDarkTheGuestIsToldTheTruthInsteadOfBeingSentNowhere(t *test
 }
 
 func TestTheStoreExistsExactlyWhenTheSurfaceDoes(t *testing.T) {
-	// THIS MUST GO THROUGH newHandler, and the first version of it did not.
-	//
-	// It originally asserted over the two fixtures in this package -- which construct the field themselves --
-	// so it restated how the fixtures were written and proved nothing about the binary. Reintroducing the
-	// defect in newHandler left it passing. A test that cannot fail on the broken code is not protection,
-	// and the whole defect being fixed here is a guard that could not fire.
-	//
-	// The real constructor reads the flags from the environment, so the environment is what this drives.
+	// This must go through newHandler: fixtures construct the field themselves, so a test over them cannot fail on the real defect. The constructor reads the flags from the environment.
 	cases := []struct {
 		name           string
 		master, portal string
@@ -99,7 +72,7 @@ func TestTheStoreExistsExactlyWhenTheSurfaceDoes(t *testing.T) {
 }
 
 func TestADarkPortalNeverResolvesACommerceSessionEvenWithACookie(t *testing.T) {
-	// A cookie minted while the surface was on -- or by anyone at all -- must not be honoured once it is off.
+	// A cookie minted while the surface was on must not be honoured once it is off.
 	h := portalFixtureCommerceOff()
 	r := httptest.NewRequest(http.MethodPost, "/packages/acquire", nil)
 	r.AddCookie(&http.Cookie{Name: commerceCookie, Value: "any-value-at-all"})

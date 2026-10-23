@@ -1,10 +1,4 @@
-// Command pkitest plays the appliance role end-to-end against a live ctrlapi to prove the PKI/mTLS path:
-// token-less registration → operator activation → CSR (auto-signed because the appliance is activated) →
-// fetch certificate → hello over mTLS (accepted) → operator reissue-certificate with no waiting CSR, which
-// revokes the certificate → hello over mTLS (rejected). It reuses the production request signer.
-//
-// Fixtures: serial ACPT-PKI-<n> in a customer/site it creates. Needs a platform_admin login; its authenticator
-// secret is kept in the internal/opsignin keyring (OPERATOR_TOTP_KEYRING).
+// Command pkitest plays the appliance role against a live ctrlapi to prove the PKI/mTLS path, including revocation.
 package main
 
 import (
@@ -58,7 +52,6 @@ func main() {
 	}
 	must(cl, "POST", base+"/v1/auth/reauth", jbody(map[string]string{"password": pass}), 200)
 
-	// 1. Token-less, self-signed registration → WAITING.
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	serial := fmt.Sprintf("ACPT-PKI-%d", time.Now().Unix()%100000)
 	regBody := jbody(map[string]any{"serial": serial, "public_key": base64.RawStdEncoding.EncodeToString(pub),
@@ -70,7 +63,6 @@ func main() {
 	}
 	ok("appliance registered id=%s", appID)
 
-	// 2. Operator activates it (new customer + site, licence terms).
 	must(cl, "POST", base+"/cloud/v1/appliances/"+appID+"/activate", jbody(map[string]any{
 		"new_customer": map[string]any{"name": "PKI test " + serial},
 		"new_site":     map[string]any{"name": "PKI site", "timezone": "UTC"},
@@ -78,12 +70,10 @@ func main() {
 	}), 200)
 	ok("activated")
 
-	// 3. The appliance submits a CSR with a SEPARATE transport key; it is signed on arrival.
 	_, tlsPriv, _ := ed25519.GenerateKey(rand.Reader)
 	signedCall(priv, appID, "POST", "/v1/appliance/csr", jbody(map[string]any{"csr_pem": string(makeCSR(tlsPriv, appID))}), 201)
 	ok("CSR auto-signed for an activated appliance")
 
-	// 4. Fetch the certificate + CA chain.
 	fetch := signedGet(priv, appID, "/v1/appliance/certificate")
 	certPEM, caPEM := gjson(fetch, "certificate_pem"), gjson(fetch, "ca_chain")
 	if certPEM == "" || caPEM == "" {
@@ -91,7 +81,6 @@ func main() {
 	}
 	ok("certificate + CA chain fetched")
 
-	// 5. hello over mTLS — ACCEPTED.
 	mc := mtlsClient(certPEM, tlsPriv, caPEM)
 	code, body := mtlsHello(mc, priv, appID)
 	if code != 200 || gjson(body, "appliance_id") != appID {
@@ -99,12 +88,10 @@ func main() {
 	}
 	ok("mTLS hello accepted, appliance_id=%s", appID)
 
-	// 6. Operator reissues the certificate with no CSR waiting → the current one is revoked.
 	must(cl, "POST", base+"/v1/auth/reauth", jbody(map[string]string{"password": pass}), 200)
 	must(cl, "POST", base+"/cloud/v1/appliances/"+appID+"/reissue-certificate", jbody(map[string]any{"reason": "pki test"}), 200)
 	ok("certificate revoked by reissue")
 
-	// 7. hello over mTLS — REJECTED.
 	if code, body = mtlsHello(mc, priv, appID); code == 200 {
 		fail("revoked certificate still accepted by mTLS! %s", body)
 	}
@@ -112,8 +99,6 @@ func main() {
 
 	fmt.Printf("\nPKI/mTLS: %d checks passed. appliance_id=%s serial=%s\n", pass2, appID, serial)
 }
-
-// ---- helpers ----
 
 func mtlsHello(cl *http.Client, idPriv ed25519.PrivateKey, appID string) (int, string) {
 	req, _ := http.NewRequest("GET", mtls+"/v1/appliance/hello", nil)

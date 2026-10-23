@@ -1,10 +1,7 @@
 package main
 
-// Provider configuration CRUD: PMS, notification (email/sms/whatsapp) and social OAuth.
-// (Card payment accounts are NOT here: they live under payment-providers, with
-// sealed credentials held by scd.) Ported from the control-plane admin handlers with the
-// fixed site scope. Secrets are write-only everywhere: never returned in
-// responses, and a blank/omitted secret on update keeps the stored value.
+// Provider configuration CRUD: notification (email/sms/whatsapp) and social OAuth providers.
+// Secrets are write-only: never returned, and a blank secret on update keeps the stored one.
 
 import (
 	"context"
@@ -26,20 +23,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 )
 
-// The PMS provider CRUD surface and its connector-kind list were removed here; see
-// resources_phase3_interface_authoring.go for the canonical set of kinds the PMS Interface runtime can
-// actually run, and for why the legacy list was not simply reused.
-//
-// `public.pms_providers` and scd's loader remain for rollback and history. They carry no operator surface,
-// and internal/pmsloader now refuses to construct or start a legacy FIAS socket owner at all, so the
-// retained rows cannot produce a second PMS owner.
-
-// ----- notification providers ----------------------------------------------------
-
-// WhatsApp is its own channel with its own provider kinds; it is never an SMS kind.
-//
-// "ses" is no longer offered: edged accepted it while scd had no adapter for it, so an operator could save a
-// sender that silently fell back to the stub. A row that already carries it is still read and validated.
+// WhatsApp is its own channel, never an SMS kind. "ses" is not offered (scd has no adapter) but existing rows are still read and validated.
 var notifyAllowedKinds = map[string]map[string]bool{
 	"email":    {"stub": true, "sendgrid": true, "smtp": true},
 	"sms":      {"stub": true, "twilio": true},
@@ -137,22 +121,19 @@ type notifyWriteReq struct {
 	Extra       map[string]string `json:"extra,omitempty"` // WhatsApp template settings; an empty value removes a key
 }
 
-// onlySwitchesOff reports a patch that turns the sender off and changes nothing else: the one change that is
-// never subject to configuration validation.
+// onlySwitchesOff reports a patch that only turns the sender off; that is never subject to validation.
 func (in notifyWriteReq) onlySwitchesOff() bool {
 	return in.Enabled != nil && !*in.Enabled && in.DisplayName == nil && in.APIKey == nil &&
 		in.APIUser == nil && in.FromAddress == nil && in.FromName == nil && in.Region == nil && len(in.Extra) == 0
 }
 
-// notifyProviderShape is what validation sees: the provider as it would be stored.
 type notifyProviderShape struct {
 	Channel, Kind, APIUser, FromAddress string
 	HasAPIKey                           bool
 	Extra                               map[string]string
 }
 
-// validateNotifyProvider returns a readable message for a provider that cannot work, or "" when it can.
-// Only WhatsApp providers are checked field by field; email and SMS keep their historical rules.
+// validateNotifyProvider returns a readable message for a provider that cannot work, or "". Only WhatsApp is checked field by field.
 func validateNotifyProvider(p notifyProviderShape) string {
 	if p.Channel == "email" && p.Kind == "smtp" {
 		for k := range p.Extra {
@@ -231,7 +212,6 @@ func validateNotifyProvider(p notifyProviderShape) string {
 	return "kind not supported for this channel"
 }
 
-// mergeExtra applies a patch to stored settings; an empty value removes the key.
 func mergeExtra(stored, patch map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range stored {
@@ -254,13 +234,11 @@ func (s *server) notificationProvidersRoutes() http.Handler {
 	r.Get("/{id}", s.getNotifyProvider)
 	r.Patch("/{id}", s.patchNotifyProvider)
 	r.Delete("/{id}", s.deleteNotifyProvider)
-	// "Send a test message": scd builds the sender exactly as the loader does and delivers one message.
 	r.Post("/{id}/test", s.testNotifyProvider)
 	return r
 }
 
-// storeNotifySecret hands a secret to scd, which seals it under the appliance key and clears the plaintext
-// column (contract §7.3). edged never holds the key. ok=false with the operator-readable reason on failure.
+// storeNotifySecret has scd seal the secret and clear the plaintext column; edged never holds the key.
 func (s *server) storeNotifySecret(r *http.Request, id, secret string) (bool, string) {
 	status, body, err := s.scd.call(r.Context(), http.MethodPost, "/v1/admin/notify/providers/"+id+"/secret",
 		map[string]string{"secret": secret})
@@ -281,9 +259,7 @@ func (s *server) storeNotifySecret(r *http.Request, id, secret string) (bool, st
 	return true, ""
 }
 
-// notifySecretStored asks scd whether a sealed secret generation exists for the row. scd holds the key and the
-// grant; edged holds neither. Unreachable scd reads as "none stored" and the operator sees the ordinary
-// "a password is required" refusal rather than a silent success that could not send.
+// notifySecretStored asks scd whether a sealed secret exists (edged has no grant). Unreachable scd reads as none, giving the ordinary refusal.
 func (s *server) notifySecretStored(r *http.Request, id string) bool {
 	status, body, err := s.scd.call(r.Context(), http.MethodGet, "/v1/admin/notify/providers/"+id+"/secret-state", nil)
 	if err != nil || status != http.StatusOK {
@@ -295,7 +271,6 @@ func (s *server) notifySecretStored(r *http.Request, id string) bool {
 	return json.Unmarshal(body, &out) == nil && out.Sealed
 }
 
-// testNotifyProvider proxies the test to scd and returns its verdict verbatim.
 func (s *server) testNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -390,8 +365,7 @@ func (s *server) createNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// THE SECRET NEVER TOUCHES THE PLAINTEXT COLUMN. The row is written without it, the secret is handed to
-	// scd to seal, and a row whose secret could not be sealed is removed again rather than left half-made.
+	// The secret never touches the plaintext column: scd seals it, and a row whose secret could not be sealed is removed.
 	var n edgeNotificationProvider
 	err := scanNotify(s.db.QueryRow(ctx, `
         INSERT INTO notification_providers(
@@ -438,7 +412,6 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// Validate the provider as it will be stored: the current row with this patch applied.
 	var cur notifyProviderShape
 	var curExtra string
 	err := s.db.QueryRow(ctx, `
@@ -460,18 +433,13 @@ func (s *server) patchNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	if in.FromAddress != nil {
 		cur.FromAddress = *in.FromAddress
 	}
-	// HasAPIKey means "a secret exists somewhere": the plaintext column (rows written before 0107), a sealed
-	// generation (rows written since, which scd alone can read -- edged is deliberately not granted that
-	// table, and asking it directly failed silently and refused every PATCH on a sealed sender), or the one
-	// arriving in this request.
+	// HasAPIKey: a secret exists as the plaintext column (older rows), a sealed generation (only scd can read it), or in this request.
 	if strings.TrimSpace(strDeref(in.APIKey)) != "" {
 		cur.HasAPIKey = true
 	} else if !cur.HasAPIKey {
 		cur.HasAPIKey = s.notifySecretStored(r, id)
 	}
-	// SWITCHING A SENDER OFF IS ALWAYS ALLOWED. Validation exists so a sender that could never send is not
-	// switched on; it must never hold a sender on because its settings no longer validate (found live: a
-	// working Gmail sender could not be switched off).
+	// Switching a sender off is always allowed, even when its settings no longer validate.
 	switchingOff := in.onlySwitchesOff()
 	var extraArg *string
 	if len(in.Extra) > 0 {
@@ -548,32 +516,16 @@ func (s *server) deleteNotifyProvider(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ----- social OAuth providers -----------------------------------------------------
-//
-// CUSTOMER-OWNED APPLICATIONS (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5). Each hotel
-// registers its own Google, Apple, Microsoft and Facebook application; this surface stores what scd needs to
-// use it.
-//
-//   - THE CALLBACK IS DERIVED, NOT TYPED. It is https://<portal hostname>/auth/social/callback for each portal
-//     hostname scd established (the OneGate hostname and, once registered, the hotel portal domain). The hotel
-//     ticks the hostnames it registered in its app (callback_hosts); a free-text redirect URI is no longer
-//     stored. One sent by an older client is still accepted and turned into its host, as migration 0116 did.
-//   - THE SECRET IS WRITE-ONLY AND SEALED BY scd. edged forwards it over scd's socket
-//     (PUT /v1/social/providers/{id}/secret) and never writes social_oauth_providers.client_secret: scd seals
-//     it under social_dek.key into iam_v2.social_provider_secret_generations, which edged holds no grant on.
-//   - SECRET_SET: edged cannot read the sealed generations, and asks scd for nothing it has no endpoint for. It
-//     reports secret_set=true for every row it returns, and that is honest by construction: a row is created
-//     only together with its secret (the insert is undone when scd refuses the secret), and a secret can be
-//     replaced but never removed through this surface.
-//   - OFFERED: a provider is offered to clients only while HTTPS is active and the canonical hostname is one of
-//     its callback_hosts (§5); the response says which, and why not.
-//   - Every change asks scd to reload its providers (POST /v1/social/reload); scd also reloads every 60 s.
+// Social OAuth providers are customer-owned applications. The callback URL is derived from each portal hostname, never typed.
+// The secret is write-only and sealed by scd (edged has no grant on the sealed generations), so secret_set is true for every row:
+// a row is created only together with its secret.
+// A provider is offered only while HTTPS is active and the canonical hostname is one of its callback_hosts.
+// Every change asks scd to reload its providers.
 
 var socialAllowedProviders = map[string]bool{
 	"google": true, "apple": true, "facebook": true, "microsoft": true,
 }
 
-// scd's social endpoints, named once.
 const scdSocialReload = "/v1/social/reload"
 
 func scdSocialSecretPath(id string) string { return "/v1/social/providers/" + id + "/secret" }
@@ -585,19 +537,14 @@ type edgeSocialProvider struct {
 	DisplayName string `json:"display_name,omitempty"`
 	ClientID    string `json:"client_id"` // public per OAuth2 spec
 	Scopes      string `json:"scopes,omitempty"`
-	// Non-secret provider settings kept in the row's extra jsonb (the same
-	// socialloader.Extra scd builds the provider from): Microsoft's tenant,
-	// Apple's Team ID and Key ID. Apple's .p8 private key is the
-	// client_secret and, like every secret, is never returned.
+	// Non-secret provider settings in extra: Microsoft tenant, Apple Team ID and Key ID. Apple's .p8 key is the client_secret.
 	Tenant string `json:"tenant,omitempty"`
 	TeamID string `json:"team_id,omitempty"`
 	KeyID  string `json:"key_id,omitempty"`
-	// The portal hostnames whose callback URL the hotel registered in its provider app, and the callback URL
-	// for every portal hostname that exists now (registered or not), so the page can show and copy them.
+	// The hostnames the hotel registered in its provider app, and the callback URL for every current portal hostname.
 	CallbackHosts []string            `json:"callback_hosts"`
 	CallbackURLs  []portalCallbackURL `json:"callback_urls"`
-	// See SECRET_SET above: true for every stored row.
-	SecretSet bool `json:"secret_set"`
+	SecretSet     bool                `json:"secret_set"`
 	// Offered is whether the portal shows this provider to clients right now; OfferedReason says why not:
 	// disabled | http_fallback | needs_hotel_domain | callback_not_registered.
 	Offered       bool       `json:"offered"`
@@ -632,8 +579,6 @@ func scanSocial(row interface{ Scan(...any) error }, p *edgeSocialProvider) erro
 	return nil
 }
 
-// socialMethodSwitches reads the Sign-in methods switch for each identity provider (auth_methods.social).
-// ok=false when it cannot be read.
 func (s *server) socialMethodSwitches(ctx context.Context) (map[string]bool, bool) {
 	var raw []byte
 	if err := s.db.QueryRow(ctx, `SELECT COALESCE(auth_methods->'social', '{}'::jsonb)::text FROM tenants WHERE id=$1`,
@@ -653,10 +598,7 @@ func (s *server) socialMethodSwitches(ctx context.Context) (map[string]bool, boo
 	return out, true
 }
 
-// applySocialSwitch: a provider whose Sign-in methods switch is off is NOT offered, whatever its application
-// says -- scd removes it from the portal on exactly that switch (applySocialOffering). The badge used to read
-// "Offered" for a provider the portal did not show. An unreadable switch is reported as not offered (fail
-// closed), with its own reason.
+// applySocialSwitch: a provider whose Sign-in methods switch is off is not offered; an unreadable switch also reads as not offered.
 func applySocialSwitch(p *edgeSocialProvider, switches map[string]bool, ok bool) {
 	if !p.Offered {
 		return
@@ -669,7 +611,6 @@ func applySocialSwitch(p *edgeSocialProvider, switches map[string]bool, ok bool)
 	}
 }
 
-// decorateSocial adds what depends on the portal's current HTTPS state: the callback URLs and the offered line.
 func decorateSocial(p *edgeSocialProvider, st portalTLSState) {
 	p.CallbackURLs = portalHostnames(st)
 	p.Offered, p.OfferedReason = socialOffered(p.Provider, p.Enabled, p.CallbackHosts, st)
@@ -697,8 +638,7 @@ func socialOffered(provider string, enabled bool, callbackHosts []string, st por
 	return false, "callback_not_registered"
 }
 
-// validateCallbackHosts normalises the ticked hostnames and refuses any that is not a portal hostname this
-// appliance has now. The result is deduplicated and in a stable order.
+// validateCallbackHosts refuses any host that is not a current portal hostname; the result is deduplicated and ordered.
 func validateCallbackHosts(hosts []string, st portalTLSState) ([]string, string) {
 	known := map[string]bool{}
 	for _, c := range portalHostnames(st) {
@@ -739,10 +679,7 @@ type socialWriteReq struct {
 	KeyID       *string `json:"key_id,omitempty"`  // apple only
 }
 
-// extraPatch is the JSON object written to the row's extra column: only the
-// keys the request actually carried, trimmed. On create it is the whole
-// column; on update it is merged over what is stored (extra || patch), so a
-// PATCH that omits team_id keeps the stored one.
+// extraPatch holds only the keys the request carried; on update it is merged over the stored extra.
 func (in *socialWriteReq) extraPatch() string {
 	m := map[string]string{}
 	for k, v := range map[string]*string{"tenant": in.Tenant, "team_id": in.TeamID, "key_id": in.KeyID} {
@@ -754,9 +691,7 @@ func (in *socialWriteReq) extraPatch() string {
 	return string(b)
 }
 
-// requestedCallbackHosts resolves what the request asks for: callback_hosts when sent, else the host of a
-// legacy redirect_uri, else nil (unchanged on update, none on create). The redirect URI is checked for shape
-// first, exactly as before, so an older client still gets the same refusal for a URL that could never work.
+// requestedCallbackHosts: callback_hosts when sent, else the host of a legacy redirect_uri, else nil (unchanged on update).
 func (in *socialWriteReq) requestedCallbackHosts() (*[]string, string) {
 	if in.CallbackHosts != nil {
 		return in.CallbackHosts, ""
@@ -773,13 +708,7 @@ func (in *socialWriteReq) requestedCallbackHosts() (*[]string, string) {
 	return &hosts, ""
 }
 
-// validateSocialWrite checks the provider-specific fields of a create
-// (creating=true) or an update and returns an operator-readable reason, or ""
-// when the request is acceptable. It is the save-time half of what scd's
-// loader enforces at start-up: a configuration that could never sign anyone
-// in is refused here, where the operator sees why, rather than logged on the
-// appliance at the next guest's attempt. The secret itself never appears in
-// the message.
+// validateSocialWrite checks provider-specific fields on create or update, returning an operator-readable reason or "".
 func validateSocialWrite(provider string, in *socialWriteReq, creating bool) string {
 	if in.RedirectURI != nil && strings.TrimSpace(*in.RedirectURI) != "" {
 		if msg := validateSocialRedirectURI(strings.TrimSpace(*in.RedirectURI)); msg != "" {
@@ -835,8 +764,7 @@ func (s *server) socialProvidersRoutes() http.Handler {
 	return r
 }
 
-// storeSocialSecret hands a secret to scd, which seals it and keeps it out of the plaintext column. ok=false
-// with an operator-readable reason; the secret itself never appears in it.
+// storeSocialSecret has scd seal the secret; the secret never appears in the reason.
 func (s *server) storeSocialSecret(r *http.Request, id, secret string) (bool, string) {
 	if s.scd == nil {
 		return false, "the secret could not be stored: the service is unavailable"
@@ -895,7 +823,6 @@ func (s *server) listSocialProviders(w http.ResponseWriter, r *http.Request) {
 		applySocialSwitch(&p, switches, switchesOK)
 		out = append(out, p)
 	}
-	// The hostnames are returned beside the list too, so the Add form can offer them before any provider exists.
 	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{},
 		"callback_urls": portalHostnames(st), "https_active": st.HTTPSActive,
 		"canonical_hostname": st.CanonicalHostname, "onegate_hostname": st.OneGateHostname})
@@ -928,7 +855,6 @@ func (s *server) getSocialProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// resolveCallbackHosts turns the request into the hosts to store: nil means "unchanged".
 func resolveCallbackHosts(in *socialWriteReq, st portalTLSState) ([]string, string) {
 	req, msg := in.requestedCallbackHosts()
 	if msg != "" || req == nil {
@@ -997,8 +923,7 @@ func (s *server) createSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "insert failed")
 		return
 	}
-	// The row exists, so scd can seal against its id. A refused secret undoes the row: a provider without a
-	// secret could never sign anyone in, and secret_set would no longer be true by construction.
+	// A refused secret undoes the row: a provider without a secret could never sign anyone in.
 	if ok, msg := s.storeSocialSecret(r, p.ID, strDeref(in.ClientSecret)); !ok {
 		if _, derr := s.db.Exec(ctx, `DELETE FROM social_oauth_providers WHERE id=$1 AND tenant_id=$2`, p.ID, s.tenantID); derr != nil {
 			slog.Error("social provider: secret refused and the row could not be removed", "id", p.ID, "err", derr)
@@ -1025,7 +950,6 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// The provider-specific checks need to know which provider this row is.
 	var provider string
 	err := s.db.QueryRow(ctx,
 		`SELECT provider FROM social_oauth_providers WHERE id=$1 AND tenant_id=$2`,
@@ -1052,7 +976,7 @@ func (s *server) patchSocialProvider(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
-	// The secret first: if scd refuses it, nothing else in the request has been applied either.
+	// The secret goes first: if scd refuses it, nothing else is applied.
 	if secret := strDeref(in.ClientSecret); secret != "" {
 		if ok, msg := s.storeSocialSecret(r, id, secret); !ok {
 			jsonErr(w, http.StatusBadGateway, "secret_not_stored", msg)
@@ -1117,13 +1041,10 @@ func (s *server) deleteSocialProvider(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// socialCallbackPath is the Client Portal's social callback. The redirect URI registered with a provider must
-// point at it, over HTTPS, on a name the guest's browser reaches the portal by.
+// socialCallbackPath is the Client Portal's social callback path.
 const socialCallbackPath = "/auth/social/callback"
 
-// validateSocialRedirectURI refuses a redirect URI that could never bring a guest back to the portal: it must
-// be an absolute https URL whose path is the portal's callback, with no query or fragment (providers compare it
-// exactly, and Apple and Microsoft refuse plain http).
+// validateSocialRedirectURI requires an absolute https URL on that path with no query or fragment (providers compare exactly).
 func validateSocialRedirectURI(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || !u.IsAbs() || u.Host == "" {

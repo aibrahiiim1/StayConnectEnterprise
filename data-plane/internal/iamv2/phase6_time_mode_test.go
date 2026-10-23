@@ -2,14 +2,6 @@ package iamv2
 
 import "testing"
 
-// THE ACCOUNTING MODE IS A PROPERTY OF THE IMMUTABLE PLAN REVISION.
-//
-// Three separate things have to hold for that sentence to be true in practice, and each is one group below:
-// a revision published without a mode is VALIDITY_WINDOW; the new mode can only be published when the build
-// carries the capability, and only with a budget; and no offer-time override may change the mode of an
-// already-published revision, because that is exactly the retroactive reinterpretation immutability exists
-// to prevent.
-
 func planSpec(mode string, quota *int64) PlanPublishSpec {
 	down, up := 1000, 1000
 	return PlanPublishSpec{
@@ -42,8 +34,7 @@ func TestAggregateModeNeedsTheCapability(t *testing.T) {
 	}
 }
 
-// A budget is the point of the mode: without one the entitlement can never exhaust, which is an unlimited
-// package wearing an aggregate label.
+// Without a budget the entitlement could never exhaust.
 func TestAggregateModeRequiresABudget(t *testing.T) {
 	for name, quota := range map[string]*int64{"absent": nil, "zero": ptr64(0), "negative": ptr64(-1)} {
 		spec := planSpec("AGGREGATE_ONLINE_TIME", quota)
@@ -60,7 +51,6 @@ func TestUnknownTimeModeIsRefused(t *testing.T) {
 	}
 }
 
-// THE TIER MAY NOT CHOOSE THE MODE, whatever the capability says.
 func TestATierCannotOverrideTheAccountingMode(t *testing.T) {
 	plan := PlanRevisionRow{DownKbps: 1000, UpKbps: 1000, MaxConcurrentDevices: 2,
 		TimeAccountingMode: "VALIDITY_WINDOW"}
@@ -71,7 +61,6 @@ func TestATierCannotOverrideTheAccountingMode(t *testing.T) {
 	}
 }
 
-// ...and a revision that genuinely carries the mode is granted under it.
 func TestAnAggregateRevisionIsGrantedUnderItsOwnMode(t *testing.T) {
 	plan := PlanRevisionRow{DownKbps: 1000, UpKbps: 1000, MaxConcurrentDevices: 2,
 		TimeAccountingMode: "AGGREGATE_ONLINE_TIME"}
@@ -82,7 +71,6 @@ func TestAnAggregateRevisionIsGrantedUnderItsOwnMode(t *testing.T) {
 	if got.TimeAccountingMode != "AGGREGATE_ONLINE_TIME" {
 		t.Fatalf("the grant snapshot says %q", got.TimeAccountingMode)
 	}
-	// ...and a VALIDITY_WINDOW revision is unchanged.
 	plan.TimeAccountingMode = "VALIDITY_WINDOW"
 	got, err = BuildGrantSnapshot(GrantTier{}, plan, PackageRevisionRow{})
 	if err != nil || got.TimeAccountingMode != "VALIDITY_WINDOW" {

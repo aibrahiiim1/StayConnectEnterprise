@@ -12,9 +12,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/totp"
 )
 
-// `ctrlapi check-mfa-key` (central-deploy.sh runs it before switching releases): with no authenticator set up any
-// key passes; once one is, the right key passes and a different key is refused, so a deploy cannot start a
-// Central that would refuse every operator.
 func TestCheckKeyCatchesTheWrongKey(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()

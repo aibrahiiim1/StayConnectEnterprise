@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// CLIENT ACCOUNTS: MANAGE AND REMOVE. Manage shows the verification state, packages and devices of one account and
-// offers the verification adjustments; Remove says what it did (deleted, or removed with history kept); a removed
-// account is badged and offers only Manage.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -51,7 +47,6 @@ function wire(roles: string[] = ["site_admin"]) {
 beforeEach(() => { get.mockReset(); post.mockReset(); del.mockReset(); wire(); });
 afterEach(() => { cleanup(); vi.resetModules(); });
 
-// The confirmation opened on top of the page (or of the Manage dialog): the last dialog, once it says what it asks.
 const topDialog = (text: RegExp) => waitFor(() => {
   const last = screen.getAllByRole("dialog").at(-1)!;
   if (!text.test(last.textContent ?? "")) throw new Error("the confirmation is not open yet");
@@ -92,7 +87,6 @@ describe("Client accounts — manage and remove", () => {
     expect(within(dialog).getByText("02:aa:bb:cc:dd:01")).toBeTruthy();
     expect(within(dialog).getByText("Holds a slot")).toBeTruthy();
 
-    // MARK VERIFIED VOUCHES FOR AN ADDRESS: a reason and the operator's password, then edged (audit C-4).
     await userEvent.click(within(dialog).getByRole("button", { name: /mark email verified/i }));
     const confirm = await topDialog(/password|disconnected/i);
     const confirmBtn = within(confirm).getByRole("button", { name: /^mark verified$/i });
@@ -114,7 +108,6 @@ describe("Client accounts — manage and remove", () => {
     await within(dialog).findByText("Day pass");
     await userEvent.click(within(dialog).getByRole("button", { name: /remove account/i }));
     expect(await screen.findByText(/its history is kept|history are kept/i)).toBeTruthy();
-    // REMOVE CANNOT BE UNDONE, so it asks for the password (audit C-19).
     const confirm = screen.getAllByRole("dialog").at(-1)!;
     await userEvent.type(within(confirm).getByLabelText(/password/i), "pw");
     await userEvent.click(within(confirm).getByRole("button", { name: /^remove account$/i }));
@@ -132,7 +125,6 @@ describe("Client accounts — what each role is offered (C-3, C-4, C-18)", () =>
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("Day pass");
     expect(within(dialog).queryByRole("button", { name: /mark email verified/i })).toBeNull();
-    // It still reads Active sessions, so the Device view is offered -- read-only.
     expect(within(dialog).getByRole("button", { name: /^device$/i })).toBeTruthy();
   });
 

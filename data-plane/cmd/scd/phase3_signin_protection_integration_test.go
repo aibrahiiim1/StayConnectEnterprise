@@ -2,26 +2,16 @@
 
 package main
 
-// GUEST SIGN-IN PROTECTION AT THE AUTHENTICATION PATH ITSELF.
-//
-// The policy's arithmetic is proved next door, against the SQL that performs it. What can only be proved
-// here is what scd does with the answer: that a restricted device is refused BEFORE its evidence is looked
-// at, that the refusal tells the guest the server's own remaining time, that the refusal is recorded, and
-// that a technical failure never feeds the counter.
-//
-// THE ORDERING IS THE SECURITY PROPERTY. A gate asked after the evidence is evaluated is not a rate limit:
-// the work is already done, the timing already differs, and the mirror has already been asked about a room.
-// So these tests submit CORRECT details from a restricted device and require the refusal anyway.
-//
-// NO REAL GUEST DATA APPEARS ANYWHERE IN THIS FILE.
+// Sign-in protection at the authentication path. The gate must run before the evidence is looked at (afterwards
+// the work and timing already differ), so these submit correct details from a restricted device and require
+// the refusal. No real guest data.
 
 import (
 	"context"
 	"testing"
 )
 
-// restrictThisDevice drives the device to the threshold through the REAL handler, with genuinely wrong
-// details — no row is written by hand, so what is under test includes the wiring that reports a failure.
+// restrictThisDevice drives the device to the threshold through the real handler; no row is written by hand.
 func restrictThisDevice(t *testing.T, f *authFixture) {
 	t.Helper()
 	for i := 0; i < 5; i++ {
@@ -33,14 +23,13 @@ func restrictThisDevice(t *testing.T, f *authFixture) {
 	}
 }
 
-// newRequestUUID gives each deliberate submission its own id, which is what the portal now does and what
-// Delivery A2 exists to guarantee. Reusing one id here would test the replay path instead of this one.
+// newRequestUUID gives each submission its own id; reusing one would test the replay path instead.
 func newRequestUUID(i int) string {
 	const base = "00000068-0000-4000-8000-0000000000"
 	return base + string(rune('0'+i/10)) + string(rune('0'+i%10))
 }
 
-// A RESTRICTED DEVICE IS REFUSED EVEN WITH CORRECT DETAILS, AND IS TOLD HOW LONG TO WAIT.
+// A restricted device is refused even with correct details and told how long to wait.
 func TestIntegration_Protection_CorrectDetailsAreRefusedWhileRestricted(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -60,8 +49,7 @@ func TestIntegration_Protection_CorrectDetailsAreRefusedWhileRestricted(t *testi
 		t.Fatalf("retry_after_seconds = %d; the guest's countdown comes from the server or it is fiction",
 			res.RetryAfterSeconds)
 	}
-	// The refusal happened before the evidence was evaluated, so the record says RATE_LIMITED and carries no
-	// comparison: nothing matched because nothing was compared, and no stay was even counted as a candidate.
+	// Refused before evidence evaluation: RATE_LIMITED, no comparison, no candidate stays.
 	a := lastAttempt(t, f)
 	if a.Result != "RATE_LIMITED" {
 		t.Fatalf("the blocked submission was recorded as %q", a.Result)
@@ -74,8 +62,7 @@ func TestIntegration_Protection_CorrectDetailsAreRefusedWhileRestricted(t *testi
 	}
 }
 
-// EVERY BLOCKED SUBMISSION IS STILL RECORDED. An operator asking "why can this guest not get online" must
-// find the refusals, not a silence — and RATE_LIMITED is the answer that stops them looking at spellings.
+// Every blocked submission is still recorded, so operators find RATE_LIMITED rather than a silence.
 func TestIntegration_Protection_BlockedSubmissionsAreRecorded(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -102,8 +89,7 @@ func TestIntegration_Protection_BlockedSubmissionsAreRecorded(t *testing.T) {
 	}
 }
 
-// A BLOCKED SUBMISSION DOES NOT FEED THE COUNTER. RATE_LIMITED is not a wrong credential, so a guest tapping
-// Connect during their wait cannot extend it — which is the behaviour a waiting guest actually exhibits.
+// A blocked submission does not feed the counter: tapping Connect during the wait cannot extend it.
 func TestIntegration_Protection_ABlockedSubmissionDoesNotCountAgainstTheGuest(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -130,7 +116,7 @@ func TestIntegration_Protection_ABlockedSubmissionDoesNotCountAgainstTheGuest(t 
 	}
 }
 
-// A SUCCESSFUL SIGN-IN CLEARS THE COUNTER, through the real handler and the real grant path.
+// A successful sign-in clears the counter.
 func TestIntegration_Protection_ASuccessfulSignInClearsTheCounter(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -144,7 +130,7 @@ func TestIntegration_Protection_ASuccessfulSignInClearsTheCounter(t *testing.T) 
 		t.Fatalf("the correct surname did not verify after four mistakes: %+v", res)
 	}
 
-	// Four more wrong submissions would restrict a device whose counter had NOT been cleared.
+	// Four more wrong submissions would restrict a device whose counter was not cleared.
 	for i := 0; i < 4; i++ {
 		_, r := post(t, f.p3.resolveHandler, f.resolveBody("412", "WrongAgain", "", newRequestUUID(50+i)))
 		if r.FailureClass == "RATE_LIMITED" {
@@ -153,8 +139,7 @@ func TestIntegration_Protection_ASuccessfulSignInClearsTheCounter(t *testing.T) 
 	}
 }
 
-// THE DEVICE, NOT THE ROOM. A restricted device stays restricted whatever room it types next, and its
-// restriction reaches nobody else.
+// The device, not the room, is restricted; the restriction reaches nobody else.
 func TestIntegration_Protection_TheRestrictionFollowsTheDeviceNotTheRoom(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -162,13 +147,13 @@ func TestIntegration_Protection_TheRestrictionFollowsTheDeviceNotTheRoom(t *test
 
 	restrictThisDevice(t, f)
 
-	// A different room from the same device: still refused, and refused for waiting rather than for the room.
+	// A different room from the same device is still refused, for waiting.
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("777", "Okonkwo", "", newRequestUUID(60)))
 	if res.FailureClass != "RATE_LIMITED" {
 		t.Fatalf("changing the room escaped the restriction: failure_class=%q", res.FailureClass)
 	}
 
-	// A different device on the same guest network is unaffected, so the guest who lives in 412 can sign in.
+	// A different device on the same network is unaffected.
 	body := f.resolveBody("412", "Okonkwo", "", newRequestUUID(61))
 	body["device"] = map[string]string{"ip": f.net.otherIP, "mac": "02:00:00:cc:dd:ee"}
 	_, other := post(t, f.p3.resolveHandler, body)
@@ -177,9 +162,8 @@ func TestIntegration_Protection_TheRestrictionFollowsTheDeviceNotTheRoom(t *test
 	}
 }
 
-// THE NETWORK PAUSE (migration 0136, GDPR audit A4). Changing the MAC defeats the device rule, so many wrong
-// room sign-ins on one network pause room sign-in there for every device: correct details are refused, before
-// the evidence is looked at, like a device restriction. A device staff confirm as a genuine guest gets through.
+// Network pause: changing the MAC defeats the device rule, so many wrong sign-ins on one network pause room
+// sign-in there for every device, before evidence is looked at. A staff-confirmed device gets through.
 func TestIntegration_Protection_NetworkPauseRefusesUntilStaffConfirmTheDevice(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()

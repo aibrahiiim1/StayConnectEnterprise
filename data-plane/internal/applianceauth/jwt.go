@@ -1,12 +1,7 @@
-// Package applianceauth signs outbound requests from scd/portald to the
-// control plane with an Ed25519-backed JWT. The format is mirrored on the
-// control-plane side (control-plane/internal/applianceauth); keep the two
-// in sync.
+// Package applianceauth signs outbound scd/portald requests to the control plane with an Ed25519 JWT; mirrored in control-plane/internal/applianceauth,
+// keep the two in sync.
 //
-// A signed request BINDS the whole HTTP call (method, path, body hash,
-// audience, key id) so a captured token cannot be replayed against a
-// different call. Format: header.payload.signature, base64url (no padding),
-// alg="EdDSA".
+// A signed request BINDS the whole HTTP call (method, path, body hash, audience, key id) so a captured token cannot be replayed against another call.
 package applianceauth
 
 import (
@@ -20,17 +15,13 @@ import (
 	"time"
 )
 
-// Audience must match the control-plane's expected audience.
 const Audience = "stayconnect-cloud-api"
 
-// DefaultLifetime is how long a signed request stays valid. Short is good —
-// scd mints per-call; the verifier caps this at 60s and allows ~5s skew.
+// The verifier caps lifetime at 60s and allows ~5s skew.
 const DefaultLifetime = 30 * time.Second
 
-// Version is the appliance software version stamped into signed requests.
 var Version = "dev"
 
-// SetVersion sets the software version reported in signed requests.
 func SetVersion(v string) {
 	if v != "" {
 		Version = v
@@ -61,8 +52,7 @@ func KeyID(pub ed25519.PublicKey) string {
 	return fmt.Sprintf("%x", sum[:8])
 }
 
-// SignRequest produces a JWT that binds appliance identity to this exact
-// HTTP call. body may be nil for GET/DELETE.
+// Binds appliance identity to this exact HTTP call; body may be nil for GET/DELETE.
 func SignRequest(key ed25519.PrivateKey, applianceID, method, path string, body []byte) (string, error) {
 	now := time.Now().UTC()
 	var nonce [16]byte
@@ -93,9 +83,6 @@ func SignRequest(key ed25519.PrivateKey, applianceID, method, path string, body 
 	return signingInput + "." + b64(sig), nil
 }
 
-// Sign is a compatibility wrapper for a GET identity assertion against a
-// fixed path.
-//
 // Deprecated: prefer SignRequest with the real method/path/body.
 func Sign(key ed25519.PrivateKey, applianceID string) (string, error) {
 	return SignRequest(key, applianceID, "GET", "/v1/appliance/hello", nil)

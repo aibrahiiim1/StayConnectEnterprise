@@ -1,14 +1,7 @@
-// Package whatsapp delivers a one-time sign-in code as a WhatsApp message.
-//
-// WHATSAPP IS NOT SMS. It is a separate identity channel with its own licence module (whatsapp_otp), its own
-// Sign-in methods switch and its own provider row (notification_providers.channel = 'whatsapp').
-//
-// A business-initiated WhatsApp message may only be sent from a template the provider has approved. A one-time
-// code therefore travels as a PARAMETER of an approved AUTHENTICATION template, never as free text: the
-// adapters here take the code and fill the template, and there is no way to hand them a message body.
-//
-// Nothing in this package logs a credential or a code. Logs carry the provider, the HTTP status and the last
-// digits of the destination only.
+// Package whatsapp delivers a one-time sign-in code over WhatsApp, a separate channel from SMS (own licence
+// module whatsapp_otp, own provider row). Business-initiated messages need an approved template, so the code
+// travels only as an AUTHENTICATION template parameter, never free text. Nothing here logs a credential or
+// code; logs carry the provider, HTTP status and the last digits of the destination.
 package whatsapp
 
 import (
@@ -24,12 +17,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 )
 
-// Sender delivers one code.
 type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// Message is one code to deliver. There is deliberately no free-text body.
+// Message deliberately has no free-text body.
 type Message struct {
 	To         string // E.164, e.g. "+15551234567"
 	Code       string // the one-time code; a template parameter, never logged
@@ -37,7 +29,6 @@ type Message struct {
 	Locale     string // preferred template language; empty = the provider's configured language
 }
 
-// Errors are typed so a caller can tell a configuration fault from a refused or failed delivery.
 var (
 	ErrConfig      = errors.New("whatsapp: provider is not configured")
 	ErrInvalidDest = errors.New("whatsapp: destination must be an E.164 number")
@@ -47,10 +38,10 @@ var (
 // ProviderError is a delivery the provider refused or could not accept.
 type ProviderError struct {
 	Provider string // "meta" | "twilio"
-	Status   int    // HTTP status; 0 when the request never completed
-	Code     string // provider error code, when it gave one
-	Message  string // provider error message, when it gave one
-	Err      error  // transport error, when there was one
+	Status   int    // 0 when the request never completed
+	Code     string
+	Message  string
+	Err      error // transport error
 }
 
 func (e *ProviderError) Error() string {
@@ -73,7 +64,7 @@ func (e *ProviderError) Error() string {
 
 func (e *ProviderError) Unwrap() error { return e.Err }
 
-// validE164 is a minimal shape check: '+' then 8..15 digits. Normalisation happens upstream (phone.Normalize).
+// validE164 is a shape check only; normalisation happens upstream (phone.Normalize).
 func validE164(s string) bool {
 	if len(s) < 9 || len(s) > 16 || s[0] != '+' {
 		return false
@@ -86,7 +77,6 @@ func validE164(s string) bool {
 	return true
 }
 
-// Suffix returns the last four characters of a destination for logs.
 func Suffix(to string) string {
 	if len(to) <= 4 {
 		return "****"
@@ -104,10 +94,8 @@ func checkMessage(m Message) error {
 	return nil
 }
 
-// Stub records outgoing codes to a local file for development only. It never contacts a provider.
-//
-// In a production build (buildprofile.Production) it records only that a message was not delivered and never
-// writes the code (audit B-13): the stub is also the fallback for a site with no WhatsApp provider configured.
+// Stub records codes to a local file for development and never contacts a provider. In a production build it
+// writes only that nothing was delivered, never the code; it is also the fallback when no provider is configured.
 type Stub struct {
 	Path string
 	mu   sync.Mutex
@@ -115,7 +103,6 @@ type Stub struct {
 	redact bool
 }
 
-// NewStub builds a development stub writing to path (default /var/log/stayconnect/otp-whatsapp.log).
 func NewStub(path string) *Stub {
 	if path == "" {
 		path = "/var/log/stayconnect/otp-whatsapp.log"
@@ -123,8 +110,7 @@ func NewStub(path string) *Stub {
 	return &Stub{Path: path, redact: buildprofile.Production}
 }
 
-// Send appends the message to the stub file (the development stand-in for the recipient's phone). The code is
-// written to that file only, never to the process log.
+// Send appends to the stub file; the code is never written to the process log.
 func (s *Stub) Send(_ context.Context, m Message) error {
 	if err := checkMessage(m); err != nil {
 		return err

@@ -1,33 +1,8 @@
 package main
 
-// THE IAM-v2 GUEST-ACCOUNT LIFECYCLE.
-//
-// THE DEFECT THIS CLOSES
-// ----------------------
-// Switching only CREATE to IAM-v2 produced a split authority that was worse than either side alone:
-// POST /edge/v1/guest-accounts wrote iam_v2.guest_access_accounts, while list, get, patch, set-password,
-// disconnect and delete all still read and wrote public.guest_accounts. Measured on the DEVELOPMENT
-// appliance: GET returned the legacy accounts (ahmed, devguest1) and did NOT return devguest2/devguest3,
-// created seconds earlier through that same API. An operator created an account under IAM-v2 authority and
-// watched it vanish, while every account they could still see was one IAM-v2 would refuse to authenticate.
-//
-// So the rule this file enforces is: ONE authority per request, chosen by the same config the authenticator
-// is gated on, for EVERY operation and not just the one that happened to be implemented first.
-//
-//   ACCOUNT enabled  -> every operation reads and writes iam_v2 only.
-//   ACCOUNT disabled -> every operation keeps its existing legacy behaviour, byte for byte.
-//
-// There is deliberately no dual write and no "try iam_v2, fall back to legacy" lookup. A fallback would make
-// an IAM-v2 account and a legacy account with the same username indistinguishable through the API, which is
-// precisely the ambiguity that let the original authority defect hide.
-//
-// RESPONSE SHAPE. The Hotel Admin UI is unchanged, so these handlers return the same edgeGuestAccount JSON.
-// Two fields need care rather than invention:
-//   * template_id: IAM-v2 has no template. What a subject may acquire is decided by package eligibility
-//     rules at listing time. The field is returned EMPTY rather than back-filled from a legacy row, because
-//     borrowing a legacy plan id here would recreate the dependency that was just removed.
-//   * max_devices: likewise a property of the pinned package/service-plan revision at acquisition time, not
-//     of the credential. Returned as null (unknown) rather than guessed.
+// One authority per request: when ACCOUNT is enabled every operation reads and writes iam_v2 only. There is
+// no dual write and no fall back to legacy, which would make same-named accounts indistinguishable.
+// IAM-v2 has no template_id or max_devices on the credential; they are not back-filled from legacy rows.
 
 import (
 	"context"
@@ -43,59 +18,43 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// contextT keeps the helper signature readable; it is just context.Context.
 type contextT = context.Context
 
 const iamv2MethodAccount = iamv2.MethodAccount
 
-// iamv2AccountAuthority reports whether IAM-v2 owns guest-account records for this request.
 func (s *server) iamv2AccountAuthority() bool {
 	return s.iamv2Cfg.Enabled(iamv2MethodAccount)
 }
 
-// iamv2Account is the IAM-v2 account response.
-//
-// It is NOT edgeGuestAccount. The legacy row carries created_at/updated_at and a template_id;
-// iam_v2.guest_access_accounts records none of them -- checked against information_schema rather than
-// assumed, after an earlier version of this file copied the legacy projection and failed at runtime with
-// `column "created_at" does not exist`.
-//
-// Absent fields are OMITTED rather than filled with a zero time or a borrowed legacy value. A fabricated
-// 0001-01-01 would be indistinguishable from a real timestamp to the UI, and back-filling template_id from
-// a legacy row would restore the very dependency this trial removed. created_at exists since migration 0104
-// and is NULL (omitted) for accounts created before it: they recorded no creation time and none is invented.
+// iamv2Account is not edgeGuestAccount: absent fields are omitted, never filled with a zero time or a legacy
+// value. created_at is NULL (omitted) for accounts created before it was recorded.
 type iamv2Account struct {
-	ID          string     `json:"id"`
-	Username    string     `json:"username"`
-	DisplayName *string    `json:"display_name,omitempty"`
-	Notes       *string    `json:"notes,omitempty"`
-	Enabled     bool       `json:"enabled"`
-	ValidFrom   *time.Time `json:"valid_from,omitempty"`
-	ValidUntil  *time.Time `json:"valid_until,omitempty"`
-	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
-	LoginCount  int64      `json:"login_count"`
-	CreatedAt   *time.Time `json:"created_at,omitempty"`
-	// Live device count for this account, from IAM-v2 session state.
-	ActiveDevices int `json:"active_devices"`
-	// Authority is explicit so an operator or a test never has to infer which domain owns this record.
-	Authority string `json:"authority"`
+	ID            string     `json:"id"`
+	Username      string     `json:"username"`
+	DisplayName   *string    `json:"display_name,omitempty"`
+	Notes         *string    `json:"notes,omitempty"`
+	Enabled       bool       `json:"enabled"`
+	ValidFrom     *time.Time `json:"valid_from,omitempty"`
+	ValidUntil    *time.Time `json:"valid_until,omitempty"`
+	LastLoginAt   *time.Time `json:"last_login_at,omitempty"`
+	LoginCount    int64      `json:"login_count"`
+	CreatedAt     *time.Time `json:"created_at,omitempty"`
+	ActiveDevices int        `json:"active_devices"`
+	Authority     string     `json:"authority"`
 
-	// EMAIL ACCOUNTS (self-service contract §2-§3, migration 0117). A self-registered account is one a client
-	// opened on the portal with their email address; its username IS that address.
+	// A self-registered account is one a client opened on the portal; its username is their email address.
 	SelfRegistered       bool       `json:"self_registered"`
 	EmailVerified        bool       `json:"email_verified"`
 	EmailVerifiedAt      *time.Time `json:"email_verified_at,omitempty"`
 	VerificationDeadline *time.Time `json:"verification_deadline,omitempty"`
 	GraceUntil           *time.Time `json:"grace_until,omitempty"`
 	GraceExtensionsUsed  int        `json:"grace_extensions_used"`
-	// Suspended: unverified past its deadline with no live grace, on a site whose policy suspends. Computed from
-	// the site's self-service settings at read time; ABSENT when those could not be read, rather than guessed.
+	// Suspended is computed at read time and absent when the site settings could not be read.
 	Suspended *bool `json:"suspended,omitempty"`
 }
 
-// accountSuspended is the contract's §3 rule, the same one scd's sweep applies: a self-registered account,
-// unverified, past its deadline, with no grace still running, on a site that requires verification and
-// suspends. A WARN_ONLY site, or one that does not require verification, never suspends.
+// accountSuspended applies the same rule as scd's sweep: unverified, past its deadline, no live grace, on a
+// site that requires verification and suspends (WARN_ONLY never suspends).
 func accountSuspended(a iamv2Account, set selfServiceSettings, now time.Time) bool {
 	if !a.SelfRegistered || a.EmailVerifiedAt != nil {
 		return false
@@ -109,7 +68,6 @@ func accountSuspended(a iamv2Account, set selfServiceSettings, now time.Time) bo
 	return a.GraceUntil == nil || !a.GraceUntil.After(now)
 }
 
-// withVerificationState fills the derived fields once the row has been scanned.
 func (a *iamv2Account) withVerificationState(set *selfServiceSettings, now time.Time) {
 	a.EmailVerified = a.EmailVerifiedAt != nil
 	if set != nil {
@@ -118,26 +76,11 @@ func (a *iamv2Account) withVerificationState(set *selfServiceSettings, now time.
 	}
 }
 
-// THERE IS NO ACCOUNT LOCKOUT ON THIS SURFACE, AND THERE NEVER WAS ONE.
+// There is no account lockout: nothing sets failed_attempts or locked_until (the authenticator would honour
+// locked_until, so the columns stay), and sign-in protection is per device. The projection omits locked_until
+// because an always-zero "locked out" count would read as a measurement.
 //
-// iam_v2.guest_access_accounts carries failed_attempts and locked_until, and the authenticator honours
-// locked_until if it is ever set (internal/iamv2/adapters.go denies with reason "locked"). Nothing in the
-// product sets either of them. The accepted protection against repeated failed sign-ins is DEVICE-BASED —
-// site_guest_signin_protection, guest_signin_restrictions and sign_in_attempts (migration 0068), served by
-// resources_signin_protection.go — which restricts the DEVICE that is guessing, not the account it is guessing
-// at.
-//
-// So locked_until was a column that could only ever read NULL, and this API reported it: a "Locked out"
-// counter that was structurally zero, a status=locked filter that could only return nothing, and a row badge
-// that could never appear. An always-zero counter is worse than no counter, because an operator reads "0
-// locked out" as a measurement and concludes nobody is being locked out — which is true of the account model
-// and tells them nothing about the devices that ARE being restricted.
-//
-// The projection therefore does not carry it. The COLUMNS STAY: the authenticator reads them and would honour
-// a value, so dropping them would remove a working deny path to tidy a display field. What is removed is the
-// claim that this screen measures something.
-//
-// iamv2AccountCols is the projection shared by list, get and patch so the three cannot drift apart.
+// iamv2AccountCols is shared by list, get and patch so they cannot drift apart.
 const iamv2AccountCols = `id, username, display_name, notes, enabled,
                 valid_from, valid_until, last_login_at, login_count, created_at,
                 self_registered, email_verified_at, verification_deadline, grace_until, grace_extensions_used`
@@ -154,8 +97,7 @@ func scanIAMv2Account(row interface{ Scan(...any) error }, a *iamv2Account) erro
 	return nil
 }
 
-// verificationSettings reads the site's self-service settings for the suspended flag. Nil when they cannot be
-// read: the list still answers, and the flag is left out rather than invented.
+// verificationSettings returns nil when the settings cannot be read; the flag is then left out, not invented.
 func (s *server) verificationSettings(ctx contextT) *selfServiceSettings {
 	set, err := s.selfServiceSettingsFor(ctx)
 	if err != nil {
@@ -164,27 +106,19 @@ func (s *server) verificationSettings(ctx contextT) *selfServiceSettings {
 	return &set.selfServiceSettings
 }
 
-// CLIENT ACCOUNTS ARE PAGED, SEARCHED AND COUNTED ON THE SERVER, the Stays pattern (resources_phase3.go).
-//
-// The list used to return every account of the site, then ask for each one's live device count in a separate
-// query (one round trip per account), and leave searching and counting to the browser. It now returns one page,
-// newest first, with the counters computed over EVERY matching account in the same request, and the device
-// counts joined in one query.
-//
-// THE SEARCH TEXT TRAVELS IN A HEADER (X-Account-Search), NOT THE URL: it is a username or a person's name, and
-// edged logs request lines.
+// The search text travels in a header (X-Account-Search), not the URL: it is a username or a person's name,
+// and edged logs request lines.
 const (
 	accountsPageSizeDefault = 50
 	accountsPageSizeMax     = 200
 	accountSearchHeader     = "X-Account-Search"
 	accountSearchMaxLen     = 100
-	// The free-text fields staff type, in characters. The Admin Console mirrors them as maxLength.
+	// Characters; the Admin Console mirrors them as maxLength.
 	accountDisplayNameMax = 120
 	accountNotesMax       = 1000
 )
 
-// accountsSummary counts only what this domain can actually answer for. There is deliberately no "locked"
-// count: see the note on iamv2AccountCols.
+// accountsSummary has no "locked" count; see iamv2AccountCols.
 type accountsSummary struct {
 	Total         int `json:"total"`
 	Enabled       int `json:"enabled"`
@@ -192,8 +126,6 @@ type accountsSummary struct {
 	DevicesOnline int `json:"devices_online"`
 }
 
-// accountFrom projects one account with its live device count. The LATERAL replaces the per-row query the list
-// used to run: one statement for the page, however many accounts it holds.
 const accountFrom = `FROM iam_v2.guest_access_accounts a
 	  LEFT JOIN LATERAL (
 	      SELECT count(DISTINCT s.device_id)::int AS active_devices
@@ -201,9 +133,8 @@ const accountFrom = `FROM iam_v2.guest_access_accounts a
 	        JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 	       WHERE e.guest_account_id = a.id AND s.ended IS NULL) dev ON true`
 
-// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|removed), $4 search pattern. A REMOVED
-// account (guest_accounts_manage.go) is listed only under its own filter: it can never sign in again, and
-// counting it among the disabled ones would read as an account staff could re-enable.
+// accountFilter: $1 tenant, $2 site, $3 status (enabled|disabled|removed), $4 search pattern. A removed
+// account is listed only under its own filter, or it would read as one staff could re-enable.
 const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
 	  AND ($3::text IS NULL AND NOT ` + sqlRemoved + `
 	       OR ($3 = 'enabled'  AND a.enabled)
@@ -212,10 +143,8 @@ const accountFilter = `WHERE a.tenant_id=$1 AND a.site_id=$2
 	  AND ($4::text IS NULL OR a.username ILIKE $4 OR a.display_name ILIKE $4)`
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
-	// Guest accounts are tenant/site scoped, and a factory-clean appliance has neither until its signed
-	// assignment arrives. Querying anyway compares a uuid column against '' and fails, which reached the
-	// operator as "Could not load guest accounts -- the appliance did not answer": a report of a broken
-	// appliance, on an appliance that is working exactly as intended.
+	// A factory-clean appliance has no tenant/site until its signed assignment arrives; querying anyway fails
+	// on a uuid compared with '' and looks like a broken appliance.
 	if s.tenantID == "" || s.siteID == "" {
 		writeAwaitingAssignment(w, "guest accounts")
 		return
@@ -227,9 +156,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	case "enabled", "disabled", "removed":
 		statusArg = v
 	default:
-		// "locked" is refused rather than quietly accepted and answered with an empty page: a filter that
-		// always matches nothing reads as "no account is locked out", which is a measurement this domain
-		// cannot make. Repeated-failure protection is per DEVICE (migration 0068).
+		// "locked" is refused: an always-empty filter would read as "no account is locked out".
 		jsonErr(w, http.StatusBadRequest, "bad_request", "status must be enabled, disabled or removed")
 		return
 	}
@@ -265,7 +192,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// The counters are over EVERY matching account, so they describe the site, not the page on screen.
+	// Counters cover every matching account, not just the page.
 	var sum accountsSummary
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
 	           count(*) FILTER (WHERE a.enabled)::int,
@@ -278,8 +205,7 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// NEWEST FIRST. Accounts created before migration 0104 have no creation time and sort after every dated
-	// one, by username; id breaks the last tie so a page boundary is stable.
+	// Accounts without a creation time sort last by username; id breaks ties so page boundaries are stable.
 	rows, err := s.db.Query(ctx, `SELECT a.id, a.username, a.display_name, a.notes, a.enabled,
 	           a.valid_from, a.valid_until, a.last_login_at, a.login_count, a.created_at,
 	           a.self_registered, a.email_verified_at, a.verification_deadline, a.grace_until,
@@ -317,13 +243,12 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 	if more {
 		out = out[:size]
 	}
-	// The site's verification policy is read once for the page, from the same function scd enforces with.
 	set := s.verificationSettings(ctx)
 	now := time.Now()
 	for i := range out {
 		out[i].withVerificationState(set, now)
 	}
-	// The AUTHORITY is stated on the ENVELOPE, not only on each row: an empty site has no rows to ask.
+	// The authority is on the envelope too: an empty site has no rows to carry it.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out, "meta": listMeta{HasMore: more}, "authority": "iam_v2",
 		"page": page, "page_size": size, "summary": sum,
@@ -346,10 +271,7 @@ func (s *server) getGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-// iamv2ActiveDeviceCount counts distinct devices currently online for this account, from IAM-v2 session
-// state. Best effort: a counting failure must not fail the whole list, so it reports 0 and the caller still
-// gets its accounts. It is a display field, not an enforcement input -- the device LIMIT is enforced in the
-// entitlement/session domain, not here.
+// iamv2ActiveDeviceCount is a best-effort display figure (0 on failure), not an enforcement input.
 func (s *server) iamv2ActiveDeviceCount(ctx contextT, accountID string) int {
 	var n int
 	err := s.db.QueryRow(ctx, `
@@ -363,18 +285,15 @@ func (s *server) iamv2ActiveDeviceCount(ctx contextT, accountID string) int {
 	return n
 }
 
-// accountPatchOut is the edited account, plus what the edit did beyond the row when it disabled or enabled it.
-// The account fields are embedded, so the response is the same object the Admin Console already reads.
 type accountPatchOut struct {
 	iamv2Account
-	// Disable / Enable (decision D-A, migration 0120). Present only when the enabled flag changed.
+	// Present only when the enabled flag changed.
 	PackagesSuspended    *int `json:"packages_suspended,omitempty"`
 	PackagesResumed      *int `json:"packages_resumed,omitempty"`
 	DisconnectedSessions *int `json:"disconnected_sessions,omitempty"`
 	DisconnectFailures   *int `json:"disconnect_failures,omitempty"`
 }
 
-// accountValidityError is the one rule a validity window must satisfy: it must not end before it starts.
 func accountValidityError(from, until *time.Time) string {
 	if from != nil && until != nil && !until.After(*from) {
 		return "valid until must be later than valid from"
@@ -382,13 +301,11 @@ func accountValidityError(from, until *time.Time) string {
 	return ""
 }
 
-// errAccountRemoved is the answer to any edit of a removed account (contract: Remove cannot be undone).
 const accountRemovedMessage = "this account has been removed; it cannot be enabled, renamed or edited again"
 
 func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// The optional fields can be CLEARED by an explicit null (optional_json.go); username and enabled cannot be
-	// null, because an account always has both.
+	// Optional fields are cleared by an explicit null; username and enabled cannot be null.
 	var in struct {
 		Username    *string             `json:"username,omitempty"`
 		DisplayName optional[string]    `json:"display_name"`
@@ -418,7 +335,6 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 		if f.Value != nil {
 			v := strings.TrimSpace(*f.Value)
 			if v == "" {
-				// An emptied text box clears the field rather than storing an empty string.
 				f.Value = nil
 			} else {
 				f.Value = &v
@@ -435,8 +351,7 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 			fmt.Sprintf("notes are limited to %d characters", accountNotesMax))
 		return
 	}
-	// template_id is accepted by the UI form but has no IAM-v2 meaning. Refuse it explicitly rather than
-	// ignoring it: silently accepting a field that does nothing is how the legacy dependency survived.
+	// template_id has no IAM-v2 meaning; refuse it rather than silently accept a field that does nothing.
 	if in.TemplateID != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request",
 			"template_id has no meaning under IAM-v2 authority: eligibility is decided by package rules")
@@ -456,15 +371,13 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
 		return
 	}
-	// A REMOVED ACCOUNT IS FINAL (contract "Remove"). Every edit is refused -- not only enabling or renaming it,
-	// which the database also refuses (migration 0120), but its notes and dates too: the record is history.
+	// A removed account is final: every edit is refused, not only enabling or renaming.
 	if !cur.enable && isRemovedUsername(cur.username) {
 		jsonErr(w, http.StatusConflict, "removed", accountRemovedMessage)
 		return
 	}
-	// A SELF-SERVICE ACCOUNT'S USERNAME IS THE CLIENT'S EMAIL ADDRESS (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE
-	// §2, §5): renaming it would move the account -- and every entitlement it owns -- to an address its owner never
-	// proved, and send the next reset link there. Staff may enable, disable, annotate or set validity; never rename.
+	// A self-service username is the client's email address; renaming would move the account and its
+	// entitlements to an address the owner never proved and send the next reset link there.
 	if in.Username != nil && cur.selfReg && !strings.EqualFold(cur.username, *in.Username) {
 		jsonErr(w, http.StatusForbidden, "self_service_account",
 			"a self-service account's username is the client's email address and cannot be changed by staff")
@@ -478,9 +391,8 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 	disabling := in.Enabled.Value != nil && !*in.Enabled.Value && cur.enable
 	enabling := in.Enabled.Value != nil && *in.Enabled.Value && !cur.enable
 
-	// DISABLE ENDS THE ACCOUNT'S SESSIONS (decision D-A). The refusals come FIRST, before anything is written:
-	// an appliance that cannot take a device off the network leaves the account exactly as it was, enabled and
-	// online, rather than disabled on paper with its devices still connected.
+	// Disabling ends the account's sessions. Refuse before writing anything: an appliance that cannot take a
+	// device off the network must not leave the account disabled on paper with devices still connected.
 	var live []liveAccountSession
 	if disabling {
 		var st int
@@ -498,7 +410,6 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Each optional field is written only when present; an explicit null clears it.
 	var out accountPatchOut
 	err = scanIAMv2Account(tx.QueryRow(ctx, `
 	    UPDATE iam_v2.guest_access_accounts
@@ -522,9 +433,8 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
 		return
 	}
-	// THE PACKAGE FOLLOWS THE ACCOUNT, in the same transaction: disabled -> ACTIVE becomes SUSPENDED; enabled ->
-	// a package Disable suspended, still inside its window, is ACTIVE again. Through the audited transition writer
-	// (iam_v2.account_entitlements_follow_access, migration 0120); the window keeps running either way.
+	// The package follows the account in the same transaction (disable suspends, enable resumes), through the
+	// audited transition writer; the window keeps running either way.
 	if disabling || enabling {
 		var suspended, resumed int
 		if err := tx.QueryRow(ctx, `SELECT suspended, resumed
@@ -551,8 +461,6 @@ func (s *server) patchGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) 
 
 	payload := map[string]any{"username": out.Username, "authority": "iam_v2"}
 	if disabling {
-		// The account is disabled and its package suspended, so nothing can sign in again; now the devices
-		// already online come off, through scd, and what actually ended is read back.
 		res, _, _, _ := s.revokeAccountSessions(r, ctx, id, out.Username, live)
 		out.DisconnectedSessions = &res.Ended
 		if res.Failed > 0 {
@@ -576,12 +484,7 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	var in struct {
 		Password string `json:"password"`
 		Generate bool   `json:"generate,omitempty"`
-		// DISCONNECT THIS ACCOUNT'S DEVICES NOW, the checkbox on the Set-password dialog.
-		//
-		// The field was missing, and decodeJSON uses DisallowUnknownFields, so the Admin Console's
-		// set-password call — which always sends disconnect_sessions, true or false — was answered
-		// 400 "bad body". Setting a client account's password from the Admin Console did not work at
-		// all; the defect was not that a ticked box was ignored.
+		// decodeJSON disallows unknown fields, and the console always sends this one.
 		DisconnectSessions bool `json:"disconnect_sessions,omitempty"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
@@ -590,10 +493,8 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// A SELF-SERVICE ACCOUNT IS NEVER RE-PASSWORDED BY STAFF (contract §5). Its owner proved control of the email
-	// address by registering with it, and recovers it only by the reset link sent there; a staff-set password -- or
-	// a generated one revealed at the desk -- would be a second recovery path that proves nothing about the address.
-	// Checked before a password is generated, so nothing is produced or revealed for it.
+	// Staff never set a self-service account's password: it recovers only by the reset link to its verified
+	// address, and a staff-set one would be a second recovery path proving nothing. Checked before generating.
 	var selfRegistered, enabledNow bool
 	var currentName string
 	if err := s.db.QueryRow(ctx, `SELECT self_registered, enabled, username FROM iam_v2.guest_access_accounts
@@ -627,8 +528,6 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusInternalServerError, "internal", "hash failed")
 		return
 	}
-	// The account must exist BEFORE anything is disconnected, so a disconnect can never run for an id the
-	// password update would then refuse.
 	var username string
 	if err := s.db.QueryRow(ctx, `SELECT username FROM iam_v2.guest_access_accounts
 	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID).Scan(&username); err != nil {
@@ -636,13 +535,8 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// THE DISCONNECT RUNS BEFORE THE PASSWORD CHANGE, and that ordering is deliberate.
-	//
-	// endAccountSessions refuses up front — before it ends anything — in the two cases it cannot honour
-	// (no enforcement channel, a live session with no address). Refusing first means a refusal leaves the
-	// password UNCHANGED and every device still online, which is a state the operator can retry from. The
-	// other order would reset the password, then refuse, and the dialog's own promise ("the old one stops
-	// working immediately") would already be half-done.
+	// Disconnect before the password change: a refusal then leaves the password unchanged and the operator can
+	// retry, whereas the other order would reset it and then refuse.
 	out := map[string]any{"status": "password_set"}
 	if in.DisconnectSessions {
 		res, st, code, msg := s.endAccountSessions(r, ctx, id, username)
@@ -664,12 +558,8 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusInternalServerError, "internal", "password not set")
 		return
 	}
-	// failed_attempts and locked_until are reset defensively, not because anything sets them: nothing in the
-	// product does (see the note on iamv2AccountCols). The authenticator would honour a locked_until that
-	// somehow existed, so clearing it here cannot leave an operator with an account they reset and still
-	// cannot use.
-	//
-	// NEVER the password or the hash.
+	// The counters are reset defensively so a stray locked_until cannot leave a reset account unusable.
+	// The audit never carries the password or hash.
 	s.audit(r, "guest_account.password_set", "guest_account", id,
 		map[string]any{"username": username, "authority": "iam_v2"})
 	if generated {
@@ -678,8 +568,8 @@ func (s *server) setGuestAccountPasswordIAMv2(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, out)
 }
 
-// selfServicePasswordRefusal is the decision above, as a pure function: (0, "", "") lets a staff-created account
-// through; a self-registered one is refused with words the desk can repeat to the client.
+// selfServicePasswordRefusal returns (0, "", "") for a staff-created account; a self-registered one is refused
+// with words the desk can repeat to the client.
 func selfServicePasswordRefusal(selfRegistered bool) (int, string, string) {
 	if !selfRegistered {
 		return 0, "", ""
@@ -689,18 +579,12 @@ func selfServicePasswordRefusal(selfRegistered bool) (int, string, string) {
 			"with the \"Forgot password\" link on the sign-in page, which emails them a reset link."
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// RESENDING THE VERIFICATION EMAIL (contract §4, §7).
-//
-// scd owns the tokens, the outbox and the resend limits; edged checks the operator's permission (guest-accounts
-// WRITE), that the account is a self-registered one of THIS site still waiting for verification, asks scd at
-// POST /v1/admin/accounts/{id}/resend-verification, and audits what scd accepted. No token or link passes
-// through edged.
+// scd owns the tokens, the outbox and the resend limits; no token or link passes through edged.
 const scdResendVerificationPath = "/v1/admin/accounts/%s/resend-verification"
 
 func (s *server) resendGuestAccountVerification(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// Checked before it is placed in scd's path.
+	// Validate before placing it in scd's path.
 	if !uuidRe.MatchString(id) {
 		jsonErr(w, http.StatusNotFound, "not_found", "account not found")
 		return
@@ -734,10 +618,7 @@ func (s *server) resendGuestAccountVerification(w http.ResponseWriter, r *http.R
 	}
 }
 
-// relayResendVerification asks scd and answers the operator. It reports whether scd accepted the request.
-//
-// A 404 from scd is reported as the feature being unavailable, not as a missing account: the account was found
-// above, so a 404 means the sign-in service on this appliance does not serve the route.
+// relayResendVerification reports whether scd accepted. A scd 404 means the route is not served, not a missing account.
 func (s *server) relayResendVerification(w http.ResponseWriter, r *http.Request, id string) bool {
 	if s.scd == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "scd_unreachable", "the sign-in service could not be reached")
@@ -763,50 +644,26 @@ func (s *server) relayResendVerification(w http.ResponseWriter, r *http.Request,
 			"notice": "The verification email is queued. It is sent as soon as the mail server accepts it."})
 		return true
 	default:
-		// scd's own refusal (resend_wait with retry_after_seconds, resend_limit, ...) is relayed as it is.
 		s.relayScd(w, st, raw)
 		return false
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// ENDING ONE CLIENT ACCOUNT'S LIVE SESSIONS.
-//
-// WHAT THIS DOES AND, MORE IMPORTANTLY, WHAT IT MUST NOT DO. It ends the account's LIVE SESSIONS. It does not
-// touch the Entitlement (not its status, not its expiry), it does not touch consumed_data_bytes or
-// consumed_online_seconds, and it writes no history. The guest signs in again with the new password and
-// resumes on the SAME Entitlement with the SAME remaining allowance — which is what the dialog promises
-// ("The account still works, so they can sign in again") and the reason a disconnect is not a revocation.
-//
-// IT GOES THROUGH scd, the one operator session-termination path, exactly as resources_sessions.go's
-// per-session Disconnect does: POST /v1/sessions/revoke {ip, reason:"admin"}. scd owns nftables and tc, so it
-// is the only component that can actually take the device off the network; it denies the address on the
-// device's bridge, deletes its shaping class, and only then ends the session row (state='ended', ended,
-// end_reason). edged never writes that row itself.
-//
-// The superseded implementation was a single UPDATE from edged that set `ended` and `end_reason =
-// 'admin_disconnect'` and left `state` at 'active'. Three things were wrong with it at once: the device kept
-// its nftables authorization and its traffic (nothing had told scd), the session stayed 'active' so every
-// state-filtered view still counted it, and 'admin_disconnect' is not in the end-reason vocabulary the rest of
-// the system uses. It reported a number of "disconnected sessions" that described rows it had edited, not
-// devices that had lost access.
-//
-// THE COUNT IS MEASURED, NOT ASSUMED. The number returned is how many of this account's sessions are
-// 'ended' AFTER the revocations, read back from the database. A revoke that scd refuses, or that leaves the
-// row untouched, is counted as a failure rather than quietly folded into the success total.
+// Ending an account's live sessions touches neither the Entitlement nor consumed usage nor history; the guest
+// resumes on the same Entitlement. It goes through scd (POST /v1/sessions/revoke), the only component that
+// owns nftables and tc and ends the session row; edged never writes that row. The count is measured by
+// reading back how many sessions are 'ended', so a revoke scd refuses counts as a failure.
 type accountDisconnectResult struct {
 	Ended  int
 	Failed int
 }
 
-// liveAccountSession is one live session of a client account with the address enforcement is keyed on.
 type liveAccountSession struct {
 	id string
 	ip string
 }
 
-// endAccountSessions ends every live session of ONE client account, scoped to this tenant, this site and this
-// account. A non-zero HTTP status is a REFUSAL, and a refusal is always issued before anything is ended.
+// endAccountSessions: a non-zero HTTP status is a refusal, always issued before anything is ended.
 func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, username string) (
 	accountDisconnectResult, int, string, string) {
 	live, st, code, msg := s.accountLiveSessions(ctx, accountID)
@@ -816,13 +673,10 @@ func (s *server) endAccountSessions(r *http.Request, ctx contextT, accountID, us
 	return s.revokeAccountSessions(r, ctx, accountID, username, live)
 }
 
-// accountLiveSessions reads one account's live sessions and decides, BEFORE anything is changed, whether they
-// can be ended from here. A non-zero status is the refusal, with nothing ended. Split from the revoke so Disable
-// can refuse first, then commit the account and its package, then end the sessions.
+// accountLiveSessions decides before anything is changed whether the sessions can be ended; a non-zero status
+// is the refusal. Split from the revoke so Disable can refuse first, commit, then end the sessions.
 func (s *server) accountLiveSessions(ctx contextT, accountID string) ([]liveAccountSession, int, string, string) {
-	// SCOPED THREE WAYS. The entitlement join is what links a session to an account (an Entitlement has
-	// exactly one subject, by the ent_one_subject constraint), and tenant_id/site_id are compared on BOTH
-	// sides so a session can never be reached through an Entitlement of another site.
+	// tenant_id and site_id are compared on both sides so a session is never reached through another site's Entitlement.
 	rows, err := s.db.Query(ctx, `
 	    SELECT s.id::text, COALESCE(host(s.ip), '')
 	      FROM iam_v2.sessions s
@@ -848,19 +702,16 @@ func (s *server) accountLiveSessions(ctx contextT, accountID string) ([]liveAcco
 		return nil, http.StatusInternalServerError, "internal", "could not read this account's sessions"
 	}
 	if len(live) == 0 {
-		// A NO-OP IS A SUCCESS WITH A COUNT OF ZERO, not a refusal. Nothing is audited for a disconnect that
-		// disconnected nothing.
+		// A no-op is a success with a count of zero, and is not audited.
 		return nil, 0, "", ""
 	}
 
-	// REFUSAL 1: no enforcement channel. Without scd nothing can be taken off the network, and ending the
-	// rows alone would be exactly the lie this replaces.
+	// Without scd nothing can be taken off the network; ending the rows alone would be a lie.
 	if s.scd == nil {
 		return nil, http.StatusServiceUnavailable, "enforcement_unavailable",
 			"this appliance cannot withdraw network access right now, so no device was disconnected"
 	}
-	// REFUSAL 2: a live session with no recorded address. Enforcement is keyed on the address, so there is no
-	// honest way to disconnect it from here.
+	// Enforcement is keyed on the address, so a session without one cannot be disconnected from here.
 	noAddr := 0
 	for _, ls := range live {
 		if ls.ip == "" {
@@ -875,7 +726,6 @@ func (s *server) accountLiveSessions(ctx contextT, accountID string) ([]liveAcco
 	return live, 0, "", ""
 }
 
-// revokeAccountSessions ends the sessions accountLiveSessions found, through scd, and reads back what ended.
 func (s *server) revokeAccountSessions(r *http.Request, ctx contextT, accountID, username string,
 	live []liveAccountSession) (accountDisconnectResult, int, string, string) {
 	var res accountDisconnectResult
@@ -883,22 +733,18 @@ func (s *server) revokeAccountSessions(r *http.Request, ctx contextT, accountID,
 		return res, 0, "", ""
 	}
 
-	// One revoke per ADDRESS: scd revokes by address, and two sessions on one address would otherwise be
-	// revoked twice, the second call reporting a failure for a device that is already off.
+	// One revoke per address: scd revokes by address, so a second call would report a failure for a device already off.
 	seen := map[string]bool{}
 	for _, ls := range live {
 		if seen[ls.ip] {
 			continue
 		}
 		seen[ls.ip] = true
-		// The verdict is deliberately not branched on. A device scd could not take off the network is a
-		// reported FAILURE, not a reason to leave the account's other devices online, and whether it came
-		// off is measured from the session rows below rather than taken from this answer.
+		// The verdict is not branched on: one failure must not leave the other devices online, and the outcome is read back below.
 		_, _, _ = s.scd.call(r.Context(), http.MethodPost, "/v1/sessions/revoke",
 			map[string]string{"ip": ls.ip, "reason": "admin"})
 	}
 
-	// READ BACK what actually ended, over exactly the sessions this call set out to end.
 	ids := make([]string, 0, len(live))
 	for _, ls := range live {
 		ids = append(ids, ls.id)
@@ -918,7 +764,6 @@ func (s *server) revokeAccountSessions(r *http.Request, ctx contextT, accountID,
 	return res, 0, "", ""
 }
 
-// disconnectGuestAccountSessionsIAMv2 is the row action: end this account's live sessions and nothing else.
 func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -940,7 +785,3 @@ func (s *server) disconnectGuestAccountSessionsIAMv2(w http.ResponseWriter, r *h
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-
-// acctAuthority is REMOVED. It dispatched each guest-account route between a legacy handler and an IAM-v2
-// one. With the superseded implementation gone there is nothing to dispatch between, and a switch with one
-// destination is dead code that quietly asserts a second destination might return.

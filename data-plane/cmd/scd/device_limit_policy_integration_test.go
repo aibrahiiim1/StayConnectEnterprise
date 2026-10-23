@@ -2,12 +2,7 @@
 
 package main
 
-// DISCONNECT_OLDEST THROUGH THE REAL ACTIVATION HANDLER (migration 0122, audit O-8).
-//
-// The database admits the new device by disconnecting the oldest one, but scd counts the entitlement's live
-// devices first and used to refuse at the limit before the database was ever asked -- so the policy could never
-// have worked from the portal even once the function implemented it. These cases drive activateIAMv2Session as
-// svc_scd, the role and path a client's Connect takes.
+// DISCONNECT_OLDEST through the real activation handler as svc_scd: scd must not refuse at the limit before the database is asked.
 
 import (
 	"bytes"
@@ -19,8 +14,6 @@ import (
 	"time"
 )
 
-// newDeviceAcquiring gives the entitlement's purchase an acquisition chain that names a NEW device (so that
-// device may activate it), seen on the fixture's network.
 func (f *ssFixture) newDeviceAcquiring(t *testing.T, ent, accountID, mac string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -56,7 +49,6 @@ func (f *ssFixture) newDeviceAcquiring(t *testing.T, ent, accountID, mac string)
 	return dev
 }
 
-// limitPlan points the entitlement at a new plan revision: one device, with the given policy.
 func (f *ssFixture) limitPlan(t *testing.T, ent, policy string) {
 	t.Helper()
 	f.ownerExec(t, `WITH r AS (
@@ -68,8 +60,7 @@ func (f *ssFixture) limitPlan(t *testing.T, ent, policy string) {
 	  UPDATE iam_v2.entitlements SET service_plan_revision_id = (SELECT id FROM r) WHERE id = $1::uuid`, ent, policy)
 }
 
-// activateQuick posts to the handler with a short deadline: nothing promotes the session in this harness, so
-// the bounded enforcement wait ends at the deadline and the answer carries the state actually reached.
+// activateQuick uses a short deadline: nothing promotes the session in this harness, so the answer carries the state reached.
 func (f *ssFixture) activateQuick(t *testing.T, body map[string]string) (int, map[string]any) {
 	t.Helper()
 	b, _ := json.Marshal(body)

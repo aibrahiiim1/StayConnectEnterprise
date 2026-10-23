@@ -14,8 +14,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 )
 
-// APPLIANCE LIFECYCLE ACTIONS (docs/CENTRAL_CONTROL_PLANE.md §4). All are platform-only and step-up gated at
-// the router. Each checks the state it starts from; none trusts the console to have checked.
+// Lifecycle actions are platform-only and step-up gated at the router; each re-checks its starting state.
 
 func (b *Base) writeAppliance(w http.ResponseWriter, r *http.Request, code int, id string) {
 	row, ok := b.loadOne(w, r, Scope{All: true}, id)
@@ -37,10 +36,6 @@ func invalidState(w http.ResponseWriter, r *http.Request, msg string, row *Appli
 	Fail(w, r, http.StatusConflict, "invalid_state", msg, map[string]any{"activation": row.Activation})
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Activate
-// ---------------------------------------------------------------------------------------------------------
-
 type activateReq struct {
 	CustomerID  string `json:"customer_id"`
 	NewCustomer *struct {
@@ -61,11 +56,8 @@ type activateReq struct {
 
 // activate: POST /cloud/v1/appliances/{id}/activate — WAITING appliances only.
 //
-// One transaction: create the customer and/or site when asked, bind the appliance to them, sign the
-// assignment and issue the licence. If any step fails nothing is kept — there is never an assignment
-// without a licence, a licence without an assignment, or a half-created customer. The certificate does
-// not block: a CSR that is already waiting is signed right after, and one that arrives later is signed on
-// arrival (certificates.go).
+// One transaction: create the customer/site, bind, sign the assignment and issue the licence, so there is never
+// an assignment without a licence or a half-created customer. A waiting CSR is signed right after.
 func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in activateReq
@@ -115,8 +107,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the row and re-check the state inside the transaction: two operators clicking Activate at once
-	// get one activation and one 409, never two assignments.
+	// Lock and re-check the state: two concurrent activations yield one 409, never two assignments.
 	var lifecycle, held string
 	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(held_customer_id::text,'') FROM appliances WHERE id=$1 FOR UPDATE`, id).
 		Scan(&lifecycle, &held); err != nil {
@@ -127,8 +118,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusConflict, "invalid_state", "the appliance is no longer waiting for activation")
 		return
 	}
-	// An appliance that still holds a customer's data is activated for that customer or not at all
-	// (held_customer.go). Checked inside the locked transaction, before anything is created.
+	// An appliance still holding a customer's data activates only for that customer (held_customer.go); checked before anything is created.
 	target := in.CustomerID
 	if in.NewCustomer != nil {
 		target = ""
@@ -178,7 +168,7 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 		failInternal(w, r, "assign failed", err)
 		return
 	}
-	// A previous life's retirement record must not make the new activation look like a retirement.
+	// A previous retirement record must not make the new activation look like a retirement.
 	if _, err := tx.Exec(ctx, `DELETE FROM appliance_terminal_delivery WHERE appliance_id=$1`, id); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "assign failed")
 		return
@@ -230,10 +220,6 @@ func (b *Base) activate(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Move
-// ---------------------------------------------------------------------------------------------------------
-
 // Operator-facing refusals of a move. The console shows `message` verbatim.
 const (
 	msgMoveCrossCustomer = "An appliance cannot move to another customer. Retire it, factory-reset it and " +
@@ -253,8 +239,8 @@ type moveRefusal struct {
 	Message string
 }
 
-// checkMoveCustomer refuses a move to another customer. The appliance's local data cannot be guaranteed to
-// be cleared in place, so changing customer is Retire -> factory-reset -> register -> Activate.
+// checkMoveCustomer refuses a move to another customer: local data cannot be guaranteed cleared in place, so
+// changing customer is Retire -> factory-reset -> register -> Activate.
 func checkMoveCustomer(currentCustomer, requestedCustomer string) *moveRefusal {
 	if requestedCustomer != currentCustomer {
 		return &moveRefusal{http.StatusConflict, "cross_customer_move", msgMoveCrossCustomer}
@@ -262,8 +248,8 @@ func checkMoveCustomer(currentCustomer, requestedCustomer string) *moveRefusal {
 	return nil
 }
 
-// decideMoveLicence decides what the licence does on a (same-customer) move. It FAILS CLOSED: the licence
-// must follow the appliance, so a move goes ahead only when Central can prove what the licence is.
+// decideMoveLicence decides what the licence does on a same-customer move. It fails closed: a move proceeds
+// only when Central can prove what the licence is.
 //
 //	licensing unavailable (no vendor signer)      -> refuse (503): nothing could re-sign the licence
 //	lookup failed for any reason but ErrNoLicense -> refuse (503): "no licence" was not verified
@@ -288,10 +274,8 @@ func decideMoveLicence(licensingAvailable bool, terms licensing.IssueParams, loo
 
 // move: POST /cloud/v1/appliances/{id}/move {customer_id, site_id, reason}
 //
-// Moves an activated appliance to another site OF THE SAME CUSTOMER: the assignment is re-signed for the new
-// site and the current licence is re-issued with exactly the same terms, bound to the new site, as the next
-// version — in one transaction. customer_id must be the appliance's current customer; any other is refused
-// (checkMoveCustomer). The move fails closed on licensing (decideMoveLicence).
+// Moves an activated appliance to another site of the same customer: assignment re-signed and licence re-issued
+// with the same terms for the new site, in one transaction.
 func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -347,8 +331,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	// Lock the appliance and re-check what the move was decided on: a retirement, a second move or a delete
-	// that committed since the check above wins, and this move is refused rather than re-granting a site.
+	// Lock and re-check: a retirement, move or delete committed since the check above wins and this move is refused.
 	var lockedLifecycle, lockedSite string
 	var lockedRetiring bool
 	if err := tx.QueryRow(ctx, `SELECT a.lifecycle_state, COALESCE(a.site_id::text,''),
@@ -359,8 +342,7 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusConflict, "invalid_state", "The appliance changed state; reload and try again.")
 		return
 	}
-	// The licence is read INSIDE the transaction, under the per-appliance licence lock, so a suspend or renew
-	// racing this move cannot be undone by re-signing stale terms.
+	// Read under the per-appliance licence lock so a racing suspend or renew is not undone by re-signing stale terms.
 	curLicense, lookupErr := b.Lic.CurrentTermsForApplianceTx(ctx, tx, id)
 	carry, ref := decideMoveLicence(true, curLicense, lookupErr, time.Now())
 	if ref != nil {
@@ -410,10 +392,6 @@ func (b *Base) move(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Retire
-// ---------------------------------------------------------------------------------------------------------
-
 // retire: POST /cloud/v1/appliances/{id}/retire {reason, emergency?, confirm_serial?}
 //
 // Normal: two-phase terminal delivery — a signed decommissioned assignment, the appliance acknowledges, then
@@ -456,10 +434,8 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	// ONE TRANSACTION: the licence revocation, the portal hostname release, the signed terminal assignment and
-	// (emergency) the credential shutdown commit together or not at all. A failure leaves the appliance exactly
-	// as it was, so the operator simply retries; there is no half-retired appliance whose licence is revoked
-	// but who was never told to stand down. Licence revocation never blocks the assignment channel or the ack.
+	// One transaction: licence revocation, hostname release, terminal assignment and (emergency) credential shutdown
+	// commit together, so there is never a revoked licence on an appliance that was not told to stand down.
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
 		failInternal(w, r, "Retirement could not start. Try again.", err)
@@ -507,10 +483,6 @@ func (b *Base) retire(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Replace
-// ---------------------------------------------------------------------------------------------------------
-
 // replace: POST /cloud/v1/appliances/{id}/replace {reason}
 //
 // Marks the appliance for replacement. The new hardware registers itself; activating it at the SAME site
@@ -555,16 +527,10 @@ func (b *Base) replace(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Rebind WAN MAC (F8)
-// ---------------------------------------------------------------------------------------------------------
-
 // rebindWANMAC: POST /cloud/v1/appliances/{id}/rebind-wan-mac {reason, new_mac?}
 //
-// After a genuine NIC replacement or VM move. The appliance reports its WAN MAC every time it registers, so
-// by default the licence is re-bound to the MAC Central last heard; new_mac overrides that. The licence is
-// re-signed with EXACTLY its current terms (cap, validity, grace, status) and the next version — it used to
-// come back unlimited and valid for a fresh year.
+// After a NIC replacement or VM move. The licence is re-bound to the MAC Central last heard (new_mac overrides)
+// and re-signed with exactly its current terms and the next version.
 func (b *Base) rebindWANMAC(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -635,16 +601,10 @@ func normalizeMAC(s string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", ":")
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Reissue certificate
-// ---------------------------------------------------------------------------------------------------------
-
 // reissueCertificate: POST /cloud/v1/appliances/{id}/reissue-certificate {reason}
 //
-// Central never holds an appliance's private key, so it cannot mint a certificate on its own. If a CSR is
-// waiting it is signed now (superseding the current certificate). Otherwise the current certificate is
-// revoked, and the appliance's next CSR — which it sends when it finds its certificate refused — is signed on
-// arrival because the appliance is activated.
+// Central never holds the appliance's private key. A waiting CSR is signed now; otherwise the current
+// certificate is revoked and the appliance's next CSR is signed on arrival.
 func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -693,8 +653,7 @@ func (b *Base) reissueCertificate(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, id)
 }
 
-// revokeActiveCertificates revokes every active client certificate of the appliance and records each
-// revocation where the mTLS listener checks it.
+// revokeActiveCertificates revokes every active client certificate and records it where the mTLS listener checks.
 func (b *Base) revokeActiveCertificates(ctx context.Context, id, operatorID, reason string) error {
 	tx, err := b.DB.Begin(ctx)
 	if err != nil {
@@ -717,10 +676,6 @@ func (b *Base) revokeActiveCertificates(ctx context.Context, id, operatorID, rea
 	}
 	return tx.Commit(ctx)
 }
-
-// ---------------------------------------------------------------------------------------------------------
-// Delete
-// ---------------------------------------------------------------------------------------------------------
 
 // deleteAppliance: DELETE /cloud/v1/appliances/{id} {confirm_serial, reason} — waiting or retired only.
 // The record goes; the audit history stays (audit_log has no foreign key).
@@ -749,16 +704,14 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	operatorID, _ := actorOf(r)
-	// Refused BEFORE anything is revoked when Central could not release the portal hostname and certificates
-	// afterwards (its portal-certificate configuration is incomplete while some exist): a refusal later would
-	// leave a half-retired appliance.
+	// Refused before anything is revoked if the portal hostname and certificates could not be released afterwards,
+	// which would leave a half-retired appliance.
 	if err := b.PortalTLS.CanRelease(ctx, id); err != nil {
 		Fail(w, r, http.StatusConflict, "portal_tls_release_pending",
 			"The appliance's portal hostname or certificate cannot be released yet ("+err.Error()+"), so it was not deleted.")
 		return
 	}
-	// Defence in depth: nothing this appliance held may outlive it. Fail closed — a record whose certificate
-	// or licence could not be revoked is not deleted.
+	// Fail closed: a record whose certificate or licence could not be revoked is not deleted.
 	if err := b.revokeActiveCertificates(ctx, id, operatorID, "appliance deleted"); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's certificate could not be revoked, so it was not deleted. Try again.")
 		return
@@ -768,8 +721,8 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "The appliance's licence could not be revoked, so it was not deleted. Try again.")
 		return
 	}
-	// Deleting the record cascades its portal rows away, and with them the worker's memory of the A record
-	// to delete and the certificates to revoke. So that work happens now, before the record goes.
+	// Deleting the record cascades away the portal rows the worker needs to delete the A record and revoke
+	// certificates, so that work happens first.
 	if err := b.PortalTLS.FinalizeRelease(ctx, id); err != nil {
 		Fail(w, r, http.StatusBadGateway, "portal_tls_release_failed",
 			"The appliance's portal hostname or certificate could not be released ("+err.Error()+"), so it was not deleted. Try again.")
@@ -781,8 +734,7 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	// A retired identity key stays refused after its record is gone: the box must be factory-reset (a new
-	// key) before it can register and be activated again.
+	// A retired identity key stays refused after deletion; the box needs a factory reset (new key) to register again.
 	if _, err := tx.Exec(ctx, `
         INSERT INTO retired_appliance_identities (public_key, serial, appliance_id, reason)
         SELECT public_key, serial, id, 'record deleted'
@@ -791,7 +743,7 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		failInternal(w, r, "delete failed", err)
 		return
 	}
-	// Its open alerts are closed, not orphaned: they would otherwise stay "open" with no appliance to act on.
+	// Close its open alerts rather than orphan them.
 	if _, err := tx.Exec(ctx, `
         UPDATE appliance_security_alerts SET status='resolved', resolved=true,
                acknowledged_by=NULLIF($2,'')::uuid, acknowledged_at=now()
@@ -818,12 +770,7 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Housekeeping
-// ---------------------------------------------------------------------------------------------------------
-
-// FetchLogRetention is how long assignment-fetch log rows are kept. The log records every 30-second poll of
-// every appliance; it is a diagnostic trail, not history anybody decides anything from.
+// FetchLogRetention is how long assignment-fetch log rows (one per 30-second poll) are kept.
 const FetchLogRetention = 30 * 24 * time.Hour
 
 // PruneAssignmentFetchLog deletes assignment-fetch log rows older than FetchLogRetention. Nothing else.

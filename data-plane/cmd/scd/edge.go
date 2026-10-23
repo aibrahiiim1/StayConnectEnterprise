@@ -1,6 +1,4 @@
-// Edge-first refactor wiring: signed-license enforcement and walled-garden
-// reconciliation from the site-local DB into nftables. Everything here works
-// fully offline; Central only issues and renews the licence.
+// Signed-licence enforcement and walled-garden reconciliation into nftables; works fully offline (Central only issues and renews the licence).
 package main
 
 import (
@@ -23,28 +21,18 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// licenseRefusal is the ONE decision every guest sign-in method takes before it may admit anybody: whether
-// the cross-tenant transition guard, the local licence state and (for a method that is a commercial feature)
-// the feature entitlement permit a new guest. It returns nil when the request may proceed, otherwise the
-// refusal body -- the same codes whichever method refused, so operators and the portal read one vocabulary.
-// feature == "" means "basic access" (voucher): allowed in every state that permits new sessions.
-//
-// It decides only. licenseGate writes the refusal in the JSON shape the voucher, account, OTP and social
-// routes answer with; the PMS room sign-in (phase3_auth.go) answers in its own uniform envelope and records
-// the refusal as a sign-in attempt, but it asks this same function, so the methods cannot disagree about who
-// is refused.
+// licenseRefusal is the ONE decision every guest sign-in method takes before admitting anybody (cross-tenant guard, licence state,
+// feature entitlement); nil means proceed. feature == "" means basic access (voucher). It only decides: licenseGate writes the
+// JSON refusal, and the PMS room sign-in asks the same function so the methods cannot disagree.
 func (s *server) licenseRefusal(feature string) map[string]any {
-	// An appliance Central deleted after it held a customer admits nobody until it is factory-reset, whatever
-	// licence state a development build would otherwise fall back to (removed_from_central.go).
+	// A Central-deleted appliance admits nobody until factory-reset, whatever licence state a development build would fall back to.
 	if s.isRemovedFromCentral() {
 		return map[string]any{
 			"error":   removedFromCentralCode,
 			"message": "This appliance was removed from OneGate Central; guest access is unavailable.",
 		}
 	}
-	// Fail CLOSED while a cross-tenant data transition is incomplete: never
-	// authorize a guest until the previous tenant's local data has been fully
-	// purged, so one customer's data can never be exposed under another's ownership.
+	// Fail CLOSED while a cross-tenant transition is incomplete: never authorize a guest until the previous tenant's data is purged.
 	if s.tenantBlocked.Load() {
 		return map[string]any{
 			"error":   "tenant_transition_pending",
@@ -52,9 +40,7 @@ func (s *server) licenseRefusal(feature string) map[string]any {
 		}
 	}
 	if s.lic == nil {
-		// Fail CLOSED: a missing license manager is a startup/config fault, never
-		// a reason to authorize a guest. (In practice s.lic is always set before
-		// the listener starts; this is defence in depth.)
+		// Fail CLOSED: a missing licence manager is a config fault, never a reason to authorize a guest.
 		return map[string]any{"error": "unlicensed", "license_state": string(lic.StateUnlicensed)}
 	}
 	if !s.lic.AllowsNewSessions() {
@@ -83,8 +69,7 @@ func (s *server) licenseRefusal(feature string) map[string]any {
 	return nil
 }
 
-// licenseGate blocks a guest auth request that licenseRefusal refuses, answering 403 with the refusal body.
-// Returns true when the request may proceed.
+// licenseGate answers 403 with the refusal body when licenseRefusal refuses; true means proceed.
 func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 	if body := s.licenseRefusal(feature); body != nil {
 		writeJSON(w, http.StatusForbidden, body)
@@ -93,10 +78,7 @@ func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 	return true
 }
 
-// ----- license admin endpoints (unix socket; consumed by edged) -------------
-
-// licenseInstall: POST /v1/license/install -- the Upload licence file action. Every other licence and
-// activation read goes through /v1/central/status (central.go).
+// licenseInstall: POST /v1/license/install (Upload licence file).
 func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	if s.refuseWhileRemoved(w) {
 		return
@@ -112,9 +94,7 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	doc, err := s.lic.Install(r.Context(), raw)
 	if err != nil {
-		// Anti-rollback: an older/superseded/revoked/replayed document is never
-		// accepted — even with a valid signature, unexpired dates, a higher
-		// guest limit, or Central offline.
+		// Anti-rollback: an older, superseded, revoked or replayed document is never accepted, even validly signed.
 		if errors.Is(err, lic.ErrRollback) {
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error":  "LICENSE_ROLLBACK_REJECTED",
@@ -149,8 +129,6 @@ func (s *server) gardenReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "reconciled", "elements": n})
 }
 
-// ----- Hotel Admin TLS certificate lifecycle (root-privileged exec) ----------
-
 const hotelCertManagerBin = "/usr/local/sbin/stayconnect-hotel-admin-cert-manager"
 
 func runHotelCertManager(action string) (int, string) {
@@ -172,8 +150,7 @@ func runHotelCertManager(action string) (int, string) {
 	return code, s
 }
 
-// hotelAdminCertCheck runs a diagnostic-only validation of the active cert.
-// edged has already authenticated + authorized the caller before proxying here.
+// hotelAdminCertCheck is a diagnostic-only validation; edged has already authorized the caller.
 func (s *server) hotelAdminCertCheck(w http.ResponseWriter, r *http.Request) {
 	code, out := runHotelCertManager("check")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": code == 0, "exit": code, "output_tail": out})
@@ -193,17 +170,9 @@ func (s *server) hotelAdminCertRenew(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": code == 0 || code == 2, "exit": code, "output_tail": out})
 }
 
-// ----- walled-garden reconciliation ------------------------------------------
-
-// THE GARDEN IS LEAST PRIVILEGE BY PORT AS WELL AS BY ADDRESS (internal/nft/garden.go).
-//
-// The three baseline resolvers are reachable on port 53 only. What this appliance adds for a sign-in opens the
-// port that sign-in needs and nothing else: an identity provider's consent page and a payment page on TCP 443.
-// An operator's own rule keeps its stated meaning: the ports it names, or every port when it names none.
-//
-// There is no mail-service entry any more. It existed so a device could read an emailed one-time code before
-// signing in; Email accounts need no pre-sign-in Internet at all (the verification link opens the local
-// portal), so nothing is opened for mail (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1).
+// The garden is least privilege by port as well as address (internal/nft/garden.go): baseline resolvers on 53 only; a sign-in opens only the
+// port it needs (identity provider consent and payment pages, TCP 443); an operator rule keeps its stated ports, or all when it names none.
+// No mail-service entry: Email accounts need no pre-sign-in Internet (docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md section 1).
 var gardenBaselineDNS = []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
 
 // gardenRule is one operator rule as stored (walled_garden_rules). Ports empty = every port.
@@ -212,15 +181,13 @@ type gardenRule struct {
 	Ports       []int
 }
 
-// gardenSources is everything the garden is built from, gathered by reconcileWalledGarden.
 type gardenSources struct {
 	Rules   []gardenRule
 	Payment []string // host names -> TCP 443
 	Social  []string // host names -> TCP 443
 }
 
-// planGarden turns the sources into the three sets' contents. resolve answers a host name with its IPv4
-// addresses (nil when it cannot). Pure, so the classification is tested without a kernel or a resolver.
+// planGarden turns the sources into the three sets' contents; pure, so it is tested without a kernel or resolver.
 func planGarden(src gardenSources, resolve func(name string) []string) nft.GardenPlan {
 	ip, tcp, udp := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	pair := func(set map[string]bool, addr string, port int) {
@@ -274,8 +241,7 @@ func planGarden(src gardenSources, resolve func(name string) []string) nft.Garde
 	return nft.GardenPlan{IP: keys(ip), TCP: keys(tcp), UDP: keys(udp)}
 }
 
-// reconcileWalledGarden loads the operator rules and the sign-in-derived host names, resolves names through
-// the guest resolver, and syncs the three garden sets in one transaction. It returns the element count.
+// reconcileWalledGarden syncs the three garden sets in one transaction and returns the element count.
 func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	rows, err := s.db.Query(ctx, `
         SELECT kind, value, COALESCE(ports, '{}') FROM walled_garden_rules
@@ -293,15 +259,12 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 		}
 		src.Rules = append(src.Rules, r)
 	}
-	// Card payment's hosted-page domains (least privilege: only while card payment is licensed, enabled and
-	// deployed, only the providers in use, plus the site's bounded extra list).
+	// Card payment's hosted-page domains: least privilege, only while payment is licensed, enabled and deployed.
 	src.Payment = s.paymentGardenDomains(ctx)
-	// The identity providers' consent pages (contract §8): only providers that are deployed, licensed and
-	// switched on, with an enabled application. The token exchange is server-side and needs none of these.
+	// Identity providers' consent pages only; the token exchange is server-side and needs none.
 	src.Social = s.socialGardenDomains(ctx)
 
-	// Resolve names (best effort, short timeout each, once per name per pass). DNS answers churn; re-resolution
-	// every reconcile pass keeps the sets fresh enough for login/payment endpoints, which is the garden's purpose.
+	// Resolve names best effort, once per name per pass; re-resolving each pass keeps churning DNS answers fresh.
 	resolver := gardenResolver()
 	cache := map[string][]string{}
 	resolve := func(name string) []string {
@@ -331,7 +294,6 @@ func (s *server) reconcileWalledGarden(ctx context.Context) (int, error) {
 	return len(plan.IP) + len(plan.TCP) + len(plan.UDP), nil
 }
 
-// socialGardenDomains lists the pre-auth host names of every social provider the site currently offers.
 func (s *server) socialGardenDomains(ctx context.Context) []string {
 	if s.db == nil {
 		return nil
@@ -370,11 +332,8 @@ func (s *server) socialGardenDomains(ctx context.Context) []string {
 	return out
 }
 
-// gardenResolver resolves garden host names THROUGH THE GUEST RESOLVER (unbound on the appliance, which is the
-// nameserver every client device is handed by DHCP), so the addresses opened are the ones the clients were
-// told -- answers cached by unbound are served to scd and to the phone alike. The appliance's own
-// systemd-resolved can answer differently for a service behind a large CDN, which left a client holding an
-// address the garden had never opened. SCD_GARDEN_RESOLVER overrides the address; "system" uses the host's.
+// gardenResolver resolves THROUGH THE GUEST RESOLVER (unbound), the nameserver clients are handed by DHCP, so the opened addresses are the
+// ones clients were told; systemd-resolved can answer differently behind a CDN. SCD_GARDEN_RESOLVER overrides; "system" uses the host's.
 func gardenResolver() *net.Resolver {
 	addr := strings.TrimSpace(os.Getenv("SCD_GARDEN_RESOLVER"))
 	if addr == "" {
@@ -393,7 +352,6 @@ func gardenResolver() *net.Resolver {
 }
 
 func (s *server) gardenReconcileLoop(ctx context.Context) {
-	// Immediate pass on boot, then every minute.
 	if n, err := s.reconcileWalledGarden(ctx); err != nil {
 		slog.Warn("walled-garden: boot reconcile failed", "err", err)
 	} else {
@@ -409,19 +367,13 @@ func (s *server) gardenReconcileLoop(ctx context.Context) {
 			if _, err := s.reconcileWalledGarden(ctx); err != nil {
 				slog.Warn("walled-garden: reconcile failed", "err", err)
 			}
-			// SMS / WhatsApp code copies that can no longer be used (temp_access_admin.go). They used to be
-			// pruned by the temporary-verification-window loop, which is removed with the email code; a copy is
-			// already deleted the moment its code is verified, so this minute-cadence sweep only catches the
-			// expired, locked and never-used ones.
+			// Prune SMS/WhatsApp code copies that can no longer be used; verified codes are already deleted, so this only catches expired, locked and unused ones.
 			s.pruneOTPEscrow(ctx)
 		}
 	}
 }
 
-// applyLicenseToMethods removes unlicensed auth methods from the tenant
-// config before it reaches the portal, so their tabs never render. Voucher
-// stays — it is the basic-access method available in every non-terminal
-// license state.
+// applyLicenseToMethods removes unlicensed auth methods before the config reaches the portal; voucher stays as basic access.
 func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if s.lic == nil || cfg == nil {
 		return
@@ -438,8 +390,7 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 	if !s.lic.FeatureEnabled(licstate.FeatSocialLogin) {
 		cfg.Social = nil
 	}
-	// Licensed is not enough: the deployed guest authority must accept that kind of identity, or a client who
-	// verifies a code or a social account would be refused after doing everything right.
+	// Licensed is not enough: the deployed guest authority must accept the identity kind, or a client would be refused after doing everything right.
 	if s.modules != nil {
 		if !s.ceiling.ModuleDeployed(lic.ModuleEmailOTP) {
 			cfg.EmailAccount = nil
@@ -454,8 +405,7 @@ func (s *server) applyLicenseToMethods(cfg *tenantcfg.AuthMethods) {
 			cfg.Social = nil
 		}
 	}
-	// Room sign-in is part of the Hotel module: licensed is not enough, the site must have it enabled and the
-	// software deployed (the four-gate resolver decides).
+	// Room sign-in is part of the Hotel module: the site must have it enabled and deployed (four-gate resolver).
 	if !s.lic.FeatureEnabled(licstate.FeatPMS) || (s.modules != nil && !s.moduleEffective(context.Background(), lic.ModuleHospitality)) {
 		cfg.PMS = nil
 	}

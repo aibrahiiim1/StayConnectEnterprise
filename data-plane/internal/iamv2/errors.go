@@ -1,6 +1,5 @@
 package iamv2
 
-// Code is a deterministic, non-sensitive error classification.
 type Code string
 
 const (
@@ -14,16 +13,15 @@ const (
 	ErrSubjectResolve  Code = "subject_resolve"
 	ErrRepo            Code = "repository"
 	ErrSocialStub      Code = "social_stub_refused"
-	// session-after-grant (dark contract)
-	ErrACExpired  Code = "auth_context_expired"
-	ErrACConsumed Code = "auth_context_consumed"
-	ErrACMismatch Code = "auth_context_mismatch"
-	ErrACNotFound Code = "auth_context_not_found"
-	ErrCapacity   Code = "capacity"
-	ErrConflict   Code = "conflict"
+	ErrACExpired       Code = "auth_context_expired"
+	ErrACConsumed      Code = "auth_context_consumed"
+	ErrACMismatch      Code = "auth_context_mismatch"
+	ErrACNotFound      Code = "auth_context_not_found"
+	ErrCapacity        Code = "capacity"
+	ErrConflict        Code = "conflict"
 )
 
-// Error is a deterministic typed error. Msg must never contain secrets, codes, OTPs or PII.
+// Msg must never contain secrets, codes, OTPs or PII.
 type Error struct {
 	Code Code
 	Msg  string
@@ -36,7 +34,6 @@ func (e *Error) Error() string {
 	return "iamv2: " + string(e.Code) + ": " + e.Msg
 }
 
-// CodeOf returns the classification of an error, or "" if it is not an *Error.
 func CodeOf(err error) Code {
 	if e, ok := err.(*Error); ok {
 		return e.Code

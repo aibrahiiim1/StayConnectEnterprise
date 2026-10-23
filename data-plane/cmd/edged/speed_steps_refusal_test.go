@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// O-5: an operator saving a package with speed steps -- more than one grant step, or a step that sets speeds --
-// is refused with a sentence that says why and what to do, before anything is published. A single empty step
-// still saves exactly as before (that path is TestAddWithATakenCodeAnswers409CodeExists).
+// Saving a package with speed steps (more than one grant step, or a step that sets speeds) is refused with a sentence saying why and what to do,
+// before anything is published. A single empty step still saves (TestAddWithATakenCodeAnswers409CodeExists).
 func TestSavingSpeedStepsIsRefusedWithAReason(t *testing.T) {
 	s := commerceTestServer(t, &fakeCommerceRepo{tx: &fakeCommerceTx{}})
 	for _, tiers := range []string{

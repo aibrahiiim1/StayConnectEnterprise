@@ -1,11 +1,6 @@
 "use client";
 
-// CODE EDITOR — for the portal designer's custom CSS and HTML.
-//
-// Deliberately NOT a bundled editor (CodeMirror/Monaco are hundreds of kilobytes, shipped to an appliance, for
-// two fields an administrator edits a few times a year). What an operator actually needs from a code field is:
-// a monospace face, line numbers to match an error message against, Tab that indents instead of leaving the
-// field, no spellcheck or autocorrect mangling selectors, and a visible size budget. That is this.
+// Use a small native editor to avoid shipping a large runtime for two rarely edited fields.
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
@@ -18,7 +13,7 @@ export const CodeEditor = React.forwardRef<
     language: "css" | "html";
     label: string;
     id?: string;
-    /** Maximum length in bytes, shown as a budget. */
+    /** Byte budget, matching the server's limit. */
     maxBytes?: number;
     minRows?: number;
     placeholder?: string;
@@ -34,8 +29,7 @@ export const CodeEditor = React.forwardRef<
   const bytes = React.useMemo(() => new TextEncoder().encode(value).length, [value]);
   const over = maxBytes != null && bytes > maxBytes;
 
-  // Escape "releases" the field: the NEXT Tab moves focus on instead of indenting. Without this a keyboard user
-  // who tabs into the editor can never tab out of it, which is a keyboard trap (WCAG 2.1.2).
+  // Escape lets the next Tab leave the editor instead of indenting.
   const released = React.useRef(false);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -49,7 +43,7 @@ export const CodeEditor = React.forwardRef<
     }
     if (released.current) {
       released.current = false;
-      return; // let the browser move focus
+      return;
     }
     e.preventDefault();
     const el = e.currentTarget;

@@ -1,14 +1,4 @@
-// Phase 4 (DARK) — financial operator surface.
-//
-// These tests are about the two things that would actually hurt if they were wrong:
-//
-//   1. the screens must not display anything they should not have, and must not invent affordances the
-//      backend does not have (a "retry" button on a recovery screen would be a way to double-charge);
-//   2. an operator must be able to understand and complete a reconciliation without guessing.
-//
-// The accessibility assertions are part of that second point rather than a separate concern: on the day
-// this screen matters, someone is reading it under pressure, possibly with a screen reader, and every
-// control needs a name.
+// Recovery screens must not offer retries that could charge a guest twice.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -27,8 +17,6 @@ const HEALTHY = {
   status: "OK" as const, reasons: [] as string[],
 };
 
-// The client is mocked rather than fetch, matching the other page tests: these are assertions about what
-// the SCREEN does with an answer, not about transport.
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api", async (orig) => {
@@ -39,8 +27,7 @@ vi.mock("@/lib/api", async (orig) => {
   };
 });
 
-// route(map) answers each path from a table, and rejects anything not in it -- so a screen that starts
-// calling something new fails loudly instead of silently rendering an empty state.
+// Reject unlisted routes so new API calls fail loudly in these tests.
 function route(map: Record<string, any>) {
   get.mockImplementation(async (path: string) => {
     if (!(path in map)) throw new Error(`unexpected GET ${path}`);
@@ -72,7 +59,6 @@ describe("financial health", () => {
     });
     render(<FinancialHealthView />);
     expect(await screen.findByText("Attention required")).toBeInTheDocument();
-    // the fixed backend code is never shown raw; the operator gets a sentence
     expect(screen.queryByText("UNKNOWN_OUTCOMES_AWAITING_REVIEW")).not.toBeInTheDocument();
     expect(screen.getByText(/nobody knows yet whether the money moved/i)).toBeInTheDocument();
     expect(screen.getByText(/waiting on a manual review decision/i)).toBeInTheDocument();
@@ -83,7 +69,6 @@ describe("financial health", () => {
     render(<FinancialHealthView />);
     expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(screen.getByText(/No payment provider has been integrated or verified/i)).toBeInTheDocument();
-    // no real provider is ever named on this screen
     const body = document.body.textContent ?? "";
     for (const name of ["Stripe", "Adyen", "Checkout.com", "PayPal", "Braintree"]) {
       expect(body).not.toContain(name);
@@ -110,8 +95,6 @@ const HELD_STATUS = {
   recovery: { Epoch: 2, Reason: "RESTORE_DETECTED", Active: true, HeldTotal: 1, HeldOpen: 1,
     EnteredAt: "2026-08-12T10:00:00Z", ReleasedAt: "" },
 };
-// The zero-attempt queue is served alongside the holds. Empty here: these tests are about the ordinary
-// reconciliation path, and a screen that started calling something new should fail loudly.
 const NO_ZERO = {
   queue: [], limit: 200, evidence_contract: { source_types: ["PMS_FOLIO_INSPECTION", "PMS_REPORT"] },
   note: "n/a", eligibility: "n/a",
@@ -131,7 +114,6 @@ describe("financial recovery", () => {
     render(<FinancialRecoveryView />);
     expect(await screen.findByText("Financial recovery")).toBeInTheDocument();
     expect(screen.getByText(/Nothing has been replayed and nothing will be/i)).toBeInTheDocument();
-    // the affordances that must NOT exist
     for (const forbidden of [/retry/i, /resend/i, /re-send/i, /replay/i, /resume now/i, /force/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
@@ -194,7 +176,7 @@ describe("financial recovery", () => {
       note: "provider dashboard shows no charge",
       password: "hunter2",
     });
-    // the author comes from the session, never the request
+    // Derive the author from the session rather than client input.
     expect(Object.keys(sent)).not.toContain("actor");
     expect(Object.keys(sent)).not.toContain("operator_id");
   });
@@ -227,8 +209,6 @@ describe("financial recovery", () => {
     });
     render(<FinancialRecoveryView canAct={false} />);
     await screen.findByText("Financial recovery");
-    // The held item is shown, but a role that may not decide is offered no decision, no password field and
-    // no button that the server would refuse.
     expect(screen.getByText("Payment")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /record/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
@@ -250,7 +230,6 @@ describe("financial recovery", () => {
     ]) {
       expect(el).toHaveAccessibleName();
     }
-    // the password field is not exposed as a textbox role, so it is checked by its label
     expect(screen.getByLabelText(/your password/i)).toHaveAttribute("type", "password");
   });
 
@@ -268,12 +247,7 @@ describe("financial recovery", () => {
   });
 });
 
-// ---------------------------------------------------------------- the zero-attempt path
-//
-// The state a restore can produce that nothing else on the appliance can decide: a charge that was held
-// BEFORE anything was sent, so there is no attempt and the Manual Review queue -- which keys on attempts --
-// cannot show it. Until this section existed the safe database function that resolves it was reachable from
-// no screen at all.
+// Zero-attempt charges cannot enter attempt-keyed Manual Review after restore.
 
 const ZERO_ELIGIBLE = {
   queue: [{

@@ -1,14 +1,6 @@
 "use client";
 
-// CHANGE A CLIENT NETWORK'S VLAN OR PORT, SAFELY.
-//
-// A network's type, port and VLAN cannot be edited in place: the applied configuration is keyed on the network's
-// bridge, and changing what that bridge carries underneath it would leave the rendered configuration describing one
-// VLAN while the live port carried another. So "move this LAN from an untagged port onto a tagged trunk" is a
-// REPLACEMENT: a new network with the new topology that carries everything configured on this one -- addressing,
-// DHCP pools, MAC reservations, DNS, portal and isolation settings, and its PMS route -- while this one is disabled
-// and kept as history. Nothing changes on the wire until the configuration is applied and confirmed, with the
-// usual automatic rollback.
+// Bridge-keyed live configuration makes port or VLAN edits unsafe; replace the network and apply with rollback.
 
 import { useEffect, useState } from "react";
 import { api, ApiError, Interface } from "@/lib/api";

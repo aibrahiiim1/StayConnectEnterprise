@@ -1,13 +1,6 @@
 package main
 
-// THE TEST THAT MAKES THE CLASSIFICATION IMPOSSIBLE TO FORGET.
-//
-// classifyRoute defaults to adminRoute, so a route added later and never classified is REFUSED to non-edged
-// callers rather than exposed. That is the safe direction at runtime and a bad surprise in practice: the
-// forgotten route might be a GUEST route, and the first symptom would be guests unable to sign in.
-//
-// So the runtime fails closed and this test fails loud. It builds the real route list and insists every
-// single path is named in one of the two lists in admin_surface.go -- not merely handled by the default.
+// Every route must be named in guestPrefixes or adminPrefixes; classifyRoute's default-deny would otherwise hide a forgotten guest route until guests cannot sign in.
 
 import (
 	"net/http"
@@ -18,14 +11,7 @@ import (
 	"testing"
 )
 
-// scdRoutePatterns reads the routes out of main.go rather than out of a chi router.
-//
-// WHY THE SOURCE AND NOT chi.Walk. Building the real router means building a *server: a database pool, a
-// PMS registry, a mailer, a metrics registry and the notification loader. That is a live-dependency test
-// pretending to be a unit test, and it would be skipped on a workstation -- which is precisely where a
-// forgotten classification needs to be caught. The registration lines are unambiguous and the regexp below
-// anchors on them; a route registered in a way this does not match shows up as a mismatch in the count
-// assertion at the end rather than silently passing.
+// scdRoutePatterns reads routes from main.go: building the real router needs a DB, PMS registry and mailer.
 func scdRoutePatterns(t *testing.T) []string {
 	t.Helper()
 	src, err := os.ReadFile("main.go")
@@ -48,7 +34,6 @@ func scdRoutePatterns(t *testing.T) []string {
 	return out
 }
 
-// TestEveryRouteIsDeliberatelyClassified is the whole point of the file.
 func TestEveryRouteIsDeliberatelyClassified(t *testing.T) {
 	named := func(path string, prefixes []string) bool {
 		for _, p := range prefixes {
@@ -59,8 +44,6 @@ func TestEveryRouteIsDeliberatelyClassified(t *testing.T) {
 		return false
 	}
 	for _, path := range scdRoutePatterns(t) {
-		// A chi pattern carries {id}; the classifier sees a real path. Neither affects prefix matching,
-		// but comparing the pattern is what keeps this test independent of any particular id.
 		g, a := named(path, guestPrefixes), named(path, adminPrefixes)
 		switch {
 		case g && a:
@@ -74,11 +57,7 @@ func TestEveryRouteIsDeliberatelyClassified(t *testing.T) {
 	}
 }
 
-// TestTheGuestSurfaceIsExactlyWhatPortaldNeeds pins the guest list against its actual consumer.
-//
-// Every path here was read out of cmd/portald, cmd/acctd or deploy/ -- see the caller table in
-// admin_surface.go. If one of these ever classifies as admin, the captive portal breaks, so the test states
-// them one by one rather than trusting the prefixes to keep meaning what they mean today.
+// Each path is a real caller of the guest surface; misclassifying one as admin breaks the captive portal.
 func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 	for _, path := range []string{
 		"/v1/health",
@@ -91,7 +70,7 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 		"/v1/sessions/authorize-credentials",
 		"/v1/sessions/authorize-social",
 		"/v1/sessions/status",
-		"/v1/sessions/revoke", // acctd, enforcing a quota
+		"/v1/sessions/revoke",
 		"/v1/auth/otp/issue",
 		"/v1/auth/social/start",
 		"/v1/auth/account/register",
@@ -123,11 +102,7 @@ func TestTheGuestSurfaceIsExactlyWhatPortaldNeeds(t *testing.T) {
 	}
 }
 
-// TestTheDangerousRoutesAreAdmin names the operations that made this gate necessary.
-//
-// Vouchers are on the list, and they are not the reason it exists. /v1/backup/restore overwrites the
-// database. /v1/license/install changes what the appliance is entitled to serve. /v1/central/offline-package changes
-// which tenant it belongs to. All three were reachable by the process listening on every guest VLAN.
+// The routes that made the admin gate necessary: restore, licence install and offline package were reachable from every guest VLAN.
 func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 	for _, path := range []string{
 		"/v1/backup/restore",
@@ -150,7 +125,6 @@ func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 		"/v1/phase3/signin-attempts/credentials",
 		"/v1/portal/tls/kick",
 		"/v1/portal/tls/renew",
-		// The operator's resend of a verification email: edged only, never the portal.
 		"/v1/admin/accounts/0f8b9a0e-0000-0000-0000-000000000000/resend-verification",
 	} {
 		if classifyRoute(path) != adminRoute {
@@ -159,14 +133,13 @@ func TestTheDangerousRoutesAreAdmin(t *testing.T) {
 	}
 }
 
-// TestAnUnknownPathIsAdministrative is the default-deny property, asserted rather than assumed.
 func TestAnUnknownPathIsAdministrative(t *testing.T) {
 	for _, path := range []string{
 		"/v1/something-added-next-year",
 		"/v1/phase9/anything",
 		"/",
 		"/v1/",
-		"/v1/sessions", // NOT a guest prefix: the guest entries are the specific session routes
+		"/v1/sessions",
 	} {
 		if classifyRoute(path) != adminRoute {
 			t.Errorf("%s classified as GUEST; an unrecognised path must default to administrative", path)
@@ -174,10 +147,7 @@ func TestAnUnknownPathIsAdministrative(t *testing.T) {
 	}
 }
 
-// TestGuestPrefixesCannotBeWidenedByAccident guards the shape of the list itself.
-//
-// "/v1/" or "/v1" in guestPrefixes would make the ENTIRE socket guest-reachable while every other test here
-// still passed, because each one only checks paths it names. This checks the list, not the paths.
+// A "/v1/" guest prefix would expose the whole socket while every other test still passed.
 func TestGuestPrefixesCannotBeWidenedByAccident(t *testing.T) {
 	for _, p := range guestPrefixes {
 		switch p {
@@ -188,7 +158,6 @@ func TestGuestPrefixesCannotBeWidenedByAccident(t *testing.T) {
 			t.Errorf("guestPrefixes entry %q is not a path", p)
 		}
 	}
-	// A prefix must not be a prefix OF an admin prefix, which would swallow it.
 	for _, g := range guestPrefixes {
 		for _, a := range adminPrefixes {
 			if strings.HasPrefix(a, g) {
@@ -199,11 +168,7 @@ func TestGuestPrefixesCannotBeWidenedByAccident(t *testing.T) {
 	}
 }
 
-// TestTheGateRefusesAnAdminRouteAndPassesAGuestRoute exercises the middleware, not just the classifier.
-//
-// On a non-Linux build requireAdminPeer allows everything by design (peer_identity_other.go), so what this
-// can assert portably is that the gate is WIRED: a guest route reaches the handler. The refusal path is
-// asserted on its own terms in the Linux-only test below.
+// On non-Linux requireAdminPeer allows everything, so this only asserts the gate is wired.
 func TestTheGateRefusesAnAdminRouteAndPassesAGuestRoute(t *testing.T) {
 	var reached bool
 	h := (&server{}).peerGate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

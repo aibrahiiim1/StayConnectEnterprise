@@ -17,21 +17,15 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// Networking resource (Phase 19). guest-network CRUD is site-DB owned by edged;
-// validate/apply/confirm/rollback and interface/lease/revision reads proxy to
-// the privileged netd daemon. All apply/rollback are audited.
-//
-// Mounted at /edge/v1/network (single "network" permission key), with the
-// sub-paths the spec calls /guest-networks, /dhcp, /interfaces, /revisions.
+// Guest-network CRUD is site-DB owned by edged; validate/apply/confirm/rollback and interface/lease/revision
+// reads proxy to the privileged netd daemon. All apply/rollback are audited. Single "network" permission key.
 
 func (s *server) networkRoutes() http.Handler {
 	r := chi.NewRouter()
 
-	// interfaces (from netd discovery, cached in DB)
 	r.Get("/interfaces", s.netInterfaces)
 	r.Patch("/interfaces/{name}/role", s.netInterfaceRole)
 
-	// guest networks
 	r.Get("/guest-networks", s.listGuestNetworks)
 	r.Post("/guest-networks", s.createGuestNetwork)
 	r.Post("/guest-networks/batch", s.createGuestNetworkBatch)
@@ -45,18 +39,12 @@ func (s *server) networkRoutes() http.Handler {
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 
-	// validate / apply operate on the whole intent (all networks) via netd.
-	//
-	// THERE IS NO "ADOPT". A POST /network/adopt used to declare the editable guest_networks rows to be the
-	// ACTIVE revision without applying them, without validating them, and without a single check that the live
-	// Linux network matched -- see cmd/netd/store.go markActive for what that cost. It is retired: a client
-	// network configuration becomes active by being applied, health-checked and confirmed, and by no other route.
+	// There is no "adopt": declaring the editable rows ACTIVE without validating or applying them is retired. A
+	// client network configuration becomes active only by being applied, health-checked and confirmed.
 	r.Post("/validate", s.netValidate)
 	r.Post("/apply", s.netApply)
 
-	// system (WAN/LAN) network — the appliance's own base networking. GET =
-	// network.view; POST = network.change/apply/rollback (permWrite). Apply and
-	// rollback additionally re-authenticate the operator's password.
+	// System (WAN/LAN) network: GET = network.view; POST = permWrite. Apply and rollback re-authenticate the password.
 	r.Get("/system", s.sysNetGet)
 	r.Get("/system/history", s.sysNetHistory)
 	r.Get("/system/diagnostics", s.sysNetDiagnostics)
@@ -65,17 +53,12 @@ func (s *server) networkRoutes() http.Handler {
 	r.Post("/system/confirm", s.sysNetConfirm)
 	r.Post("/system/rollback", s.sysNetRollback)
 
-	// The Cloud Connection page and the setup wizard that used to live here (/cloud*, /setup/*) are replaced
-	// by /edge/v1/central/* (resources_cloud.go).
-
-	// DHCP
 	r.Get("/dhcp/leases", s.dhcpLeases)
 	r.Get("/dhcp/reservations", s.listReservations)
 	r.Post("/dhcp/reservations", s.createReservation)
 	r.Put("/dhcp/reservations/{id}", s.updateReservation)
 	r.Delete("/dhcp/reservations/{id}", s.deleteReservation)
 
-	// revisions
 	r.Get("/revisions", s.listRevisions)
 	r.Get("/revisions/{id}", s.getRevision)
 	r.Post("/revisions/{id}/confirm", s.confirmRevision)
@@ -90,8 +73,6 @@ func (s *server) actor(r *http.Request) string {
 	}
 	return ""
 }
-
-// ---- interfaces ----
 
 func (s *server) netInterfaces(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodGet, "/v1/interfaces", nil)
@@ -127,8 +108,6 @@ func (s *server) netInterfaceRole(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "network.interface.role", "interface", name, map[string]any{"role": in.Role})
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "role": in.Role})
 }
-
-// ---- guest networks CRUD ----
 
 type guestNetworkRow struct {
 	ID              string           `json:"id"`
@@ -203,7 +182,6 @@ func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, g)
 	}
-	// attach pool summaries
 	for i := range out {
 		out[i].Pools = s.loadPoolsFor(ctx, out[i].ID)
 	}
@@ -297,25 +275,11 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 
-	// THE TOPOLOGY FIELDS ARE IMMUTABLE, AND SAYING SO IS PART OF BEING IMMUTABLE.
-	//
-	// network_type, vlan_id, parent_interface and bridge_name are decided at create and cannot be changed:
-	// delete and recreate is the supported lifecycle, the UI says so in prose, and the comment that used to
-	// sit here said so too. What the comment did NOT do was tell the CALLER. The request struct accepts all
-	// four, the UPDATE statement below names none of them, and the handler answered
-	// 200 {"status":"updated"}. A client that PUT {"vlan_id": 30} against a VLAN-20 network was told its
-	// change had been applied, and nothing anywhere had changed.
-	//
-	// Worse than the lie is what a client would do next. A hand-edited row would not take effect either: the
-	// apply diff is keyed on bridge_name (apply_ops.go), bridge_name is computed once at create, and so the
-	// existing bridge is found present, createNetwork is never called, the VLAN sub-interface for the new id
-	// is never made -- while the rendered netplan and nft DESCRIBE the new id. The nft fingerprint would then
-	// report "converged" against a kernel whose bridge carries the wrong tag.
-	//
-	// So a change to any of the four is REFUSED, with the supported lifecycle named in the message. An
-	// unchanged echo is accepted: a client that GETs the object, edits one field and PUTs the whole thing
-	// back is doing nothing wrong, and refusing it would break the honest case to punish the dishonest one.
-	// The comparison is therefore against what is stored, not against presence in the body.
+	// The topology fields (network_type, vlan_id, parent_interface, bridge_name) are immutable: the apply diff is
+	// keyed on bridge_name (apply_ops.go), so an edited row would never create the new VLAN sub-interface while the
+	// rendered netplan and nft described it, and the nft fingerprint would report "converged" against a bridge with
+	// the wrong tag. A change to any of them is refused, naming delete-and-recreate. An unchanged echo is accepted,
+	// so the comparison is against what is stored, not against presence in the body.
 	var curType, curParent string
 	var curVLAN *int
 	if err := tx.QueryRow(ctx,
@@ -330,15 +294,8 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	portalURL := netcfg.PortalURLFor(in.GatewayIP, 8380)
-	// dns_servers: SQL NULL when the caller did not supply the field, so COALESCE preserves what is stored.
-	//
-	// It used to be `string(json.Marshal(in.DNSServers))`, which for a nil slice is the four bytes `null` --
-	// JSON null, not SQL NULL. COALESCE does not fall through a JSON null, so every PUT that omitted
-	// dns_servers OVERWROTE the column with JSON null. A custom resolver list survived exactly until the
-	// next unrelated edit of the same network, and then the render had nothing to write.
-	//
-	// nil means "not supplied, keep it"; an empty array means "clear it", which is a real instruction and is
-	// passed through as `[]`.
+	// dns_servers: nil (not supplied) must stay SQL NULL so COALESCE keeps the stored value; a nil slice marshals to
+	// JSON null, which COALESCE does not fall through and would overwrite the column. An empty array clears it.
 	var dnsArg any
 	if in.DNSServers != nil {
 		raw, merr := json.Marshal(in.DNSServers)
@@ -379,13 +336,11 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "client network not found")
 		return
 	}
-	// THE EDITED NETWORK MAY NOT COLLIDE WITH ANOTHER LIVE ONE (N-14): checked on what is now stored, so a PUT
-	// that changes the subnet, the name or enabled is judged exactly as the next apply would see it.
+	// The edited network may not collide with another live one: checked on what is now stored, as the next apply sees it.
 	if cerr := s.enabledConflict(ctx, tx, id); cerr != nil {
 		writeNetworkInsertErr(w, cerr)
 		return
 	}
-	// replace pools if provided
 	if in.Pools != nil {
 		if _, err := tx.Exec(ctx, `DELETE FROM dhcp_pools WHERE guest_network_id=$1`, id); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "pool clear")
@@ -404,10 +359,8 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "updated"})
 }
 
-// activeOnNetworkSQL counts the sessions live ON this network now: an active session whose address is inside
-// the network's subnet (enabled subnets never overlap). It used to join every device that had EVER appeared on
-// the network, so a device that had moved to another network was counted on both -- the status doubled, and a
-// network nobody was using could not be deleted (audit N-14).
+// Counts sessions live on this network now: an active session whose address is inside its subnet. Joining every
+// device that ever appeared double-counted moved devices and blocked deleting an unused network.
 const activeOnNetworkSQL = `SELECT count(*) FROM iam_v2.sessions se
 	  JOIN guest_networks g ON g.id = $1
 	 WHERE se.state = 'active' AND se.ended IS NULL AND se.ip IS NOT NULL AND se.ip <<= g.subnet_cidr`
@@ -416,11 +369,7 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// only allow deleting a disabled network with no active sessions
-	//
-	// BOTH READS ARE CHECKED. They were discarded, so a failed read produced enabled=false and active=0 -- which
-	// is precisely "it is safe to delete". The two guards that stop an operator from deleting a live client
-	// network out from under its guests were therefore disabled by any error that reached them.
+	// Both reads are checked: a failed read must not look like enabled=false, active=0 ("safe to delete").
 	var enabled bool
 	var active int
 	if err := s.db.QueryRow(ctx, `SELECT enabled FROM guest_networks WHERE id=$1`, id).Scan(&enabled); err != nil {
@@ -447,10 +396,8 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	tag, err := s.db.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1`, id)
 	if err != nil {
-		// A NETWORK THAT HAS SEEN CLIENTS IS PART OF THEIR HISTORY. Sign-ins, resolutions and device
-		// appearances name the network they happened on (foreign keys with no cascade, deliberately), so such a
-		// network cannot be deleted -- that used to surface as a bare "delete failed" 500. It stays disabled:
-		// it is not rendered, frees its VLAN/interface for a new network, and keeps the history readable.
+		// A network that has seen clients is part of their history: sign-ins, resolutions and device appearances
+		// reference it (foreign keys without cascade), so it cannot be deleted. It stays disabled.
 		if isFKViolation(err) {
 			jsonErr(w, http.StatusConflict, "kept_as_history",
 				"this network has client history (sign-ins and devices recorded on it), so it is kept, disabled, "+
@@ -480,9 +427,8 @@ func (s *server) disableGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disabled", "note": "apply to activate the change"})
 }
 
-// enableGuestNetwork is the way back from disableGuestNetwork: it stages the network as enabled and touches
-// nothing else (a PUT carrying only "enabled" would clear the description and SSID label). Like disabling, it
-// takes effect on the next apply.
+// The way back from disable: stages the network as enabled and touches nothing else (a PUT carrying only
+// "enabled" would clear the description and SSID label). Takes effect on the next apply.
 func (s *server) enableGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := dbCtx(r)
@@ -502,7 +448,6 @@ func (s *server) enableGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found")
 		return
 	}
-	// Enabling puts the network back among the live ones, so it is checked against them first (N-14).
 	if cerr := s.enabledConflict(ctx, tx, id); cerr != nil {
 		writeNetworkInsertErr(w, cerr)
 		return
@@ -532,45 +477,31 @@ func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- validate / apply (proxy to netd) ----
-
 func (s *server) netValidate(w http.ResponseWriter, r *http.Request) {
 	s.netd.proxy(w, r, http.MethodPost, "/v1/validate", map[string]string{"actor": s.actor(r), "summary": "validate"})
 }
 
-// netApply materialises every staged client-network replacement, then asks netd to render and apply the whole
-// intent. netd answers synchronously, so a validation failure, a failed apply or a failed health check is
-// undone here, in the same request: the database and the appliance never disagree about which network is live.
+// Materialises every staged replacement, then asks netd to render and apply the whole intent. A validation
+// failure, failed apply or failed health check is undone in the same request, so the database and the appliance never disagree.
 func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Summary  string `json:"summary"`
 		Password string `json:"password"`
 	}
 	_ = decodeJSON(r, &in)
-	// STEP-UP (audit N-15). An apply changes what every client network forwards; like a WAN / LAN change it
-	// needs the operator's password, checked before anything is staged or sent to netd.
+	// Step-up: an apply changes what every client network forwards, so it needs the operator's password before anything is staged.
 	if !s.reauth(r, in.Password) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
 		return
 	}
 	ctx, cancel := dbCtx(r)
 
-	// ONE APPLY AT A TIME, FOR THIS SITE.
-	//
-	// Nothing serialized materialise-commit + netd-apply as a unit, and the two interleave badly. Request A
-	// commits its materialisation and calls netd; request B calls netd a moment later; netd's LoadIntent now
-	// includes A's successor, and whichever of the two loses netd's single in-flight slot gets a 500. When that
-	// is A, A reverts ITS OWN materialisation -- deleting the successor row -- while B's apply has already built
-	// that successor's bridge and is awaiting confirmation. The wire then holds a bridge no enabled row
-	// describes, and the database holds an original that is not on the wire.
-	//
-	// It also makes the /v1/pending fallback below trustworthy: with one apply in flight, the pending revision
-	// netd names can only be this one's.
-	//
-	// A SESSION-scoped advisory lock on a DEDICATED CONNECTION, not a transaction one: it has to outlive the
-	// materialise transaction and cover the netd call, and a session lock belongs to the connection that took
-	// it -- so it is taken and released on a connection held for the whole handler. Releasing it through the
-	// pool would reach some other connection and quietly fail, leaving the appliance unable to apply anything.
+	// One apply at a time per site. Without it, two applies interleave: the loser of netd's single in-flight slot
+	// reverts its own materialisation (deleting the successor row) while the other has already built that
+	// successor's bridge, leaving a bridge no enabled row describes. It also makes the /v1/pending fallback
+	// trustworthy. The lock is SESSION-scoped on a DEDICATED connection (it must outlive the materialise
+	// transaction and cover the netd call); releasing through the pool would hit another connection and silently
+	// fail, leaving the appliance unable to apply anything.
 	lockConn, lerr := s.db.Acquire(context.Background())
 	if lerr != nil {
 		cancel()
@@ -631,9 +562,7 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
 		map[string]string{"actor": s.actor(r), "summary": in.Summary})
-	// THE AUDIT FOLLOWS THE OUTCOME (audit N-15), as confirm and rollback already do: it used to be written
-	// before the netd call, so an apply that never reached the appliance or was rolled back by its health checks
-	// read in Activity as an apply.
+	// The audit follows the outcome, as confirm and rollback do, so an apply that never reached the appliance is not logged as one.
 	{
 		detail := map[string]any{"summary": in.Summary, "replacements": staged, "status": st}
 		var out struct {
@@ -652,19 +581,10 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		s.audit(r, action, "network", out.RevisionID, detail)
 	}
 
-	// EVERYTHING BELOW RUNS ON A FRESH CONTEXT OF ITS OWN, NOT ON THE ONE THE MATERIALISE USED.
-	//
-	// dbCtx gives ten seconds; the netd client deliberately allows a hundred, because an apply does netplan
-	// generate, two systemctl restarts, bridge creation and health checks. So by the time netd answers, the
-	// context the materialise ran under is almost always ALREADY EXPIRED -- and every recovery path below used
-	// it. The consequence was the worst available: a successful apply whose revision id could not be recorded
-	// (context deadline exceeded), whose revert then also failed on the same dead context, leaving the successor
-	// live and confirmed on the wire while the database held it as APPLIED with no revision -- which this very
-	// file's reconcile then reverted ten minutes later, tearing down a working network.
-	//
-	// It is derived from Background, not from the request: a revert must finish whether or not the operator is
-	// still waiting, and a closed browser tab is not a reason to leave the database describing a network that is
-	// not there.
+	// Everything below runs on a fresh context derived from Background: dbCtx allows ten seconds but the netd call
+	// allows a hundred, so the materialise context is usually expired by then and recovery would fail on it,
+	// leaving a successor live on the wire while the database held it APPLIED with no revision. A revert must
+	// finish whether or not the operator is still waiting.
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err != nil {
@@ -687,13 +607,8 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case len(staged) > 0:
-		// WHICH REVISION CARRIES THEM, OR NO APPLY AT ALL. Everything that notices a watchdog rollback later
-		// keys on this id, so a replacement that never records one is a successor on the wire the database
-		// cannot account for.
-		//
-		// A successful apply states its revision; this asks netd directly when the answer did not arrive
-		// (a body edged could not parse, a field a future netd renames), because GUESSING is the one thing
-		// that may not happen here, and /v1/pending is the same question netd's own watchdog asks.
+		// The revision id is what everything noticing a watchdog rollback later keys on. If netd's answer did not
+		// carry it, ask netd (/v1/pending) rather than guess.
 		rev := res.RevisionID
 		if rev == "" {
 			if _, praw, perr := s.netd.call(r.Context(), http.MethodGet, "/v1/pending", nil); perr == nil {
@@ -705,9 +620,8 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if rev == "" {
-			// netd answered that the apply was fine and there is no revision to confirm. Those two statements
-			// cannot both be true, so edged does not know what the appliance did -- and must not leave the
-			// database claiming a successor network on that basis.
+			// netd said the apply was fine yet there is no revision to confirm; edged does not know what the
+			// appliance did and must not leave the database claiming a successor on that basis.
 			if rerr := s.revertMaterialised(ctx, staged, "the apply reported no revision to confirm"); rerr != nil {
 				unrevertedStagedChanges(w, staged, rerr, "the apply named no revision")
 				return
@@ -718,8 +632,7 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, uerr := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid
 			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, rev); uerr != nil {
-			// THE RECORD IS THE WHOLE SAFETY NET. Without it nothing can tell later whether this apply was
-			// kept or rolled back, so the change is put back now rather than left unaccountable.
+			// Without the record nothing can tell later whether this apply was kept or rolled back, so it is put back now.
 			slog.Error("client network replacement revision could not be recorded", "err", uerr)
 			if rerr := s.revertMaterialised(ctx, staged, "the apply's revision could not be recorded"); rerr != nil {
 				unrevertedStagedChanges(w, staged, rerr, "the apply's revision could not be recorded")
@@ -735,11 +648,8 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-// ---- DHCP ----
-
 func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
-	// Unpaged callers get netd's answer untouched, as they always did. A paged caller gets one page of it,
-	// searched and ordered here (dhcp_paging.go).
+	// Unpaged callers get netd's answer untouched; a paged caller gets one page, searched and ordered here (dhcp_paging.go).
 	if !hasPageParams(r.URL.Query()) {
 		s.netd.proxy(w, r, http.MethodGet, "/v1/leases", nil)
 		return
@@ -774,7 +684,6 @@ func (s *server) dhcpLeases(w http.ResponseWriter, r *http.Request) {
 func (s *server) listReservations(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// Paged only when asked: a client network's own page reads every reservation it has, as it always did.
 	paged := hasPageParams(r.URL.Query())
 	pg, ok := readPage(w, r, 0)
 	if !ok {
@@ -791,7 +700,6 @@ func (s *server) listReservations(w http.ResponseWriter, r *http.Request) {
 		args = append(args, gnFilter)
 		where += fmt.Sprintf(` AND d.guest_network_id=$%d`, len(args))
 	}
-	// The search matches what the screen shows a reservation by, the network's name included.
 	if search != "" {
 		args = append(args, likePattern(search))
 		where += fmt.Sprintf(` AND (text(d.mac) ILIKE $%[1]d OR host(d.reserved_ip) ILIKE $%[1]d
@@ -914,8 +822,6 @@ func (s *server) deleteReservation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// ---- revisions ----
-
 func (s *server) listRevisions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -959,7 +865,6 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "revision not found")
 		return
 	}
-	// events + health
 	evs, _ := s.db.Query(ctx, `SELECT phase, ok, detail, at FROM network_apply_events WHERE revision_id=$1 ORDER BY at`, id)
 	var events []map[string]any
 	if evs != nil {
@@ -992,34 +897,26 @@ func (s *server) getRevision(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// confirmRevision keeps the applied configuration. Only now does a replacement become permanent: the request
-// is settled and the Internet Packages that named the retired network are republished forward onto its
-// successor, so eligibility keeps meaning what the hotel intended.
+// Keeps the applied configuration: only now does a replacement become permanent, and the Internet Packages that
+// named the retired network are republished forward onto its successor.
 func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Password string `json:"password"`
 	}
 	_ = decodeJSON(r, &in)
-	// STEP-UP (audit N-15): keeping a configuration makes it permanent.
 	if !s.reauth(r, in.Password) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
 		return
 	}
-	// FAIL-CLOSED, BEFORE THE WIRE IS MADE PERMANENT. Confirming tells netd to keep this configuration; after
-	// that the retired client network is gone for good. So the packages that depend on it are pre-flighted
-	// first, writing nothing: if one could not be carried forward, the confirm is refused and the appliance is
-	// left inside its confirmation window, where the operator can still correct the package and confirm, or let
-	// the watchdog roll the whole change back. Confirming anyway would be exactly the half-finished state this
-	// whole staged lifecycle exists to prevent.
+	// Fail closed before the wire is made permanent: confirming retires the old client network for good, so the
+	// dependent packages are pre-flighted first, writing nothing. If one cannot be carried forward the confirm is
+	// refused and the appliance stays inside its confirmation window.
 	{
 		ctx, cancel := dbCtx(r)
 		if blocking := s.replacementsBlockingConfirm(ctx, id); len(blocking) > 0 {
 			cancel()
-			// The reason is IN THE MESSAGE, not only in a structured field. Every confirm button in the console
-			// renders the message; an operator told "packages_not_preservable" and nothing else has no idea
-			// which package or why, and the only lever they would have left is rolling back a change that was
-			// otherwise correct.
+			// The reason is in the message, not only a structured field: every confirm button renders the message.
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": "packages_not_preservable",
 				"message": "this change cannot be kept yet. These Internet Packages are limited to the client network being replaced and could not be carried forward onto its successor: " +
@@ -1031,9 +928,7 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 		}
 		cancel()
 	}
-	// THE AUDIT FOLLOWS THE ACTION. It used to be written before the netd call, so a 409, a 500 or a timeout
-	// still left a record asserting the revision had been confirmed -- in the log an operator reads to find out
-	// what was done to the live network, which is the wrong direction to be wrong in.
+	// The audit follows the action, so a 409, 500 or timeout does not leave a record claiming the revision was confirmed.
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/confirm",
 		map[string]string{"revision_id": id, "actor": s.actor(r)})
 	if err != nil {
@@ -1059,16 +954,14 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-// rollbackRevision undoes the applied configuration. The appliance goes back to the previous confirmed
-// revision and so does this database: every replacement the apply materialised is reverted, leaving the
-// original client network enabled and the request waiting for another attempt.
+// Undoes the applied configuration: the appliance returns to the previous confirmed revision and every
+// replacement the apply materialised is reverted, leaving the original network enabled.
 func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Password string `json:"password"`
 	}
 	_ = decodeJSON(r, &in)
-	// STEP-UP (audit N-15): a rollback changes what every client network forwards, now.
 	if !s.reauth(r, in.Password) {
 		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation failed")
 		return
@@ -1080,18 +973,12 @@ func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
 		return
 	}
-	// Recorded with what actually happened, for the reason given on the confirm route above.
 	s.audit(r, "network.revision.rolledback", "network_revision", id, map[string]any{"undone": st < 300, "status": st})
 	if st < 300 {
-		// A BACKGROUND-DERIVED CONTEXT, because netd has ALREADY changed the wire. If the operator's connection
-		// drops while this runs, the database must still be brought back in line with the configuration that is
-		// now live; a closed browser tab is not a reason to leave the two disagreeing until somebody happens to
-		// open the networks page.
+		// Background-derived context: netd has already changed the wire, so the database must be brought into line even if the operator disconnects.
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		// THE OPERATOR ASKED FOR THIS ONE, so they are told if it did not finish. netd has put the previous
-		// configuration back on the wire; if the staged client-network rows could not follow, the database is
-		// the only thing still claiming the successor and saying "rolled back" would be false.
+		// The operator asked for this, so they are told if it did not finish: if the staged rows could not follow, the database still claims the successor.
 		if rerr := s.reconcileStaleReplacements(ctx, r); rerr != nil {
 			jsonErr(w, http.StatusInternalServerError, "staged_changes_not_reverted",
 				"the live network was rolled back, but "+rerr.Error()+". The live network is unchanged by this; "+
@@ -1103,8 +990,6 @@ func (s *server) rollbackRevision(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(st)
 	_, _ = w.Write(raw)
 }
-
-// ---- helpers ----
 
 func (s *server) loadPoolsFor(ctx context.Context, id string) []netcfg.Pool {
 	rows, err := s.db.Query(ctx, `SELECT host(start_ip), host(end_ip) FROM dhcp_pools WHERE guest_network_id=$1 ORDER BY sort_order, start_ip`, id)
@@ -1173,7 +1058,6 @@ func nullIfZero(n int) any {
 
 func pgErr(err error) string {
 	msg := err.Error()
-	// surface a friendlier hint for the common constraint hits
 	switch {
 	case strings.Contains(msg, "guest_networks_vlan_parent_uniq"):
 		return "that VLAN id is already used on this interface"
@@ -1189,14 +1073,8 @@ func pgErr(err error) string {
 	return msg
 }
 
-// immutableTopologyChange returns a message describing the refusal, or "" when the request asks for no
-// topology change at all.
-//
-// It compares against what is STORED rather than against presence in the body, so a client that GETs the
-// object, edits one setting and PUTs the whole thing back is accepted. Only an actual change is refused.
-//
-// bridge_name is not in guestNetworkInput and so cannot be asked for; it is derived from the other three at
-// create and is named in the message because an operator reading it needs to know it moves too.
+// Returns a refusal message, or "" when no topology change is requested. Compares against what is stored, so a
+// GET-edit-PUT of the whole object is accepted. bridge_name is derived at create and named in the message because it moves too.
 func immutableTopologyChange(in guestNetworkInput, curType, curParent string, curVLAN *int) string {
 	const lifecycle = " Topology is fixed at creation: disable the network, apply, delete it, and create a " +
 		"new one with the topology you want. Changing it in place would leave the rendered configuration " +

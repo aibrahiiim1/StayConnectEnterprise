@@ -1,21 +1,10 @@
-// VOUCHER API TYPES AND THE PURE HELPERS THE SCREEN IS BUILT ON.
-//
-// Kept out of lib/api.ts on purpose (it is shared by every screen) and kept free of React so each rule here --
-// what status a card is really in, how a price in minor units is written, what a CSV contains -- is testable
-// on its own.
+// Voucher API types and pure helpers, kept out of lib/api.ts and free of React so each rule is testable.
 
 import type { Voucher, VoucherCodeFormat, VoucherReveal } from "@/lib/api";
 
 export type { Voucher, VoucherCodeFormat, VoucherReveal };
 
-/**
- * What a card IS right now, as opposed to what its row says.
- *
- * Nothing writes REDEMPTION_EXPIRED: expiry is enforced at sign-in from the validity window. So a card past
- * its valid-until stays UNUSED in the table forever, and a screen reading `state` alone says "not used yet"
- * and offers to cancel a card no guest can redeem. The server computes this with the authenticator's own
- * [from, until) rule; `effectiveStatus` below is the same rule, used only when a row predates that field.
- */
+/** Expired cards stay UNUSED in storage; sign-in enforces [from, until) and this helper handles older rows. */
 export type EffectiveStatus = "available" | "not_yet_valid" | "expired" | "redeemed" | "cancelled";
 
 export type VoucherRow = Voucher & {
@@ -119,8 +108,6 @@ export type IssuedBatch = { batch_id: string; count: number; codes: string[]; pa
 /** An export's response: the codes of one batch, recovered under the step-up. */
 export type ExportedBatch = { batch_id: string; count: number; vouchers: { id: string; code: string }[] };
 
-// ---------------------------------------------------------------------------------------------------------
-
 export function effectiveStatus(v: Pick<VoucherRow, "state" | "redemption_valid_from" | "redemption_valid_until" | "effective_state">, now = Date.now()): EffectiveStatus {
   if (v.effective_state) return v.effective_state;
   if (v.state === "REDEEMED") return "redeemed";
@@ -161,15 +148,11 @@ export function canCancel(status: EffectiveStatus): boolean {
   return status === "available" || status === "not_yet_valid";
 }
 
-/** `•••• AB12` — the display hint, masked. The last four characters match a card in a hand; they are not one. */
 export function maskedCode(last4: string): string {
   return `•••• ${last4}`;
 }
 
-/**
- * A price in MINOR units, written the way the currency is written. `price_minor` 1500 in EUR is €15.00; in
- * JPY it is ¥1,500. The revision's own exponent wins when it has one; otherwise the currency's convention.
- */
+/** A price in MINOR units (1500 EUR = 15.00); the revision's exponent wins, else the currency's convention. */
 export function formatPrice(minor: number, currency: string, exponent?: number | null): string {
   if (!minor || minor <= 0 || !currency) return "Free";
   let digits = exponent ?? null;
@@ -245,8 +228,8 @@ export function batchLabel(b: { batch_id: string; created_at?: string | null }):
 }
 
 /**
- * The CSV of codes the operator holds right now. Built in the browser, never sent anywhere, never stored:
- * the server has already done the only privileged part (issuing, or recovering and recording the export).
+ * The CSV of codes the operator holds now. Built in the browser, never sent or stored; the server did the privileged
+ * part.
  */
 export function codesCsv(rows: { code: string; id?: string }[], meta: { package?: string; validity?: string } = {}): string {
   const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
@@ -269,10 +252,7 @@ export function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * An ILLUSTRATIVE code for a format, drawn only from characters the generator actually uses (ambiguous ones
- * such as 0/O, 1/I/L, 5/S are never printed). It is an example of the shape, not a real code.
- */
+/** An illustrative code drawn only from generator characters (no ambiguous 0/O, 1/I/L, 5/S); not a real code. */
 export function sampleCode(mode: "numbers" | "mixed", length: number): string {
   const src = mode === "numbers" ? "4827396248" : "K7PX4R9MHT";
   return src.slice(0, Math.max(1, Math.min(length, src.length)));

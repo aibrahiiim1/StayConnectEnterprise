@@ -1,23 +1,9 @@
-// Package pms abstracts hotel Property-Management-System integrations used
-// for guest auth (room number + verification data).
-//
-// The validation rule is: room_number + ONE OF (first_name | last_name |
-// reservation_number) must match. Modes:
-//
-//   - ModeRoomLastName    : exactly the last name
-//   - ModeRoomFirstName   : exactly the first name
-//   - ModeRoomReservation : exactly the reservation number
-//   - ModeEither          : ANY of the three matches → pass
-//
-// The portal sends ALL filled secondary fields and the configured mode; the
-// provider does the matching. This keeps tenant-policy decisions out of the
-// portal.
-//
-// RETIRED PATH. This Provider interface and its scd loader (internal/pmsloader) are kept for rollback and
-// history only; scd no longer runs PMS providers. The live PMS runtime is pmsd (internal/pmsd), whose
-// supported connectors are listed in one place, the provider registry (internal/pmsprovider): Protel FIAS
-// over a socket, and Mews, Apaleo and OPERA Cloud as polled REST connectors (internal/pmsrest). New
-// connectors belong there, not here. The FIAS framing helpers in this package remain in use by pmsd.
+// Package pms abstracts hotel PMS integrations for guest auth: room_number plus one of first_name, last_name or
+// reservation_number must match, per the configured mode (ModeRoomLastName, ModeRoomFirstName, ModeRoomReservation,
+// ModeEither = any of the three). The portal sends all filled fields and the mode; the provider matches.
+// This Provider interface and its scd loader (internal/pmsloader) are retired and kept for rollback; the live runtime
+// is pmsd (internal/pmsd) with connectors in internal/pmsprovider. New connectors belong there. The FIAS framing
+// helpers here remain in use by pmsd.
 package pms
 
 import (
@@ -45,9 +31,7 @@ func ValidMode(m string) bool {
 	return false
 }
 
-// Query is what the portal/scd hands the provider. Strings are normalized
-// (trimmed) by the caller; the provider performs case-insensitive name
-// matches as appropriate.
+// Strings are normalized (trimmed) by the caller; the provider matches names case-insensitively.
 type Query struct {
 	RoomNumber        string
 	FirstName         string
@@ -56,69 +40,46 @@ type Query struct {
 	Mode              Mode
 }
 
-// Result is what the provider returns when validation succeeds.
 type Result struct {
 	Valid         bool
-	GuestName     string // formatted display name (PMS-decided)
+	GuestName     string
 	FirstName     string
 	LastName      string
-	CheckIn       time.Time // local PMS time, zero if unknown
+	CheckIn       time.Time
 	CheckOut      time.Time
-	RoomNumber    string // canonical (provider may normalize "0103" → "103")
+	RoomNumber    string
 	ReservationID string
-	Email         string // optional, when PMS exposes it
+	Email         string
 }
 
 type Provider interface {
-	// Name is the per-tenant unique identifier of this configured instance
-	// (matches pms_providers.name); registries are keyed on this.
+	// Name is the per-tenant unique name (pms_providers.name); registries are keyed on it.
 	Name() string
-	// Kind is the provider family (matches pms_providers.kind), used by the
-	// loader to route construction.
 	Kind() string
-	// Configure (re)applies a config bundle. Safe to call multiple times;
-	// the loader calls it after construction and on subsequent reloads.
+	// Configure is safe to call repeatedly (initial load and reloads).
 	Configure(cfg ProviderConfig) error
-	// Config returns the last-applied bundle so scd can read normalization
-	// and stay-policy without re-fetching the DB row.
 	Config() ProviderConfig
-	// Health returns the current connection / cache snapshot.
 	Health() Health
-	// ValidateGuest performs the per-guest check.
 	ValidateGuest(ctx context.Context, q Query) (*Result, error)
 }
 
-// Starter is implemented by providers that need a background goroutine
-// (e.g. ProtelFIAS keeps a TCP link alive). The loader calls Start after
-// Configure. Stub providers implement only Provider.
 type Starter interface {
 	Start(ctx context.Context)
 }
 
-// Tester is implemented by providers that can be probed for connectivity
-// without committing real data. The admin endpoint /v1/admin/pms/{name}/test
-// dispatches here.
 type Tester interface {
 	TestConnection(ctx context.Context) error
 }
 
-// Cacher exposes the in-memory lookup cache for admin debugging. Returns at
-// most `limit` entries; pass 0 for the implementation default.
 type Cacher interface {
 	CacheSnapshot(limit int) []Reservation
 }
 
-// Stopper is implemented by providers that own background resources
-// (e.g. a persistent TCP link). scd calls Stop during a live reload so the
-// old goroutines exit before the new provider instances take over.
+// Stop lets scd end old goroutines during a live reload before new instances take over.
 type Stopper interface {
 	Stop()
 }
 
-// ---- Tier-2 config bundle (one row in pms_providers) ----------------------
-
-// ProviderConfig is the per-tenant config record handed to Configure.
-// Fields irrelevant to a given Kind should be zero-valued.
 type ProviderConfig struct {
 	Name          string
 	Kind          string
@@ -132,44 +93,38 @@ type ConnectionConfig struct {
 	Host       string
 	Port       int
 	UseTLS     bool
-	AuthKey    string         // FIAS IfcAuthKey
-	BaseURL    string         // REST family (Mews/Apaleo)
-	APIKey     string         // REST
-	PropertyID string         // Mews property / Apaleo accountCode
-	Extra      map[string]any // escape hatch for kind-specific knobs
+	AuthKey    string
+	BaseURL    string
+	APIKey     string
+	PropertyID string
+	Extra      map[string]any
 }
 
-// FieldMap routes our canonical field names to PMS-specific paths/codes.
-// Empty string = "use the provider's built-in default".
-//
-// Canonical keys we recognize:
+// FieldMap routes canonical names to PMS paths/codes; empty means the provider's default. Canonical keys:
 //
 //	"room_number", "first_name", "last_name", "reservation_number",
 //	"check_in", "check_out", "guest_email", "guest_display_name"
 type FieldMap map[string]string
 
-// Normalization is per-tenant input shaping applied before matching.
 type Normalization struct {
-	RoomFormat      string `json:"room_format"`       // Sprintf format e.g. "%03d"; applied after NormalizeRoom
-	NameStripTitles bool   `json:"name_strip_titles"` // strip Mr./Mrs./Dr. prefixes from incoming names
-	ReservationCase string `json:"reservation_case"`  // "upper" | "lower" | "preserve" (default upper)
+	RoomFormat      string `json:"room_format"`
+	NameStripTitles bool   `json:"name_strip_titles"`
+	ReservationCase string `json:"reservation_case"`
 }
 
-// StayPolicy bounds the access window relative to the PMS-reported stay.
 type StayPolicy struct {
-	EarlyCheckinMinutes int `json:"early_checkin_minutes"` // allow this many minutes before check_in
-	LateCheckoutMinutes int `json:"late_checkout_minutes"` // allow this many minutes after check_out
-	MinRemainingSeconds int `json:"min_remaining_seconds"` // refuse if less than this remains in the stay
+	EarlyCheckinMinutes int `json:"early_checkin_minutes"`
+	LateCheckoutMinutes int `json:"late_checkout_minutes"`
+	MinRemainingSeconds int `json:"min_remaining_seconds"`
 }
 
-// Health is the per-provider observability snapshot. Phase 4.5.5b syncs to DB.
 type Health struct {
-	Status         string    `json:"status"`                    // idle | connecting | connected | degraded | down
-	ConnectedSince time.Time `json:"connected_since,omitempty"` // zero when not connected
-	LastRecordAt   time.Time `json:"last_record_at,omitempty"`  // last GI/GC/GO arrived (FIAS); zero for stub
+	Status         string    `json:"status"`
+	ConnectedSince time.Time `json:"connected_since,omitempty"`
+	LastRecordAt   time.Time `json:"last_record_at,omitempty"`
 	LastError      string    `json:"last_error,omitempty"`
 	LastErrorAt    time.Time `json:"last_error_at,omitempty"`
-	CacheSize      int       `json:"cache_size"` // entries currently in the lookup cache
+	CacheSize      int       `json:"cache_size"`
 }
 
 var (
@@ -187,21 +142,12 @@ func (r *Registry) Get(name string) (Provider, bool) {
 	return p, ok
 }
 
-// ---- Input normalization helpers shared by all providers --------------------
-
-// NormalizeRoom strips whitespace, leaves digits + letters intact, lowercases.
-// "  103 " → "103"; " A12 " → "a12".
 func NormalizeRoom(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// NormalizeName lowercases + trims + collapses inner whitespace + strips
-// diacritics. Accent-insensitive matching is important for international
-// guests whose names may be entered without diacritics on a phone keypad.
-//
-// Diacritic stripping uses a small mapping for the common Latin set; for
-// production we'd swap to golang.org/x/text/unicode/norm if requirements
-// expand to non-Latin scripts.
+// NormalizeName lowercases, trims, collapses whitespace and strips diacritics, so names typed without accents on a
+// phone keypad still match.
 func NormalizeName(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -212,7 +158,7 @@ func NormalizeName(s string) string {
 	prevSpace := true
 	for _, r := range s {
 		if r == '\'' {
-			continue // O'Brien → obrien
+			continue
 		}
 		if unicode.IsSpace(r) {
 			if !prevSpace {
@@ -231,8 +177,6 @@ func NormalizeName(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// diacriticFold maps the most common accented Latin lowercase letters to
-// their unaccented equivalents. Extended in steps as needed.
 var diacriticFold = map[rune]rune{
 	'á': 'a', 'à': 'a', 'â': 'a', 'ä': 'a', 'ã': 'a', 'å': 'a', 'ā': 'a',
 	'ç': 'c', 'ć': 'c', 'č': 'c',
@@ -246,17 +190,12 @@ var diacriticFold = map[rune]rune{
 	'ž': 'z', 'ź': 'z', 'ż': 'z',
 }
 
-// NormalizeReservation strips whitespace, uppercases. Reservation numbers
-// are alphanumeric tokens with no semantic case.
 func NormalizeReservation(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
 }
 
-// MatchesQuery is a helper providers can use after they've located a
-// candidate reservation by room number. It returns nil if the secondary
-// field passes per the configured mode.
-//
-// Pass NormalizedX values for both inputs.
+// MatchesQuery returns nil if the secondary field passes per the configured mode; pass normalized values for both
+// inputs.
 func MatchesQuery(mode Mode, qFirst, qLast, qRes, recFirst, recLast, recRes string) bool {
 	first := qFirst != "" && qFirst == recFirst
 	last := qLast != "" && qLast == recLast

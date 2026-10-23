@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// fakeLegacySet models the legacy auth_ipv4 set: a separate set the Phase-3 gate cannot reach.
 type fakeLegacySet struct {
 	elems   map[string]bool
 	drains  int
@@ -24,9 +23,7 @@ func (l *fakeLegacySet) Drain(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// B-15: the legacy set still GRANTS (the forward chain accepts it) and nothing writes or reconciles it. While
-// netd owns Phase-3 enforcement it is kept empty, counted as strays, and the Phase-3 gate is still never used
-// to do it.
+// The legacy set still grants access, so it is drained and counted as strays without using the Phase-3 gate.
 func TestSystem_LegacySetIsDrainedToEmpty(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	legacy := &fakeLegacySet{elems: map[string]bool{"br-guest|10.0.0.200": true, "br-guest|10.0.0.201": true}}
@@ -44,14 +41,12 @@ func TestSystem_LegacySetIsDrainedToEmpty(t *testing.T) {
 			t.Fatalf("the Phase-3 gate was used on a legacy address: %s", c)
 		}
 	}
-	// A second pass finds nothing and reports nothing extra.
 	res2, _ := p.submit(context.Background(), envelopeOn([]string{"br-guest"}, 2), time.Now())
 	if res2.StraysRemoved != 0 || res2.Degraded {
 		t.Fatalf("an empty legacy set produced %+v", res2)
 	}
 }
 
-// A legacy set that cannot be read is reported as a problem, not hidden.
 func TestSystem_LegacySetDrainFailureIsReported(t *testing.T) {
 	_, _, _, _, _, p := sysSetup()
 	p.legacy = &fakeLegacySet{failErr: errors.New("no such set")}

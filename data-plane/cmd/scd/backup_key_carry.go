@@ -1,19 +1,8 @@
 package main
 
-// THE KEY-HOLDER REGISTER OUTLIVES A RESTORE (GDPR branch review 2026-10-20).
-//
-// A restore swaps the whole database, and the backup key holders (migration 0129) are rows in it. Restoring a
-// backup taken before the first holder silently switched encryption off; restoring one taken before a holder
-// was removed -- a departed IT manager -- made that holder active again, and new backups were encrypted to
-// their key. Who may open this hotel's backups is a fact about now, not about the day the backup was taken.
-//
-// So before the swap the live register is copied into the staging database: holders and events the backup
-// does not have are added, every holder takes its live status, and a holder the live register does not know
-// is removed (recorded as removed by the restore). Nothing is deleted; both tables stay append-only.
-//
-// A backup that predates the register altogether (no table in staging) cannot carry it; the step says so, and
-// Hotel Admin shows backups as unencrypted until a holder is set up again. Any other failure stops the restore
-// before the swap, so the live database is never replaced by one that has lost its key holders.
+// A restore swaps the whole database, so the live backup key-holder register is copied into staging first: who may open this
+// hotel's backups is a fact about now. Missing holders and events are added, holders take their live status, unknown holders
+// are marked removed; nothing is deleted. A backup predating the register cannot carry it; any other failure stops the restore before the swap.
 
 import (
 	"context"
@@ -27,8 +16,7 @@ const keyRegisterCaptureSQL = `SELECT CASE WHEN to_regclass('public.backup_key_h
     'holders', (SELECT COALESCE(jsonb_agg(to_jsonb(h) ORDER BY h.created_at), '[]'::jsonb) FROM public.backup_key_holders h),
     'events',  (SELECT COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.at), '[]'::jsonb) FROM public.backup_key_holder_events e))::text END`
 
-// keyRegisterCarryFn is created in the staging session only (pg_temp): the restored database may predate any
-// function of ours, and nothing of this survives the session.
+// keyRegisterCarryFn lives in the staging session only (pg_temp): the restored database may predate any function of ours.
 const keyRegisterCarryFn = `CREATE FUNCTION pg_temp.carry_key_register(snap jsonb) RETURNS text LANGUAGE plpgsql AS $carry$
 DECLARE n integer;
 BEGIN
@@ -62,7 +50,6 @@ BEGIN
   RETURN 'carried:' || n;
 END $carry$;`
 
-// keyRegisterCarrySQL runs it through psql, which passes the snapshot as a quoted variable.
 const keyRegisterCarrySQL = "BEGIN;\n" + keyRegisterCarryFn + "\nSELECT pg_temp.carry_key_register(:'snap'::jsonb);\nCOMMIT;\n"
 
 // captureKeyRegister reads the live register as JSON; "" when the live database has none (before 0129).

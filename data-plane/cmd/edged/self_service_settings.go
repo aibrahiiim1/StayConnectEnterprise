@@ -1,25 +1,10 @@
 package main
 
-// EMAIL ACCOUNTS: THE SELF-SERVICE SETTINGS (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §6,
-// migration 0117).
-//
-// How long a self-registered client has to verify their email address, what happens when they do not, how often
-// they may ask for the email again, how long the one-time grace hour lasts and how many new accounts one device
-// may open a day. Every value is an operational setting (docs/OPERATIONAL_SETTINGS_POLICY.md): a default, a unit,
-// bounds held here AND by the SQL setter, a per-site row, and an append-only change log written inside
-// iam_v2.self_service_settings_set -- the only writer -- with the operator and a reason.
-//
-// PERMISSION. It is the same decision as switching Email accounts on (which sign-in methods the property offers,
-// and on what terms), so it is governed by the auth-methods resource key rather than by a key of its own: whoever
-// may switch the method on may set its terms, and every role that may read the methods may read them. The route
-// is mounted at /edge/v1/self-service-settings with that key (main.go).
-//
-// STEP-UP. A change alters every self-service client's access at once (a shorter deadline suspends accounts that
-// were fine a minute ago), so the save takes the operator's password as well as a bounded reason, like the other
-// guest-facing security settings (Portal HTTPS, voucher code recovery).
-//
-// ONE SOURCE OF TRUTH. scd reads iam_v2.self_service_settings_get on every decision; this file reads the same
-// function, so the screen cannot show a policy the appliance is not running.
+// Email accounts: the self-service settings (verification deadline, expiry action, resend interval, grace hour, accounts per device per day).
+// Bounds are held here AND by the SQL setter; changes go through iam_v2.self_service_settings_set, the only writer, which logs operator and reason.
+// Governed by the auth-methods resource key: whoever may switch the method on may set its terms.
+// A save takes the operator's password and a bounded reason: it changes every self-service client's access at once.
+// scd reads iam_v2.self_service_settings_get on every decision and so does this file, so the screen cannot show a policy the appliance is not running.
 
 import (
 	"context"
@@ -39,12 +24,10 @@ const (
 	suspensionWarnOnly = "WARN_ONLY"
 )
 
-// selfServiceChangeNotice says on the screen what a save does and does not affect (settings policy).
 const selfServiceChangeNotice = "Saved. A new verification deadline applies to accounts registered from now on; " +
 	"accounts already registered keep the deadline they were given. Switching verification off, or choosing " +
 	"Warn only, applies to every account at once."
 
-// selfServiceSettings is one site's settings, in the wire names of the contract (§6).
 type selfServiceSettings struct {
 	VerificationRequired         bool   `json:"verification_required"`
 	VerificationDeadlineHours    int    `json:"verification_deadline_hours"`
@@ -80,7 +63,7 @@ type selfServiceBound struct {
 	Default int    `json:"default"`
 }
 
-// selfServiceBounds, in the order the screen shows them. The numbers are the contract's §6 table.
+// selfServiceBounds, in the order the screen shows them.
 var selfServiceBounds = []selfServiceBound{
 	{"verification_deadline_hours", 1, 168, "hours", 24},
 	{"reminder_hours_before", 0, 72, "hours", 4},
@@ -146,7 +129,6 @@ type selfServiceSettingsReq struct {
 	Password                     string  `json:"password"`
 }
 
-// settings returns the request's values, or the name of the first missing one.
 func (in selfServiceSettingsReq) settings() (selfServiceSettings, string) {
 	var v selfServiceSettings
 	switch {
@@ -183,7 +165,6 @@ func (in selfServiceSettingsReq) settings() (selfServiceSettings, string) {
 	return v, ""
 }
 
-// storedSelfServiceSettings is what self_service_settings_get answers: the values and their provenance.
 type storedSelfServiceSettings struct {
 	selfServiceSettings
 	Version   int64      `json:"config_version"`
@@ -204,11 +185,8 @@ func isSettingRefusal(err error) bool {
 	return errors.As(err, &pgErr) && (pgErr.Code == "23514" || pgErr.Code == "22023" || pgErr.Code == "P0001")
 }
 
-// selfServiceSettingsFor reads the site's settings through the definer function. A site with no row reads the
-// defaults (config_version 0). A DATABASE ERROR is returned, never papered over with a default.
-//
-// The row is read as JSON so a column the function adds later is ignored rather than breaking the scan, and a
-// value the function does not carry keeps the contract default.
+// selfServiceSettingsFor reads through the definer function; a site with no row reads the defaults (config_version 0).
+// A database error is returned, never papered over. The row is read as JSON so a column added later is ignored.
 func (s *server) selfServiceSettingsFor(ctx context.Context) (storedSelfServiceSettings, error) {
 	out := storedSelfServiceSettings{selfServiceSettings: defaultSelfServiceSettings}
 	var raw []byte

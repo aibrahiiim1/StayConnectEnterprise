@@ -12,36 +12,32 @@ import (
 	"time"
 )
 
-// DNS provider kinds (CTRLAPI_PORTAL_DNS_PROVIDER).
 const (
 	ProviderCloudflare   = "cloudflare"
 	ProviderChalltestsrv = "challtestsrv"
 )
 
-// Default DNS-over-HTTPS resolvers for hotel-domain checks (contract §3.1): two independent operators, both
-// of which must agree before a domain is VERIFIED.
+// DefaultDoHURLs are two independent resolvers that must agree before a hotel domain is VERIFIED.
 var DefaultDoHURLs = []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"}
 
-// Options is how this process obtains certificates: where the secrets live, and the TEST-ONLY overrides that
-// let the whole chain run against Pebble and challtestsrv before a real DNS token exists. Every override
-// defaults to off; OptionsFromEnv reports the ones that are on so ctrlapi can say so at startup.
+// Options holds where the secrets live plus test-only overrides, all off by default; OptionsFromEnv
+// reports the active ones so ctrlapi can log them at startup.
 type Options struct {
 	SecretsDir string
 
-	// TEST-ONLY overrides (deploy/env/ctrlapi.env.example).
+	// Test-only overrides.
 	DNSProvider      string        // cloudflare (default) | challtestsrv
-	ChalltestsrvURL  string        // challtestsrv management API base, e.g. http://127.0.0.1:8055
+	ChalltestsrvURL  string        // management API base
 	DirectoryURL     string        // overrides the staging/production ACME directory URL
-	ACMECAFile       string        // extra root (PEM) trusted for the HTTPS connection to the ACME server only
+	ACMECAFile       string        // extra root (PEM) trusted for the ACME connection only
 	DNSCheckServers  []string      // host:port list replacing the zone's authoritative nameservers
 	DoHURLs          []string      // DNS-over-HTTPS JSON endpoints for hotel-domain checks
-	CloudflareAPI    string        // Cloudflare API base (tests only; not read from the environment)
-	PropagationLimit time.Duration // how long to wait for a TXT record at every nameserver (default 2 min)
-	PropagationPoll  time.Duration // and how often to look (default 5 s)
+	CloudflareAPI    string        // not read from the environment
+	PropagationLimit time.Duration // default 2 min
+	PropagationPoll  time.Duration // default 5 s
 }
 
-// OptionsFromEnv reads CTRLAPI_PORTAL_* and returns the options plus a human list of the test overrides that
-// are active (empty in production).
+// OptionsFromEnv reads CTRLAPI_PORTAL_* and lists the active test overrides (empty in production).
 func OptionsFromEnv() (Options, []string) {
 	o := Options{
 		SecretsDir:      envOr("CTRLAPI_PORTAL_TLS_DIR", "/etc/stayconnect/portal-tls"),
@@ -74,7 +70,6 @@ func OptionsFromEnv() (Options, []string) {
 	return o, active
 }
 
-// Check refuses an inconsistent set of overrides at startup rather than at the first order.
 func (o Options) Check() error {
 	switch o.DNSProvider {
 	case ProviderCloudflare:
@@ -114,7 +109,6 @@ func (o Options) propagationPoll() time.Duration {
 	return 5 * time.Second
 }
 
-// directoryURL is the ACME directory for a settings value, unless the test override replaces it.
 func (o Options) directoryURL(setting string) string {
 	if o.DirectoryURL != "" {
 		return o.DirectoryURL
@@ -125,8 +119,7 @@ func (o Options) directoryURL(setting string) string {
 	return LetsEncryptStagingURL
 }
 
-// acmeHTTPClient is the client for the ACME server. ACMECAFile ADDS a root for this one connection (Pebble's
-// test CA); the system roots stay trusted and nothing else in the process is affected.
+// acmeHTTPClient: ACMECAFile adds a root for this connection only; system roots stay trusted.
 func (o Options) acmeHTTPClient() (*http.Client, error) {
 	if o.ACMECAFile == "" {
 		return &http.Client{Timeout: 60 * time.Second}, nil

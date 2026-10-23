@@ -1,11 +1,5 @@
-// THE PRIVACY NOTICE TEMPLATE (GDPR remediation plan F1, Product-Owner decision D-F1).
-//
-// The hotel is the controller and the notice is the hotel's: we ship a starting text, it completes it. The text
-// says only what this system actually records. Everything that differs from hotel to hotel -- who the controller
-// is, how long each record is kept, which outside services are switched on -- is a [[placeholder]]; the server
-// warns (portaldesign, privacy_text) while any is left, so an unfinished notice is never published unnoticed.
-//
-// An engineering draft: the hotel's own legal adviser should review it before it is relied on (plan D-F3).
+// The hotel is the controller and completes this text, which says only what the system records. Per-hotel facts
+// are [[placeholders]]; the server warns (portaldesign, privacy_text) while any remain. An engineering draft: legal review is needed.
 
 export const PRIVACY_TEMPLATE = `Privacy notice: guest Wi-Fi
 

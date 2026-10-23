@@ -1,10 +1,6 @@
 "use client";
 
-// CODES THE OPERATOR HOLDS RIGHT NOW: the one-time issue response, or a batch export that was just recorded.
-//
-// Everything here works on the codes in memory. Copy puts them on the clipboard, CSV builds a file in the
-// browser, Print lays out cards -- none of them sends a code anywhere or stores one. When the surrounding
-// dialog or sheet closes, this component unmounts and the codes go with it.
+// Codes stay in memory; closing the dialog or sheet unmounts them without persistent storage.
 
 import * as React from "react";
 import { Copy, Download, Printer } from "lucide-react";

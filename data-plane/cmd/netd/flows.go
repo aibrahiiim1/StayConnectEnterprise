@@ -1,20 +1,9 @@
 package main
 
-// POST /v1/flows/end — END AN ADDRESS'S ACCESS AND ITS OPEN FLOWS NOW.
-//
-// netd ends access on its own whenever durable state says so (the Phase-3 reconciliation, flushingGate). One
-// path did not go through netd: scd's staff disconnect (cmd/scd/main.go denyAtGate) removed the address from the
-// legacy set and deleted the tc class directly, then waited for netd's next pass to revoke the Phase-3
-// element. Until that pass the guest stayed authorized with NO class -- every open flow, and any new one,
-// forwarded unshaped through the bridge's default class and uncounted (audit B-1, F-14).
-//
-// This route is that path's kernel half, owned by the component that owns the kernel state: the Phase-3
-// element for the address is revoked (on every bridge that carries it, or the one named) and proven gone, and
-// every conntrack entry naming the address is deleted. The tc class is left to the reconciliation, which removes
-// it once durable state no longer lists the session -- by then nothing can reach the class, because nothing is
-// authorized. Revoking ahead of the reconciliation only ever REMOVES access; if durable state still lists the
-// session the next pass re-admits it, so a caller cannot use this to grant anything.
-//
+// POST /v1/flows/end revokes the address's Phase-3 element (on every bridge carrying it, or the one named),
+// proves it gone and deletes every conntrack entry naming it. The tc class is left to the reconciliation, which
+// removes it once durable state stops listing the session. Revoking early only removes access: if durable state
+// still lists the session the next pass re-admits it, so a caller cannot use this to grant anything.
 // Callers: NETD_FLOW_CALLERS (scd). See caller_authz.go.
 
 import (
@@ -32,16 +21,14 @@ import (
 
 type flowsEndReq struct {
 	IP string `json:"ip"`
-	// Bridge narrows the revocation to one ingress bridge. Empty: every Phase-3 element for the address.
+	// Bridge narrows the revocation to one ingress bridge; empty means every one.
 	Bridge string `json:"bridge,omitempty"`
 }
 
 type flowsEndResp struct {
-	IP string `json:"ip"`
-	// Phase3Revoked is how many Phase-3 authorizations for the address were removed (and proven gone).
-	Phase3Revoked int `json:"phase3_revoked"`
-	// Phase3Managed reports whether the address was in the Phase-3 set at all. When it was, its tc class belongs
-	// to netd and the caller must NOT delete it.
+	IP            string `json:"ip"`
+	Phase3Revoked int    `json:"phase3_revoked"`
+	// Phase3Managed: when true the tc class belongs to netd and the caller must not delete it.
 	Phase3Managed bool `json:"phase3_managed"`
 	FlowsEnded    int  `json:"flows_ended"`
 }
@@ -66,8 +53,7 @@ func (s *server) flowsEnd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// endFlows revokes the address's Phase-3 authorization(s), then flushes its flows. The flush runs AFTER the
-// revocation, so a flow cannot re-establish against a still-present element.
+// endFlows flushes after the revocation so a flow cannot re-establish against a still-present element.
 func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows conntrack.Flusher) (flowsEndResp, error) {
 	out := flowsEndResp{IP: ip.String()}
 	var problems []error
@@ -90,8 +76,7 @@ func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows c
 		}
 		p.mu.Unlock()
 	}
-	// Whatever the sets said, the address's flows end. The legacy set is the caller's to revoke (scd removed it
-	// before calling), and a flow from either set dies the same way.
+	// Flows end whatever the sets said; the legacy set is the caller's to revoke.
 	n, err := flows.FlushAddrs(ctx, []net.IP{ip})
 	out.FlowsEnded = n
 	if err != nil {
@@ -100,9 +85,8 @@ func (s *server) endFlows(ctx context.Context, ip net.IP, bridge string, flows c
 	return out, errors.Join(problems...)
 }
 
-// runFlowsEndCommand is `netd flows-end --ip A.B.C.D`: the same flush, in the CALLING network namespace, with no
-// database and no socket. scripts/flow-teardown-netns-test.sh drives it inside a disposable router namespace
-// (`ip netns exec <router> netd flows-end ...`) to prove that a long transfer stops once its flows are flushed.
+// runFlowsEndCommand is `netd flows-end --ip A.B.C.D`: the same flush in the calling network namespace, with no
+// database or socket (driven by scripts/flow-teardown-netns-test.sh).
 func runFlowsEndCommand(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("flows-end", flag.ContinueOnError)
 	fs.SetOutput(stderr)

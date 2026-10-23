@@ -13,8 +13,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 )
 
-// orphanFixture is an appliance with an identity, a licence and a client certificate on disk, whose record
-// Central has just been confirmed to have deleted.
 type orphanFixture struct {
 	srv      *server
 	paths    orphanPaths
@@ -61,8 +59,6 @@ func (f *orphanFixture) adopt(t *testing.T, docs ...*assignment.Document) {
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// NEVER HELD A CUSTOMER: a waiting appliance whose record was deleted may clear its identity and register
-// again as a fresh waiting appliance, exactly as before.
 func TestOrphanThatNeverHeldACustomerMayRegisterAgain(t *testing.T) {
 	f := newOrphanFixture(t)
 	if got := f.srv.handleConfirmedOrphan(context.Background(), f.paths); got != "reset" {
@@ -85,8 +81,6 @@ func TestOrphanThatNeverHeldACustomerMayRegisterAgain(t *testing.T) {
 	}
 }
 
-// HAS HELD A CUSTOMER: it stops admitting guests, keeps its identity and data, writes the durable marker, and
-// never registers again -- not now and not after a restart.
 func TestOrphanThatHeldACustomerIsBlockedAndKeepsItsIdentity(t *testing.T) {
 	f := newOrphanFixture(t)
 	f.adopt(t, &assignment.Document{AssignmentID: "a-1", ApplianceID: "appl-1", TenantID: "t-1", SiteID: "s-1",
@@ -112,7 +106,7 @@ func TestOrphanThatHeldACustomerIsBlockedAndKeepsItsIdentity(t *testing.T) {
 		t.Fatal("this process does not know it was removed")
 	}
 
-	// AFTER A RESTART: the marker alone carries the state.
+	// after a restart the marker alone carries the state
 	rec := loadRemoved(f.paths.Marker)
 	if rec == nil {
 		t.Fatal("no marker was written; a restart would register again")
@@ -131,7 +125,6 @@ func TestOrphanThatHeldACustomerIsBlockedAndKeepsItsIdentity(t *testing.T) {
 	if st.Activation != activationRetired || st.Details.Reason != removedFromCentralCode {
 		t.Fatalf("status reads %q / %q; want retired / %s", st.Activation, st.Details.Reason, removedFromCentralCode)
 	}
-	// No way back in through a licence file or an activation package.
 	for name, h := range map[string]http.HandlerFunc{
 		"licence upload":     restarted.licenseInstall,
 		"offline package":    restarted.centralOfflinePackage,
@@ -147,8 +140,6 @@ func TestOrphanThatHeldACustomerIsBlockedAndKeepsItsIdentity(t *testing.T) {
 	}
 }
 
-// A TERMINAL ASSIGNMENT is the retired case: the appliance held a customer before it was retired, so a later
-// deletion of the retired record must not let it register again under a new key either.
 func TestOrphanAfterATerminalAssignmentIsBlocked(t *testing.T) {
 	f := newOrphanFixture(t)
 	f.adopt(t,
@@ -163,8 +154,7 @@ func TestOrphanAfterATerminalAssignmentIsBlocked(t *testing.T) {
 	}
 }
 
-// An unreadable marker is still a marker: a file that exists and cannot be parsed must not be read as
-// permission to register.
+// An unreadable marker is still a marker, not permission to register.
 func TestAnUnreadableMarkerStillBlocksRegistration(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "removed-from-central.json")
 	if err := os.WriteFile(p, []byte("{not json"), 0o644); err != nil {

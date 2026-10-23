@@ -16,9 +16,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 )
 
-// SYSTEM: security alerts, trust & keys, the audit log.
-
-// listSecurityAlerts: GET /cloud/v1/security-alerts?status=&appliance_id=
 func (b *Base) listSecurityAlerts(w http.ResponseWriter, r *http.Request) {
 	scope, ok := readScope(w, r)
 	if !ok {
@@ -64,7 +61,6 @@ func (b *Base) listSecurityAlerts(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
-// patchSecurityAlert: PATCH /cloud/v1/security-alerts/{id} {status, reason} — security.manage.
 func (b *Base) patchSecurityAlert(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -103,8 +99,7 @@ func (b *Base) patchSecurityAlert(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": in.Status, "from": prev})
 }
 
-// trust: GET /cloud/v1/trust — CA versions, appliance certificates, assignment signing keys, registry.
-// Public material and fingerprints only; no private key and no certificate PEM is ever returned.
+// trust returns public material and fingerprints only; never a private key or certificate PEM.
 func (b *Base) trust(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
@@ -216,13 +211,12 @@ func (b *Base) trust(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// auditRowKey is the deterministic tie-break between audit rows with the same timestamp. audit_log has no id
-// column (it is a hypertable keyed on ts), and several rows routinely share a ts -- a retirement writes its
-// events in one go -- so a cursor of the last ts alone skipped every same-instant row after a page boundary.
+// auditRowKey breaks ties between audit rows sharing a ts (audit_log has no id column); a ts-only cursor
+// would skip same-instant rows at a page boundary.
 const auditRowKey = `md5(actor_type || '|' || COALESCE(actor_id,'') || '|' || action || '|' || COALESCE(target_type,'') ||
                          '|' || COALESCE(target_id,'') || '|' || COALESCE(host(ip),'') || '|' || payload::text)`
 
-// parseAuditCursor reads "<RFC3339Nano ts>|<row key>"; a bare timestamp (the old cursor) means "older than".
+// parseAuditCursor reads "<RFC3339Nano ts>|<row key>"; a bare timestamp is accepted too.
 func parseAuditCursor(v string) (*time.Time, string, error) {
 	tsPart, key, _ := strings.Cut(v, "|")
 	t, err := time.Parse(time.RFC3339Nano, tsPart)
@@ -232,11 +226,7 @@ func parseAuditCursor(v string) (*time.Time, string, error) {
 	return &t, key, nil
 }
 
-// listAudit: GET /cloud/v1/audit?customer_id=&appliance_id=&action=&since=&limit=&cursor=
-//
-// Platform roles read everything, including platform events that belong to no customer. A customer-scoped
-// caller reads only its own customer's records. The cursor names the last row returned (its ts and row key),
-// so a page boundary inside a group of same-instant rows loses none of them.
+// listAudit: platform roles read everything; a customer-scoped caller reads only its own customer's records.
 func (b *Base) listAudit(w http.ResponseWriter, r *http.Request) {
 	scope, ok := readScope(w, r)
 	if !ok {

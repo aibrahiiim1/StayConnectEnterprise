@@ -2,9 +2,7 @@ package main
 
 import "testing"
 
-// THE BACKUP ROWS (decision D-B). The document said the IT manager could WRITE backups and the payments desk
-// could READ them, and the code agreed with neither; download had no row at all while every reader could take a
-// full database dump. Both rows are now held to the code cell by cell, like the voucher rows.
+// Holds the documented backups and backup-download rows to the code cell by cell.
 func TestBackupResourcesMatchTheDocumentedRoleMatrix(t *testing.T) {
 	for _, resource := range []string{"backups", "backup-download"} {
 		row := docMatrixRow(t, resource)

@@ -2,15 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// CLIENT ACCOUNTS: the two things this screen used to say that were not true.
-//
-//  1. "Disconnect this account's devices now" sent a field the appliance's decoder refused outright, so the
-//     whole set-password call failed. The screen must send the flag AND report the number of devices the
-//     appliance CONFIRMED were disconnected -- including when some could not be, which used to be announced as
-//     a clean success.
-//  2. A "Locked out" counter and a "Locked out" filter, both reading a column nothing in the product ever
-//     sets. An always-zero counter reads as a measurement; the screen must not make one.
-
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -28,8 +19,6 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-// The generated-password format card lives on this screen and loads on mount; it is not what these cases are
-// about, so it is answered with the appliance's own defaults.
 const FORMAT = {
   password_style: "mixed", password_length: 14, config_version: 0,
   limits: {
@@ -64,17 +53,12 @@ function wire() {
   });
 }
 
-// The password box is reached by its form field name rather than its label: the kit's Field binds its label to
-// the single child element, and in this form that child is the row holding the input and the show/hide button,
-// so the label points at the row. Worth fixing on the kit, not worth asserting around here.
 const passwordBox = (dialog: HTMLElement) =>
   dialog.querySelector('input[name="password"]') as HTMLInputElement;
 
 async function openPage() {
-  // BOTH IMPORTS MUST COME FROM THE SAME MODULE GRAPH. vi.resetModules() between cases means a statically
-  // imported ToastProvider would carry a DIFFERENT React context than the freshly imported page's useToast, and
-  // the page would quietly fall back to the no-op toast API -- so every toast assertion after the first case
-  // would fail for a reason that has nothing to do with the screen.
+  // Both imports must come from the same module graph: after vi.resetModules() a static ToastProvider would carry a
+  // different React context than the page's useToast.
   const { ToastProvider } = await import("@/components/ui/toast");
   const { default: Page } = await import("@/app/(app)/guest-accounts/page");
   render(<ToastProvider><Page /></ToastProvider>);
@@ -156,7 +140,6 @@ describe("Client accounts — disconnecting an account's devices", () => {
 
     await user.click(screen.getByRole("button", { name: /disconnect/i }));
     const confirm = await screen.findByRole("dialog");
-    // The promise the dialog makes is the one the appliance keeps: the account still works.
     expect(within(confirm).getByText(/The account still works, so they can sign in again/)).toBeTruthy();
     await user.click(within(confirm).getByRole("button", { name: /disconnect devices/i }));
 
@@ -175,7 +158,6 @@ describe("Client accounts — no account-lockout fiction", () => {
     const filter = screen.getByRole("combobox", { name: "Filter by status" });
     expect(Array.from(filter.querySelectorAll("option")).map((o) => o.textContent))
       .toEqual(["All accounts", "Can sign in", "Disabled", "Removed"]); // Removed: accounts retired with history kept
-    // The counters that remain are the ones the server can answer for.
     expect(screen.getByText("Devices online")).toBeTruthy();
     expect(screen.getByText("Able to sign in")).toBeTruthy();
   });

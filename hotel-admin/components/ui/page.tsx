@@ -2,17 +2,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { HelpTip } from "@/components/help";
 
-// THE PAGE MEASURE AND RHYTHM.
-//
-// The GUTTER is deliberately NOT here — it lives on the scrolling container in app/(app)/layout.tsx, so that a
-// screen cannot render flush against the window edge by forgetting to ask for padding. That is exactly how half
-// this admin ended up doing it: about half the screens opened with a padded, centred container of their own and
-// the other half with a bare `space-y-4` div, which has no padding at all — so their cards touched both the
-// window edge and the sidebar. The padded half did not agree either: max-w-7xl, max-w-[92rem] and max-w-3xl all
-// appeared, alongside two different padding scales.
-//
-// What this component owns is the maximum measure and the vertical spacing between blocks. `width` is the only
-// knob: a session table with eight columns wants the room, and a single form does not want 96rem of it.
+// The scrolling layout owns page gutters; this shell controls width and spacing only.
 
 const WIDTHS = {
   wide: "max-w-[96rem]",
@@ -33,10 +23,7 @@ export function PageShell({
   return <div className={cn("mx-auto w-full space-y-5", WIDTHS[width], className)}>{children}</div>;
 }
 
-/**
- * PageHeader — the title block. `eyebrow` is the section the screen belongs to, which the sidebar also shows;
- * having it here is what lets someone arriving from a link know where they are.
- */
+/** The eyebrow orients visitors who arrive directly from a link. */
 export function PageHeader({
   title,
   description,
@@ -50,13 +37,11 @@ export function PageHeader({
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
-  /** Tips for this screen, opened from a lightbulb beside the title. Keep warnings on the page, not in here. */
+  /** Keep warnings on the page, outside optional help. */
   help?: React.ReactNode;
-  /** The tips drawer title; defaults to the page title when that is a string. */
   helpTitle?: string;
   eyebrow?: React.ReactNode;
   actions?: React.ReactNode;
-  /** A section icon in a tinted tile, left of the title. Optional; existing headers are unchanged. */
   icon?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
@@ -97,11 +82,6 @@ export function PageHeader({
   );
 }
 
-/**
- * StatCard — the dashboard tile. Replaces `KpiCard`, which could show a label, a value and one line of hint
- * and nothing else: no trend, no secondary figure, no link to the screen that explains it, and no way to mark
- * a figure as a problem.
- */
 export function StatCard({
   label,
   value,
@@ -191,10 +171,6 @@ export function StatCard({
   );
 }
 
-/**
- * Toolbar — the filter/search row that sits above a table. Pages were building this with ad-hoc flex rows, so
- * the search box was a different height from the select next to it on most screens.
- */
 export function Toolbar({
   className,
   children,

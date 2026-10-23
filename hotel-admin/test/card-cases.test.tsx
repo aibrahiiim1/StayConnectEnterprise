@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-// CARD DISPUTES AND CHARGEBACKS (migration 0115): an open case offers Keep / End access to a role that may act,
-// each with a reason and the password; a decided case shows the decision; a role that may not act sees no buttons;
-// full-refund terminations are listed as evidence.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

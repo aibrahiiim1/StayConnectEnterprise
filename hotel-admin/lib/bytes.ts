@@ -1,9 +1,5 @@
-// BYTES, AS A HOTEL READS THEM.
-//
-// An operator in a dispute is holding a guest's phone showing "you said 5 GB". Reporting 5368709120 to them
-// is technically exact and practically useless, and reporting "5.4 GB" when the quota was written as 5 GB
-// starts a second argument. So: binary units, because that is what the quota was expressed in, one decimal
-// place, and no rounding that could make a figure look like it crossed a threshold it did not.
+// Bytes as a hotel reads them: binary units (quotas are written in them), one decimal, no rounding that crosses a
+// threshold.
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
@@ -27,12 +23,7 @@ export function quotaPercent(consumed?: number | null, quota?: number | null): n
   return Math.min(100, Math.round((consumed / quota) * 100));
 }
 
-/** WHY ACCESS ENDED, in words rather than an enum.
- *
- *  These are the codes the entitlement and session records carry. An operator reading "TIME" has to guess;
- *  reading "the time allowance ran out" they can answer the guest in the same sentence. Anything unrecognised
- *  is shown as-is rather than mapped to a guess — an unknown code is information, and inventing a friendly
- *  name for it would hide that the product learned a new one. */
+/** Why access ended, in words. Unrecognised codes are shown as-is rather than guessed. */
 const END_REASONS: Record<string, string> = {
   TIME: "The time allowance ran out",
   DATA: "The data allowance was used up",

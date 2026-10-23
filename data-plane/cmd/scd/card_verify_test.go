@@ -21,7 +21,6 @@ func waitChecks(t *testing.T, n *int32, want int32) {
 	time.Sleep(10 * time.Millisecond)
 }
 
-// Card payment is never ready before the provider has accepted the credentials, and a refusal keeps it unready.
 func TestCardVerifier_ReadyOnlyAfterTheProviderAcceptsTheCredentials(t *testing.T) {
 	v := newCardVerifier()
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
@@ -43,7 +42,6 @@ func TestCardVerifier_ReadyOnlyAfterTheProviderAcceptsTheCredentials(t *testing.
 	if !v.ready(fp, check) {
 		t.Fatal("not ready after the provider accepted the credentials")
 	}
-	// A rotated secret is a different fingerprint: verified again before it is trusted.
 	fp2 := credentialFingerprint("acct-1", payment.ModeTest, payment.Credentials{"secret_key": "sk_test_b"})
 	if fp2 == fp {
 		t.Fatal("rotating a secret must change the fingerprint")
@@ -56,7 +54,6 @@ func TestCardVerifier_ReadyOnlyAfterTheProviderAcceptsTheCredentials(t *testing.
 	if v.ready(fp2, check) {
 		t.Fatal("refused credentials made card payment ready")
 	}
-	// A refusal is retried after 5 minutes, not on every request.
 	before := atomic.LoadInt32(&calls)
 	v.ready(fp2, check)
 	now = now.Add(6 * time.Minute)
@@ -66,7 +63,6 @@ func TestCardVerifier_ReadyOnlyAfterTheProviderAcceptsTheCredentials(t *testing.
 	if atomic.LoadInt32(&calls) != before+1 || !v.ready(fp2, check) {
 		t.Fatalf("expected exactly one retry after the backoff and readiness after success: calls %d->%d", before, atomic.LoadInt32(&calls))
 	}
-	// A success lapses if never refreshed.
 	now = now.Add(31 * time.Minute)
 	fail.Store(true)
 	if v.ready(fp2, check) {
@@ -74,8 +70,6 @@ func TestCardVerifier_ReadyOnlyAfterTheProviderAcceptsTheCredentials(t *testing.
 	}
 }
 
-// A wildcard extra domain is refused at save: the garden opens the addresses a name resolves to, and a wildcard
-// names no host (automated review finding on PR #202).
 func TestPaymentDomainsSave_RefusesWildcards(t *testing.T) {
 	s := &server{}
 	for _, d := range []string{"*.provider.example", "a.*.provider.example"} {

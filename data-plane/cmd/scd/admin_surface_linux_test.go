@@ -2,16 +2,8 @@
 
 package main
 
-// THE REFUSAL ITSELF, ON THE ONLY PLATFORM WHERE IT EXISTS.
-//
-// admin_surface_test.go checks the classification and that the gate is wired. What it cannot check is the
-// refusal: on a non-Linux build requireAdminPeer allows everything by design, so a portable test asserting
-// "403" would pass for the wrong reason on Linux and fail on a workstation.
-//
-// A REFUSAL-ONLY TEST IS HALF A PROOF, and this file was written with that in mind: a gate that refused
-// EVERYTHING would satisfy "portald is refused" perfectly while breaking the appliance. So each case below
-// pairs the refusal with the admission it must not break -- the same request from edged's uid, and the same
-// caller on a guest route.
+// The refusal itself, on the only platform where it exists (elsewhere requireAdminPeer allows everything). Each case
+// pairs the refusal with the admission it must not break: a gate that refused everything would pass refusal tests alone.
 
 import (
 	"context"
@@ -24,7 +16,6 @@ import (
 	"testing"
 )
 
-// asPeer builds a request carrying the peer credentials the accept hook would have attached.
 func asPeer(method, path string, uid uint32, exe string) *http.Request {
 	r := httptest.NewRequest(method, path, nil)
 	ctx := context.WithValue(r.Context(), peerKey{}, peerCred{
@@ -33,19 +24,11 @@ func asPeer(method, path string, uid uint32, exe string) *http.Request {
 	return r.WithContext(ctx)
 }
 
-// currentUIDAsEdged points SCD_EDGED_USER at a real, resolvable, NON-ROOT account on this machine, so
-// "edged's uid" is a uid the name service actually returns rather than a number this test invented.
-//
-// WHY NOT user.Current(). The obvious version of this helper used the test process's own user and skipped
-// when that was root -- which meant it skipped in every container, including the CI container and the
-// golang image used to check the Linux build, i.e. everywhere this Linux-only file can actually run. And
-// the skip was unnecessary: the peer uid in these tests is SYNTHETIC, supplied through asPeer, so whether
-// the test process is root has no bearing on what the gate sees. What matters is only that the configured
-// service user resolves and is not uid 0.
+// currentUIDAsEdged points SCD_EDGED_USER at a real, resolvable, non-root account, so "edged's uid" is one the name
+// service returns. The peer uid is synthetic (via asPeer), so whether the test process is root is irrelevant.
 func currentUIDAsEdged(t *testing.T) uint32 {
 	t.Helper()
-	// Any of these exists on a Debian-family appliance, a CI runner and the golang image. "stayconnect"
-	// first, because on the appliance it is the real answer.
+	// Any of these exists on a Debian-family appliance, a CI runner and the golang image; "stayconnect" first.
 	for _, name := range []string{"stayconnect", "daemon", "bin", "nobody", "sys"} {
 		u, err := user.Lookup(name)
 		if err != nil {
@@ -56,8 +39,7 @@ func currentUIDAsEdged(t *testing.T) uint32 {
 			continue
 		}
 		t.Setenv("SCD_EDGED_USER", name)
-		// edgedUID caches, so a case that ran earlier in this binary may have resolved a different user.
-		// Reset it: a stale cache would silently invert the result of every assertion below.
+		// edgedUID caches; reset it, or a stale value would invert every assertion below.
 		resetEdgedUIDCache()
 		t.Cleanup(resetEdgedUIDCache)
 		return uint32(id)
@@ -102,7 +84,7 @@ func TestAForeignUIDCannotReachTheAdminSurface(t *testing.T) {
 	}
 }
 
-// THE OTHER HALF. A gate that refused everything would pass the test above.
+// A gate that refused everything would pass the test above.
 func TestEdgedItselfIsStillAdmitted(t *testing.T) {
 	mine := currentUIDAsEdged(t)
 	for _, path := range []string{
@@ -116,15 +98,8 @@ func TestEdgedItselfIsStillAdmitted(t *testing.T) {
 	}
 }
 
-// THE CASE A REVIEW CAUGHT: edged's OWN UID, A DIFFERENT IMAGE.
-//
-// After portald was given its own account this gate checked the uid alone, on the belief that edged was
-// then the only thing holding it. stayconnect-hotel-admin.service was still running `/usr/bin/node
-// server.js` as User=stayconnect -- uid 998 on the appliance, exactly edged's -- with a group that opens
-// scd.sock. So the Node process rendering the admin web UI was admitted to /v1/backup/restore,
-// /v1/license/install and /v1/central/offline-package.
-//
-// It has its own account now, and this asserts the in-process half: sharing the account is not enough.
+// edged's uid alone is not enough: the hotel-admin node process once ran under the same uid with a group that opens
+// scd.sock, so the image path must match too.
 func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
 	mine := currentUIDAsEdged(t)
 	for _, exe := range []string{
@@ -145,8 +120,7 @@ func TestSharingEdgedsUIDIsNotEnough(t *testing.T) {
 	}
 }
 
-// AND THE GUEST SURFACE IS UNAFFECTED BY THE IMAGE. The guest routes are reachable by anything the socket's
-// group admits, whatever binary it is -- that is what keeps the captive portal working.
+// The guest surface is reachable by anything the socket's group admits, whatever binary it is.
 func TestTheGuestSurfaceDoesNotCareWhichImageCalls(t *testing.T) {
 	mine := currentUIDAsEdged(t)
 	for _, exe := range []string{"/usr/bin/node", "/opt/stayconnect/bin/portald", "/usr/bin/curl"} {
@@ -156,8 +130,7 @@ func TestTheGuestSurfaceDoesNotCareWhichImageCalls(t *testing.T) {
 	}
 }
 
-// AND THE GUEST SURFACE STAYS OPEN TO THE FOREIGN UID, which is the entire reason the socket group still
-// admits portald. If this fails, guests cannot sign in.
+// The guest surface stays open to the foreign uid; if this fails, guests cannot sign in.
 func TestTheGuestSurfaceStaysOpenToPortald(t *testing.T) {
 	mine := currentUIDAsEdged(t)
 	foreign := mine + 1
@@ -177,8 +150,7 @@ func TestTheGuestSurfaceStaysOpenToPortald(t *testing.T) {
 	}
 }
 
-// ROOT IS ALLOWED, and it is allowed on purpose rather than by omission: netd, acctd, keepalived and the
-// deployment scripts dial this socket as root, and uid 0 can read the DEK from disk regardless.
+// Root is allowed on purpose: netd, acctd, keepalived and deploy scripts dial as root, and uid 0 can read the DEK from disk anyway.
 func TestRootIsAllowed(t *testing.T) {
 	currentUIDAsEdged(t)
 	if code, _ := gate(t, asPeer("POST", "/v1/backup/run", 0, "/usr/bin/curl")); code != http.StatusOK {
@@ -187,9 +159,7 @@ func TestRootIsAllowed(t *testing.T) {
 	}
 }
 
-// FAIL CLOSED WHEN THE PEER IS UNKNOWN. A connection whose credentials could not be read must not reach an
-// administrative route, and must still reach a guest one -- refusing those would take the portal down over
-// a diagnostic gap.
+// An unknown peer must not reach an administrative route but must still reach a guest one.
 func TestAnUnidentifiedPeerIsRefusedAdminAndAllowedGuest(t *testing.T) {
 	currentUIDAsEdged(t)
 
@@ -204,7 +174,7 @@ func TestAnUnidentifiedPeerIsRefusedAdminAndAllowedGuest(t *testing.T) {
 	}
 }
 
-// AND WHEN SCD CANNOT RESOLVE WHO EDGED IS AT ALL, the admin surface closes rather than opening.
+// When scd cannot resolve who edged is, the admin surface closes.
 func TestAnUnresolvableEdgedUserClosesTheAdminSurface(t *testing.T) {
 	t.Setenv("SCD_EDGED_USER", "a-user-that-does-not-exist-on-this-machine-0f8b9a0e")
 	resetEdgedUIDCache()
@@ -213,15 +183,13 @@ func TestAnUnresolvableEdgedUserClosesTheAdminSurface(t *testing.T) {
 	if code, body := gate(t, asPeer("POST", "/v1/backup/restore", 4242, "/opt/stayconnect/bin/edged")); code != http.StatusForbidden {
 		t.Errorf("unresolvable service user returned %d, not 403 (%s)", code, strings.TrimSpace(body))
 	}
-	// Root still gets through: uid 0 is checked before the lookup, so a broken passwd entry does not lock
-	// an administrator out of the appliance they own.
+	// Root still gets through: uid 0 is checked before the lookup.
 	if code, _ := gate(t, asPeer("POST", "/v1/backup/restore", 0, "/usr/bin/curl")); code != http.StatusOK {
 		t.Errorf("root was locked out (%d) by an unresolvable service user", code)
 	}
 }
 
-// THE DEFAULT SERVICE USER IS THE ONE THE APPLIANCE USES. If SCD_EDGED_USER is unset, the lookup must be
-// for "stayconnect" -- not root, not the current user, not empty.
+// With SCD_EDGED_USER unset the lookup is for "stayconnect".
 func TestTheDefaultServiceUserIsStayconnect(t *testing.T) {
 	src, err := os.ReadFile("peer_identity_linux.go")
 	if err != nil {

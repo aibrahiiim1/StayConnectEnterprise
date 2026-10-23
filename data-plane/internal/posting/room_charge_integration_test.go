@@ -2,10 +2,8 @@
 
 package posting
 
-// PMS ROOM CHARGE, end to end on the FULL appliance schema (migrations 0095-0100), with a scripted transport:
-// onboarding, posting creation from the settlement alone, PA=OK -> settled and granted, any other PA -> failed,
-// UNKNOWN -> manual review and never retried, and the accepted review actions. Set ROOMCHARGE_TEST_DSN to a
-// database built by scripts/sitedb-dev.sh; ROOMCHARGE_WORKER_DSN (svc_posting) proves the worker role suffices.
+// PMS room charge end to end with a scripted transport. Set ROOMCHARGE_TEST_DSN to a database built by
+// scripts/sitedb-dev.sh; ROOMCHARGE_WORKER_DSN (svc_posting) proves the worker role suffices.
 
 import (
 	"context"
@@ -33,8 +31,7 @@ func rcPool(t *testing.T, env string) *pgxpool.Pool {
 }
 
 type rcScope struct {
-	tenant, site, iface, stay, settle, purchase, ac string
-	// what a further purchase for the same stay needs, and the reservation the charge targets
+	tenant, site, iface, stay, settle, purchase, ac         string
 	rev, pkgRev, mapping, dev, gn, op, reservation, planRev string
 }
 
@@ -59,9 +56,8 @@ func rcGuarded(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) s
 	return id
 }
 
-// seedRoomCharge builds an interface onboarded for reservation-targeted room charge (Amendment A1), an in-house
-// stay with a reservation number, a priced Room-charge package with its mapping, a verified Room sign-in, and a
-// REQUIRED PMS_POSTING settlement. There is no folio anywhere.
+// seedRoomCharge builds an onboarded interface, an in-house stay with a reservation number, a priced
+// Room-charge package, a verified Room sign-in and a REQUIRED PMS_POSTING settlement.
 func seedRoomCharge(t *testing.T, p *pgxpool.Pool) rcScope {
 	t.Helper()
 	ctx := context.Background()
@@ -81,7 +77,6 @@ func seedRoomCharge(t *testing.T, p *pgxpool.Pool) rcScope {
 		VALUES ($1,$2,$3,1,'UTC','UNSET','{"heartbeat_timeout_ms":300000,"feed_freshness_ms":900000,"complete_sync_ms":86400000}') RETURNING id::text`,
 		s.tenant, s.site, s.iface)
 	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, rev)
-	// ONBOARDING, through the audited definer.
 	onboarded := scan1[string](t, p, `SELECT iam_v2.pms_interface_financial_onboard($1,$2,$3,$4,'RESERVATION','USD',2::smallint,
 		'Vendor confirmed in writing: reservation numbers are unique and never reused.','onboarding test',$5)::text`,
 		s.tenant, s.site, s.iface, rev, op)
@@ -104,7 +99,6 @@ func seedRoomCharge(t *testing.T, p *pgxpool.Pool) rcScope {
 	s.mapping = scan1[string](t, p, `INSERT INTO iam_v2.package_settlement_mappings
 		(tenant_id,site_id,package_revision_id,pms_interface_id,mapping_revision,posting_code)
 		VALUES ($1,$2,$3,$4,1,'WIFI') RETURNING id::text`, s.tenant, s.site, s.pkgRev, s.iface)
-	// posting_allowed is not set here: the database evaluates it (IN_HOUSE, reservation present, no block).
 	s.reservation = fmt.Sprintf("%d", 5000+u%1000000)
 	s.stay = rcGuarded(t, p, "stay", `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,normalized_room_number,status)
@@ -118,10 +112,8 @@ func seedRoomCharge(t *testing.T, p *pgxpool.Pool) rcScope {
 	return s
 }
 
-// addRoomChargePurchase adds one more verified Room sign-in, quote, AWAITING_SETTLEMENT purchase and REQUIRED
-// PMS_POSTING settlement for the same stay, so a test can make sequential purchases in one stay. Each further
-// purchase is of a NEW package: commerce already allows only one live purchase of the same package revision
-// per stay (C3, purchase_once_per_stay), which is a different rule from the one room charge per stay (E16).
+// addRoomChargePurchase adds another purchase and settlement for the same stay. Each is of a new package
+// because commerce allows only one live purchase of a package revision per stay (purchase_once_per_stay).
 func addRoomChargePurchase(t *testing.T, p *pgxpool.Pool, s *rcScope) {
 	t.Helper()
 	if s.purchase != "" {
@@ -205,8 +197,7 @@ func TestRoomChargePAOKSettlesAndGrants(t *testing.T) {
 	}
 }
 
-// A refusal the vendor has confirmed means "not posted" fails the charge (Amendment A1, rule 8). The same code
-// NOT confirmed is UNKNOWN: see TestA1_UnconfirmedRefusalIsUnknown.
+// A vendor-confirmed refusal means "not posted" and fails the charge; unconfirmed it is UNKNOWN.
 func TestRoomChargeRejectedFails(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)
@@ -282,7 +273,7 @@ func TestRoomChargeUnknownIsNeverRetriedAndReviewDecides(t *testing.T) {
 	}
 }
 
-// Without the posting target recorded, nothing is charged (E4b): a fresh revision is UNSET.
+// Without the posting target recorded, nothing is charged: a fresh revision is UNSET.
 func TestRoomChargeRefusedWithoutOnboarding(t *testing.T) {
 	admin := rcPool(t, "ROOMCHARGE_TEST_DSN")
 	s := seedRoomCharge(t, admin)

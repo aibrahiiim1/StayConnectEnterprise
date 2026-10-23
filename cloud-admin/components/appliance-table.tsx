@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { ActivationBadge, ConnectionBadge, LicenseBadge } from "@/components/status-badge";
 import { connectionSentence, licenseSentence } from "@/lib/status";
 
-/** Waiting-for-activation first (they are the ones that need someone), then by serial. */
 export function sortAppliances(rows: ApplianceRow[]): ApplianceRow[] {
   return [...rows].sort((a, b) => {
     const wa = a.activation === "waiting" ? 0 : 1;
@@ -17,11 +16,6 @@ export function sortAppliances(rows: ApplianceRow[]): ApplianceRow[] {
   });
 }
 
-/**
- * The one appliance table: the fleet list and a customer's Appliances tab. A row opens the appliance, where
- * every action lives; the only action on the row itself is Activate, because a waiting appliance is the one
- * thing an operator comes to this list to find.
- */
 export function ApplianceTable({
   rows,
   showCustomer = true,
@@ -29,7 +23,6 @@ export function ApplianceTable({
 }: {
   rows: ApplianceRow[];
   showCustomer?: boolean;
-  /** Offered on waiting rows when the role can activate. */
   onActivate?: (a: ApplianceRow) => void;
 }) {
   const router = useRouter();

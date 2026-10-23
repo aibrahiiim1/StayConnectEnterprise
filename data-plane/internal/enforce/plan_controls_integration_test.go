@@ -2,12 +2,8 @@
 
 package enforce
 
-// THE PLAN CONTROLS, THROUGH THE OPERATIONS THE APPLIANCE RUNS (migration 0122).
-//
-// Every control here was stored, accepted by the editor and shown to clients for the whole life of the product,
-// and none of them did anything. These cases go through the same sweep acctd runs, the same admission function
-// scd and the room sign-in call, and the same ingestion operation the meter uses, so what passes here is what
-// a guest gets.
+// Plan controls, exercised through the same sweep acctd runs, the admission function scd uses and the ingestion
+// operation the meter uses, so what passes here is what a guest gets.
 
 import (
 	"context"
@@ -20,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// revisePlan publishes a NEW revision of the fixture's plan with the given column overrides and points the
-// entitlement at it. Plan revisions are immutable, so this is what a product change does too.
+// revisePlan publishes a new revision (revisions are immutable) and points the entitlement at it.
 func revisePlan(t *testing.T, p *pgxpool.Pool, f fixture, ent string, set map[string]any) string {
 	t.Helper()
 	ctx := context.Background()
@@ -63,7 +58,6 @@ func itoa(n int) string {
 	return itoa(n/10) + d[n%10:n%10+1]
 }
 
-// rolePool is a pool whose every connection has become one production service role.
 func rolePool(t *testing.T, role string) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("PHASE3_TEST_DSN")
@@ -95,8 +89,7 @@ func scalar[T any](t *testing.T, p *pgxpool.Pool, q string, args ...any) T {
 	return v
 }
 
-// seedObserved records that the session has already been OBSERVED online for `observed`, as the accrual's own
-// watermark would. A test cannot wait ten real minutes, and a watermark cannot move backwards.
+// seedObserved records the session as already observed online for `observed`, as the accrual watermark would.
 func seedObserved(t *testing.T, p *pgxpool.Pool, f fixture, sess string, observed time.Duration) {
 	t.Helper()
 	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.session_online_watermarks
@@ -106,12 +99,7 @@ func seedObserved(t *testing.T, p *pgxpool.Pool, f fixture, sess string, observe
 	}
 }
 
-// =========================================================================================================
-// 1. TIME ALLOWANCE ON A VALIDITY_WINDOW PLAN (D-C / O-6)
-// =========================================================================================================
-
-// A plan with a 60-second time allowance on VALIDITY_WINDOW used to be accepted, shown to the guest as "1 min",
-// and then never consulted. The window here is a day away; the allowance must end the access long before it.
+// A 60-second time allowance on a VALIDITY_WINDOW plan must end access long before the window (a day away).
 func TestIntegration_PlanControls_TimeAllowanceEndsAValidityWindowEntitlement(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -138,7 +126,7 @@ func TestIntegration_PlanControls_TimeAllowanceEndsAValidityWindowEntitlement(t 
 	if got.Reason != "TIME" {
 		t.Fatalf("reason %q, want the contract's TIME", got.Reason)
 	}
-	// 60 seconds of the ten observed minutes were all it had: it ended about nine minutes ago, not now.
+	// Only 60 of the ten observed minutes were allowed: it ended about nine minutes ago, not now.
 	if age := time.Since(got.At); age < 8*time.Minute || age > 10*time.Minute {
 		t.Fatalf("the ending is dated %s ago; it should be dated when the allowance ran out (~9 min)", age)
 	}
@@ -160,7 +148,6 @@ func TestIntegration_PlanControls_TimeAllowanceEndsAValidityWindowEntitlement(t 
 	}
 }
 
-// Under the allowance nothing ends, and the consumption the portal shows ("remaining") is what was charged.
 func TestIntegration_PlanControls_TimeAllowanceIsSpentNotEnded(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -183,7 +170,6 @@ func TestIntegration_PlanControls_TimeAllowanceIsSpentNotEnded(t *testing.T) {
 	}
 }
 
-// A VALIDITY_WINDOW plan WITHOUT an allowance is exactly what it was: no accrual, no watermark, no writes.
 func TestIntegration_PlanControls_NoAllowanceMeansNoAccrual(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -202,7 +188,6 @@ func TestIntegration_PlanControls_NoAllowanceMeansNoAccrual(t *testing.T) {
 	}
 }
 
-// The accounting role, and only its existing grants, runs the allowance end to end.
 func TestIntegration_PlanControls_TimeAllowanceRunsAsSvcAcctd(t *testing.T) {
 	owner := pool(t)
 	defer owner.Close()
@@ -220,10 +205,6 @@ func TestIntegration_PlanControls_TimeAllowanceRunsAsSvcAcctd(t *testing.T) {
 	}
 }
 
-// =========================================================================================================
-// 2. IDLE TIMEOUT AND MAXIMUM CONTINUOUS SESSION (D-C / O-7 / B-6)
-// =========================================================================================================
-
 func sessionRow(t *testing.T, p *pgxpool.Pool, sess string) (state, reason string, ended *time.Time) {
 	t.Helper()
 	if err := p.QueryRow(context.Background(), `SELECT state, COALESCE(end_reason,''), ended FROM iam_v2.sessions WHERE id=$1`,
@@ -233,8 +214,7 @@ func sessionRow(t *testing.T, p *pgxpool.Pool, sess string) (state, reason strin
 	return
 }
 
-// A session ends N seconds after it started -- at that instant -- and NOTHING ELSE moves: the entitlement stays
-// ACTIVE and the device keeps its place, so it can sign straight back in.
+// A session ends N seconds after it started, at that instant, and nothing else moves: the device can sign back in.
 func TestIntegration_PlanControls_MaxContinuousSessionEndsOnlyTheSession(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -264,8 +244,7 @@ func TestIntegration_PlanControls_MaxContinuousSessionEndsOnlyTheSession(t *test
 		 WHERE entitlement_id=$1 AND device_id=$2 AND deauthorized_at IS NULL`, ent, f.device); n != 1 {
 		t.Fatal("the device lost its place on the entitlement; it could not sign back in")
 	}
-	// ...and signing back in works: admission is idempotent for a device that holds a place, and a new session
-	// is accepted on it.
+	// Signing back in works: admission is idempotent for a device that holds a place.
 	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, f.device); err != nil {
 		t.Fatalf("the device could not be admitted again: %v", err)
 	}
@@ -274,7 +253,6 @@ func TestIntegration_PlanControls_MaxContinuousSessionEndsOnlyTheSession(t *test
 		f.tenant, f.site, ent, f.device); err != nil {
 		t.Fatalf("a new session could not be opened after the limit: %v", err)
 	}
-	// Idempotent: the ended session is not ended again, and the fresh one is within its limit.
 	again, err := New(p).EnforceSessionLimits(ctx, f.tenant, f.site, time.Now(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -284,8 +262,7 @@ func TestIntegration_PlanControls_MaxContinuousSessionEndsOnlyTheSession(t *test
 	}
 }
 
-// IDLE is measured from the last metered traffic. A session whose counters last moved ten minutes ago, on a plan
-// with a five-minute idle timeout, ended five minutes ago -- and only when the accounting pass is healthy.
+// Idle is measured from the last metered traffic, and only when the accounting pass is healthy.
 func TestIntegration_PlanControls_IdleTimeoutEndsAtLastTrafficPlusTimeout(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -299,7 +276,7 @@ func TestIntegration_PlanControls_IdleTimeoutEndsAtLastTrafficPlusTimeout(t *tes
 	submit(t, p, f, m, 1, 0, 0, started.Add(time.Minute))
 	lastTraffic := time.Now().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	submit(t, p, f, m, 1, 5_000, 50_000, lastTraffic)
-	// A reading that has not moved is a replay: it is NOT traffic, and must not postpone the idle end.
+	// A reading that has not moved is a replay, not traffic.
 	submit(t, p, f, m, 1, 5_000, 50_000, time.Now().Add(-time.Minute))
 
 	// A tick whose accounting pass did not complete judges nobody idle.
@@ -321,7 +298,6 @@ func TestIntegration_PlanControls_IdleTimeoutEndsAtLastTrafficPlusTimeout(t *tes
 	}
 }
 
-// A session with recent traffic, and one the meter has never observed, are not idle.
 func TestIntegration_PlanControls_IdleNeedsEvidence(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -347,7 +323,6 @@ func TestIntegration_PlanControls_IdleNeedsEvidence(t *testing.T) {
 	}
 }
 
-// The accounting role runs it, through its EXECUTE grant only.
 func TestIntegration_PlanControls_SessionLimitsRunAsSvcAcctd(t *testing.T) {
 	owner := pool(t)
 	defer owner.Close()
@@ -365,18 +340,13 @@ func TestIntegration_PlanControls_SessionLimitsRunAsSvcAcctd(t *testing.T) {
 	}
 }
 
-// =========================================================================================================
-// 3. DISCONNECT_OLDEST (D-C / O-8)
-// =========================================================================================================
-
 func newDevice(t *testing.T, p *pgxpool.Pool, f fixture, mac string) string {
 	t.Helper()
 	return scalar[string](t, p, `INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 		VALUES (gen_random_uuid(),$1,$2,gen_random_uuid(),($3::text)::macaddr) RETURNING id::text`, f.tenant, f.site, mac)
 }
 
-// On a one-device plan with DISCONNECT_OLDEST, a second device is ADMITTED: the first device's session ends,
-// its place is released, and the move is recorded.
+// On a one-device DISCONNECT_OLDEST plan a second device is admitted: the first's session ends, its place is released and the move recorded.
 func TestIntegration_PlanControls_DisconnectOldestAdmitsTheNewDevice(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -387,7 +357,6 @@ func TestIntegration_PlanControls_DisconnectOldestAdmitsTheNewDevice(t *testing.
 	revisePlan(t, p, f, ent, map[string]any{"max_concurrent_devices": 1, "device_limit_policy": "DISCONNECT_OLDEST"})
 	newDev := newDevice(t, p, f, "02:00:00:00:51:01")
 
-	// Admission runs as scd does it in production.
 	if _, err := rolePool(t, "svc_scd").Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, newDev); err != nil {
 		t.Fatalf("DISCONNECT_OLDEST refused the new device: %v", err)
 	}
@@ -417,7 +386,6 @@ func TestIntegration_PlanControls_DisconnectOldestAdmitsTheNewDevice(t *testing.
 	if gone != f.device || came != newDev || limit != 1 || sessions != 1 {
 		t.Fatalf("record = %s -> %s limit %d sessions %d", gone, came, limit, sessions)
 	}
-	// The record cannot be rewritten.
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.device_limit_disconnections SET sessions_ended=0 WHERE entitlement_id=$1`, ent); err == nil {
 		t.Fatal("device_limit_disconnections accepted an UPDATE")
 	}
@@ -426,8 +394,7 @@ func TestIntegration_PlanControls_DisconnectOldestAdmitsTheNewDevice(t *testing.
 	}
 }
 
-// The other two policies are unchanged: REJECT refuses, and ADMIN_APPROVAL fails closed with a reason that says
-// it is not available rather than "not implemented".
+// REJECT refuses, and ADMIN_APPROVAL fails closed with a reason saying it is not available.
 func TestIntegration_PlanControls_RejectAndAdminApprovalStillRefuse(t *testing.T) {
 	for _, policy := range []string{"REJECT_NEW_DEVICE", "ADMIN_APPROVAL"} {
 		t.Run(policy, func(t *testing.T) {
@@ -453,10 +420,6 @@ func TestIntegration_PlanControls_RejectAndAdminApprovalStillRefuse(t *testing.T
 	}
 }
 
-// =========================================================================================================
-// 4. THE DATA CROSSING IS COUNTED INCREMENTALLY (B-5)
-// =========================================================================================================
-
 func crossing(t *testing.T, p *pgxpool.Pool, fn, ent string) *time.Time {
 	t.Helper()
 	var at *time.Time
@@ -473,8 +436,8 @@ func advance(t *testing.T, p *pgxpool.Pool, f fixture) {
 	}
 }
 
-// THE SAME ANSWER. Through two devices, interleaved readings, a counter reset and a restart, the incremental
-// answer equals the full derivation at every step -- the crossing is the same crossing, not an approximation.
+// Through two devices, interleaved readings, a counter reset and a restart, the incremental answer equals the
+// full derivation at every step.
 func TestIntegration_DataCrossing_IncrementalEqualsTheFullDerivation(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -497,12 +460,12 @@ func TestIntegration_DataCrossing_IncrementalEqualsTheFullDerivation(t *testing.
 			submit(t, p, f, b, epochB, ub/2, ub-ub/2, ts)
 		}
 		if i == 20 {
-			// A TRUSTED RESET of device b's class: its counters restart from a new baseline and nothing is lost.
+			// A trusted reset of device b's class: counters restart from a new baseline, nothing lost.
 			ub, epochB = 0, 2
 			submit(t, p, f, b, epochB, 0, 0, ts)
 		}
 		if i%5 == 0 {
-			// A RESTART: nothing is held in memory -- a brand new Enforcer, the same durable checkpoint.
+			// A restart: a new Enforcer over the same durable checkpoint.
 			advance(t, p, f)
 		}
 		got := crossing(t, p, "p6_data_crossing", ent)
@@ -526,9 +489,8 @@ func TestIntegration_DataCrossing_IncrementalEqualsTheFullDerivation(t *testing.
 	}
 }
 
-// IT DOES NOT RESCAN. Once the checkpoint has passed a record, that record is not read again. Proven by changing
-// an already-counted record behind the checkpoint's back (only a test can: the table is immutable): a rescan
-// would see the change, the checkpointed answer does not.
+// Once the checkpoint has passed a record it is not read again, proven by changing a counted record behind the
+// checkpoint's back: a rescan would see the change.
 func TestIntegration_DataCrossing_CountedRecordsAreNotReadAgain(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -565,7 +527,6 @@ func TestIntegration_DataCrossing_CountedRecordsAreNotReadAgain(t *testing.T) {
 	if full := crossing(t, p, "p6_data_crossing_full", ent); full == nil {
 		t.Fatal("the full derivation does not see the rewritten record; the case proves nothing")
 	}
-	// New traffic arrives; the checkpoint reads ONLY it.
 	submit(t, p, f, m, 1, 510_000, 4_590_000, at.Add(51*time.Second))
 	advance(t, p, f)
 	if got := crossing(t, p, "p6_data_crossing", ent); got != nil {
@@ -576,9 +537,8 @@ func TestIntegration_DataCrossing_CountedRecordsAreNotReadAgain(t *testing.T) {
 	}
 }
 
-// AN OVERSTATED CHECKPOINT IS CORRECTED, NOT OBEYED. If an attribution interval shrinks after the checkpoint
-// counted under it, the running total can overstate. The exact derivation then decides, and the checkpoint is
-// recounted so the overstatement does not trigger a full scan on every tick.
+// An overstated checkpoint (an attribution interval shrank after it counted) is corrected, not obeyed: the exact
+// derivation decides and the checkpoint is recounted so it does not trigger a full scan every tick.
 func TestIntegration_DataCrossing_OverstatementIsRecounted(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -590,8 +550,7 @@ func TestIntegration_DataCrossing_OverstatementIsRecounted(t *testing.T) {
 	submit(t, p, f, m, 1, 0, 0, at)
 	submit(t, p, f, m, 1, 100_000, 400_000, at.Add(time.Minute))     // 0.5 MB
 	submit(t, p, f, m, 1, 200_000, 1_000_000, at.Add(2*time.Minute)) // +0.7 MB -> 1.2 MB, over
-	// A checkpoint that counted both readings under the binding's old, wider interval -- and then the interval
-	// shrinks so the second reading is no longer this entitlement's (only a test can do this directly).
+	// The interval shrinks so the second reading is no longer this entitlement's.
 	overstate := func() {
 		tx, err := p.Begin(ctx)
 		if err != nil {
@@ -629,12 +588,8 @@ func TestIntegration_DataCrossing_OverstatementIsRecounted(t *testing.T) {
 	}
 }
 
-// =========================================================================================================
-// 5. ACCOUNTING-DETAIL RETENTION (D-H)
-// =========================================================================================================
-
-// oldTerminatedUsage builds an entitlement whose session metered one reading 40 days ago and which ended 39
-// days ago, plus a LIVE entitlement with a 40-day-old reading of its own.
+// oldTerminatedUsage builds an entitlement metered 40 days ago that ended 39 days ago, plus a live one with a
+// 40-day-old reading.
 func oldTerminatedUsage(t *testing.T, p *pgxpool.Pool) (fixture, string, string) {
 	t.Helper()
 	f := quotaSeed(t, p, nil, "PER_DEVICE", "VALIDITY_WINDOW")
@@ -657,8 +612,7 @@ func oldTerminatedUsage(t *testing.T, p *pgxpool.Pool) (fixture, string, string)
 	return f, sess, ls.id
 }
 
-// A YEAR IS THE DEFAULT (0131, GDPR C2), SO DETAIL YOUNGER THAN THAT STAYS; AN ADMINISTRATOR'S UNLIMITED MEANS
-// NOTHING HAPPENS.
+// A year is the default retention, so younger detail stays; an administrator's unlimited means nothing happens.
 func TestIntegration_Retention_AYearByDefaultAndUnlimitedPurgesNothing(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -694,7 +648,7 @@ func TestIntegration_Retention_AYearByDefaultAndUnlimitedPurgesNothing(t *testin
 	purgeNothing("under the administrator's unlimited")
 }
 
-// A RETENTION, ONCE SET, REMOVES ONLY WHAT IS OLD AND FINISHED -- and records that it did.
+// A retention, once set, removes only what is old and finished, and records that it did.
 func TestIntegration_Retention_PurgesOnlyOldFinishedDetail(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -732,7 +686,7 @@ func TestIntegration_Retention_PurgesOnlyOldFinishedDetail(t *testing.T) {
 	}
 }
 
-// THE SETTING IS BOUNDED AND AUDITED, AND NOTHING ELSE CAN DELETE A RECORD.
+// The setting is bounded and audited, and nothing else can delete a record.
 func TestIntegration_Retention_BoundsAndNoOtherDeletePath(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -768,10 +722,8 @@ func TestIntegration_Retention_BoundsAndNoOtherDeletePath(t *testing.T) {
 	}
 }
 
-// SUB-SECOND TICKS ARE CHARGED IN FULL (migration 0126). acctd ticks about once a second, so many ticks are a
-// little under one second. The accrual used to floor each tick's charge but still move the watermark to the
-// end of the tick, discarding the fraction every time: on PRE-LIVE a 90 s allowance lasted about 180 s of wall
-// time. A hundred 0.9 s ticks are 90 s of online time and must charge 90 s (89 allows the last remainder).
+// Sub-second ticks are charged in full: flooring each tick's charge while moving the watermark discards the
+// fraction. A hundred 0.9 s ticks are 90 s of online time and must charge 90 s (89 allows the last remainder).
 func TestIntegration_PlanControls_SubSecondTicksChargeEverySecond(t *testing.T) {
 	p := pool(t)
 	defer p.Close()

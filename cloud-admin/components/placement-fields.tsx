@@ -7,16 +7,15 @@ import { DEFAULT_SITE_TYPE, SITE_TYPES } from "@/lib/site-types";
 
 const NEW = "__new";
 
-/** Where a waiting appliance goes on activation: an existing customer and site, or new ones created in the same step. */
 export type Placement = {
-  customerId: string;       // "" | id | NEW
+  customerId: string;
   newCustomerName: string;
-  siteId: string;           // "" | id | NEW
+  siteId: string;
   newSiteName: string;
   newSiteTimezone: string;
   newSiteCountry: string;
-  newSiteType: string;      // one of SITE_TYPES
-  existingSiteType: string; // the chosen existing site's type, for the license's suggested modules
+  newSiteType: string;
+  existingSiteType: string;
 };
 
 export function browserTimezone(): string {
@@ -43,14 +42,12 @@ export function emptyPlacement(customerId = "", siteId = ""): Placement {
 const isNewCustomer = (p: Placement) => p.customerId === NEW;
 const isNewSite = (p: Placement) => p.siteId === NEW || p.customerId === NEW;
 
-/** The type of the site the appliance goes to: the new site's chosen type, or the existing site's. */
 export function placementSiteType(p: Placement): string {
   return isNewSite(p) ? p.newSiteType : p.existingSiteType;
 }
 
 export type PlacementField = "customer" | "newCustomerName" | "site" | "newSiteName" | "newSiteTimezone" | "newSiteCountry";
 
-/** The first thing missing from the placement and the field it belongs to, or null. */
 export function placementIssue(p: Placement): { field: PlacementField; message: string } | null {
   if (!p.customerId) return { field: "customer", message: "Choose a customer." };
   if (isNewCustomer(p) && !p.newCustomerName.trim()) return { field: "newCustomerName", message: "Enter the new customer's name." };
@@ -67,7 +64,6 @@ export function placementProblem(p: Placement): string | null {
   return placementIssue(p)?.message ?? null;
 }
 
-/** The customer/site half of the §6 activate body. */
 export function placementBody(p: Placement): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (isNewCustomer(p)) out.new_customer = { name: p.newCustomerName.trim() };
@@ -91,14 +87,14 @@ function timezones(): string[] {
   }
 }
 
-/** A site's time zone: the browser's list when it has one, free text on an older browser. */
+/** Older browsers without a time-zone list use free text. */
 export function TimezoneSelect({
   value,
   onChange,
   ...rest
 }: { value: string; onChange: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange">) {
   const zones = useMemo(timezones, []);
-  // `rest` carries the id and aria-* that Field injects, so the label is bound to this control (as SiteTypeSelect).
+  // Forward Field's ID and ARIA attributes to keep the label bound.
   if (zones.length === 0) {
     return <Input {...(rest as React.InputHTMLAttributes<HTMLInputElement>)} value={value} onChange={(e) => onChange(e.target.value)} />;
   }
@@ -110,14 +106,14 @@ export function TimezoneSelect({
   );
 }
 
-/** A site's type. Descriptive only; an unknown value Central sent is kept and shown as is. */
+/** Preserve unknown site types sent by a newer Central. */
 export function SiteTypeSelect({
   value,
   onChange,
   ...rest
 }: { value: string; onChange: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange">) {
   const known = SITE_TYPES.some((t) => t.value === value);
-  // `rest` carries the id and aria-* that Field injects, so the label is bound to this control.
+  // Forward Field's ID and ARIA attributes to keep the label bound.
   return (
     <Select {...rest} value={value} onChange={(e) => onChange(e.target.value)}>
       {!known && value && <option value={value}>{value}</option>}
@@ -126,9 +122,7 @@ export function SiteTypeSelect({
   );
 }
 
-/** Activate's customer and site. Move stays within the customer and picks its site itself (appliance-dialogs.tsx).
- *  `lockedCustomer` pins the customer (an appliance that still holds that customer's data): the customer cannot
- *  be changed and no new customer can be created; only the site is chosen. */
+/** Held customer data locks placement to that customer; only its site may change. */
 export function PlacementFields({
   value,
   onChange,
@@ -139,7 +133,6 @@ export function PlacementFields({
   value: Placement;
   onChange: (next: Placement) => void;
   lockedCustomer?: { id: string; name: string };
-  /** A field's error and id (useFieldErrors), so a problem is shown under, and focuses, the field it is about. */
   errorFor?: (field: PlacementField) => string | undefined;
   idFor?: (field: PlacementField) => string;
 }) {

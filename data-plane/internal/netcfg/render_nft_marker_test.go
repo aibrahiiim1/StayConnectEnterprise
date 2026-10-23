@@ -17,9 +17,8 @@ func markerTestTopo() Topology {
 	return Topology{WANInterface: "ens160", MgmtInterface: "ens160", MgmtAddr: "192.0.2.23"}
 }
 
-// The render must carry its own fingerprint into the kernel, and that fingerprint must be the one
-// RenderFingerprint reports — otherwise reconciliation would compare two different things and either never
-// settle or never converge.
+// The render must carry its own fingerprint into the kernel, and it must be the one RenderFingerprint reports, or
+// reconciliation compares two different things.
 func TestRender_MarkerCarriesTheReportedFingerprint(t *testing.T) {
 	out := string(RenderNftables(markerTestNets(), markerTestTopo()))
 	want := RenderFingerprint(markerTestNets(), markerTestTopo())
@@ -41,8 +40,8 @@ func TestRender_MarkerCarriesTheReportedFingerprint(t *testing.T) {
 	}
 }
 
-// The marker sits INSIDE the table, so a `delete table` + recreate replaces it atomically with the rest of the
-// structure. A marker outside the table would survive a replace and could claim a structure that is gone.
+// The marker sits inside the table so a `delete table` + recreate replaces it atomically; one outside would survive
+// and could claim a structure that is gone.
 func TestRender_MarkerIsInsideTheTable(t *testing.T) {
 	out := string(RenderNftables(markerTestNets(), markerTestTopo()))
 	open := strings.LastIndex(out, "table inet stayconnect {\n")
@@ -55,8 +54,8 @@ func TestRender_MarkerIsInsideTheTable(t *testing.T) {
 	}
 }
 
-// The fingerprint describes the STRUCTURE, not itself. If the marker were included in its own input the value
-// could never be reproduced by a reader.
+// The fingerprint describes the structure, not itself; if the marker were in its own input a reader could never
+// reproduce it.
 func TestRender_FingerprintExcludesTheMarker(t *testing.T) {
 	fp := RenderFingerprint(markerTestNets(), markerTestTopo())
 	if strings.Contains(renderNftBody(markerTestNets(), markerTestTopo()), RenderMarkerSet) {
@@ -67,8 +66,7 @@ func TestRender_FingerprintExcludesTheMarker(t *testing.T) {
 	}
 }
 
-// Every structural input must move the fingerprint, or an upgrade that changes the ruleset would be invisible
-// to reconciliation and silently skipped.
+// Every structural input must move the fingerprint, or an upgrade changing the ruleset would be skipped by reconciliation.
 func TestRender_FingerprintMovesWithStructure(t *testing.T) {
 	base := RenderFingerprint(markerTestNets(), markerTestTopo())
 
@@ -100,9 +98,8 @@ func TestRender_FingerprintMovesWithStructure(t *testing.T) {
 	}
 }
 
-// A comment that is not a well-formed marker must yield "", which compares unequal to every fingerprint. The
-// failure mode this prevents is a truncated or hand-edited comment being read as a match and skipping a needed
-// convergence.
+// A comment that is not a well-formed marker must yield "", which compares unequal to every fingerprint, so a
+// truncated or hand-edited comment never skips a needed convergence.
 func TestRender_MalformedMarkerCommentsYieldNothing(t *testing.T) {
 	good := RenderFingerprint(markerTestNets(), markerTestTopo())
 	if FingerprintFromSetComment(`comment "`+renderMarkerPrefix+good+`"`) != good {
@@ -125,8 +122,7 @@ func TestRender_MalformedMarkerCommentsYieldNothing(t *testing.T) {
 	}
 }
 
-// The Phase-3 set is part of the rendered structure — that is what makes its presence durable across restarts
-// rather than dependent on a one-off operator install.
+// The Phase-3 set is part of the rendered structure, so its presence survives restarts without an operator install.
 func TestRender_Phase3SetIsPartOfTheRenderedStructure(t *testing.T) {
 	out := string(RenderNftables(markerTestNets(), markerTestTopo()))
 	for _, want := range []string{

@@ -12,9 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// These tests require a disposable PostgreSQL 16 with the accepted iam_v2 schema + migration 0010 applied,
-// reachable via PHASE3_TEST_DSN. scripts/pmsd-pg-integration.sh builds it. They FAIL (not skip) if the DSN
-// is set but the database is unreachable/misbuilt; they skip ONLY when no DSN is configured (local dev).
+// Needs a disposable PostgreSQL 16 via PHASE3_TEST_DSN (scripts/pmsd-pg-integration.sh). Fails if the DSN is
+// set but the database is unusable; skips only when no DSN is configured.
 
 func integPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -51,7 +50,6 @@ type seeded struct {
 	otherTenant                  string
 }
 
-// seedScope inserts a tenant/site/interface/revision(+full config)/secret-generation and returns the ids.
 func seedScope(t *testing.T, pool *pgxpool.Pool) seeded {
 	t.Helper()
 	ctx := context.Background()
@@ -205,9 +203,6 @@ func TestIntegration_IndependentAxisPreservation(t *testing.T) {
 	}
 }
 
-// TestIntegration_AtomicGapAndResync proves §4 against real PostgreSQL: the two-axis gap/resync transition is
-// atomic (both axes or neither), a forced failure rolls back both, a stale owner changes neither, a heartbeat
-// cannot clear the barrier, and ordinary transport writes preserve the gap/resync state.
 func TestIntegration_AtomicGapAndResync(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -295,7 +290,6 @@ func TestIntegration_AtomicGapAndResync(t *testing.T) {
 	}
 }
 
-// inbox builds a minimal InboxRow for a seeded scope at the given runtime generation.
 func inbox(s seeded, gen int64, identity, eventType string) InboxRow {
 	return InboxRow{
 		axisBase:              axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen, At: time.Now()},
@@ -315,8 +309,7 @@ func publishedGen(t *testing.T, pool *pgxpool.Pool, s seeded) int64 {
 	return g
 }
 
-// consumableCount mirrors the Increment-4 consumer visibility rule: a row is consumable iff it is LIVE, or a
-// RESYNC row whose resync_generation has been published.
+// consumableCount: a row is consumable iff LIVE, or RESYNC with a published resync_generation.
 func consumableCount(t *testing.T, pool *pgxpool.Pool, s seeded, identity string) int {
 	return scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events se
 		JOIN iam_v2.pms_interface_runtime r USING (tenant_id, site_id, pms_interface_id)
@@ -325,9 +318,6 @@ func consumableCount(t *testing.T, pool *pgxpool.Pool, s seeded, identity string
 		s.tenant, s.site, s.iface, identity)
 }
 
-// TestIntegration_ResyncGenerationAndPublication proves §G: monotonic resync-generation allocation under the
-// runtime-generation CAS; staged RESYNC rows are invisible until the atomic publication boundary reaches
-// their generation; and a stale owner cannot allocate, stage, admit or publish.
 func TestIntegration_ResyncGenerationAndPublication(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -391,9 +381,6 @@ func TestIntegration_ResyncGenerationAndPublication(t *testing.T) {
 	}
 }
 
-// TestIntegration_LiveVsResyncIdempotency proves the admission-aware partial unique indexes: LIVE dedups per
-// interface; RESYNC dedups per resync generation; the same identity may exist as both LIVE and RESYNC and
-// across different resync generations.
 func TestIntegration_LiveVsResyncIdempotency(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -426,8 +413,6 @@ func TestIntegration_LiveVsResyncIdempotency(t *testing.T) {
 	}
 }
 
-// TestIntegration_InboxImmutability proves the admission columns are immutable append-first (the trigger
-// rejects mutating admission_kind/resync_generation).
 func TestIntegration_InboxImmutability(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -444,9 +429,6 @@ func TestIntegration_InboxImmutability(t *testing.T) {
 	}
 }
 
-// TestIntegration_SinkResyncLifecycle drives the real workerSink against PostgreSQL through a full
-// RequireInitialResync → DS → stage → DE(publish) → live-admit lifecycle and asserts the durable rows and the
-// publication boundary land correctly through the real append-only triggers.
 func TestIntegration_SinkResyncLifecycle(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -521,9 +503,6 @@ func TestIntegration_SinkResyncLifecycle(t *testing.T) {
 	}
 }
 
-// TestIntegration_CredentialAwarePinCoherence proves the amended pir_connected_pins CHECK: a NONE connector
-// may be CONNECTED with NO pinned Secret Generation, while an AUTH_KEY connector CONNECTED without a pinned
-// secret is rejected by the constraint.
 func TestIntegration_CredentialAwarePinCoherence(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -602,21 +581,8 @@ func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	}
 }
 
-// RUNTIME TABLE PRIVILEGE ON iam_v2 IS EXACTLY GATE-P'S — nothing broader, nothing missing.
-//
-// History. The original assertion was "zero svc_* grants on iam_v2"; Phase 6 restated it as a hand-kept
-// allow-list of the few SELECT/INSERT grants the dark-but-mounted surfaces needed. Both were measured on the
-// historical scratch fixture, which never applied the per-service Gate-P files, so the posture they describe
-// ("dark") is one no real appliance has: on a factory-clean appliance deploy/gatep/gatep-grants.sql and its
-// `\ir` per-service files ARE applied (svc-pmsd-iamv2-connector-grants.sql gives the PMS connector its
-// stay/PMS tables, svc-acctd-iamv2-accounting-grants.sql gives acctd its accounting tables, and so on).
-//
-// PRODUCTION TRUTH (converted when the suites moved onto the full Gate-P schema). The rule the test was
-// always trying to express is "no runtime role reaches an iam_v2 table unless Gate-P deliberately granted
-// it". It is now asserted in exactly that form, against the authoritative source rather than a copy: the
-// expected set is DERIVED from deploy/gatep/*.sql (gatepIamV2TableGrants), and the database's table-level
-// svc_* grants on iam_v2 must equal it. A grant that appears in the database without a Gate-P GRANT behind
-// it still fails (the bite the original had), and so does a Gate-P grant that did not land.
+// Runtime table privilege on iam_v2 must equal exactly what deploy/gatep/*.sql grants (derived by
+// gatepIamV2TableGrants): an extra grant fails, and so does a Gate-P grant that did not land.
 func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
@@ -628,42 +594,29 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	// The historical Phase-6 allow-list, by role and table, retained as a floor (each must still be a Gate-P
-	// grant). EXECUTE on the controlled writers is audited separately by the Phase-6 privilege gate; this is
-	// about table reach.
+	// A floor: each of these must still be a Gate-P grant. EXECUTE on definer writers is audited elsewhere.
 	allowed := map[string]bool{
 		"svc_scd|appliance_product_settings|SELECT": true,
 		"svc_scd|devices|SELECT":                    true,
-		// 0047. The guest surface resolves the requesting device before it does anything else, and that
-		// resolution is an upsert -- a device row is created the first time the appliance sees it. SELECT
-		// alone made every request fail on its first line under the real service role, which is how this was
-		// found. The UPDATE is column-level (mac, last_seen, last_ip) and does not appear here, because
-		// information_schema reports column grants separately; there is no table-level UPDATE to allow.
+		// Device resolution upserts a device row on first sight. The UPDATE is column-level and not listed:
+		// information_schema reports column grants separately.
 		"svc_scd|devices|INSERT": true,
-		// ...and the two reads the same path makes: whose entitlement this device belongs to, and the pinned
-		// plan revision the listing reports remaining time from. Read-only: svc_scd never writes either, and
-		// the Phase-6 privilege gate asserts that refusal directly.
+		// Read-only: svc_scd never writes entitlements or plan revisions.
 		"svc_scd|entitlements|SELECT":                 true,
 		"svc_scd|service_plan_revisions|SELECT":       true,
 		"svc_scd|entitlement_devices|SELECT":          true,
 		"svc_scd|sessions|SELECT":                     true,
 		"svc_scd|sessions|INSERT":                     true,
 		"svc_edged|appliance_product_settings|SELECT": true,
-		// svc_acctd's reads for the enforcement plan and the expiry sweep (migrations 0039/0040). It holds no
-		// write anywhere in iam_v2, which the Phase-6 privilege gate and gatep-grants.sql's B-7 assertion check.
-		// session_online_watermarks, entitlement_devices and entitlement_termination_evidence used to be listed
-		// here: no acctd statement reads them (the tick and the expiry writer are definers and read them as their
-		// owner), so audit B-7 / migration 0124 withdrew them and this floor no longer requires them.
+		// svc_acctd reads for the enforcement plan and expiry sweep; it holds no write anywhere in iam_v2.
 		"svc_acctd|entitlements|SELECT":           true,
 		"svc_acctd|service_plan_revisions|SELECT": true,
 		"svc_acctd|sessions|SELECT":               true,
-		// The pre-Phase-6 data-crossing expression (internal/enforce dataCrossingLegacy). Still SELECT-only:
-		// acctd's write capabilities are definer functions, not tables.
+		// Data-crossing expression (internal/enforce dataCrossingLegacy); acctd writes via definer functions.
 		"svc_acctd|accounting_records|SELECT":           true,
 		"svc_acctd|session_entitlement_bindings|SELECT": true,
 	}
 	expected := gatepIamV2TableGrants(t)
-	// The historical Phase-6 allow-list is kept as a floor: every grant it names must still be a Gate-P grant.
 	for k := range allowed {
 		if !expected[k] {
 			t.Errorf("historical Phase-6 grant %s is no longer granted by deploy/gatep", k)
@@ -684,9 +637,8 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	// A grant on a table this database does not have is not a missing grant: every Gate-P grant on an object a
-	// later migration creates is guarded on that object (audit B-20), so a database built or rolled back short of
-	// that migration legitimately lacks both the table and the grant. Only a PRESENT table must carry its grants.
+	// Gate-P grants on later-migration objects are guarded on the object, so a database short of that migration
+	// lacks both table and grant; only a present table must carry its grants.
 	for k := range expected {
 		if seen[k] {
 			continue

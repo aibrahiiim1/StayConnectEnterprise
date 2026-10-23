@@ -7,11 +7,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// PROVIDER READINESS, THE FOURTH GATE FOR A CODE OR SOCIAL SIGN-IN. A method that is licensed, deployed and
-// switched on is still not offered to a client until something can deliver it: an enabled sender for its
-// channel (email, sms, whatsapp), or an enabled application for a social provider. Without that the client
-// would be asked for an address or sent to a provider and then fail. "Test only" senders count: an operator
-// chose them on purpose, and they are how the flow is verified without a real provider.
+// Provider readiness is the fourth gate for a code or social sign-in: a licensed, deployed, enabled method is not offered
+// until an enabled sender (email, sms, whatsapp) or social application can deliver it. "Test only" senders count: operators
+// choose them on purpose to verify the flow.
 
 // providerReadiness returns the channels with an enabled sender and the social providers with an enabled
 // application. ok=false when it could not be read.
@@ -59,11 +57,8 @@ func (s *server) applyProviderReadiness(ctx context.Context, cfg *tenantcfg.Auth
 		return
 	}
 	channels, social, ok := s.readProviderReadiness(ctx)
-	// EMAIL ACCOUNTS ARE OFFERED ONLY WITH AN EMAIL SENDER. Registration itself never waits for the sender (the
-	// verification email is queued, and the appliance may be offline), but a site with no email sender at all
-	// could never deliver a verification or reset link, and every account would end up suspended at its
-	// deadline. Refusing to offer the method in that state is the honest answer; the register route keeps
-	// working for a portal page that is already open (the switch, not readiness, gates it).
+	// Email accounts are offered only with an email sender: with none, no verification or reset link could ever be delivered
+	// and every account would be suspended at its deadline. The register route keeps working for an already-open page (the switch, not readiness, gates it).
 	if !ok || !channels["email"] {
 		cfg.EmailAccount = nil
 	}

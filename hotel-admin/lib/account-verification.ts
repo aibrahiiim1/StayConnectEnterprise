@@ -1,6 +1,3 @@
-// A self-service email account's verification state (self-service contract §3), in the words the desk says to
-// the client. edged computes `suspended` from the site's Email accounts settings; this only words it.
-
 import type { GuestAccount } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
@@ -16,14 +13,13 @@ export function verificationStatus(a: GuestAccount, now = Date.now()): Verificat
   if (a.verification_deadline) {
     return new Date(a.verification_deadline).getTime() > now
       ? { label: `Verify by ${formatDate(a.verification_deadline)}`, tone: "warn" }
-      // Past the deadline but not suspended: the site only reminds (or the flag could not be computed).
+      // The site may only remind after the deadline; suspension comes from the server.
       : { label: "Email not verified", tone: "warn" };
   }
   return { label: "Email not verified", tone: "neutral" };
 }
 
-// A REMOVED account (edged guest_accounts_manage.go) is disabled and its username moved to
-// "<name>.removed-<id>.invalid", which frees the address while its history stays. It is listed only under Removed.
+// Renaming removed usernames frees the address while retaining account history.
 export function isRemovedAccount(a: GuestAccount): boolean {
   return !a.enabled && /\.removed-[0-9a-f]+\.invalid$/i.test(a.username);
 }

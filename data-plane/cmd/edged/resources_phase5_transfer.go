@@ -1,24 +1,9 @@
 package main
 
-// THE CROSS-PMS TRANSFER OPERATOR SURFACE.
-//
-// Four routes, and the shape is chosen to keep a staff-confirmed action from becoming a reflex:
-//
-//	GET  /review-signals   the AMBIGUOUS resolutions. A SIGNAL, labelled as one. It is read-only, it names no
-//	                       transfer, and nothing downstream reads it — "the guest matched on two interfaces"
-//	                       is a reason for somebody to look, never evidence of where they went.
-//	POST /preview          what would happen, with no locks taken and nothing written. An operator who cannot
-//	                       see which rooms are involved and how many devices are about to move is confirming
-//	                       a sentence rather than a decision.
-//	POST /execute          the transfer: RBAC, password step-up, a bounded reason, an audit row, and the
-//	                       whole thing atomic.
-//	GET  /                 the lineage that has already been recorded.
-//
-// The operator names BOTH Stays here, which is the opposite of the guest surface — and it is safe for the
-// opposite reason. The caller is an authenticated operator acting under step-up, and every named Stay is
-// re-verified against live PMS state INSIDE the transaction rather than trusted. A Stay that does not exist
-// is refused; one that is not in house is refused; one on the same interface is refused as the room move it
-// is.
+// Routes: review-signals (read-only), preview (no locks, nothing written), execute (RBAC, password step-up,
+// bounded reason, audit row, atomic) and the recorded lineage. review-signals are AMBIGUOUS resolutions, a reason
+// to look, never evidence of where a guest went. The operator names both Stays; each is re-verified against live
+// PMS state inside the transaction (missing, not in house, or same-interface is refused).
 
 import (
 	"context"
@@ -33,9 +18,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/transfer"
 )
 
-// transferGraceValidity is how long the destination grace entitlement lasts. It is a WINDOW rather than an
-// open-ended grant: a transfer moves a guest so they stay online across the change, and the destination
-// property's own authentication then applies like anyone else's.
+// A window, not an open-ended grant; the destination property's own authentication then applies.
 const transferGraceValidity = 4 * time.Hour
 
 func (s *server) stayTransfersRoutes() http.Handler {
@@ -47,11 +30,7 @@ func (s *server) stayTransfersRoutes() http.Handler {
 	return r
 }
 
-// ---- the review signal -----------------------------------------------------
-
-// reviewSignal deliberately carries no stay id. The rows are GROUPED by outcome and network, so no single
-// stay characterises a group — and naming one would invite an operator to read it as "the guest who moved",
-// which is precisely the inference this endpoint exists not to support.
+// Deliberately carries no stay id: rows are grouped by outcome and network, and naming one would invite reading it as "the guest who moved".
 type reviewSignal struct {
 	ResolvedAt  string `json:"resolved_at"`
 	OutcomeCode string `json:"outcome_code"`
@@ -59,13 +38,8 @@ type reviewSignal struct {
 	Count       int    `json:"occurrences"`
 }
 
-// listTransferReviewSignals reports AMBIGUOUS multi-PMS resolutions.
-//
-// This is the only "detection" Phase 5 ships, and calling it detection would already be overstating it. An
-// AMBIGUOUS outcome means the guest's evidence matched on more than one interface — which happens when a
-// property genuinely has two PMS systems and the same name appears in both, and says nothing whatsoever
-// about a guest having MOVED. It is surfaced so an operator can go and look. Nothing reads it to decide
-// anything, and the transfer package does not import this file's data at all.
+// AMBIGUOUS means the guest matched on more than one interface; it says nothing about a guest having moved.
+// Nothing reads it to decide anything.
 func (s *server) listTransferReviewSignals(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -96,15 +70,11 @@ func (s *server) listTransferReviewSignals(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"signals": out,
-		// Said in the payload because the screen must say it too, and because a future caller reading this
-		// endpoint deserves to be told before they build on it.
 		"notice": "These are ambiguous authentication outcomes, not transfers. They indicate that a guest's " +
 			"details matched on more than one PMS interface and that somebody should look. They are never " +
 			"evidence that a guest moved, and no transfer may be based on them.",
 	})
 }
-
-// ---- lineage ---------------------------------------------------------------
 
 type transferRow struct {
 	ID              string `json:"id"`
@@ -154,15 +124,6 @@ func (s *server) listStayTransfers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"transfers": out})
 }
 
-// ---- preview + execute -----------------------------------------------------
-
-// THE OPERATOR NAMES A STAY THE WAY THE PMS DOES (audit H-18).
-//
-// The screen asked for "the PMS reference" while the API took only a stay uuid, so typing the reservation
-// number the front desk actually has produced a uuid cast error and a raw 500. Each side is now either a stay
-// id or a PMS reservation number. A reservation number is resolved among this property's stays -- IN_HOUSE
-// first, because both ends of a transfer must be in house -- optionally narrowed to one PMS connection; if it
-// still names more than one stay the request is refused as ambiguous and nothing is guessed.
 type transferPreviewReq struct {
 	FromStayID      string `json:"from_stay_id"`
 	ToStayID        string `json:"to_stay_id"`
@@ -173,7 +134,6 @@ type transferPreviewReq struct {
 var errStayRefNotFound = errors.New("no stay on this property has that reference")
 var errStayRefAmbiguous = errors.New("that reference names more than one stay; choose the PMS connection")
 
-// resolveStayRef turns a stay id or a PMS reservation number into a stay id.
 func (s *server) resolveStayRef(ctx context.Context, ref, iface string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	iface = strings.TrimSpace(iface)
@@ -188,8 +148,7 @@ func (s *server) resolveStayRef(ctx context.Context, ref, iface string) (string,
 		ifaceArg = iface
 	}
 	if uuidRe.MatchString(ref) {
-		// A stay id goes to the transfer rules unchanged: they re-verify it inside the transaction and answer
-		// a missing destination as the conflict it is (destination_missing).
+		// Passed unchanged: the transfer rules re-verify inside the transaction and report a missing destination as a conflict.
 		return ref, nil
 	}
 	rows, err := s.db.Query(ctx, `SELECT id::text FROM iam_v2.stays
@@ -219,8 +178,7 @@ func (s *server) resolveStayRef(ctx context.Context, ref, iface string) (string,
 	if len(ids) == 1 {
 		return ids[0], nil
 	}
-	// More than one stay carries the reservation number (two connections, or a reused number). Prefer the
-	// single IN_HOUSE one; anything else is ambiguous.
+	// More than one stay carries the number (two connections, or a reused one): prefer the single IN_HOUSE one, else ambiguous.
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stays
 		WHERE tenant_id=$1 AND site_id=$2 AND btrim(external_reservation_id)=$3 AND status='IN_HOUSE'
 		  AND ($4::uuid IS NULL OR pms_interface_id=$4::uuid)`, s.tenantID, s.siteID, ref, ifaceArg).Scan(&inHouse)
@@ -230,7 +188,6 @@ func (s *server) resolveStayRef(ctx context.Context, ref, iface string) (string,
 	return "", errStayRefAmbiguous
 }
 
-// resolveTransferPair resolves both ends, answering the operator for a reference that cannot be resolved.
 func (s *server) resolveTransferPair(ctx context.Context, w http.ResponseWriter, from, fromIface, to, toIface string) (string, string, bool) {
 	fromID, err := s.resolveStayRef(ctx, from, fromIface)
 	if err != nil {
@@ -286,7 +243,7 @@ type transferExecuteReq struct {
 	ToStayID        string `json:"to_stay_id"`
 	FromInterfaceID string `json:"from_pms_interface_id"`
 	ToInterfaceID   string `json:"to_pms_interface_id"`
-	// Password is the step-up. There is no actor field: the operator comes from the SESSION.
+	// Password is the step-up. There is no actor field: the operator comes from the session.
 	Password string `json:"password"`
 	Reason   string `json:"reason"`
 }
@@ -337,11 +294,7 @@ func (s *server) executeStayTransfer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// transferOpErr maps the package's typed refusals onto HTTP.
-//
-// Every one of these is a CONFLICT rather than a server fault: the operator asked for something the current
-// state does not permit, and the message says which, because an operator who cannot tell "that guest has
-// already moved" from "the other property has not checked them in yet" cannot do anything about either.
+// Every refusal is a conflict, not a server fault, and the message says which so the operator can act on it.
 func transferOpErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, transfer.ErrNotAuthorized):
@@ -363,7 +316,7 @@ func transferOpErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, transfer.ErrNoGracePackage):
 		jsonErr(w, http.StatusConflict, "no_landing_package", err.Error())
 	default:
-		// Logged with the cause; the operator is not shown a database message (audit H-22).
+		// Logged with the cause; the operator is not shown a database message.
 		slog.Error("stay transfer failed", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "transfer_failed", "the transfer could not be completed")
 	}

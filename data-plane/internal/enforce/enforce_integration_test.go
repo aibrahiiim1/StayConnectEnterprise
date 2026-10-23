@@ -12,10 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// opTx opens a transaction with the named controlled-operation families already open. On the production
-// schema the test login (postgres) no longer owns the iam_v2 openers, so a seed that writes a capability-scoped
-// family (stays -> 'stay', purchases -> 'commerce_intent', ...) must declare the operation exactly as the
-// product's own writers do. The caller commits; a deferred Rollback after Commit is a no-op.
+// opTx opens a transaction with the controlled-operation families open, as the product's writers do. The caller commits.
 func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
 	t.Helper()
 	ctx := context.Background()
@@ -32,10 +29,8 @@ func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
 	return tx
 }
 
-// ownerTx opens a transaction running as iam_v2_owner. It exists ONLY for SEEDS that need a raw write to an
-// owner-guarded table (accounting_records, UPDATE of a session's accounting identity). On the historical
-// scratch chain the test login WAS the owner, so this reproduces exactly what those seeds did there. It is
-// never used for the code path under test, nor where a test asserts that such a write is refused.
+// ownerTx runs as iam_v2_owner, only for seeds needing a raw write to an owner-guarded table; never for the
+// path under test or where a refusal is asserted.
 func ownerTx(t *testing.T, p *pgxpool.Pool) pgx.Tx {
 	t.Helper()
 	ctx := context.Background()
@@ -50,7 +45,6 @@ func ownerTx(t *testing.T, p *pgxpool.Pool) pgx.Tx {
 	return tx
 }
 
-// ownerExec runs one SEED statement through ownerTx and commits it.
 func ownerExec(t *testing.T, p *pgxpool.Pool, sql string, args ...any) error {
 	t.Helper()
 	ctx := context.Background()
@@ -82,7 +76,6 @@ func pool(t *testing.T) *pgxpool.Pool {
 
 type fixture struct{ tenant, site, iface, stay, device, pkgRev, svcRev string }
 
-// seed builds a site with one IN_HOUSE Stay, a device, and a plan revision carrying explicit rates + quota.
 func seed(t *testing.T, p *pgxpool.Pool, down, up int, quota int64) fixture {
 	t.Helper()
 	ctx := context.Background()
@@ -117,7 +110,6 @@ func seed(t *testing.T, p *pgxpool.Pool, down, up int, quota int64) fixture {
 	return f
 }
 
-// grant creates an ACTIVE entitlement with its initial history and an authorized device + live session.
 func grant(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, startedAt time.Time) (string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -164,8 +156,6 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
-// TestIntegration_PlanIsDerivedFromDurableState proves the shaping plan comes from the Entitlement's pinned
-// plan revision — no separate bookkeeping — and that an ended/unentitled session is torn down with no rates.
 func TestIntegration_PlanIsDerivedFromDurableState(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -189,7 +179,6 @@ func TestIntegration_PlanIsDerivedFromDurableState(t *testing.T) {
 		t.Fatalf("shape carries no addressing: %+v", s)
 	}
 
-	// terminate the entitlement: the SAME session must now be torn down, with no rates at all
 	if _, err := p.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,now(),'ADMIN')`, ent); err != nil {
 		t.Fatal(err)
 	}
@@ -205,8 +194,6 @@ func TestIntegration_PlanIsDerivedFromDurableState(t *testing.T) {
 	}
 }
 
-// TestIntegration_WindowExpiryEndsAtTheTrueTime proves acctd-style enforcement ends access at the instant the
-// window elapsed — not when the sweep noticed — and revokes the device and session with it.
 func TestIntegration_WindowExpiryEndsAtTheTrueTime(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -240,7 +227,6 @@ func TestIntegration_WindowExpiryEndsAtTheTrueTime(t *testing.T) {
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id=$1 AND deauthorized_at IS NULL`, ent); n != 0 {
 		t.Fatal("a device authorization survived the expiry")
 	}
-	// idempotent: a second sweep finds nothing and changes nothing
 	again, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
 	if err != nil {
 		t.Fatal(err)
@@ -250,8 +236,6 @@ func TestIntegration_WindowExpiryEndsAtTheTrueTime(t *testing.T) {
 	}
 }
 
-// TestIntegration_QuotaExpiryEndsWhenTheQuotaWasCrossed proves a data-quota ending is recorded at the SAMPLE
-// that crossed the allowance — the moment the guest actually used it up — not when the sweep ran.
 func TestIntegration_QuotaExpiryEndsWhenTheQuotaWasCrossed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -292,8 +276,7 @@ func TestIntegration_QuotaExpiryEndsWhenTheQuotaWasCrossed(t *testing.T) {
 	if !terminated.Equal(crossing) || reason != "DATA" {
 		t.Fatalf("terminated_at=%v reason=%s, want %v/DATA", terminated, reason, crossing)
 	}
-	// the plan no longer shapes that session. (It also carries no tear instruction: the session ended more
-	// than an hour ago in business time, so the edge has long since removed it and the plan stays small.)
+	// The plan no longer shapes that session, and carries no tear: it ended over an hour ago.
 	plan, err := New(p).PlanForSite(ctx, f.tenant, f.site)
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +286,6 @@ func TestIntegration_QuotaExpiryEndsWhenTheQuotaWasCrossed(t *testing.T) {
 	}
 }
 
-// TestIntegration_UnexpiredAccessIsUntouched proves the sweep never ends access that is still valid.
 func TestIntegration_UnexpiredAccessIsUntouched(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -331,16 +313,8 @@ func TestIntegration_UnexpiredAccessIsUntouched(t *testing.T) {
 	}
 }
 
-// THE SWEEP MUST WORK ON A DATABASE THAT HAS NEVER SEEN PHASE 6.
-//
-// iam_v2.p6_data_crossing arrives with migration 0038. This sweep predates it by two phases and runs on every
-// appliance, so calling it unconditionally made the whole of expiry enforcement fail with "function
-// iam_v2.p6_data_crossing(uuid) does not exist" the moment the binary met an older schema — which is exactly
-// what rolling Phase 6 back produces. The consequence is not a missing feature: NOTHING expires, so every
-// guest whose window or quota has run out keeps their access.
-//
-// This drops the function, runs the real sweep, and puts it back. Reinstating the unconditional call makes it
-// fail here rather than two phases later on somebody's appliance.
+// The sweep must work without iam_v2.p6_data_crossing, or on an older schema nothing would expire. This drops
+// the function, runs the real sweep and restores it.
 func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -352,10 +326,8 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 		WHERE n.nspname='iam_v2' AND p.proname='p6_data_crossing'`).Scan(&def); err != nil {
 		t.Skip("p6_data_crossing is not present in this schema; the fallback is already what runs")
 	}
-	// On the production schema the function is owned by iam_v2_owner and EXECUTE is granted to named roles
-	// only. Re-running its definition would leave it owned by postgres with PUBLIC EXECUTE, silently changing
-	// the privilege posture every other suite sharing this database runs against, so owner and grants are
-	// captured here and put back with it.
+	// The function is owned by iam_v2_owner with EXECUTE for named roles only; re-running its definition would
+	// change the privilege posture other suites rely on, so owner and grants are captured and restored.
 	var owner string
 	var grantees []string
 	if err := p.QueryRow(ctx, `SELECT p.proowner::regrole::text,
@@ -375,8 +347,7 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 	if _, err := p.Exec(ctx, `DROP FUNCTION iam_v2.p6_data_crossing(uuid)`); err != nil {
 		t.Fatalf("drop the Phase-6 crossing: %v", err)
 	}
-	// Put it back whatever happens: a test that leaves the schema short of a function every later test needs
-	// is a worse failure than the one it was written to catch.
+	// Restore it whatever happens; later tests need the function.
 	defer func() {
 		rctx := context.Background()
 		if _, err := p.Exec(rctx, def); err != nil {
@@ -402,10 +373,8 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 		t.Fatalf("the sweep failed on a pre-Phase-6 schema: %v", err)
 	}
 
-	// The fragments the sweep chose, checked directly. online_time_exhausted_at arrives with 0036 and appears
-	// in the candidate query in three places; on a schema without it the statement fails as a whole, exactly
-	// as the missing function did. Asserting the fragment is what proves the column is never emitted -- the
-	// fragment is the only place its name appears.
+	// Check the chosen fragments directly: a missing online_time_exhausted_at column fails the whole statement,
+	// and the fragment is the only place its name appears.
 	if e.phase6Writers {
 		t.Fatal("the sweep still believes the Phase-6 writers are present")
 	}

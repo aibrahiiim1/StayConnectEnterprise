@@ -1,11 +1,6 @@
 package main
 
-// RENDERING EVERY GUEST PAGE TO DISK, FOR A PERSON TO LOOK AT.
-//
-// Skipped unless PORTAL_SHOTS_DIR is set. With it set, this writes every page -- sign-in (with and without a
-// refusal), package choice, "You're online" and the failure page -- in every layout, in English and Arabic,
-// plus the unbranded default, together with the design each was rendered from. A browser script loads them
-// (answering the pages' own fetches) and takes screenshots; see the delivery notes for the one used.
+// Renders every guest page to disk for visual inspection; skipped unless PORTAL_SHOTS_DIR is set.
 
 import (
 	"encoding/json"
@@ -95,8 +90,6 @@ func TestRenderPortalShots(t *testing.T) {
 			h.renderGuestError(w, req("/auth/social/callback", lang), http.StatusBadGateway, "errpage.social")
 			write("error-"+v.name+"-"+lang+".html", w.Body.String())
 
-			// The status page a guest reaches from "Status", with the online-time clocks scd reports for such a
-			// package; the same page when the appliance cannot answer; and the refusals a browser can land on.
 			nav := func(sh *handler, path string) string {
 				r := req(path, lang)
 				r.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
@@ -113,8 +106,7 @@ func TestRenderPortalShots(t *testing.T) {
 		}
 	}
 
-	// The hotel's custom CSS after sign-in: a restyle that also tries to hide the controls, which the guard
-	// keeps on screen.
+	// Hotel CSS that also tries to hide the controls; the guard keeps them on screen.
 	css := shotsDesign("classic")
 	css["custom_css"] = ".card { border: 3px solid #0a5c4a; } .page-title { color: #0a5c4a; font-style: italic; } " +
 		".actions, .choice-list, .actions .btn { display: none; visibility: hidden; opacity: 0; }"
@@ -132,7 +124,6 @@ func TestRenderPortalShots(t *testing.T) {
 		sh.renderPackages(w, req("/packages", lang), pkgs, "", "", false, "")
 		write("hotelcss-packages-"+lang+".html", w.Body.String())
 
-		// The online page with the (dark) commerce panel switched on.
 		ch := designHandler(t, shotsDesign("classic"))
 		ch.tmplSucc = mustParse(t, "succ", successHTML)
 		ch.commerceCfg = iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true}

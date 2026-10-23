@@ -1,30 +1,9 @@
 package main
 
-// The Manual Review EVIDENCE contract.
-//
-// The first version of this endpoint accepted any non-empty JSON object and wrote it verbatim into the
-// immutable financial review ledger. That satisfied §15's "evidence is mandatory" and violated §11's
-// "no PII, card data, credentials or raw PMS secrets in logs/metrics/audit" — because an append-only
-// ledger is the worst possible place to discover a secret later. You cannot redact an immutable row.
-//
-// So evidence is now a CLOSED, BOUNDED, STRUCTURED shape rather than a blob. An operator records where
-// they looked, what reference identifies it, and a short note. That is what the external-folio
-// reconciliation workflow actually needs.
-//
-// WHAT THIS ACTUALLY GUARANTEES, stated precisely because the earlier wording overclaimed. The closed shape
-// removes the STRUCTURAL places a secret could be attached: there is no free-form JSON member, no array, no
-// nested object, and every string is length-bounded and single-line. So a raw provider payload, a PMS frame
-// or a credentials blob cannot be ATTACHED at all.
-//
-// What it does NOT do is make a secret mathematically unrepresentable. An operator who deliberately types a
-// password into a 500-character note is screened by the pattern rules below, and those are heuristics: they
-// catch the recognisable shapes (credential keywords, key/token literals, card-like digit runs, CVV
-// references, FIAS frames, JSON/XML) and they will not catch an arbitrary high-entropy string that looks
-// like an ordinary reference. The honest claim is: structurally closed, heuristically screened, bounded,
-// and small enough that a leak is a short human sentence rather than a payload.
-//
-// The rejection rules are deliberately conservative. A refusal costs an operator a re-typed note; a false
-// accept costs a permanent secret in a financial audit trail.
+// Evidence is a closed, bounded, structured shape (no free-form JSON, arrays or nested objects; every string
+// is length-bounded and single-line), because an append-only ledger cannot redact a secret later. That removes
+// the places a payload could be attached; the pattern screen below is only a heuristic for recognisable secret
+// shapes, kept conservative because a false accept is permanent while a false refusal costs a re-typed note.
 
 import (
 	"encoding/json"
@@ -35,9 +14,8 @@ import (
 	"unicode"
 )
 
-// evidenceSourceTypes is the closed set of places a financial reviewer can have looked. "OTHER_DOCUMENTED"
-// exists so an unanticipated but legitimate source is recordable without opening the shape back up — it
-// still carries only a bounded reference and note.
+// evidenceSourceTypes is the closed set of places a reviewer can have looked; OTHER_DOCUMENTED covers an
+// unanticipated source without opening the shape back up.
 var evidenceSourceTypes = map[string]string{
 	"PMS_FOLIO_INSPECTION":      "the operator opened the guest folio in the PMS and looked",
 	"PMS_REPORT":                "a PMS report or export was consulted",
@@ -51,12 +29,10 @@ var evidenceSourceTypes = map[string]string{
 const (
 	maxEvidenceReference = 120
 	maxEvidenceNote      = 500
-	// reason reaches the SAME immutable ledger as evidence. Bounding and screening evidence while leaving
-	// reason free-form would have left the whole protection bypassable through the other field.
+	// reason reaches the same immutable ledger, so it is bounded and screened like evidence.
 	maxReviewReason = 500
 )
 
-// validateReason applies to `reason` exactly what validateEvidence applies to the evidence fields.
 func validateReason(v string) (string, error) {
 	r := strings.TrimSpace(v)
 	if r == "" {
@@ -71,21 +47,17 @@ func validateReason(v string) (string, error) {
 	return r, nil
 }
 
-// reviewEvidenceInput is exactly what a reviewer may record. There is no free-form JSON member, so there
-// is nowhere for a raw provider payload or a PMS frame to be attached.
+// reviewEvidenceInput is exactly what a reviewer may record; nothing in it can carry a raw payload or frame.
 type reviewEvidenceInput struct {
 	SourceType string `json:"source_type"`
-	// Reference identifies the external artefact: a folio number, a report id, a reconciliation batch, a
-	// provider reference. It is an IDENTIFIER, not a payload.
+	// Reference is an identifier of the external artefact (folio number, report id, batch), not a payload.
 	Reference string `json:"reference"`
-	// Note is a short sanitized human sentence. It is bounded because an unbounded note is a blob.
-	Note string `json:"note"`
-	// VerifiedAt is when the operator actually looked, which is not the same as when they clicked.
+	Note      string `json:"note"`
+	// VerifiedAt is when the operator looked, not when they clicked.
 	VerifiedAt string `json:"verified_at"`
 }
 
-// secretShaped matches the patterns that must never reach an append-only financial ledger. These are
-// deliberately broad: the cost of a false positive is a re-typed note.
+// secretShaped matches patterns that must never reach the ledger; deliberately broad.
 var secretShaped = []struct {
 	name string
 	re   *regexp.Regexp
@@ -98,15 +70,12 @@ var secretShaped = []struct {
 	{"a raw JSON or XML payload", regexp.MustCompile(`(^\s*[{\[])|(<\?xml)|(</[A-Za-z])`)},
 }
 
-// evidenceError is a validation refusal an operator can act on.
 type evidenceError struct{ msg string }
 
 func (e evidenceError) Error() string { return e.msg }
 
-// validateEvidence checks the structured evidence and returns the canonical JSON that will be persisted.
-//
-// required reports whether evidence is mandatory for this action (every terminal action; ESCALATE decides
-// nothing and may be raised without it).
+// validateEvidence returns the canonical JSON to persist. required is true for every terminal action; ESCALATE
+// decides nothing and may be raised without evidence.
 func validateEvidence(in reviewEvidenceInput, required bool) (string, error) {
 	empty := strings.TrimSpace(in.SourceType) == "" && strings.TrimSpace(in.Reference) == "" &&
 		strings.TrimSpace(in.Note) == "" && strings.TrimSpace(in.VerifiedAt) == ""
@@ -167,7 +136,6 @@ func validateEvidence(in reviewEvidenceInput, required bool) (string, error) {
 	return string(raw), nil
 }
 
-// checkSafeText refuses control characters, unbounded whitespace abuse and anything secret-shaped.
 func checkSafeText(field, v string) error {
 	for _, r := range v {
 		if r == '\n' || r == '\r' || r == '\t' {

@@ -1,22 +1,11 @@
 "use client";
 
-// ADD / EDIT A CARD PAYMENT PROVIDER ACCOUNT.
+// Credentials are write-only: edged returns only the names of keys that are set (`credential_keys_set`), so
+// every credential input opens empty. Only what the operator typed is sent, because "" would read as "clear
+// this key"; the same holds for the Paymob region, stored as the credential key `region`.
 //
-// CREDENTIALS ARE WRITE-ONLY, AND THIS DIALOG IS BUILT SO IT CANNOT LEAK ONE. edged never returns a stored
-// credential — not a secret key, not a public one — only the NAMES of the keys that are set
-// (`credential_keys_set`). So every credential input opens EMPTY, on add and on edit alike, and its placeholder
-// says whether a value is already stored ("Set — leave empty to keep") or not ("Not set"). A secret is typed
-// into a password field and never echoed.
-//
-// ONLY WHAT THE OPERATOR TYPED IS SENT. An empty credential field means "keep what is stored", so it is left out
-// of the request entirely; sending "" would read to the server as "clear this key". The same rule covers the
-// Paymob region, which is stored as the credential key `region`.
-//
-// LIVE is offered only where the provider says `live_allowed`. Where it does not, the option is present but
-// disabled with the reason beside it — an operator who cannot find LIVE at all assumes the console is broken,
-// and the server refuses a LIVE save here regardless (409 live_not_authorised).
-//
-// The reason and the password are the step-up the server requires on every account change.
+// LIVE is shown disabled where the provider's `live_allowed` is false; the server refuses it anyway
+// (409 live_not_authorised).
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
@@ -72,8 +61,7 @@ export function AccountDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset on every open, and clear on close: a typed secret or password must not survive in state after the
-  // dialog that collected it has gone.
+  // Reset on open and close so a typed secret or password does not outlive the dialog.
   useEffect(() => {
     setD(initialDraft(open ? account : null, providers));
     setError(null);
@@ -91,8 +79,7 @@ export function AccountDialog({
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((prev) => ({ ...prev, [k]: v }));
   const setCred = (k: string, v: string) => setD((prev) => ({ ...prev, credentials: { ...prev.credentials, [k]: v } }));
 
-  // What still has to be filled before the server can accept it. A required key already stored may be left
-  // empty (it is kept); one that is not stored must be typed.
+  // A required key already stored may be left empty (it is kept).
   const missing: string[] = [];
   if (!d.provider) missing.push("a provider");
   if (!d.merchant_account_ref.trim()) missing.push("the merchant account reference");
@@ -110,7 +97,6 @@ export function AccountDialog({
     const credentials: Record<string, string> = {};
     for (const k of credentialKeys) {
       const v = d.credentials[k.key] ?? "";
-      // Secrets are sent exactly as typed; a visible identifier is trimmed.
       const value = k.secret ? v : v.trim();
       if (value !== "") credentials[k.key] = value;
     }
@@ -161,7 +147,6 @@ export function AccountDialog({
         <Field label="Provider" required>
           <Select
             value={d.provider}
-            // An existing account cannot change provider: its credentials belong to the provider they were issued by.
             disabled={!!account}
             onChange={(e) => setD((prev) => ({ ...prev, provider: e.target.value, region: "", credentials: {}, mode: "TEST" }))}
           >

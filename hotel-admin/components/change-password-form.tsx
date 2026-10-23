@@ -1,11 +1,6 @@
 "use client";
 
-// CHANGE MY PASSWORD — the operator's own password, with the current one (edged POST /auth/password).
-//
-// Two places use it. Forced: a session that signed in with a weak or administrator-chosen password can do
-// nothing else until it sets one of its own (the layout shows only this form). Voluntary: from the account
-// menu, at /account/password. Either way the current password is required -- a console left open must not let
-// a passer-by take the account -- and every other place the operator was signed in is signed out.
+// Require the current password to protect an unattended console; changing it signs out other sessions.
 
 import { useState } from "react";
 import { api } from "@/lib/api";

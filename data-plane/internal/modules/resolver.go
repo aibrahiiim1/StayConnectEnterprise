@@ -1,21 +1,11 @@
-// Package modules is OneGate's single module resolver. For every registered optional module it evaluates
-// the four gates, in order, and never collapses them:
+// Package modules is OneGate's single module resolver. Each optional module is evaluated against four gates that
+// are never collapsed: Deployed (deployment ceiling), Licensed (signed licence in Active/Grace), Enabled (the site's
+// switch; modules without one are enabled when licensed) and Ready (runtime readiness).
 //
-//  1. Deployed  -- the deployment ceiling (internal/deployment): can this software run it here?
-//  2. Licensed  -- the signed licence (v4 modules; legacy mapping for older licences) in an Active/Grace state.
-//  3. Enabled   -- the site's own choice (iam_v2.site_module_settings, or the Sign-in methods switch for the
-//     identity modules). Modules without a local switch are enabled when licensed.
-//  4. Ready     -- runtime readiness (a provider reachable, an interface onboarded, ...).
-//
-// EXECUTION (offering a method to a client, creating a quote, posting a charge) requires all four.
-// MANAGEMENT (configuration, diagnostics, history, reconciliation, recovery) requires only that the module is
-// deployed and either licensed or already holds records. Readiness NEVER hides a management surface: an
-// unreachable provider or PMS must stop new execution while leaving everything needed to restore service.
-//
-// Site Type is not an input. Nothing here reads it, by design and by test.
-//
-// Every failure mode is closed: an error reading local state means "not enabled", an unknown module is not
-// deployed, and a missing readiness probe for a module that declares one means "not ready".
+// Execution requires all four. Management requires only that the module is deployed and either licensed or already
+// holds records; readiness never hides a management surface. Site Type is not an input. Every failure mode is
+// closed: a local-state read error means not enabled, an unknown module is not deployed, and a missing probe means
+// not ready.
 package modules
 
 import (
@@ -26,7 +16,6 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// Reason codes are stable machine strings; the Admin Console translates them.
 const (
 	ReasonNotDeployed     = "NOT_DEPLOYED"
 	ReasonNotLicensed     = "NOT_LICENSED"
@@ -37,7 +26,6 @@ const (
 	ReasonNotReady        = "NOT_READY"
 )
 
-// Licence is what the resolver needs from the licence manager.
 type Licence interface {
 	ModuleEnabled(id string) bool       // authorised AND the licence state allows features
 	AuthorizedModules() map[string]bool // authorised, regardless of state (display)
@@ -78,18 +66,14 @@ type Resolver struct {
 	records  map[string]RecordsProbe
 }
 
-// New builds a resolver.
 func New(c deployment.Ceiling, l Licence, local Local, id IdentitySwitches) *Resolver {
 	return &Resolver{Ceiling: c, Licence: l, Local: local, Identity: id, probes: map[string]Probe{}, records: map[string]RecordsProbe{}}
 }
 
-// SetProbe registers the readiness probe for a module.
 func (r *Resolver) SetProbe(id string, p Probe) { r.probes[id] = p }
 
-// SetRecordsProbe registers the "has records" probe for a module.
 func (r *Resolver) SetRecordsProbe(id string, p RecordsProbe) { r.records[id] = p }
 
-// State is one module's evaluated gates.
 type State struct {
 	ID         string   `json:"id"`
 	Label      string   `json:"label"`
@@ -106,18 +90,14 @@ type State struct {
 	Readiness  []string `json:"readiness,omitempty"`
 }
 
-// Snapshot is every module's state.
 type Snapshot struct {
 	Modules map[string]State `json:"modules"`
 }
 
-// Effective reports whether module id may execute now.
 func (s Snapshot) Effective(id string) bool { return s.Modules[id].Effective }
 
-// Manageable reports whether module id's management surfaces are available.
 func (s Snapshot) Manageable(id string) bool { return s.Modules[id].Manageable }
 
-// Resolve evaluates every registered module for one site.
 func (r *Resolver) Resolve(ctx context.Context, tenantID, siteID string) Snapshot {
 	var local map[string]bool
 	localErr := error(nil)
@@ -173,9 +153,8 @@ func (r *Resolver) Resolve(ctx context.Context, tenantID, siteID string) Snapsho
 		if !st.Enabled && (switchable[spec.ID] || identity[spec.ID]) && localErr == nil && idErr == nil {
 			st.Reasons = append(st.Reasons, ReasonDisabledBySite)
 		}
-		// Readiness is probed as soon as the module is deployed and licensed -- before the site switches it on,
-		// so the administrator sees what is missing first. A module with a probe that cannot be probed (not
-		// deployed or not licensed) is not ready; one without a probe has nothing to be ready for.
+		// Readiness is probed once the module is deployed and licensed, before the site enables it, so the administrator
+		// sees what is missing; an unprobeable module is not ready.
 		st.Ready = true
 		if p, ok := r.probes[spec.ID]; ok {
 			if st.Deployed && st.Licensed {

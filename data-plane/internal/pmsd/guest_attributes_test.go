@@ -7,11 +7,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// GUEST ATTRIBUTES FROM THE PROPERTY-MAPPED FIAS FIELDS.
-//
-// This property's Protel maps its travel agent (AG) to A0 and its VIP flag (VP) to A1, on GI and GC. They are
-// what package rules for VIP guests and a travel agent's guests are judged against, so they must arrive -- but
-// they are attributes, not identity, and an unusable one must never stop the feed.
+// Protel maps travel agent (AG) to A0 and VIP (VP) to A1 on GI and GC. Package rules need them, but they are
+// attributes, not identity: an unusable one must never stop the feed.
 
 func TestLinkRecordsAskForTravelAgentAndVIPOnArrivalAndChange(t *testing.T) {
 	lrs := pms.BuildLRs()
@@ -103,9 +100,8 @@ func TestGuestAttributes_PayloadCarriesThemOnlyWhenStated(t *testing.T) {
 	}
 }
 
-// THE LINK DESCRIPTION IS THE VERIFIED ONE. pmsd once sent "LD|..|pmsd|V#1|RT4|": no IF (Interface Family)
-// field at all, although IF is what the PMS uses to activate an interface's functions. The record must be the
-// handshake verified on this property's Protel for both the feed and posting.
+// The LD must carry IF (Interface Family), which the PMS uses to activate an interface's functions; match the
+// handshake verified on Protel for both feed and posting.
 func TestLinkDescriptionIsTheVerifiedHandshake(t *testing.T) {
 	if got, want := pms.VerifiedLD("261001", "120000"), "LD|DA261001|TI120000|IFPB|V#1.13|RT4|"; got != want {
 		t.Fatalf("LD = %q, want %q", got, want)

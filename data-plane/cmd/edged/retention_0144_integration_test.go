@@ -12,8 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration 0144 (GDPR branch review 2026-10-20): retention keeps what is still in use, and the nightly backup
-// uses only the current hotel's keys.
+// Retention keeps what is still in use, and the nightly backup uses only the current hotel's keys.
 
 func runRetention(t *testing.T, f *apiFixture) {
 	t.Helper()

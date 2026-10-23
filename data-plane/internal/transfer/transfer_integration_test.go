@@ -2,19 +2,6 @@
 
 package transfer
 
-// THE F9 SERIES, against a real PostgreSQL.
-//
-// A transfer is the one Phase-5 operation that ENDS a guest's live access, so almost every test here is
-// about what it refuses to do and about what survives when it does act. The three properties that would be
-// silently wrong if untested:
-//
-//   * a room move must not be recordable as a transfer (two Stays on one interface satisfy "two different
-//     Stays", which is all the original CHECK required);
-//   * a failed transfer must leave the guest exactly as they were — terminating the source and then failing
-//     to land them anywhere is worse than refusing;
-//   * concurrent transfers must produce one lineage row, and two operators transferring in OPPOSITE
-//     directions between the same pair must not deadlock.
-
 import (
 	"context"
 	"errors"
@@ -50,18 +37,18 @@ type fx struct {
 	tenant, site   string
 	ifaceA, ifaceB string
 	stayA, stayB   string
-	stayA2         string // a SECOND stay on interface A — the room-move shape
+	stayA2         string // a second stay on interface A (room-move shape)
 	device         string
 	pkg            string
 }
 
-// seed builds two PMS interfaces with an IN_HOUSE Stay on each, a second Stay on the first interface, and a
-// zero-price no-posting package for the guest to land on.
+// seed builds two PMS interfaces with an IN_HOUSE Stay on each, a second Stay on the first, and a
+// zero-price no-posting landing package.
 func seed(t *testing.T, p *pgxpool.Pool) fx {
 	t.Helper()
 	ctx := context.Background()
 	var f fx
-	// On the full schema stays are a controlled-writer table: the seed opens the 'stay' family in its tx.
+	// Stays are a controlled-writer table: open the 'stay' family in the seed transaction.
 	stx, err := p.Begin(ctx)
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
@@ -115,8 +102,7 @@ func seed(t *testing.T, p *pgxpool.Pool) fx {
 	return f
 }
 
-// grant gives a Stay a live entitlement with the device bound and an active session — the state a guest who
-// is actually online is in, which is the only state a transfer is interesting in.
+// grant gives a Stay a live entitlement with a bound device and an active session.
 func grant(t *testing.T, p *pgxpool.Pool, f fx, stay string) (entitlement, session string) {
 	t.Helper()
 	ctx := context.Background()
@@ -170,7 +156,6 @@ func req(f fx, from, to string) Request {
 		Operator: operator, Reason: "guest moved to the other property", GraceValidFor: 2 * time.Hour}
 }
 
-// F9 baseline + F9-g: the access moves, and the guest never notices.
 func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -189,8 +174,7 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	if out.DevicesRebound != 1 || out.SessionsRebound != 1 {
 		t.Fatalf("rebound %d device(s) and %d session(s), want 1 and 1", out.DevicesRebound, out.SessionsRebound)
 	}
-	// THE SAME session row, re-pointed. A new session id would mean the guest was logged out and back in,
-	// which is exactly what "seamless" excludes -- and it is what the kernel state is keyed on.
+	// The same session row is re-pointed; a new id would mean a logout, and kernel state is keyed on it.
 	var sessEnt, sessState string
 	if err := p.QueryRow(ctx, `SELECT entitlement_id::text, state FROM iam_v2.sessions WHERE id=$1`, session).
 		Scan(&sessEnt, &sessState); err != nil {
@@ -199,7 +183,6 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	if sessEnt != out.ToEntitlement || sessState != "active" {
 		t.Fatalf("the session did not move in place: entitlement=%s state=%s", sessEnt, sessState)
 	}
-	// The source is terminated AS TRANSFERRED — the state the lineage row requires.
 	var status, reason string
 	if err := p.QueryRow(ctx, `SELECT status, COALESCE(terminal_reason,'') FROM iam_v2.entitlements WHERE id=$1`,
 		fromEnt).Scan(&status, &reason); err != nil {
@@ -208,7 +191,6 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	if status != "TERMINATED" || reason != "TRANSFERRED" {
 		t.Fatalf("source is %s/%s", status, reason)
 	}
-	// F9-d: NOT a supersession.
 	var supersedes *string
 	if err := p.QueryRow(ctx, `SELECT supersedes_entitlement_id::text FROM iam_v2.entitlements WHERE id=$1`,
 		out.ToEntitlement).Scan(&supersedes); err != nil {
@@ -217,7 +199,6 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	if supersedes != nil {
 		t.Fatalf("the transfer-created entitlement carries a supersedes pointer")
 	}
-	// The typed lineage and the stay link both exist.
 	var links, transfers int
 	if err := p.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM iam_v2.entitlement_transfers WHERE from_entitlement_id=$1),
@@ -228,7 +209,6 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	if transfers != 1 || links != 1 {
 		t.Fatalf("lineage: %d transfer(s), %d link(s)", transfers, links)
 	}
-	// No money moved and no posting was attempted.
 	var amount int64
 	var postings int
 	if err := p.QueryRow(ctx, `SELECT
@@ -242,7 +222,6 @@ func TestIntegration_F9_TransferMovesAccessSeamlessly(t *testing.T) {
 	}
 }
 
-// F9-b / F9-c: a room move is not a transfer, and refusing it leaves the guest untouched.
 func TestIntegration_F9_SameInterfaceIsARoomMoveNotATransfer(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -254,8 +233,6 @@ func TestIntegration_F9_SameInterfaceIsARoomMoveNotATransfer(t *testing.T) {
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayA2)); !errors.Is(err, ErrSameInterface) {
 		t.Fatalf("a same-interface move was accepted as a transfer: %v", err)
 	}
-	// F9-c: the guest is EXACTLY as they were. A refusal that had already terminated the source would have
-	// taken their access away to tell them no.
 	var status string
 	var sessState string
 	if err := p.QueryRow(ctx, `SELECT e.status, se.state FROM iam_v2.entitlements e
@@ -275,7 +252,6 @@ func TestIntegration_F9_SameInterfaceIsARoomMoveNotATransfer(t *testing.T) {
 	}
 }
 
-// F9-a: the destination must already exist from verified PMS state, and no Stay is ever created.
 func TestIntegration_F9_DestinationMustAlreadyExist(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -300,9 +276,8 @@ func TestIntegration_F9_DestinationMustAlreadyExist(t *testing.T) {
 		t.Fatalf("the refusal created %d stay(s)", after-before)
 	}
 
-	// A destination that exists but has checked out is refused too: there is nobody there to receive access.
-	// posting_allowed=false in the same UPDATE, exactly as internal/checkout does: the posting_only_in_house
-	// CHECK is evaluated before the AFTER trigger recomputes the permission.
+	// posting_allowed=false in the same UPDATE, as internal/checkout does: the posting_only_in_house CHECK
+	// runs before the AFTER trigger recomputes the permission.
 	stayExec(t, p, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
 		WHERE id=$1`, f.stayB)
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayB)); !errors.Is(err, ErrDestinationNotEligible) {
@@ -310,7 +285,6 @@ func TestIntegration_F9_DestinationMustAlreadyExist(t *testing.T) {
 	}
 }
 
-// The destination must not already hold access: landing on it would require superseding across subjects.
 func TestIntegration_F9_OccupiedDestinationIsRefused(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -323,7 +297,6 @@ func TestIntegration_F9_OccupiedDestinationIsRefused(t *testing.T) {
 	}
 }
 
-// F9-f: idempotency. The same transfer twice is one lineage row and one answer.
 func TestIntegration_F9_SecondTransferIsRefused(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -334,8 +307,6 @@ func TestIntegration_F9_SecondTransferIsRefused(t *testing.T) {
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayB)); err != nil {
 		t.Fatalf("first transfer: %v", err)
 	}
-	// The source now has no live access, so the second attempt is refused for that reason before it can
-	// reach the uniqueness constraint — either way it is a refusal, never a second lineage row.
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayB)); err == nil {
 		t.Fatalf("the same transfer succeeded twice")
 	}
@@ -349,7 +320,6 @@ func TestIntegration_F9_SecondTransferIsRefused(t *testing.T) {
 	}
 }
 
-// F9-f, concurrently: many operators, one transfer.
 func TestIntegration_F9_ConcurrentTransfersProduceExactlyOne(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -392,15 +362,9 @@ func TestIntegration_F9_ConcurrentTransfersProduceExactlyOne(t *testing.T) {
 	}
 }
 
-// F9-i: operators transferring in OPPOSITE directions between the same pair of Stays.
-//
-// Locking the two Stays in CALLER order would let tx1 hold A while waiting for B and tx2 hold B while waiting
-// for A — the classic pair, and the pair a busy property produces. The fixed id order removes the cycle.
-//
-// A single opposite pair almost never interleaves, so this drives MANY pairs at once against several
-// independent Stay pairs: the point is to give the interleaving a real chance rather than to assert it
-// happened. Every call must RETURN — a deadlock surfaces as SQLSTATE 40P01, and a lock cycle that PostgreSQL
-// did not break surfaces as the timeout.
+// Opposite-direction transfers between the same pair would deadlock if Stays were locked in caller order.
+// A single pair rarely interleaves, so many pairs run at once; a deadlock surfaces as SQLSTATE 40P01 and an
+// unbroken lock cycle as the timeout.
 func TestIntegration_F9_OppositeDirectionsDoNotDeadlock(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -429,9 +393,8 @@ func TestIntegration_F9_OppositeDirectionsDoNotDeadlock(t *testing.T) {
 	for i := 0; i < pairs*2; i++ {
 		select {
 		case err := <-done:
-			// Both stays hold access, so BOTH directions are correctly refused by the occupied-destination
-			// rule. That is not what is being measured: what matters is that the call returned, and that it
-			// did not return a deadlock.
+			// Both stays hold access, so both directions are refused as occupied; only returning without a
+			// deadlock is measured.
 			if err == nil {
 				t.Fatalf("a transfer onto an occupied stay succeeded")
 			}
@@ -460,7 +423,6 @@ func contains(h, n string) bool {
 	})()
 }
 
-// Authorization: an operator and a bounded reason, or nothing happens.
 func TestIntegration_F9_RequiresAnOperatorAndAReason(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -494,7 +456,6 @@ func TestIntegration_F9_RequiresAnOperatorAndAReason(t *testing.T) {
 	}
 }
 
-// FAIL CLOSED: with nothing to land the guest on, the transfer refuses rather than terminating the source.
 func TestIntegration_F9_NoLandingPackageRefusesWithoutTakingAccessAway(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -502,7 +463,6 @@ func TestIntegration_F9_NoLandingPackageRefusesWithoutTakingAccessAway(t *testin
 	s := New(p)
 	fromEnt, session := grant(t, p, f, f.stayA)
 	ctx := context.Background()
-	// Retire the only eligible package by pointing the package at no current revision.
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.internet_packages SET active=false
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkg); err != nil {
 		t.Fatalf("retire the package: %v", err)
@@ -520,7 +480,6 @@ func TestIntegration_F9_NoLandingPackageRefusesWithoutTakingAccessAway(t *testin
 	}
 }
 
-// F9-h: ambiguity is a signal. This package must never read a resolution to decide anything.
 func TestIntegration_F9_AmbiguityIsNotAnAuthorization(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -529,8 +488,7 @@ func TestIntegration_F9_AmbiguityIsNotAnAuthorization(t *testing.T) {
 	grant(t, p, f, f.stayA)
 	ctx := context.Background()
 
-	// Record an AMBIGUOUS resolution naming both stays' guest network. If ambiguity were ever treated as
-	// evidence, THIS is the state that would make an unauthorized transfer look justified.
+	// An AMBIGUOUS resolution must never make an unauthorized transfer look justified.
 	var gn string
 	if err := p.QueryRow(ctx, `INSERT INTO public.guest_networks
 		(id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr)
@@ -555,8 +513,7 @@ func TestIntegration_F9_AmbiguityIsNotAnAuthorization(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	// The transfer still needs everything it always needed. Ambiguity changed nothing, in either direction.
-	r := req(f, f.stayA, f.stayA2) // same interface: still a room move
+	r := req(f, f.stayA, f.stayA2)
 	if _, err := s.Execute(ctx, r); !errors.Is(err, ErrSameInterface) {
 		t.Fatalf("an AMBIGUOUS resolution changed the answer: %v", err)
 	}
@@ -567,7 +524,6 @@ func TestIntegration_F9_AmbiguityIsNotAnAuthorization(t *testing.T) {
 	}
 }
 
-// The preview tells the operator the same thing the execution would, before they commit to it.
 func TestIntegration_F9_PreviewAgreesWithExecution(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -598,14 +554,12 @@ func TestIntegration_F9_PreviewAgreesWithExecution(t *testing.T) {
 	if blocked.Blocker != ErrSameInterface.Error() {
 		t.Fatalf("preview did not name the room-move blocker: %q", blocked.Blocker)
 	}
-	// ...and the execution agrees, which is the property that makes the preview worth showing.
 	if _, err := s.Execute(ctx, req(f, f.stayA, f.stayA2)); !errors.Is(err, ErrSameInterface) {
 		t.Fatalf("execution disagreed with the preview: %v", err)
 	}
 }
 
-// stayExec runs one statement inside the 'stay' controlled-writer scope, as the PMS mirror does. Used only to
-// STAGE a stay state (e.g. a departed destination); the code under test is never run inside it.
+// stayExec stages a stay state inside the 'stay' controlled-writer scope; the code under test never runs in it.
 func stayExec(t *testing.T, p *pgxpool.Pool, sql string, args ...any) {
 	t.Helper()
 	ctx := context.Background()

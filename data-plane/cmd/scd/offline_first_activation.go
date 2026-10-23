@@ -1,21 +1,10 @@
 package main
 
-// OFFLINE FIRST ACTIVATION — the appliance half.
-//
-// Two endpoints, one per file the operator carries:
-//
-//	GET  /v1/central/offline-request    emit the request (generates the local keypair if absent)
-//	POST /v1/central/offline-package    verify and apply the package Central returned (a first-activation
-//	                                    package is recognised by shape; see centralOfflinePackage)
-//
-// This is SEPARATE from the offline LICENCE package (offline_import.go), which transports a licence to an
-// appliance that is already assigned. That path is untouched; nothing here changes its envelope, its checks or
-// its ledger.
-//
-// APPLYING IS ATOMIC IN THE ONLY sense that matters operationally: the appliance either ends up assigned AND
-// licensed, or it ends up exactly as it started. The order below is chosen so that the step most likely to
-// fail runs first and the irreversible one runs last, and any failure after a durable write is undone before
-// returning. See applyActivationPackage.
+// Offline first activation, appliance half: GET /v1/central/offline-request emits the request (generating the local keypair
+// if absent); POST /v1/central/offline-package verifies and applies the package Central returned (a first-activation package
+// is recognised by shape; see centralOfflinePackage). Separate from the offline licence package (offline_import.go).
+// Applying ends with the appliance either assigned and licensed or exactly as it started: the step most likely to fail runs
+// first, the irreversible one last, and any failure after a durable write is undone. See applyActivationPackage.
 
 import (
 	"crypto/ed25519"
@@ -38,34 +27,22 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// activationRequestFile keeps the emitted request beside the identity so the package that answers it can be
-// matched. Without it a second request would invalidate the first, and an operator carrying a package back
-// would be told it "does not answer this appliance's request" with no way to see why.
+// activationRequestFile keeps the emitted request beside the identity so the answering package can be matched; a second request would invalidate the first.
 func (s *server) activationRequestPath() string {
 	return filepath.Join(envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"), "activation-request.json")
 }
 
-// activationJournalPath is the crash-recovery marker.
-//
-// Applying a package touches four durable places -- a ledger row, the assignment file, the trust bundle and
-// the licence store -- and no filesystem gives us one transaction across them. Power loss between any two
-// leaves an appliance that is partly activated, which is the one outcome that must never survive a reboot:
-// a box assigned to a hotel but unlicensed, or licensed but with no identity, is worse than one that is
-// plainly unactivated, because it looks finished.
-//
-// So the package is journalled BEFORE anything is written and the journal is removed only after everything
-// is. On boot, a journal that is still present means an activation was interrupted, and
-// recoverInterruptedActivation either finishes it or undoes it. Both directions are safe because every step
-// is idempotent: Adopt is version-checked, the licence store is anti-rollback, and AdoptApplianceID refuses
-// to repoint an identity.
+// activationJournalPath is the crash-recovery marker. Applying touches four durable places (ledger row, assignment file, trust
+// bundle, licence store) with no cross-file transaction, and a half-activated box (assigned but unlicensed, or the reverse)
+// looks finished. So the package is journalled before anything is written and removed only after everything; a journal present
+// at boot means an interrupted activation, which recoverInterruptedActivation finishes or undoes. Both directions are safe
+// because every step is idempotent (Adopt is version-checked, the licence store is anti-rollback, AdoptApplianceID refuses to repoint an identity).
 func (s *server) activationJournalPath() string {
 	return filepath.Join(envOr("SCD_IDENTITY_DIR", "/etc/stayconnect/identity"), "activation-in-progress.json")
 }
 
-// setupActivationRequest emits the offline activation request.
-//
-// It generates the identity keypair locally if this appliance has none. The private half never leaves: the
-// request carries the public key and a signature made with the private one, which is the whole proof.
+// setupActivationRequest emits the request, generating the identity keypair locally if absent. The private half never
+// leaves: the request carries the public key and a signature made with the private one.
 func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) {
 	if s.refuseWhileRemoved(w) {
 		return
@@ -83,8 +60,7 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusInternalServerError, "could not prepare an identity for this appliance")
 		return
 	}
-	// The request says whose customer data this appliance still holds, exactly as an online registration
-	// does (held_customer.go): Central will not activate it for anyone else.
+	// The request says whose customer data this appliance still holds (held_customer.go); Central will not activate it for anyone else.
 	held, err := heldCustomerID(r.Context(), s.db, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"))
 	if errors.Is(err, errHoldsSeveralCustomers) {
 		httpErr(w, http.StatusConflict, err.Error())
@@ -93,8 +69,7 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusServiceUnavailable, "could not read which customer's data this appliance holds; try again")
 		return
 	}
-	// Reuse an outstanding request rather than minting a new one on every click: a fresh nonce would
-	// silently invalidate the package the operator is already carrying back.
+	// Reuse an outstanding request: a fresh nonce would invalidate the package the operator is carrying back.
 	if raw, err := os.ReadFile(s.activationRequestPath()); err == nil {
 		var prev activation.Request
 		if json.Unmarshal(raw, &prev) == nil && activation.VerifyRequest(&prev) &&
@@ -130,7 +105,6 @@ func (s *server) setupActivationRequest(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write(b)
 }
 
-// setupActivationPackage verifies and applies the package Central issued for this appliance's request.
 func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) {
 	var pkg activation.Package
 	if err := json.NewDecoder(r.Body).Decode(&pkg); err != nil {
@@ -141,7 +115,6 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusServiceUnavailable, "activation stores unavailable")
 		return
 	}
-	// The outstanding request this package must answer.
 	raw, err := os.ReadFile(s.activationRequestPath())
 	if err != nil {
 		httpErr(w, http.StatusConflict, "no activation request has been generated on this appliance yet")
@@ -179,17 +152,13 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusForbidden, "package rejected: "+reason)
 		return
 	}
-	// VERIFY THE SIGNED ASSIGNMENT BEFORE ANYTHING IS WRITTEN (F8). The package signature proves the vendor
-	// sent the envelope; it does not prove the assignment inside it would survive the check every boot applies.
-	// Adopting it unverified meant an appliance could come up "activated" and then, on its very next boot,
-	// refuse its own assignment -- or, worse, hold a tenant/site that no trusted assignment key ever signed.
-	// Same function, same registry, same binding as the online path and as boot.
+	// Verify the signed assignment before anything is written: the package signature proves the vendor sent it, not that the
+	// assignment survives the check every boot applies (same function, registry and binding as the online path).
 	if _, reason := verifyPackageAssignment(&pkg, id.PublicKeyB64, serial, s.assignmentStore(), time.Now()); reason != "" {
 		httpErr(w, http.StatusForbidden, "package rejected: "+reason)
 		return
 	}
-	// Bind the licence check at install to this identity and the appliance id the package names, so the
-	// licence inside it is checked against THIS key rather than against an identity not loaded yet.
+	// Bind the licence check to this identity and the appliance id the package names, since the identity is not loaded yet.
 	if s.lic != nil {
 		s.lic.SetLocalIdentity(lic.LocalIdentity{
 			ApplianceID: pkg.ApplianceID, IdentityKeyFingerprint: applianceauthKeyIDFromB64(id.PublicKeyB64),
@@ -204,8 +173,7 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 		httpErr(w, http.StatusBadRequest, "activation failed, nothing was changed: "+err.Error())
 		return
 	}
-	// Restart so the daemon comes up holding the new identity, assignment and licence, exactly as the online
-	// path does after registration.
+	// Restart so the daemon comes up with the new identity, assignment and licence, as the online path does.
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		restartAfterActivation()
@@ -219,14 +187,11 @@ func (s *server) setupActivationPackage(w http.ResponseWriter, r *http.Request) 
 
 var errPackageConsumed = errors.New("package already consumed")
 
-// restartAfterActivation restarts scd under systemd once an offline activation has landed. A variable so a test
-// can apply a package without restarting anything.
+// restartAfterActivation is a variable so a test can apply a package without restarting.
 var restartAfterActivation = func() { _ = exec.Command("systemctl", "restart", "stayconnect-scd").Run() }
 
-// verifyPackageAssignment checks the signed assignment a first-activation package carries exactly as the
-// online assignment agent and every boot do: trusted assignment-signing key, bound to the appliance id the
-// package names and to THIS identity key, a version newer than anything held, and a granting state for the
-// tenant/site the package claims. Returns "" when it verifies.
+// verifyPackageAssignment checks the signed assignment exactly as the online agent and every boot do: trusted signing key,
+// bound to the package's appliance id and this identity key, a newer version, and a granting state. Returns "" when it verifies.
 func verifyPackageAssignment(pkg *activation.Package, identityPubB64, serial string, store *assignment.Store,
 	now time.Time) (*assignment.Document, string) {
 	var doc assignment.Document
@@ -251,9 +216,7 @@ func verifyPackageAssignment(pkg *activation.Package, identityPubB64, serial str
 	return &doc, ""
 }
 
-// applianceauthKeyIDFromB64 is the hex identity-key fingerprint the assignment and the licence carry (NOT the
-// base64url form the activation envelope uses -- see internal/activation.KeyID; both sides of each document
-// agree on their own encoding).
+// applianceauthKeyIDFromB64 is the hex identity-key fingerprint assignment and licence carry (not the base64url form the activation envelope uses; see internal/activation.KeyID).
 func applianceauthKeyIDFromB64(pubB64 string) string {
 	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
 	if err != nil || len(raw) != ed25519.PublicKeySize {
@@ -262,16 +225,11 @@ func applianceauthKeyIDFromB64(pubB64 string) string {
 	return applianceauth.KeyID(ed25519.PublicKey(raw))
 }
 
-// applyActivationPackage performs the durable writes, and undoes them on any failure.
-//
-// ORDER MATTERS. Single-use is claimed FIRST, because a package that reaches the point of being applied must
-// not be usable a second time even if a later step fails. Everything after that is reversible, and is
-// reversed on error: the assignment is cleared, the adopted appliance id is only written once the licence is
-// in, and the licence is the last thing installed because it is the step with its own anti-rollback that may
-// legitimately refuse.
+// applyActivationPackage performs the durable writes and undoes them on any failure. Single-use is claimed first (a package
+// reaching apply must not be reusable even if a later step fails); everything after is reversible. The licence goes in last
+// because its anti-rollback may legitimately refuse, and the appliance id is adopted only once it is in.
 func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package) error {
-	// 0. JOURNAL FIRST, fsynced, before a single durable change. If the power fails from here on, the next
-	//    boot finds this file and knows an activation was in flight.
+	// 0. Journal first, fsynced, before any durable change: a crash from here on is found at the next boot.
 	jb, _ := json.Marshal(pkg)
 	if err := writeFileSync(s.activationJournalPath(), jb, 0o600); err != nil {
 		return errors.New("could not journal the activation: " + err.Error())
@@ -279,7 +237,6 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 	// The journal is removed only on the success path at the end, or by the rollback below.
 	// 1. Single-use ledger, reboot-persistent.
 	if s.db != nil {
-		// edge_offline_packages is declared by migration 0048; it is not created here.
 		tag, err := s.db.Exec(r.Context(),
 			`INSERT INTO edge_offline_packages (package_id, nonce) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
 			pkg.PackageID, pkg.Nonce)
@@ -290,8 +247,7 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 			return errPackageConsumed
 		}
 	}
-	// 2. Signed assignment. Adopt verifies its OWN signature and version anti-rollback; this envelope only
-	//    carried it. A package cannot smuggle in a tenant/site that the assignment authority did not sign.
+	// 2. Signed assignment: Adopt verifies its own signature and version; the envelope only carried it, so a package cannot smuggle in an unsigned tenant/site.
 	var doc assignment.Document
 	if err := json.Unmarshal(pkg.Assignment, &doc); err != nil {
 		return errors.New("the signed assignment inside the package is unreadable")
@@ -329,24 +285,18 @@ func (s *server) applyActivationPackage(r *http.Request, pkg *activation.Package
 			return errors.New("licence install failed: " + err.Error())
 		}
 	}
-	// 5. Adopt the appliance id Central minted. Last, so an appliance never claims an id for an activation
-	//    that did not complete.
+	// 5. Adopt the appliance id Central minted, last, so an appliance never claims an id for an incomplete activation.
 	if err := s.idStore.AdoptApplianceID(pkg.ApplianceID); err != nil {
 		undoAssignment()
 		return errors.New("could not adopt the appliance identity: " + err.Error())
 	}
-	// 6. Everything durable is in place. Clearing the journal is what makes the activation "done"; a crash
-	//    before this point is recovered on the next boot, and a crash after it has nothing left to recover.
+	// 6. Clearing the journal makes the activation done; a crash before is recovered at next boot, after has nothing to recover.
 	_ = os.Remove(s.activationJournalPath())
 	return nil
 }
 
-// recoverInterruptedActivation runs at startup. A journal means a package was being applied when the
-// appliance stopped, and the appliance must end up in exactly one of two states: fully activated, or
-// unassigned as it was before.
-//
-// It decides by looking at what actually landed rather than at how far the code got, because a crash does
-// not leave a note about which line it reached.
+// recoverInterruptedActivation runs at startup: a journal means a package was mid-apply, and the appliance must end up fully
+// activated or unassigned as before. It decides by what actually landed, not by how far the code got.
 func (s *server) recoverInterruptedActivation() {
 	path := s.activationJournalPath()
 	raw, err := os.ReadFile(path)
@@ -374,9 +324,7 @@ func (s *server) recoverInterruptedActivation() {
 			"package_id", pkg.PackageID)
 		_ = os.Remove(path)
 	default:
-		// Anything else is partial. Undo it: clear the assignment so the appliance is plainly unassigned,
-		// and leave the single-use ledger entry standing -- the package was spent, and re-using it would be
-		// exactly the replay the ledger exists to prevent. The operator generates a fresh one.
+		// Partial: clear the assignment so the appliance is plainly unassigned, but leave the single-use ledger entry: the package was spent and re-using it is the replay the ledger prevents.
 		slog.Warn("offline activation was interrupted and is incomplete; rolling back to unassigned",
 			"package_id", pkg.PackageID, "assigned", assigned, "identity", identityAdopted,
 			"licensed", licensed)
@@ -387,8 +335,7 @@ func (s *server) recoverInterruptedActivation() {
 	}
 }
 
-// writeFileSync writes and fsyncs both the file and its directory, so the bytes survive a power loss rather
-// than sitting in a cache that never reaches the disk. A journal that is not durable is not a journal.
+// writeFileSync fsyncs both the file and its directory so the bytes survive power loss; a journal that is not durable is not a journal.
 func writeFileSync(path string, data []byte, mode os.FileMode) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
@@ -416,7 +363,6 @@ func writeFileSync(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// firstNonEmpty returns the first value that is not empty.
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {

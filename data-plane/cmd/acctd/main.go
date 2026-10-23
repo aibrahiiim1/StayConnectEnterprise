@@ -1,13 +1,4 @@
-// acctd — Accounting Daemon.
-//
-// Every tick (default 1s):
-//  1. Snapshot byte counters from tc for every guest-session class.
-//  2. Compute per-IP deltas against the previous snapshot.
-//  3. Write accounting_records rows + update sessions.bytes_up/bytes_down.
-//  4. Enforce quotas:
-//     - elapsed seconds > ticket_templates.duration_seconds  -> revoke (quota_time)
-//     - bytes_up+bytes_down > ticket_templates.data_cap_bytes -> revoke (quota_bytes)
-//     Revoke is done by POSTing to scd's Unix socket so nft/tc are cleaned up.
+// acctd is the accounting daemon.
 package main
 
 import (
@@ -58,17 +49,14 @@ func envOr(k, d string) string {
 	return d
 }
 
-// The accounting tick is BOUNDED. It is an engineering parameter, not a hotel setting: every lease and plan
-// timer downstream assumes a tick of a second or so. netd admits a new guest on a short provisional lease that
-// only the next plan submission renews, and a submitted plan is current for planValidity -- so a tick of a
-// minute or more takes every guest offline once per cycle, with nothing failing loudly (audit B-25). Out-of-range
-// and unparseable values are clamped into range and said so, rather than silently honoured.
+// The tick is bounded: netd admits a new guest on a short provisional lease that only the next plan submission
+// renews and a plan is current for planValidity, so a tick of a minute or more would drop every guest offline
+// each cycle without failing loudly. Out-of-range values are clamped with a warning.
 const (
 	minTickSeconds = 1
 	maxTickSeconds = 10
 )
 
-// tickSeconds reads ACCTD_TICK_SECONDS, default 1, clamped to [minTickSeconds, maxTickSeconds].
 func tickSeconds(getenv func(string) string) int {
 	raw := getenv("ACCTD_TICK_SECONDS")
 	if raw == "" {
@@ -104,15 +92,13 @@ type acctd struct {
 	applID       string
 	legacyBridge string
 	prev         snapshot
-	// p3 is the Phase-3 arm (nil while dark).
-	p3 *phase3
+	p3           *phase3 // nil while dark
 }
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	// Adaptive crash-loop backoff (see internal/startupbackoff).
 	startupbackoff.Guard("acctd")
 
 	c := loadCfg()
@@ -120,13 +106,8 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Accounting rows are attributed to a CUSTOMER, so the tenant/appliance identity
-	// must come from the same source of truth as everything else on the appliance:
-	//   appliance_id -> identity.json (enrollment)
-	//   tenant_id    -> the vendor-signed ASSIGNMENT document
-	// Both come from the VERIFIED assignment and the registered identity (scope.go); a production build never
-	// takes them from the environment. Hard-wired env vars once meant a re-assigned appliance kept billing
-	// usage to the PREVIOUS customer.
+	// Tenant and appliance identity come from the verified assignment and registered identity (scope.go), never
+	// the environment: a hard-wired env var would keep billing a re-assigned appliance's usage to the previous customer.
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
 	scope := resolveAcctdScope(os.Getenv)
 	c.TenantID, c.ApplianceID = scope.TenantID, scope.ApplianceID
@@ -135,12 +116,10 @@ func main() {
 	if c.TenantID == "" || c.ApplianceID == "" {
 		slog.Warn("acctd: appliance not registered/assigned — accounting paused until a verified signed assignment arrives",
 			"assignment_outcome", scope.Outcome.String())
-		// Wait for an assignment, then re-exec into the normal path.
 		waitForAssignment(rootCtx, func() bool { return resolveAcctdScope(os.Getenv).TenantID != "" })
 		return
 	}
 	slog.Info("acctd identity resolved", "tenant_id", c.TenantID, "appliance_id", c.ApplianceID)
-	// Adopt a re-assignment without manual intervention.
 	go watchAssignmentReexec(rootCtx, asgStore)
 
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
@@ -160,16 +139,14 @@ func main() {
 		prev:         snapshot{},
 	}
 
-	// Phase 3 (DARK): the enforcement arm is constructed only when the master + checkout-grace flags are on.
-	// While dark p3 is nil, every call on it is a no-op, and acctd issues zero Phase-3 queries.
+	// The Phase-3 arm exists only when its flags are on; while dark p3 is nil and every call on it is a no-op.
 	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("acctd: phase3 config fail-closed", "err", err)
 		os.Exit(1)
 	}
-	// The controlled-writer boundary must be REAL before this process writes anything Phase-3. A schema whose
-	// guards were never applied accepts raw writes silently, and a process connected as the operations' owner
-	// satisfies every guard trivially — both are "Phase 3 is running" with none of its guarantees.
+	// The controlled-writer boundary must be real before any Phase-3 write: a schema without the guards accepts
+	// raw writes silently, and a connection as the operations' owner satisfies every guard trivially.
 	if pmsCfg.Enabled() {
 		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
 			slog.Error("acctd: refusing to start", "err", err)
@@ -177,25 +154,21 @@ func main() {
 		}
 	}
 
-	// The shaping contract is scoped to THIS appliance under THIS assignment: netd checks a submitted plan
-	// against its own copy of the same facts, so a plan derived for another site can never be applied here.
+	// Plans are scoped to this appliance and assignment; netd checks them against its own copy.
 	p3scope := planScope{TenantID: c.TenantID, SiteID: assignedSite, ApplianceID: c.ApplianceID,
 		AssignmentGe: assignedGen}
 	if rec, err := asgStore.Load(); err == nil && rec != nil && rec.Current != nil {
 		p3scope.AssignmentID = rec.Current.AssignmentID
 	}
-	// The plan generation is durable: a restarted producer that began again at 1 would have every plan
-	// correctly refused as stale, freezing enforcement at the pre-restart state with nothing looking broken.
+	// The plan generation is durable: restarting at 1 would get every plan refused as stale, silently freezing enforcement.
 	p3plans := newPlanCounter(envOr("ACCTD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/acctd-phase3-plan.json"))
 	p3plans.start()
 	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite, p3scope, p3plans)
-	// ADR-0002: acctd derives the plan; netd is the ONLY process that mutates Phase-3 tc state.
+	// acctd derives the plan; netd is the only process that mutates Phase-3 tc state.
 	netdShaping := newNetdShaper(envOr("ACCTD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
 	p3 := a.p3
-	// PHASE 6: the accounting owner of last resort. Constructed only when the Phase-3 arm is absent, so a
-	// normal deployment sweeps once per tick -- and an appliance whose Phase-3 flags are off still accounts
-	// for any aggregate entitlement it has already granted, instead of letting a finite budget become
-	// unlimited because of a flag belonging to another phase.
+	// Accounting owner of last resort, active only when the Phase-3 arm is absent, so a finite budget already
+	// granted does not become unlimited because another phase's flag is off.
 	aggOwner := newAggregateOwner(p3, a.db, c.TenantID, assignedSite,
 		aggregateChargeBoundSeconds(c.TickSeconds))
 	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil,
@@ -214,25 +187,21 @@ func main() {
 			if err := a.loop(rootCtx); err != nil {
 				slog.Error("loop", "err", err)
 			}
-			// Phase 3 runs on the same tick over its OWN session domain: measure first (so this tick's usage
-			// is attributed before anything is closed out), then enforce expiry at its true time, then submit
-			// the derived plan to netd — the single shaping writer. All three are no-ops while dark.
+			// Order matters: measure first so this tick's usage is attributed before anything is closed out,
+			// then enforce expiry, then submit the plan to netd. All are no-ops while dark.
 			now := time.Now()
 			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, now); n > 0 {
 				slog.Debug("phase3: accounting samples ingested", "count", n)
 			}
-			// The plan's per-session limits (idle timeout, maximum continuous session) come next, so a session
-			// they end is closed before the expiry sweep accrues online time against it. Idle is judged only
-			// when the accounting pass above completed cleanly: an unread meter is not an idle guest.
+			// Session limits run before the expiry sweep so an ended session accrues no more online time. Idle is
+			// judged only after a clean accounting pass: an unread meter is not an idle guest.
 			p3.enforceSessionLimits(rootCtx, now)
 			p3.enforceExpiries(rootCtx)
 			p3.purgeAccountingDetail(rootCtx, now)
 			aggOwner.sweep(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
-			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
-			// just that the process is up) for the edged health supervisor — together with WHY it is
-			// degraded, if it is. A ticking loop whose every observation is refused is not healthy, and
-			// the heartbeat alone cannot say so.
+			// The heartbeat proves the loop is progressing; the report says why it is degraded, since a loop
+			// whose every observation is refused is not healthy.
 			livez.Touch("acctd")
 			livez.Report("acctd", p3.degradedSummary())
 		}
@@ -249,7 +218,6 @@ func newUnixClient(socketPath string) *http.Client {
 	return &http.Client{Transport: tr, Timeout: 3 * time.Second}
 }
 
-// activeSession is one accountable session with its network placement and quota.
 type activeSession struct {
 	id, tid, vid       string
 	ip                 net.IP
@@ -258,27 +226,11 @@ type activeSession struct {
 	durSec             int
 	startedAt          time.Time
 	totalUp, totalDown int64
-	// voucherBytes is the AGGREGATE bytes across every session of this session's
-	// voucher, as of this tick's load — the data cap is enforced on this
-	// aggregate so multiple devices on one voucher share (not multiply) the cap.
-	voucherBytes int64
+	voucherBytes       int64 // across all sessions of the voucher: devices share the cap
 }
 
-// loop is retained as the accounting tick's entry point, but the LEGACY PASS IS GONE.
-//
-// It used to read tc counters for every row in public.sessions, write public.accounting_records, update the
-// session's byte columns and enforce the voucher's data/time quota by calling back into scd. All of that
-// belonged to the superseded session domain: the quotas came from ticket_templates through vouchers, and the
-// records were keyed by a public.sessions id.
-//
-// The current authority is Phase 3. netd is the only shaping writer (ADR-0002); phase3.accountingPass reads
-// each live iam_v2.sessions row's absolute counters and submits them through the controlled ingest, and
-// entitlement exhaustion -- not a per-voucher byte cap -- is what ends access, decided by internal/enforce.
-//
-// Nothing replaces the legacy pass here because something already had: the two ran side by side, and the
-// legacy one stood down whenever Phase 3 owned accounting. Removing it makes permanent the state the system
-// was already reaching at runtime, and removes the possibility of two writers disagreeing about one guest's
-// usage.
+// loop is a no-op: Phase 3 (phase3.accountingPass) is the sole accounting writer, so two writers can never
+// disagree about one guest's usage.
 func (a *acctd) loop(ctx context.Context) error {
 	a.prev = snapshot{}
 	return nil
@@ -296,6 +248,4 @@ func (a *acctd) revoke(ctx context.Context, ip, reason string) {
 	}
 	defer resp.Body.Close()
 	slog.Info("revoked", "ip", ip, "reason", reason, "status", resp.StatusCode)
-	// prev is keyed by session id and fully replaced each tick, so a revoked
-	// session drops out naturally once it leaves the active set.
 }

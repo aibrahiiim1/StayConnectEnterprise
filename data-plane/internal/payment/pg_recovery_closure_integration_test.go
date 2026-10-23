@@ -10,17 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// RECOVERY CLOSURE — the half T0038 did not have.
-//
-// T0038's recovery COPIED non-terminal work into a ledger. These tests are about the difference between a
-// ledger entry and a structural hold: after recovery begins, the underlying posting_outbox row must stop
-// being claimable, and the claim path must lose the race rather than slip through it.
-//
-// The claim race is the one that would actually hurt. A posting worker polling for QUEUED rows at the exact
-// moment recovery begins is not a hypothetical -- it is the normal state of a busy site -- and a worker that
-// escapes the hold re-sends a charge the folio already has.
+// After recovery begins the underlying posting_outbox row must stop being claimable, not just be listed in a ledger,
+// and the claim path must lose the race with a polling worker, which would otherwise re-send a charge the folio already
+// has.
 
-// seedOutboxPosting creates a real posting with a QUEUED outbox row: the state a worker would claim.
 func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outboxID, ifaceID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -33,8 +26,7 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 	var revID string
 	q(&ifaceID, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind)
 		VALUES ($1,$2,'protel-fias') RETURNING id::text`, s.tenant, s.site)
-	// Migration 0100 (Amendment A1): a CHARGE targets the stay's reservation (RN + G#), so the revision
-	// carries posting_target_model='RESERVATION' where it used to carry a folio identity strategy.
+	// A CHARGE targets the stay's reservation, so the revision carries posting_target_model='RESERVATION'.
 	q(&revID, `INSERT INTO iam_v2.pms_interface_revisions
 		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,
 		 financial_base_currency,financial_base_currency_exponent)
@@ -44,9 +36,8 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 		ifaceID, revID); err != nil {
 		t.Fatal(err)
 	}
-	// The four runtime freshness axes (0012). A posting is refused against an interface whose runtime is
-	// unknown, which is correct and is why this row exists: without it the fixture would be testing the
-	// freshness gate rather than the recovery hold.
+	// Runtime freshness axes: a posting is refused against an interface with unknown runtime, so this row is needed to
+	// test the recovery hold rather than the freshness gate.
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
 		(tenant_id,site_id,pms_interface_id,pinned_revision_id,credential_mode,runtime_generation,
 		 transport_status,last_connected_at,last_heartbeat_at,continuity_status,last_valid_event_at,
@@ -55,14 +46,12 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 		s.tenant, s.site, ifaceID, revID); err != nil {
 		t.Fatal(err)
 	}
-	// posting_allowed is computed by the database (IN_HOUSE + a reservation number + no active block).
 	stayID := guarded(t, p, "stay", `INSERT INTO iam_v2.stays
 		(tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status)
 		VALUES ($1,$2,$3,'R'||substr(md5(random()::text),1,8),'S'||substr(md5(random()::text),1,8),
 		        'IN_HOUSE') RETURNING id::text`, s.tenant, s.site, ifaceID)
-	// A posting's purchase must carry the SAME pms_interface_id (a composite foreign key), which the paid
-	// chain's guest purchase does not. So the posting rail gets its own purchase and settlement -- which is
-	// also more faithful: a PMS posting settles against the reservation, not by card.
+	// The posting's purchase must carry the same pms_interface_id (composite FK), so the posting rail gets its own
+	// purchase and settlement.
 	postPurchase := guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,
 		 amount_minor,currency,currency_exponent,state)
@@ -71,7 +60,6 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 		s.tenant, s.site, ifaceID, stayID, s.purchase)
 	postSettlement := guarded(t, p, "commerce_intent", `INSERT INTO iam_v2.settlements(tenant_id,site_id,purchase_id,method,status)
 		VALUES ($1,$2,$3,'PMS_POSTING','REQUIRED') RETURNING id::text`, s.tenant, s.site, postPurchase)
-	// 0100: the posting carries the stay's reservation number (g_number) instead of a folio.
 	q(&postingID, `INSERT INTO iam_v2.pms_postings
 		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,g_number,
 		 posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key)
@@ -84,14 +72,12 @@ func seedOutboxPosting(t *testing.T, p *pgxpool.Pool, s scope) (postingID, outbo
 	return postingID, outboxID, ifaceID
 }
 
-// claim is what a posting worker does: move a QUEUED row to IN_FLIGHT.
 func claim(ctx context.Context, p *pgxpool.Pool, outboxID string) error {
 	_, err := p.Exec(ctx,
 		`UPDATE iam_v2.posting_outbox SET state='IN_FLIGHT' WHERE id=$1 AND state='QUEUED'`, outboxID)
 	return err
 }
 
-// The correction itself: after recovery, the underlying row is not merely LISTED as held, it is held.
 func TestIntegrationRecoveryClosure_ExistingPostingWorkBecomesNonSendable(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -99,7 +85,6 @@ func TestIntegrationRecoveryClosure_ExistingPostingWorkBecomesNonSendable(t *tes
 	_, outboxID, _ := seedOutboxPosting(t, p, s)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(), &fakeGranter{})
 
-	// before recovery, a worker can claim it -- otherwise this test would pass against a broken fixture
 	if err := claim(ctx, p, outboxID); err != nil {
 		t.Fatalf("baseline: a healthy site could not claim its own posting: %v", err)
 	}
@@ -112,30 +97,25 @@ func TestIntegrationRecoveryClosure_ExistingPostingWorkBecomesNonSendable(t *tes
 		t.Fatalf("recovery entry: %s %v", got, err)
 	}
 
-	// the UNDERLYING row moved, not just the ledger
 	if st := scan1[string](t, p, `SELECT state FROM iam_v2.posting_outbox WHERE id=$1`, outboxID); st != "HELD_RECOVERY" {
 		t.Fatalf("the outbox row is still %s; the hold is a ledger entry only", st)
 	}
-	// and a worker cannot get it back
 	if err := claim(ctx, p, outboxID); err != nil {
 		t.Fatalf("the claim errored rather than simply matching nothing: %v", err)
 	}
 	if st := scan1[string](t, p, `SELECT state FROM iam_v2.posting_outbox WHERE id=$1`, outboxID); st != "HELD_RECOVERY" {
 		t.Fatalf("a worker reclaimed a held posting: %s", st)
 	}
-	// nor can it be moved out of the hold by an ordinary UPDATE
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.posting_outbox SET state='QUEUED' WHERE id=$1`, outboxID); err == nil {
 		t.Fatal("held posting work was returned to the queue without a reconciliation decision")
 	}
 }
 
-// THE RACE. A worker claiming at the moment recovery begins must not escape.
 func TestIntegrationRecoveryClosure_AWorkerRacingRecoveryEntryCannotEscape(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 
-	// Run the race repeatedly with both orderings, because a single run proves only which one happened to
-	// win that time. The invariant is that NEITHER outcome leaves a sendable posting.
+	// Run both orderings repeatedly: the invariant is that neither outcome leaves a sendable posting.
 	for i := 0; i < 12; i++ {
 		s := recoverySite(t, p)
 		_, outboxID, _ := seedOutboxPosting(t, p, s)
@@ -160,7 +140,6 @@ func TestIntegrationRecoveryClosure_AWorkerRacingRecoveryEntryCannotEscape(t *te
 	}
 }
 
-// An operator declaring recovery must freeze the same rails a detected restore freezes.
 func TestIntegrationRecoveryClosure_OperatorDeclarationFreezesEveryRail(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -183,7 +162,6 @@ func TestIntegrationRecoveryClosure_OperatorDeclarationFreezesEveryRail(t *testi
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); CodeOf(err) != ErrRecoveryHeld {
 		t.Fatalf("an operator declaration did not hold the payment rail: %v", err)
 	}
-	// every rail is represented in the ledger, so the operator can see what they froze
 	kinds := map[string]bool{}
 	holds, _ := e.OpenHolds(ctx, s.tenant, s.site, 50)
 	for _, h := range holds {
@@ -196,7 +174,6 @@ func TestIntegrationRecoveryClosure_OperatorDeclarationFreezesEveryRail(t *testi
 	}
 }
 
-// Rail-specific consequences: a conclusion must change the record, and must never re-queue anything.
 func TestIntegrationRecoveryClosure_ReconciliationHasRailSpecificConsequences(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -242,12 +219,11 @@ func TestIntegrationRecoveryClosure_ReconciliationHasRailSpecificConsequences(t 
 				t.Fatalf("%s %s: %v", h.Kind, h.ID, err)
 			}
 		}
-		// It stays held. Re-queueing here would be exactly the automatic replay recovery exists to prevent;
-		// a retry becomes possible only through the audited review authorization.
+		// It stays held: re-queueing would be the automatic replay recovery exists to prevent; retry is only via the
+		// audited review authorization.
 		if st := scan1[string](t, p, `SELECT state FROM iam_v2.posting_outbox WHERE id=$1`, outboxID); st != "HELD_RECOVERY" {
 			t.Fatalf("a not-completed posting was moved to %s by a reconciliation decision", st)
 		}
-		// and it is STILL not sendable after recovery is released
 		epoch, err := e.ReleaseRecovery(ctx, s.tenant, s.site, actor,
 			"every held item reconciled against the folio and the provider")
 		if err != nil {
@@ -284,9 +260,8 @@ func TestIntegrationRecoveryClosure_ReconciliationHasRailSpecificConsequences(t 
 			if h.Kind != "PAYMENT_TRANSACTION" {
 				continue
 			}
-			// The operator is as certain as they can be that the money moved -- and it STILL must not
-			// become a capture, because a capture settles a settlement and grants access on an operator's
-			// say-so, bypassing the authenticated provider boundary entirely.
+			// Even certain operator knowledge that money moved must not become a capture, which would bypass the
+			// authenticated provider boundary.
 			if err := e.ResolveHold(ctx, h.ID, "CONFIRMED_COMPLETED", actor,
 				"the provider dashboard shows this charge as captured"); err != nil {
 				t.Fatal(err)
@@ -304,7 +279,6 @@ func TestIntegrationRecoveryClosure_ReconciliationHasRailSpecificConsequences(t 
 	})
 }
 
-// Release must interrogate the RECORDS, not the resolutions.
 func TestIntegrationRecoveryClosure_ReleaseVerifiesTheUnderlyingState(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -323,10 +297,8 @@ func TestIntegrationRecoveryClosure_ReleaseVerifiesTheUnderlyingState(t *testing
 			t.Fatal(err)
 		}
 	}
-	// Every hold is resolved, and CONFIRMED_COMPLETED moved the outbox row to DONE. Now the underlying
-	// record diverges from the conclusion: something puts it back in the queue. This is the divergence a
-	// resolution count is blind to by construction -- the ledger still says "all reconciled" -- and it is
-	// exactly why release must interrogate the records instead.
+	// The record diverges from the resolution (something re-queues the row); a resolution count is blind to that, hence
+	// release interrogates the records.
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.posting_outbox SET state='QUEUED' WHERE id=$1 AND state='DONE'`,
 		outboxID); err != nil {
 		t.Fatalf("staging the divergence: %v", err)
@@ -343,12 +315,11 @@ func TestIntegrationRecoveryClosure_ReleaseVerifiesTheUnderlyingState(t *testing
 
 }
 
-// A forged author is refused even for the role that is allowed to decide.
 func TestIntegrationRecoveryClosure_AForgedActorIsRefused(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	a := recoverySite(t, p)
-	b := recoverySite(t, p) // a different tenant entirely
+	b := recoverySite(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(), &fakeGranter{})
 	simulateRestore(t, p, a)
 	if _, err := e.ReconcileEpoch(ctx, a.tenant, a.site); err != nil {
@@ -359,13 +330,11 @@ func TestIntegrationRecoveryClosure_AForgedActorIsRefused(t *testing.T) {
 		t.Fatal("nothing was held")
 	}
 
-	// an operator that does not exist
 	if err := e.ResolveHold(ctx, holds[0].ID, "CONFIRMED_COMPLETED",
 		"11111111-2222-3333-4444-555555555555",
 		"a decision attributed to nobody"); CodeOf(err) != ErrUntrustedInput {
 		t.Fatalf("an invented author was accepted: %v", err)
 	}
-	// a real operator, but of another tenant
 	foreign := seedOperator(t, p, b.tenant)
 	if err := e.ResolveHold(ctx, holds[0].ID, "CONFIRMED_COMPLETED", foreign,
 		"a decision attributed to another tenant's operator"); CodeOf(err) != ErrUntrustedInput {
@@ -375,7 +344,6 @@ func TestIntegrationRecoveryClosure_AForgedActorIsRefused(t *testing.T) {
 		WHERE id=$1 AND resolution IS NOT NULL`, holds[0].ID); r != 0 {
 		t.Fatal("a forged decision was recorded")
 	}
-	// the site's own operator succeeds, so the check discriminates rather than simply refusing
 	own := seedOperator(t, p, a.tenant)
 	if err := e.ResolveHold(ctx, holds[0].ID, "CONFIRMED_COMPLETED", own,
 		"confirmed against the folio and the provider dashboard"); err != nil {

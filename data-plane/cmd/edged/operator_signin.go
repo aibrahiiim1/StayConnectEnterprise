@@ -1,32 +1,12 @@
 package main
 
-// ADMIN CONSOLE SIGN-IN: the login, the password step-up, the password change, and the protection around all
-// three (audit remediation N-1, N-8, N-13, N-23, N-24; migration 0119).
-//
-// WHAT WAS WRONG
-// --------------
-// The login accepted unlimited guesses (20 wrong passwords in 2.6 s, then the right one signed in), recorded
-// none of the failures, read an unbounded body, and spent 64 MiB of argon2 per attempt for anybody who could
-// reach the management address. Unknown accounts answered measurably faster than real ones. The password
-// step-up that guards every high-risk action had the same shape. A seeded admin/admin was only warned about.
-//
-// WHAT IT DOES NOW
-// ----------------
-//   - A durable throttle in the site database (public.operator_signin_throttle), so a restart or parallel
-//     requests do not reset it: per account and per source address for the login, per operator and per source
-//     address for the step-up. From the second failure each one doubles the wait before the next attempt
-//     (1 s, 2 s, 4 s ...); reaching it locks that account or address for the lockout period. The numbers are
-//     an audited setting (public.operator_signin_protection, defaults 5 / 15 min per account, 20 / 15 min per
-//     address, lockout 15 min). A correct password clears the account's counter, never the address's.
-//   - The answer is the same whether or not the account exists: an unknown account is throttled like a real
-//     one and its password is checked against a dummy hash, so neither the timing nor a lockout says which
-//     accounts exist.
-//   - Every failure is audited (operator.login_failed / operator.reauth_failed, with the reason and source
-//     address, never the password), and so is the start of every lockout (operator.login_locked /
-//     operator.reauth_locked).
-//   - Bodies are bounded, passwords are bounded, and at most passwordVerifySlots argon2 checks run at once.
-//   - A weak or administrator-chosen password puts the session in must-change mode: requireAuth refuses every
-//     route except whoami, logout and the password change until the operator sets a new one.
+// Console sign-in: login, password step-up, password change and their throttle.
+// The throttle is durable (public.operator_signin_throttle) so restarts and parallel requests cannot reset it;
+// it is per account and per source address, doubles the wait from the second failure, and locks at the configured
+// threshold (public.operator_signin_protection). A correct password clears the account's counter, never the address's.
+// Unknown accounts are throttled like real ones and checked against a dummy hash, so neither timing nor lockout reveals which exist.
+// Every failure and lockout is audited with reason and source address, never the password.
+// A weak or administrator-chosen password puts the session in must-change mode until the operator sets a new one.
 
 import (
 	"context"
@@ -49,17 +29,15 @@ import (
 )
 
 const (
-	// minOperatorPasswordLen is the existing operator password policy (create, reset, seed-admin).
 	minOperatorPasswordLen = 10
-	// maxOperatorPasswordLen bounds what reaches argon2. It is a bound on input, not a policy anybody tunes.
+	// maxOperatorPasswordLen bounds what reaches argon2; it is an input bound, not a tunable policy.
 	maxOperatorPasswordLen = 1024
 	maxOperatorEmailLen    = 320
-	// authBodyLimit bounds the login and password-change bodies, read before anybody is authenticated.
+	// authBodyLimit bounds bodies read before anybody is authenticated.
 	authBodyLimit = 16 << 10
-	// passwordVerifySlots bounds concurrent argon2 checks (64 MiB each): the memory a burst of sign-in requests
-	// can take is bounded no matter how many arrive.
+	// passwordVerifySlots bounds concurrent argon2 checks (64 MiB each), so a burst cannot exhaust memory.
 	passwordVerifySlots = 4
-	// backoffCap is the longest wait between attempts before the lockout threshold.
+	// backoffCap is the longest wait between attempts below the lockout threshold.
 	backoffCap = 30 * time.Second
 )
 
@@ -69,8 +47,7 @@ const (
 	scopeReauth  = "reauth"
 )
 
-// operatorPasswordProblem is the one password policy for an operator password chosen by a person (create,
-// reset, self-service change). "" means acceptable.
+// operatorPasswordProblem is the one password policy; "" means acceptable.
 func operatorPasswordProblem(pw, email string) string {
 	switch {
 	case len(pw) < minOperatorPasswordLen:
@@ -83,24 +60,20 @@ func operatorPasswordProblem(pw, email string) string {
 	return ""
 }
 
-// ----- password verification -------------------------------------------------------------------------------
-
 var (
 	dummyHashOnce sync.Once
 	dummyHash     string
 	verifySem     = make(chan struct{}, passwordVerifySlots)
 )
 
-// dummyPasswordHash is a real argon2id hash of a random secret nobody knows. An unknown account's password is
-// checked against it, so the unknown-account answer costs the same as the wrong-password one (N-24).
+// dummyPasswordHash is checked for unknown accounts so they cost the same as a wrong password.
 func dummyPasswordHash() string {
 	dummyHashOnce.Do(func() {
 		b := make([]byte, 24)
 		_, _ = rand.Read(b)
 		h, err := hashPassword(base64.RawStdEncoding.EncodeToString(b))
 		if err != nil {
-			// Same parameters as hashPassword, so the cost matches; an unparseable value would make the check
-			// return early, which is exactly the timing difference this exists to remove.
+			// Same parameters as hashPassword: an unparseable value would return early and leak timing.
 			h = "$argon2id$v=19$m=65536,t=1,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 		}
 		dummyHash = h
@@ -110,7 +83,6 @@ func dummyPasswordHash() string {
 
 var errVerifyBusy = errors.New("password verification is busy")
 
-// verifyOperatorPassword runs ONE bounded argon2 check. It waits for a slot while the request is alive.
 func verifyOperatorPassword(ctx context.Context, pw, encoded string) (bool, error) {
 	if len(pw) > maxOperatorPasswordLen {
 		return false, nil
@@ -124,12 +96,8 @@ func verifyOperatorPassword(ctx context.Context, pw, encoded string) (bool, erro
 	return verifyPassword(pw, encoded), nil
 }
 
-// ----- per-key serialisation ---------------------------------------------------------------------------------
-
-// keyedLocks serialises attempts on ONE account (or one operator's step-up) inside this process, so the check,
-// the password verification and the recorded failure happen in order: twenty parallel guesses at one account
-// are twenty sequential guesses, each seeing the previous one's failure. The database counter is what makes it
-// durable; this is what makes it exact. Striped, so it is bounded and different accounts rarely contend.
+// keyedLocks serialises attempts per account so parallel guesses are sequential, each seeing the previous failure.
+// The database counter makes it durable; this makes it exact. Striped so different accounts rarely contend.
 type keyedLocks struct{ stripes [64]sync.Mutex }
 
 func (k *keyedLocks) lock(key string) func() {
@@ -142,9 +110,7 @@ func (k *keyedLocks) lock(key string) func() {
 
 var signinLocks keyedLocks
 
-// ----- the durable throttle -----------------------------------------------------------------------------------
-
-// throttleKey is what the database stores: a SHA-256 of the scope and the normalised value, never the value.
+// throttleKey stores a SHA-256 of scope and value, never the value.
 func throttleKey(scope, value string) string {
 	sum := sha256.Sum256([]byte(scope + "\x00" + strings.ToLower(strings.TrimSpace(value))))
 	return hex.EncodeToString(sum[:])
@@ -168,8 +134,7 @@ func (s *server) throttleStateFor(ctx context.Context, scope, value string) (thr
 }
 
 func (s *server) throttleFail(ctx context.Context, scope, value string) (failures int, lockedUntil *time.Time, newlyLocked bool, err error) {
-	// newly_locked is NULL, not false, when no lockout is running (NULL > now() in the function), so it is
-	// coalesced here; scanning NULL into a bool failed and lost the failure count from the audit entry.
+	// newly_locked is NULL when no lockout is running; it is coalesced because scanning NULL into a bool fails.
 	err = s.db.QueryRow(ctx, `SELECT failures, locked_until, COALESCE(newly_locked, false) FROM public.operator_signin_throttle_fail($1, $2)`,
 		scope, throttleKey(scope, value)).Scan(&failures, &lockedUntil, &newlyLocked)
 	return
@@ -180,9 +145,7 @@ func (s *server) throttleClear(ctx context.Context, scope, value string) error {
 	return err
 }
 
-// backoffFor is the wait after `failures` failures below the lockout threshold. One mistyped password costs
-// nothing -- the person retyping it is not slowed down -- and every failure after that doubles the wait:
-// 1 s after the second, 2 s after the third, 4 s after the fourth ... capped, until the lockout.
+// backoffFor: the first failure costs nothing; each later one doubles the wait (1 s, 2 s, 4 s ...), capped.
 func backoffFor(failures int) time.Duration {
 	if failures <= 1 {
 		return 0
@@ -197,8 +160,7 @@ func backoffFor(failures int) time.Duration {
 	return d
 }
 
-// refusal says whether a state refuses an attempt now, and for how long. withBackoff applies the doubling wait
-// (per account / per operator); the source-address scope only locks.
+// refusal returns how long an attempt is refused; withBackoff applies the doubling wait, and the address scope only locks.
 func (st throttleState) refusal(withBackoff bool) time.Duration {
 	if st.LockedUntil != nil && st.Now.Before(*st.LockedUntil) {
 		return st.LockedUntil.Sub(st.Now)
@@ -211,7 +173,6 @@ func (st throttleState) refusal(withBackoff bool) time.Duration {
 	return 0
 }
 
-// waitWords renders a wait the way the console says it.
 func waitWords(d time.Duration) string {
 	if d < time.Minute {
 		sec := int((d + time.Second - 1) / time.Second)
@@ -240,8 +201,7 @@ func writeThrottled(w http.ResponseWriter, wait time.Duration, what string) {
 	})
 }
 
-// recordFailure counts one failed password on every scope given and audits it, and audits the start of a
-// lockout. The reason and source address are recorded; the password never is.
+// recordFailure counts a failure on every scope and audits it and any lockout start; never the password.
 func (s *server) recordFailure(r *http.Request, action, lockAction, operatorID, reason string, scopes map[string]string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -272,8 +232,6 @@ func (s *server) recordFailure(r *http.Request, action, lockAction, operatorID, 
 	s.audit(r, action, "operator", operatorID, payload)
 }
 
-// ----- login ---------------------------------------------------------------------------------------------------
-
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, authBodyLimit)
 	var in struct {
@@ -293,7 +251,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	unlock := signinLocks.lock("login\x00" + account)
 	defer unlock()
 
-	// FAIL CLOSED: a throttle that cannot be read is not a reason to allow unlimited guesses.
+	// Fail closed: an unreadable throttle must not allow unlimited guesses.
 	stIP, err1 := s.throttleStateFor(ctx, scopeIP, ip)
 	stAcct, err2 := s.throttleStateFor(ctx, scopeAccount, account)
 	if err1 != nil || err2 != nil {
@@ -348,7 +306,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	if reason != "" {
 		s.recordFailure(r, "operator.login_failed", "operator.login_locked", id, reason,
 			map[string]string{scopeAccount: account, scopeIP: ip})
-		// Constant-shape failure; do not reveal which check failed.
+		// Same answer for every failure, so it never reveals which check failed.
 		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "invalid credentials")
 		return
 	}
@@ -361,8 +319,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	if err := s.throttleClear(ctx, scopeAccount, account); err != nil {
 		slog.Warn("could not clear the account sign-in counter", "err", err)
 	}
-	// A PASSWORD THAT DOES NOT MEET THE POLICY MUST BE REPLACED before the console is usable. This is how the
-	// seeded admin/admin of a provisioning run is caught even where the row predates migration 0119.
+	// A password that does not meet the policy must be replaced before the console is usable (catches a seeded admin/admin).
 	if !mustChange && operatorPasswordProblem(in.Password, "") != "" {
 		if _, err := s.db.Exec(ctx, `UPDATE operators SET must_change_password = true, updated_at = now() WHERE id = $1`, id); err != nil {
 			slog.Error("could not mark a weak operator password for change", "err", err)
@@ -370,7 +327,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		mustChange = true
 		s.audit(r, "operator.password_change_required", "operator", id, map[string]any{"reason": "weak_password"})
 	}
-	// THE PASSWORD IS ONE OF TWO STEPS (0132): no session yet. The authenticator code opens it (operator_mfa.go).
+	// No session yet: the authenticator code opens it.
 	s.beginSecondStep(w, r, ctx, &pendingSignin{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
 		MustChangePassword: mustChange, PasswordFP: passwordFingerprint(hash)})
 }
@@ -379,7 +336,7 @@ func (s *server) setSessionCookie(w http.ResponseWriter, tok string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secure,
-		// The browser's bound only; the session limits are enforced by requireAuth.
+		// The browser's bound only; requireAuth enforces the session limits.
 		Expires: time.Now().Add(sessionStoreCap),
 	})
 }
@@ -389,10 +346,8 @@ func (s *server) clearSessionCookie(w http.ResponseWriter) {
 		SameSite: http.SameSiteLaxMode, Secure: s.secure})
 }
 
-// logout ends the CALLER'S OWN session. It requires one (N-23): without a live session it changes nothing and
-// answers 401 -- and still clears the cookie, because the console sends a stale cookie here to escape a
-// redirect loop after edged restarted and forgot its sessions. The same-origin guard in front of every
-// state-changing request means another site cannot sign an operator out.
+// logout ends only the caller's own session. Without a live session it answers 401 but still clears the cookie, since
+// the console sends a stale cookie here to escape a redirect loop after edged forgot its sessions.
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	ck, err := r.Cookie(sessionCookie)
 	var sess *session
@@ -409,7 +364,7 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// mustChangeAllowed is the whole of what a must-change session may call.
+// mustChangeAllowed lists the only routes a must-change session may call.
 func mustChangeAllowed(r *http.Request) bool {
 	switch strings.TrimSuffix(r.URL.Path, "/") {
 	case "/edge/v1/auth/whoami", "/edge/v1/auth/password", "/edge/v1/auth/logout":
@@ -418,14 +373,11 @@ func mustChangeAllowed(r *http.Request) bool {
 	return false
 }
 
-// ----- password step-up ----------------------------------------------------------------------------------------
-
 type reauthNoteKeyT struct{}
 
 var reauthNoteKey reauthNoteKeyT
 
-// reauthNote carries WHY a step-up was refused from reauth to reauthRefused, so the 28 callers keep their
-// two-line shape and still answer 429 for a throttled operator instead of "wrong password".
+// reauthNote carries why a step-up was refused from reauth to reauthRefused, so callers answer 429 for a throttled operator.
 type reauthNote struct {
 	retryAfter  time.Duration
 	unavailable bool
@@ -436,8 +388,7 @@ func reauthNoteFrom(ctx context.Context) *reauthNote {
 	return n
 }
 
-// reauth re-verifies the logged-in operator's password before a high-risk change. Throttled per operator and
-// per source address, and every failure is audited.
+// reauth re-verifies the operator's password before a high-risk change; throttled per operator and address, failures audited.
 func (s *server) reauth(r *http.Request, password string) bool {
 	sess := sessFrom(r.Context())
 	if sess == nil || password == "" || len(password) > maxOperatorPasswordLen {
@@ -503,8 +454,7 @@ func (s *server) reauth(r *http.Request, password string) bool {
 	return true
 }
 
-// reauthRefused answers a refused step-up: 429 while the operator or address is throttled, 503 when the check
-// could not run, otherwise 401 reauth_required with the caller's own wording.
+// reauthRefused answers 429 while throttled, 503 when the check could not run, otherwise 401 with the caller's wording.
 func (s *server) reauthRefused(w http.ResponseWriter, r *http.Request, msg string) {
 	if n := reauthNoteFrom(r.Context()); n != nil {
 		if n.retryAfter > 0 {
@@ -520,12 +470,8 @@ func (s *server) reauthRefused(w http.ResponseWriter, r *http.Request, msg strin
 	jsonErr(w, http.StatusUnauthorized, "reauth_required", msg)
 }
 
-// ----- changing one's own password ------------------------------------------------------------------------------
-
-// changeOwnPassword: POST /edge/v1/auth/password {current_password, new_password}. The current password is a
-// step-up (throttled and audited like any other); the new one must meet the policy and differ from it. Every
-// session of the operator is ended -- a password change is how somebody who suspects their account is in use
-// elsewhere takes it back -- and the caller gets a fresh one.
+// changeOwnPassword ends every session of the operator (how someone takes back an account they suspect is in use
+// elsewhere) and gives the caller a fresh one.
 func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, authBodyLimit)
 	var in struct {
@@ -581,15 +527,10 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ----- the same-origin guard (N-23) ---------------------------------------------------------------------------
-
-// sameOrigin refuses a state-changing request whose Origin (or, without one, Referer) names another site. It is
-// in addition to the SameSite=Lax cookie, which a sibling subdomain or an old browser does not stop.
-//
-// The console reaches edged through Caddy and the Next proxy, so edged's own Host is 127.0.0.1:8090; the
-// address the browser used arrives as X-Forwarded-Host, which Caddy sets from the request it received
-// (a browser cannot forge it on a cross-site request). A request with neither header is not from a browser
-// page -- curl, the appliance's own scripts -- and CSRF is a browser attack, so it passes.
+// sameOrigin refuses a state-changing request whose Origin (or Referer) names another site, in addition to the
+// SameSite=Lax cookie. edged's own Host is 127.0.0.1:8090 behind Caddy and the Next proxy, so the browser's address
+// arrives as X-Forwarded-Host, which a cross-site browser request cannot forge. A request with neither header is
+// not from a browser page (curl, appliance scripts) and CSRF is a browser attack, so it passes.
 func sameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

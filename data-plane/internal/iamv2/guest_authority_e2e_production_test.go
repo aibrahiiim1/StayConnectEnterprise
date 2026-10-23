@@ -4,8 +4,7 @@ package iamv2
 
 import "testing"
 
-// End to end through the real loader, compiled the way a Production appliance is compiled. The unit tests
-// prove the lock; this proves the shipped binary actually applies it.
+// End to end through the real loader, compiled as a Production appliance is.
 func TestProductionBuildLoaderRefusesTheSupersededAuthority(t *testing.T) {
 	if !productionBuild || BuildProfile() != "production" {
 		t.Fatal("this file is built only under -tags stayconnect_production")

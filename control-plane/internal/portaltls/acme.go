@@ -16,13 +16,9 @@ import (
 	"golang.org/x/crypto/acme"
 )
 
-// ACME, RFC 8555, through golang.org/x/crypto/acme. Central holds ONE account (key in acme-account.key) per
-// directory; it registers lazily, and again when the operator switches directory (staging <-> production),
-// because an account exists only at the CA that created it.
-
-// acmeClient returns a client for directoryURL with the account key, registered (or found) at that CA. The
-// account URL is cached in settings for the CURRENT directory only; a client for another directory (an old
-// certificate's issuer, for ARI or revocation) finds its account by key.
+// acmeClient returns a client registered (or found) at directoryURL. An account exists only at the CA that
+// created it, so switching directory registers again. The account URL is cached for the current directory
+// only; a client for another directory (an old issuer, for ARI or revocation) finds its account by key.
 func (s *Service) acmeClient(ctx context.Context, st *Settings, directoryURL string) (*acme.Client, error) {
 	key, err := s.Secrets.AccountKey()
 	if err != nil {
@@ -56,8 +52,7 @@ func (s *Service) acmeClient(ctx context.Context, st *Settings, directoryURL str
 	return c, nil
 }
 
-// forgetAccountIfGone clears the cached account when the CA says it no longer knows it (a test CA that was
-// restarted; an account deactivated out of band). The next call registers afresh.
+// forgetAccountIfGone clears the cached account when the CA no longer knows it; the next call registers afresh.
 func (s *Service) forgetAccountIfGone(ctx context.Context, err error) {
 	var ae *acme.Error
 	if errors.As(err, &ae) && strings.HasSuffix(ae.ProblemType, ":accountDoesNotExist") {
@@ -65,7 +60,6 @@ func (s *Service) forgetAccountIfGone(ctx context.Context, err error) {
 	}
 }
 
-// issued is what a successful issuance yields.
 type issued struct {
 	ChainPEM   string
 	Serial     string
@@ -75,21 +69,20 @@ type issued struct {
 	OrderURL   string
 }
 
-// issue runs one ACME order for hostname with the appliance's CSR, answering DNS-01 by writing challengeName.
-// The TXT records it writes are ALWAYS deleted before it returns, on success and on failure.
+// issue runs one ACME order, answering DNS-01 at challengeName. The TXT records are always deleted before it returns.
 func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, hostname, challengeName string, csrDER []byte,
 	setOrderURL func(string)) (*issued, error) {
 	order, err := c.AuthorizeOrder(ctx, acme.DomainIDs(hostname))
 	if err != nil {
 		return nil, fmt.Errorf("new order: %w", err)
 	}
-	// The order URL comes only from the newOrder answer's Location header; later answers need not repeat it.
+	// Only the newOrder answer's Location header carries the order URL.
 	orderURL := order.URI
 	setOrderURL(orderURL)
 
 	var txtIDs []string
 	defer func() {
-		// The caller's context may already be cancelled; the clean-up must still happen.
+		// The caller's context may be cancelled; clean up anyway.
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		for _, id := range txtIDs {
@@ -103,7 +96,7 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 			return nil, fmt.Errorf("authorization: %w", err)
 		}
 		if authz.Status == acme.StatusValid {
-			continue // the CA remembers a recent validation of this name
+			continue
 		}
 		var chal *acme.Challenge
 		for _, ch := range authz.Challenges {
@@ -129,8 +122,8 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 				return nil, fmt.Errorf("nameservers: %w", err)
 			}
 		}
-		// Tell the CA only once EVERY authoritative server answers: the CA queries one at random, and a
-		// premature Accept is a failed validation that counts against the CA's failed-validation limit.
+		// Accept only once every authoritative server answers: a premature Accept is a failed validation that
+		// counts against the CA's limit.
 		if err := waitForTXT(ctx, servers, challengeName, value, s.Opts.propagationLimit(), s.Opts.propagationPoll()); err != nil {
 			return nil, err
 		}
@@ -152,10 +145,8 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 	}
 	der, _, err := c.CreateOrderCert(ctx, order.FinalizeURL, csrDER, true)
 	if err != nil {
-		// CreateOrderCert follows a still-processing order through the Location header of the finalize
-		// answer, which RFC 8555 does not require (Pebble omits it). The order's own URL is known: wait on
-		// that and fetch the certificate it names. A finalize that really failed shows up here as an
-		// invalid order.
+		// CreateOrderCert needs a Location header on the finalize answer, which RFC 8555 does not require
+		// (Pebble omits it); wait on the known order URL instead. A failed finalize shows as an invalid order.
 		wctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		done, werr := c.WaitOrder(wctx, orderURL)
 		cancel()
@@ -174,8 +165,7 @@ func (s *Service) issue(ctx context.Context, c *acme.Client, prov DNSProvider, h
 	return out, nil
 }
 
-// checkIssuedChain refuses to record anything but what was asked for: a leaf for exactly hostname, carrying
-// the CSR's public key, with its intermediates. The appliance checks again before installing it.
+// checkIssuedChain refuses anything but a leaf for exactly hostname carrying the CSR's key; the appliance checks again.
 func checkIssuedChain(der [][]byte, hostname string, csrDER []byte) (*issued, error) {
 	if len(der) == 0 {
 		return nil, errors.New("the CA returned no certificate")
@@ -210,8 +200,7 @@ func checkIssuedChain(der [][]byte, hostname string, csrDER []byte) (*issued, er
 	}, nil
 }
 
-// waitForTXT polls every server until each answers name TXT with value, or the limit passes. Servers are
-// asked directly (no recursive resolver, no cache), so "visible" means visible at the source.
+// waitForTXT polls every server directly (no recursive resolver, no cache) until each answers with value.
 func waitForTXT(ctx context.Context, servers []string, name, value string, limit, poll time.Duration) error {
 	deadline := time.Now().Add(limit)
 	pending := map[string]bool{}
@@ -268,8 +257,7 @@ func txtVisibleAt(ctx context.Context, server, fqdn, value string) bool {
 	return false
 }
 
-// revokeCert asks the issuing CA to revoke leafDER, signing with the account key. A certificate the CA says
-// is already revoked counts as revoked.
+// revokeCert treats a certificate the CA says is already revoked as revoked.
 func revokeCert(ctx context.Context, c *acme.Client, leafDER []byte, reason string) error {
 	code := acme.CRLReasonCessationOfOperation
 	if reason == RevokeSuperseded {
@@ -283,7 +271,6 @@ func revokeCert(ctx context.Context, c *acme.Client, leafDER []byte, reason stri
 	return err
 }
 
-// leafFromChain returns the first certificate of a PEM chain.
 func leafFromChain(chainPEM string) (*x509.Certificate, error) {
 	block, _ := pem.Decode([]byte(chainPEM))
 	if block == nil {
@@ -292,7 +279,6 @@ func leafFromChain(chainPEM string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// acmeHTTP is the HTTP client used for the ACME server's unauthenticated reads (directory, ARI).
 func (s *Service) acmeHTTP() *http.Client {
 	hc, err := s.Opts.acmeHTTPClient()
 	if err != nil {

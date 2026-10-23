@@ -9,7 +9,6 @@ import { DataRetentionSetting } from "@/components/data-retention";
 import { roleLabel, TEAM_ROLES, usePermissions } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 
-/** Central's own operators. A customer's users are managed on that customer's page, under Users. */
 export default function TeamPage() {
   const { can } = usePermissions();
   const { me } = useSession();

@@ -13,20 +13,16 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// alertRepeatWindow is how long an open security alert absorbs repeats of the same event instead of a new row
-// being raised. Registration is unauthenticated: without it, anyone able to reach Central could raise an alert
-// every two seconds (the registration limit) for as long as they liked, burying the real ones.
+// alertRepeatWindow is how long an open alert absorbs repeats of the same event. Registration is unauthenticated,
+// so without it anyone reaching Central could bury real alerts under new rows.
 const alertRepeatWindow = 24 * time.Hour
 
-// alertDB is what raiseAlertOnce needs: a pool or a transaction.
 type alertDB interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// raiseAlertOnce records a security alert for (applianceID, kind). While an unresolved alert of the same kind
-// for the same appliance was raised within alertRepeatWindow, the event is folded into it -- its detail gains
-// repeats, last_seen_at and last_source_ip -- and no new row appears. It reports whether a NEW alert was
-// raised, which is also when the caller audits (so a flood is one alert and one audit row, not thousands).
+// raiseAlertOnce records a security alert for (applianceID, kind), folding repeats within alertRepeatWindow into the
+// open one. It reports whether a new alert was raised, which is also when the caller audits.
 func raiseAlertOnce(ctx context.Context, db alertDB, applianceID, serial, kind string, detail map[string]any, ip string) (bool, error) {
 	raw, _ := json.Marshal(detail)
 	var id string
@@ -53,9 +49,8 @@ func raiseAlertOnce(ctx context.Context, db alertDB, applianceID, serial, kind s
 	return err == nil, err
 }
 
-// publicError is what an operator may be shown of an error: a validation sentence is passed through, but a
-// database error never is -- its text names tables, constraints and values, which is not the console's
-// business. Those are logged with the request's trace id and replaced by a sentence.
+// publicError is what an operator may see of an error: validation sentences pass through, but database errors never
+// do (they name tables, constraints and values); those are logged with the trace id and replaced.
 func publicError(r *http.Request, err error) string {
 	if err == nil {
 		return ""
@@ -69,13 +64,12 @@ func publicError(r *http.Request, err error) string {
 	return err.Error()
 }
 
-// failInternal answers 500 with msg and logs the cause, which is never sent to the client.
+// failInternal answers 500 with msg and logs the cause, never sending it to the client.
 func failInternal(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	slog.Warn(msg, "path", r.URL.Path, "trace_id", middleware.GetReqID(r.Context()), "err", err)
 	Fail(w, r, http.StatusInternalServerError, CodeInternal, msg)
 }
 
-// isUniqueViolation reports a Postgres unique-constraint violation (23505).
 func isUniqueViolation(err error) bool {
 	var pe *pgconn.PgError
 	return errors.As(err, &pe) && pe.Code == "23505"

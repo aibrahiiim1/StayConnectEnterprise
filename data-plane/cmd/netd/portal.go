@@ -1,22 +1,7 @@
 package main
 
-// THE PORTAL ADDRESS ON THE WIRE, AND THE PORTAL'S HTTPS STATE IN DHCP AND DNS
-// (contract docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §2.1, §4, §6).
-//
-// Two different kinds of state live here, and they are handled differently on purpose.
-//
-//	THE PORTAL ADDRESS is NETWORK CONFIGURATION. It is a site setting, but changing it changes what the firewall
-//	admits and which address the appliance carries, so it moves only through validate -> apply -> confirm. The
-//	address an apply used is recorded in the revision bundle (netcfg.PortalVIPBundleFile); a rollback restores
-//	the previous revision's address, and the dummy interface follows whatever address is IN FORCE.
-//
-//	THE HTTPS STATE is RUNTIME STATE. scd flips https_active and the canonical hostname whenever a certificate
-//	installs, expires or is revoked, with no operator and no revision. Only two things depend on it -- DHCP
-//	option 114 and the portal-names resolver fragment -- and a runtime refresh keeps both in step with it. That
-//	refresh never touches nftables or netplan: whether HTTPS is active must never change what guests may reach.
-//
-// The dummy interface is ALSO runtime state in the kernel sense: anything (a hand-run `ip link del`, a
-// networkd restart that decides it owns every link) can remove it. So it is re-asserted by the same refresh.
+// Portal address and HTTPS state on the wire.
+// The portal address is network configuration (validate, apply, confirm; recorded in the revision bundle). HTTPS state is runtime state: its refresh never touches nftables or netplan, so it cannot change what guests may reach.
 
 import (
 	"context"
@@ -36,37 +21,29 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
-// portalRefreshInterval is how often the runtime refresh runs. It is not an operator setting: it is how soon
-// after scd's own decision a device's next DHCP answer reflects it, bounded below by not polling Kea for nothing.
+// portalRefreshInterval is not an operator setting; it bounds how soon a device's DHCP answer reflects scd's decision.
 const portalRefreshInterval = 15 * time.Second
 
-// keaRuntime is the part of the Kea control socket the portal refresh needs. It is an interface so a test can
-// state what Kea is running and observe exactly what was pushed to it.
 type keaRuntime interface {
 	RunningDhcp4() (map[string]any, error)
 	ConfigTest(dhcp4 map[string]any) error
 	ConfigSet(dhcp4 map[string]any) error
 }
 
-// portalInForce is what the wire carries NOW: the intent and portal address the last apply, rollback or boot
-// reconcile put in force. It is what every render reads, so an apply, a rollback and the runtime refresh can
-// only ever render the same thing for the same moment.
+// portalInForce is what the wire carries now; every render reads it so apply, rollback and refresh render the same thing.
 type portalInForce struct {
 	intent []netcfg.GuestNetwork
 	vip    string
-	known  bool // false until an apply, rollback or boot reconcile has established it
-	// activeVIP is the portal address of the CONFIRMED active revision. It is the rollback target when the
-	// previous bundle predates the portal address and therefore records none.
+	known  bool
+	// activeVIP is the confirmed active revision's portal address, the rollback target when the previous bundle records none.
 	activeVIP string
 	tls       netcfg.PortalTLS
 
-	// log-once bookkeeping: a refresh every 15 s must not write the same line every 15 s.
+	// Log-once bookkeeping so a 15 s refresh does not repeat a line.
 	lastOpt114 string
 	lastErr    map[string]string
 }
 
-// renderTopo is the topology every render uses: the static appliance facts plus the portal address in force and
-// the latest HTTPS state.
 func (a *applier) renderTopo() netcfg.Topology {
 	a.portalMu.Lock()
 	defer a.portalMu.Unlock()
@@ -83,7 +60,6 @@ func (a *applier) setInForce(intent []netcfg.GuestNetwork, vip string) {
 	a.portal.intent, a.portal.vip, a.portal.known = intent, vip, true
 }
 
-// clearInForce is the factory-clean state: nothing is in force, so there is no portal address either.
 func (a *applier) clearInForce() {
 	a.portalMu.Lock()
 	defer a.portalMu.Unlock()
@@ -126,7 +102,6 @@ func (a *applier) setPortalTLS(p netcfg.PortalTLS) {
 	a.portal.tls = p
 }
 
-// logOnce logs a portal refresh problem once per distinct message, and again only after it has cleared.
 func (a *applier) logOnce(key, msg string) {
 	a.portalMu.Lock()
 	if a.portal.lastErr == nil {
@@ -139,8 +114,6 @@ func (a *applier) logOnce(key, msg string) {
 		slog.Error("netd portal refresh", "step", key, "err", msg)
 	}
 }
-
-// --- seams with their defaults ---
 
 func (a *applier) loadPortalIP(ctx context.Context) (string, error) {
 	if a.portalIPFn != nil {
@@ -162,9 +135,7 @@ func (a *applier) loadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error) {
 	return a.st.LoadPortalTLS(ctx)
 }
 
-// refreshPortalTLS reads the HTTPS state into the render topology. On a read failure the previous state is KEPT:
-// an unreadable database is not evidence that HTTPS went down, and flipping every device's option 114 on a
-// transient error would be the refresh causing the outage it reports.
+// On a read failure the previous HTTPS state is kept: flipping option 114 on a transient error would cause the outage it reports.
 func (a *applier) refreshPortalTLS(ctx context.Context) {
 	p, err := a.loadPortalTLS(ctx)
 	if err != nil {
@@ -175,8 +146,7 @@ func (a *applier) refreshPortalTLS(ctx context.Context) {
 	a.setPortalTLS(p)
 }
 
-// hostAddrs lists every IPv4 address on every interface, unfiltered -- Docker bridges and guest bridges
-// included, which is exactly what Discover() leaves out and exactly what the portal address must not overlap.
+// hostAddrs lists every IPv4 address including Docker and guest bridges, which the portal address must not overlap.
 func (a *applier) hostAddrs(ctx context.Context) ([]netcfg.HostAddr, error) {
 	if a.hostAddrsFn != nil {
 		return a.hostAddrsFn(ctx)
@@ -204,7 +174,6 @@ func parseHostAddrs(raw []byte) ([]netcfg.HostAddr, error) {
 	return out, nil
 }
 
-// portalLink answers whether the portal interface exists and is administratively up.
 func (a *applier) portalLink(name string) (exists, up bool) {
 	if a.portalLinkFn != nil {
 		return a.portalLinkFn(name)
@@ -227,11 +196,7 @@ func (a *applier) keaRT() keaRuntime {
 	return nil
 }
 
-// --- validation ---
-
-// validatePortal checks a portal address against the intent it will be applied with and every address this
-// appliance carries right now. FAIL CLOSED: if the host's addresses cannot be read, the overlap cannot be ruled
-// out, and the caller gets an error rather than a pass.
+// validatePortal fails closed: if host addresses cannot be read, overlap cannot be ruled out.
 func (a *applier) validatePortal(ctx context.Context, vip string, intent []netcfg.GuestNetwork) ([]netcfg.Issue, error) {
 	if strings.TrimSpace(vip) == "" {
 		return nil, nil
@@ -244,9 +209,7 @@ func (a *applier) validatePortal(ctx context.Context, vip string, intent []netcf
 	return netcfg.ValidatePortalIP(vip, intent, host), nil
 }
 
-// ValidatePortalIP answers POST /v1/portal-ip/validate: may this address become the portal address, given the
-// client networks as currently edited and every address on the appliance? edged asks before it saves the setting;
-// the apply that follows validates again, against the moment it applies.
+// ValidatePortalIP answers POST /v1/portal-ip/validate; the apply validates again at apply time.
 func (a *applier) ValidatePortalIP(ctx context.Context, vip string) (netcfg.ValidationResult, error) {
 	res := netcfg.ValidationResult{OK: true, Issues: []netcfg.Issue{}}
 	if strings.TrimSpace(vip) == "" {
@@ -278,15 +241,11 @@ func (a *applier) ValidatePortalIP(ctx context.Context, vip string) (netcfg.Vali
 	return res, nil
 }
 
-// --- the revision bundle record ---
-
-// writePortalBundle records the portal address a revision is applied with. An empty file records "none", which
-// is different from a missing file: missing means the revision predates the portal address.
+// An empty file records "none"; a missing file means the revision predates the portal address.
 func writePortalBundle(bundle, vip string) error {
 	return os.WriteFile(filepath.Join(bundle, netcfg.PortalVIPBundleFile), []byte(strings.TrimSpace(vip)+"\n"), 0o640)
 }
 
-// readPortalBundle returns the portal address a revision recorded, and whether it recorded one at all.
 func readPortalBundle(bundle string) (vip string, recorded bool) {
 	if bundle == "" {
 		return "", false
@@ -305,14 +264,8 @@ func readPortalBundle(bundle string) (vip string, recorded bool) {
 	return v, true
 }
 
-// adoptPortalIP is the one-time upgrade step for a confirmed revision applied before the portal address existed
-// (its bundle records none). The configured address is adopted ONLY if it passes the same validation an apply
-// runs, against that revision's intent and the host as it is now; it is then written into the bundle, so the
-// revision records it from here on and every later restart reads the record rather than the setting.
-//
-// Anything short of a clean pass adopts NOTHING: the portal stays on its HTTP fallback (scd reports
-// PORTAL_ADDRESS_NOT_ACTIVE) until an operator applies, which is visible and harmless, where adopting an
-// unvalidated address on an unattended restart could steal an address from a real network.
+// adoptPortalIP upgrades a confirmed revision that predates the portal address, adopting the configured address only if it passes apply validation.
+// Anything less adopts nothing: adopting an unvalidated address on an unattended restart could steal an address from a real network.
 func (a *applier) adoptPortalIP(ctx context.Context, bundle string, intent []netcfg.GuestNetwork) string {
 	vip, err := a.loadPortalIP(ctx)
 	if err != nil {
@@ -339,10 +292,7 @@ func (a *applier) adoptPortalIP(ctx context.Context, bundle string, intent []net
 	return vip
 }
 
-// --- the dummy interface ---
-
-// ensurePortalIface makes the portal interface carry exactly vip/32 and be up, or not exist when vip is "".
-// It changes nothing when the interface is already right, so the periodic refresh is silent in steady state.
+// ensurePortalIface is a no-op when the interface is already right, so the refresh is silent.
 func (a *applier) ensurePortalIface(ctx context.Context, vip string) (bool, error) {
 	if a.dryRun {
 		return false, nil
@@ -373,8 +323,7 @@ func (a *applier) ensurePortalIface(ctx context.Context, vip string) (bool, erro
 			found = true
 			continue
 		}
-		// THE PREVIOUS ADDRESS GOES. A portal interface carrying the old address and the new one would answer
-		// for an address no ruleset admits and no DNS record names any more.
+		// The previous address goes: an interface carrying both would answer for an address no ruleset admits.
 		changed = true
 		if err := a.run(ctx, "ip", "addr", "del", c, "dev", name); err != nil {
 			return true, fmt.Errorf("remove stale portal address %s: %w", c, err)
@@ -395,7 +344,6 @@ func (a *applier) ensurePortalIface(ctx context.Context, vip string) (bool, erro
 	return changed, nil
 }
 
-// portalIfaceHealthy is the post-apply assertion: the portal interface carries the address in force.
 func (a *applier) portalIfaceHealthy(vip string) (bool, string) {
 	ip := netcfg.ParsePortalIP(vip)
 	exists, up := a.portalLink(netcfg.PortalIface)
@@ -416,10 +364,7 @@ func (a *applier) portalIfaceHealthy(vip string) (bool, string) {
 	return false, netcfg.PortalIface + " does not carry " + ip.String() + "/32"
 }
 
-// --- the resolver fragment for the portal names ---
-
-// writeUnboundPortal writes the portal-names fragment if its content differs, atomically (a resolver reading a
-// half-written file would refuse its whole configuration). It reports whether the file changed.
+// writeUnboundPortal writes atomically: a resolver reading a half-written file would refuse its whole configuration.
 func (a *applier) writeUnboundPortal(vip string, p netcfg.PortalTLS) (bool, []byte, error) {
 	if a.dryRun || a.unboundPortalFrag == "" {
 		return false, nil, nil
@@ -443,8 +388,7 @@ func (a *applier) writeUnboundPortal(vip string, p netcfg.PortalTLS) (bool, []by
 	return true, old, nil
 }
 
-// reloadUnboundPortal validates and reloads the resolver after the portal fragment changed. A fragment the
-// resolver refuses is put back to what it was, so a bad hostname can never take guest DNS down.
+// A fragment the resolver refuses is restored, so a bad hostname cannot take guest DNS down.
 func (a *applier) reloadUnboundPortal(ctx context.Context, previous []byte) error {
 	if a.dryRun {
 		return nil
@@ -457,7 +401,7 @@ func (a *applier) reloadUnboundPortal(ctx context.Context, previous []byte) erro
 		}
 		return fmt.Errorf("the resolver refused the portal fragment, which was put back: %w", err)
 	}
-	// local-data only: a reload is enough (no listener changes). Restart only if reload is unavailable.
+	// local-data only: reload suffices.
 	if err := a.run(ctx, "unbound-control", "reload"); err != nil {
 		if rerr := a.run(ctx, "systemctl", "restart", "unbound"); rerr != nil {
 			return fmt.Errorf("the resolver would neither reload (%v) nor restart: %w", err, rerr)
@@ -466,15 +410,11 @@ func (a *applier) reloadUnboundPortal(ctx context.Context, previous []byte) erro
 	return nil
 }
 
-// --- Kea option 114 ---
-
-// renderKea is THE Kea render: apply, rollback, boot reconcile and the runtime refresh all call it, so they
-// cannot disagree about what option 114 says for the same intent and the same HTTPS state.
+// renderKea is the single Kea render so apply, rollback, boot and refresh agree on option 114.
 func (a *applier) renderKea(intent []netcfg.GuestNetwork) map[string]any {
 	return netcfg.RenderKeaDhcp4(intent, a.renderTopo(), a.keaLeaseCSV, a.keaSocket)
 }
 
-// pushKea is every config-set netd issues, serialised against the runtime refresh.
 func (a *applier) pushKea(dhcp4 map[string]any) error {
 	a.keaMu.Lock()
 	defer a.keaMu.Unlock()
@@ -485,8 +425,7 @@ func (a *applier) pushKea(dhcp4 map[string]any) error {
 	return kr.ConfigSet(dhcp4)
 }
 
-// captiveOptions maps each subnet to the option-114 value it carries ("" for none). It reads both a render
-// (typed maps) and Kea's config-get answer (generic JSON) by going through JSON, so the two compare like for like.
+// captiveOptions compares render and config-get via JSON so both compare like for like.
 func captiveOptions(dhcp4 map[string]any) map[string]string {
 	raw, err := json.Marshal(dhcp4)
 	if err != nil {
@@ -509,8 +448,7 @@ func captiveOptions(dhcp4 map[string]any) map[string]string {
 	for _, s := range d.Subnet4 {
 		v := ""
 		for _, o := range s.Options {
-			// Code 114 only: a stale "v4-captive-portal" entry from before the fix is code 160 on Kea 2.0 and
-			// must read as "no option 114", so the refresh replaces it.
+			// Code 114 only: a stale "v4-captive-portal" entry is code 160 on Kea 2.0 and must read as no option 114.
 			if o.Code == 114 {
 				v = o.Data
 			}
@@ -533,15 +471,8 @@ func describeOptions(m map[string]string) string {
 	return strings.Join(parts, " ")
 }
 
-// syncKeaCaptive pushes the in-force intent's Kea configuration ONLY when the option-114 values Kea is running
-// differ from what the current HTTPS state calls for. It returns whether it pushed.
-//
-// No revision is created and nothing else is touched: the configuration pushed is the SAME render an apply of
-// the in-force intent produces (renderKea), differing from what is running only in option 114. It is config-
-// tested first -- unlike an apply, this path adds no interface, so config-test can see everything it needs.
-//
-// It holds the Kea lock across read-compare-push and gives way to an apply, rollback or boot reconcile in
-// progress: those put a whole configuration in force, and the next tick will compare against theirs.
+// syncKeaCaptive pushes only when running option-114 values differ from the HTTPS state; it creates no revision and is config-tested first.
+// It holds the Kea lock across read-compare-push and yields to an apply, rollback or boot reconcile in progress.
 func (a *applier) syncKeaCaptive(ctx context.Context) (bool, error) {
 	if a.dryRun {
 		return false, nil
@@ -561,7 +492,7 @@ func (a *applier) syncKeaCaptive(ctx context.Context) (bool, error) {
 	}
 	running, err := kr.RunningDhcp4()
 	if err != nil {
-		// Kea not running (factory-clean, or restarting) is not this loop's problem to solve.
+		// Kea not running is not this loop's problem.
 		return false, fmt.Errorf("read the running DHCP configuration: %w", err)
 	}
 	desired := a.renderKea(intent)
@@ -594,10 +525,7 @@ func (a *applier) setLastOpt114(s string) {
 	a.portal.lastOpt114 = s
 }
 
-// --- the runtime refresh ---
-
-// portalRefresh is one pass of the runtime refresh: read the HTTPS state, re-assert the portal interface, the
-// portal-names resolver fragment and option 114. Each step is independent; one failing does not stop the others.
+// Refresh steps are independent; one failing does not stop the others.
 func (a *applier) portalRefresh(ctx context.Context) {
 	if a.dryRun || a.busy.Load() > 0 {
 		return
@@ -605,9 +533,7 @@ func (a *applier) portalRefresh(ctx context.Context) {
 	a.refreshPortalTLS(ctx)
 	_, vip, known := a.inForce()
 	if !known {
-		// Nothing has been put in force yet (no confirmed revision, or boot reconcile has not run). There is no
-		// address to assert and no intent to render; touching the interface here could only remove one an
-		// in-flight operation is about to need.
+		// Nothing is in force yet: touching the interface could remove one an in-flight operation needs.
 		return
 	}
 	if changed, err := a.ensurePortalIface(ctx, vip); err != nil {
@@ -636,8 +562,6 @@ func (a *applier) portalRefresh(ctx context.Context) {
 	}
 }
 
-// portalRuntimeLoop runs the refresh once immediately (so a restart does not leave option 114 stale for a whole
-// interval) and then every portalRefreshInterval.
 func (a *applier) portalRuntimeLoop(ctx context.Context) {
 	a.portalRefresh(ctx)
 	t := time.NewTicker(portalRefreshInterval)
@@ -652,14 +576,11 @@ func (a *applier) portalRuntimeLoop(ctx context.Context) {
 	}
 }
 
-// --- the socket endpoint ---
-
 type portalIPReq struct {
 	PortalIP string `json:"portal_ip"`
 }
 
-// portalIPValidate is POST /v1/portal-ip/validate {"portal_ip":"10.255.255.1"} -> 200 {"ok":bool,"issues":[...]}.
-// It changes nothing. 400 on an unreadable body; 500 when the check itself could not be made (fail closed).
+// portalIPValidate serves POST /v1/portal-ip/validate and changes nothing; 400 on an unreadable body, 500 when the check cannot be made (fail closed).
 func (s *server) portalIPValidate(w http.ResponseWriter, r *http.Request) {
 	var req portalIPReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

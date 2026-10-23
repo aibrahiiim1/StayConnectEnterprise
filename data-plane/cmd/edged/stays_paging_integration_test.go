@@ -15,11 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// THE STAYS SCREEN SEES THE WHOLE PROPERTY.
-//
-// It used to stop at 200 rows, and its counters counted those 200: a hotel with 403 in house was shown 200.
-// These tests hold the server to paging every stay, counting over every match, and searching the whole list
-// rather than the page on screen.
+// The stays screen sees the whole property: paging covers every stay, counters count every match, and search covers the whole list.
 
 func (f *apiFixture) getWithSearch(t *testing.T, path, search string) (int, map[string]any) {
 	t.Helper()
@@ -46,9 +42,7 @@ func (f *apiFixture) getWithSearch(t *testing.T, path, search string) (int, map[
 func (f *apiFixture) seedStays(t *testing.T, n int) {
 	t.Helper()
 	ctx := context.Background()
-	// The reservation ids are tag||i and the search also matches reservation numbers, so the tag must hold NO
-	// DIGITS: a nanosecond tag ending in "100" made "P…100"+"1" contain "1001", and the room-1001 search then
-	// matched 111 stays (i = 1, 10-19, 100-199) whenever the clock happened to line up.
+	// Reservation ids are tag||i and search matches them, so the tag must hold NO digits (a tag ending in "100" made the room-1001 search match 111 stays).
 	tag := "P" + strings.Map(func(r rune) rune { return 'a' + (r - '0') }, fmt.Sprint(time.Now().UnixNano()))
 	if err := controlled(ctx, f.pool, []string{"stay"}, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `WITH
@@ -118,8 +112,7 @@ func TestIntegration_Stays_SearchCoversTheWholeListNotThePage(t *testing.T) {
 	f := newAPI(t)
 	f.seedStays(t, 230)
 
-	// Room 1001 arrives earliest-but-one, so it sits past the first 200 by arrival order: the old in-browser
-	// search could never have found it.
+	// Room 1001 sits past the first 200 by arrival order.
 	status, body := f.getWithSearch(t, "/pms-stays?page_size=10", "1001")
 	if status != 200 {
 		t.Fatalf("search = %d %v", status, body)

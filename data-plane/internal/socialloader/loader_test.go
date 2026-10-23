@@ -15,9 +15,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 )
 
-// THE SECRET COMES FROM THE OPENER AND NOWHERE ELSE. A row whose sealed secret opens is built with exactly that
-// secret; a row whose secret does not open is not built; without an opener (no sealing key) nothing is built and
-// the base stub, if any, stays.
+// The secret comes from the opener only: a row that opens is built with it, one that does not is skipped,
+// and with no opener nothing is built and the base stub stays.
 func TestAssembleBuildsOnlyFromOpenedSecrets(t *testing.T) {
 	rows := []Row{
 		{ID: "p-google", Provider: "google", ClientID: "gid", ExtraJSON: `{}`, CallbackHosts: []string{"WiFi.Hotel.example.", " "}},
@@ -65,8 +64,7 @@ func TestAssembleBuildsOnlyFromOpenedSecrets(t *testing.T) {
 	}
 }
 
-// Each load is a fresh registry: a provider removed from the database disappears on the next load instead of
-// lingering in a registry that is only ever added to.
+// Each load is a fresh registry, so a provider removed from the database disappears on the next load.
 func TestAssembleReturnsAFreshRegistryEachTime(t *testing.T) {
 	open := func(context.Context, string) (string, bool) { return "s", true }
 	first := Assemble(context.Background(), []Row{{ID: "1", Provider: "google", ClientID: "c", ExtraJSON: `{}`}}, open)

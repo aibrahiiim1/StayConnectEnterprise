@@ -2,20 +2,10 @@
 
 package main
 
-// GRANT ATOMICITY, proven by failing on purpose at each stage.
-//
-// The grant chain is Auth-Context consumption → Quote → Purchase → Entitlement → initial history → device
-// authorization → Session → binding. Every one of these is a row somebody would later reason about, and a
-// partial chain is worse than no grant at all:
-//
-//   a consumed Context with no Entitlement  → the guest proved who they are and got nothing, and cannot
-//                                             retry because the proof is spent;
-//   a Purchase with no Entitlement          → the Folio says they bought access they never received;
-//   an Entitlement with no history          → nothing can say when or why it became active;
-//   a Session before its Entitlement        → a period of network access with nothing authorising it.
-//
-// These tests inject a failure after each stage and assert the database is exactly as it was — including that
-// the Auth Context is still UNCONSUMED, so the guest can genuinely retry.
+// Grant atomicity, proven by failing on purpose after each stage of the chain (Auth-Context consumption, Quote, Purchase,
+// Entitlement, history, device authorization, Session, binding). A partial chain is worse than no grant: a consumed Context
+// with no Entitlement strands a guest whose proof is spent. After each injected failure the database must be exactly as it
+// was, with the Auth Context still unconsumed.
 
 import (
 	"bytes"
@@ -29,8 +19,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/staygrant"
 )
 
-// grantRequestFor builds the same request the handler builds, so the fault-injection path exercises the real
-// chain rather than a parallel one that could drift from it.
 func grantRequestFor(authContextID, pkgRev string, dev deviceIdentity) staygrant.Request {
 	return staygrant.Request{
 		AuthContextID: authContextID,
@@ -41,7 +29,6 @@ func grantRequestFor(authContextID, pkgRev string, dev deviceIdentity) staygrant
 	}
 }
 
-// grantCensus is the full row census the atomicity assertions compare.
 type grantCensus struct {
 	quotes, purchases, entitlements, transitions, deviceAuths, sessions, bindings, offers int
 	contextConsumed                                                                       bool
@@ -80,13 +67,10 @@ func (f *authFixture) census(t *testing.T, authContextID string) grantCensus {
 	return c
 }
 
-// A FAILURE AFTER EVERY STAGE. The injection point is a statement executed inside the same transaction the
-// grant runs in, chosen to abort after the named stage has already written its rows — which is exactly the
-// condition a crash, a lock timeout or a constraint violation would produce in production.
+// A failure after every stage: the injection is a statement inside the grant transaction that aborts after the named stage wrote its rows, as a crash or lock timeout would.
 func TestIntegration_Phase3Auth_GrantIsAllOrNothingAtEveryStage(t *testing.T) {
 	stages := []struct {
-		name string
-		// abortAfter runs inside the grant transaction and fails it.
+		name       string
 		abortAfter string
 	}{
 		{"after the Auth Context is consumed", `SELECT 1/0`},
@@ -112,8 +96,6 @@ func TestIntegration_Phase3Auth_GrantIsAllOrNothingAtEveryStage(t *testing.T) {
 				t.Fatal("setup: the context was already consumed")
 			}
 
-			// Drive the real chain in a transaction we abort ourselves. This is the same code path the
-			// handler uses; only the commit is replaced by a failure.
 			tx, err := f.pool.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -147,13 +129,10 @@ func TestIntegration_Phase3Auth_GrantIsAllOrNothingAtEveryStage(t *testing.T) {
 	}
 }
 
-// After a failed attempt the guest must be able to try again and succeed — which is the whole point of the
-// Context surviving. A rollback that leaves the proof spent is indistinguishable, to the guest, from being
-// refused outright.
+// After a failed attempt the guest must be able to retry and succeed: a rollback that leaves the proof spent looks like an outright refusal.
 func TestIntegration_Phase3Auth_RetryAfterAFailedGrantSucceeds(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// Without the enforcement owner a grant waits and refuses, because the guest would not be online.
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
@@ -199,7 +178,6 @@ func TestIntegration_Phase3Auth_RetryAfterAFailedGrantSucceeds(t *testing.T) {
 	}
 }
 
-// grantVia drives the real grant handler for a device of the test's choosing.
 func (f *authFixture) grantVia(t *testing.T, authContextID, ip, mac string) (*httptest.ResponseRecorder, phase3GrantResp) {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -216,18 +194,11 @@ func (f *authFixture) grantVia(t *testing.T, authContextID, ip, mac string) (*ht
 	return rec, out
 }
 
-// THE LOST REPLY. The grant commits and the answer never arrives — portald abandoned the hop at its
-// response-time budget, the guest closed the page, a proxy dropped the connection. The rows are durable and
-// correct; only the reply is gone.
-//
-// Without idempotency the retry finds the Auth Context consumed and refuses, and the guest is permanently
-// unable to obtain a session they already have, on a network already carrying their traffic. That is worse
-// than a plain refusal: it is real access the guest is told they do not have, and no amount of retrying fixes
-// it because the proof is spent.
+// The lost reply: the grant commits but the answer never arrives. Without idempotency the retry finds the Auth Context
+// consumed and refuses, leaving the guest unable to obtain a session they already have.
 func TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// Without the enforcement owner a grant waits and refuses, because the guest would not be online.
 	defer f.startEnforcementOwner(t)()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
@@ -259,12 +230,10 @@ func TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession(t *te
 	}
 }
 
-// The retry is answered on DEVICE identity, not on knowledge of a context id. A second device that somehow
-// learned the id — a shared screen, a log, a guessed value — must not be handed the first device's session.
+// The retry is answered on device identity, not on knowledge of a context id: a second device that learned the id must not get the first device's session.
 func TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// Without the enforcement owner a grant waits and refuses, because the guest would not be online.
 	defer f.startEnforcementOwner(t)()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
@@ -284,13 +253,10 @@ func TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession(t *tes
 	}
 }
 
-// A CLOSED session is not access, and the idempotent path must not resurrect one. If a guest's session was
-// ended — checkout, revocation, an operator action — replaying the old grant has to be refused like any other
-// spent context, or the retry would become a way to undo an operator's decision.
+// A closed session is not access and the idempotent path must not resurrect one: replaying the old grant is refused like any spent context, or the retry would undo an operator's decision.
 func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// Without the enforcement owner a grant waits and refuses, because the guest would not be online.
 	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
@@ -304,9 +270,7 @@ func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T
 		t.Fatalf("setup: %+v", first)
 	}
 
-	// Closed the way production closes one: enforce and the checkout boundary both end a session by moving it
-	// to 'ended' with a reason. Reproducing that statement rather than inventing a state keeps the test honest
-	// about which sessions the idempotent path will actually see.
+	// Closed the way production closes one: enforce and the checkout boundary move the session to 'ended' with a reason.
 	ct, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions
 		SET state='ended', ended=now(), end_reason='TEST_OPERATOR_ACTION'
 		WHERE id=$1::uuid AND state='active'`, first.SessionID)
@@ -323,12 +287,10 @@ func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T
 	}
 }
 
-// The guest-facing response must not carry the Entitlement id. It is internal identity: the guest can act on
-// their session, and nothing in the approved guest contract needs the Entitlement.
+// The guest-facing response must not carry the Entitlement id: it is internal identity.
 func TestIntegration_Phase3Auth_GuestResponseCarriesNoEntitlementIdentity(t *testing.T) {
 	f := newAuthFixture(t)
-	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
-	// and then refuses, because the guest would not actually be online.
+	// Without the enforcement owner a grant waits and refuses, because the guest would not be online.
 	defer f.startEnforcementOwner(t)()
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
 		"0000fa03-0000-4000-8000-000000000000"))
@@ -348,8 +310,7 @@ func TestIntegration_Phase3Auth_GuestResponseCarriesNoEntitlementIdentity(t *tes
 		`SELECT id::text FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay).Scan(&ent); err != nil {
 		t.Fatal(err)
 	}
-	// portald is what a guest actually talks to, and it never forwards this field — but scd's own body is
-	// the boundary that matters if the internal hop is ever exposed.
+	// portald never forwards this field, but scd's own body is the boundary that matters if the internal hop is exposed.
 	if bytes.Contains(rec.Body.Bytes(), []byte(f.stay)) {
 		t.Fatal("the grant response carried the Stay identity")
 	}

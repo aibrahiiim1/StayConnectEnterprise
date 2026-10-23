@@ -9,9 +9,8 @@ import (
 	"testing"
 )
 
-// GDPR audit A4 (migration 0136): many wrong room sign-ins on one network, from many devices, pause room sign-in
-// there; staff can confirm a genuine guest's device, which may then try again while everyone else waits; staff
-// can end the pause; and the burst a pause answered does not start the next one.
+// Many wrong room sign-ins on one network from many devices pause room sign-in there; staff can confirm a
+// genuine guest's device or end the pause, and the burst a pause answered does not start the next one.
 func TestIntegration_NetworkPause_StaffConfirmAndEnd(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()

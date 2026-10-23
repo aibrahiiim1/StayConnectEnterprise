@@ -2,9 +2,8 @@ package pmsd
 
 import "testing"
 
-// TestLockKey_FixedVectors pins the SHA-256 advisory-lock derivation to exact numeric outputs so an
-// accidental change to the namespace, byte order, or hashing cannot silently move every interface to a
-// different lock (which would break single-owner mutual exclusion across a rolling deploy).
+// Fixed vectors: a changed namespace, byte order or hash would move every interface to a different lock and
+// break single-owner exclusion across a rolling deploy.
 func TestLockKey_FixedVectors(t *testing.T) {
 	cases := []struct {
 		t, s, i string
@@ -36,8 +35,6 @@ func TestLockKey_Deterministic(t *testing.T) {
 	}
 }
 
-// TestLockKey_UniquePerComponent proves each identity component affects the key (no collisions from
-// swapping tenant/site/interface).
 func TestLockKey_UniquePerComponent(t *testing.T) {
 	base, _ := LockKey("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333")
 	swapped, _ := LockKey("22222222-2222-2222-2222-222222222222", "11111111-1111-1111-1111-111111111111", "33333333-3333-3333-3333-333333333333")

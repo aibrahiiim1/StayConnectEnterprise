@@ -1,6 +1,3 @@
-// Words for the erasure ledger card on the Backups screen (GDPR final mission). Kept apart from the page so a test can hold
-// them, and so what an administrator reads about a failed copy is written once.
-
 export type LedgerStatus = {
   erasure_available: boolean;
   state: "ok" | "not_configured" | "attention" | "recovery_needed" | "blocked" | "unavailable" | string;
@@ -33,7 +30,6 @@ export type BackupStatus = {
   };
 };
 
-/** What each kind of backup is, in the words of the person reading the list. */
 export const BACKUP_KIND_LABELS: Record<string, string> = {
   scheduled: "Scheduled",
   manual: "Manual",
@@ -43,7 +39,6 @@ export const BACKUP_KIND_LABELS: Record<string, string> = {
 };
 export const backupKindLabel = (k?: string) => BACKUP_KIND_LABELS[k ?? ""] ?? "Backup";
 
-/** The settings Hotel Admin shows on the Scheduled backups card (the rest of the retention file belongs to the sweep). */
 export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_EVERY_DAYS", "BACKUP_KEEP", "SAFETY_BACKUP_KEEP"] as const;
 
 export const STORAGE_KINDS: { value: "dir" | "sftp" | "s3"; label: string; hint: string }[] = [
@@ -58,7 +53,6 @@ export function kindLabel(kind?: string): string {
 
 export type Headline = { tone: "ok" | "warn" | "err"; title: string; detail: string };
 
-/** One sentence for the top of the card: is erasure available, and if not, why and what to do. Never about guest internet. */
 export function ledgerHeadline(s: LedgerStatus | null): Headline {
   if (!s) return { tone: "warn", title: "Checking…", detail: "Asking the appliance about the two copies of the erasure ledger." };
   switch (s.state) {

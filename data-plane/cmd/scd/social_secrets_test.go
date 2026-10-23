@@ -1,7 +1,6 @@
 package main
 
-// SOCIAL SIGN-IN: SEALED SECRETS, THE OFFERING RULE AND THE ATTEMPT'S REDIRECT URI (social_secrets.go).
-// Database-free; the database half is social_secrets_integration_test.go.
+// Sealed secrets, the offering rule and the attempt redirect URI (social_secrets.go); database-free.
 
 import (
 	"bytes"
@@ -38,8 +37,7 @@ func socialKeyForTest(t *testing.T) sealbox.Key {
 	return k
 }
 
-// THE AAD NAMES THE OWNER. A ciphertext opens for exactly the tenant, provider row and generation it was sealed
-// for, under exactly the social key -- not under the notification key that shares the sealing code.
+// The AAD names the owner: a ciphertext opens only for the tenant, provider row and generation it was sealed for, under the social key (not the notification key).
 func TestSocialSecretSealingIsBoundToTenantProviderAndGeneration(t *testing.T) {
 	k := socialKeyForTest(t)
 	sl, err := sealSocial(k, socTenant, socProvider, 3, "GOCSPX-hotel-secret")
@@ -86,7 +84,6 @@ type fakePortal struct {
 
 func (f fakePortal) PortalTLS() (bool, string) { return f.active, f.canonical }
 
-// socialServer is a server whose registry holds a real Google client registered for one callback host.
 func socialServer(t *testing.T, portal portalHosts, hosts ...string) *server {
 	t.Helper()
 	g, err := social.NewGoogle("cid.apps.googleusercontent.com", "sec", "")
@@ -134,8 +131,7 @@ func TestARealProviderIsOfferedOnlyOverHTTPSOnARegisteredCallbackHost(t *testing
 	}
 }
 
-// The development stub keeps working over plain HTTP through the portal's own callback, as it always did. It is
-// only ever in the registry of a development build (main.go).
+// The development stub keeps working over plain HTTP through the portal's own callback; it is only in the registry of a development build.
 func TestTheDevelopmentStubIsAllowedOverHTTP(t *testing.T) {
 	s := &server{socialPortal: noPortalHTTPS{}}
 	s.socialBase = []social.Provider{&social.Stub{ProviderName: "google", AuthorizeBase: "http://portal/api/oauth/stub/authorize"}}
@@ -164,8 +160,7 @@ func TestThePortalListsOnlyStartableProviders(t *testing.T) {
 	}
 }
 
-// socialStart refuses with a reason code -- before any throttle charge or state row -- when the provider may
-// not be started now.
+// socialStart refuses with a reason code, before any throttle charge or state row, when the provider may not be started.
 func TestSocialStartRefusesWithAReasonCode(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -212,8 +207,6 @@ func TestSocialSecretStoreWithoutTheKeyRefuses(t *testing.T) {
 	}
 }
 
-// The registry generation handlers read is swapped whole: a reader holding the old generation keeps a coherent
-// registry, and the next read sees the new one.
 func TestTheRegistryIsSwappedWhole(t *testing.T) {
 	s := socialServer(t, noPortalHTTPS{}, "a.example")
 	old := s.currentSocial()
@@ -224,7 +217,6 @@ func TestTheRegistryIsSwappedWhole(t *testing.T) {
 	if _, err := s.currentSocial().reg.Get("google"); err == nil {
 		t.Fatal("the new generation was not swapped in")
 	}
-	// With nothing loaded at all, the base providers answer and nothing panics.
 	if (&server{}).currentSocial().reg == nil {
 		t.Fatal("no registry")
 	}

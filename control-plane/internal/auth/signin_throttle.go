@@ -1,19 +1,13 @@
 package auth
 
-// SIGN-IN LOCKOUT (Central migrations 0053, 0056). Wrong passwords are counted per sign-in name AND client
-// address, keyed by a hash of the lower-cased email and the address so unknown names are counted exactly like
-// real ones; signin_lock_failures within signin_lock_minutes lock that name at that address for
-// signin_lock_minutes (central_security_settings).
+// Sign-in lockout: wrong passwords are counted per sign-in name and client address (unknown names counted like
+// real ones); signin_lock_failures within signin_lock_minutes lock that name at that address.
 //
-// PER ADDRESS (Product-Owner decision D-R1, 2026-10-20, "Email+IP, plus unlock"). Counted per email alone, the lock
-// let anyone who knew an administrator's address keep them locked out from anywhere. Failures from one address
-// now lock the account only for that address; the per-address request limit still bounds guessing from it. Every
-// lock on an account can be cleared by its name hash (ClearSigninLocks): `ctrlapi unlock-signin` and an
-// administrator's "Reset two-step".
+// The lock is per address: counted per email alone, anyone knowing an administrator's address could keep them
+// locked out from anywhere. Every lock on an account is cleared by its name hash (ClearSigninLocks).
 //
-// THE KEY IS AN HMAC (GDPR audit 2026-10-19, A8). A plain SHA-256 of an email can be reversed by anyone holding
-// a list of addresses, so the counter held personal data. MFA.SigninName keys it with a secret derived from
-// the two-step sign-in key; the caller passes the result in.
+// The key is an HMAC, not a plain SHA-256: a plain hash of an email is reversible from a list of addresses, so
+// the counter would hold personal data. MFA.SigninName keys it with a secret derived from the two-step key.
 
 import (
 	"context"
@@ -27,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The lockout settings' defaults and bounds; the table CHECKs (0053) are the authority.
+// The lockout settings' defaults and bounds; the table CHECK constraints are the authority.
 const (
 	DefaultSigninLockFailures = 5
 	MinSigninLockFailures     = 3
@@ -37,14 +31,12 @@ const (
 	MaxSigninLockMinutes      = 1440
 )
 
-// SigninName is the name hash for email (every lock on the account carries it): an HMAC under a key derived from
-// the two-step sign-in key. A nil MFA (every sign-in is refused then) falls back to a plain hash so the counter
-// still works.
+// SigninName is the HMAC name hash every lock on the account carries. A nil MFA (every sign-in refused) falls back
+// to a plain hash so the counter still works.
 func (m *MFA) SigninName(email string) string {
 	return m.throttleMAC(strings.ToLower(strings.TrimSpace(email)))
 }
 
-// SigninKey is the counter key for email signing in from the client address addr (clientip.From).
 func (m *MFA) SigninKey(email, addr string) string {
 	return m.throttleMAC("addr:v1\x00" + strings.ToLower(strings.TrimSpace(email)) + "\x00" + strings.TrimSpace(addr))
 }
@@ -59,7 +51,6 @@ func (m *MFA) throttleMAC(s string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// SigninLockedUntil is when a running lockout on the key ends, or nil. key is MFA.SigninKey.
 func SigninLockedUntil(ctx context.Context, db *pgxpool.Pool, key string) (*time.Time, error) {
 	var until *time.Time
 	err := db.QueryRow(ctx, `SELECT max(locked_until) FROM operator_signin_throttle
@@ -67,8 +58,7 @@ func SigninLockedUntil(ctx context.Context, db *pgxpool.Pool, key string) (*time
 	return until, err
 }
 
-// SigninFailed counts one wrong password for key (MFA.SigninKey) of the account name (MFA.SigninName).
-// newlyLockedUntil is set when this failure started a lockout.
+// SigninFailed counts one wrong password; newlyLockedUntil is set when it started a lockout.
 func SigninFailed(ctx context.Context, db *pgxpool.Pool, key, name string) (newlyLockedUntil *time.Time, err error) {
 	var n int
 	err = db.QueryRow(ctx, `SELECT failures, newly_locked_until FROM operator_signin_throttle_fail($1, $2)`,
@@ -76,8 +66,7 @@ func SigninFailed(ctx context.Context, db *pgxpool.Pool, key, name string) (newl
 	return newlyLockedUntil, err
 }
 
-// ClearSigninLocks removes every wrong-password count and lock on the account name (MFA.SigninName), from every
-// address. Returns how many there were.
+// ClearSigninLocks removes every count and lock on the account name, from every address.
 func ClearSigninLocks(ctx context.Context, q interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, name string) (int64, error) {
@@ -85,8 +74,7 @@ func ClearSigninLocks(ctx context.Context, q interface {
 	return tag.RowsAffected(), err
 }
 
-// SigninSucceeded clears the count for the key: the right password from one address does not reset what other
-// addresses have tried.
+// SigninSucceeded clears the count for the key only; it does not reset what other addresses have tried.
 func SigninSucceeded(ctx context.Context, db *pgxpool.Pool, key string) error {
 	_, err := db.Exec(ctx, `DELETE FROM operator_signin_throttle WHERE key_hash = $1`, key)
 	return err

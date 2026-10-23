@@ -1,12 +1,7 @@
 package main
 
-// CARD PAYMENT IN scd.
-//
-// scd owns the payment key (it seals provider credentials) and runs the checkout engine with two dedicated
-// credentials: svc_payment (checkout, intent, paid grant) and svc_payment_outcome (applying what the provider
-// said). svc_scd itself holds neither. What the browser reports is never proof: the portal's return page asks
-// scd, and scd asks the provider (payment.CheckoutEngine.Reconcile). A background reconciler does the same for
-// every open checkout, so a client who paid and never came back is still granted.
+// Card payment: scd owns the payment key and runs the checkout engine under svc_payment and svc_payment_outcome (svc_scd holds neither).
+// What the browser reports is never proof: scd asks the provider, and a background reconciler grants clients who paid and never returned.
 
 import (
 	"context"
@@ -34,8 +29,7 @@ import (
 
 const paymentKeyFile = "payment_dek.key"
 
-// cardState is scd's card-payment wiring. card is nil when card payment is not deployed or not configured;
-// every surface then reports "not ready" and nothing executes.
+// cardState is scd's card-payment wiring; card is nil when payment is not deployed or configured, and every surface then reports not ready.
 type cardState struct {
 	engine     *payment.CheckoutEngine
 	key        payment.PaymentKey
@@ -43,11 +37,10 @@ type cardState struct {
 	unready    string // why card payment cannot run on this appliance at all ("" when it can)
 	statusMu   sync.Mutex
 	lastStatus map[string]time.Time // per-transaction rate limit for portal-driven status checks
-	verify     *cardVerifier        // provider-accepted credentials (card_verify.go)
+	verify     *cardVerifier
 }
 
-// initCard builds the card engine when the deployment ceiling allows card payment. Missing credentials or key
-// are not fatal: card payment is simply not ready, which the Payment methods screen explains.
+// initCard builds the card engine when the deployment ceiling allows it; missing credentials or key make card payment not ready, not fatal.
 func (s *server) initCard(ctx context.Context, secretsDir string) {
 	s.card = &cardState{lastStatus: map[string]time.Time{}, verify: newCardVerifier()}
 	s.card.adapters = map[string]payment.HostedCheckoutProvider{"stripe": stripe.New()}
@@ -101,9 +94,8 @@ func (s *server) initCard(ctx context.Context, secretsDir string) {
 	slog.Info("card payment engine ready", "live_allowed", s.card.engine.LiveAllowed)
 }
 
-// cardReadiness is the readiness probe for the card_payment module: a default ACTIVE account whose provider
-// has an adapter, whose credentials open and are complete, whose mode is permitted, and whose provider is
-// answering. Readiness only stops NEW purchases; configuration and history stay available.
+// cardReadiness: default ACTIVE account whose provider has an adapter, complete openable credentials, a permitted mode and an answering provider.
+// It only stops NEW purchases; configuration and history stay available.
 func (s *server) cardReadiness(ctx context.Context, tenantID, siteID string) (bool, []string) {
 	if s.card == nil || s.card.unready != "" {
 		r := "CARD_NOT_CONFIGURED"
@@ -134,7 +126,6 @@ func (s *server) cardReadiness(ctx context.Context, tenantID, siteID string) (bo
 	if !s.card.engine.Health.Healthy(acct.ID) {
 		return false, []string{"PROVIDER_UNREACHABLE"}
 	}
-	// The provider must have ACCEPTED these exact credentials recently (card_verify.go).
 	fp := credentialFingerprint(acct.ID, acct.Mode, acct.Credentials)
 	mode, merchant, creds := acct.Mode, acct.MerchantRef, acct.Credentials
 	if !s.card.verify.ready(fp, func(ctx context.Context) error { return ad.TestConnection(ctx, mode, merchant, creds) }) {
@@ -143,7 +134,6 @@ func (s *server) cardReadiness(ctx context.Context, tenantID, siteID string) (bo
 	return true, nil
 }
 
-// cardHasRecords keeps the card screens manageable when the module is withdrawn but history exists.
 func (s *server) cardHasRecords(ctx context.Context, tenantID, siteID string) bool {
 	if s.db == nil {
 		return false
@@ -166,8 +156,7 @@ func portalBase(raw string) string {
 	return raw
 }
 
-// startCardCheckout is called by commerceConfirm when a Card payment purchase was created. It starts the
-// provider checkout and answers with where to send the client. Nothing is granted here.
+// startCardCheckout starts the provider checkout and answers where to send the client; nothing is granted here.
 func (s *server) startCardCheckout(w http.ResponseWriter, r *http.Request, purchaseID, settlementID, returnBase, name string) {
 	base := portalBase(returnBase)
 	if s.card == nil || s.card.engine == nil || base == "" {
@@ -197,15 +186,12 @@ func (s *server) startCardCheckout(w http.ResponseWriter, r *http.Request, purch
 
 type purchaseStatusReq struct {
 	PurchaseID string `json:"purchase_id"`
-	// IP and MAC are server-derived by portald from the connection. The device is resolved from them here, so
-	// the return page works even when the client's browser dropped every cookie.
+	// IP and MAC are derived by portald from the connection; the device is resolved from them so the return page works without cookies.
 	IP  string `json:"ip"`
 	MAC string `json:"mac"`
 }
 
-// purchaseStatus answers where one purchase stands, for the portal's pending and return pages. It is bound to
-// the device that made the purchase: another device learns nothing. For a card payment it asks the provider
-// (rate limited); what the browser says plays no part.
+// purchaseStatus is bound to the device that made the purchase; for card payments it asks the provider (rate limited), never the browser.
 func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	var req purchaseStatusReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PurchaseID == "" {
@@ -255,8 +241,7 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	if eid != nil {
 		out["entitlement_id"] = *eid
 	}
-	// How long the provider's checkout lives (the site's card payment setting), so the portal's pending page waits
-	// exactly that long before it says it could not confirm the payment (audit P-7), instead of a fixed 20 minutes.
+	// The provider's checkout lifetime (site setting), so the pending page waits exactly that long before saying it could not confirm.
 	if method == "ONLINE_PAYMENT" {
 		var exp int
 		if err := s.db.QueryRow(ctx, `SELECT checkout_expiry_minutes FROM iam_v2.card_payment_settings_get($1,$2)`,
@@ -267,7 +252,6 @@ func (s *server) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// purchaseView is the client-facing state vocabulary.
 func purchaseView(purchaseState, settlementStatus string) string {
 	switch purchaseState {
 	case "GRANTED":
@@ -326,8 +310,7 @@ func (s *server) cardReconcileLoop(ctx context.Context) {
 		for _, id := range s.card.engine.CapturedStillUngranted(cctx, s.tenID, s.siteID) {
 			_, _ = s.card.engine.Reconcile(cctx, s.tenID, s.siteID, id)
 		}
-		// Purchases whose checkout was never created (the intent was refused) are failed once they are older
-		// than any checkout could be, so the package is offered again (migration 0121; audited per purchase).
+		// Fail purchases whose checkout was never created once older than any checkout could be, so the package is offered again.
 		if n, ferr := s.card.engine.FailUnstartedPurchases(cctx, s.tenID, s.siteID); ferr != nil {
 			slog.Warn("card: unstarted purchase sweep failed", "err", ferr)
 		} else if n > 0 {
@@ -341,10 +324,8 @@ func (s *server) cardReconcileLoop(ctx context.Context) {
 	}
 }
 
-// paymentGardenDomains are the pre-sign-in domains card payment needs: the declared hosted-payment domains of
-// the providers of this site's ACTIVE accounts, plus the site's bounded extra list. Only while card payment is
-// licensed, enabled and deployed (readiness is deliberately ignored here so a flapping provider does not tear
-// a client's payment page down mid-payment).
+// paymentGardenDomains: pre-sign-in domains card payment needs, only while licensed, enabled and deployed. Readiness is ignored
+// so a flapping provider does not tear down a payment page mid-payment.
 func (s *server) paymentGardenDomains(ctx context.Context) []string {
 	if s.card == nil || s.db == nil {
 		return nil
@@ -358,9 +339,7 @@ func (s *server) paymentGardenDomains(ctx context.Context) []string {
 	var out []string
 	add := func(d string) {
 		d = strings.ToLower(strings.TrimSpace(d))
-		// A wildcard cannot be honoured: the garden opens the IP addresses a NAME resolves to, and "*.x" names
-		// no host. Opening the apex instead (the old behaviour) allowed a host nobody asked for and still left
-		// every subdomain closed. Such an entry is skipped; new ones are refused at save.
+		// A wildcard cannot be honoured (the garden opens the IPs a name resolves to); skip it. New ones are refused at save.
 		if strings.HasPrefix(d, "*.") {
 			return
 		}
@@ -394,8 +373,6 @@ func (s *server) paymentGardenDomains(ctx context.Context) []string {
 	}
 	return out
 }
-
-// ---- administration (edged proxies these; admin socket only) ---------------------------------------------
 
 func (s *server) paymentAdminRoutes(r chi.Router) {
 	r.Get("/v1/payment/providers", s.paymentProviders)
@@ -458,8 +435,7 @@ func (s *server) paymentAccounts(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt   time.Time `json:"updated_at"`
 		HasSecrets  bool      `json:"has_credentials"`
 		SetKeys     []string  `json:"credential_keys_set"`
-		// ProviderConverts: the provider presents in the package's currency and settles in this account's
-		// (migration 0112). ConversionSupported: the provider can do that at all (Stripe yes, Paymob no).
+		// ProviderConverts: the provider presents in the package currency and settles in the account's. ConversionSupported: the provider can (Stripe yes, Paymob no).
 		ProviderConverts    bool `json:"provider_converts"`
 		ConversionSupported bool `json:"conversion_supported"`
 	}
@@ -582,8 +558,7 @@ func (s *server) paymentAccountSave(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.DisplayName), req.Currency, payment.Mode(req.Mode), req.Status, req.IsDefault, toSeal,
 		strings.TrimSpace(req.Operator), strings.TrimSpace(req.Reason))
 	if err != nil {
-		// Open checkouts pin the account's identity (migration 0121): a conflict with work in flight, not a
-		// malformed request.
+		// Open checkouts pin the account's identity: a conflict with work in flight, not a malformed request.
 		if strings.Contains(err.Error(), "PAYMENT_ACCOUNT_CHECKOUTS_OPEN") {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "checkouts_open", "message": sanitizeDBError(err)})
 			return
@@ -676,7 +651,6 @@ func sanitizeDBError(err error) string {
 	return m
 }
 
-// kickGarden re-reconciles the walled garden soon, so an account or domain change reaches the portal quickly.
 func (s *server) kickGarden() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -690,7 +664,6 @@ func (s *server) kickGarden() {
 	}()
 }
 
-// paymentAccountConversion marks an account provider-converts through the audited definer (Stripe only).
 func (s *server) paymentAccountConversion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ProviderConverts bool   `json:"provider_converts"`
@@ -701,9 +674,7 @@ func (s *server) paymentAccountConversion(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid", "message": "operator is required"})
 		return
 	}
-	// ONLY THE DEFAULT ACCOUNT TAKES CHECKOUTS (p4_resolve_payment_account_v2), so provider-converts on any
-	// other account changes nothing a client sees -- the switch said "on" and did nothing. Turning it on is
-	// refused there; turning it off is always allowed.
+	// Only the default account takes checkouts (p4_resolve_payment_account_v2), so provider-converts elsewhere would silently do nothing; turning it on is refused, off is always allowed.
 	if req.ProviderConverts {
 		var isDefault bool
 		if err := s.db.QueryRow(r.Context(), `SELECT is_default AND status='ACTIVE' FROM iam_v2.payment_provider_accounts

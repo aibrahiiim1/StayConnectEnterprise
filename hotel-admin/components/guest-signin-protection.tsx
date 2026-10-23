@@ -1,17 +1,6 @@
 "use client";
 
-// GUEST SIGN-IN PROTECTION — the three numbers a hotel administrator may change, on the screen where they
-// already decide how guests sign in.
-//
-// WHY THESE ARE SETTINGS AT ALL. A threshold, a waiting period and an observation window are exactly the
-// values a property discovers it has wrong at 22:00 on a full night — a conference floor of guests mistyping
-// a surname, a resort with elderly guests who need longer to read the message. Compiled in, correcting them
-// means a code change, a build and a deployment to fix a number. So they are persisted, site-scoped,
-// permission-checked, validated and audited, and they take effect on the next submission.
-//
-// WHAT IS DELIBERATELY NOT HERE. There is no "enable protection" switch. A security control that must be
-// switched on is switched off wherever nobody remembered, and the property that most needs it is the one that
-// never opened this screen. Absence of a saved policy means the approved defaults, not "off".
+// Sign-in protection is always on; sites without saved policy use approved defaults.
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
@@ -30,8 +19,7 @@ import { formatDate } from "@/lib/utils";
 
 type Draft = { max: string; window: string; restriction: string };
 
-// The approved defaults a site runs on until it saves a policy of its own. The allowed range for each comes
-// from the SERVER's response, so the form and the thing that enforces it cannot drift apart.
+// Read allowed ranges from the server so the form matches enforcement.
 const STANDARD = { max: 5, window: 60, restriction: 60 } as const;
 
 function draftOf(p: GuestSignInProtection): Draft {
@@ -42,7 +30,6 @@ function draftOf(p: GuestSignInProtection): Draft {
   };
 }
 
-/** A whole number inside the server's bounds, or the sentence that says it is not. */
 function invalid(value: string, min: number, max: number): string | undefined {
   const n = Number(value);
   const bad = value.trim() === "" || !Number.isInteger(n) || n < min || n > max;
@@ -56,8 +43,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
   const [err, setErr] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState("");
-  // A change applies to every client on the site, so it is confirmed with a reason and the operator's password
-  // (edged refuses it otherwise).
+  // Site-wide changes require reason and operator password.
   const [confirming, setConfirming] = useState(false);
   const [saveErr, setSaveErr] = useState<unknown>(null);
 
@@ -136,7 +122,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             </HelpTip>
             {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
-          {/* Visible on purpose: "standard settings" must never read as "protection is off". */}
+          {/* Make clear that default settings still protect sign-in. */}
           <CardDescription className="max-w-2xl">
             It is always on — these settings decide how strict it is, not whether it runs.
           </CardDescription>
@@ -144,7 +130,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
       </CardHeader>
       <CardBody className="space-y-5">
         {!canWrite && (
-          // The desk cannot retune protection: reception may release one device, only IT changes the thresholds.
+          // Reception may release a device; only IT may change thresholds.
           <ReadOnlyNotice>Your role can see these settings but not change them.</ReadOnlyNotice>
         )}
         {err ? <ErrorBanner err={err} className="mb-0" /> : null}
@@ -192,9 +178,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
           />
         </div>
 
-        {/* SAID PLAINLY, BECAUSE IT IS THE ONE THING AN OPERATOR WILL EXPECT TO WORK THE OTHER WAY. Somebody
-            shortening the wait to help a client who is waiting right now would otherwise watch nothing happen
-            and assume the setting is broken. */}
+        {/* New wait settings do not shorten a restriction already running. */}
         <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-3 text-sm text-muted-foreground">
           <p>
             New settings apply to <strong>what happens next</strong>. A device already waiting keeps the time it

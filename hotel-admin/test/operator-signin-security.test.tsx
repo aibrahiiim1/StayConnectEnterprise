@@ -2,16 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// ADMIN CONSOLE SIGN-IN SECURITY, AS THE CONSOLE PRESENTS IT (audit N-1, N-8, N-18; edged migration 0119).
-//
-//   - /login?next= only ever returns to a path on this console.
-//   - a must-change session sees only the password form; the form needs the current password and a new one
-//     that meets the policy, and sends exactly { current_password, new_password }.
-//   - an administrator's reset says it signs the operator out, defaults to "must choose their own", and is not
-//     offered for the administrator's own row (that is Change my password, with the current password).
-//   - sign-in protection is shown with its bounds, editable only by a role that may change operators, and is
-//     saved with a reason and the password.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
@@ -164,7 +154,6 @@ describe("Operators (N-8)", () => {
     expect(box.checked).toBe(true);
     await userEvent.type(within(dialog).getByLabelText(/^New password/), "temporary-pass-1");
     await userEvent.type(within(dialog).getByLabelText(/Type it again/), "temporary-pass-1");
-    // B7: the administrator's own password confirms the reset.
     expect(within(dialog).getByRole("button", { name: "Reset password" })).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText(/^Your password/), "admin-pass-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Reset password" }));

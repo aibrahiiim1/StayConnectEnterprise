@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// A ROOM GUEST, A VOUCHER GUEST AND AN ACCOUNT GUEST READ ONE SENTENCE FOR ONE LICENCE CONDITION.
-//
-// scd refuses every method through the same licence decision; these assert that portald turns that decision
-// into the same words whichever method met it, that the room sign-in's closed set carries them (so the
-// disclosure test still holds), and that the translated page knows them.
+// Room, voucher and account guests read one sentence for one licence condition, and the room sign-in's closed set carries them.
 func TestLicenceRefusalsReadTheSameForEveryMethod(t *testing.T) {
 	if got := messageForClass("CAPACITY", 0); got != guestCapacityMessage {
 		t.Errorf("room sign-in at capacity reads %q", got)
@@ -34,7 +30,7 @@ func TestLicenceRefusalsReadTheSameForEveryMethod(t *testing.T) {
 	if isLicenceRefusal("AUTH_DENIED") || isLicenceRefusal("MAX_DEVICES_REACHED") {
 		t.Error("a credential or device-limit refusal is not a licence refusal")
 	}
-	// The English of each translation key IS the server's sentence, so the page can translate it.
+	// The English of each translation key is the server's sentence, so the page can translate it.
 	en := builtinStrings["en"]
 	if en["err.capacity"] != guestCapacityMessage || en["err.method.disabled"] != guestLicenseRefusedMessage {
 		t.Error("the capacity / licence sentences and their translation keys disagree")

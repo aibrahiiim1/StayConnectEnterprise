@@ -1,42 +1,11 @@
 package main
 
-// USAGE EXPLORER — the screen a hotel opens during an argument.
-//
-// The two questions this exists to answer, in the words they arrive in:
-//
-//     "How much internet did room 4202 use during this stay?"
-//     "How much data did this device use between these dates?"
-//
-// The first is asked of an ACCESS SOURCE -- whatever granted the access: a client account, a voucher or a
-// Hotel room/stay (see "by access source" at the end of this file). Room and stay detail belongs only to the
-// stay source.
-//
-// EVERY NUMBER HERE IS MEASURED, NEVER DERIVED. There is no estimation, no interpolation and no filling of
-// gaps. A stay with no sessions reports no usage rather than zero-with-an-asterisk, and a session whose
-// samples stop reports what was sampled. A figure an operator cannot defend line by line is worse than no
-// figure at all, because it will be quoted back at them by a guest who has their own numbers.
-//
-// WHAT THE NUMBERS COME FROM
-// --------------------------
-//   iam_v2.sessions             the per-session byte totals, start, end and end reason. Written by acctd from
-//                               the accounting pipeline; this is the authoritative session record.
-//   iam_v2.accounting_records   the durable samples behind those totals. The timeline view reads these, so a
-//                               disputed total can be shown as the samples that make it up.
-//   iam_v2.entitlements         the quota that applied and why access ended, plus the link to the stay.
-//   iam_v2.stays               the room, the reservation and the PMS interface that scopes them.
-//   iam_v2.devices             the MAC an operator can read off a handset.
-//
-// TWO RULES THIS FILE IS BUILT AROUND, because both are easy to break by accident here:
-//
-//   A ROOM NUMBER IS NOT AN IDENTITY. Room "4202" means nothing on its own — two properties behind two PMS
-//   interfaces can both have one. Every room lookup in this file is scoped by pms_interface_id AND resolves
-//   to a STAY, which is the thing that actually has an occupant, a period and usage. A room search that
-//   matched across interfaces would be a cross-property data leak wearing a convenience feature's clothes.
-//
-//   A MAC IS NOT A PERSON. The device view reports what a device did and which stays it was associated with.
-//   It does not name a guest, and the wording it feeds says "device" throughout. A hotel investigating a
-//   dispute needs to know which handset burned the quota; it does not need, and must not be handed, an
-//   identity claim the data cannot support.
+// Usage Explorer: measured usage per access source (client account, voucher or Hotel room/stay) and per device.
+// Every number is measured, never estimated or interpolated; a stay with no sessions reports no usage.
+// Sources: iam_v2.sessions (authoritative per-session byte totals), accounting_records (the samples behind them),
+// entitlements (quota, end reason, stay link), stays, devices (MAC).
+// A room number is not an identity: every room lookup is scoped by pms_interface_id and resolves to a stay, or it would leak across properties.
+// A MAC is not a person: the device view names no guest, only the stays the device was associated with.
 
 import (
 	"context"
@@ -55,22 +24,15 @@ import (
 
 func (s *server) usageRoutes() http.Handler {
 	r := chi.NewRouter()
-	// Find the stay to investigate: by room, reservation, or simply what used the most this week.
 	r.Get("/stays", s.listUsageStays)
-	// One stay, in full: totals, quota, devices, sessions, why access ended.
 	r.Get("/stays/{stay_id}", s.getStayUsage)
-	// One device, over a period the operator chooses.
 	r.Get("/devices/{mac}", s.getDeviceUsage)
-	// The samples behind one session's total, for when the total itself is what is disputed.
 	r.Get("/sessions/{session_id}/samples", s.listSessionSamples)
-	// BY ACCESS SOURCE: whatever granted the access -- a client account, a voucher or a Hotel room/stay.
-	// /stays above stays as it was (deep links and older screens use it); these are the generic form.
+	// By access source: the generic form of /stays, which stays as is for deep links and older screens.
 	r.Get("/sources", s.listUsageSources)
 	r.Get("/sources/{type}/{id}", s.getSourceUsage)
 	return r
 }
-
-// ---------------------------------------------------------------------------------- shared shapes --------
 
 type usageTotals struct {
 	BytesDown int64 `json:"bytes_down"`
@@ -82,7 +44,7 @@ type usageTotals struct {
 
 type usageStayRow struct {
 	StayID string `json:"stay_id"`
-	// Room and interface travel TOGETHER, always. See the rule at the top of this file.
+	// Room and interface always travel together.
 	Room          string      `json:"room"`
 	PMSInterface  string      `json:"pms_interface"`
 	Reservation   string      `json:"reservation,omitempty"`
@@ -96,14 +58,9 @@ type usageStayRow struct {
 	EndReason     string      `json:"end_reason,omitempty"`
 }
 
-// usageSearchHeader carries the access-source search text (see listUsageSources).
 const usageSearchHeader = "X-Usage-Search"
 
-// parseWindow reads an explicit from/to, defaulting to the last 30 days.
-//
-// A DISPUTE HAS A PERIOD, and it is usually not "all time". Defaulting to everything would make the first
-// answer the operator sees the least useful one, and on an appliance that has been running for a year it
-// would also be the slowest.
+// parseWindow reads an explicit from/to, defaulting to the last 30 days (a dispute has a period; all-time is slowest and least useful).
 func parseWindow(r *http.Request) (from, to time.Time) {
 	to = time.Now().UTC()
 	from = to.AddDate(0, 0, -30)
@@ -127,19 +84,12 @@ func queryLimit(r *http.Request, def, max int) int {
 	return def
 }
 
-// ---------------------------------------------------------------------------- finding the stay -----------
-
-// listUsageStays finds stays to investigate.
-//
-// Ordered by what was actually used, descending, because an operator arriving with "someone is hammering the
-// wifi" has no room number yet — and one arriving WITH a room number filters to it. Both journeys start here.
+// listUsageStays orders by use, descending: an operator without a room number starts there, and one with a room filters.
 func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 	from, to := parseWindow(r)
 	limit := queryLimit(r, 50, 200)
 
-	// The room/reservation filter is one field in the UI, because an operator has "4202" or "BK-88213" in
-	// front of them and should not have to know which kind of thing it is.
-	// In the X-Usage-Search header like the other usage lists; ?q= is still read for an older console.
+	// The room/reservation filter is one UI field. The search travels in X-Usage-Search; ?q= is still read for an older console.
 	q, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return
@@ -213,8 +163,6 @@ func (s *server) listUsageStays(w http.ResponseWriter, r *http.Request) {
 	writeList(w, out)
 }
 
-// ------------------------------------------------------------------------- one stay, in full -------------
-
 type stayDeviceRow struct {
 	MAC       string     `json:"mac"`
 	BytesDown int64      `json:"bytes_down"`
@@ -239,8 +187,7 @@ type staySessionRow struct {
 	BytesAll  int64      `json:"bytes_total"`
 }
 
-// stayHeaderSQL reads one stay, with the room ALWAYS carrying its interface, and the allowance of the most
-// recent entitlement granted under it.
+// stayHeaderSQL reads one stay, the room always carrying its interface, with the allowance of its most recent entitlement.
 const stayHeaderSQL = `
 		SELECT st.id::text,
 		       COALESCE(st.normalized_room_number, ''),
@@ -263,23 +210,20 @@ type stayUsageDetail struct {
 	Plan     string           `json:"service_plan,omitempty"`
 	Devices  []stayDeviceRow  `json:"devices"`
 	Sessions []staySessionRow `json:"sessions"`
-	// The period the totals cover, the same [from, to) as the list.
-	From time.Time `json:"from"`
-	To   time.Time `json:"to"`
+	From     time.Time        `json:"from"`
+	To       time.Time        `json:"to"`
 }
 
 // errNoSuchSource is "this site has no record of it" -- a 404, never a 500.
 var errNoSuchSource = errors.New("no such access source at this site")
 
-// readStayUsage reads one stay in full. It is the stay case of both /usage/stays/{id} and
-// /usage/sources/stay/{id}, so the two can never disagree.
+// readStayUsage is the stay case of both /usage/stays/{id} and /usage/sources/stay/{id}, so they cannot disagree.
 func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time.Time) (stayUsageDetail, error) {
 	out := stayUsageDetail{Devices: []stayDeviceRow{}, Sessions: []staySessionRow{}, From: from, To: to}
 	if err := s.db.QueryRow(ctx, stayHeaderSQL, stayID, s.tenantID, s.siteID).Scan(
 		&out.Stay.StayID, &out.Stay.Room, &out.Stay.PMSInterface, &out.Stay.Reservation,
 		&out.Stay.Status, &out.Stay.Arrival, &out.Stay.Departure, &out.Stay.EffectiveOut,
 		&out.Stay.QuotaBytes, &out.Stay.ConsumedBytes, &out.Stay.EndReason, &out.Plan); err != nil {
-		// As before: an unknown or malformed stay id reads as "no such stay", not as a failure.
 		return out, errNoSuchSource
 	}
 	devices, sessions, totals, err := s.subjectDevicesAndSessions(ctx, "stay", stayID, from, to)
@@ -290,7 +234,6 @@ func (s *server) readStayUsage(ctx context.Context, stayID string, from, to time
 	return out, nil
 }
 
-// getStayUsage answers "how much internet did this room use during this stay".
 func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
 	from, to := parseWindow(r)
 	out, err := s.readStayUsage(r.Context(), chi.URLParam(r, "stay_id"), from, to)
@@ -306,9 +249,7 @@ func (s *server) getStayUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// subjectDevicesSQL is the per-device breakdown of one access source. A source usually has two or three
-// devices and the dispute is normally about one of them, so this is the breakdown an operator reads first.
-// The subject column comes from usageSubjectColumn, never from the request.
+// subjectDevicesSQL is the per-device breakdown of one access source. The subject column comes from usageSubjectColumn, never the request.
 func subjectDevicesSQL(col string) string {
 	return `
 		SELECT COALESCE(d.mac::text, ''),
@@ -323,8 +264,7 @@ func subjectDevicesSQL(col string) string {
 		 ORDER BY 2 DESC`
 }
 
-// subjectSessionsSQL is the sessions of one access source, newest first: when access started, when it ended
-// and why.
+// subjectSessionsSQL is the sessions of one access source, newest first.
 func subjectSessionsSQL(col string) string {
 	return `
 		SELECT se.id::text, COALESCE(d.mac::text,''), COALESCE(se.ip::text,''),
@@ -338,12 +278,8 @@ func subjectSessionsSQL(col string) string {
 		 ORDER BY se.started DESC NULLS LAST LIMIT 200`
 }
 
-// subjectDevicesAndSessions reads the device breakdown and the sessions of one access source, and totals them.
-// The totals are the sum of the device rows, which are the sum of the sessions: nothing else is added.
-//
-// OVER THE SAME PERIOD AS THE LIST. The detail used to sum every session the source ever had while the list it
-// was opened from summed the last 30 days, so the two totals for one room disagreed on the same screen. Both
-// now read [from, to): the list's period travels into the detail.
+// subjectDevicesAndSessions reads the device breakdown and sessions of one source over the list's [from, to) period, so detail and list totals agree.
+// Totals are the sum of the device rows, which are the sum of the sessions.
 func (s *server) subjectDevicesAndSessions(ctx context.Context, kind, id string, from, to time.Time) ([]stayDeviceRow, []staySessionRow, usageTotals, error) {
 	devices, sessions := []stayDeviceRow{}, []staySessionRow{}
 	var t usageTotals
@@ -391,23 +327,8 @@ func (s *server) subjectDevicesAndSessions(ctx context.Context, kind, id string,
 	return devices, sessions, t, srows.Err()
 }
 
-// ------------------------------------------------------------------------ one device, one period ---------
-
-// macFromPath reads the {mac} path parameter, whatever shape the caller sent it in.
-//
-// WHY THIS IS NOT JUST chi.URLParam. A MAC contains colons, and a colon is a reserved character in a URL
-// path, so a correct client escapes it: encodeURIComponent turns 7e:58:… into 7e%3A58%3A…. chi hands back
-// the RAW segment, still escaped, and `$1::macaddr` then fails to cast. The screen reported "this appliance
-// has no record of that device" about a device with twelve sessions and 576 MB of traffic, because a cast
-// error and an empty result had been given the same answer.
-//
-// The client was not wrong and neither was the database. The server was simply reading an encoded string as
-// if it were a literal one. So: unescape first, then PARSE it as hardware address rather than trusting the
-// text -- which also makes the endpoint accept the dash and dot notations an operator might paste from a
-// router or a switch, and normalise every one of them to the single form Postgres stores.
-//
-// The second return value distinguishes "you did not give me a MAC" from "I have no record of it". Those are
-// different answers and only one of them is about the device.
+// macFromPath reads the {mac} path parameter. chi returns the raw segment, still escaped (7e%3A58%3A...), so unescape first, then parse it
+// as a hardware address (accepting dash and dot notation, normalised to Postgres' form). The second return value separates "not a MAC" from "no record of it".
 func macFromPath(r *http.Request) (string, bool) {
 	raw := chi.URLParam(r, "mac")
 	if unescaped, err := url.PathUnescape(raw); err == nil {
@@ -419,17 +340,13 @@ func macFromPath(r *http.Request) (string, bool) {
 	}
 	hw, err := net.ParseMAC(raw)
 	if err != nil || len(hw) != 6 {
-		// PostgreSQL's macaddr is six bytes. An EUI-64 or an Infiniband address parses here but cannot be
-		// stored there, so refusing it now is better than a cast error later.
+		// PostgreSQL macaddr is six bytes; EUI-64 and Infiniband addresses parse but cannot be stored, so refuse them now.
 		return "", false
 	}
 	return hw.String(), true
 }
 
-// getDeviceUsage answers "how much did this device use between these dates".
-//
-// It reports a DEVICE. It does not name a guest, and it does not imply the MAC identifies one -- it lists the
-// stays the device was associated with over the period, which is a different and defensible claim.
+// getDeviceUsage reports a DEVICE over a period, listing the stays it was associated with; it does not claim the MAC identifies a guest.
 func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 	mac, ok := macFromPath(r)
 	if !ok {
@@ -452,14 +369,12 @@ func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 	out.MAC, out.From, out.To = mac, from, to
 	out.Sessions, out.Stays = []staySessionRow{}, []usageStayRow{}
 
-	// THREE OUTCOMES, THREE ANSWERS. Collapsing them into one 404 is what hid this: a device with twelve
-	// sessions was reported as unknown because the query had errored, not because the row was absent.
+	// Three outcomes, three answers: a query error must not be reported as an unknown device.
 	switch err := s.db.QueryRow(r.Context(),
 		`SELECT first_seen, last_seen FROM iam_v2.devices
 		  WHERE mac = $1::macaddr AND tenant_id = $2 AND site_id = $3`,
 		mac, s.tenantID, s.siteID).Scan(&out.FirstSeen, &out.LastSeen); {
 	case err == nil:
-		// found
 	case errors.Is(err, pgx.ErrNoRows):
 		jsonErr(w, http.StatusNotFound, "not_found", "this appliance has no record of that device")
 		return
@@ -519,18 +434,15 @@ func (s *server) getDeviceUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// ------------------------------------------------------------- the samples behind one total --------------
-
 type usageSample struct {
 	At        time.Time `json:"sampled_at"`
 	BytesDown int64     `json:"bytes_down"`
 	BytesUp   int64     `json:"bytes_up"`
 }
 
-// sessionSamplesMax is how many samples one request returns, oldest first.
 const sessionSamplesMax = 2000
 
-// listSessionSamples is what makes a disputed total defensible: the durable samples it was summed from.
+// listSessionSamples returns the durable samples a session total was summed from.
 func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "session_id")
 	rows, err := s.db.Query(r.Context(), `
@@ -561,8 +473,7 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the accounting samples could not be read")
 		return
 	}
-	// A CUT LIST SAYS SO. Past sessionSamplesMax the samples shown no longer add up to the session total, and
-	// the screen must say "the first N" rather than present a partial sum as the whole.
+	// Past sessionSamplesMax the samples no longer add up to the total, so the response must say it is a cut list.
 	truncated := len(out) > sessionSamplesMax
 	if truncated {
 		x := out[sessionSamplesMax]
@@ -570,63 +481,41 @@ func (s *server) listSessionSamples(w http.ResponseWriter, r *http.Request) {
 		up -= x.BytesUp
 		out = out[:sessionSamplesMax]
 	}
-	// The sum is returned WITH the samples so the screen can show that they add up to the session total
-	// rather than asking the operator to trust that they do.
+	// The sum is returned with the samples so the screen can show they add up to the session total.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"samples": out, "sample_count": len(out), "truncated": truncated,
 		"bytes_down": down, "bytes_up": up, "bytes_total": down + up,
 	})
 }
 
-// ------------------------------------------------------------------ by access source -------------------
-//
-// AN ACCESS SOURCE is the thing that granted access: the SUBJECT of the entitlement a session ran under,
-// which is exactly one of stay, client account, voucher or guest principal (ent_one_subject). The totals are
-// the same sums of iam_v2.sessions bytes as everywhere else in this file -- the grouping changes, the
-// accounting does not.
-//
-// WHAT EACH SOURCE MAY SAY ABOUT ITSELF, and why:
-//
-//   stay     room + PMS interface (always together), reservation, stay status, arrival, departure. Exactly
-//            what /usage/stays already says.
-//   account  the client account's USERNAME. Operators already read it on Client accounts, where they created
-//            it; it is the handle they will be given at the desk ("my login is 4202smith"). The account's
-//            display name, notes and password hash are NOT read: a display name is a guest name.
-//   voucher  the CARD REFERENCE -- the voucher's id, which the voucher sheet already prints as "Card
-//            reference". Never the code, and nothing from iam_v2.vouchers: svc_edged holds no SELECT there
-//            (deploy/gatep/svc-voucher-iamv2-grants.sql), so the batch is not named. The reference lives on
-//            the entitlement itself.
-//
-//   The fourth subject, the email / phone / social sign-in (guest_principal_id), is NOT offered: what
-//   identifies it lives in iam_v2.guest_principals and guest_principal_identities, which svc_edged may not
-//   read. A source the operator cannot recognise is not a source worth listing. Its sessions still appear
-//   under "By device".
+// By access source: the subject of the entitlement a session ran under (stay, client account, voucher or guest principal; ent_one_subject).
+// Totals are the same iam_v2.sessions sums as elsewhere in this file.
+// stay: room + PMS interface (always together), reservation, status, arrival, departure.
+// account: the USERNAME only, never display name, notes or password hash (a display name is a guest name).
+// voucher: the card reference (the voucher id); never the code, and nothing from iam_v2.vouchers (svc_edged has no SELECT there).
+// The guest-principal source (email/phone/social) is not offered: its identity tables are unreadable here. Its sessions still appear under "By device".
 
-// usageSubjectColumn maps a source type to the entitlement column that holds it. It is the ONLY way a source
-// type reaches SQL text: the request picks a key, never a column.
+// usageSubjectColumn maps a source type to its entitlement column; it is the only way a source type reaches SQL text.
 var usageSubjectColumn = map[string]string{
 	"stay":    "stay_id",
 	"account": "guest_account_id",
 	"voucher": "voucher_id",
-	// A package chosen without signing in: the anonymous access subject (0095). Identified only by its
-	// opaque reference -- it carries no name, no MAC and no identity factor to show.
+	// A package chosen without signing in: the anonymous access subject, identified only by its opaque reference.
 	"open": "anonymous_subject_id",
 }
 
 type usageSourceRow struct {
-	Type string `json:"source_type"`
-	ID   string `json:"source_id"`
-	// account only
+	Type     string `json:"source_type"`
+	ID       string `json:"source_id"`
 	Username string `json:"account_username,omitempty"`
 	// stay only. Room and interface travel TOGETHER, always.
-	Room         string     `json:"room,omitempty"`
-	PMSInterface string     `json:"pms_interface,omitempty"`
-	Reservation  string     `json:"reservation,omitempty"`
-	StayStatus   string     `json:"stay_status,omitempty"`
-	Arrival      *time.Time `json:"arrival,omitempty"`
-	Departure    *time.Time `json:"departure,omitempty"`
-	EffectiveOut *time.Time `json:"effective_checkout_at,omitempty"`
-	// every source
+	Room          string      `json:"room,omitempty"`
+	PMSInterface  string      `json:"pms_interface,omitempty"`
+	Reservation   string      `json:"reservation,omitempty"`
+	StayStatus    string      `json:"stay_status,omitempty"`
+	Arrival       *time.Time  `json:"arrival,omitempty"`
+	Departure     *time.Time  `json:"departure,omitempty"`
+	EffectiveOut  *time.Time  `json:"effective_checkout_at,omitempty"`
 	Totals        usageTotals `json:"totals"`
 	QuotaBytes    *int64      `json:"quota_bytes,omitempty"`
 	ConsumedBytes *int64      `json:"consumed_bytes,omitempty"`
@@ -634,10 +523,9 @@ type usageSourceRow struct {
 	LastActivity  *time.Time  `json:"last_activity,omitempty"`
 }
 
-// usageSourceListSQL lists access sources with their measured totals over [from, to).
-// $1 tenant, $2 site, $3 from, $4 to, $5 source type (empty for every type), $6 the search text, LIKE-escaped.
-// The search matches what each source can honestly be searched by: a stay by room or reservation, an account
-// by username, a voucher by the start of its card reference.
+// usageSourceListSQL lists access sources with measured totals over [from, to).
+// $1 tenant, $2 site, $3 from, $4 to, $5 source type (empty for every type), $6 LIKE-escaped search text.
+// The search matches what each source can honestly be searched by: a stay by room or reservation, an account by username, a voucher by card-reference prefix.
 func usageSourceListSQL(limit, offset int) string {
 	return `
 		WITH src AS (
@@ -694,8 +582,7 @@ func usageSourceListSQL(limit, offset int) string {
 		 LIMIT ` + strconv.Itoa(limit) + ` OFFSET ` + strconv.Itoa(offset)
 }
 
-// parseSourceType reads a source type. An empty value (or "all") means every type; anything unknown is
-// refused rather than silently widened to "every type".
+// parseSourceType: an empty value or "all" means every type; an unknown one is refused, not widened.
 func parseSourceType(v string) (string, bool) {
 	v = strings.TrimSpace(strings.ToLower(v))
 	if v == "" || v == "all" {
@@ -705,8 +592,7 @@ func parseSourceType(v string) (string, bool) {
 	return v, ok
 }
 
-// normaliseSourceQuery trims the search text and, because the voucher screens print a shortened card
-// reference as "3fa85f64…", drops a trailing ellipsis so a pasted reference still matches.
+// normaliseSourceQuery trims the search and drops a trailing ellipsis (voucher screens print "3fa85f64…") so a pasted reference still matches.
 func normaliseSourceQuery(q string) string {
 	q = strings.TrimSpace(q)
 	q = strings.TrimSuffix(q, "…")
@@ -714,7 +600,6 @@ func normaliseSourceQuery(q string) string {
 	return strings.TrimSpace(q)
 }
 
-// listUsageSources lists access sources, heaviest first.
 func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 	kind, ok := parseSourceType(r.URL.Query().Get("type"))
 	if !ok {
@@ -723,14 +608,12 @@ func (s *server) listUsageSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, to := parseWindow(r)
-	// PAGED: ?page and ?page_size, with an older client's ?limit= still sizing the page (up to the 200 it always
-	// allowed). The list is ordered by use and then by identity, so a page boundary is stable.
+	// Paged by ?page and ?page_size (?limit= still sizes the page for older clients, up to 200); ordered by use then identity so page boundaries are stable.
 	pg, ok := readPage(w, r, 200)
 	if !ok {
 		return
 	}
-	// THE SEARCH TEXT TRAVELS IN A HEADER (X-Usage-Search): it is a username or a room number, and edged logs
-	// request lines. ?q= is still read for an older console.
+	// The search text travels in X-Usage-Search (a username or room number; edged logs request lines). ?q= is still read for an older console.
 	raw, ok := readSearch(w, r, usageSearchHeader)
 	if !ok {
 		return

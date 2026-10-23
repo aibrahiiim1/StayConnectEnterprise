@@ -15,10 +15,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// Central migration 0056, Product-Owner decision D-R1 ("Email+IP, plus unlock"): wrong passwords lock an account
-// only for the address they came from, so nobody can keep an administrator locked out from elsewhere; the
-// password confirmation (step-up) obeys the same lock; an unknown name still behaves exactly like a real one; and
-// the address is the one the request limit uses -- Caddy's X-Real-IP only when Caddy on loopback relayed it.
 func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -62,7 +58,6 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 		return send(d.login, f, map[string]string{"email": email, "password": pw}, nil)
 	}
 
-	// Three wrong passwords from address A, relayed by Caddy, lock the account at A ...
 	a, b := viaCaddy("198.51.100.10"), viaCaddy("198.51.100.20")
 	for i := 0; i < 2; i++ {
 		if code, _ := login(a, "admin@central.test", "wrong"); code != 401 {
@@ -75,11 +70,11 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 	if code, e := login(a, "admin@central.test", "correct-horse-battery"); code != 429 || e != "signin_locked" {
 		t.Fatalf("the right password from A during its lock = %d %q", code, e)
 	}
-	// ... and nowhere else: the administrator still signs in from B.
+	// The lock holds only at A.
 	if code, _ := login(b, "admin@central.test", "correct-horse-battery"); code != 200 {
 		t.Fatalf("the right password from B while A is locked = %d", code)
 	}
-	// A client that is not Caddy cannot pick its address with X-Real-IP: a direct connection is its TCP peer.
+	// Only Caddy on loopback may set the address via X-Real-IP.
 	if code, _ := login(from{remote: "198.51.100.10:1", realIP: "198.51.100.30"}, "admin@central.test", "correct-horse-battery"); code != 429 {
 		t.Fatalf("a direct client from A claiming another address = %d, want the lock", code)
 	}
@@ -87,7 +82,6 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 		t.Fatalf("a direct client from another address = %d", code)
 	}
 
-	// The password confirmation obeys the same per-address lock.
 	sess := &auth.Session{OperatorID: id, Email: "admin@central.test"}
 	if code, e := send(d.reauth, a, map[string]string{"password": "correct-horse-battery"}, sess); code != 429 || e != "signin_locked" {
 		t.Fatalf("step-up from A during its lock = %d %q", code, e)
@@ -96,7 +90,6 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 		t.Fatalf("step-up from B = %d", code)
 	}
 
-	// An unknown name answers exactly like the real one, at A and at B.
 	for i := 0; i < 2; i++ {
 		if code, _ := login(a, "nobody@central.test", "x"); code != 401 {
 			t.Fatalf("unknown name from A, attempt %d = %d", i+1, code)
@@ -109,7 +102,7 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 		t.Fatalf("unknown name from B = %d", code)
 	}
 
-	// No row holds the address or the email, or a plain hash of the name: each carries the name's HMAC.
+	// No row holds the address, the email or a plain hash of the name: only HMACs.
 	var n int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM operator_signin_throttle WHERE key_hash LIKE '%198.51%' OR name_hash LIKE '%@%'`).Scan(&n)
 	if n != 0 {
@@ -120,7 +113,6 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 		t.Fatalf("the administrator has %d counter rows, want the one for A (B's success cleared nothing it did not own)", n)
 	}
 
-	// Clearing the name lifts the lock at every address.
 	if c, err := auth.ClearSigninLocks(ctx, pool, mfa.SigninName("admin@central.test")); err != nil || c != 1 {
 		t.Fatalf("clear = %d %v", c, err)
 	}

@@ -5,27 +5,16 @@ import (
 	"time"
 )
 
-// Phase-2 duration/end-policy resolution. Only policies whose required inputs are authoritative WITHOUT
-// PMS/Stay resolution are supported; every Stay-dependent or checkout-grace policy is capability-
-// disabled and fails closed. The policy is resolved ONCE at quote time and frozen into the snapshot;
-// historical purchases/entitlements are never recomputed when a package revision later changes.
-//
-// Supported end_mode values (non-PMS):
-//   - MANUAL_END                          : no automatic window.
-//   - VALIDITY_WINDOW {duration_seconds}  : window_ends_at = now + duration_seconds.
-//   - FIXED_AT        {ends_at RFC3339 UTC}: window_ends_at = ends_at (must be in the future).
-//
-// Capability-disabled (Phase 3): AT_CHECKOUT, GRACE_AFTER_CHECKOUT, EARLIEST_OF_FIXED_AND_CHECKOUT,
-// REST_OF_STAY, and any local-time-boundary policy (needs authoritative site timezone semantics).
-
+// Only non-PMS end modes are supported (MANUAL_END, VALIDITY_WINDOW, FIXED_AT); stay-dependent and
+// local-time policies are capability-disabled and fail closed. The policy is resolved once at quote time and
+// frozen into the snapshot, so later revisions never recompute historical purchases.
 var stayDependentEndModes = map[string]bool{
 	"AT_CHECKOUT": true, "GRACE_AFTER_CHECKOUT": true, "EARLIEST_OF_FIXED_AND_CHECKOUT": true, "REST_OF_STAY": true,
 }
 
 const maxDurationSeconds = int64(10) * 365 * 24 * 3600
 
-// ResolveEndPolicy computes (end_mode, window) from the immutable package-revision duration_policy. A
-// nil/empty policy is malformed (deny). Returns a deterministic error for unsupported/malformed input.
+// ResolveEndPolicy resolves the revision's duration_policy; a nil or empty policy is malformed (deny).
 func ResolveEndPolicy(dp map[string]any, now time.Time) (endMode string, window *time.Time, err error) {
 	if len(dp) == 0 {
 		return "", nil, &Error{Code: ErrInvalidInput, Msg: "duration_policy required"}
@@ -38,7 +27,6 @@ func ResolveEndPolicy(dp map[string]any, now time.Time) (endMode string, window 
 	if stayDependentEndModes[mode] {
 		return "", nil, &Error{Code: ErrInvalidInput, Msg: "end_mode " + mode + " is capability-disabled in Phase 2 (needs PMS Stay resolution)"}
 	}
-	// a local-time boundary is capability-disabled in Phase 2 (no authoritative site tz in this path)
 	if _, hasLocal := dp["local_end_time"]; hasLocal {
 		return "", nil, &Error{Code: ErrInvalidInput, Msg: "local-time-boundary duration is capability-disabled in Phase 2"}
 	}

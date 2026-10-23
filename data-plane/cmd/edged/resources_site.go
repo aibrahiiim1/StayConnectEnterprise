@@ -18,24 +18,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
-// Site-wide settings + the read-mostly resources: auth-methods, walled
-// garden, portal branding, payments, audit, reports, backups.
-
-// ----- auth-methods (tenants.auth_methods jsonb) -------------------------------
-
-// pmsSignInModes are the verification values a site may accept alongside the room number, mapped to the
-// wire values the portal and resolver already use.
-//
-// "either" is ABSENT deliberately. It is still accepted from an existing stored configuration and still
-// behaves exactly as it did, but it is not offered as a new choice: it means last-name-or-reservation and
-// the portal decides which by guessing at the shape of what was typed, so a surname containing a digit is
-// submitted as a reservation number and fails.
-//
-// "room_any" is the supported way to accept more than one kind of identifier, and it is NOT a revival of
-// "either". The distinction is where the decision happens. "either" made the BROWSER guess which field the
-// guest meant and send one of them; "room_any" sends the value as typed and has the server compare it against
-// all three PMS-derived fields at once, with the existing ambiguity rule failing closed when a value matches
-// more than one Stay. Nothing is inferred from the shape of what was typed.
+// pmsSignInModes are the verification values a site may accept with the room number, mapped to portal/resolver wire values.
+// "either" is deliberately absent: it still works from stored config but made the portal guess the field from the input's shape.
+// "room_any" is the supported alternative: the server compares the value against all three PMS fields, failing closed when it matches more than one Stay.
 var pmsSignInModes = map[string]bool{
 	"room_lastname":    true,
 	"room_firstname":   true,
@@ -43,12 +28,8 @@ var pmsSignInModes = map[string]bool{
 	"room_any":         true,
 }
 
-// authMethodsRoutes reads and writes the site's guest sign-in configuration.
-//
-// THE WRITE IS A MERGE, NOT A REPLACEMENT. It used to marshal whatever the caller posted straight over the
-// column, so any client that sent a partial object silently deleted every key it did not know about —
-// including provider blocks and any future method. The screen that drives this only owns the methods it
-// renders, so the server merges per top-level key and leaves everything else exactly as it found it.
+// authMethodsRoutes reads and writes the site's guest sign-in configuration. The write is a per-key merge:
+// the screen owns only the methods it renders, so other keys (providers, future methods) must survive.
 func (s *server) authMethodsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
@@ -73,9 +54,7 @@ func (s *server) authMethodsRoutes() http.Handler {
 			jsonErr(w, http.StatusBadRequest, "validation", err.Error())
 			return
 		}
-		// A METHOD THAT BELONGS TO AN UNLICENSED MODULE CANNOT BE SWITCHED ON. The screen does not offer it,
-		// and the API refuses it too, so a site without Hospitality cannot be given Room sign-in by a direct
-		// call. Switching a method OFF is always allowed.
+		// A method of an unlicensed module cannot be switched on, in the API as well as the screen; switching off is always allowed.
 		if code, msg := s.authMethodModuleRefusal(req.Context(), patch); code != 0 {
 			jsonErr(w, code, "module_not_licensed", msg)
 			return
@@ -83,8 +62,7 @@ func (s *server) authMethodsRoutes() http.Handler {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
 
-		// Read-modify-write inside one transaction: two operators saving different methods at the same
-		// moment must not lose one of the changes.
+		// Read-modify-write in one transaction so concurrent saves of different methods do not lose one.
 		tx, err := s.db.Begin(ctx)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods update failed")
@@ -101,8 +79,7 @@ func (s *server) authMethodsRoutes() http.Handler {
 		merged := map[string]json.RawMessage{}
 		if len(currentRaw) > 0 {
 			if err := json.Unmarshal(currentRaw, &merged); err != nil {
-				// Refuse rather than overwrite: a column that does not parse may hold configuration this
-				// build does not understand, and replacing it would destroy it.
+				// Refuse rather than overwrite: an unparseable column may hold configuration this build does not understand.
 				jsonErr(w, http.StatusConflict, "conflict",
 					"the stored sign-in configuration could not be read; refusing to overwrite it")
 				return
@@ -122,8 +99,7 @@ func (s *server) authMethodsRoutes() http.Handler {
 			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods update failed")
 			return
 		}
-		// The audit records WHICH methods were touched, never the whole blob: it may carry provider
-		// identifiers, and an audit row is not the place to copy them.
+		// The audit records which methods were touched, never the blob, which may carry provider identifiers.
 		changed := make([]string, 0, len(patch))
 		for k := range patch {
 			changed = append(changed, k)
@@ -136,14 +112,8 @@ func (s *server) authMethodsRoutes() http.Handler {
 	return r
 }
 
-// validateAuthMethodsPatch refuses a patch the portal could not act on, so a bad value is reported here
-// rather than becoming a sign-in method that silently never works.
-//
-// EVERY KEY IS KNOWN AND EVERY SHAPE IS CHECKED. The merge used to store any top-level key it was given, with any
-// value -- {"voucher":"yes"} and {"anything":{"enabled":"maybe"}} were saved -- so a typo or a stale client
-// wrote configuration nothing reads, or a value that would not parse back into tenantcfg.AuthMethods and broke
-// every reader of the document. Only the methods tenantcfg serves are accepted, each as an object of the fields
-// it actually has.
+// validateAuthMethodsPatch refuses a patch the portal could not act on. Only methods tenantcfg serves are accepted,
+// each as an object of its known fields, so a typo or stale client cannot store configuration that breaks readers.
 func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	if len(patch) == 0 {
 		return errors.New("nothing to change: send at least one sign-in method")
@@ -201,8 +171,7 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 			return errors.New("portal.remember_device_days must be between 0 (never) and 365")
 		}
 	}
-	// EMAIL ACCOUNTS (contract §1) replace the email one-time code. The old key is refused rather than stored: a
-	// stale screen writing "email" back would store a method nothing serves any more.
+	// Email accounts replace the email one-time code; the old key is refused so a stale screen cannot store a method nothing serves.
 	if _, ok := patch["email"]; ok {
 		return errors.New("email (Email code) has been replaced by email_account (Email accounts)")
 	}
@@ -228,8 +197,7 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	if !cfg.Enabled {
 		return nil // a disabled method needs no mode
 	}
-	// "either" stays ACCEPTED so an existing stored configuration can be saved back unchanged; it is simply
-	// not offered as a new choice.
+	// "either" stays accepted so an existing stored configuration can be saved back unchanged.
 	if cfg.Mode == "either" {
 		return nil
 	}
@@ -239,7 +207,6 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 	return nil
 }
 
-// The JSON kind each field of a method object must have.
 type amKind int
 
 const (
@@ -248,8 +215,7 @@ const (
 	amInt
 )
 
-// The fields tenantcfg reads for each kind of method (internal/tenantcfg). template_id is the legacy plan link
-// some stored objects still carry; it is accepted so a stored object can be saved back unchanged.
+// The fields tenantcfg reads per kind of method. template_id is a legacy plan link some stored objects carry; accepted so they save back unchanged.
 var (
 	simpleMethodFields = map[string]amKind{"enabled": amBool, "template_id": amString}
 	pmsMethodFields    = map[string]amKind{"enabled": amBool, "template_id": amString, "provider": amString,
@@ -257,7 +223,6 @@ var (
 	portalFields = map[string]amKind{"primary_method": amString, "remember_device_days": amInt}
 )
 
-// validateMethodObject refuses anything but an object of the known fields with the right JSON kinds.
 func validateMethodObject(name string, raw json.RawMessage, fields map[string]amKind) error {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
@@ -291,8 +256,6 @@ func validateMethodObject(name string, raw json.RawMessage, fields map[string]am
 // portalPrimaryMethods are the methods that may lead the landing page (contract §6.2).
 var portalPrimaryMethods = map[string]bool{"pms": true, "email_account": true, "sms": true, "whatsapp": true, "guest_account": true, "voucher": true}
 
-// ----- walled garden ---------------------------------------------------------------
-
 type wgRule struct {
 	ID          string    `json:"id"`
 	Kind        string    `json:"kind"`
@@ -300,8 +263,7 @@ type wgRule struct {
 	Ports       []int     `json:"ports,omitempty"`
 	Description *string   `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
-	// WiderThanPolicy marks a rule stored before the site's widest-network policy (or wider than it now): it is
-	// listed so the operator can see and correct it, and the console says so.
+	// WiderThanPolicy marks a rule stored before (or wider than) the site's widest-network policy; it is listed so the operator can correct it.
 	WiderThanPolicy bool `json:"wider_than_policy,omitempty"`
 }
 
@@ -320,7 +282,7 @@ func validWGRule(kind, value string) bool {
 	return false
 }
 
-// wgPolicy is the site's walled-garden policy (migration 0125): the widest network a rule may name.
+// wgPolicy is the site's walled-garden policy: the widest network a rule may name.
 type wgPolicy struct {
 	WidestPrefixLen int        `json:"widest_prefix_len"`
 	Min             int        `json:"min"`
@@ -345,7 +307,6 @@ func (s *server) walledGardenPolicy(ctx context.Context) (wgPolicy, error) {
 	return p, err
 }
 
-// wgInput is one rule as an operator writes it.
 type wgInput struct {
 	Kind        string `json:"kind"`
 	Value       string `json:"value"`
@@ -353,9 +314,8 @@ type wgInput struct {
 	Description string `json:"description"`
 }
 
-// check validates a rule against its shape and, for an address or network, the site's policy (audit N-7):
-// 0.0.0.0/0 and every network wider than the policy are refused, and so are targets a garden entry is
-// meaningless for. It returns the refusal to show the operator, or "".
+// check validates a rule's shape and, for addresses/networks, the site policy: 0.0.0.0/0, networks wider than the policy and meaningless targets are refused.
+// It returns the refusal to show the operator, or "".
 func (in *wgInput) check(widest int) string {
 	in.Kind, in.Value = strings.TrimSpace(in.Kind), strings.TrimSpace(in.Value)
 	if !validWGRule(in.Kind, in.Value) {
@@ -403,7 +363,7 @@ func (s *server) walledGardenRoutes() http.Handler {
 		}
 		writeList(w, out)
 	})
-	// THE POLICY: read by everyone who can see the garden; changed with a password and a reason, audited.
+	// The policy: readable by all who can see the garden; changed with a password and reason, audited.
 	r.Get("/policy", func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
@@ -485,8 +445,7 @@ func (s *server) walledGardenRoutes() http.Handler {
 		s.pokeSCD(req, "/v1/admin/walled-garden/reload")
 		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 	})
-	// EDIT (audit N-7: there was no way to correct a rule but delete and re-add). The same checks as create; the
-	// audit row carries what the rule was and what it is now.
+	// Edit applies the same checks as create; the audit row carries the old and new rule.
 	r.Put("/{id}", func(w http.ResponseWriter, req *http.Request) {
 		id := chi.URLParam(req, "id")
 		var in wgInput
@@ -548,24 +507,8 @@ func (s *server) walledGardenRoutes() http.Handler {
 	return r
 }
 
-// ----- portal branding (tenants.branding jsonb) -------------------------------------
-
-// brandingRoutes moved to resources_branding.go, where the design gained a schema, validation, versioned
-// revisions and a rollback -- and where the reason the old pair of handlers was not enough is written down.
-
-// PAYMENTS ARE NOT SERVED FROM HERE ANY MORE.
-//
-// This was a read-only list over public.payments -- a Stripe-session record keyed to a superseded voucher and
-// access plan. The current financial surface is the Phase-4 one in resources_phase4_finops.go, over
-// iam_v2.payment_transactions and iam_v2.v_financial_settlements, which is where refunds, chargebacks and
-// settlement state actually live. Keeping a second, thinner list beside it meant an operator could read a
-// payment history that the financial authority did not recognise.
-
-// ----- local audit log ----------------------------------------------------------------
-
-// guestAuditResources: the trail entries that name a guest, by action prefix, and the screen whose read
-// permission shows them (GDPR audit B6; final check D3). What was searched for is client data too, so the
-// guest_data entries follow guest-data-rights.
+// guestAuditResources: audit entries that name a guest, by action prefix, and the screen whose read permission shows them.
+// Searches are client data too, so guest_data entries follow guest-data-rights.
 var guestAuditResources = []struct{ prefix, resource string }{
 	{"guest_data.", "guest-data-rights"},
 	{"guest_account.", "guest-accounts"},
@@ -608,17 +551,14 @@ type auditRow struct {
 	Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
-// auditSearchHeader carries the activity trail's free-text search, and auditSearchActionsHeader the action codes
-// whose readable title matched it (the titles live in the Admin Console, so the browser resolves them). Headers,
-// not the URL: edged's request logger writes every request line.
+// auditSearchHeader carries the trail's free-text search and auditSearchActionsHeader the action codes whose title matched it
+// (titles live in the Admin Console). Headers, not the URL: edged logs request lines.
 const (
 	auditSearchHeader        = "X-Audit-Search"
 	auditSearchActionsHeader = "X-Audit-Search-Actions"
 )
 
-// auditActionCount is how many entries of one action code the period holds -- over the period (and actor)
-// only, never narrowed by the category, action or search filters, so the screen's filter counts describe the
-// whole period whichever filter is selected.
+// auditActionCount counts one action code over the period (and actor) only, never narrowed by category, action or search.
 type auditActionCount struct {
 	Action string `json:"action"`
 	Count  int    `json:"count"`
@@ -632,8 +572,7 @@ type auditPage struct {
 func (s *server) auditRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		// PAGED. The screen used to read the newest 500 entries and filter those in the browser, so on a busy
-		// appliance an older entry was simply unreachable. ?limit= still sizes the page for an older client.
+		// Paged in SQL; ?limit= still sizes the page for older clients.
 		pg, ok := readPage(w, req, 500)
 		if !ok {
 			return
@@ -644,23 +583,13 @@ func (s *server) auditRoutes() http.Handler {
 		}
 		qv := req.URL.Query()
 
-		// THE FILTERS AN OPERATOR ACTUALLY ARRIVES WITH: a period, a person, or a kind of thing.
-		//
-		// All are applied in SQL rather than in the browser. The trail on a year-old appliance is tens of
-		// thousands of rows, and filtering a page the server already chose is the kind of search box that
-		// looks like it works until the day somebody needs it.
-		//
-		// `period` is the period and actor alone: the per-action counts are taken over it. `where` adds the
-		// action, category and search filters and selects the page.
+		// Filters are applied in SQL. `period` is period and actor alone (the per-action counts use it); `where` adds action, category and search and selects the page.
 		args := []any{s.tenantID}
 		bind := func(v any) int { args = append(args, v); return len(args) }
 		period := ` WHERE tenant_id = $1`
 
-		// GUEST DETAILS IN THE TRAIL FOLLOW THE SCREEN THEY CAME FROM (GDPR audit B6; final check D3). An entry
-		// about a guest -- an account, a device, a stay, a sign-in -- names them in its target or its details. A
-		// role that cannot read that screen sees that the action happened, when, and who did it; not whom it was
-		// about, and neither a search nor the actor filter matches on it -- otherwise actor=<a MAC or an e-mail>
-		// would confirm that guest's presence, and when, through the matches and the per-action counts.
+		// Guest details in the trail follow the screen they came from: a role that cannot read it sees that an action happened, when and by whom, not whom about.
+		// Searches and the actor filter skip those entries, otherwise they would confirm a guest's presence.
 		var roles []string
 		if sess := sessFrom(req.Context()); sess != nil {
 			roles = sess.Roles
@@ -671,9 +600,7 @@ func (s *server) auditRoutes() http.Handler {
 			hiddenLike[i] = likeEscape(h) + "%"
 		}
 
-		// ONE PLACEHOLDER, REFERENCED TWICE. On a sign-in the operator is the TARGET, not the actor, so an
-		// actor search that only looked at actor_id would miss every login on the appliance -- which is the
-		// most common thing anyone searches for.
+		// One placeholder, referenced twice: on a sign-in the operator is the target, not the actor, so an actor_id-only search would miss every login.
 		if v := qv.Get("actor"); v != "" {
 			n, h := bind(v), bind(hiddenLike)
 			period += fmt.Sprintf(` AND (actor_id = $%[1]d OR (target_id = $%[1]d AND NOT action LIKE ANY($%[2]d)))`, n, h)
@@ -691,8 +618,7 @@ func (s *server) auditRoutes() http.Handler {
 		periodArgs := len(args)
 
 		where := period
-		// action= is an exact list. PRESENT BUT EMPTY means "none of them": the screen sends the codes a
-		// category holds in this period, and a category with no entries must show nothing, not everything.
+		// action= is an exact list. Present but empty means none: a category with no entries must show nothing, not everything.
 		if qv.Has("action") {
 			codes := []string{}
 			for _, c := range strings.Split(qv.Get("action"), ",") {
@@ -702,8 +628,7 @@ func (s *server) auditRoutes() http.Handler {
 			}
 			where += fmt.Sprintf(` AND action = ANY($%d)`, bind(codes))
 		}
-		// A PREFIX, not an exact match, so one category maps to one clause: "network" selects network.apply,
-		// network.guest.created and the rest without the screen enumerating them.
+		// A prefix, not an exact match, so one category maps to one clause ("network" selects network.apply, network.guest.created, ...).
 		if p := qv.Get("action_prefix"); p != "" {
 			where += fmt.Sprintf(` AND action LIKE $%d`, bind(likeEscape(p)+"%"))
 		}
@@ -723,8 +648,7 @@ func (s *server) auditRoutes() http.Handler {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
 
-		// ts alone is not unique, and an offset over a non-unique order can repeat or skip a row at a page
-		// boundary. Rows sharing a ts share a chunk of the hypertable, so ctid settles the order among them.
+		// ts alone is not unique and offset paging could repeat or skip rows; rows sharing a ts share a hypertable chunk, so ctid settles the order.
 		q := `SELECT ts, actor_type, actor_id, action, target_type, target_id, ip::text, payload
                 FROM audit_log` + where + fmt.Sprintf(` ORDER BY ts DESC, ctid DESC LIMIT %d OFFSET %d`, pg.Fetch(), pg.Offset())
 		rows, err := s.db.Query(ctx, q, args...)
@@ -751,13 +675,7 @@ func (s *server) auditRoutes() http.Handler {
 			}
 			out = append(out, a)
 		}
-		// A FAILED READ IS NOT AN EMPTY ONE.
-		//
-		// pgx reports a permission error on the first Next(), not at Query() -- so without this, "svc_edged
-		// may not read audit_log" arrived at the operator as HTTP 200 and the words "No audit entries.
-		// Operator and system actions are recorded here." On PRE-LIVE that sentence was false in the most
-		// expensive way available: 345 rows for this tenant, going back to the day the appliance was
-		// commissioned, and a screen calmly reporting that nothing had ever happened.
+		// A failed read is not an empty one: pgx reports a permission error on the first Next(), not at Query().
 		if err := rows.Err(); err != nil {
 			slog.Error("audit read failed", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "internal", "the audit trail could not be read")
@@ -800,15 +718,11 @@ func (s *server) auditRoutes() http.Handler {
 	return r
 }
 
-// ----- reports --------------------------------------------------------------------------
-
 func (s *server) reportsRoutes() http.Handler {
 	r := chi.NewRouter()
-	// The richer operational snapshot the dashboard reads. /summary stays exactly as it is: it is a stable
-	// contract other screens read, and widening it would change them as a side effect of changing one.
+	// The richer operational snapshot for the dashboard; /summary stays unchanged because other screens read it as a stable contract.
 	r.Get("/dashboard", s.reportsDashboard)
-	// The overview (range-selectable analytics + operational state) and the appliance's own resources. Both
-	// are additive; /dashboard is unchanged. See resources_overview.go and appliance_resources.go.
+	// The overview and the appliance's own resources are additive; /dashboard is unchanged.
 	r.Get("/overview", s.reportsOverview)
 	r.Get("/appliance-resources", s.reportsApplianceResources)
 	r.Get("/summary", func(w http.ResponseWriter, req *http.Request) {
@@ -816,9 +730,7 @@ func (s *server) reportsRoutes() http.Handler {
 		defer cancel()
 		out := map[string]any{}
 
-		// COUNTED FROM THE SINGLE SESSION AUTHORITY. These read iam_v2.sessions; they used to read
-		// public.sessions and public.vouchers, which is why an operator watching this page during the
-		// IAM-v2 trial saw zero activity while guests were online.
+		// Counted from iam_v2.sessions, the single session authority.
 		var active, today, sess7d, vUnused, vRedeemed int64
 		var upToday, downToday int64
 		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions
@@ -830,21 +742,7 @@ func (s *server) reportsRoutes() http.Handler {
 		_ = s.db.QueryRow(ctx,
 			`SELECT count(*) FROM iam_v2.sessions
 			  WHERE tenant_id=$1 AND started >= now() - interval '7 days'`, s.tenantID).Scan(&sess7d)
-		// THE VOUCHER TILES CAME FROM scd, BECAUSE EVERY PART OF THE QUERY THAT WAS HERE WAS WRONG.
-		//
-		// It read `count(*) FILTER (WHERE status = 'ISSUED')` from iam_v2.vouchers. Three independent
-		// reasons it could never return anything, each sufficient on its own:
-		//
-		//   * the column is `state`, not `status`;
-		//   * the vocabulary is UNUSED / REDEEMED / REVOKED / REDEMPTION_EXPIRED, and ISSUED is not a value
-		//     iam_v2 has ever had -- the comment that used to sit here asserted otherwise;
-		//   * svc_edged holds no privilege on iam_v2.vouchers AT ALL, deliberately, because scd owns the
-		//     voucher key material and edged proxies everything that touches it.
-		//
-		// The error was swallowed by `_ =`, so both tiles read 0 permanently and looked like a property
-		// that had not printed any cards. Asking scd is not a workaround for the missing privilege; it is
-		// the same arrangement the rest of this surface uses, and it means the tile counts what the voucher
-		// screen counts rather than a second query that can drift from it.
+		// Voucher tiles come from scd: svc_edged has no privilege on iam_v2.vouchers (scd owns the key material), and asking scd counts what the voucher screen counts.
 		if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/vouchers/summary", nil); err == nil && st == http.StatusOK {
 			var sum struct {
 				Unused   int64 `json:"unused"`
@@ -861,25 +759,11 @@ func (s *server) reportsRoutes() http.Handler {
 		out["bytes_down_today"] = downToday
 		out["sessions_7d"] = sess7d
 		out["vouchers_unused"] = vUnused
-		// NAMED FOR WHAT IT COUNTS. The old key was `vouchers_active`, which under iam_v2 means nothing a
-		// voucher can be: "active" was the legacy state of a voucher with a live session, and that is a
-		// property of the entitlement now. Nothing in the repository read the old key -- the tile it fed
-		// was permanently 0 -- so renaming it breaks no consumer and stops the next reader inferring a
-		// state the schema does not have.
+		// Named for what it counts: under iam_v2 "active" is a property of the entitlement, not of a voucher.
 		out["vouchers_redeemed"] = vRedeemed
 
-		// TOP PACKAGES, not top legacy plans. The name kept its wire key so the dashboard card does not
-		// break, but the thing being counted is the internet package an entitlement was granted from --
-		// the current commercial object -- rather than a ticket_template.
-		//
-		// THIS QUERY USED TO BE DEAD, and silently so. It joined `iam_v2.internet_packages p ON p.id =
-		// e.package_id` and selected `p.name`: iam_v2.entitlements has no package_id column (it pins a
-		// package_revision_id) and iam_v2.internet_packages has no name column (the display name lives in the
-		// revision's `display` JSON). Every execution therefore errored, `if err == nil` below swallowed it,
-		// and the card has been permanently empty since it was written — the kind of fault that never gets
-		// reported because an empty "top packages" list looks exactly like a quiet week.
-		//
-		// The link runs through the revision, which is where the schema actually puts it.
+		// Top packages: the internet package an entitlement was granted from. The link runs through the package revision
+		// (entitlements pin package_revision_id; the display name lives in the revision's `display` JSON).
 		type topPlan struct {
 			TemplateID string `json:"template_id"`
 			Name       string `json:"name"`
@@ -916,8 +800,6 @@ func (s *server) reportsRoutes() http.Handler {
 	return r
 }
 
-// ----- backups ------------------------------------------------------------------------------
-
 type backupRow struct {
 	ID         string     `json:"id"`
 	StartedAt  time.Time  `json:"started_at"`
@@ -929,8 +811,7 @@ type backupRow struct {
 	Error      *string    `json:"error,omitempty"`
 }
 
-// listBackupRecords is the ledger of backups this appliance has TAKEN -- distinct from the artefacts on
-// disk, which include deploy and rollback sets nobody recorded. Routed from resources_backups.go.
+// listBackupRecords is the ledger of backups this appliance took, distinct from artefacts on disk.
 func (s *server) listBackupRecords(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := dbCtx(req)
 	defer cancel()
@@ -956,9 +837,7 @@ func (s *server) listBackupRecords(w http.ResponseWriter, req *http.Request) {
 	writeList(w, out)
 }
 
-// pokeSCD fires a best-effort admin action on scd (reload pokes). Failures
-// are logged into the request-scoped audit payload but never fail the write:
-// the periodic reconcilers guarantee convergence anyway.
+// pokeSCD fires a best-effort admin action on scd; failures go to the audit payload but never fail the write (reconcilers converge anyway).
 func (s *server) pokeSCD(req *http.Request, path string) {
 	if s.scd == nil { // a test server with no scd: the reconcilers converge on their own
 		return
@@ -968,11 +847,9 @@ func (s *server) pokeSCD(req *http.Request, path string) {
 	}
 }
 
-// authMethodModules names the licence module behind each optional sign-in method.
 var authMethodModules = map[string]struct{ module, label string }{
 	"pms": {"hospitality", "Room sign-in"},
-	// The email_otp module now means "Email accounts" (contract §1): the module that licensed the email code
-	// licenses the email account that replaced it.
+	// email_otp now licenses "Email accounts", which replaced the email code.
 	"email_account": {"email_otp", "Email accounts"},
 	"sms":           {"sms_otp", "SMS code"},
 	"whatsapp":      {"whatsapp_otp", "WhatsApp code"},

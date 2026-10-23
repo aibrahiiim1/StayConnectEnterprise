@@ -1,12 +1,5 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
-// USAGE EXPLORER, BY ACCESS SOURCE, IN A BROWSER.
-//
-// edged is mocked at the network layer. No appliance, no database, no client data. What this asserts is what a
-// component test cannot: the real page loads under Next, the new tab lists every source type, the type
-// filter reaches edged, a stay deep link still lands on the stay, and nothing a voucher card would need to be
-// used appears on the page.
-
 const ACCOUNT = "aaaaaaaa-1111-4111-8111-111111111111";
 const VOUCHER = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 const STAY = "cccccccc-3333-4333-8333-333333333333";
@@ -71,7 +64,6 @@ test("the /usage?stay=<id> deep link still opens the stay", async ({ page, baseU
   await page.goto(`/usage?stay=${STAY}`);
   await expect(page.getByText("Devices used during this stay")).toBeVisible();
   await expect(page.getByText(/Main PMS · reservation BK-88213/)).toBeVisible();
-  // The stay is fetched by its id; the request now also carries the period window the header shows (C-8).
   const stayReq = requested.find((r) => r.startsWith(`/usage/sources/stay/${STAY}`));
   expect(stayReq).toBeTruthy();
   const q = new URLSearchParams(stayReq!.split("?")[1] ?? "");

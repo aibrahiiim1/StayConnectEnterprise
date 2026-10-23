@@ -10,24 +10,15 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// PHASE-6 GUEST SURFACE — the HTTP identity boundary, treated as security rather than wiring.
-//
-// These tests do not need a database. Every one of them is about what the WIRE CONTRACT permits, and the
-// wire contract is where an identity-spoofing attempt either lands or is refused. A request carrying
-// entitlement_id, stay_id, room, pms_interface_id, profile_id, tenant_id or site_id must be REFUSED, not
-// parsed-and-ignored: a field that is silently dropped is indistinguishable, from the caller's side, from one
-// that was honoured, and the difference only becomes visible the day somebody starts honouring it.
-
-// decodeInto is the same strictness the handlers use. Testing it directly is deliberate: the guarantee is a
-// property of the decoder configuration, and asserting it here fails if somebody relaxes DisallowUnknownFields
-// without noticing what it was protecting.
+// Guest device surface wire contract (no database needed): a request carrying entitlement_id, stay_id, room,
+// pms_interface_id, profile_id, tenant_id or site_id must be refused, not parsed and ignored. decodeInto
+// mirrors the handlers' strictness, so relaxing DisallowUnknownFields fails here.
 func decodeInto(body string, dst any) error {
 	dec := json.NewDecoder(strings.NewReader(body))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
 }
 
-// EVERY identity a guest might try to supply must be refused by the wire type itself.
 func TestPhase6GuestWireTypesRefuseEverySubjectIdentity(t *testing.T) {
 	spoofs := map[string]string{
 		"entitlement_id":   `{"device":{"ip":"10.90.0.5","mac":"02:00:00:00:00:01"},"entitlement_id":"11111111-1111-1111-1111-111111111111"}`,
@@ -50,7 +41,7 @@ func TestPhase6GuestWireTypesRefuseEverySubjectIdentity(t *testing.T) {
 		})
 		t.Run("release/"+name, func(t *testing.T) {
 			var req p6ReleaseReq
-			// A release legitimately carries device_id, so the spoof is added alongside it.
+			// a release legitimately carries device_id
 			withTarget := strings.Replace(body, `"device":{`, `"device_id":"22222222-2222-2222-2222-222222222222","device":{`, 1)
 			if err := decodeInto(withTarget, &req); err == nil {
 				t.Fatalf("the RELEASE wire type ACCEPTED a request carrying %s", name)
@@ -59,7 +50,7 @@ func TestPhase6GuestWireTypesRefuseEverySubjectIdentity(t *testing.T) {
 	}
 }
 
-// The legitimate shapes must still decode, or the test above would pass for a type that accepts nothing.
+// The legitimate shapes must still decode, or the test above would pass for a type accepting nothing.
 func TestPhase6GuestWireTypesAcceptOnlyTheLegitimateShape(t *testing.T) {
 	var l p6ListReq
 	if err := decodeInto(`{"device":{"ip":"10.90.0.5","mac":"02:00:00:00:00:01"}}`, &l); err != nil {
@@ -79,9 +70,7 @@ func TestPhase6GuestWireTypesAcceptOnlyTheLegitimateShape(t *testing.T) {
 	}
 }
 
-// THE DEPLOYMENT GATE DECIDES WHETHER THE ROUTES EXIST AT ALL. With it off the constructor returns nil, so
-// nothing is registered and the path is ABSENT -- a 404, not a handler that refuses. That distinction is the
-// whole difference between "this appliance does not offer this" and "this appliance offers this and said no".
+// With the deployment gate off the constructor returns nil: the path is absent (404), not a refusing handler.
 func TestPhase6RoutesAreAbsentWhileTheGateIsOff(t *testing.T) {
 	off, err := iamv2.LoadPhase6ConfigFromEnv(func(string) string { return "" })
 	if err != nil {
@@ -99,15 +88,13 @@ func TestPhase6RoutesAreAbsentWhileTheGateIsOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A minimal server is enough: the constructor only stores the pool handle, and this test is about
-	// whether it constructs at all.
+	// A minimal server suffices: the constructor only stores the pool handle.
 	if got := newPhase6Devices(on, &server{}, nil, "appliance-1"); got == nil {
 		t.Fatal("the guest device surface was NOT constructed while the deployment gate was ON")
 	}
 }
 
-// The master flag alone is not the guest surface: a deployment that turned on Phase 6 without turning on the
-// device child has not asked for guest device management.
+// The master flag alone is not the guest surface; the device child flag is also required.
 func TestPhase6MasterAloneDoesNotMountTheGuestSurface(t *testing.T) {
 	env := map[string]string{iamv2.EnvPhase6Master: "true"}
 	cfg, err := iamv2.LoadPhase6ConfigFromEnv(func(k string) string { return env[k] })
@@ -119,7 +106,6 @@ func TestPhase6MasterAloneDoesNotMountTheGuestSurface(t *testing.T) {
 	}
 }
 
-// A refusal must carry no detail. The reason is for the operator log; the guest gets one word.
 func TestPhase6RefusalBodyCarriesNoReason(t *testing.T) {
 	p := &phase6Devices{}
 	w := httptest.NewRecorder()
@@ -139,7 +125,7 @@ func TestPhase6RefusalBodyCarriesNoReason(t *testing.T) {
 	if len(resp.Devices) != 0 {
 		t.Fatal("a refusal carried devices")
 	}
-	// The internal reason must not reach the wire in any form.
+	// the internal reason must not reach the wire
 	for _, leak := range []string{"disabled", "appliance", "entitlement", "throttl", "online", "not_found"} {
 		if strings.Contains(strings.ToLower(body), leak) {
 			t.Fatalf("the refusal body leaks %q: %s", leak, body)
@@ -147,7 +133,6 @@ func TestPhase6RefusalBodyCarriesNoReason(t *testing.T) {
 	}
 }
 
-// The guest device projection must not carry a MAC or any internal identity, whatever the database returns.
 func TestPhase6GuestDeviceProjectionHasNoMACOrInternalIdentity(t *testing.T) {
 	b, err := json.Marshal(p6Device{ID: "dev-1", LastSeen: "2026-08-15T00:00:00Z", Online: true, Removable: false})
 	if err != nil {

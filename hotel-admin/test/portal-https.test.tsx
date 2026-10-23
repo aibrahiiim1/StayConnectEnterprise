@@ -1,17 +1,9 @@
-// NETWORKING → PORTAL HTTPS, and the callback URLs on Identity providers
-// (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §4, §5, §8).
-//
-// Pinned here: the fallback is said in words with its reason and since when; the hotel domain shows the three
-// DNS records with copy buttons; every change collects the password and sends exactly what edged expects; a
-// refused address shows netd's issues; a role without manage is offered no control. On Identity providers:
-// there is no redirect URI field, each portal host name's callback URL is shown with a "registered" tick, and
-// the ticks are what is sent.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-// jsdom implements no ResizeObserver; the provider dialog's switch (Radix) measures itself with one.
+// jsdom lacks ResizeObserver, which the Radix switch measures with.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

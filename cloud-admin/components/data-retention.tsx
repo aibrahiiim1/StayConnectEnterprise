@@ -46,10 +46,7 @@ const FIELDS: { key: Key; label: string; aria: string; explain: string }[] = [
   },
 ];
 
-/**
- * How long Central keeps its own records (System → Team, migration 0054). Applied every hour; a shorter period
- * removes the older records at the next run.
- */
+/** Shorter retention periods remove older records at the next hourly run. */
 export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
   const toast = useToast();
   const [s, setS] = useState<RetentionSettings | null>(null);
@@ -82,7 +79,6 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
       const b = s[`${f.key}_bounds`];
       const n = Number(vals[f.key]);
       if (!/^\d+$/.test(vals[f.key].trim()) || n < b.min || n > b.max) {
-        // Reported under its own field, which takes focus.
         setErr(null);
         fields.fail({ [f.key]: `${f.label}: enter a whole number from ${b.min} to ${b.max}.` });
         return;

@@ -2,15 +2,6 @@
 
 package main
 
-// THE PACKAGE AND PLAN EDITORS' SERVER CONTRACT (audit O-1, O-15, O-20, O-21), through the real router, the
-// real auth middleware and role matrix, and a real database:
-//
-//	a revision of an existing package states its commercial terms or is refused (commercial_fields_required)
-//	the revision fields an editor does not show are carried from the current revision when absent
-//	changing price, currency, methods or the plan revision needs the operator's password
-//	revising a service plan needs the password and keeps its time accounting
-//	reactivating a package and issuing vouchers need the password
-
 import (
 	"context"
 	"net/http/httptest"
@@ -102,7 +93,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("create a voucher-only package: %d %v", code, out)
 	}
 
-	// O-1: the repin's old body -- no price, no methods -- used to republish the package as FREE.
+	// A body without price and methods must be refused, not republish the package as FREE.
 	if code, out := f.do(t, "POST", "/commercial-packages", pkg(nil)); code != 400 || out["error"] != "commercial_fields_required" {
 		t.Fatalf("a revision without its terms must be refused: %d %v", code, out)
 	}
@@ -110,7 +101,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("the refused revision was published: %v", cur)
 	}
 
-	// A rename with the same terms needs no password -- and carries what the editor did not send (O-15).
+	// A rename with the same terms needs no password and carries what the editor did not send.
 	if code, out := f.do(t, "POST", "/commercial-packages", pkg(terms)); code != 200 {
 		t.Fatalf("a rename with unchanged terms: %d %v", code, out)
 	}
@@ -126,7 +117,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("the voucher-only package lost its method: %v", cur["settlement_methods"])
 	}
 
-	// Changing how it is acquired needs the password (O-21).
+	// Changing how it is acquired needs the password.
 	changed := map[string]any{}
 	for k, v := range terms {
 		changed[k] = v
@@ -144,7 +135,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("the change with the password: %d %v", code, out)
 	}
 
-	// A plan change (the repin) needs the password too.
+	// Moving a package to another plan needs the password too.
 	if code, out := f.do(t, "POST", "/commercial-packages/plans", map[string]any{"code": "PLN2", "name": "Plan 2",
 		"down_kbps": 4000, "up_kbps": 1000, "max_concurrent_devices": 2, "create_only": true}); code != 200 {
 		t.Fatalf("create plan 2: %d %v", code, out)
@@ -157,7 +148,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("moving a package to another plan without the password: %d", code)
 	}
 
-	// Reactivation needs the password (T30); deactivation already did.
+	// Reactivation needs the password, as deactivation does.
 	id := f.packageCurrent(t, "VCH")["package_id"].(string)
 	if code, out := f.do(t, "POST", "/commercial-packages/"+id+"/active",
 		map[string]any{"active": false, "reason": "test", "password": f.password}); code != 200 {
@@ -171,7 +162,7 @@ func TestIntegration_PackageRevisionStatesItsTermsAndChangesNeedThePassword(t *t
 		t.Fatalf("reactivation with the password: %d %v", code, out)
 	}
 
-	// Issuing vouchers needs the password (T30). Refused before anything reaches scd.
+	// Issuing vouchers needs the password, checked before anything reaches scd.
 	if code, out := f.do(t, "POST", "/vouchers/issue", map[string]any{"package_revision_id": planRev, "count": 1}); code != 401 ||
 		out["error"] != "reauth_required" {
 		t.Fatalf("voucher issue without the password: %d %v", code, out)

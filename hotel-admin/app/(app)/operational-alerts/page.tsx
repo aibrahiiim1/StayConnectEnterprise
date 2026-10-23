@@ -1,9 +1,5 @@
 "use client";
 
-// Route shell. The interactive view lives in a component so it can be rendered with an explicit permission in
-// tests and stories; the page itself derives that permission from the signed-in operator's roles, and edged
-// enforces the real gate on every request regardless.
-
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";

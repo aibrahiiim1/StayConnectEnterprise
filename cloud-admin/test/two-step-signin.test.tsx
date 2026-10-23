@@ -4,10 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { mockFetch, PLATFORM_ME, renderAs } from "./helpers";
 import { nav } from "./navigation";
 
-// TWO-STEP SIGN-IN, AS CENTRAL'S CONSOLE PRESENTS IT (migration 0052, GDPR plan C10).
-//   - the password opens nothing: the console asks for the authenticator code, and only that signs in;
-//   - the first time, the app is set up (QR code and the key to type) and the ten recovery codes are shown once;
-//   - an administrator resets a colleague's two-step sign-in with a reason; never their own row.
+// Password alone does not sign in; recovery codes appear once and admins cannot reset their own second factor.
 
 vi.mock("next/navigation", async () => (await import("./navigation")).navigationModule);
 vi.mock("qrcode", () => ({ default: { toDataURL: async () => "data:image/png;base64,AAAA" } }));

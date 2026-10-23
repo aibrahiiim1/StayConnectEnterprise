@@ -37,9 +37,7 @@ func newPkg(t *testing.T, vendor ed25519.PrivateKey, r *Request) *Package {
 	return p
 }
 
-// A request is evidence only because it proves possession of the key it names. Without that check, anyone
-// could submit another appliance's hardware facts with their own public key and be handed a package bound to
-// a key they control.
+// A request is evidence only because it proves possession of the key it names; otherwise anyone could request a package bound to a key they control.
 func TestRequestMustProvePossession(t *testing.T) {
 	r, _ := newReq(t)
 	if !VerifyRequest(r) {
@@ -63,7 +61,6 @@ func TestRequestMustProvePossession(t *testing.T) {
 	}
 }
 
-// Every way a package could be pointed at the wrong appliance, replayed, downgraded or edited.
 func TestPackageAcceptanceFailsClosed(t *testing.T) {
 	vendorPub, vendorPriv, _ := ed25519.GenerateKey(rand.Reader)
 	r, _ := newReq(t)
@@ -94,9 +91,7 @@ func TestPackageAcceptanceFailsClosed(t *testing.T) {
 			serial: r.Serial, fpr: fpr, reqID: r.RequestID, nonce: r.Nonce},
 		{name: "carries no signed assignment", mutate: func(p *Package) { p.Assignment = nil; SignPackage(vendorPriv, p) },
 			serial: r.Serial, fpr: fpr, reqID: r.RequestID, nonce: r.Nonce},
-		// SignPackage stamps the CURRENT version, so a re-signed package can never carry a foreign one.
-		// Bumping it after signing is therefore the only way it can arrive wrong, and that is both a version
-		// mismatch and a tamper -- refused either way.
+		// SignPackage stamps the CURRENT version, so bumping it after signing is the only way a foreign one arrives: a version mismatch and a tamper.
 		{name: "version bumped after signing", mutate: func(p *Package) { p.SchemaVersion = 99 },
 			serial: r.Serial, fpr: fpr, reqID: r.RequestID, nonce: r.Nonce},
 	}

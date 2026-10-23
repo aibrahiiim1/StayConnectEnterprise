@@ -2,18 +2,13 @@
 
 package main
 
-// THE CONFIGURED ROOM SIGN-IN MODE, ENFORCED BY scd, through the real resolve handler against a real schema.
-//
-// The fixture's stay in room 412 has surname OKONKWO and reservation RES-4001; both are correct evidence for
-// that stay. Under room_lastname only the surname may be used, so the correct reservation number -- alone, or
-// sent beside the correct surname -- must be refused. NO REAL GUEST DATA APPEARS IN THIS FILE.
+// The fixture's stay in room 412 has surname OKONKWO and reservation RES-4001. No real guest data here.
 
 import (
 	"context"
 	"testing"
 )
 
-// setRoomMode stores the site's room sign-in mode exactly where Hotel Admin stores it.
 func setRoomMode(t *testing.T, f *authFixture, mode string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(),
@@ -32,7 +27,6 @@ func (f *authFixture) roomBody(room string, fields map[string]string, reqID stri
 	return b
 }
 
-// failureCount is the device's rolling count of counted wrong credentials, read the way the policy reads it.
 func failureCount(t *testing.T, f *authFixture) int {
 	t.Helper()
 	var n int
@@ -52,10 +46,10 @@ func TestIntegration_RoomMode_LastNameSiteAcceptsOnlyTheSurname(t *testing.T) {
 	setRoomMode(t, f, roomModeLastName)
 
 	refused := []map[string]string{
-		{"reservation_number": "RES-4001"},                         // correct reservation number, wrong kind
-		{"last_name": "Okonkwo", "reservation_number": "RES-4001"}, // both correct, but two fields
-		{"verification": "Okonkwo"},                                // the room_any field
-		{"first_name": "Okonkwo"},                                  // another name field
+		{"reservation_number": "RES-4001"},
+		{"last_name": "Okonkwo", "reservation_number": "RES-4001"},
+		{"verification": "Okonkwo"},
+		{"first_name": "Okonkwo"},
 	}
 	for i, fields := range refused {
 		before := attemptCount(t, f)
@@ -103,7 +97,6 @@ func TestIntegration_RoomMode_ReservationSiteAcceptsOnlyTheReservation(t *testin
 	}
 }
 
-// room_any IS UNCHANGED: the one combined value, and explicit fields, are compared as before.
 func TestIntegration_RoomMode_AnyIsUnchanged(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -115,7 +108,7 @@ func TestIntegration_RoomMode_AnyIsUnchanged(t *testing.T) {
 		{"verification": "RES-4001"},
 		{"last_name": "Okonkwo"},
 		{"reservation_number": "RES-4001"},
-		// The audit's T34 shape: right reservation number, wrong names -- "any one of" admits it.
+		// right reservation number, wrong names: "any one of" admits it
 		{"last_name": "Wrong", "first_name": "Wrong", "reservation_number": "RES-4001"},
 	} {
 		_, res := post(t, f.p3.resolveHandler, f.roomBody("412", fields, f.reqID(t, i)))
@@ -125,7 +118,6 @@ func TestIntegration_RoomMode_AnyIsUnchanged(t *testing.T) {
 	}
 }
 
-// THE LEGACY "either" SETTING: last name OR reservation number, exactly one, as the portal sends it.
 func TestIntegration_RoomMode_LegacyEither(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
@@ -148,9 +140,6 @@ func TestIntegration_RoomMode_LegacyEither(t *testing.T) {
 	}
 }
 
-// ONE REQUEST IS ONE ATTEMPT, however many fields it carries: a room_any request with three wrong values is
-// one row and one count, never three -- and a correct field among wrong ones is one success, not a success
-// and two failures.
 func TestIntegration_RoomMode_OneRequestWithManyFieldsIsOneAttempt(t *testing.T) {
 	f := newAuthFixture(t)
 	defer f.startEnforcementOwner(t)()

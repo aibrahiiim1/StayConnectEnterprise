@@ -1,14 +1,5 @@
-// Package metrics defines scd's Prometheus metric surface.
-//
-// All metrics live in a single registry exposed at /metrics on scd's
-// Unix socket. scd is single-tenant + single-site + single-appliance, so
-// tenant_id / site_id / appliance_id are constant labels attached at
-// registration time — there's nothing scrape-side relabeling can't add,
-// but baking them in makes the labels visible without external config.
-//
-// Cardinality budget per series ≈ O(1) for gauges + O(N) for counters
-// where N is the small fixed set of methods/reasons/results we track.
-// Don't add user-supplied strings as labels (room numbers, IPs, names).
+// Package metrics defines scd's Prometheus metric surface in a single registry exposed at /metrics.
+// tenant_id/site_id/appliance_id are constant labels. Never add user-supplied strings (room numbers, IPs, names) as labels.
 package metrics
 
 import (
@@ -21,8 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Registry holds the per-process Prometheus registry plus the metric
-// handles. Build via New(); call Handler() to mount the HTTP handler.
+// Registry holds the per-process Prometheus registry plus the metric handles.
 type Registry struct {
 	reg *prometheus.Registry
 
@@ -48,18 +38,15 @@ type Registry struct {
 	NFTOps       *prometheus.CounterVec // labels: op (add|del), source (local|reaper)
 	ReaperClosed *prometheus.CounterVec // labels: reason
 
-	// Phase 8 — notification provider observability.
 	NotifySendTotal    *prometheus.CounterVec   // labels: channel, provider, result
 	NotifySendDuration *prometheus.HistogramVec // labels: channel, provider
 
-	// Phase 9 — social login observability.
 	SocialLoginTotal    *prometheus.CounterVec   // labels: provider, result
 	SocialLoginDuration *prometheus.HistogramVec // labels: provider
 }
 
-// New builds a fresh registry preloaded with Go runtime + process collectors
-// and the application metrics. constLabels typically carries
-// {tenant_id, site_id, appliance_id} so every series renders with them.
+// New builds a registry with Go runtime and process collectors plus the application metrics; constLabels are
+// attached to every series.
 func New(version string, constLabels prometheus.Labels) *Registry {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -92,13 +79,8 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		ConstLabels: constLabels,
 	}, []string{"method"})
 
-	// AUTH CONTEXTS ARE NOT SESSIONS.
-	//
-	// The IAM-v2 guest entry points first establish an auth_context and a device; a SESSION only exists later,
-	// after the guest selects a package and the entitlement is granted and activated. Counting the auth step as
-	// scd_sessions_started_total inflated the session rate, made started/closed permanently unbalanced, and
-	// would have shown a healthy "sessions starting" signal on an appliance where no guest ever reached the
-	// network. Operator health must correspond to actual session state, so the auth step gets its own counter.
+	// Auth contexts are not sessions: a session exists only after the guest selects a package and the entitlement is
+	// activated. Counting the auth step as sessions started inflated the rate and unbalanced started/closed.
 	r.AuthContextsCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "scd_iamv2_auth_contexts_created_total",
 		Help:        "IAM-v2 auth contexts created, by auth method. NOT sessions: an auth context precedes package selection, entitlement and activation.",
@@ -138,8 +120,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	r.PMSValidateDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "scd_pms_validate_duration_seconds",
 		Help: "Latency of PMS ValidateGuest calls, by provider.",
-		// REST providers can take >1s on first request; FIAS is local-cache
-		// fast. Same buckets as notification_send covers both.
+		// REST providers can take >1s on first request; FIAS is local-cache fast.
 		Buckets:     []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		ConstLabels: constLabels,
 	}, []string{"provider"})
@@ -189,9 +170,8 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	}, []string{"provider", "result"})
 
 	r.SocialLoginDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "scd_social_login_duration_seconds",
-		Help: "Latency of the social Exchange (token swap + userinfo round-trip).",
-		// Token + userinfo round-trip; same shape as notify_send.
+		Name:        "scd_social_login_duration_seconds",
+		Help:        "Latency of the social Exchange (token swap + userinfo round-trip).",
 		Buckets:     []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		ConstLabels: constLabels,
 	}, []string{"provider"})
@@ -206,11 +186,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		r.SocialLoginTotal, r.SocialLoginDuration,
 	)
 
-	// Pre-touch every known label combo for the counters we care about
-	// so the series exists in /metrics output even before the first
-	// Inc(). Counters with no samples are omitted by default — that's
-	// fine in production but trips up dashboards / alerts that expect
-	// the series to be present.
+	// Pre-touch known label combos so the series exist before the first Inc(); dashboards and alerts expect them.
 	for _, m := range []string{"voucher", "otp", "pms", "social"} {
 		r.SessionsStarted.WithLabelValues(m).Add(0)
 	}
@@ -244,7 +220,6 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	return r
 }
 
-// Handler returns the /metrics HTTP handler.
 func (r *Registry) Handler() http.Handler {
 	return promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
@@ -252,7 +227,6 @@ func (r *Registry) Handler() http.Handler {
 }
 
 // PMSStatusValue maps a pms.Health.Status string to the gauge enum.
-// Kept here so metric translation isn't sprinkled across handlers.
 func PMSStatusValue(status string) float64 {
 	switch status {
 	case "connected":
@@ -283,14 +257,11 @@ func mergeLabels(base, extra prometheus.Labels) prometheus.Labels {
 	return out
 }
 
-// active-sessions sampling: a tiny helper so we don't proliferate the
-// gauge across multiple goroutines fighting to write it.
 var (
 	activeMu sync.Mutex
 )
 
-// SetActive atomically updates the active-sessions gauge. Safe for
-// concurrent callers (heartbeat / reaper / authorize paths).
+// SetActive atomically updates the active-sessions gauge; safe for concurrent callers.
 func (r *Registry) SetActive(n int) {
 	activeMu.Lock()
 	defer activeMu.Unlock()

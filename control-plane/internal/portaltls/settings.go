@@ -18,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ACME directories (contract §3 "Staging first").
 const (
 	DirectoryStaging    = "staging"
 	DirectoryProduction = "production"
@@ -27,7 +26,7 @@ const (
 	LetsEncryptProductionURL = "https://acme-v02.api.letsencrypt.org/directory"
 )
 
-// DB is what this package needs from Postgres: a pool, a transaction or a connection all qualify.
+// DB is satisfied by a pool, a transaction or a connection.
 type DB interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
@@ -35,7 +34,7 @@ type DB interface {
 }
 
 // Settings is the one portal_tls_settings row. The DNS token and ACME account key are files (Secrets), never
-// columns: a database dump or a replica must not be enough to issue certificates for the zone.
+// columns: a database dump must not be enough to issue certificates for the zone.
 type Settings struct {
 	ACMEDirectory    string     `json:"acme_directory"`
 	ContactEmail     string     `json:"contact_email"`
@@ -49,7 +48,6 @@ type Settings struct {
 	UpdatedBy        string     `json:"updated_by"`
 }
 
-// LoadSettings reads the settings row (migration 0050 inserts it).
 func LoadSettings(ctx context.Context, db DB) (Settings, error) {
 	var s Settings
 	err := db.QueryRow(ctx, `
@@ -61,7 +59,7 @@ func LoadSettings(ctx context.Context, db DB) (Settings, error) {
 	return s, err
 }
 
-// SettingsUpdate is what an operator may change. A nil field is left alone.
+// SettingsUpdate: a nil field is left alone.
 type SettingsUpdate struct {
 	ACMEDirectory  *string `json:"acme_directory"`
 	ContactEmail   *string `json:"contact_email"`
@@ -69,8 +67,7 @@ type SettingsUpdate struct {
 	WeeklyNewLimit *int    `json:"weekly_new_limit"`
 }
 
-// Validate checks an update against the same rules the table's CHECK constraints enforce, so the operator
-// gets a sentence instead of a constraint name.
+// Validate mirrors the table's CHECK constraints so the operator gets a sentence, not a constraint name.
 func (u SettingsUpdate) Validate() error {
 	if u.ACMEDirectory != nil && *u.ACMEDirectory != DirectoryStaging && *u.ACMEDirectory != DirectoryProduction {
 		return errors.New("acme_directory must be staging or production")
@@ -94,9 +91,8 @@ func (u SettingsUpdate) Validate() error {
 	return nil
 }
 
-// SaveSettings applies an update. Changing the zone forgets the cached zone id (it belonged to the old zone);
-// changing the directory leaves the account alone -- the next ACME call notices account_directory no longer
-// matches and registers on the new directory.
+// SaveSettings applies an update. Changing the zone clears the cached zone id; changing the directory leaves
+// the account alone and the next ACME call re-registers when account_directory no longer matches.
 func SaveSettings(ctx context.Context, db DB, u SettingsUpdate, actor string) (Settings, error) {
 	if err := u.Validate(); err != nil {
 		return Settings{}, err
@@ -125,16 +121,12 @@ func SaveSettings(ctx context.Context, db DB, u SettingsUpdate, actor string) (S
 	return LoadSettings(ctx, db)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Secrets: two root-only files. Never columns, never logged, never returned by any API.
-// ---------------------------------------------------------------------------------------------------------
-
 const (
 	accountKeyFile = "acme-account.key"
 	dnsTokenFile   = "dns-api.token"
 )
 
-// Secrets is the directory holding the ACME account key and the DNS API token.
+// Secrets is the root-only directory holding the ACME account key and DNS API token; never logged or returned by an API.
 type Secrets struct{ Dir string }
 
 func (s Secrets) path(name string) string { return filepath.Join(s.Dir, name) }
@@ -146,13 +138,11 @@ func (s Secrets) ensureDir() error {
 	return os.Chmod(s.Dir, 0o700)
 }
 
-// TokenSet reports whether a DNS API token has been stored.
 func (s Secrets) TokenSet() bool {
 	fi, err := os.Stat(s.path(dnsTokenFile))
 	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
 
-// ReadToken returns the stored DNS API token. Callers hand it straight to the provider; it is never logged.
 func (s Secrets) ReadToken() (string, error) {
 	raw, err := os.ReadFile(s.path(dnsTokenFile))
 	if err != nil {
@@ -165,8 +155,7 @@ func (s Secrets) ReadToken() (string, error) {
 	return t, nil
 }
 
-// WriteToken replaces the DNS API token atomically (temp file, fsync, rename): a crash leaves either the old
-// token or the new one, never half of one.
+// WriteToken replaces the token atomically: a crash leaves the old or the new one, never half.
 func (s Secrets) WriteToken(token string) error {
 	token = strings.TrimSpace(token)
 	if token == "" || len(token) > 4096 || strings.ContainsAny(token, " \t\r\n") {
@@ -203,10 +192,9 @@ func writeFileAtomic(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
-// AccountKey loads the ACME account key, creating it on first use. Creation writes a complete temp file and
-// then LINKS it into place: the link fails if another process created the key first, so two ctrlapi starts
-// can never each register an account with a different key and leave the second one's account orphaned (the
-// O_EXCL guarantee, without the half-written file a crash during an O_EXCL write would leave).
+// AccountKey loads the ACME account key, creating it on first use. A complete temp file is linked into place;
+// the link fails if another process won, so two starts never register accounts with different keys, and a
+// crash cannot leave a half-written key.
 func (s Secrets) AccountKey() (*ecdsa.PrivateKey, error) {
 	path := s.path(accountKeyFile)
 	if k, err := readECKey(path); err == nil {
@@ -243,7 +231,7 @@ func (s Secrets) AccountKey() (*ecdsa.PrivateKey, error) {
 	f.Close()
 	if err := os.Link(tmp, path); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return readECKey(path) // somebody else won; use theirs
+			return readECKey(path)
 		}
 		return nil, err
 	}

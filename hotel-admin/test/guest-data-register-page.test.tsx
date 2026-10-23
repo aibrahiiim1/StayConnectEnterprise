@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { dueWords } from "@/lib/guest-data-register-words";
 
-// The request register: record a request, see its deadline, close it with a ground when it is refused.
-
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api", async () => {

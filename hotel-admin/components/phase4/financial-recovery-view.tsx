@@ -1,19 +1,7 @@
 "use client";
 
-// Phase 4 (DARK) — Recovery.
-//
-// This screen exists for the worst day: the database has been restored, and nobody yet knows which of the
-// payments and postings that were in flight actually completed out in the world.
-//
-// The design follows from that. There is no "resume", no "retry all", and no way to release recovery with
-// work still unaccounted for -- because the one thing that must not happen is charging a guest twice for
-// the same night's internet. Every button here records what an operator ESTABLISHED; none of them re-sends
-// anything.
-//
-// Each decision takes a password and a written account of how it was established, for the same reason a
-// Manual review decision does: this is an assertion about real money and it should carry a name.
-//
-// A role that may not decide sees the same state and items, and no form, password field or button at all.
+// After restore, decisions record established payment outcomes without resending and risking duplicate charges.
+// Each decision requires a password and written evidence; read-only roles cannot submit one.
 
 import { useCallback, useEffect, useState } from "react";
 import { CircleCheck, LifeBuoy, ShieldAlert } from "lucide-react";
@@ -61,13 +49,12 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  // Per-hold decision state. Kept keyed by hold so two half-filled decisions cannot bleed into each other.
+  // Key drafts by hold so decisions cannot inherit another hold's input.
   const [choice, setChoice] = useState<Record<string, RecoveryResolution>>({});
   const [evidence, setEvidence] = useState<Record<string, string>>({});
   const [password, setPassword] = useState("");
 
-  // The zero-attempt authorization form, keyed per posting for the same reason: two half-written
-  // authorizations about two different charges must not be able to merge into one.
+  // Key authorization drafts by posting so distinct charges cannot share input.
   const [zaReason, setZaReason] = useState<Record<string, string>>({});
   const [zaSource, setZaSource] = useState<Record<string, string>>({});
   const [zaRef, setZaRef] = useState<Record<string, string>>({});
@@ -134,10 +121,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
     }
   }
 
-  // Authorizing ONE attempt for a posting that was never transmitted. This sends nothing: it records that an
-  // operator established the folio was never charged, and permits exactly one future attempt by the ordinary
-  // worker. There is deliberately no "send now" here, and no bulk action -- each charge is decided on its own
-  // evidence or not at all.
+  // Authorization records evidence of no prior charge and permits one later worker attempt; it sends nothing.
   async function authorizeZeroAttempt(row: ZeroAttemptRow) {
     setBusy(row.posting_id);
     setErr(null);
@@ -241,7 +225,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       <ErrorBanner err={err} className="mb-0" />
       {note && <Callout tone="success">{note}</Callout>}
 
-      {/* The recovery banner. Deliberately not an alert region: it is the page's standing state, not news. */}
+      {/* The recovery banner is standing state, so it does not trigger an alert announcement. */}
       <section className="overflow-hidden rounded-lg border border-destructive/40 bg-card shadow-card">
         <div className="flex flex-col gap-3 bg-destructive-subtle px-5 py-4 sm:flex-row sm:items-start">
           <ShieldAlert className="size-6 shrink-0 text-destructive-subtle-foreground" aria-hidden />
@@ -452,8 +436,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   );
 }
 
-// The database refuses a recovery decision with a fixed code; the operator reads a sentence. Unknown codes fall
-// back to the server's message, which is never empty of meaning.
+// Unknown refusal codes fall back to the server's meaningful message.
 const RECOVERY_CODE_WORDS: [string, string][] = [
   ["RECOVERY_NOT_ACTIVE", "This site is not in financial recovery, so there is nothing to release."],
   ["RECOVERY_HOLD_UNKNOWN", "That held item no longer exists. Refresh the list."],

@@ -33,12 +33,10 @@ func TestV4ModulesAreTheSoleAuthority(t *testing.T) {
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// An independent feature claim is refused.
 	d.Features.PaidWiFi = true
 	if err := d.Validate(); err == nil {
 		t.Fatal("v4 features that disagree with modules were accepted")
 	}
-	// v4 without modules is refused.
 	d2 := testDoc(time.Now().UTC())
 	d2.Modules = nil
 	if err := d2.Validate(); err == nil {
@@ -70,8 +68,7 @@ func TestLegacyMappingNeverDerivesFinancialModules(t *testing.T) {
 }
 
 func TestUnknownModuleSurvivesSignedRoundTrip(t *testing.T) {
-	// A newer Central may authorise a module this appliance does not know:
-	// the signature still verifies (raw bytes) and the id is simply ignored.
+	// Unknown signed modules remain readable but grant no access.
 	s := newSigner(t)
 	v := NewVerifier(s.PublicKey())
 	d := testDoc(time.Now().UTC())
@@ -121,7 +118,6 @@ func TestWhatsAppOTPIsItsOwnRegisteredIdentityModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// It is not SMS: authorising WhatsApp never authorises SMS, and the legacy Features projection is unchanged.
 	if f := ProjectFeatures(m); f != (Features{}) {
 		t.Fatalf("whatsapp_otp projected onto legacy features: %+v", f)
 	}

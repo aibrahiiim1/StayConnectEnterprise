@@ -1,16 +1,5 @@
-// Package hwid derives this appliance's STABLE hardware identity — the
-// StayConnect serial number and the permanent WAN/LAN interface MAC addresses —
-// from real device sources so the values survive reboot, de-enrollment and a
-// full factory reset (they are re-derived deterministically from the hardware,
-// never from a random database row).
-//
-// StayConnect serial: SC-XXXX-XXXX-XXXX, a Crockford-base32 encoding of
-// sha256("stayconnect-serial-v1:" + hardwareAnchor). The anchor is the DMI
-// product UUID (stable per physical/virtual machine), falling back through the
-// DMI product/board serial, /etc/machine-id, and finally the first physical
-// NIC's permanent MAC. Because it is a pure function of the hardware, the same
-// box always yields the same serial — "generated once" in effect, and unchanged
-// by anything we wipe on the filesystem.
+// Package hwid derives the appliance serial and permanent NIC MACs as a pure function of the hardware, so
+// they survive reset and de-enrollment.
 package hwid
 
 import (
@@ -24,8 +13,6 @@ import (
 	"strings"
 )
 
-// Info is the appliance's detected hardware identity. Appliance ID is filled in
-// by the caller from the cryptographic identity; everything else is hardware.
 type Info struct {
 	Serial       string `json:"serial"`
 	Fingerprint  string `json:"hardware_fingerprint"`
@@ -40,7 +27,7 @@ type Info struct {
 
 var macRe = regexp.MustCompile(`([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}`)
 
-// crockford base32 alphabet — no I, L, O, U to avoid visual/scan ambiguity.
+// Crockford base32: no I, L, O, U.
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 func encodeCrockford(b []byte, n int) string {
@@ -84,8 +71,6 @@ func isBadDMI(v string) bool {
 	return false
 }
 
-// hardwareAnchor returns a stable string uniquely identifying this machine and
-// the source it came from. Deterministic across reboots and factory resets.
 func hardwareAnchor() (anchor, source string) {
 	for _, p := range []string{
 		"/sys/class/dmi/id/product_uuid",
@@ -100,7 +85,6 @@ func hardwareAnchor() (anchor, source string) {
 	if v := readTrim("/etc/machine-id"); v != "" {
 		return v, "machine-id"
 	}
-	// Last resort: the first physical NIC's permanent MAC (stable per hardware).
 	if ifc := firstPhysicalIface(); ifc != "" {
 		if mac := permMAC(ifc); mac != "" {
 			return mac, "nic-perm-mac"
@@ -109,7 +93,6 @@ func hardwareAnchor() (anchor, source string) {
 	return "stayconnect-unknown-anchor", "none"
 }
 
-// Serial derives the stable SC-XXXX-XXXX-XXXX serial from the hardware anchor.
 func Serial() string {
 	anchor, _ := hardwareAnchor()
 	sum := sha256.Sum256([]byte("stayconnect-serial-v1:" + anchor))
@@ -117,11 +100,7 @@ func Serial() string {
 	return "SC-" + s[0:4] + "-" + s[4:8] + "-" + s[8:12]
 }
 
-// Fingerprint is a stable hardware fingerprint (hex) over the machine's DMI
-// identity fields ONLY — deliberately excluding NIC MACs so a legitimate WAN
-// NIC replacement changes the WAN MAC (a soft rebind signal) without changing
-// the fingerprint (which still proves "same machine"). A clone onto different
-// hardware yields a different product UUID and therefore a different fingerprint.
+// Fingerprint covers DMI identity fields only, never NIC MACs, so a WAN NIC replacement does not change it.
 func Fingerprint() string {
 	var parts []string
 	for _, p := range []string{"product_uuid", "product_serial", "board_serial", "board_asset_tag", "product_name", "sys_vendor", "chassis_serial"} {
@@ -138,7 +117,6 @@ func Fingerprint() string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// NormalizeMAC lower-cases and colon-normalizes a MAC for storage/comparison.
 func NormalizeMAC(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.ReplaceAll(s, "-", ":")
@@ -152,9 +130,7 @@ func NormalizeMAC(s string) string {
 	return s
 }
 
-// permMAC returns the PERMANENT physical MAC of iface (via ethtool -P), falling
-// back to the current /sys address. Randomized/overridden MACs are avoided by
-// preferring the permanent address the NIC firmware reports.
+// permMAC prefers the NIC firmware's permanent address over randomized/overridden ones.
 func permMAC(iface string) string {
 	if iface == "" {
 		return ""
@@ -170,8 +146,6 @@ func permMAC(iface string) string {
 	return ""
 }
 
-// isPhysical reports whether iface is a real NIC (has a device symlink, is not a
-// bridge/vlan/veth/loopback).
 func isPhysical(iface string) bool {
 	if iface == "" || iface == "lo" || strings.Contains(iface, ".") {
 		return false
@@ -200,8 +174,6 @@ func firstPhysicalIface() string {
 	return ""
 }
 
-// wanInterface picks the WAN NIC: explicit env override, else the interface of
-// the default route, else the first physical NIC.
 func wanInterface() string {
 	for _, k := range []string{"HWID_WAN_INTERFACE", "NETD_WAN_INTERFACE", "SCD_WAN_INTERFACE"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -219,8 +191,6 @@ func wanInterface() string {
 	return firstPhysicalIface()
 }
 
-// lanInterface picks the LAN NIC: env override, else the physical member of the
-// legacy LAN bridge (br-lan), else the second physical NIC.
 func lanInterface(wan string) string {
 	for _, k := range []string{"HWID_LAN_INTERFACE", "NETD_LAN_MEMBER", "SCD_LAN_INTERFACE"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
@@ -243,7 +213,6 @@ func lanInterface(wan string) string {
 			return members[0]
 		}
 	}
-	// else the first physical NIC that isn't WAN
 	ents, err := os.ReadDir("/sys/class/net")
 	if err == nil {
 		var names []string
@@ -273,7 +242,6 @@ func model() string {
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-// Detect gathers the full hardware identity for this appliance.
 func Detect() Info {
 	anchor, src := hardwareAnchor()
 	_ = anchor

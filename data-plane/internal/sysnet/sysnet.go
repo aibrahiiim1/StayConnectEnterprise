@@ -1,8 +1,5 @@
-// Package sysnet is the pure model, validator and netplan serializer for the
-// appliance's OWN WAN/Management + LAN base networking (as opposed to netcfg,
-// which models the guest VLAN/DHCP overlay). It has no side effects: given an
-// intended WAN + LAN configuration it validates it against the safety rules and
-// renders the netplan YAML. netd owns the side effects (backup/apply/rollback).
+// Package sysnet models, validates and renders netplan for the appliance's own WAN/management and LAN base
+// networking (netcfg models the guest overlay). It is side-effect free; netd applies.
 package sysnet
 
 import (
@@ -21,8 +18,7 @@ type WANConfig struct {
 	DNS       []string `json:"dns"`        // resolvers
 }
 
-// LANConfig is the guest-facing LAN. The IP lives on the BRIDGE, never on the
-// enslaved physical interface.
+// LANConfig is the guest-facing LAN; the IP lives on the bridge, never the enslaved NIC.
 type LANConfig struct {
 	PhysicalInterface string   `json:"physical_interface"` // ens192 (bridge member)
 	Bridge            string   `json:"bridge"`             // br-lan (carries the IP)
@@ -57,9 +53,7 @@ func (r *ValidationResult) add(field, code, msg string) {
 	r.OK = false
 }
 
-// Merge overlays a proposal onto the current effective config so validation and
-// rendering always operate on the FULL intended state (cross-section rules need
-// both WAN and LAN).
+// Merge overlays a proposal onto the current config so cross-section rules see the full intended state.
 func Merge(cur WANConfig, curLAN LANConfig, p Proposal) (WANConfig, LANConfig) {
 	w, l := cur, curLAN
 	if p.WAN != nil {
@@ -95,15 +89,12 @@ func Merge(cur WANConfig, curLAN LANConfig, p Proposal) (WANConfig, LANConfig) {
 }
 
 // ValidateFull runs every safety rule against the effective WAN + LAN config.
-// The 15 rules from the spec are all covered.
 func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 	res := ValidationResult{OK: true}
 
-	// --- WAN structural ---
 	static := wan.Mode != "dhcp"
 	var wanNet *net.IPNet
 	if static {
-		// (9) prefix sanity
 		if wan.PrefixLen < 1 || wan.PrefixLen > 32 {
 			res.add("wan.prefix_len", "invalid_prefix", "WAN prefix length must be 1–32")
 		}
@@ -112,7 +103,6 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 			res.add("wan.ip", "invalid_ip", "WAN IP is not a valid IPv4 address")
 		} else if wan.PrefixLen >= 1 && wan.PrefixLen <= 32 {
 			_, wanNet, _ = net.ParseCIDR(fmt.Sprintf("%s/%d", wan.IP, wan.PrefixLen))
-			// (6/host) WAN IP must be a usable host, not network/broadcast
 			if wanNet != nil {
 				if isNetworkAddr(wip, wanNet) {
 					res.add("wan.ip", "network_address", "WAN IP is the network address")
@@ -122,11 +112,9 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 				}
 			}
 		}
-		// (13/15) management path: static WAN must carry an IP.
 		if wan.IP == "" {
 			res.add("wan.ip", "no_management_ip", "WAN/management IP is required to keep the appliance reachable")
 		}
-		// (2/4) WAN gateway required and must be in the WAN subnet (unless on-link).
 		if wan.Gateway == "" {
 			res.add("wan.gateway", "no_gateway", "WAN requires a default gateway")
 		} else {
@@ -138,14 +126,12 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 			}
 		}
 	}
-	// (10) DNS validity
 	for _, d := range wan.DNS {
 		if ip := net.ParseIP(strings.TrimSpace(d)); ip == nil {
 			res.add("wan.dns", "invalid_dns", "invalid WAN DNS address: "+d)
 		}
 	}
 
-	// --- LAN structural ---
 	if lan.PrefixLen < 1 || lan.PrefixLen > 30 {
 		res.add("lan.prefix_len", "invalid_prefix", "LAN prefix length must be 1–30")
 	}
@@ -170,11 +156,9 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		}
 	}
 
-	// (11) same physical interface cannot be both WAN and LAN.
 	if wan.Interface != "" && (wan.Interface == lan.PhysicalInterface || wan.Interface == lan.Bridge) {
 		res.add("lan.physical_interface", "iface_conflict", "WAN and LAN cannot share the same interface")
 	}
-	// (12) the IP-bearing LAN iface must be the bridge, not a bridge member.
 	if lan.Bridge == "" {
 		res.add("lan.bridge", "no_bridge", "LAN IP must live on a bridge, not directly on the physical NIC")
 	}
@@ -182,16 +166,13 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 		res.add("lan.physical_interface", "member_is_bridge", "LAN physical interface cannot equal the bridge")
 	}
 
-	// (1) WAN and LAN must not share a subnet.
 	if wanNet != nil && lanNet != nil && wanNet.String() == lanNet.String() {
 		res.add("lan.ip", "subnet_overlap", "WAN and LAN cannot use the same subnet")
 	}
-	// (7/8) WAN IP must differ from LAN IP.
 	if wan.IP != "" && wan.IP == lan.IP {
 		res.add("lan.ip", "duplicate_ip", "WAN IP and LAN IP must be different")
 	}
 
-	// (5/6) DHCP range rules.
 	if lan.DHCPEnabled {
 		s := net.ParseIP(lan.DHCPStart)
 		e := net.ParseIP(lan.DHCPEnd)
@@ -214,7 +195,6 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 			if cmpIP(s, e) > 0 {
 				res.add("lan.dhcp_end", "range_reversed", "DHCP end must be >= DHCP start")
 			}
-			// exclude gateway / network / broadcast from the pool
 			if lip != nil && inRange(lip, s, e) {
 				res.add("lan.dhcp_start", "pool_contains_gateway", "DHCP range must not include the LAN gateway")
 			}
@@ -230,15 +210,11 @@ func ValidateFull(wan WANConfig, lan LANConfig) ValidationResult {
 	return res
 }
 
-// ValidateProposal validates the effective configuration a proposal produces, and adds the two rules that depend
-// on what the proposal touches rather than on the result alone:
-//
-//   - A WAN-only change is not blocked by the LAN. On an appliance whose base LAN bridge carries no address (it is
-//     a legacy bridge client networks do not use), every LAN rule failed and the WAN could never be changed.
-//     The LAN is validated in full whenever the proposal changes it, or when it is configured at all.
-//   - DHCP on the base LAN is NOT edited here. It has one source of truth, the client-network pages (the console
-//     says so), and the values this screen sends were validated and then silently discarded. A proposal whose
-//     DHCP fields differ from what is in force is refused, so nobody believes a change was made.
+// ValidateProposal validates the resulting configuration plus two rules that depend on what the proposal touches:
+//   - A WAN-only change is not blocked by an unaddressed base LAN bridge; the LAN is validated in full when
+//     the proposal changes it or it is configured.
+//   - DHCP on the base LAN is edited on the client-network pages, so a differing DHCP value is refused rather
+//     than silently discarded.
 func ValidateProposal(wan WANConfig, lan LANConfig, cur LANConfig, p Proposal) ValidationResult {
 	res := ValidateFull(wan, lan)
 	if p.LAN == nil && strings.TrimSpace(cur.IP) == "" {
@@ -261,16 +237,13 @@ func ValidateProposal(wan WANConfig, lan LANConfig, cur LANConfig, p Proposal) V
 	return res
 }
 
-// ManagementURL is the URL an operator uses to reach Hotel Admin after a WAN
-// change (rule 14). Caddy serves TLS on the WAN/management IP.
+// ManagementURL is where an operator reaches Hotel Admin after a WAN change (Caddy serves TLS on the WAN IP).
 func ManagementURL(wan WANConfig) string {
 	if wan.IP != "" {
 		return "https://" + wan.IP
 	}
 	return ""
 }
-
-// --- helpers ---
 
 func isNetworkAddr(ip net.IP, n *net.IPNet) bool {
 	return ip.Mask(n.Mask).Equal(ip.To4()) && ip.To4().Equal(n.IP.To4())
@@ -339,8 +312,7 @@ func RenderWANNetplan(w WANConfig) string {
 	return b.String()
 }
 
-// RenderLANNetplan serializes the LAN bridge (physical member enslaved, IP on
-// the bridge — never on the member).
+// RenderLANNetplan serializes the LAN bridge.
 func RenderLANNetplan(l LANConfig) string {
 	var b strings.Builder
 	b.WriteString("# StayConnect Hotel Appliance — LAN bridge (managed by the Hotel Admin\n")

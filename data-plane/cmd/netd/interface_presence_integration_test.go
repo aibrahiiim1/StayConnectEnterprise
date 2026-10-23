@@ -10,15 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// WHAT THE INVENTORY IS FOR, NOW THAT IT IS NOT THE PRESENCE ORACLE.
-//
-// Presence is observed live at the moment of the decision (see applier.presenceSets and
-// interface_presence_test.go). This table answers a different question — what has this appliance EVER
-// recorded — and holds the operator's own columns. These cases pin the properties that question depends on,
-// against a real PostgreSQL, because they are properties of the SQL.
-//
-// They run against the disposable PostgreSQL the Phase-3 gate provisions and executes
-// `-tags integration -run Integration ./cmd/netd/` against.
+// The inventory records what the appliance has ever seen and holds the operator's own columns; presence is
+// observed live (applier.presenceSets). These pin SQL properties against the Phase-3 gate's disposable PostgreSQL.
 
 func presenceTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -34,8 +27,7 @@ func presenceTestPool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// A REAL TABLE, NOT A TEMP ONE: the store holds a pool, so consecutive statements can land on different
-// connections and a TEMP table is visible only to the session that made it.
+// A real table, not a TEMP one: the store holds a pool, so statements can land on different connections.
 func freshInventory(t *testing.T, p *pgxpool.Pool) *store {
 	t.Helper()
 	ctx := context.Background()
@@ -59,9 +51,7 @@ func freshInventory(t *testing.T, p *pgxpool.Pool) *store {
 	return &store{db: p}
 }
 
-// NOTHING IS EVER DELETED, and the operator's own column survives an interface going away. This is why the
-// fix does not prune: role, is_protected and mode are chosen by a person, and an interface that came back
-// after a prune would return silently declassified.
+// Nothing is ever deleted: role, is_protected and mode are chosen by a person, and a pruned interface would return declassified.
 func TestIntegrationInventoryRetainsVanishedInterfaceAndItsRole(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)
@@ -74,7 +64,6 @@ func TestIntegrationInventoryRetainsVanishedInterfaceAndItsRole(t *testing.T) {
 		t.Fatalf("classify: %v", err)
 	}
 
-	// ens224 is gone: a later sweep does not see it.
 	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}}, "ens160", "ens160"); err != nil {
 		t.Fatalf("sync 2: %v", err)
 	}
@@ -94,7 +83,6 @@ func TestIntegrationInventoryRetainsVanishedInterfaceAndItsRole(t *testing.T) {
 		t.Fatalf("the operator-assigned role must survive absence, got %q", role)
 	}
 
-	// And it comes back with that classification intact.
 	if err := st.SyncInterfaces(ctx, []Interface{{Name: "ens160"}, {Name: "ens224"}}, "ens160", "ens160"); err != nil {
 		t.Fatalf("sync 3: %v", err)
 	}
@@ -106,8 +94,7 @@ func TestIntegrationInventoryRetainsVanishedInterfaceAndItsRole(t *testing.T) {
 	}
 }
 
-// ONE SWEEP IS ONE INSTANT, so anything that legitimately reads this table reads a coherent snapshot rather
-// than a spread of per-row timestamps.
+// One sweep is one instant, so readers see a coherent snapshot.
 func TestIntegrationSweepStampsOneInstant(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)
@@ -127,8 +114,7 @@ func TestIntegrationSweepStampsOneInstant(t *testing.T) {
 	}
 }
 
-// THE KNOWN SET IS EVERY ROW, whatever its observation state — including one never observed at all, which
-// other paths (edged assigning a role) can create.
+// The known set is every row, including one never observed (edged assigning a role can create it).
 func TestIntegrationKnownSetIncludesNeverObservedRows(t *testing.T) {
 	p := presenceTestPool(t)
 	st := freshInventory(t, p)

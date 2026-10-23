@@ -13,24 +13,20 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// replacementWindow bounds how long an outgoing (replacement_pending) appliance may stay licensed while its
-// replacement registers itself and is activated at the same site.
+// replacementWindow bounds how long an outgoing appliance may stay licensed until its replacement is activated at the same site.
 const replacementWindow = 72 * time.Hour
 
-// completeReplacementIfPending is invoked when an appliance is activated. If the SAME site has an outgoing
-// appliance marked for replacement, the replacement is complete and the OLD appliance is retired through the
-// normal, acknowledged two-phase terminal delivery (terminal_delivery.go) — exactly like Retire:
+// completeReplacementIfPending runs on activation. If the same site has an outgoing appliance marked for
+// replacement, the old one is retired through the acknowledged two-phase terminal delivery, like Retire:
 //
-//   - its licence is revoked now (licence state never blocks the assignment channel or the ack);
-//   - a signed DECOMMISSIONED assignment is minted and delivery is recorded as pending;
-//   - its certificate and identity stay valid, so the old box can fetch that document over mTLS, adopt it
-//     and send its signed acknowledgment. Only that ack (AckHandler) revokes its credentials and marks it
-//     decommissioned. No ack within terminalTimeout -> terminal_delivery_failed + a security alert; the
-//     operator may then retire it as an emergency, which revokes the credentials without waiting.
+//   - its licence is revoked now;
+//   - a signed DECOMMISSIONED assignment is minted and delivery recorded as pending;
+//   - its certificate stays valid so the old box can fetch the document over mTLS; only its signed ack
+//     (AckHandler) revokes the credentials. No ack within terminalTimeout raises terminal_delivery_failed
+//     and an alert; the operator may then emergency-retire it.
 //
-// Revoking the credentials here, before the ack, is the bug this replaced: the old box could then never fetch
-// its retirement (strictMTLSSelf refuses a revoked certificate) and kept serving on its cached assignment.
-// Idempotent: a no-op when no replacement is pending.
+// Credentials must not be revoked before the ack: strictMTLSSelf would refuse the retirement fetch and the box
+// would keep serving on its cached assignment. Idempotent; a no-op when no replacement is pending.
 func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request, newID, siteID string) {
 	if siteID == "" {
 		return
@@ -43,7 +39,7 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
            AND lifecycle_state = 'assigned'
          ORDER BY updated_at ASC LIMIT 1`, siteID, newID).Scan(&oldID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return // nothing pending — a normal activation
+		return
 	}
 	if err != nil {
 		audit.Op(ctx, b.DB, r, "appliance.replacement_check_failed", "appliance", newID,
@@ -56,12 +52,9 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
 	}
 	reason := "replaced by " + newID
 
-	// ONE TRANSACTION: link the two rows and close the replacement window, revoke the old appliance's licence
-	// and sign its terminal assignment -- exactly as a normal Retire. Never a revoked licence with no
-	// retirement document (the box would keep serving on its cached assignment), never a retirement whose
-	// licence survived, never a "completed" link with neither. If any step fails nothing is kept: the old
-	// appliance stays marked for replacement, so the window reconciler raises its alert, and the failure is
-	// audited; the operator retires it from its page.
+	// One transaction: link the rows, close the window, revoke the old licence and sign its terminal assignment. Never
+	// a revoked licence without a retirement document (the box would keep serving on its cache). On failure nothing
+	// is kept: the old appliance stays marked, the window reconciler alerts, and the failure is audited.
 	var licRevoked []string
 	var ver int64
 	err = func() error {
@@ -105,12 +98,9 @@ func (b *Base) completeReplacementIfPending(ctx context.Context, r *http.Request
 		"assignment_version": ver, "retirement": "awaiting_ack"})
 }
 
-// ReconcileReplacements raises a visible operational/security alert for any
-// replacement that has NOT completed within its window, so an outgoing appliance
-// can never stay licensed indefinitely without a decision. It deliberately does
-// NOT auto-terminate the old appliance (service continuity + explicit audited
-// operator decision required). Idempotent: it will not re-raise while an open
-// alert already exists. Returns the number of alerts raised this pass.
+// ReconcileReplacements raises an alert for any replacement not completed within its window. It deliberately does
+// not auto-terminate the old appliance (an explicit, audited operator decision is required). Idempotent while an
+// alert is open; returns the number of alerts raised.
 func ReconcileReplacements(ctx context.Context, b *Base) (int64, error) {
 	rows, err := b.DB.Query(ctx, `
         SELECT a.id::text, COALESCE(a.serial,''), COALESCE(a.site_id::text,'')

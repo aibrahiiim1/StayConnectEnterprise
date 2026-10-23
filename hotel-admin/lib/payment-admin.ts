@@ -1,18 +1,9 @@
-// PAYMENT ADMINISTRATION — the shapes edged answers on the Payment methods and Room charge screens, and the
-// plain words for the codes it answers with.
-//
-// THE CODES ARE THE CONTRACT; THE WORDS ARE OURS. edged reports why a module or a provider is not ready as a
-// stable code (NO_ACTIVE_PAYMENT_ACCOUNT, PMS_POSTING_NOT_AUTHORISED …). An operator reads a sentence, so each
-// known code is translated here, once, and both screens use the same sentence for the same code. A code this
-// file does not know is shown VERBATIM rather than hidden or guessed at: a new server reason must reach the
-// operator even before the console learns to word it.
+// Shapes edged answers on the Payment methods and Room charge screens, and plain words for its codes.
+// The codes are the contract; a code this file does not know is shown VERBATIM so a new server reason still reaches the
+// operator.
 
 import { ApiError } from "./api";
 import { errMsg } from "./utils";
-
-/* ----------------------------------------------------------------------------------------------------- */
-/* Site modules (GET /modules)                                                                             */
-/* ----------------------------------------------------------------------------------------------------- */
 
 export type SiteModule = {
   id: string;
@@ -36,10 +27,6 @@ export type SiteModules = {
   modules: Record<string, SiteModule>;
   deployment?: unknown;
 };
-
-/* ----------------------------------------------------------------------------------------------------- */
-/* Card payment (/payment-providers/*)                                                                     */
-/* ----------------------------------------------------------------------------------------------------- */
 
 export type CredentialKey = { key: string; label: string; secret: boolean; required: boolean };
 
@@ -67,9 +54,7 @@ export type PaymentAccount = {
   is_default: boolean;
   updated_at?: string;
   has_credentials: boolean;
-  /** The provider presents a package's price in the package currency and settles in this account's (0112). */
   provider_converts?: boolean;
-  /** Whether the provider converts at all (Stripe yes, Paymob no). */
   conversion_supported?: boolean;
   credential_keys_set?: string[];
 };
@@ -118,14 +103,8 @@ export type PaymentChange = {
 
 export type TestResult = { ok: boolean; error?: string; message?: string };
 
-/* ----------------------------------------------------------------------------------------------------- */
-/* Room charge onboarding (/pms-financial-onboarding)                                                      */
-/* ----------------------------------------------------------------------------------------------------- */
-
-/** What a room charge targets. Only RESERVATION exists; UNSET means room charge has not been approved yet. */
 export type PostingTargetModel = "UNSET" | "RESERVATION";
 
-/** A PMS answer (FIAS PA status) the vendor can confirm means "definitely not posted", and what it does then. */
 export type AnswerEffect = "NO_POST_BLOCK" | "DATA_SUSPECT_BLOCK" | "NO_STAY_BLOCK";
 
 export type AnswerMeaning = {
@@ -152,13 +131,11 @@ export type OnboardingInterface = {
   approved_by?: string | null;
   attestation?: string | null;
   answer_meanings?: AnswerMeaning[];
-  // How long room charge trusts the guest list after a successful complete resync (D48), and when it last had one.
   financial_mirror?: { max_age_seconds: number; is_default: boolean; last_complete_sync_at: string | null };
 };
 
 export type OnboardingResp = { interfaces: OnboardingInterface[]; posting_target_models: string[] };
 
-/** The one posting target, in words. The operator never chooses it: it is what the PMS integration does. */
 export const RESERVATION_TARGET = {
   label: "Reservation (room + reservation number)",
   explanation:
@@ -173,7 +150,6 @@ export function postingTargetLabel(s: string | null | undefined): string {
   return s;
 }
 
-/** The PMS answers that can be vendor-confirmed as "definitely not posted", in the order edged lists them. */
 export const ANSWER_NAMES: Record<string, string> = {
   NP: "No-post restriction",
   NG: "Guest not found",
@@ -182,7 +158,6 @@ export const ANSWER_NAMES: Record<string, string> = {
   RY: "Try again later",
 };
 
-/** What a confirmed answer does, by the effect edged reports for it (contract §9a rule 9). */
 export const ANSWER_EFFECT_WORDS: Record<string, string> = {
   NO_POST_BLOCK:
     "The purchase fails and room charge is blocked for the stay until Protel data allows posting again.",
@@ -193,11 +168,6 @@ export const ANSWER_EFFECT_WORDS: Record<string, string> = {
     "The purchase fails. The stay is not blocked, and the charge is never retried automatically.",
 };
 
-/* ----------------------------------------------------------------------------------------------------- */
-/* Room charge on a stay: posting permission and blocks                                                    */
-/* ----------------------------------------------------------------------------------------------------- */
-
-/** Why room charge is not allowed on a stay, in words. */
 export const POSTING_BLOCK_WORDS: Record<string, string> = {
   NOT_IN_HOUSE: "The guest is not in house",
   NO_RESERVATION: "The stay has no reservation number from the PMS",
@@ -207,7 +177,6 @@ export const POSTING_BLOCK_WORDS: Record<string, string> = {
   ADMIN_BLOCK: "Blocked by an administrator",
 };
 
-/** Who clears each block. Only ADMIN_BLOCK is an operator's to clear. */
 export const POSTING_BLOCK_CLEARED_BY: Record<string, string> = {
   NOT_IN_HOUSE: "Clears when the PMS reports the guest in house.",
   NO_RESERVATION: "Clears when the PMS sends the reservation number for this stay.",
@@ -219,7 +188,6 @@ export const POSTING_BLOCK_CLEARED_BY: Record<string, string> = {
   ADMIN_BLOCK: "A site administrator can remove it.",
 };
 
-/** Which side decided the stay's room-charge permission, in words. */
 export const POSTING_SOURCE_WORDS: Record<string, string> = {
   PMS_FEED: "PMS guest data",
   PMS_ANSWER: "Protel's answer to a charge",
@@ -237,12 +205,7 @@ export function postingSourceWords(code: string | null | undefined): string {
   return POSTING_SOURCE_WORDS[code] ?? code;
 }
 
-/* ----------------------------------------------------------------------------------------------------- */
-/* Code → sentence                                                                                         */
-/* ----------------------------------------------------------------------------------------------------- */
-
 const CODE_WORDS: Record<string, string> = {
-  // Card payment readiness.
   CARD_NOT_DEPLOYED: "Card payment is not installed on this appliance",
   PAYMENT_KEY_MISSING: "This appliance has no payment key",
   PAYMENT_CREDENTIALS_MISSING: "The appliance's payment database login is not configured",
@@ -254,12 +217,10 @@ const CODE_WORDS: Record<string, string> = {
   PROVIDER_NOT_SUPPORTED: "The provider of the active account is not supported",
   PROVIDER_CREDENTIALS_INCOMPLETE: "Some required provider credentials are not set",
   PROVIDER_UNREACHABLE: "The payment provider cannot be reached",
-  // Room charge readiness.
   PMS_POSTING_NOT_AUTHORISED: "Sending charges to the PMS is switched off on this appliance",
   NO_DATABASE: "The appliance database is not available",
   READINESS_UNREADABLE: "Readiness could not be read",
   NO_ONBOARDED_INTERFACE: "No PMS interface is approved for room charge",
-  // Module reasons: why a module is not in effect.
   NOT_DEPLOYED: "Not installed on this appliance",
   NOT_LICENSED: "Not included in the licence",
   LICENCE_NOT_ACTIVE: "The licence is not active",
@@ -267,7 +228,6 @@ const CODE_WORDS: Record<string, string> = {
   DISABLED_BY_SITE: "Switched off for this site",
   LOCAL_STATE_UNAVAILABLE: "The appliance could not read its module settings",
   NOT_READY: "Not ready",
-  // Room charge onboarding, per interface.
   INTERFACE_UNKNOWN: "The PMS interface is not known",
   CONNECTOR_NOT_FINANCIAL: "Room charge is supported on FIAS interfaces only",
   INTERFACE_NOT_ACTIVE: "The PMS interface is not active",
@@ -275,18 +235,12 @@ const CODE_WORDS: Record<string, string> = {
   ONBOARDING_NOT_APPROVED: "The room charge approval is incomplete",
 };
 
-/** The sentence for a code, or null when this console does not know it (the caller then shows the code). */
 export function codeWords(code: string): string | null {
   return CODE_WORDS[code] ?? null;
 }
 
-/* ----------------------------------------------------------------------------------------------------- */
-/* Errors from a step-up save                                                                              */
-/* ----------------------------------------------------------------------------------------------------- */
-
 /**
- * The message for a failed save that asked for the operator's password. The server's own `message` wins when
- * it sent one — it knows which field it refused — and the known codes get a sentence when it did not.
+ * The message for a failed step-up save: the server's own `message` wins when present, else known codes get a sentence.
  */
 export function saveErrorMessage(e: unknown): string {
   if (e instanceof ApiError) {

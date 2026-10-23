@@ -1,22 +1,9 @@
 package main
 
-// FULL RESYNC NOW — the operator's end of a command channel whose other end is a different process.
-//
-// WHAT THIS HANDLER DOES NOT DO is the important part. It does not open a socket, it does not build a FIAS
-// frame, and it does not talk to pmsd. It writes one row. The worker that owns the socket claims that row and
-// raises the DR through the serialized writer it already owns, which is the only thing in the system
-// permitted to emit a frame.
-//
-// That indirection is not ceremony. edged is a web process handling operator sessions; giving it a path to
-// the PMS socket would mean two writers on one link, and FIAS has no way to interleave them safely. The row
-// also survives the operator closing their laptop, and it carries the runtime generation it was issued
-// against, so a command aimed at a worker that has since been replaced is refused by the claim rather than
-// executed against a socket the operator never saw.
-//
-// WHY THE PRECONDITIONS ARE CHECKED HERE AND AGAIN AT CLAIM. The checks below exist to give the operator a
-// real answer — "the PMS is disconnected" rather than a request that vanishes. They are NOT the safety
-// boundary: between this check and the claim the transport can drop, ownership can change, or another resync
-// can start. The claim re-checks all of it under the CAS, and the claim is what actually decides.
+// Operator's end of a command channel: this handler only writes one row. The pmsd worker that owns the PMS
+// socket claims it and raises the DR through its serialized writer, because edged writing to the link would mean
+// two writers on one FIAS link. The row carries the runtime generation, so a command aimed at a replaced worker
+// is refused at claim. The checks here only give the operator a real answer; the claim re-checks under the CAS.
 
 import (
 	"context"
@@ -27,8 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Bounded reason codes. A free-text reason from an operator would end up in a durable record and, eventually,
-// on a screen; a closed set keeps both honest and keeps guest data out of an operations field by construction.
+// Bounded reason codes keep free text, and so guest data, out of a durable operations field.
 var fullResyncReasons = map[string]bool{
 	"SUSPECTED_STALE_GUEST_LIST": true,
 	"AFTER_PMS_MAINTENANCE":      true,
@@ -41,7 +27,6 @@ type fullResyncReq struct {
 	Password   string `json:"password"`
 }
 
-// requestFullResync serves POST /edge/v1/pms-interfaces/{id}/full-resync.
 func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(id) {
@@ -58,9 +43,7 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 			"a bounded reason code is required: a full resync replaces the entire guest list")
 		return
 	}
-	// Step-up on the same terms as publishing a revision. Requesting a fresh roster is not destructive — the
-	// current mirror keeps serving until a new generation publishes — but it does put load on the hotel's PMS
-	// and changes what every subsequent guest resolves against.
+	// Step-up as for publishing a revision: a fresh roster loads the hotel's PMS and changes what every sign-in resolves against.
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
@@ -69,39 +52,26 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// THE WRITE GOES THROUGH A FUNCTION, NOT A TABLE.
-	//
-	// svc_edged holds no write privilege on iam_v2.pms_interface_runtime and must not: that row carries
-	// transport_status, sync_status, runtime_generation and the pinned revision — the state a pmsd worker uses
-	// to prove it still owns a socket. An admin process able to write any of it could invalidate ownership or
-	// fake a connection. The first deployment of this handler failed with "permission denied" and that refusal
-	// was correct; iam_v2.request_full_resync (migration 0055) is the narrow capability that replaced it.
-	//
-	// The function returns NULL rather than raising when no row qualifies, so a refusal is an ordinary result
-	// here and the specific reason is read back below.
+	// The write goes through iam_v2.request_full_resync, not a table: svc_edged must not write
+	// iam_v2.pms_interface_runtime (transport/sync status, generation, pinned revision), which pmsd uses to prove
+	// it owns a socket. The function returns NULL when no row qualifies; the reason is read back below.
 	var cmdID *string
 	err := s.db.QueryRow(ctx,
 		`SELECT iam_v2.request_full_resync($1,$2,$3::uuid,$4)::text`,
 		s.tenantID, s.siteID, id, strings.TrimSpace(in.ReasonCode)).Scan(&cmdID)
 
 	if err == nil && cmdID == nil {
-		// Nothing qualified. Read the row back to tell the operator WHICH rule stopped them — a bare
-		// "refused" on a button that looks like it should work is how an operator concludes the product is
-		// broken and starts restarting services.
+		// Nothing qualified: read the row back to tell the operator which rule stopped them.
 		jsonErr(w, http.StatusConflict, "resync_not_possible", s.fullResyncRefusal(ctx, id))
 		return
 	}
 	if err != nil {
-		// Logged with the cause, because the operator-facing message deliberately carries none: a database
-		// error rendered into an admin screen is how internal detail escapes. Without this line the first
-		// deployment of this handler produced a bare 500 with nothing to diagnose it by.
+		// Logged with the cause because the operator-facing message deliberately carries none (internal detail must not reach the screen).
 		slog.Error("full resync request could not be recorded", "interface", id, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal", "could not record the request")
 		return
 	}
-	// WHO ASKED (audit H-4). A full resync is real traffic to the hotel's PMS and replaces the guest list every
-	// sign-in resolves against; the command row carries the reason but not the operator, so the actor is
-	// recorded here, with the command it produced.
+	// Record the actor: the command row carries the reason but not the operator.
 	s.audit(r, "pms_interface.full_resync_requested", "pms_interfaces", id,
 		map[string]any{"reason_code": strings.TrimSpace(in.ReasonCode), "command_id": *cmdID})
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -112,10 +82,7 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// fullResyncRefusal names the first unmet precondition, in the order an operator would check them.
-//
-// Deliberately a SECOND query rather than a value returned by the first: the refusal is diagnostic text, and
-// computing it inside the write would mean the write had to succeed to explain why it failed.
+// Names the first unmet precondition. A second query on purpose: the refusal is diagnostic text and must not depend on the write succeeding.
 func (s *server) fullResyncRefusal(ctx context.Context, id string) string {
 	var lifecycle, transport, sync string
 	var pending bool

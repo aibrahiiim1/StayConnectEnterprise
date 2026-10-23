@@ -1,8 +1,6 @@
-// Package authctx is the Increment-6 one-time, TTL-bounded PMS Auth Context. A successful STRICT resolution
-// issues an Auth Context — NOT a guest session directly. Every identity pin (tenant/site/interface/stay/
-// revision) is SERVER-DERIVED from the resolution, never client input. The context is consumed EXACTLY once;
-// a replay or an expired context is rejected uniformly (no detail). Consuming it is the gate a later session
-// issuance passes through — this package issues no session and no financial command.
+// Package authctx is the one-time, TTL-bounded PMS Auth Context. A successful STRICT resolution issues a context, NOT a guest session; every identity pin
+// is SERVER-DERIVED, never client input. The context is consumed EXACTLY once; a replay or expired context is rejected uniformly. This package issues no
+// session and no financial command.
 package authctx
 
 import (
@@ -25,9 +23,7 @@ var ErrGrantIncomplete = errors.New("authctx: incomplete or invalid PMS grant")
 
 const nilUUID = "00000000-0000-0000-0000-000000000000"
 
-// validPinUUID reports whether s is a canonical 8-4-4-4-12 lowercase/uppercase-hex UUID and NOT the nil UUID
-// (a real identity pin is never nil). Validating in Go means a malformed id returns a typed sanitized error
-// BEFORE any SQL, never a raw PostgreSQL cast error.
+// Reports whether s is a canonical UUID and not the nil UUID; validating in Go returns a typed sanitized error BEFORE any SQL, never a raw PostgreSQL cast error.
 func validPinUUID(s string) bool {
 	if len(s) != 36 || s == nilUUID {
 		return false
@@ -47,8 +43,7 @@ func validPinUUID(s string) bool {
 	return true
 }
 
-// valid reports whether every required server-derived pin is a proper UUID and the TTL is positive/bounded. A
-// PMS Auth Context is NEVER issued without the full valid pin set.
+// A PMS Auth Context is NEVER issued without the full valid pin set.
 func (g PMSGrant) valid() bool {
 	for _, v := range []string{g.Tenant, g.Site, g.Interface, g.Revision, g.Stay, g.Device, g.GuestNetwork} {
 		if !validPinUUID(strings.TrimSpace(v)) {
@@ -58,20 +53,17 @@ func (g PMSGrant) valid() bool {
 	return g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
 }
 
-// valid reports whether the presenter identity is fully-formed (proper UUIDs). A malformed presenter is a
-// uniform ErrContextInvalid, never a raw cast error.
+// valid reports whether the presenter identity is well-formed; a malformed presenter is a uniform ErrContextInvalid.
 func (p Presenter) valid() bool {
 	return validPinUUID(strings.TrimSpace(p.Tenant)) && validPinUUID(strings.TrimSpace(p.Site)) &&
 		validPinUUID(strings.TrimSpace(p.Device)) && validPinUUID(strings.TrimSpace(p.GuestNetwork))
 }
 
-// Store is the DB-backed Auth Context issuer/consumer.
 type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// PMSGrant is the SERVER-DERIVED pin set for a PMS Auth Context. Interface/Revision/Stay come from the
-// verified resolution; Device/GuestNetwork from the trusted request context. TTLSeconds bounds its lifetime.
+// The SERVER-DERIVED pin set: Interface, Revision and Stay come from the verified resolution; Device and GuestNetwork from the trusted request context.
 type PMSGrant struct {
 	Tenant, Site        string
 	Interface, Revision string
@@ -79,26 +71,22 @@ type PMSGrant struct {
 	Device              string
 	GuestNetwork        string
 	TTLSeconds          int
-	// lifecycle_version + occupancy_evidence_version are NOT supplied by the caller — they are read
-	// authoritatively from the resolved Stay row inside IssuePMSTx (the caller cannot invent them).
+	// lifecycle_version and occupancy_evidence_version are read from the resolved Stay row inside IssuePMSTx, never supplied by the caller.
 }
 
-// Consumed is what a successful one-time consumption yields — the server-pinned subject the caller may then
-// act on (e.g. issue a scoped session). It carries NO guest credential.
+// Consumed is the server-pinned subject a successful consumption yields; it carries NO guest credential.
 type Consumed struct {
 	Method    string
 	Stay      string
 	Interface string
 	Revision  string
-	// PostStayProfile is the server-pinned subject of a POST_STAY_PIN context. It is empty for every other
-	// method, and a caller acting on a post-stay context MUST read it rather than Stay: the origin Stay is
-	// lineage, not the subject, and treating it as the subject is how post-stay access would end up attached
-	// to a room again.
+	// PostStayProfile is the server-pinned subject of a POST_STAY_PIN context (empty otherwise); a caller must read it rather than Stay, since the origin
+	// Stay is lineage and treating it as the subject would attach post-stay access to a room again.
 	PostStayProfile string
 }
 
-// Presenter is the request-side identity a consumption is checked against. A context pinned to one
-// device/guest-network/scope is UNUSABLE from another — a mismatch is a uniform ErrContextInvalid.
+// The request-side identity a consumption is checked against: a context pinned to one device, guest network and scope is UNUSABLE from another
+// (uniform ErrContextInvalid).
 type Presenter struct {
 	Tenant       string
 	Site         string
@@ -106,13 +94,11 @@ type Presenter struct {
 	GuestNetwork string
 }
 
-// ErrContextInvalid is returned uniformly for a missing / expired / already-consumed context, OR one presented
-// from a different device / guest-network / scope (no detail distinguishes these to the caller).
+// Returned uniformly for a missing, expired, consumed or mispresented context; no detail distinguishes these to the caller.
 var ErrContextInvalid = errors.New("authctx: context invalid, expired, consumed, or wrong presenter")
 
-// IssuePMS creates a one-time, TTL-bounded PMS Auth Context and returns its opaque id (the single-use token).
-// expires_at is computed SERVER-SIDE (now() + TTL) so no client clock influences the lifetime. A
-// non-positive TTL yields an already-expired context (fail-closed).
+// Creates a one-time PMS Auth Context and returns its opaque id. expires_at is computed SERVER-SIDE (now() + TTL); a non-positive TTL yields an
+// already-expired context (fail-closed).
 func (s *Store) IssuePMS(ctx context.Context, g PMSGrant) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -129,53 +115,27 @@ func (s *Store) IssuePMS(ctx context.Context, g PMSGrant) (string, error) {
 	return id, nil
 }
 
-// IssuePMSTx issues the PMS Auth Context INSIDE the caller's transaction (ideally the successful
-// STRICT-resolution transaction). It locks the resolved Stay, verifies scope + IN_HOUSE + valid occupancy
-// evidence produced by the pinned Revision, and reads the AUTHORITATIVE lifecycle_version + monotonic
-// occupancy_evidence_version from that row — the caller supplies only the verified resolution identity, never
-// the current counters. Fails closed (ErrGrantIncomplete) on any missing/invalid pin, without inserting.
+// Issues the PMS Auth Context INSIDE the caller's transaction: locks the resolved Stay, verifies scope, IN_HOUSE and valid occupancy evidence from the pinned
+// Revision, and reads the AUTHORITATIVE lifecycle_version and occupancy_evidence_version from that row, never from the caller. Fails closed
+// (ErrGrantIncomplete) on any missing or invalid pin, without inserting.
 func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, error) {
 	if !g.valid() {
 		return "", ErrGrantIncomplete
 	}
-	// The Auth Context family is capability-scoped: this transaction declares the operation it is about to
-	// perform, and writes to auth_contexts are refused without that declaration.
+	// The Auth Context family is capability-scoped: declare the operation first, or writes to auth_contexts are refused.
 	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
 		return "", err
 	}
 	var lifecycleVer int
 	var evVer int64
-	// Authoritative snapshot from the resolved Stay: locked (L1 Stay-first), and eligible according to
-	// iam_v2.p3_feed_authorizes — the SINGLE definition of the feed-health rule, shared with
-	// iam_v2.issue_or_return_pms_context.
-	//
-	// It used to be spelled out here, and in the consume path below, and again inside the SQL function: three
-	// hand-maintained copies of one security rule. They agreed, and all three were wrong the same way, keying
-	// eligibility to the age of the last event about the individual Stay. A healthy PMS says nothing about a
-	// guest who is simply in their room, so evidence "expired" five minutes after check-in while the feed was
-	// perfectly healthy. Eligibility now follows FEED health; see the function's comment for the full rule.
-	//
-	// It is still revalidated HERE as well as in the function, so a context that has become ineligible at the
-	// moment of issue is never persisted.
-	// THE LINEARIZATION POINT. Taken AFTER the Stay lock, preserving the L1 Stay-first order.
-	//
-	// p3_feed_authorizes is STABLE and this transaction is READ COMMITTED, so evaluating it proves only that
-	// the roster was materialized as of that statement's snapshot. A concurrent pmsd admission can commit a
-	// new PENDING occupancy event immediately afterwards and this transaction can still commit — authorising
-	// on a snapshot that predates a fact already durable. Demonstrated against PostgreSQL 16: auth predicate
-	// true at T, admission committed at T+3s, auth committed at T+8s, with the pending row never observed.
-	//
-	// SERIALIZABLE does not close it. This transaction reads stay_events and writes auth_contexts while
-	// admission writes stay_events and reads nothing we wrote, so SSI sees no dangerous cycle and aborts
-	// nobody — also measured, both transactions committed cleanly.
-	//
-	// So the fix is a lock, on the row admission already serializes on: from here until commit, no new
-	// occupancy event can be admitted for this interface, which turns "true a moment ago" into "true as of a
-	// point no admission can precede".
-	//
-	// Taken through the scoped helper (migration 0058), not inline: PostgreSQL requires UPDATE as well as
-	// SELECT for a row lock, and this table is the PMS feed's own state. Granting scd UPDATE on it would let
-	// the role being authorised rewrite the feed health it is authorised against.
+	// Authoritative snapshot of the resolved Stay: locked (L1 Stay-first) and eligible per iam_v2.p3_feed_authorizes, the SINGLE definition of the feed-health
+	// rule shared with iam_v2.issue_or_return_pms_context (eligibility follows FEED health, not the age of the last event about the Stay). Revalidated here
+	// too, so a context ineligible at the moment of issue is never persisted.
+	// THE LINEARIZATION POINT, taken AFTER the Stay lock (L1 Stay-first). p3_feed_authorizes is STABLE under READ COMMITTED, so it proves only that the
+	// roster was materialized as of its snapshot: a concurrent pmsd admission can commit a PENDING occupancy event right after and this transaction can
+	// still commit. SERIALIZABLE does not close it (SSI sees no dangerous cycle). So lock the row admission serializes on: until commit no new occupancy
+	// event can be admitted for this interface. Taken through the scoped helper, not inline: a row lock needs UPDATE as well as SELECT, and granting scd
+	// UPDATE on the PMS feed state would let the role being authorised rewrite the feed health it is authorised against.
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.lock_pms_interface_runtime($1,$2,$3)`,
 		g.Tenant, g.Site, g.Interface); err != nil {
 		return "", err
@@ -207,13 +167,9 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	return id, err
 }
 
-// PostStayGrant is the SERVER-DERIVED pin set for a POST_STAY_PIN Auth Context. It is deliberately NOT a
-// PMSGrant with fields left blank: a PMS context pins an interface, a Revision and the occupancy evidence
-// that proved the guest was in the room, and NONE of that is what a post-stay PIN proves. Sharing the struct
-// would have meant either lying about those pins or making them optional for everyone.
-//
-// The subject is the PROFILE. The origin Stay is reached through it and is never supplied by the caller —
-// that is what keeps post-stay identity off the room.
+// The SERVER-DERIVED pin set for a POST_STAY_PIN context. Deliberately NOT a PMSGrant with blank fields: a post-stay PIN proves none of the interface,
+// Revision or occupancy evidence. The subject is the PROFILE; the origin Stay is reached through it and never supplied by the caller, which keeps
+// post-stay identity off the room.
 type PostStayGrant struct {
 	Tenant, Site string
 	Profile      string
@@ -231,21 +187,13 @@ func (g PostStayGrant) valid() bool {
 	return g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
 }
 
-// ErrPostStayNotAuthenticable is a typed, SANITIZED refusal for a post-stay context that must not exist: the
-// profile is revoked, past its validity window, or bound to an episode the Stay has already left. It carries
-// no PIN, no guest identifier and no hint about WHICH of those it was — the caller returns the same uniform
-// non-success either way, and an error that distinguished them would be an oracle.
+// A typed, SANITIZED refusal for a post-stay context that must not exist (profile revoked, past its window, or bound to an episode the Stay has left).
+// It does not say WHICH, since distinguishing them would be an oracle.
 var ErrPostStayNotAuthenticable = errors.New("authctx: post-stay profile is not authenticable")
 
-// IssuePostStayTx issues a one-time, TTL-bounded POST_STAY_PIN Auth Context inside the caller's transaction —
-// ideally the same one that verified the PIN. It verifies NOTHING about the PIN itself (that is the caller's
-// job and happens before this); what it does is bind the context to the profile's CURRENT episode so that a
-// reinstatement between issue and consume invalidates it.
-//
-// It locks the origin Stay (L1 first, as everywhere else) and reads the episode AUTHORITATIVELY from that
-// locked row: the caller supplies the verified profile identity and never the counter. A profile that is not
-// authenticable at this instant yields ErrPostStayNotAuthenticable and NO row — a context that is already
-// dead the moment it is minted is never persisted.
+// Issues a one-time POST_STAY_PIN context inside the caller's transaction (ideally the one that verified the PIN; this verifies NOTHING about the PIN).
+// It binds the context to the profile's CURRENT episode so a reinstatement between issue and consume invalidates it, locking the origin Stay (L1 first)
+// and reading the episode AUTHORITATIVELY from it. A profile not authenticable now yields ErrPostStayNotAuthenticable and NO row.
 func (s *Store) IssuePostStayTx(ctx context.Context, tx pgx.Tx, g PostStayGrant) (string, error) {
 	if !g.valid() {
 		return "", ErrGrantIncomplete
@@ -277,7 +225,6 @@ func (s *Store) IssuePostStayTx(ctx context.Context, tx pgx.Tx, g PostStayGrant)
 	return id, err
 }
 
-// IssuePostStay is IssuePostStayTx in its own transaction, for a caller that has nothing else to commit.
 func (s *Store) IssuePostStay(ctx context.Context, g PostStayGrant) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -294,11 +241,8 @@ func (s *Store) IssuePostStay(ctx context.Context, g PostStayGrant) (string, err
 	return id, nil
 }
 
-// Consume atomically consumes the context EXACTLY once against the FULL server pin set — it must be
-// un-consumed, unexpired, in the presenter's tenant/site, AND presented from the SAME device + guest network.
-// Runs in its own transaction (for a standalone session issuance). For commerce, use ConsumeTx so the
-// consumption commits/rolls back ATOMICALLY with the Quote/Purchase — a failed purchase must not leave a
-// context permanently consumed.
+// Consumes the context EXACTLY once against the FULL server pin set (unconsumed, unexpired, presenter's tenant/site, SAME device + guest network) in its
+// own transaction. For commerce use ConsumeTx so consumption rolls back atomically with a failed purchase.
 func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -315,35 +259,21 @@ func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, 
 	return c, nil
 }
 
-// ConsumeTx performs the one-time consumption inside the CALLER's transaction, so the caller can bind it to a
-// Quote/Purchase and roll the consumption back if that fails. It obeys the approved GLOBAL lock order
-// L1 Stay → L2 Subject/Credential (the Auth Context row) → L3 Entitlement → L4 Capacity → L5 Config, so it
-// serializes deterministically against Checkout / Reinstatement / occupancy-evidence replacement (which all
-// take the Stay lock first) and never deadlocks against them:
-//
-//	(1) resolve the context's scoped Stay identity (unlocked read, filtered by presenter + unconsumed +
-//	    unexpired) — no context detail is returned to the caller on failure;
-//	(2) lock the pinned Stay row FIRST (SELECT ... FOR UPDATE OF st) while re-verifying the FULL pin set:
-//	    tenant/site/interface, IN_HOUSE, interface ACTIVE, Revision provenance, episode + monotonic evidence
-//	    snapshot, evidence present + not clock-suspect, and freshness under the pinned Revision;
-//	(3) only THEN atomically flip the context unconsumed→consumed (single-row UPDATE guarded by
-//	    consumed_at IS NULL AND expires_at > now()) — exactly one concurrent winner.
-//
-// The caller continues Quote/Purchase/Entitlement in the SAME transaction while still holding the Stay lock,
-// so a Checkout cannot interleave; a failed purchase rolls the consumption back with it. Every failure —
-// invalid/malformed id, stale, consumed, expired, wrong presenter — is the uniform ErrContextInvalid.
+// Performs the one-time consumption inside the CALLER's transaction, obeying the global lock order L1 Stay, L2 Subject/Credential (the Auth Context row),
+// L3 Entitlement, L4 Capacity, L5 Config, so it serializes against Checkout, Reinstatement and evidence replacement and never deadlocks. (1) Resolve the
+// scoped Stay identity (unlocked read, no detail on failure). (2) Lock the pinned Stay FIRST while re-verifying the full pin set. (3) Only THEN flip
+// unconsumed to consumed, guarded by consumed_at IS NULL AND expires_at > now(): exactly one winner. The caller continues in the SAME transaction
+// holding the Stay lock. Every failure is the uniform ErrContextInvalid.
 func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter) (Consumed, error) {
 	if !validPinUUID(strings.TrimSpace(id)) || !p.valid() {
 		return Consumed{}, ErrContextInvalid // typed/sanitized BEFORE any SQL — never a raw cast error
 	}
-	// The Auth Context family is capability-scoped: this transaction declares the operation it is about to
-	// perform, and writes to auth_contexts are refused without that declaration.
+	// The Auth Context family is capability-scoped: declare the operation first, or writes to auth_contexts are refused.
 	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
 		return Consumed{}, err
 	}
 
-	// (1) Resolve the context's scoped Stay identity WITHOUT locking the context. Presenter scope + one-time +
-	//     unexpired are enforced here (and re-asserted atomically in step 3). We learn only which Stay to lock.
+	// (1) Resolve the scoped Stay identity WITHOUT locking the context; presenter scope, one-time and expiry are enforced here and re-asserted in step 3.
 	var method, stayID, ifaceID, profileID string
 	err := tx.QueryRow(ctx, `SELECT ac.method, COALESCE(ac.stay_id::text,''),
 		       COALESCE(ac.pms_interface_id::text,''), COALESCE(ac.post_stay_profile_id::text,'')
@@ -352,10 +282,8 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		  AND ac.device_id=$4 AND ac.guest_network_id=$5
 		  AND ac.consumed_at IS NULL AND ac.expires_at > now()`,
 		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&method, &stayID, &ifaceID, &profileID)
-	// NOTE for anyone adding a method here: step (2) below re-verifies live subject state, and it is written
-	// PER METHOD. A method with no arm gets NO re-verification at all — the context stays usable for its whole
-	// TTL no matter what happens to its subject in the meantime. That is correct for a voucher (the subject is
-	// the voucher) and catastrophic for anything whose subject can be superseded underneath it.
+	// NOTE for anyone adding a method: step (2) re-verifies live subject state PER METHOD, and a method with no arm gets NO re-verification, so the
+	// context stays usable for its whole TTL however its subject changes (fine for a voucher, catastrophic for anything that can be superseded).
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Consumed{}, ErrContextInvalid
@@ -363,30 +291,20 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		return Consumed{}, err
 	}
 
-	// (2) L1: lock the pinned Stay FIRST and re-verify the full server pin set against live authoritative state.
-	//     Holding this lock serializes the whole consumption+commerce transaction against Checkout /
-	//     Reinstatement / evidence replacement, which acquire the same Stay lock before mutating it.
+	// (2) L1: lock the pinned Stay FIRST and re-verify the full pin set against live state; this serializes against Checkout, Reinstatement and
+	// evidence replacement.
 	if method == "PMS" {
 		var one int
-		// GRANT-TIME LINEARIZATION. A PMS Auth Context lives for minutes, so gating only issuance leaves the
-		// entire window between issue and grant unguarded: a GO can be admitted, still be unapplied, and the
-		// guest can redeem a context that was perfectly valid when minted.
-		//
-		// Same lock, same reason, same order as IssuePMSTx — taken before the Stay lock here only because the
-		// Stay id comes from the context row read above, and the runtime row is reached through it. The Stay
-		// lock still precedes every Stay-row condition, so L1 Stay-first is preserved for the Stay itself.
-		//
-		// Through the scoped helper (migration 0058) for the same reason as the issue path: a row lock needs
-		// UPDATE, and UPDATE here would let scd rewrite the feed health it is authorised against. The
-		// interface is the one PINNED IN THE CONTEXT, and step (2) below re-verifies that it is still the
-		// Stay's interface, so the row locked is the row the admission serializes on.
+		// GRANT-TIME LINEARIZATION: a PMS context lives minutes, so gating only issuance leaves issue-to-grant unguarded (a GO can be admitted, still
+		// unapplied, while the guest redeems a context that was valid when minted). Same lock, scoped helper and order as IssuePMSTx, taken before the Stay
+		// lock only because the Stay id comes from the context row; L1 Stay-first still holds for Stay-row conditions. The interface is the one PINNED IN
+		// THE CONTEXT and step (2) re-verifies it is still the Stay's interface.
 		if _, lerr := tx.Exec(ctx, `SELECT iam_v2.lock_pms_interface_runtime($1,$2,$3::uuid)`,
 			p.Tenant, p.Site, ifaceID); lerr != nil {
 			return Consumed{}, lerr
 		}
-		// L1: the Stay lock itself, taken through the scoped helper before its conditions are tested. The lock
-		// blocks until a concurrent Checkout commits, and the statement below then reads a fresh READ COMMITTED
-		// snapshot — so a departed guest is refused exactly as the combined FOR UPDATE refused them.
+		// L1: the Stay lock via the scoped helper before its conditions are tested; it blocks until a concurrent Checkout commits and the next statement
+		// reads a fresh snapshot, so a departed guest is refused.
 		if _, lerr := tx.Exec(ctx, `SELECT iam_v2.lock_stay($1,$2,$3::uuid)`,
 			p.Tenant, p.Site, stayID); lerr != nil {
 			return Consumed{}, lerr
@@ -427,20 +345,10 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		}
 	}
 
-	// (2b) POST_STAY_PIN. This method CANNOT reuse the PMS arm above, and the difference is not cosmetic:
-	//
-	//   * the PMS arm demands IN_HOUSE, an interface Revision, occupancy evidence and freshness. A post-stay
-	//     guest has checked OUT, and their identity was never proven from occupancy evidence — every one of
-	//     those conditions is false for a perfectly valid post-stay context;
-	//   * what post-stay needs instead is the EPISODE check, and it needs it here rather than only at issue.
-	//     Without this arm the method would fall through with NO re-verification at all: a context minted
-	//     seconds before a reinstatement would stay usable for its whole TTL, which is precisely the
-	//     next-occupant leak the whole design exists to prevent.
-	//
-	// The Stay is locked FIRST, keeping the approved L1→L2 order, so this serializes against Checkout and
-	// Reinstatement exactly as the PMS arm does. The predicate itself is the single one the database, the
-	// tests and this code all share (p5_post_stay_authenticable), and the pinned episode must ALSO still match
-	// the context — a profile that is authenticable again for a LATER episode is not this context's subject.
+	// (2b) POST_STAY_PIN cannot reuse the PMS arm: a post-stay guest has checked OUT and was never proven from occupancy evidence, so IN_HOUSE, Revision,
+	// evidence and freshness are all false for a valid context. It needs the EPISODE check here, not only at issue: with no arm the method gets NO
+	// re-verification and a context minted before a reinstatement would stay usable for its whole TTL (the next-occupant leak). The Stay is locked FIRST
+	// (L1 then L2); the predicate is the single p5_post_stay_authenticable shared with the database and tests, and the pinned episode must also match.
 	if method == "POST_STAY_PIN" {
 		var one int
 		// L1 first here too, keyed by the profile the context pins.
@@ -466,8 +374,8 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		}
 	}
 
-	// (3) L2: atomically flip the Auth Context unconsumed→consumed. The consumed_at IS NULL guard yields exactly
-	//     one concurrent winner even after the Stay lock is granted; presenter scope + expiry re-asserted.
+	// (3) L2: atomically flip unconsumed to consumed; the consumed_at IS NULL guard yields exactly one concurrent winner even after the Stay lock is
+	// granted, and presenter scope and expiry are re-asserted.
 	var c Consumed
 	err = tx.QueryRow(ctx, `UPDATE iam_v2.auth_contexts ac SET consumed_at = now()
 		WHERE ac.id=$1 AND ac.tenant_id=$2 AND ac.site_id=$3

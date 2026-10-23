@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 
-// EMAIL ACCOUNTS: THE TERMS (self-service contract §6). Every range, unit and default comes from the appliance; a
-// save needs a valid draft, a reason and the operator's password; a read-only role sees the values and no Save;
-// the change history is listed in words.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 

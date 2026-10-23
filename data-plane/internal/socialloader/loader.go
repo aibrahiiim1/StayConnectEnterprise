@@ -1,15 +1,9 @@
-// Package socialloader resolves a tenant's social OAuth providers from the database and builds the matching
-// implementation for each into a fresh social.Registry.
+// Package socialloader builds a fresh social.Registry from a tenant's provider rows.
 //
-// SECRETS COME FROM ONE PLACE ONLY: the sealed generation scd opens (contract
-// docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §5). The loader never reads
-// social_oauth_providers.client_secret. scd seals any plaintext still in that column before it loads
-// (cmd/scd/social_secrets.go), so a provider is built from a secret that has been through the sealing key or
-// not at all: there is no path on which a plaintext column is used once sealing exists, and none on which a
-// missing key quietly falls back to it.
-//
-// The development Stub (social.Stub) is passed in by the caller as a base provider; a real provider built from
-// a row replaces it. scd passes no stub in a production build.
+// Secrets come only from the sealed generation scd opens; the loader never reads
+// social_oauth_providers.client_secret, so no plaintext column is ever used and a missing key never falls
+// back to it. The development Stub is passed in as a base provider (never in a production build) and a real
+// provider built from a row replaces it.
 package socialloader
 
 import (
@@ -24,17 +18,14 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 )
 
-// Extra is the non-secret, provider-specific configuration kept in
-// social_oauth_providers.extra (jsonb). Only the keys a provider reads are
-// defined; anything else in the column is ignored.
+// Extra is the non-secret provider configuration in social_oauth_providers.extra; other keys are ignored.
 type Extra struct {
 	Tenant string `json:"tenant,omitempty"`  // microsoft: common|organizations|consumers|<tenant id>|<domain>
 	TeamID string `json:"team_id,omitempty"` // apple: 10-character Team ID
 	KeyID  string `json:"key_id,omitempty"`  // apple: 10-character Key ID of the .p8 key
 }
 
-// Build constructs the real provider for one configuration row. The secret is
-// passed in and never appears in the returned error.
+// Build never puts the secret in the returned error.
 func Build(provider, clientID, clientSecret, scopes string, extra Extra) (social.Provider, error) {
 	switch provider {
 	case "google":
@@ -49,7 +40,6 @@ func Build(provider, clientID, clientSecret, scopes string, extra Extra) (social
 	return nil, social.ErrUnknownProvider
 }
 
-// Row is one enabled provider configuration, without its secret.
 type Row struct {
 	ID            string
 	Provider      string
@@ -59,20 +49,18 @@ type Row struct {
 	CallbackHosts []string
 }
 
-// SecretOpener returns the current sealed secret of one provider row, opened. ok is false when the row has no
-// sealed generation or it cannot be opened (no key, a replaced key, a tampered row).
+// SecretOpener returns a row's opened sealed secret; ok is false when there is none or it cannot be opened.
 type SecretOpener func(ctx context.Context, providerID string) (secret string, ok bool)
 
-// Loaded is the result of one load: the registry the handlers use, and for every provider built from a row the
-// callback hosts the hotel registered in its own app (lower-case, as compared against the canonical hostname).
 type Loaded struct {
-	Registry      *social.Registry
+	Registry *social.Registry
+	// CallbackHosts are the lower-case hosts the hotel registered per provider, compared against the canonical hostname.
 	CallbackHosts map[string][]string
-	// Real names the providers built from a configuration row (as opposed to a base stub).
+	// Real names the providers built from a row rather than a base stub.
 	Real map[string]bool
 }
 
-// ReadRows reads the enabled provider rows of a tenant. It selects no secret column.
+// ReadRows selects no secret column.
 func ReadRows(ctx context.Context, db *pgxpool.Pool, tenantID string) ([]Row, error) {
 	rows, err := db.Query(ctx, `
         SELECT id::text, provider, COALESCE(client_id,''), COALESCE(scopes,''),
@@ -95,10 +83,9 @@ func ReadRows(ctx context.Context, db *pgxpool.Pool, tenantID string) ([]Row, er
 	return out, rows.Err()
 }
 
-// Assemble builds a fresh registry: the base providers first, then one real provider per row whose secret
-// opens. A row that cannot be built (no opener, no sealed secret, missing credentials, an unreadable Apple key,
-// invalid extra) is logged by provider name only -- never the secret -- and leaves the base entry, if any, in
-// place. open == nil means the sealing key is absent: no row is built.
+// Assemble registers base providers, then one real provider per row whose secret opens. A row that cannot
+// be built is logged by provider name only, never the secret, and leaves any base entry in place.
+// open == nil means the sealing key is absent: no row is built.
 func Assemble(ctx context.Context, rows []Row, open SecretOpener, base ...social.Provider) *Loaded {
 	out := &Loaded{Registry: social.NewRegistry(), CallbackHosts: map[string][]string{}, Real: map[string]bool{}}
 	for _, p := range base {
@@ -132,7 +119,6 @@ func Assemble(ctx context.Context, rows []Row, open SecretOpener, base ...social
 	return out
 }
 
-// Load is ReadRows + Assemble.
 func Load(ctx context.Context, db *pgxpool.Pool, tenantID string, open SecretOpener, base ...social.Provider) (*Loaded, error) {
 	rows, err := ReadRows(ctx, db, tenantID)
 	if err != nil {
@@ -141,8 +127,7 @@ func Load(ctx context.Context, db *pgxpool.Pool, tenantID string, open SecretOpe
 	return Assemble(ctx, rows, open, base...), nil
 }
 
-// NormaliseHosts lower-cases callback hosts and drops a trailing dot and empties, so a host the operator typed
-// as "WiFi.Hotel.example." compares equal to the canonical hostname.
+// NormaliseHosts lower-cases and drops trailing dots and empties so "WiFi.Hotel.example." matches the canonical hostname.
 func NormaliseHosts(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, h := range in {

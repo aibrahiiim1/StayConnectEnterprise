@@ -2,10 +2,6 @@
 
 package main
 
-// Composition-root tests for Phase-3 accounting ingestion, with non-zero synthetic counter deltas driven
-// through the SAME entry point acctd's tick uses, against a real PostgreSQL 16. These cover the cases where
-// usage is easy to lose, double-count or attribute to the wrong Entitlement.
-
 import (
 	"context"
 	"os"
@@ -19,10 +15,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// opTx opens a transaction with the named controlled-operation families already open. On the production
-// schema the test login (postgres) does not own the iam_v2 openers, so a SEED that writes a capability-scoped
-// family (stays -> 'stay', purchases -> 'commerce_intent') declares the operation exactly as the product's own
-// writers do. The caller commits; a deferred Rollback after Commit is a no-op.
+// opTx opens a transaction with the named controlled-operation families open, as the product's own writers do
+// (the test login does not own the iam_v2 openers). The caller commits.
 func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
 	t.Helper()
 	ctx := context.Background()
@@ -39,7 +33,6 @@ func opTx(t *testing.T, p *pgxpool.Pool, families ...string) pgx.Tx {
 	return tx
 }
 
-// opExec runs one SEED statement inside opTx and commits it.
 func opExec(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) error {
 	t.Helper()
 	ctx := context.Background()
@@ -108,7 +101,6 @@ func newIngest(t *testing.T, quota int64) *ingestFixture {
 	return f
 }
 
-// grantEntitlement creates an ACTIVE entitlement with its initial history.
 func (f *ingestFixture) grantEntitlement(t *testing.T, activatedAt time.Time, window *time.Time) string {
 	t.Helper()
 	ctx := context.Background()
@@ -137,23 +129,16 @@ func (f *ingestFixture) grantEntitlement(t *testing.T, activatedAt time.Time, wi
 	return ent
 }
 
-// openSession creates a session on a bridge. The interface and address are set AT CREATION because they are
-// accounting identity: the controlled operation re-derives the counter source from them, and the writer
-// boundary refuses a later UPDATE of either.
+// openSession sets interface and address at creation: they are accounting identity and the writer boundary
+// refuses a later UPDATE.
 func (f *ingestFixture) openSession(t *testing.T, ent, device string, startedAt time.Time, ip string) string {
 	return f.openSessionOn(t, ent, device, startedAt, ip, "br-guest")
 }
 
 func (f *ingestFixture) openSessionOn(t *testing.T, ent, device string, startedAt time.Time, ip, bridge string) string {
 	t.Helper()
-	// THE DEVICE IS AUTHORIZED FIRST, through the same primitive the grant path uses.
-	//
-	// This fixture used to insert a session straight into the table, which produced a state the product
-	// cannot: a live session on an entitlement with no authorization binding at all. Phase-6 migration 0032
-	// made that state unrepresentable -- a live session requires an AUTHORIZED binding, so that a released
-	// or revoked device can never keep forwarding traffic -- and these fixtures were the first thing to hit
-	// it. The guard is right and the fixture was wrong: every real session exists because a device was
-	// admitted first.
+	// The device is authorized first: a live session requires an AUTHORIZED binding so a released or revoked
+	// device cannot keep forwarding traffic.
 	if _, err := f.pool.Exec(context.Background(),
 		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, ent, device, startedAt); err != nil {
 		t.Fatalf("authorize the device before opening its session: %v", err)
@@ -177,7 +162,6 @@ func (f *ingestFixture) usage(t *testing.T, ent string) (up, down int64) {
 	return
 }
 
-// sessionTotals reads the Session's own running usage — the number a refused sample must never move.
 func (f *ingestFixture) sessionTotals(t *testing.T, sess string) (up, down int64) {
 	t.Helper()
 	if err := f.pool.QueryRow(context.Background(),
@@ -196,10 +180,9 @@ func (f *ingestFixture) countRows(t *testing.T, q string, args ...any) int {
 	return n
 }
 
-// grantEntitlementFor creates an ACTIVE entitlement for a specific device's stay context.
 func (f *ingestFixture) grantEntitlementFor(t *testing.T, device string, activatedAt time.Time) string {
 	t.Helper()
-	// the previous entitlement must be terminated first: ent_live_stay allows one live entitlement per Stay
+	// ent_live_stay allows one live entitlement per Stay, so terminate the previous one first.
 	if _, err := f.pool.Exec(context.Background(),
 		`SELECT iam_v2.terminate_entitlement_at_boundary(e.id, now() - interval '1 minute', 'ADMIN')
 		   FROM iam_v2.entitlements e WHERE e.stay_id=$1 AND e.status IN ('ACTIVE','PENDING','SUSPENDED')`,

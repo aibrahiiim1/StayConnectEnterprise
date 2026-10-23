@@ -49,7 +49,6 @@ export default function NetworkPage() {
       const r = await api.get<ListResp<GuestNetwork>>("/network/guest-networks");
       const data = r.data ?? [];
       setRows(data);
-      // fetch per-network status (active clients) — best-effort.
       const entries = await Promise.all(
         data.map(async (n) => {
           try { return [n.id, await api.get<GuestNetworkStatus>(`/network/guest-networks/${n.id}/status`)] as const; }
@@ -77,8 +76,7 @@ export default function NetworkPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the confirmation window runs out the appliance rolls back on its own; re-read once so the banner does
-  // not sit at 0:00 offering buttons for a revision that no longer waits for anyone.
+  // Refresh after the deadline because the appliance rolls back automatically.
   const left = useSecondsLeft(pending?.confirm_deadline ?? null);
   const reloadedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -90,12 +88,10 @@ export default function NetworkPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [left, pending]);
 
-  // "Take offline" and "Delete" are STAGED changes: nothing happens to a guest until the configuration is applied.
-  // The confirmation says so, because that is the difference between a scary button and a safe one.
+  // Taking a network offline or deleting it is staged until configuration is applied.
   const [confirming, setConfirming] = useState<{ kind: "disable" | "delete"; net: GuestNetwork } | null>(null);
 
-  // BRINGING A DISABLED NETWORK BACK. Staged exactly like taking it offline, and touching nothing else about it:
-  // it goes live again on the next apply. No confirmation, because it removes nothing.
+  // Re-enabling is staged and preserves all other network settings.
   async function enableNetwork(net: GuestNetwork) {
     setActing(net.id);
     try {
@@ -135,7 +131,6 @@ export default function NetworkPage() {
     finally { setBusy(null); }
   }
 
-  // Apply, Keep and Roll back need the operator's password (the server requires it).
   const stepUp = useNetworkChangeStepUp();
 
   function onApply() {

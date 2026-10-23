@@ -1,25 +1,15 @@
-// Package deviceselfservice is the Phase-6 guest device-management surface: an authenticated guest may see
-// the devices on their OWN entitlement and release one that is offline.
+// Package deviceselfservice lets an authenticated guest list the devices on their own entitlement and release
+// an offline one.
 //
-// THREE THINGS THIS PACKAGE DOES NOT DO, and each is deliberate.
+//   - It accepts no subject identifier (MAC, room, stay, entitlement...); the caller's entitlement is resolved
+//     from the authenticated context by the layer above.
+//   - It does not decide whether a device may be released: the offline check and removal must be atomic, so both
+//     happen inside iam_v2.p6_guest_release_device.
+//   - It never explains a refusal to the guest, so "not yours" and "does not exist" are indistinguishable; the
+//     reason goes to the durable audit.
 //
-//  1. It accepts no subject identifier of any kind. There is no MAC, room, stay, PMS-interface, profile or
-//     entitlement parameter anywhere in its API — absent, not validated. The caller's entitlement is resolved
-//     from the authenticated context by the layer above and passed in; a parameter that does not exist cannot
-//     be validated wrongly, which is the same conclusion Phase 5 reached for post-stay.
-//
-//  2. It does not decide whether a device may be released. That decision is inseparable from the write —
-//     an offline check followed by a separate removal is a race, not a rule — so both happen inside
-//     iam_v2.p6_guest_release_device under one lock order. This package's job is to ask the right question
-//     and to say nothing useful about the answer.
-//
-//  3. It never explains a refusal to the guest. Every refusal returns the same opaque outcome to the caller
-//     precisely so that "that device is not yours" and "that device does not exist" are indistinguishable
-//     from outside. The reason is recorded in the durable audit, where an operator can see it.
-//
-// TWO CONTROLS GATE THE SURFACE, and both must permit it: the Phase-6 deployment gate (is this build allowed
-// to serve the route at all) and the per-appliance product setting (does this hotel offer the feature). They
-// are different questions with different owners and are never collapsed into one check.
+// Both the deployment gate and the per-appliance product setting must permit the surface; they are separate
+// questions and never collapsed.
 package deviceselfservice
 
 import (
@@ -32,7 +22,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Outcome is the result of a release attempt, as the database decided it.
 type Outcome string
 
 const (
@@ -44,47 +33,29 @@ const (
 	OutcomeRefusedThrottled Outcome = "REFUSED_THROTTLED"
 )
 
-// Released reports whether the attempt actually freed a slot. Everything else is a refusal, and callers are
-// expected to treat all refusals identically on the guest surface.
+// Released is false for every refusal; callers treat all refusals identically on the guest surface.
 func (o Outcome) Released() bool { return o == OutcomeOK }
 
-// ErrDisabled means the feature is not available on this appliance. It is returned rather than a refusal
-// outcome so a caller cannot accidentally render "you may not remove that device" when the truth is that the
-// hotel does not offer device management at all.
+// ErrDisabled is not a refusal outcome, so callers cannot render "you may not remove that device" when the hotel
+// does not offer device management at all.
 var ErrDisabled = errors.New("guest device self-service is not enabled on this appliance")
 
-// Device is one device on the caller's own entitlement, as the guest may see it.
-//
-// It carries NO MAC address. A guest does not need one to recognise their own phone, and printing it would
-// hand every guest a stable network identifier for a device on a shared network — including, if the listing
-// were ever mis-scoped, somebody else's. LastSeen and the online flag are what a person actually uses to tell
-// their devices apart.
+// Device deliberately carries no MAC address: a stable network identifier would be exposed if the listing were
+// ever mis-scoped.
 type Device struct {
 	ID       string
 	LastSeen *time.Time
 	Online   bool
-	// Removable is the same predicate the database will re-check under lock. It is advisory only: it says
-	// what was true when the list was built, and the release path re-decides. Rendering it saves a guest from
-	// an obviously futile attempt; trusting it would be a race.
+	// Removable is advisory (true when the list was built); the release path re-decides under lock.
 	Removable bool
 }
 
-// Service reads and mutates guest device state.
 type Service struct{ pool *pgxpool.Pool }
 
-// New builds a Service over an existing pool.
 func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
-// EnabledForAppliance reports the per-appliance product setting.
-//
-// LOCAL-FIRST BY CONSTRUCTION: it is one read of the site database on the appliance itself. There is no
-// Central Control Plane call on this path, so an appliance with no uplink answers exactly as one with an
-// uplink — which is the property the feature is required to have, and the reason the setting does not live
-// in a remotely-fetched configuration bundle.
-//
-// A MISSING ROW IS OFF. The default is expressed in the schema and again here: an appliance nobody has
-// configured has not opted in, and inventing a default of true at read time would quietly enable a
-// guest-facing capability on every unconfigured appliance in the fleet.
+// EnabledForAppliance is a local read with no Central call, so it works without an uplink. A missing row is
+// off: defaulting to true would silently enable the feature on every unconfigured appliance.
 func (s *Service) EnabledForAppliance(ctx context.Context, tenant, site, appliance string) (bool, error) {
 	var on bool
 	err := s.pool.QueryRow(ctx, `SELECT guest_device_self_service
@@ -99,27 +70,12 @@ func (s *Service) EnabledForAppliance(ctx context.Context, tenant, site, applian
 	return on, nil
 }
 
-// SetForAppliance changes the setting and records who changed it.
-//
-// BOTH THE SCOPE AND THE ACTOR ARE THE SERVER'S. tenant/site/appliance describe the appliance this process is
-// running on, resolved from its own local identity, and operatorID is the authenticated operator resolved
-// from the session — neither is ever taken from a request body. The database enforces both: the settings row
-// is foreign-keyed to (id, tenant_id, site_id) of a real enrolled appliance, so a real appliance under
-// somebody else's scope is refused, and the audit's actor is foreign-keyed to a real operator record.
-//
-// The audit row is written in the SAME transaction as the change. A setting that moved without a trace, or a
-// trace of a change that did not happen, are both worse than no audit at all.
+// SetForAppliance scope and actor are the server's, never from a request body: tenant/site/appliance come from
+// the local assignment, operatorID from the session, and foreign keys refuse anything invented.
 func (s *Service) SetForAppliance(ctx context.Context, tenant, site, appliance string,
 	on bool, operatorID, operatorLabel, reason string) error {
-	// ONE CONTROLLED OPERATION, not two writes in a transaction. The Go layer used to write the setting and
-	// its audit itself, which was atomic only because this function chose to be: the ROLE could write either
-	// alone, so the audit was mandatory by convention and optional by privilege. svc_edged now holds no
-	// direct write on either table and only EXECUTE on this operation, so a setting cannot move without its
-	// audit -- there is no privilege that would do it.
-	//
-	// Every argument is still the SERVER'S. tenant/site/appliance come from the appliance's own trusted local
-	// assignment and the operator from authenticated session context; the foreign keys behind them refuse
-	// anything invented.
+	// One controlled operation: svc_edged has no direct write on either table, so a setting cannot move
+	// without its audit.
 	_, err := s.pool.Exec(ctx,
 		`SELECT iam_v2.p6_set_guest_device_self_service($1,$2,$3,$4,$5,$6,$7)`,
 		tenant, site, appliance, on, operatorID, operatorLabel, nullIfEmpty(reason))
@@ -129,29 +85,10 @@ func (s *Service) SetForAppliance(ctx context.Context, tenant, site, appliance s
 	return nil
 }
 
-// ListOwnDevices returns the devices bound to the caller's OWN entitlement.
-//
-// LISTING IS NOT AUDITED, and the schema no longer claims it is. An earlier version of guest_device_actions
-// admitted a LIST action that no path ever wrote; migration 0035 narrowed the action set to RELEASE, which is
-// the only guest action that changes durable state. Auditing reads would also have meant granting this
-// surface a write on its own audit table -- exactly the privilege the Phase-6 audit removed on purpose.
-//
-// The entitlement is the one the server resolved from the authenticated context. Every row returned is
-// scoped by it in the WHERE clause, so "only your own devices" is a property of the query rather than of a
-// filter somebody has to remember to apply.
-//
-// THE LISTING IS "WHAT IS USING YOUR ALLOWANCE", so a RELEASED binding is not in it.
-//
-// An earlier version returned released bindings too, on the reasoning that a device vanishing might leave a
-// guest unsure whether the removal worked. Walking the assembled flow end to end showed that reasoning was
-// wrong in both directions: the guest is already told in words that the device was removed and its place is
-// free, and a released device reappearing in a list headed "the devices using your internet access" -- with
-// the explanation that it cannot be removed -- says the opposite of what happened. The durable history is
-// preserved where history belongs (the binding row, the authorization intervals, the audit), none of which
-// is a guest-facing screen.
-//
-// It follows that Removable no longer needs to restate the status: every row here is AUTHORIZED, so the only
-// remaining question is whether the device is online.
+// ListOwnDevices lists devices on the caller's own entitlement, scoped in the WHERE clause. Listing is not
+// audited (only RELEASE changes durable state; auditing reads would need a write grant on the audit table).
+// Released bindings are excluded: the list means "what is using your allowance". Every row is AUTHORIZED, so
+// Removable reduces to "not online".
 func (s *Service) ListOwnDevices(ctx context.Context, entitlementID string) ([]Device, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT d.id::text,
@@ -183,16 +120,11 @@ func (s *Service) ListOwnDevices(ctx context.Context, entitlementID string) ([]D
 	return out, rows.Err()
 }
 
-// Release attempts to free the slot held by one device on the caller's own entitlement.
-//
-// It delegates the entire decision to iam_v2.p6_guest_release_device, which is the only place the offline
-// state, the binding status and the throttle can be read and acted on atomically. This function deliberately
-// contains no logic that could disagree with it.
+// Release delegates the whole decision to the database, which alone can read offline state, binding status
+// and throttle atomically; this function must hold no logic that could disagree.
 func (s *Service) Release(ctx context.Context, entitlementID, deviceID string) (Outcome, error) {
-	// THE POLICY ENTRY POINT, which takes no throttle parameter. The three-argument primitive exists for
-	// tests and is not granted to any runtime role: a caller that can pass its own hourly limit can pass
-	// 2147483647 and use the approved function to bypass the approved policy, so the runtime is never in a
-	// position to name one.
+	// Use the policy entry point, which takes no throttle parameter: a caller able to pass its own hourly limit
+	// could bypass the policy, so the three-argument primitive is not granted to runtime roles.
 	var out string
 	if err := s.pool.QueryRow(ctx,
 		`SELECT iam_v2.p6_guest_release_device_policy($1,$2)`, entitlementID, deviceID).Scan(&out); err != nil {
@@ -208,17 +140,9 @@ func nullIfEmpty(s string) *string {
 	return &s
 }
 
-// EntitlementForDevice resolves the entitlement this device is currently authorized under.
-//
-// THIS IS THE WHOLE SUBJECT DERIVATION, and it takes nothing from any request. The caller supplies a device
-// identity that the server itself resolved from the source address and hardware address against its own
-// tables; from there the entitlement is whichever LIVE entitlement currently holds an AUTHORIZED binding for
-// that device. A guest cannot name an entitlement, a Stay, a room, a PMS interface or a profile, because no
-// parameter here would carry one.
-//
-// A device with no live authorized binding gets ErrNoEntitlement, which callers must render as the same
-// uniform non-success as everything else: "you have no access here" and "that device is not yours" must be
-// indistinguishable from outside.
+// EntitlementForDevice is the whole subject derivation: the device identity is server-resolved from source and
+// hardware address, and the entitlement is the live one holding an AUTHORIZED binding for it. A device with
+// none gets ErrNoEntitlement, which callers must render like every other refusal.
 func (s *Service) EntitlementForDevice(ctx context.Context, tenant, site, device string) (string, error) {
 	var id string
 	err := s.pool.QueryRow(ctx, `
@@ -239,6 +163,5 @@ func (s *Service) EntitlementForDevice(ctx context.Context, tenant, site, device
 	return id, nil
 }
 
-// ErrNoEntitlement means this device holds no live authorized binding. It is a distinct error from a refusal
-// so the caller can log which happened, and it must NOT be distinguishable in anything the guest sees.
+// ErrNoEntitlement is distinct from a refusal for logging only; it must not be distinguishable to the guest.
 var ErrNoEntitlement = errors.New("no live authorized entitlement for this device")

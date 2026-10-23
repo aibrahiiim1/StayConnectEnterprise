@@ -1,17 +1,9 @@
 package main
 
-// THE TENANT AND SITE A PACKAGE READ IS SCOPED BY MUST COME FROM THE APPLIANCE, NEVER FROM THE REQUEST.
-//
-// iam_v2.p2_package_current_conditions is a SECURITY DEFINER reader: it runs with the rights that own the
-// package-conditions tables, and its only protection against reading another property's packages is the
-// tenant and site it is handed. If any of that could be influenced by a query parameter, a header or a JSON
-// body, the definer would become a way to read across sites — which is precisely the failure a definer
-// function has to be designed against.
-//
-// edged pins both ids at startup from its own assignment (s.tenantID / s.siteID). This asserts the handler
-// uses those and nothing else, by reading the handler's own source: the property is "no request-derived
-// value reaches the scope arguments", and that is a statement about the code path rather than about any one
-// request, so a single crafted request could not prove it and its absence could not disprove it.
+// Tenant and site scope must come from the appliance (s.tenantID / s.siteID), never the request: the
+// SECURITY DEFINER reader iam_v2.p2_package_current_conditions is protected only by the scope it is handed, so a
+// request-influenced value would allow cross-site reads. This inspects the handlers' source because the
+// property is about the code path, which no single crafted request could prove.
 
 import (
 	"go/ast"
@@ -21,7 +13,6 @@ import (
 	"testing"
 )
 
-// scopeHandlers are the commerce read handlers whose scope arguments must be appliance-pinned.
 var scopeHandlers = []string{
 	"getCommercialPackageCurrent",
 	"listCommercialPackages",
@@ -64,15 +55,13 @@ func TestCommerceReadsScopeFromTheAppliance(t *testing.T) {
 		})
 		src := body.String()
 
-		// The pinned identity must be what the handler passes.
 		for _, pinned := range []string{"s.tenantID", "s.siteID"} {
 			if !strings.Contains(src, pinned) {
 				t.Fatalf("%s does not use %s; a commerce read that does not scope by the appliance's own "+
 					"identity can be aimed at another property", name, pinned)
 			}
 		}
-		// ...and nothing request-derived may appear near the scope. These are the ways a value could arrive
-		// from outside: parsed form values, query parameters, headers and decoded bodies.
+		// Nothing request-derived (form values, query, headers) may reach the scope.
 		for _, hostile := range []string{"r.URL", "r.Form", "r.PostForm", "r.Header", "r.Host"} {
 			if strings.Contains(src, hostile) {
 				t.Fatalf("%s reads %s; tenant and site scope must not be influenced by the request", name, hostile)
@@ -87,9 +76,8 @@ func TestCommerceReadsScopeFromTheAppliance(t *testing.T) {
 	}
 }
 
-// The package id IS taken from the URL, and that is correct and safe: it names WHICH package, never whose.
-// The reader refuses any package that is not in the pinned tenant and site, so an id from another property
-// returns no rows rather than another property's conditions.
+// The package id may come from the URL: it names which package, never whose; the reader refuses packages
+// outside the pinned scope.
 func TestPackageIdentityMayComeFromTheURLButScopeMayNot(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "resources_commerce.go", nil, parser.ParseComments)

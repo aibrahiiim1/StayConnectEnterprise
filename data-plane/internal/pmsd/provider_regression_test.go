@@ -1,10 +1,7 @@
 package pmsd
 
-// PROTEL FIAS IS THE PROTECTED, LIVE-ACCEPTED BASELINE.
-//
-// The provider registry replaced four hand-kept lists. These tests pin that the protel-fias path came out of
-// that refactor unchanged: it is still a supported kind, its revisions validate exactly as before, its durable
-// payload is byte-identical, and the registry dial hands it to the very FIAS dial function it always used.
+// Protel FIAS is the live-accepted baseline: still a supported kind, revisions validate unchanged, durable
+// payload byte-identical, and the registry dial reaches the FIAS dial function.
 
 import (
 	"context"
@@ -57,8 +54,7 @@ func TestProtelRegression_RevisionValidateOutcomesUnchanged(t *testing.T) {
 	}
 }
 
-// The exact bytes the FIAS path persisted before occupants could be carried. An Event with no sharers (every
-// FIAS event) must marshal to precisely this.
+// An Event with no sharers (every FIAS event) must marshal to exactly these bytes.
 func TestProtelRegression_PayloadBytesUnchanged(t *testing.T) {
 	ev := Event{
 		ReservationRef: "RES1", RoomNumber: "101", GuestLastName: "Doe", GuestFirstName: "Jane",

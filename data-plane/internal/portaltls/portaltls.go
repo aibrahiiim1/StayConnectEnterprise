@@ -1,15 +1,6 @@
-// Package portaltls is the appliance half of the Client Portal's HTTPS certificate lifecycle
-// (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md section 3).
-//
-// WHAT LIVES HERE AND WHAT DOES NOT. This package owns the files: the private key the appliance generates for
-// each portal hostname, the certificate signing request built from it, and the verified, atomic installation of
-// the chain Central hands back. It does not talk to Central and it does not touch the database -- scd's agent
-// (cmd/scd/portal_tls.go) decides WHEN a certificate is needed; this package decides whether what came back is
-// safe to serve.
-//
-// THE PRIVATE KEY NEVER LEAVES THE APPLIANCE (contract section 1, decision 2). It is generated here, written once
-// to a 0640 file readable by portald's group, and never logged, returned or sent. Only the CSR -- which carries
-// the public key -- goes to Central. Every renewal generates a new key.
+// Package portaltls owns the appliance's portal TLS files: per-hostname key, CSR, and verified atomic installation
+// of the chain Central returns. The private key never leaves the appliance; it is never logged, returned or sent,
+// only the CSR goes to Central, and every renewal generates a new key.
 //
 // File layout under Dir (default /etc/stayconnect/portal-tls):
 //
@@ -41,35 +32,26 @@ import (
 	"time"
 )
 
-// DefaultDir is where the portal's keys and certificates live on the appliance.
 const DefaultDir = "/etc/stayconnect/portal-tls"
 
-// DefaultGroup is the group that may read the private keys: portald's own primary group, and nobody else's.
+// DefaultGroup is the only group that may read the private keys: portald's own.
 const DefaultGroup = "stayconnect-portald"
 
 var (
-	// ErrNotInstalled: no certificate (or no key) is installed for the hostname.
 	ErrNotInstalled = errors.New("portal certificate not installed")
-	// ErrKeyMismatch: the installed certificate does not carry the installed key's public half. Serving it
-	// would fail every handshake, so it counts as no certificate at all and a new one is ordered.
-	ErrKeyMismatch = errors.New("installed certificate does not match the installed key")
-	// ErrNoPendingKey: an issued chain arrived but there is no pending key to pair it with.
+	// ErrKeyMismatch: serving the pair would fail every handshake, so it counts as no certificate and a new one is ordered.
+	ErrKeyMismatch  = errors.New("installed certificate does not match the installed key")
 	ErrNoPendingKey = errors.New("no pending key for this hostname")
-	// ErrBadHostname: the name is not one this package will put in a file name or a CSR.
-	ErrBadHostname = errors.New("not a valid portal hostname")
+	ErrBadHostname  = errors.New("not a valid portal hostname")
 )
 
-// hostnameRE is the same shape migration 0116 enforces on custom_domain, applied to every hostname this package
-// handles. It is what makes a hostname safe to use as a FILE NAME: no slash, no "..", no upper case, no
-// trailing dot.
+// hostnameRE matches migration 0116's custom_domain shape and makes a hostname safe as a file name: no slash, "..", upper case or trailing dot.
 var hostnameRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 
-// ValidHostname reports whether h is a lower-case DNS name of 4..253 characters with at least two labels.
 func ValidHostname(h string) bool {
 	return len(h) >= 4 && len(h) <= 253 && hostnameRE.MatchString(h)
 }
 
-// Installed describes the certificate installed for one hostname. It carries nothing secret.
 type Installed struct {
 	Hostname    string
 	Serial      string // hex, lower case
@@ -78,25 +60,20 @@ type Installed struct {
 	Fingerprint string // SHA-256 of the leaf DER, hex
 }
 
-// Store manages the portal certificate files in one directory.
 type Store struct {
 	Dir string
-	// Group is the group that may read the keys (DefaultGroup when empty).
+	// Group defaults to DefaultGroup.
 	Group string
-	// LookupGID resolves Group; nil means os/user. ok=false means the group does not exist on this machine, and
-	// keys are then written 0600 root-only -- portald cannot read them, and Warn says so once per write.
+	// LookupGID resolves Group (nil means os/user). If the group is missing, keys are written 0600 root-only,
+	// portald cannot read them, and Warn says so.
 	LookupGID func(name string) (gid int, ok bool)
-	// Chown replaces os.Chown (tests; and platforms where it is meaningless).
-	Chown func(path string, uid, gid int) error
-	// Now replaces time.Now (tests).
-	Now func() time.Time
-	// Roots, when set, is the ONLY trust anchor set used to verify an issued chain (tests). When nil the system
-	// pool is used, plus ExtraRoots.
+	Chown     func(path string, uid, gid int) error
+	Now       func() time.Time
+	// Roots, when set, is the only trust anchor set (tests); otherwise the system pool plus ExtraRoots.
 	Roots *x509.CertPool
-	// ExtraRoots are opt-in additional anchors (SCD_PORTAL_TLS_EXTRA_ROOTS): Let's Encrypt staging or a Pebble
-	// test CA. Empty in production.
+	// ExtraRoots are opt-in anchors (SCD_PORTAL_TLS_EXTRA_ROOTS) for Let's Encrypt staging or Pebble; empty in production.
 	ExtraRoots []*x509.Certificate
-	// Warn receives operational warnings (never key material). Nil discards them.
+	// Warn receives operational warnings, never key material.
 	Warn func(msg string, args ...any)
 }
 
@@ -120,15 +97,13 @@ func (s *Store) dir() string {
 	return s.Dir
 }
 
-// KeyPath, CertPath and PendingKeyPath name the three files of one hostname. The hostname must already be valid;
-// callers that take a name from outside go through ValidHostname first.
+// The hostname must already be valid; callers taking a name from outside go through ValidHostname first.
 func (s *Store) KeyPath(host string) string  { return filepath.Join(s.dir(), host+".key") }
 func (s *Store) CertPath(host string) string { return filepath.Join(s.dir(), host+".crt") }
 func (s *Store) PendingKeyPath(host string) string {
 	return filepath.Join(s.dir(), host+".key.pending")
 }
 
-// keyGID returns the gid keys are group-owned by, or ok=false when the group is missing.
 func (s *Store) keyGID() (int, bool) {
 	name := s.Group
 	if name == "" {
@@ -158,8 +133,7 @@ func (s *Store) chown(path string, uid, gid int) error {
 	return os.Chown(path, uid, gid)
 }
 
-// EnsureDir creates the directory 0750 root:<group> (root-only 0700 when the group is missing) and re-asserts
-// ownership and mode on an existing one, so a directory created by hand with the wrong mode heals at startup.
+// EnsureDir creates the directory 0750 root:<group> (0700 when the group is missing) and re-asserts mode and ownership on an existing one.
 func (s *Store) EnsureDir() error {
 	gid, ok := s.keyGID()
 	mode := os.FileMode(0o750)
@@ -186,9 +160,7 @@ func (s *Store) groupName() string {
 	return s.Group
 }
 
-// writeAtomic writes data to path through a temporary file in the same directory: write, fsync, chmod/chown,
-// rename, then fsync the directory. A reader (portald) therefore sees either the old file or the new one, never
-// a half-written key -- and a crash leaves at worst a stray temporary, never a truncated key.
+// writeAtomic goes through a temporary file, fsync, rename and directory fsync, so portald sees the old file or the new one, never a half-written key.
 func (s *Store) writeAtomic(path string, data []byte, mode os.FileMode, gid int, setGID bool) error {
 	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
@@ -197,7 +169,7 @@ func (s *Store) writeAtomic(path string, data []byte, mode os.FileMode, gid int,
 	}
 	tmp := f.Name()
 	cleanup := func() { _ = os.Remove(tmp) }
-	// Mode first, before a single byte of a key exists in the file.
+	// Mode first, before any key byte is written.
 	if err := f.Chmod(mode); err != nil && runtime.GOOS != "windows" {
 		f.Close()
 		cleanup()
@@ -229,13 +201,12 @@ func (s *Store) writeAtomic(path string, data []byte, mode os.FileMode, gid int,
 		return err
 	}
 	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync() // best effort: not supported on every platform
+		_ = d.Sync() // not supported on every platform
 		d.Close()
 	}
 	return nil
 }
 
-// writeKey writes a private key 0640 root:<group>, or 0600 root when the group is missing.
 func (s *Store) writeKey(path string, pemBytes []byte) error {
 	gid, ok := s.keyGID()
 	if !ok {
@@ -246,7 +217,6 @@ func (s *Store) writeKey(path string, pemBytes []byte) error {
 	return s.writeAtomic(path, pemBytes, 0o640, gid, true)
 }
 
-// HasPending reports whether a pending key exists for host.
 func (s *Store) HasPending(host string) bool {
 	if !ValidHostname(host) {
 		return false
@@ -255,7 +225,6 @@ func (s *Store) HasPending(host string) bool {
 	return err == nil
 }
 
-// DropPending removes the pending key, if any.
 func (s *Store) DropPending(host string) error {
 	if !ValidHostname(host) {
 		return ErrBadHostname
@@ -267,8 +236,7 @@ func (s *Store) DropPending(host string) error {
 	return nil
 }
 
-// NewPendingKey generates a NEW ECDSA P-256 key for host, writes it as the pending key (replacing any previous
-// pending key) and returns a CSR for it.
+// NewPendingKey generates a new ECDSA P-256 key, replacing any pending key, and returns its CSR.
 func (s *Store) NewPendingKey(host string) ([]byte, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -287,9 +255,8 @@ func (s *Store) NewPendingKey(host string) ([]byte, error) {
 	return CreateCSR(host, key)
 }
 
-// PendingCSR rebuilds the CSR for the existing pending key. Used when an order request failed AFTER the key was
-// written, and when Central answered 409 for an order that may well have been made with this very key: reusing
-// the pending key is what lets that open order be installed when it issues.
+// PendingCSR rebuilds the CSR for the existing pending key. Reuse it after a failed order request or a 409, since
+// the open order may have been made with this key and can only be installed with it.
 func (s *Store) PendingCSR(host string) ([]byte, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -304,8 +271,7 @@ func (s *Store) PendingCSR(host string) ([]byte, error) {
 	return CreateCSR(host, key)
 }
 
-// CreateCSR builds a PEM CSR that names exactly one DNS name, host, and nothing else: no common name, no other
-// SAN. Central refuses anything else (contract section 3), and so does this function's own test.
+// CreateCSR names exactly one DNS name and nothing else (no common name, no other SAN); Central refuses anything else.
 func CreateCSR(host string, key crypto.Signer) ([]byte, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -350,8 +316,7 @@ func parseKey(b []byte) (crypto.Signer, error) {
 	return sg, nil
 }
 
-// ParseChain parses every CERTIFICATE block of a PEM bundle, leaf first. Anything other than certificates is
-// refused rather than skipped: a chain from Central that carries a key or junk is not a chain to install.
+// ParseChain refuses non-certificate blocks rather than skipping them: a chain carrying a key or junk is not installable.
 func ParseChain(chainPEM []byte) ([]*x509.Certificate, error) {
 	var out []*x509.Certificate
 	rest := bytes.TrimSpace(chainPEM)
@@ -397,13 +362,8 @@ func (s *Store) roots() *x509.CertPool {
 	return pool
 }
 
-// VerifyChain checks that chainPEM is a certificate this appliance may serve for host with key's public half:
-//
-//   - every block parses and the leaf names host among its DNS names (and only DNS-verifies for host);
-//   - the leaf's public key IS the given key's public key -- a chain issued for some other key is worthless and,
-//     installed, would break every handshake;
-//   - now is within the leaf's validity;
-//   - the chain verifies to a trusted root for server authentication, using the bundle's own intermediates.
+// VerifyChain checks the leaf names host, carries pub (a chain for another key would break every handshake), is
+// valid now, and verifies to a trusted root for server authentication using the bundle's own intermediates.
 func (s *Store) VerifyChain(host string, chainPEM []byte, pub crypto.PublicKey) (*Installed, error) {
 	certs, err := ParseChain(chainPEM)
 	if err != nil {
@@ -438,10 +398,7 @@ func (s *Store) VerifyChain(host string, chainPEM []byte, pub crypto.PublicKey) 
 		CurrentTime:   now,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
-		// A LET'S ENCRYPT STAGING CHAIN is refused here exactly like any other untrusted chain -- its roots are in no
-		// trust store, which is the point of staging -- but saying so turns an alarming "unknown authority" into
-		// the expected step it is: Central is still on the staging directory (runbook ONEGATE_WORK_DNS_AND_
-		// CERTIFICATES.md section 5). Verification is unchanged; only the words differ.
+		// A Let's Encrypt staging chain is refused like any untrusted chain; only the message says it is expected.
 		var ua x509.UnknownAuthorityError
 		if errors.As(err, &ua) && isStagingChain(certs) {
 			return nil, fmt.Errorf("certificate chain does not verify: it is a Let's Encrypt STAGING certificate, "+
@@ -453,8 +410,7 @@ func (s *Store) VerifyChain(host string, chainPEM []byte, pub crypto.PublicKey) 
 	return describe(host, leaf), nil
 }
 
-// isStagingChain reports whether an intermediate or the leaf's issuer is a Let's Encrypt STAGING authority (their
-// names carry the "(STAGING)" marker). A description, never a trust decision.
+// isStagingChain matches the "(STAGING)" marker in Let's Encrypt staging names; a description, never a trust decision.
 func isStagingChain(certs []*x509.Certificate) bool {
 	for _, c := range certs {
 		if strings.Contains(c.Issuer.CommonName, "(STAGING)") || strings.Contains(c.Subject.CommonName, "(STAGING)") {
@@ -475,9 +431,8 @@ func describe(host string, leaf *x509.Certificate) *Installed {
 	}
 }
 
-// Install verifies an issued chain against the PENDING key and, only if it verifies, installs both atomically:
-// the key first, then the chain, then the pending key is removed. portald loads the pair by SNI and keeps the
-// pair it already has if a load fails, so the instant between the two renames cannot break a handshake.
+// Install verifies the chain against the pending key, then installs the key, the chain, and drops the pending
+// key. portald keeps its current pair if a load fails, so the gap between the renames cannot break a handshake.
 func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -509,9 +464,7 @@ func (s *Store) Install(host string, chainPEM []byte) (*Installed, error) {
 	return inst, nil
 }
 
-// Inspect reads the installed pair for host and returns its description. It does NOT check expiry or trust --
-// the agent decides what an expired certificate means -- but it does refuse a pair whose key and certificate
-// do not belong together (ErrKeyMismatch), because that pair can never serve a handshake.
+// Inspect does not check expiry or trust (the agent decides), but refuses a mismatched pair (ErrKeyMismatch).
 func (s *Store) Inspect(host string) (*Installed, error) {
 	if !ValidHostname(host) {
 		return nil, ErrBadHostname
@@ -538,7 +491,6 @@ func (s *Store) Inspect(host string) (*Installed, error) {
 	return describe(host, certs[0]), nil
 }
 
-// Remove deletes every file of host: installed key, certificate and pending key.
 func (s *Store) Remove(host string) error {
 	if !ValidHostname(host) {
 		return ErrBadHostname
@@ -552,8 +504,7 @@ func (s *Store) Remove(host string) error {
 	return first
 }
 
-// RemoveInstalled deletes the installed key and certificate of host and keeps a pending key (a revoked
-// certificate must stop being served at once; an order already open for its replacement must survive).
+// RemoveInstalled keeps the pending key: a revoked certificate stops at once but an open replacement order must survive.
 func (s *Store) RemoveInstalled(host string) error {
 	if !ValidHostname(host) {
 		return ErrBadHostname
@@ -567,7 +518,6 @@ func (s *Store) RemoveInstalled(host string) error {
 	return first
 }
 
-// Hosts lists every hostname that has any file in the directory (certificate, key or pending key).
 func (s *Store) Hosts() ([]string, error) {
 	ents, err := os.ReadDir(s.dir())
 	if err != nil {
@@ -602,8 +552,7 @@ func (s *Store) Hosts() ([]string, error) {
 	return out, nil
 }
 
-// LoadExtraRoots reads a PEM bundle of additional trust anchors. Only CA certificates are accepted: a leaf in
-// a roots bundle is a configuration mistake that would otherwise silently trust one server.
+// LoadExtraRoots accepts only CA certificates: a leaf in a roots bundle would silently trust one server.
 func LoadExtraRoots(path string) ([]*x509.Certificate, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

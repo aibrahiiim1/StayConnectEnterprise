@@ -6,19 +6,12 @@ import (
 	"strings"
 )
 
-// RenderNetplan produces a netplan YAML that defines, for each enabled guest
-// network, the VLAN sub-interface (tagged) and the bridge carrying the L3
-// gateway. The management and WAN interfaces are NEVER emitted here — this
-// file only ever adds guest bridges/VLANs, so applying it cannot disturb
+// RenderNetplan produces a netplan YAML defining, for each enabled guest network, the VLAN sub-interface (tagged) and
+// the bridge carrying the L3 gateway. Management and WAN interfaces are never emitted, so applying it cannot disturb
 // management connectivity.
-//
-// Untagged network:   bridge <br> enslaves the parent interface directly.
-// Tagged VLAN:         parent.<vid> vlan device -> bridge <br> (parent stays a
-//
-//	trunk and may also carry an untagged bridge).
-//
-// The renderer does not touch a parent's own address — parents are L2 here — but it DOES declare every
-// parent it references, because netplan will not resolve a bridge member that nothing defines.
+// Untagged: the bridge enslaves the parent directly. Tagged: parent.VID vlan device -> bridge (the parent may also
+// carry an untagged bridge). Parents are L2 here but are still declared, because netplan will not resolve a bridge
+// member that nothing defines.
 func RenderNetplan(nets []GuestNetwork) []byte {
 	var b strings.Builder
 	b.WriteString("# StayConnect generated — guest network L2/L3. Do not edit by hand.\n")
@@ -26,31 +19,11 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 
 	enabled := sortEnabled(nets)
 
-	// EVERY PARENT THIS FILE REFERENCES MUST ALSO BE DEFINED IN IT.
-	//
-	// netplan resolves a bridge's `interfaces:` list against the merged configuration and refuses to
-	// generate when a member is defined nowhere:
-	//
-	//	Error in network definition: br-g-xxxx: interface 'ens192' is not defined
-	//
-	// This used to emit ethernets for TRUNK parents only — parents carrying a tagged VLAN — on the
-	// assumption, once written into the comment above, that an untagged parent was "already-configured by
-	// the base netplan". On a factory-clean appliance it is not: the base netplan declares the WAN
-	// interface and nothing else, because the guest NIC has no configuration until an operator creates a
-	// guest network. So the FIRST UNTAGGED guest network on a new appliance could never apply, and the
-	// error named the operator's interface rather than the file that failed to declare it. A tagged VLAN
-	// would have worked, which is why this survived until somebody chose untagged first.
-	//
-	// A generated file has to stand on its own. An address-less, optional ethernet per parent declares the
-	// interface without claiming an address or disturbing whatever the base netplan already says about it,
-	// because netplan merges per interface. `optional: true` keeps an unplugged guest NIC from holding up
-	// boot.
-	//
-	// The management and WAN interfaces are still never emitted: validation refuses them as guest parents
-	// long before rendering is reached.
-	//
-	// PARENTS ARE SORTED. Map iteration order is random, and this file is fingerprinted to decide whether
-	// the configuration actually changed — unstable output made every render look like a change.
+	// Every parent this file references must also be defined in it: netplan refuses to generate when a bridge member is
+	// defined nowhere, and a factory-clean appliance's base netplan declares only the WAN interface. An address-less,
+	// optional ethernet per parent declares it without claiming an address (netplan merges per interface; optional keeps
+	// an unplugged NIC from holding up boot).
+	// Parents are sorted: map order is random and this file is fingerprinted to detect changes.
 	parents := make([]string, 0, len(enabled))
 	seen := map[string]bool{}
 	for _, n := range enabled {
@@ -68,7 +41,6 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 		}
 	}
 
-	// VLAN devices
 	var vlans []GuestNetwork
 	for _, n := range enabled {
 		if n.NetworkType == "vlan" {
@@ -84,9 +56,7 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 		}
 	}
 
-	// Bridges (one per network). Only emit the section when there is at least
-	// one — an empty "bridges:" mapping is invalid netplan YAML (this is the
-	// legacy-only case, where the single legacy bridge is not netd-managed).
+	// Bridges, only when there is at least one: an empty "bridges:" mapping is invalid netplan YAML (the legacy-only case).
 	if len(enabled) > 0 {
 		b.WriteString("  bridges:\n")
 		for _, n := range enabled {
@@ -106,13 +76,11 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 	return []byte(b.String())
 }
 
-// gatewayCIDR combines the gateway host address with the subnet prefix length,
-// e.g. gateway 10.20.0.1 + subnet 10.20.0.0/22 -> 10.20.0.1/22.
+// gatewayCIDR combines the gateway host address with the subnet prefix length (10.20.0.1 + 10.20.0.0/22 -> 10.20.0.1/22).
 func gatewayCIDR(n GuestNetwork) string {
 	if n.PrefixLen > 0 {
 		return fmt.Sprintf("%s/%d", n.GatewayIP, n.PrefixLen)
 	}
-	// derive from subnet_cidr
 	if i := strings.IndexByte(n.SubnetCIDR, '/'); i >= 0 {
 		return n.GatewayIP + n.SubnetCIDR[i:]
 	}

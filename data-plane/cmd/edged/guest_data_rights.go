@@ -1,20 +1,8 @@
 package main
 
-// GUEST DATA RIGHTS: look up, export and erase one guest (migration 0128; GDPR remediation plan C3 and C4;
-// Product-Owner decisions D-C3 and D-C4).
-//
-//	GET  /edge/v1/guest-data-rights/search      client accounts, guest identities and stays matching a search
-//	                                            (the text in X-Guest-Data-Search; ?q= is still read for an older console)
-//	GET  /edge/v1/guest-data-rights/erasures    the erasures that ran (reference, who, why, what was anonymised)
-//	POST /edge/v1/guest-data-rights/export      one guest's data as a JSON document           password + reason
-//	POST /edge/v1/guest-data-rights/erase       anonymise one guest; refused while live         password + reason
-//
-// Its own resource key, guest-data-rights: site_admin and the IT manager only (D-C4). Staff check the guest's
-// identity and hand the export over; there is no guest self-service. All the deciding -- what belongs to the
-// guest, what is still live, what each column becomes -- is in the database functions, so export and erasure
-// share one definition of "this guest". Audit rows name the record id (export) or the erasure reference
-// (erasure), never the guest's name or address. The search is recorded by guest_data_reads.go, and its text is
-// shown in the activity log only to holders of guest-data-rights.
+// Look up, export and erase one guest; resource key guest-data-rights (site_admin and IT manager only).
+// The database functions decide what belongs to the guest and what is live, so export and erasure share one
+// definition. Audit rows name the record id or erasure reference, never the guest's name or address.
 
 import (
 	"context"
@@ -32,7 +20,7 @@ const guestDataEraseTimeout = ledgerRouteTimeout
 
 const guestDataSearchHeader = "X-Guest-Data-Search"
 
-// stay_guest is one guest of a stay with more than one guest named on it (migration 0141, GDPR audit C3).
+// stay_guest is one guest of a stay with more than one guest named on it.
 var guestDataKinds = map[string]bool{"account": true, "principal": true, "stay": true, "stay_guest": true}
 
 func (s *server) guestDataRightsRoutes() http.Handler {
@@ -52,8 +40,7 @@ func (s *server) searchGuestData(w http.ResponseWriter, r *http.Request) {
 		writeAwaitingAssignment(w, "guest data")
 		return
 	}
-	// THE SEARCH TRAVELS IN A HEADER (GDPR final check): it is a name, an email or a phone number, and a URL is
-	// what logs and browser histories keep.
+	// The search travels in a header: it is a name, email or phone number, and URLs end up in logs and browser histories.
 	q, ok := readSearch(w, r, guestDataSearchHeader)
 	if !ok {
 		return
@@ -190,7 +177,7 @@ func (s *server) exportGuestData(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), guestDataEraseTimeout)
 	defer cancel()
-	// THE REASON NAMES NOBODY (0144): it is kept in the activity log, which erasure does not remove.
+	// The reason must name nobody: it is kept in the activity log, which erasure does not remove.
 	if _, err := s.db.Exec(ctx, `SELECT public.guest_data_reason_check($1::uuid,$2::uuid,$3,$4::uuid,$5)`,
 		s.tenantID, s.siteID, in.Kind, in.ID, in.Reason); err != nil && !isUndefinedObject(err) {
 		// Recorded without the reason: it is the very thing that was refused.

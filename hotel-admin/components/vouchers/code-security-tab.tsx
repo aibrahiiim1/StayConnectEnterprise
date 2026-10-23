@@ -1,10 +1,6 @@
 "use client";
 
-// CODE SECURITY — what a code looks like, how that has changed, and the keys codes are indexed under.
-//
-// The format used to save the moment a dropdown changed: no preview, no reason, no confirmation, and no way
-// to see what it had been before. It is now an explicit change -- choose, see what new cards will look like,
-// give a reason, confirm -- and the history the server has always kept is shown beside it.
+// Code-format changes require a preview, reason, and confirmation before saving.
 
 import * as React from "react";
 import { History, KeyRound, Pencil, RefreshCw } from "lucide-react";

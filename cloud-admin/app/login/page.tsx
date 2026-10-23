@@ -1,7 +1,5 @@
 "use client";
 
-// THE SIGN-IN SCREEN — outside the app shell, so it carries its own theme control.
-
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
@@ -15,7 +13,7 @@ import { destinationAfterSignIn } from "@/lib/session-expiry";
 import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
-  // useSearchParams must live inside a Suspense boundary for production build.
+  // Next.js requires Suspense around useSearchParams in production builds.
   return (
     <Suspense fallback={null}>
       <LoginInner />
@@ -26,14 +24,12 @@ export default function LoginPage() {
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
-  // Only a path inside this console: "next" arrives in the address and must not send anyone elsewhere
-  // (lib/session-expiry.ts safeNext).
+  // Reject external return paths supplied in the address bar.
   const next = destinationAfterSignIn(params.get("next"));
   const expired = params.get("reason") === "expired";
 
   useEffect(() => { document.title = "Sign in · OneGate Central"; }, []);
-  // Why the person is here, said politely. Filled after the first render so the status region already exists
-  // when the text arrives, which is what makes a screen reader speak it.
+  // Fill the mounted live region after render so screen readers announce the sign-out reason.
   const [notice, setNotice] = useState("");
   useEffect(() => {
     setNotice(expired ? "Your sign-in ended, so you were signed out. Sign in again to continue where you were." : "");
@@ -43,7 +39,7 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // The password is the first of two steps (0052): it answers which second step comes, and opens no session.
+  // Password entry alone never opens a session.
   const [second, setSecond] = useState<SecondStep | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
@@ -107,7 +103,7 @@ function LoginInner() {
               <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4">
-              {/* The banner is its own alert; a live wrapper around it made screen readers announce it twice. */}
+              {/* The alert already announces itself; an outer live wrapper would announce it twice. */}
               <ErrorBanner err={err} className="mb-0" />
               <div role="status" aria-live="polite">
                 {notice && !err && <Callout tone="info">{notice}</Callout>}
@@ -116,8 +112,6 @@ function LoginInner() {
                 <Input
                   type="email"
                   required
-                  // The sign-in page has one job and this is where it starts; focusing it does not skip anything
-                  // a person would need to read first (the page heading and its one-line purpose are above it).
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   autoComplete="username"

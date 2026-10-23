@@ -1,12 +1,6 @@
-// Package appliancecert manages the appliance's mutual-TLS client certificate
-// lifecycle: it generates a CSR from the local identity key, submits it through
-// the signed-auth channel, downloads the signed certificate + CA bundle, stores
-// them atomically, and uses them for mTLS transport to Central — with the
-// signed-request JWT still layered on top (defence in depth). It also rotates
-// the certificate before expiry with verify-before-switch and rollback.
-//
-// The appliance PRIVATE key never leaves the box and is the same Ed25519
-// identity key (0600, in identity store). The certificate + CA are public.
+// Package appliancecert manages the appliance mutual-TLS client certificate lifecycle: CSR from the local identity key, signed-auth submission, atomic
+// storage, mTLS transport to Central (the signed-request JWT stays layered on top) and rotation with verify-before-switch and rollback. The private key
+// never leaves the box; the certificate and CA are public.
 package appliancecert
 
 import (
@@ -34,7 +28,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 )
 
-// Manager owns the cert files and the live mTLS client.
 type Manager struct {
 	dir         string // cert directory, e.g. /etc/stayconnect/certs
 	ctrlBase    string // https ingress for signed-auth CSR submit/fetch (e.g. https://sc-central.echofusion.com)
@@ -55,7 +48,6 @@ type Manager struct {
 	onAttempt func(error)
 }
 
-// Kick asks a waiting certificate bootstrap to try again now. Non-blocking.
 func (m *Manager) Kick() {
 	select {
 	case m.kick <- struct{}{}:
@@ -63,15 +55,11 @@ func (m *Manager) Kick() {
 	}
 }
 
-// OnAttempt registers an observer for every bootstrap attempt's outcome. Set it before EnsureUntilInstalled.
 func (m *Manager) OnAttempt(fn func(error)) { m.onAttempt = fn }
 
 func (m *Manager) mtlsKeyPath() string { return filepath.Join(m.dir, "mtls-client.key") }
 
-// ensureMTLSKey loads or generates the dedicated mTLS client key. It is
-// independent of the identity-signing key: the identity key signs application
-// requests; THIS key backs the CSR and the mTLS client certificate only. It is
-// never uploaded and never placed in identity.json.
+// Independent of the identity-signing key: this key backs the CSR and the mTLS client certificate only, and is never uploaded or placed in identity.json.
 func (m *Manager) ensureMTLSKey() error {
 	if m.mtlsPriv != nil {
 		return nil
@@ -118,29 +106,23 @@ func New(dir, ctrlBase, mtlsBase, applianceID string, priv ed25519.PrivateKey) *
 func (m *Manager) certPath() string { return filepath.Join(m.dir, "client.crt") }
 func (m *Manager) caPath() string   { return filepath.Join(m.dir, "ca.crt") }
 
-// Ready reports whether an mTLS client cert is loaded and usable.
 func (m *Manager) Ready() bool { m.mu.RLock(); defer m.mu.RUnlock(); return m.ready }
 
-// Client returns the mTLS http.Client, or nil if no cert is loaded yet.
 func (m *Manager) Client() *http.Client { m.mu.RLock(); defer m.mu.RUnlock(); return m.client }
 
-// Status returns a small snapshot for the local UI / diagnostics.
 func (m *Manager) Status() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return map[string]any{"mtls_ready": m.ready, "cert_fingerprint": m.fpr, "not_after": m.notAfter}
 }
 
-// Transport returns the mTLS client + base URL if a cert is loaded, so other
-// subsystems (license fetch) can route their Central API calls over mTLS.
 func (m *Manager) Transport() (*http.Client, string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.client, m.mtlsBase, m.ready
 }
 
-// apiBase picks the mTLS transport once a cert is loaded, else the HTTPS
-// ingress (used for the very first bootstrap CSR before any cert exists).
+// Prefers the mTLS transport once a cert is loaded, else the HTTPS ingress (the very first bootstrap CSR).
 func (m *Manager) apiBase() (string, *http.Client) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -150,25 +132,20 @@ func (m *Manager) apiBase() (string, *http.Client) {
 	return m.ctrlBase, http.DefaultClient
 }
 
-// The certificate-status contract, as Central actually implements it (see CertBase.FetchCertificate):
+// The certificate-status contract, as Central implements it (CertBase.FetchCertificate):
 //
 //	issued   an active certificate exists; the PEM and CA chain come with it
 //	pending  a certificate request is on file with status='pending'
 //	none     no active certificate and no pending request
 //
-// The request table also allows 'rejected', but FetchCertificate does not surface it — a rejected request
-// currently reads as "none", so the appliance submits a fresh CSR. That is existing, defensible behaviour
-// and changing it would be a protocol change affecting appliances already in the field, so it is left
-// alone. The terminal states below are handled because the client must not depend on Central never
-// reporting one.
+// A rejected request currently reads as "none", so the appliance submits a fresh CSR; changing that would be a protocol change for fielded appliances.
 const (
 	statusIssued  = "issued"
 	statusPending = "pending"
 	statusNone    = "none"
 )
 
-// terminalStatuses stop the bootstrap. Nothing the appliance does on its own can move a request out of
-// these, so retrying is just noise that buries the reason.
+// terminalStatuses stop the bootstrap: nothing the appliance does can move a request out of these, so retrying just buries the reason.
 var terminalStatuses = map[string]string{
 	"rejected": "the certificate request was rejected",
 	"revoked":  "the certificate was revoked",
@@ -176,30 +153,19 @@ var terminalStatuses = map[string]string{
 }
 
 var (
-	// ErrCertPending means Central has our CSR but has not issued a certificate yet. It is a WAITING
-	// state, never a failure: first issuance is gated on a human pressing Activate, which may be minutes,
-	// hours or days after the appliance was installed.
+	// ErrCertPending: Central has our CSR but has not issued yet. A WAITING state, never a failure: first issuance waits on a human pressing Activate.
 	ErrCertPending = errors.New("certificate not issued yet (awaiting activation)")
 
 	// ErrCertTerminal means Central reported a state the appliance cannot advance from by retrying.
 	ErrCertTerminal = errors.New("certificate request is in a terminal state")
 
-	// ErrCertUnknownState means Central reported a status this client does not recognise.
-	//
-	// IT IS DELIBERATELY NOT TERMINAL. The dangerous action is submitting a CSR, and that is what is
-	// refused: a client that does not understand the state must not guess "none" and post a request, which
-	// is how one unrecognised word turns into a pile of duplicates. But treating it as fatal would mean a
-	// Central that starts reporting one new status stops the certificate lifecycle on every appliance in
-	// the fleet at once. So the appliance keeps waiting, loudly, and recovers by itself the moment Central
-	// reports something it understands.
+	// ErrCertUnknownState: Central reported a status this client does not recognise. DELIBERATELY NOT TERMINAL: it must not guess "none" and post a CSR
+	// (duplicate requests), but treating it as fatal would stop the certificate lifecycle on every appliance at once when Central adds a status. The
+	// appliance keeps waiting, loudly, and recovers when Central says something it understands.
 	ErrCertUnknownState = errors.New("unrecognised certificate status from Central")
 )
 
-// Ensure loads an existing local certificate, or makes ONE bootstrap attempt if none is present.
-//
-// It no longer blocks for ten minutes waiting for issuance. Callers that need the certificate for the life
-// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready get a fast
-// answer instead of a startup stall.
+// Loads an existing local certificate, or makes ONE bootstrap attempt if none is present, without blocking for issuance (see EnsureUntilInstalled).
 func (m *Manager) Ensure(ctx context.Context) error {
 	if err := m.ensureMTLSKey(); err != nil {
 		return err
@@ -210,19 +176,9 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	return m.bootstrapOnce(ctx)
 }
 
-// EnsureUntilInstalled keeps trying until the certificate is installed, the service is shutting down, or
-// Central reports something genuinely terminal.
-//
-// WHY THIS EXISTS. The bootstrap used to be a single ten-minute window starting at boot, and on expiry the
-// caller logged a warning and returned — killing the certificate lifecycle for the life of the process.
-// On the Production appliance the CSR was submitted at 15:10:46, the window closed at 15:20:46, and the
-// operator issued the certificate at 15:21:45. Fifty-nine seconds. The appliance never asked again.
-//
-// Nothing downstream could work after that: the assignment channel is mTLS-only, so the signed assignment,
-// the licence and convergence were all blocked behind a certificate that was sitting on Central, ready to
-// collect. The only recovery was a restart nobody knew to perform.
-//
-// A waiting appliance and a broken one are not the same thing, and only the second is worth giving up on.
+// EnsureUntilInstalled keeps trying until the certificate is installed, the service is shutting down, or Central reports something genuinely terminal.
+// A single fixed window used to end the certificate lifecycle when an operator activated just after it closed, stranding the mTLS-only assignment and
+// licence channels until a restart; a waiting appliance is not a broken one.
 func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 	const (
 		first = 15 * time.Second
@@ -245,15 +201,13 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// TERMINAL: retrying cannot move a rejected or revoked request forward, and continuing to poll
-		// would bury the one line that says why. Stop, and surface the exact reason.
+		// TERMINAL: retrying cannot advance a rejected or revoked request, and polling would bury the reason. Stop and surface it.
 		if errors.Is(err, ErrCertTerminal) {
 			slog.Error("appliancecert: certificate bootstrap cannot continue", "err", err,
 				"note", "this needs an operator in the control panel; the appliance will not retry")
 			return err
 		}
-		// Report the first few attempts, then only as the backoff itself lengthens, so an appliance that
-		// waits a week for activation does not write a log line every fifteen seconds for a week.
+		// Log the first few attempts, then only as the backoff lengthens, so a week-long wait is not a log line every fifteen seconds.
 		if attempt <= 3 || delay >= cap {
 			switch {
 			case errors.Is(err, ErrCertPending):
@@ -261,8 +215,7 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 					"attempt", attempt, "retry_in", delay.String(),
 					"note", "issued when an operator activates this appliance in the control panel")
 			case errors.Is(err, ErrCertUnknownState):
-				// Loud, because it means this appliance and Central disagree about the protocol. No CSR
-				// was sent, and none will be until the status is one this build understands.
+				// Loud: this appliance and Central disagree about the protocol. No CSR was sent.
 				slog.Error("appliancecert: Central reported a certificate status this appliance does not "+
 					"recognise; not submitting a CSR", "attempt", attempt, "retry_in", delay.String(),
 					"err", err, "note", "upgrade the appliance, or check Central's version")
@@ -289,18 +242,8 @@ func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
 	}
 }
 
-// bootstrapOnce COLLECTS BEFORE IT SUBMITS.
-//
-// Central's SubmitCSR inserts a new request row on every call, so a retry loop that always posts a CSR
-// would leave a trail of duplicate pending requests for one appliance — and an operator approving "the"
-// request would be picking one of many. So the existing protocol state decides:
-//
-//	issued   collect and install it. No CSR: the certificate already exists.
-//	pending  Central is holding our CSR. Wait. Submitting another would only add noise.
-//	none     genuinely nothing on file — this is the only case that warrants a CSR.
-//
-// The local mTLS private key is never regenerated here; ensureMTLSKey keeps the existing one, so a CSR
-// submitted earlier still matches the key the certificate will be bound to.
+// bootstrapOnce COLLECTS BEFORE IT SUBMITS: SubmitCSR inserts a new request row on every call, so the existing state decides. issued: collect and
+// install, no CSR. pending: wait. none: the only case that warrants a CSR. The local mTLS private key is never regenerated, so an earlier CSR still matches.
 func (m *Manager) bootstrapOnce(ctx context.Context) error {
 	status, certPEM, caPEM, err := m.collect(ctx)
 	if err != nil {
@@ -314,8 +257,7 @@ func (m *Manager) bootstrapOnce(ctx context.Context) error {
 	if err := m.submitCSR(ctx); err != nil {
 		return err
 	}
-	// One immediate re-collect: an already-activated appliance is auto-issued the moment the CSR lands,
-	// so this usually completes the bootstrap without waiting for the next retry.
+	// One immediate re-collect: an activated appliance is auto-issued as the CSR lands, so this usually completes the bootstrap.
 	status, certPEM, caPEM, err = m.collect(ctx)
 	if err != nil {
 		return err
@@ -325,18 +267,14 @@ func (m *Manager) bootstrapOnce(ctx context.Context) error {
 		return err
 	}
 	if maySubmit {
-		// Still "none" immediately after a successful submit. Do not submit again in the same attempt;
-		// wait and let the next retry look.
+		// Still "none" right after a successful submit: do not submit again this attempt; let the next retry look.
 		return ErrCertPending
 	}
 	return nil
 }
 
-// actOnStatus is the ONE place a certificate status is interpreted.
-//
-// It returns (maySubmitCSR, err). Every branch is explicit and there is no fall-through: a status this
-// client does not recognise must never be mistaken for "none", because "none" is the single state that
-// authorises posting a CSR, and Central inserts a new request row for every one it receives.
+// The ONE place a certificate status is interpreted; returns (maySubmitCSR, err). No fall-through: an unrecognised status must never be mistaken for
+// "none", the single state that authorises posting a CSR.
 func (m *Manager) actOnStatus(ctx context.Context, status, certPEM, caPEM string) (bool, error) {
 	switch status {
 	case statusIssued:
@@ -353,7 +291,6 @@ func (m *Manager) actOnStatus(ctx context.Context, status, certPEM, caPEM string
 		"understand", ErrCertUnknownState, status)
 }
 
-// collect asks Central what it holds for this appliance. It changes nothing.
 func (m *Manager) collect(ctx context.Context) (status, certPEM, caPEM string, err error) {
 	var out struct {
 		Status         string `json:"status"`
@@ -379,35 +316,21 @@ func (m *Manager) installCollected(ctx context.Context, certPEM, caPEM string) e
 	return nil
 }
 
-// rotateCert renews an EXISTING certificate before expiry.
-//
-// Rotation must submit a CSR — that is the whole operation, and Central auto-issues for an appliance that
-// already holds a valid certificate. It deliberately does not collect-first like the bootstrap does:
-// collecting would return the certificate we are trying to replace and quietly do nothing, so the appliance
-// would sail past its expiry believing it had rotated.
-// rotationResubmitAfter bounds how long a rotation request is assumed to be outstanding before another is
-// sent. Long enough that a stuck rotation cannot generate a stream of duplicates; short enough that a CSR
-// genuinely lost in transit still gets replaced well inside the fourteen-day rotation window.
+// Bounds how long a rotation request is assumed outstanding: long enough to avoid a stream of duplicates, short enough that a CSR lost in transit is
+// replaced well inside the fourteen-day rotation window.
 const rotationResubmitAfter = 24 * time.Hour
 
+// Renews an EXISTING certificate before expiry. It must submit a CSR and deliberately does not collect first: collecting would return the certificate
+// being replaced and rotation would silently do nothing.
 func (m *Manager) rotateCert(ctx context.Context) error {
 	m.mu.RLock()
 	currentFpr := m.fpr
 	m.mu.RUnlock()
 	outstanding := m.loadRotationPending(currentFpr)
 
-	// A ROTATION ALREADY IN FLIGHT IS NOT A REASON TO START ANOTHER.
-	//
-	// MaybeRotate runs every six hours for the last fourteen days of a certificate's life. Central
-	// auto-issues for a healthy appliance, so rotation normally completes on the first pass and the
-	// question never arises. But an appliance that is suspended, revoked or decommissioned is NOT
-	// auto-issued: SubmitCSR files the request as pending and returns. Unconditionally submitting would
-	// then post a fresh CSR every six hours for a fortnight — roughly fifty-six duplicate rotation
-	// requests for one appliance, and an operator having to guess which is current.
-	//
-	// FetchCertificate reports "issued" for the certificate we are trying to replace (an active one
-	// exists), so the status alone cannot tell us whether our rotation request is still outstanding. The
-	// fingerprint can: a DIFFERENT certificate is the new one.
+	// A rotation already in flight is not a reason to start another: MaybeRotate runs every six hours for the last fourteen days, and a suspended,
+	// revoked or decommissioned appliance is NOT auto-issued, so unconditional submits would file ~56 duplicate requests. FetchCertificate reports
+	// "issued" for the certificate being replaced, so only a DIFFERENT fingerprint means the new one has arrived.
 	if !outstanding.IsZero() && time.Since(outstanding) < rotationResubmitAfter {
 		status, certPEM, caPEM, err := m.collect(ctx)
 		if err != nil {
@@ -444,17 +367,9 @@ func (m *Manager) rotateCert(ctx context.Context) error {
 	return nil
 }
 
-// THE PENDING-ROTATION MARKER IS ON DISK, NOT IN MEMORY.
-//
-// Suppression that lives in a process variable is not suppression: scd restarts on assignment changes,
-// deploys, crashes and reboots, and each restart would file a fresh rotation CSR against a request Central
-// is already holding. Over the fourteen-day rotation window that is the same pile of duplicates the
-// in-process guard was written to prevent, just triggered by restarts instead of ticks.
-//
-// A small file beside the certificate is the smallest mechanism that actually survives that. It needs no
-// schema, no migration and no coordination, and it lives exactly where the rest of this lifecycle's state
-// already lives. It holds a timestamp and the fingerprint of the certificate being replaced — both public;
-// the fingerprint is already in Status() and the logs. No key material is written, copied or weakened.
+// THE PENDING-ROTATION MARKER IS ON DISK, NOT IN MEMORY: scd restarts on assignment changes, deploys, crashes and reboots, so an in-process guard would
+// file a fresh rotation CSR on each restart. A small file beside the certificate holds a timestamp and the fingerprint of the certificate being
+// replaced (both public); no key material.
 type rotationMarker struct {
 	SubmittedAt    time.Time `json:"submitted_at"`
 	ForFingerprint string    `json:"for_fingerprint"`
@@ -462,14 +377,8 @@ type rotationMarker struct {
 
 func (m *Manager) rotationMarkerPath() string { return filepath.Join(m.dir, "rotation-pending.json") }
 
-// loadRotationPending returns when the outstanding rotation CSR was filed, or the zero time if there is
-// none that still applies.
-//
-// It is SELF-INVALIDATING. The marker names the certificate it was filed against; if the installed
-// certificate is no longer that one, the rotation it describes has already completed — by this process, by
-// an earlier one, or by a plain Ensure() that collected the new certificate at startup — so the marker is
-// stale and is removed. That is what makes a restart *after* a successful rotation clean up after itself
-// instead of suppressing the next one.
+// Returns when the outstanding rotation CSR was filed, or the zero time if none applies. SELF-INVALIDATING: the marker names the certificate it was
+// filed against, and if the installed one differs the rotation is done (here, earlier, or by Ensure at startup), so the marker is stale and removed.
 func (m *Manager) loadRotationPending(currentFpr string) time.Time {
 	raw, err := os.ReadFile(m.rotationMarkerPath())
 	if err != nil {
@@ -477,8 +386,7 @@ func (m *Manager) loadRotationPending(currentFpr string) time.Time {
 	}
 	var mk rotationMarker
 	if err := json.Unmarshal(raw, &mk); err != nil || mk.SubmittedAt.IsZero() {
-		// A corrupt marker must not be able to block rotation forever: a certificate that silently expires
-		// is a far worse outcome than one duplicate CSR. Drop it and let this pass proceed normally.
+		// A corrupt marker must not block rotation forever: a silently expiring certificate is far worse than one duplicate CSR.
 		slog.Warn("appliancecert: unreadable rotation marker, ignoring it", "path", m.rotationMarkerPath())
 		_ = os.Remove(m.rotationMarkerPath())
 		return time.Time{}
@@ -498,8 +406,7 @@ func (m *Manager) markRotationPending(forFpr string) {
 	}
 	// 0644: a timestamp and a public fingerprint. Nothing here is secret.
 	if err := writeAtomic(m.rotationMarkerPath(), b, 0o644); err != nil {
-		// Non-fatal. Worst case the suppression is lost and one extra CSR is filed later — the rotation
-		// itself has already been submitted and must not be undone by a bookkeeping failure.
+		// Non-fatal: at worst the suppression is lost and one extra CSR is filed; the submitted rotation must not be undone by bookkeeping.
 		slog.Warn("appliancecert: could not record the pending rotation", "err", err)
 	}
 }
@@ -510,8 +417,7 @@ func (m *Manager) clearRotationPending() {
 	}
 }
 
-// fprOfPEM computes the same fingerprint installPEM records, so a collected certificate can be compared
-// against the installed one without installing it first.
+// The same fingerprint installPEM records, so a collected certificate can be compared without installing it.
 func fprOfPEM(certPEM string) string {
 	block, _ := pem.Decode([]byte(certPEM))
 	if block == nil {
@@ -529,8 +435,7 @@ func (m *Manager) submitCSR(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Prefer the mTLS transport when a cert already exists (rotation); the very first bootstrap CSR falls
-	// back to the HTTPS ingress.
+	// Prefer the mTLS transport when a cert exists (rotation); the first bootstrap CSR falls back to the HTTPS ingress.
 	base, cl := m.apiBase()
 	body, _ := json.Marshal(map[string]string{"csr_pem": string(csrPEM)})
 	if _, err := m.signedDoWith(ctx, cl, base, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
@@ -540,7 +445,6 @@ func (m *Manager) submitCSR(ctx context.Context) error {
 	return nil
 }
 
-// loadLocal loads client.crt + ca.crt from disk into a live mTLS client.
 func (m *Manager) loadLocal() error {
 	if err := m.ensureMTLSKey(); err != nil {
 		return err
@@ -613,7 +517,6 @@ func x509sha256(der []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// writeAtomic writes data via temp file + fsync + rename.
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -640,8 +543,7 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// MTLSHello performs a signed-auth + mTLS call to the Central mTLS listener,
-// proving the client cert is accepted. Returns the server-echoed identity.
+// A signed-auth + mTLS call proving the client cert is accepted; returns the server-echoed identity.
 func (m *Manager) MTLSHello(ctx context.Context) (map[string]any, error) {
 	cl := m.Client()
 	if cl == nil {
@@ -654,9 +556,7 @@ func (m *Manager) MTLSHello(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// MaybeRotate rotates the certificate when it is within `within` of expiry.
-// It fetches a new (auto-issued) cert, verifies it via an mTLS hello BEFORE
-// switching, and rolls back to the old cert if verification fails.
+// Rotates when within `within` of expiry: fetches the new cert, verifies it with an mTLS hello BEFORE switching, and rolls back if that fails.
 func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	m.mu.RLock()
 	na, ready := m.notAfter, m.ready
@@ -664,7 +564,6 @@ func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	if !ready || time.Until(na) > within {
 		return nil
 	}
-	// Snapshot current material for rollback.
 	oldCert, _ := os.ReadFile(m.certPath())
 	oldCA, _ := os.ReadFile(m.caPath())
 	slog.Info("appliancecert: rotating certificate before expiry", "not_after", na)
@@ -683,12 +582,10 @@ func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	return nil
 }
 
-// signedDo issues a signed-auth request over the default (system-trust) client.
 func (m *Manager) signedDo(ctx context.Context, base, method, path string, body []byte, out any) (int, error) {
 	return m.signedDoWith(ctx, http.DefaultClient, base, method, path, body, out)
 }
 
-// signedDoWith issues a signed-auth request over a specific http.Client.
 func (m *Manager) signedDoWith(ctx context.Context, cl *http.Client, base, method, path string, body []byte, out any) (int, error) {
 	tok, err := applianceauth.SignRequest(m.priv, m.applianceID, method, path, body)
 	if err != nil {
@@ -721,7 +618,6 @@ func (m *Manager) signedDoWith(ctx context.Context, cl *http.Client, base, metho
 	return resp.StatusCode, nil
 }
 
-// ReconcileOutcome is what Reconcile found and did.
 type ReconcileOutcome string
 
 const (
@@ -732,23 +628,11 @@ const (
 	ReconcileNotYetReady ReconcileOutcome = "not_ready" // no certificate is installed; the bootstrap owns this
 )
 
-// Reconcile checks that the installed certificate is still the one Central honours, and repairs it when not.
-//
-// WHY. Central can withdraw a certificate by itself -- "Reissue certificate" revokes the active one and
-// waits for the appliance's next CSR, which it signs at once because the appliance is activated. An
-// appliance that holds a certificate FILE never re-enters the bootstrap, so before this it kept presenting the
-// revoked certificate on every mTLS call, was refused forever, and Central showed "Activating" indefinitely.
-//
-// It asks over the SIGNED HTTPS INGRESS, never over the mTLS channel -- the mTLS channel is exactly what is
-// being refused -- and it follows the same one status contract as the bootstrap:
-//
-//	issued, same fingerprint    nothing to do
-//	issued, other fingerprint   Central signed a newer certificate (a reissue from a waiting CSR): install it
-//	pending                     our request is on file: wait
-//	none                        Central holds no active certificate for us: send ONE CSR and install the result
-//
-// "none" is the only state that sends a CSR, exactly as in the bootstrap, so a reconcile can never file a
-// second request while one is pending. The mTLS private key is kept: the new certificate binds the same key.
+// Checks that the installed certificate is still the one Central honours and repairs it when not. Central can withdraw a certificate itself ("Reissue
+// certificate" revokes the active one) and an appliance holding a certificate FILE never re-enters the bootstrap, so it would present the revoked one
+// forever. It asks over the SIGNED HTTPS INGRESS, never mTLS (the refused channel), with the bootstrap status contract: issued with the same fingerprint
+// is nothing to do, issued with another is installed, pending waits, none sends ONE CSR and installs the result. "none" is the only state that sends
+// a CSR, so a reconcile never files a second while one is pending. The mTLS private key is kept.
 func (m *Manager) Reconcile(ctx context.Context) (ReconcileOutcome, error) {
 	if !m.Ready() {
 		return ReconcileNotYetReady, nil
@@ -795,7 +679,6 @@ func (m *Manager) Reconcile(ctx context.Context) (ReconcileOutcome, error) {
 
 func (m *Manager) currentFpr() string { m.mu.RLock(); defer m.mu.RUnlock(); return m.fpr }
 
-// collectIngress is collect over the signed HTTPS ingress, whatever certificate is installed.
 func (m *Manager) collectIngress(ctx context.Context) (status, certPEM, caPEM string, err error) {
 	var out struct {
 		Status         string `json:"status"`
@@ -808,7 +691,6 @@ func (m *Manager) collectIngress(ctx context.Context) (status, certPEM, caPEM st
 	return out.Status, out.CertificatePEM, out.CAChain, nil
 }
 
-// submitCSRIngress sends a CSR over the signed HTTPS ingress.
 func (m *Manager) submitCSRIngress(ctx context.Context) error {
 	csrPEM, err := m.makeCSR()
 	if err != nil {

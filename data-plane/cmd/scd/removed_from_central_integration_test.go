@@ -11,9 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TENANT DATA IN THE SITE DATABASE COUNTS AS HAVING HELD A CUSTOMER, even with no assignment file on disk --
-// a wiped or lost assignment directory must not turn an appliance carrying a customer's data back into one
-// that may register under a new key.
+// Tenant data in the site database counts as having held a customer even with no assignment file on disk.
 func TestIntegration_OrphanWithTenantDataButNoAssignmentIsBlocked(t *testing.T) {
 	dsn := os.Getenv("PHASE3_TEST_DSN")
 	if dsn == "" {

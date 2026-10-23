@@ -1,31 +1,12 @@
 package main
 
-// ADMIN CONSOLE SECOND STEP AND SESSION LIMITS (migration 0132; GDPR remediation plan C10, decision D-C10;
-// NIST SP 800-63B, OWASP ASVS V2/V3).
-//
-// SIGNING IN IS TWO STEPS. The password (login, operator_signin.go) no longer opens a session: it opens a short
-// "password accepted" state, held here for five minutes under its own cookie, and the session is created only
-// when the second step succeeds:
-//
-//	POST /auth/login        {email, password}  -> {second_step: "code" | "enrol"}
-//	POST /auth/login/enrol                      -> {secret, otpauth_uri}   (first sign-in: the QR code)
-//	POST /auth/login/code   {code}              -> the session; on first sign-in also the 10 recovery codes
-//
-// A code is the 6 digits from the authenticator app, or one of the recovery codes. Wrong codes are throttled per
-// operator with the same limits as wrong passwords (scope 'mfa') and per source address, and audited
-// (operator.mfa_failed / operator.mfa_locked). The secret is sealed by scd, which holds the key; edged never sees
-// it after the QR code and cannot open it.
-//
-// THE PASSWORD STEP-UP STAYS A PASSWORD. Re-confirming inside a session that was opened with both factors may
-// use one (NIST SP 800-63B section 7.2), so the screens that already ask for the password are unchanged.
-//
-// SESSIONS END WHEN IDLE OR OLD. requireAuth ends a session after public.operator_session_policy's idle minutes
-// without activity, and its hours after sign-in whatever the activity (defaults 30 minutes and 12 hours). The
-// console's background whoami check does not count as activity; otherwise an open tab would never be idle.
-//
-// LOSING THE PHONE: a recovery code signs in once each; a site administrator can reset a colleague's second
-// step (password step-up, reason, audited, every session of theirs ended); the last administrator can be reset
-// on the appliance itself with `edged reset-mfa --email`.
+// Sign-in is two steps: the password opens only a five-minute "password accepted" state under its own cookie, and
+// the session is created when the second step (authenticator code or recovery code) succeeds. Wrong codes are
+// throttled like wrong passwords (scope 'mfa') and audited. scd seals the secret; edged never sees it after the QR code.
+// Password step-up inside a two-factor session stays a password (NIST SP 800-63B 7.2).
+// Sessions end after idle minutes or total hours (public.operator_session_policy); the console's background whoami
+// does not count as activity, or an open tab would never idle out.
+// Recovery: a site administrator can reset a colleague's second step; the last administrator via `edged reset-mfa --email`.
 
 import (
 	"context"
@@ -50,16 +31,12 @@ import (
 
 const (
 	scopeMFA = "mfa"
-	// pendingSigninCookie carries the "password accepted" state between the two steps. Its own name, so the
-	// console's middleware (which looks for the session cookie) still shows the sign-in page.
+	// pendingSigninCookie has its own name so the console's middleware (which looks for the session cookie) still shows the sign-in page.
 	pendingSigninCookie = "sc_edge_signin"
-	// pendingSigninTTL is how long the second step may take after the password, setting up the app included.
-	pendingSigninTTL = 5 * time.Minute
-	mfaIssuer        = "StayConnect Hotel Admin"
-	maxMFACodeLen    = 32
+	pendingSigninTTL    = 5 * time.Minute
+	mfaIssuer           = "StayConnect Hotel Admin"
+	maxMFACodeLen       = 32
 )
-
-// ----- the authenticator service (scd) ------------------------------------------------------------------------
 
 var (
 	errMFAUnavailable     = errors.New("the authenticator service is unavailable")
@@ -73,17 +50,13 @@ type mfaStatus struct {
 	RecoveryCodesLeft int        `json:"recovery_codes_left"`
 }
 
-// mfaService is what edged needs from the holder of the authenticator key. In production it is scd; the
-// sign-in tests give a stand-in that computes real codes.
+// mfaService is scd in production; tests give a stand-in that computes real codes.
 type mfaService interface {
 	Status(ctx context.Context, operatorID string) (mfaStatus, error)
 	Enrol(ctx context.Context, operatorID, account string) (secret, uri string, err error)
-	// Confirm proves a freshly set-up authenticator with its first code and makes the recovery codes.
 	Confirm(ctx context.Context, operatorID, code string) (recoveryCodes []string, ok bool, err error)
-	// Verify checks a code or a recovery code against a confirmed authenticator.
 	Verify(ctx context.Context, operatorID, code string) (method string, recoveryLeft int, ok bool, err error)
-	// NewRecoveryCodes replaces the set, but only against a current authenticator code (never a recovery code),
-	// spent with the same replay rule as sign-in. ok is false for a wrong or already-used code.
+	// NewRecoveryCodes accepts only a current authenticator code (never a recovery code), with sign-in's replay rule.
 	NewRecoveryCodes(ctx context.Context, operatorID, code string) (recoveryCodes []string, ok bool, err error)
 	Reset(ctx context.Context, operatorID string) (removed bool, err error)
 }
@@ -100,7 +73,6 @@ func (m scdMFA) Status(ctx context.Context, operatorID string) (mfaStatus, error
 	return st, err
 }
 
-// post calls one scd route and decodes its answer; 409 and 503 become the errors the handlers act on.
 func (m scdMFA) post(ctx context.Context, path string, body map[string]string, out any) error {
 	if m.scd == nil {
 		return errMFAUnavailable
@@ -169,12 +141,9 @@ func (m scdMFA) Reset(ctx context.Context, operatorID string) (bool, error) {
 	return out.Removed, err
 }
 
-// ----- the "password accepted" state --------------------------------------------------------------------------
-
-// pendingSignin is what the password step proved. Roles, display name and must-change are NOT trusted at the code
-// step: up to five minutes may pass, in which an administrator can change the account, so the code step reloads
-// them (currentOperator). PasswordFP is a fingerprint of the password hash the password was checked against, so
-// a password changed in between ends the pending sign-in even if nothing dropped it.
+// pendingSignin is what the password step proved. Roles, display name and must-change are not trusted at the code
+// step (an administrator may change the account meanwhile), so it reloads them. PasswordFP lets a password changed
+// in between end the pending sign-in.
 type pendingSignin struct {
 	OperatorID         string
 	Email              string
@@ -182,12 +151,10 @@ type pendingSignin struct {
 	Roles              []string
 	MustChangePassword bool
 	PasswordFP         string
-	// Enrol: no authenticator is confirmed yet; the second step sets one up.
-	Enrol   bool
-	Expires time.Time
+	Enrol              bool
+	Expires            time.Time
 }
 
-// passwordFingerprint identifies a stored password hash without keeping it.
 func passwordFingerprint(hash string) string {
 	sum := sha256.Sum256([]byte(hash))
 	return hex.EncodeToString(sum[:])
@@ -218,8 +185,7 @@ func (p *pendingSignins) create(ps *pendingSignin) string {
 	return tok
 }
 
-// get returns a COPY of the pending sign-in: handlers on concurrent requests must not share one struct. Changes
-// go through setEnrol, under the lock.
+// get returns a copy so concurrent handlers never share the struct; changes go through setEnrol under the lock.
 func (p *pendingSignins) get(tok string) *pendingSignin {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -266,7 +232,6 @@ func (s *server) clearPendingCookie(w http.ResponseWriter) {
 		SameSite: http.SameSiteStrictMode, Secure: s.secure})
 }
 
-// pendingFrom is the caller's "password accepted" state, or a 401 telling the console to start again.
 func (s *server) pendingFrom(w http.ResponseWriter, r *http.Request) (string, *pendingSignin, bool) {
 	ck, err := r.Cookie(pendingSigninCookie)
 	var ps *pendingSignin
@@ -281,7 +246,6 @@ func (s *server) pendingFrom(w http.ResponseWriter, r *http.Request) (string, *p
 	return ck.Value, ps, true
 }
 
-// beginSecondStep replaces the session the password used to open (login): it answers which second step comes.
 func (s *server) beginSecondStep(w http.ResponseWriter, r *http.Request, ctx context.Context, ps *pendingSignin) {
 	if s.mfa == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
@@ -302,7 +266,6 @@ func (s *server) beginSecondStep(w http.ResponseWriter, r *http.Request, ctx con
 	writeJSON(w, http.StatusOK, map[string]any{"second_step": step})
 }
 
-// POST /auth/login/enrol: the QR code for an operator who has no authenticator yet.
 func (s *server) loginEnrol(w http.ResponseWriter, r *http.Request) {
 	tok, ps, ok := s.pendingFrom(w, r)
 	if !ok {
@@ -328,7 +291,6 @@ func (s *server) loginEnrol(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": mfaIssuer, "account": ps.Email})
 }
 
-// POST /auth/login/code {code}: the second step. Creates the session.
 func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, authBodyLimit)
 	var in struct {
@@ -372,7 +334,6 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case errors.Is(err, errMFANotEnrolled), errors.Is(err, errMFAAlreadyEnrolled):
-		// The authenticator changed between the two steps (a reset, or set up elsewhere): start again.
 		s.pending.drop(tok)
 		s.clearPendingCookie(w)
 		jsonErr(w, http.StatusConflict, "signin_restart", "Your sign-in changed while you were entering the code. Sign in again.")
@@ -391,8 +352,7 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 	if err := s.throttleClear(ctx, scopeMFA, ps.OperatorID); err != nil {
 		slog.Warn("could not clear the code counter", "err", err)
 	}
-	// THE ACCOUNT AS IT IS NOW, not as the password step saw it: it may have been disabled, given other roles or a
-	// new password while the code was being typed.
+	// Use the account as it is now: it may have been disabled, re-roled or re-passworded while the code was typed.
 	cur, err := s.currentOperator(ctx, ps)
 	if err != nil {
 		s.pending.drop(tok)
@@ -433,8 +393,7 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 
 var errNoRoles = errors.New("no roles assigned")
 
-// currentOperator reloads what the session is made from when the code step completes. It refuses an account
-// that is no longer active, or whose password changed since the password step; errNoRoles when it has none left.
+// currentOperator refuses an account that is no longer active or whose password changed since the password step.
 func (s *server) currentOperator(ctx context.Context, ps *pendingSignin) (*pendingSignin, error) {
 	var display, hash, status string
 	var mustChange bool
@@ -457,9 +416,6 @@ func (s *server) currentOperator(ctx context.Context, ps *pendingSignin) (*pendi
 	return &cur, nil
 }
 
-// ----- the operator's own second step (Your account > Two-step sign-in) ----------------------------------------
-
-// GET /auth/mfa
 func (s *server) getOwnMFA(w http.ResponseWriter, r *http.Request) {
 	sess := sessFrom(r.Context())
 	if s.mfa == nil {
@@ -476,12 +432,9 @@ func (s *server) getOwnMFA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// POST /auth/mfa/recovery-codes {password, code}: a new set, replacing every earlier code.
-//
-// THE PASSWORD AND A CURRENT AUTHENTICATOR CODE (Product-Owner decision D-R3). With the password alone, a stolen
-// session plus the password could mint codes that later sign in with the password alone -- the second factor
-// bypassed for good. The code is the authenticator's 6 digits, never a recovery code; it is checked by scd with
-// sign-in's replay rule and counted against sign-in's wrong-code throttle and audit.
+// Replaces every earlier recovery code. Needs the password and a current authenticator code (never a recovery
+// code): otherwise a stolen session plus the password could mint codes and bypass the second factor for good.
+// The code is checked with sign-in's replay rule and counted against its wrong-code throttle.
 func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string `json:"password"`
@@ -545,7 +498,6 @@ func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
 }
 
-// isTOTPCode reports whether a normalised code is the authenticator's 6 digits (a recovery code never is).
 func isTOTPCode(code string) bool {
 	if len(code) != totp.Digits {
 		return false
@@ -558,11 +510,8 @@ func isTOTPCode(code string) bool {
 	return true
 }
 
-// ----- an administrator resetting a colleague's second step ----------------------------------------------------
-
-// POST /operators/{id}/reset-mfa {password, reason}. The colleague sets up a new authenticator at their next
-// sign-in. Every session of theirs ends. Not for one's own account: a stolen session plus the password must not
-// be enough to remove the second factor.
+// Ends every session of the colleague, who sets up a new authenticator at next sign-in. Not for one's own
+// account: a stolen session plus the password must not be enough to remove the second factor.
 func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
 	id, ok := operatorIDParam(w, r)
 	if !ok {
@@ -616,8 +565,6 @@ func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
 		"notice": "Their sessions were ended. They set up a new authenticator the next time they sign in."})
 }
 
-// ----- the session limits ----------------------------------------------------------------------------------------
-
 type sessionPolicy struct {
 	IdleTimeoutMinutes int        `json:"idle_timeout_minutes"`
 	MaxSessionHours    int        `json:"max_session_hours"`
@@ -629,10 +576,10 @@ type sessionPolicy struct {
 func (p sessionPolicy) idle() time.Duration { return time.Duration(p.IdleTimeoutMinutes) * time.Minute }
 func (p sessionPolicy) max() time.Duration  { return time.Duration(p.MaxSessionHours) * time.Hour }
 
-// defaultSessionPolicy mirrors 0132's defaults; it is what applies if the setting cannot be read.
+// defaultSessionPolicy applies if the setting cannot be read.
 var defaultSessionPolicy = sessionPolicy{IdleTimeoutMinutes: 30, MaxSessionHours: 12}
 
-// sessionBounds mirror the CHECKs in migration 0132 exactly; the API sends them so the form cannot drift.
+// sessionBounds mirror the table CHECKs exactly; the API sends them so the form cannot drift.
 var sessionBounds = []signinBound{
 	{"idle_timeout_minutes", "Sign out after inactivity", "minutes", 5, 240, 30,
 		"An Admin Console session with no activity for this long ends, and the next screen asks to sign in again. An open tab that is only being looked at counts as inactive."},
@@ -648,8 +595,8 @@ func (s *server) readSessionPolicy(ctx context.Context) (sessionPolicy, error) {
 	return p, err
 }
 
-// sessionPolicyFor is what requireAuth enforces. Read on every request (no cache, §0C), and the defaults if the
-// read fails: a database blip must not sign everybody out, and the defaults are never looser than the bounds.
+// sessionPolicyFor is read on every request (no cache); on failure the defaults apply, so a database blip does not
+// sign everybody out.
 func (s *server) sessionPolicyFor(ctx context.Context) sessionPolicy {
 	if s.db == nil {
 		return defaultSessionPolicy

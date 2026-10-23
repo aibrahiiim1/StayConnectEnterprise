@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// A REFUSED ACQUISITION DOES NOT SIGN THE CLIENT OUT (iamv2_commerce_session.go backToPackages, main.go index).
-// On a phone the sign-in page meant a new code, the mail app, and the captive browser gone again.
+// A refused acquisition does not sign the client out (backToPackages, main.go index).
 
 func journeyHandler(t *testing.T) (*handler, string) {
 	t.Helper()
@@ -20,7 +19,6 @@ func journeyHandler(t *testing.T) (*handler, string) {
 	mux.HandleFunc("/v1/commerce/packages", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"packages":[{"package_id":"p1","display":{"name":"Day pass"},"price_minor":100,"currency":"USD","currency_exponent":2,"methods":["ONLINE_PAYMENT"]}],"free_allowance_used":false}`))
 	})
-	// The quote succeeds; the confirm refuses the card (what a currency mismatch did on PRE-LIVE).
 	mux.HandleFunc("/v1/commerce/quote", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"quote_id":"q1","expires_at":"2030-01-01T00:00:00Z","display":{}}`))
 	})
@@ -52,7 +50,6 @@ func TestARefusedCardPaymentReturnsToPackageSelectionSignedIn(t *testing.T) {
 	if strings.Contains(body, `id="form-voucher"`) || strings.Contains(body, `name="code"`) {
 		t.Fatal("no sign-in form: the client is still signed in")
 	}
-	// With no session at all (expired), the sign-in page with the reason is still the answer.
 	req2 := httptest.NewRequest(http.MethodPost, "/packages/acquire", strings.NewReader("package_id=p1&method=ONLINE_PAYMENT"))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req2.RemoteAddr = "10.20.0.50:4321"
@@ -73,7 +70,6 @@ func TestTheLandingPageContinuesAnUnfinishedJourneyAtPackageSelection(t *testing
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/packages" {
 		t.Fatalf("a signed-in client who has not chosen yet continues at package selection: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	// Once the journey finished, the landing page is the landing page again.
 	sess, _ := h.commerceSessions.get(tok)
 	sess.acquired = true
 	h.commerceSessions.put(tok, sess)
@@ -82,7 +78,6 @@ func TestTheLandingPageContinuesAnUnfinishedJourneyAtPackageSelection(t *testing
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a finished journey is not redirected: %d", rec.Code)
 	}
-	// And a visit with no session (every captive-portal probe) is untouched.
 	rec = httptest.NewRecorder()
 	h.index(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusOK {
@@ -90,9 +85,7 @@ func TestTheLandingPageContinuesAnUnfinishedJourneyAtPackageSelection(t *testing
 	}
 }
 
-// NOTHING TO BUY IS NOT A SIGN-OUT. A client whose free allowance is spent and who has no package they can
-// complete stays on the package page, signed in, told why -- with the voucher code field when the site takes
-// vouchers, and Sign out -- instead of being dropped on the sign-in page under an error.
+// Nothing to buy is not a sign-out: the client stays on the package page, signed in, told why, with the voucher field when the site takes vouchers.
 func TestNothingToBuyStaysSignedInAndOffersAVoucher(t *testing.T) {
 	h := &handler{}
 	rec := httptest.NewRecorder()

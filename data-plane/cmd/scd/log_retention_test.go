@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// GDPR plan F5 (migration 0134): a log is cut once a day, cuts and other files older than the period are deleted,
-// a live file nobody has written for longer than the period is emptied in place, and the journal is vacuumed to
-// the same period.
 func TestLogRetention_CutsDeletesAndEmpties(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
@@ -59,7 +56,6 @@ func TestLogRetention_CutsDeletesAndEmpties(t *testing.T) {
 		t.Fatal("a cut inside the period was removed")
 	}
 
-	// The same day again: no second cut, and the day's new lines stay in the live file.
 	if err := os.WriteFile(live, []byte("more\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +65,7 @@ func TestLogRetention_CutsDeletesAndEmpties(t *testing.T) {
 	}
 }
 
-// The log directories are writable by the services that log there and this job runs as root: a symlink -- or a
-// hard link -- planted in one must never lead it to empty, copy or remove a file elsewhere. handle is called
-// directly as well as through run, because the dangerous case is a name swapped for a link AFTER the listing.
+// Planted symlinks and hard links must never lead the job to empty, copy or remove a file elsewhere; handle is also called directly because a name can be swapped for a link AFTER the listing.
 func TestLogRetention_NeverFollowsALink(t *testing.T) {
 	dir, outside := t.TempDir(), t.TempDir()
 	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
@@ -135,8 +129,6 @@ func TestLogRetention_NeverFollowsALink(t *testing.T) {
 	}
 }
 
-// A setting that could not be read must never delete anything: a hotel that kept logs for a year would lose them
-// to a database restart at the hourly tick.
 func TestLogRetention_AnUnreadableSettingDeletesNothing(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)

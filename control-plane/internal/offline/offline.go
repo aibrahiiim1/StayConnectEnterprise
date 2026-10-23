@@ -1,8 +1,5 @@
-// Package offline implements Appliance-specific, vendor-signed offline
-// activation packages. A package binds a signed license to ONE appliance
-// (id/serial/key fingerprints/tenant/site), is single-use (nonce), expiring,
-// and signed with the vendor key the appliance already trusts. Mirror the
-// envelope + Verify on the data-plane side; the signed bytes MUST match.
+// Package offline implements vendor-signed offline activation packages bound to one appliance.
+// The envelope and Verify are mirrored on the data-plane side; the signed bytes must match.
 package offline
 
 import (
@@ -14,7 +11,6 @@ import (
 	"time"
 )
 
-// Package is the signed offline activation envelope.
 type Package struct {
 	PackageID       string          `json:"package_id"`
 	ApplianceID     string          `json:"appliance_id"`
@@ -23,7 +19,7 @@ type Package struct {
 	MTLSKeyFpr      string          `json:"mtls_key_fingerprint"`
 	TenantID        string          `json:"tenant_id"`
 	SiteID          string          `json:"site_id"`
-	LicenseEnvelope json.RawMessage `json:"license_envelope"` // vendor-signed license doc
+	LicenseEnvelope json.RawMessage `json:"license_envelope"`
 	Entitlements    json.RawMessage `json:"entitlements"`
 	CABundlePEM     string          `json:"ca_bundle_pem"`
 	IssuedAt        int64           `json:"issued_at"`
@@ -58,20 +54,18 @@ func signingBytes(p *Package) []byte {
 	return b
 }
 
-// KeyID is the short fingerprint of the signing public key.
 func KeyID(pub ed25519.PublicKey) string {
 	s := sha256.Sum256(pub)
 	return fmt.Sprintf("%x", s[:8])
 }
 
-// Sign fills SignerKeyID + Signature with the vendor key.
 func Sign(priv ed25519.PrivateKey, p *Package) {
 	p.SignerKeyID = KeyID(priv.Public().(ed25519.PublicKey))
 	sig := ed25519.Sign(priv, signingBytes(p))
 	p.Signature = base64.StdEncoding.EncodeToString(sig)
 }
 
-// Verify checks the signature only (binding/expiry/nonce are the importer's job).
+// Verify checks the signature only; binding, expiry and nonce are the importer's job.
 func Verify(pub ed25519.PublicKey, p *Package) bool {
 	sig, err := base64.StdEncoding.DecodeString(p.Signature)
 	if err != nil {
@@ -80,9 +74,7 @@ func Verify(pub ed25519.PublicKey, p *Package) bool {
 	return ed25519.Verify(pub, signingBytes(p), sig)
 }
 
-// AcceptFor validates the package binding, expiry and signature for a specific
-// appliance identity. Returns "" if acceptable, else a rejection reason. The
-// caller separately enforces single-use via a local nonce/package_id ledger.
+// AcceptFor returns "" if acceptable, else a rejection reason. The caller enforces single use via a nonce ledger.
 func AcceptFor(pub ed25519.PublicKey, p *Package, applianceID, serial, identityFpr, mtlsFpr string, now time.Time) string {
 	if !Verify(pub, p) {
 		return "signature invalid (modified or wrong signer)"

@@ -1,12 +1,5 @@
-// Package auth — password hashing + verification with argon2id.
-//
-// Encoded form:
-//
-//	$argon2id$v=19$m=<mem>,t=<time>,p=<threads>$<b64salt>$<b64hash>
-//
-// Parameters (OWASP 2023 second-preference row, fine for web-admin logins):
-//
-//	m = 64 MiB, t = 1, p = 4, salt = 16 B, hash = 32 B
+// Package auth: passwords use argon2id (OWASP 2023 second-preference parameters), encoded as
+// $argon2id$v=19$m=<mem>,t=<time>,p=<threads>$<b64salt>$<b64hash>.
 package auth
 
 import (
@@ -37,11 +30,9 @@ var (
 	ErrBusy = errors.New("password check busy")
 )
 
-// MEMORY IS BOUNDED BY CONCURRENCY, NOT BY THE RATE LIMIT. Each argon2id evaluation allocates m (64 MiB, or
-// whatever the stored hash says). The per-address login limit does not cap how many run at once across
-// addresses, so at most argonSlots run concurrently (256 MiB with the default parameters) and the rest wait
-// up to argonWait, then fail with ErrBusy. A stored hash asking for more than maxHashMemoryKiB is refused
-// outright rather than evaluated.
+// Memory is bounded by concurrency, not the rate limit: the per-address limit does not cap parallel evaluations
+// across addresses, so at most argonSlots run at once and the rest wait up to argonWait, then fail with ErrBusy.
+// A stored hash asking for more than maxHashMemoryKiB is refused outright.
 const (
 	argonSlots       = 4
 	maxHashMemoryKiB = 256 * 1024
@@ -64,7 +55,6 @@ func acquireArgon() error {
 
 func releaseArgon() { <-argonSem }
 
-// HashPassword returns the encoded argon2id hash of password.
 func HashPassword(password string) (string, error) {
 	if err := acquireArgon(); err != nil {
 		return "", err
@@ -82,7 +72,6 @@ func HashPassword(password string) (string, error) {
 	), nil
 }
 
-// VerifyPassword checks password against encoded. Returns nil on match.
 func VerifyPassword(encoded, password string) error {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
@@ -124,10 +113,9 @@ var (
 	decoyHash string
 )
 
-// SpendPasswordCheck does the work of checking a password that cannot match, so a sign-in for a name Central does not
-// know (or an account that cannot sign in) takes as long as a wrong password for a real one: the response time must not
-// say which names have an account. It returns ErrBusy exactly when a real check would have, so the caller can answer the
-// same "busy" for both. The decoy hash is made on first use and made again if that failed.
+// SpendPasswordCheck does the work of a check that cannot match, so a sign-in for an unknown name takes as long as a
+// wrong password for a real one and timing does not reveal which names have an account. It returns ErrBusy exactly
+// when a real check would have.
 func SpendPasswordCheck(password string) error {
 	decoyMu.Lock()
 	if decoyHash == "" {

@@ -31,9 +31,7 @@ func assignmentRegistryRootPath() string {
 	return envOr("SCD_ASSIGNMENT_REGISTRY_ROOT", "/etc/stayconnect/assignment-registry-root.pub")
 }
 
-// registryStore is the durable store for the SIGNED trust registry, anchored by
-// the manufacture-time registry root public key. nil if no root anchor exists yet
-// (falls back to the legacy plain trust file during rollout).
+// registryStoreOnDisk returns the signed registry store; nil if no root anchor exists yet.
 func registryStoreOnDisk() *assignment.RegistryStore {
 	rootPub, err := assignment.LoadRootPub(assignmentRegistryRootPath())
 	if err != nil {
@@ -42,17 +40,12 @@ func registryStoreOnDisk() *assignment.RegistryStore {
 	return &assignment.RegistryStore{Path: assignmentRegistryPath(), RootPub: rootPub}
 }
 
-// currentRegistryOnDisk returns the trusted assignment-key registry: preferring
-// the verified SIGNED registry (last-known-good survives a Central outage),
-// falling back to the legacy plain trust file only where no signed registry
-// exists yet.
+// currentRegistryOnDisk prefers the verified signed registry (last-known-good survives a Central outage), else the legacy plain trust file.
 func currentRegistryOnDisk() (*assignment.Registry, string) {
 	return assignment.TrustedRegistry(assignmentPaths(), slog.Default())
 }
 
-// assignmentPaths gathers the on-disk assignment chain from scd's environment. The same four paths are what
-// every other daemon resolves its scope from; the resolver that consumes them lives in internal/assignment so
-// there is exactly one implementation of "which tenant and site is this appliance".
+// assignmentPaths is the single place scd resolves the on-disk assignment chain; the resolver lives in internal/assignment.
 func assignmentPaths() assignment.Paths {
 	return assignment.Paths{
 		Dir:              envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
@@ -62,48 +55,28 @@ func assignmentPaths() assignment.Paths {
 	}
 }
 
-// verifiedAssignment loads the persisted assignment and RE-VERIFIES it on boot
-// against the local trust registry: the signature must come from an ACTIVE
-// dedicated assignment-signing key, and the document must be bound to THIS
-// appliance. A document signed by a retired key — or by the license / command /
-// update / CA key, none of which are in the registry — is refused, and the
-// appliance falls back to awaiting-assignment rather than operating on an
-// unverifiable identity.
-//
-// The Resolution's Outcome says WHY there is no scope (absent vs refused), which is what decides whether a
-// development build may fall back to its env tenant/site: only when nothing is present at all.
+// verifiedAssignment re-verifies the persisted assignment against the local trust registry (active assignment-signing key, bound to THIS appliance).
+// The Outcome says why there is no scope; a development build may fall back to its env tenant/site only when nothing is present.
 func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) assignment.Resolution {
 	return assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
 		ApplianceID: ident.ApplianceID, Serial: ident.Serial, PublicKeyB64: ident.PublicKeyB64,
 	}, time.Now(), slog.Default())
 }
 
-// cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert
-// exists. Central's server CA is installed in the appliance trust store, so the
-// default roots verify it (same approach as the license fetcher).
+// cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert exists.
 func (s *server) cloudHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
 }
 
-// startAssignmentAgent polls Central for this appliance's signed assignment,
-// verifies it (vendor signature + appliance binding + monotonic version),
-// persists it atomically, repoints local guest-network ownership, and — when the
-// operational tenant/site changes — re-execs scd so every subsystem picks up the
-// new assignment. This is the ONLY channel by which an appliance adopts a
-// tenant/site; there is no env/identity hard-wiring.
+// startAssignmentAgent is the ONLY channel by which an appliance adopts a tenant/site; it re-execs scd when the operational identity changes.
 func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
-	// The assignment trust registry is the appliance's LOCAL list of assignment-
-	// signing public keys. It is re-read on every poll so a rotated registry takes
-	// effect without a restart. It holds ONLY assignment keys — the license,
-	// command, update, CA and auth-callout keys are absent, so a document signed by
-	// any of those is rejected as an unknown signer.
+	// The registry holds ONLY assignment keys, so a document signed by any other key is rejected; re-read every poll.
 	if reg, _ := currentRegistryOnDisk(); reg == nil && registryStoreOnDisk() == nil {
 		slog.Warn("assignment: no trusted registry and no root anchor — assignment agent disabled")
 		return
 	}
 	store := s.assignmentStore()
 
-	// currentVersion = the version already applied on disk (0 if none).
 	currentVersion := int64(0)
 	if rec, e := store.Load(); e == nil && rec != nil {
 		currentVersion = rec.Version
@@ -113,20 +86,15 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		"ctrl_base", ctrlBase, "status", store.Status())
 
 	poll := func() {
-		// Refresh the SIGNED trust registry first (verify + persist, rollback-safe).
-		// A failure keeps the last-known-good registry — verification continues offline.
+		// A refresh failure keeps the last-known-good registry.
 		s.refreshSignedRegistry(ctx)
 
 		doc, ok := s.fetchAssignment(ctx, ctrlBase)
 		if !ok || doc == nil {
-			// Central unreachable, or nothing to hand us. Record the attempt so an
-			// operator can see refresh is failing. This NEVER downgrades or clears
-			// the assignment — an unreachable Central must not unassign a hotel.
+			// An unreachable Central must never unassign a hotel.
 			store.NoteRefresh(false)
 			return
 		}
-		// Central answered: refresh succeeded, so we are no longer stale even if the
-		// document we hold is the same one.
 		store.NoteRefresh(true)
 
 		reg, _ := currentRegistryOnDisk()
@@ -136,23 +104,18 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		}
 		reason := assignment.AcceptForRegistry(reg, doc, s.applID, s.serial, s.identityKeyFpr, currentVersion, time.Now())
 		if reason != "" {
-			// Not newer / not for us / bad signature — ignore quietly (a same or
-			// older version is the steady state between reassignments).
 			if doc.Version > currentVersion {
 				slog.Warn("assignment: rejected", "reason", reason, "version", doc.Version)
 			}
 			return
 		}
-		// Adopt: rotates the outgoing document into `previous` (rollback-safe) and
-		// resets staleness.
 		if err := store.Adopt(doc); err != nil {
 			slog.Error("assignment: persist failed", "err", err)
 			return
 		}
 		slog.Info("assignment: applied signed assignment", "version", doc.Version, "state", doc.State,
 			"signer_key_id", doc.SignerKeyID, "tenant_id", doc.TenantID, "site_id", doc.SiteID)
-		// A new assignment is when the licence is most likely waiting: fetch it now rather than at the next
-		// tick (F10). If scd re-execs below, the new process fetches at boot anyway.
+		// Fetch the licence now rather than at the next tick.
 		if s.lic != nil {
 			s.lic.Kick()
 		}
@@ -160,16 +123,12 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		prevVersion := currentVersion
 		currentVersion = doc.Version
 
-		// TERMINAL adoption: the box has cleared its authority. Send Central a signed
-		// acknowledgment BEFORE re-exec so Phase 2 (credential revocation) can proceed; if it is not
-		// confirmed, ensureTerminalAck keeps retrying it (here and in the re-executed process).
+		// Send the signed terminal ack BEFORE re-exec so credential revocation can proceed; ensureTerminalAck retries.
 		if assignment.Clears(doc.State) {
 			s.sendTerminalAck(ctx, doc)
 			s.ensureTerminalAck(ctx)
 		}
 
-		// Re-exec when the operational identity actually changes (including an
-		// explicit unassign/revoke/decommission, which removes tenant/site).
 		operationalChanged := !assignment.Grants(doc.State) ||
 			doc.TenantID != s.tenID || doc.SiteID != s.siteID
 		if prevVersion == 0 || operationalChanged {
@@ -178,10 +137,9 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		}
 	}
 
-	// A terminal assignment adopted earlier whose acknowledgement Central never confirmed -- a re-exec, a
-	// restart or a reboot interrupted it -- is retried until Central answers.
+	// Retry a terminal ack Central never confirmed (interrupted by re-exec, restart or reboot).
 	s.ensureTerminalAck(ctx)
-	poll() // apply immediately on boot if a newer assignment is waiting
+	poll()
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
@@ -191,17 +149,14 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 				return
 			case <-t.C:
 				poll()
-			case <-s.asgKick: // Check now
+			case <-s.asgKick:
 				poll()
 			}
 		}
 	}()
 }
 
-// mtlsTransport returns the mTLS client + base, or (nil,"",false) if a client
-// certificate is not yet established. The assignment channel is mTLS-ONLY: there
-// is no JWT-over-:443 fallback, so a document can only reach a box holding a
-// valid client certificate.
+// mtlsTransport: the assignment channel is mTLS-only, with no JWT fallback.
 func (s *server) mtlsTransport() (*http.Client, string, bool) {
 	if s.certMgr == nil {
 		return nil, "", false
@@ -209,24 +164,14 @@ func (s *server) mtlsTransport() (*http.Client, string, bool) {
 	return s.certMgr.Transport()
 }
 
-// fetchAssignment GETs the current signed assignment over the mTLS transport ONLY.
-// Identity is carried entirely by the client certificate — Central authenticates
-// this request from the cert alone, so NO appliance JWT/bearer is attached.
+// fetchAssignment authenticates by client certificate alone; no bearer is attached.
 func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Document, bool) {
 	if s.applID == "" {
 		return nil, false
 	}
 	cl, base, ready := s.mtlsTransport()
 	if !ready || base == "" {
-		// mTLS not ready — assignment is mTLS-only, so there is no fallback and this poll can do nothing.
-		//
-		// SAY SO, PERIODICALLY. This returned silently, so an appliance blocked here polled every thirty
-		// seconds for as long as it was up and wrote nothing at all. On the Production appliance that meant
-		// twenty-five minutes of an operator's activation appearing to hang with no error anywhere: the
-		// certificate had not been collected, and the one line that would have said so did not exist.
-		//
-		// Not every poll: once a minute at first and then far less often, because an appliance waiting for
-		// activation is in a NORMAL state and must not fill the journal while it waits.
+		// No mTLS yet and no fallback. Log rarely: waiting for activation is normal, but silence hid a stuck activation.
 		s.noMTLSLogged++
 		if n := s.noMTLSLogged; n == 1 || n == 2 || n%20 == 0 {
 			slog.Info("assignment: waiting for the mTLS client certificate before fetching the assignment",
@@ -251,8 +196,7 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	if resp.StatusCode != http.StatusOK {
 		s.central.record(&httpStatusErr{code: resp.StatusCode}, time.Now())
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			// Central answered and refused the certificate: have the certificate agent check whether it was
-			// revoked or reissued, and repair it (appliancecert.Reconcile).
+			// Certificate refused: have the certificate agent check for revocation or reissue.
 			select {
 			case s.certReconcile <- struct{}{}:
 			default:
@@ -271,11 +215,7 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	return &doc, true
 }
 
-// refreshSignedRegistry fetches the current signed trust registry over mTLS,
-// verifies it against the baked-in root anchor and its version rules, and
-// persists it (keeping the previous one). A failure keeps the last-known-good
-// registry in force — verification of assignments continues during a Central
-// outage. Rejections are logged (and count as an audit signal).
+// refreshSignedRegistry verifies against the root anchor and keeps the last-known-good registry on failure.
 func (s *server) refreshSignedRegistry(ctx context.Context) {
 	rs := registryStoreOnDisk()
 	if rs == nil || s.idPriv == nil || s.applID == "" {
@@ -293,7 +233,7 @@ func (s *server) refreshSignedRegistry(ctx context.Context) {
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := cl.Do(req)
 	if err != nil {
-		return // outage — keep last-known-good
+		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -316,12 +256,7 @@ func (s *server) refreshSignedRegistry(ctx context.Context) {
 	}
 }
 
-// sendTerminalAck makes the FIRST delivery of the appliance's signed acknowledgment that it has adopted a
-// TERMINAL assignment (over mTLS) -- what authorises Central to revoke the credentials and complete the
-// retirement. It is attempted once here, synchronously, because scd re-executes right after adopting a
-// terminal document. Anything short of a definitive answer is left to runTerminalAck (central_retry.go),
-// which the re-executed process starts from ensureTerminalAck and which retries with backoff until Central
-// confirms.
+// sendTerminalAck makes the first, synchronous delivery of the terminal acknowledgment (scd re-execs right after); runTerminalAck retries.
 func (s *server) sendTerminalAck(ctx context.Context, doc *assignment.Document) {
 	if s.terminalAckSettled(doc) {
 		return
@@ -340,17 +275,12 @@ func (s *server) sendTerminalAck(ctx context.Context, doc *assignment.Document) 
 	}
 }
 
-// repointGuestNetworks updates every appliance-local row that carries a Central
-// tenant/site UUID so it reflects the CURRENT assignment — never the old one.
-// These columns are stored-but-not-read on the edge, so this is an ownership /
-// consistency correction (proves zero stale UUIDs after onboarding); it never
-// touches the WAN/LAN/management network. Best-effort, in one transaction.
+// repointGuestNetworks restamps appliance-local rows carrying a Central tenant/site UUID with the current assignment; best-effort, one transaction.
 func (s *server) repointGuestNetworks(ctx context.Context, doc *assignment.Document) {
 	if s.db == nil || !assignment.Grants(doc.State) || doc.TenantID == "" || doc.SiteID == "" {
 		return
 	}
-	// Ensure the appliance-local tenant/site mirror rows exist first (guest-domain
-	// tables FK to them).
+	// Mirror rows first: guest-domain tables FK to them.
 	s.seedTenantSiteMirror(ctx, doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName)
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -365,15 +295,7 @@ func (s *server) repointGuestNetworks(ctx context.Context, doc *assignment.Docum
 	slog.Info("assignment: guest-network ownership repointed", "tenant_id", doc.TenantID, "site_id", doc.SiteID)
 }
 
-// seedTenantSiteMirror upserts the appliance-local tenant + site MIRROR rows for
-// the current assignment. The guest-domain tables (ticket_templates/plans,
-// voucher_batches, sessions, guests, …) carry a tenant_id/site_id FOREIGN KEY to
-// these local mirror tables, so without this a freshly (re)assigned appliance
-// cannot create ANY tenant-scoped resource — the insert fails the FK because the
-// current tenant/site is not present locally. This is idempotent and safe to run
-// on every boot and on every assignment adoption. slug/code use the UUIDs to
-// guarantee uniqueness; name is cosmetic. NOT-NULL columns that have DB defaults
-// (status/metadata/auth_methods/timezone/timestamps) are left to those defaults.
+// seedTenantSiteMirror upserts the local tenant/site mirror rows that guest-domain tables FK to; idempotent.
 func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, tenantName, siteName string) {
 	if s.db == nil || tenantID == "" || siteID == "" {
 		return
@@ -405,10 +327,7 @@ func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, ten
 		slog.Warn("assignment: site mirror upsert failed", "err", err)
 		return
 	}
-	// The appliance's own MIRROR row. sessions.appliance_id (and other guest-domain
-	// tables) FK to appliances(id); without this row every guest session INSERT
-	// fails "sessions_appliance_id_fkey", so a voucher validates but authorization
-	// never completes. Repointed to the current owner so it survives a transition.
+	// Mirror row for the appliance: sessions.appliance_id FKs to appliances(id).
 	if s.applID != "" {
 		name := s.serial
 		if name == "" {
@@ -427,33 +346,8 @@ func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, ten
 			return
 		}
 	}
-	// THE LOCAL OPERATORS BELONG TO THE ASSIGNED TENANT, AND SOMETHING HAS TO SAY SO.
-	//
-	// cmd/edged/resources_operators.go states the appliance's convention: "every operator on the appliance
-	// belongs to this site, and roles live in operator_roles with tenant_id NULL." That is true and it is
-	// deliberate -- edged resolves roles by operator_id and never by tenant -- but "belongs to this site"
-	// was a fact the database did not record anywhere.
-	//
-	// IT IS RECORDED BECAUSE THE FINANCIAL KERNELS ASK. iam_v2.p4_assert_financial_actor requires
-	// `o.tenant_id = p_tenant AND o.status = 'active'`, and four SECURITY DEFINER functions are gated on
-	// it: p4_release_financial_recovery, p4_resolve_recovery_hold, p4_declare_financial_recovery and
-	// p4_authorize_zero_attempt_retry. Those functions came from the control plane, where operators DO
-	// carry a tenant_id (control-plane/internal/api/operators.go inserts one). On the appliance the column
-	// was NULL, so the assertion could never pass and none of the four could be performed here at all.
-	//
-	// MEASURED ON PRE-LIVE during the restore drill of this closure: a supported restore correctly entered
-	// FINANCIAL_RECOVERY_MODE, and the recovery could not then be released by anybody, because the only
-	// operator on the appliance was not an operator of any tenant as far as the kernel could tell.
-	//
-	// THE VALUE COMES FROM THE SIGNED ASSIGNMENT, not from a request or a config file. This function is
-	// called with the tenant from a verified assignment document (or, on boot, from the assignment the
-	// process already validated), which is the same source the tenants/sites/appliances mirror rows above
-	// come from. So this is not a new trust decision; it writes down, in the place the kernels look, the
-	// binding that the assignment already establishes.
-	//
-	// AND IT FOLLOWS A CROSS-TENANT MOVE. The predicate is `IS DISTINCT FROM`, so a reassigned appliance
-	// restamps its operators to the new owner on the next boot or adoption -- the same repointing the
-	// appliance and guest-network rows get, for the same reason.
+	// Stamp local operators with the assigned tenant: p4_assert_financial_actor requires o.tenant_id = p_tenant, so
+	// financial recovery could not be released otherwise. The tenant comes from the signed assignment; IS DISTINCT FROM follows a cross-tenant move.
 	if _, err := tx.Exec(ctx, `
         UPDATE operators SET tenant_id = $1, updated_at = now()
          WHERE tenant_id IS DISTINCT FROM $1
@@ -469,9 +363,7 @@ func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, ten
 	slog.Info("assignment: tenant/site/appliance mirror upserted", "tenant_id", tenantID, "site_id", siteID, "appliance_id", s.applID)
 }
 
-// reexec replaces the current process image with a fresh scd, so all subsystems
-// re-read the newly-applied assignment. systemd keeps the same PID (this is not
-// a crash), satisfying "restart only as part of the automated application flow".
+// reexec replaces the process image (same PID) so all subsystems re-read the assignment.
 func (s *server) reexec() {
 	exe, err := os.Executable()
 	if err != nil {

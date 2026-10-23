@@ -1,41 +1,9 @@
 package main
 
-// THE BACKUP SYSTEM: ONE ENGINE, ONE FORMAT, ONE RETENTION POLICY.
-//
-// This is the only way the appliance takes a backup. A backup is the database and the configuration and keys under
-// /etc/stayconnect, both encrypted to the hotel's backup key holders AS THEY ARE WRITTEN (the appliance holds public keys only, so
-// it cannot read them back; any one holder's key can). Nothing is ever written in the clear, and a backup that cannot be encrypted
-// is not taken: the administrator is told, and nothing weaker is written instead.
-//
-// A BACKUP THAT CANNOT BE RESTORED IS NOT A BACKUP. The encrypted dump cannot be opened here, so it is verified while it is made:
-// the same plain SQL that is being encrypted is also loaded into a scratch database, which must accept it without one error, hold
-// the appliance's tables, and carry an intact erasure ledger. Only then is the backup kept, marked verified, and described in a
-// small plain note (what it is for, who asked, the SHA-256 of what is stored, the tables, and the ledger head it contains -- one of
-// the witnesses a restore uses to tell whether a copy of the erasure ledger is complete).
-//
-// KINDS. Four reasons to take one, one engine:
-//
-//	scheduled    the hotel switched the schedule on (OFF by default) and set when
-//	manual       an administrator asked for one in Hotel Admin
-//	pre-change   a controlled migration or deployment asked for one first (scripts/edge-migrate.sh refuses a live-site migration
-//	             without a fresh one), through `scd backup-now`
-//	pre-restore  a restore takes one before it touches anything; the restoring key holder's key is also a recipient, so a restore
-//	             onto a fresh appliance that has no registered holder yet is still protected
-//
-// THE SCHEDULE IS A CONVENIENCE; THE PROTECTIONS ARE NOT. Switching scheduled backups off stops only the first kind. The last two
-// are mandatory, are taken whatever the schedule says, and are kept by their own rule.
-//
-// ONE RETENTION POLICY, COUNTS ONLY. scheduled and manual backups are one pool: the newest BACKUP_KEEP are kept. pre-change and
-// pre-restore backups are the other: the newest SAFETY_BACKUP_KEEP are kept. A set (dump, configuration archive, note, marker) is
-// removed only after a newer one of its pool has been verified, and the newest of a pool is never removed. No age rule exists
-// beside the count, so the two cannot contradict each other.
-//
-// NOTHING BEFORE THIS IS DELETED. Backups taken by the retired mechanisms (the nightly site backup in /var/backups/stayconnect, and
-// on-demand dumps made before notes existed) have no note, are never touched by rotation or the sweep, are listed as "earlier
-// backups", and go only when an administrator removes them, after a verified backup of the new kind exists.
-//
-// Every day the stored files are checked against the digests in their notes, so silent corruption is noticed while there are still
-// other backups to restore from.
+// One backup engine: encrypted to the hotel's key holders as it is written (a backup that cannot be encrypted is not taken) and
+// verified by loading the same SQL into a scratch database. Kinds: scheduled, manual, pre-change, pre-restore; the last two are
+// mandatory whatever the schedule says. Retention is counts only: scheduled+manual share BACKUP_KEEP, pre-change+pre-restore share
+// SAFETY_BACKUP_KEEP, and a pool's newest is never removed. Backups without a note (earlier mechanisms) are never rotated.
 
 import (
 	"archive/tar"
@@ -67,7 +35,6 @@ var etcStayconnectDir = "/etc/stayconnect"
 // financialMarker is deliberately NOT archived: it must survive a restore and keep counting (see the financial recovery notes in restore_financial.go).
 const financialMarker = "financial-restore-generation.json"
 
-// backupMeta is the note kept beside each backup. It holds no personal data.
 type backupMeta struct {
 	Kind       string    `json:"kind"` // scheduled | manual | pre-change | pre-restore
 	Reason     string    `json:"reason,omitempty"`
@@ -112,7 +79,6 @@ func poolOf(kind string) string {
 	return "regular"
 }
 
-// backupOpts says why a backup is being taken.
 type backupOpts struct {
 	Kind   string
 	Reason string
@@ -121,8 +87,7 @@ type backupOpts struct {
 	Identity string
 }
 
-// recipientsFor is who a backup is encrypted to: the registered key holders, plus -- for a pre-restore backup -- the holder whose
-// key is being used to restore, so that the safety copy exists even where no holder is registered yet (a replacement appliance).
+// recipientsFor adds the restoring holder's key for a pre-restore backup so the safety copy exists even where no holder is registered yet.
 func (s *server) recipientsFor(ctx context.Context, identity string) ([]age.Recipient, error) {
 	keys, err := s.backupRecipientKeys(ctx)
 	if err != nil {
@@ -131,7 +96,6 @@ func (s *server) recipientsFor(ctx context.Context, identity string) ([]age.Reci
 	return recipientsFromKeys(keys, identity)
 }
 
-// recipientsFromKeys is recipientsFor without the database: the registered holders' public keys, and the restoring holder's.
 func recipientsFromKeys(keys []string, identity string) ([]age.Recipient, error) {
 	keys = append([]string(nil), keys...)
 	if strings.TrimSpace(identity) != "" {
@@ -154,7 +118,6 @@ func recipientsFromKeys(keys []string, identity string) ([]age.Recipient, error)
 	return backupcrypt.ParseRecipients(keys)
 }
 
-// takeBackup takes, verifies and records one backup, then rotates. It returns the note of the new backup.
 func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, error) {
 	switch o.Kind {
 	case kindScheduled, kindManual, kindPreChange, kindPreRestore:
@@ -203,7 +166,6 @@ func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, err
 		}
 	}()
 
-	// The dump is encrypted to the file AND loaded into the scratch database, from the same stream.
 	loader := exec.CommandContext(ctx, "docker", "exec", "-i", pgContainer, "psql", "-U", pgUser, "-d", scratch, "-q", "-v", "ON_ERROR_STOP=1")
 	stdin, err := loader.StdinPipe()
 	if err != nil {
@@ -261,7 +223,6 @@ func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, err
 		meta.LedgerID, meta.LedgerSeq, meta.LedgerHash = head.Ledger, head.Seq, head.Hash
 	}
 
-	// The configuration and keys.
 	etcName := "etc-" + stamp + ".tgz" + backupcrypt.Suffix
 	if n, err := writeEtcArchive(filepath.Join(scdBackupDir, etcName), recipients); err != nil {
 		slog.Error("backup: the configuration and keys could not be archived", "err", err)
@@ -279,8 +240,7 @@ func (s *server) takeBackup(ctx context.Context, o backupOpts) (*backupMeta, err
 		return nil, err
 	}
 	if merr := writeVerifiedMarker(name, tables); merr != nil {
-		// Restore requires the marker: a backup without one is not a recovery point, and rotating now would discard an older one
-		// in its favour. It is discarded, and nothing is rotated.
+		// Restore requires the marker; without one this is not a recovery point, so discard it and do not rotate.
 		for _, f := range []string{name, meta.EtcName, filepath.Base(metaPathFor(name)), name + ".verified"} {
 			if f != "" {
 				_ = os.Remove(filepath.Join(scdBackupDir, f))
@@ -311,8 +271,7 @@ func writeMetaAtomically(m *backupMeta) error {
 	return nil
 }
 
-// writeEtcArchive writes /etc/stayconnect (without the financial restore marker) as a gzip tar, encrypted as it is written. It
-// returns the number of files, or -1 when the folder does not exist (an appliance under construction).
+// writeEtcArchive writes /etc/stayconnect (minus the financial marker) as an encrypted gzip tar; returns the file count, or -1 if the folder does not exist.
 func writeEtcArchive(dest string, recipients []age.Recipient) (int, error) {
 	if _, err := os.Stat(etcStayconnectDir); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -402,8 +361,6 @@ func writeEtcArchive(dest string, recipients []age.Recipient) (int, error) {
 	return files, nil
 }
 
-// backupSettings are the operator's choices for scheduled backups and for how many of each kind are kept. They live with the other
-// retention settings (the file Hotel Admin writes and the sweep reads), so there is one place and one source of truth.
 type backupSettings struct {
 	Enabled    bool
 	Hour       int
@@ -435,7 +392,6 @@ func readBackupSettings() backupSettings {
 	return b
 }
 
-// listBackupMetas returns every backup the engine made, newest first.
 func listBackupMetas() []backupMeta {
 	matches, _ := filepath.Glob(filepath.Join(scdBackupDir, "db-*.meta.json"))
 	var out []backupMeta
@@ -457,14 +413,13 @@ func validKind(k string) bool {
 	return k == kindScheduled || k == kindManual || k == kindPreChange || k == kindPreRestore
 }
 
-// rotateBackups trims each pool to its count. A pool's newest backup is never removed; a note whose dump is gone is removed with
-// what is left of its set; nothing without a note is ever touched. Returns how many sets were removed.
+// rotateBackups trims each pool to its count; a pool's newest is never removed and nothing without a note is touched.
 func (s *server) rotateBackups() int {
 	set := readBackupSettings()
 	keep := map[string]int{"regular": set.Keep, "protective": set.SafetyKeep}
 	count := map[string]int{}
 	removed := 0
-	for _, m := range listBackupMetas() { // newest first
+	for _, m := range listBackupMetas() {
 		pool := poolOf(m.Kind)
 		count[pool]++
 		_, statErr := os.Stat(filepath.Join(scdBackupDir, m.Name))
@@ -487,14 +442,11 @@ func (s *server) rotateBackups() int {
 	return removed
 }
 
-// backupProblem is a stored backup that no longer matches its note.
 type backupProblem struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail"`
 }
 
-// verifyStoredBackups checks every kept backup against the digests in its note: silent corruption (a failing disk) is found while
-// there are other backups to restore from.
 func verifyStoredBackups() []backupProblem {
 	var out []backupProblem
 	for _, m := range listBackupMetas() {
@@ -522,9 +474,7 @@ func verifyStoredBackups() []backupProblem {
 	return out
 }
 
-// storedCheck remembers the last full re-read of the stored backups. Reading every kept file takes a while, so the status screen asks
-// for the cached answer (at most storedCheckAge old) and only the loop, which runs every quarter hour, and a change to the stored set
-// force a fresh one.
+// storedCheck caches the last full re-read of stored backups (at most storedCheckAge old); only the loop and changes to the stored set force a fresh one.
 var storedCheck struct {
 	mu    sync.Mutex
 	at    time.Time
@@ -544,14 +494,11 @@ func storedBackupProblems(maxAge time.Duration) []backupProblem {
 	return append([]backupProblem(nil), storedCheck.probs...)
 }
 
-// forgetStoredCheck drops the cached answer: the stored set changed, so it no longer describes it.
 func forgetStoredCheck() {
 	storedCheck.mu.Lock()
 	storedCheck.at = time.Time{}
 	storedCheck.mu.Unlock()
 }
-
-// ---- the schedule ----------------------------------------------------------------------------------------------------------
 
 var backupState struct {
 	mu      sync.Mutex
@@ -560,14 +507,11 @@ var backupState struct {
 	running bool
 }
 
-// backupInterval is how far apart scheduled backups are: whole days, less four hours so that "every day at 02:00" is not skipped
-// by a backup that took a little longer yesterday.
+// backupInterval is whole days less four hours so a slightly slower backup yesterday does not skip today's.
 func backupInterval(everyDays int) time.Duration {
 	return time.Duration(max(1, everyDays))*24*time.Hour - 4*time.Hour
 }
 
-// scheduledBackupDue: the schedule is on, it is at or after the chosen hour, and the newest regular backup (scheduled or manual) is
-// older than the interval.
 func scheduledBackupDue(set backupSettings, now, newestRegular time.Time) bool {
 	if !set.Enabled || now.Hour() < set.Hour {
 		return false
@@ -584,8 +528,6 @@ func newestRegularBackup() time.Time {
 	return time.Time{}
 }
 
-// nextScheduledBackup says when the next scheduled backup will be attempted (zero when the schedule is off): the first moment that is
-// at or after the chosen hour and a full interval after the newest regular backup.
 func nextScheduledBackup(set backupSettings, now, newestRegular time.Time) time.Time {
 	if !set.Enabled {
 		return time.Time{}
@@ -639,7 +581,6 @@ func (s *server) runScheduledBackupIfDue(ctx context.Context) {
 	s.runBackupTracked(ctx, backupOpts{Kind: kindScheduled, Reason: "scheduled", By: "schedule"})
 }
 
-// runBackupTracked takes a backup and records the outcome for the screen.
 func (s *server) runBackupTracked(ctx context.Context, o backupOpts) (*backupMeta, error) {
 	backupState.mu.Lock()
 	backupState.running = true
@@ -660,9 +601,6 @@ func (s *server) runBackupTracked(ctx context.Context, o backupOpts) (*backupMet
 	return meta, err
 }
 
-// ---- the screen ------------------------------------------------------------------------------------------------------------
-
-// backupStatus serves GET /v1/backup/status: the schedule, what exists, and whether anything needs attention.
 func (s *server) backupStatus(w http.ResponseWriter, r *http.Request) {
 	set := readBackupSettings()
 	metas := listBackupMetas()

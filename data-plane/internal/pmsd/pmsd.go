@@ -1,15 +1,7 @@
-// Package pmsd is the dedicated read-only PMS connector runtime (Phase 3, ADR-0001). It owns each PMS
-// Interface connection under a DB advisory single-owner lock, runs one independent supervised worker per
-// Interface, and persists the interface-level freshness axes (transport / feed-continuity / complete-sync)
-// to iam_v2.pms_interface_runtime via INDEPENDENT compare-and-set updates. It reuses the accepted FIAS
-// protocol layer (data-plane/internal/pms) and enforces a hard outbound allowlist at the socket write
-// chokepoint: no financial Posting record (PS/PA), no Posting engine, no P# allocation.
-//
-// Identity is assignment-scoped: Tenant/Site derive ONLY from the verified signed appliance assignment.
-// EVERYTHING is DARK-gated: with the connector flag OFF the daemon loads no assignment, constructs no DB
-// connection, reads no secret, starts no worker and opens no PMS socket. All external effects are injected
-// via Deps so the contract is provable with spies (no live PostgreSQL or PMS required for the unit/race
-// gates).
+// Package pmsd is the PMS connector runtime: one supervised worker per Interface under a DB advisory
+// single-owner lock, persisting the transport / continuity / sync axes via independent CAS updates.
+// Tenant/Site derive only from the verified signed assignment. With the connector flag off nothing loads,
+// connects or starts; all external effects are injected via Deps.
 package pmsd
 
 import (
@@ -24,7 +16,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsprovider"
 )
 
-// TransportStatus / ContinuityStatus / SyncStatus mirror the iam_v2.pms_interface_runtime enums.
 type TransportStatus string
 type ContinuityStatus string
 type SyncStatus string
@@ -48,15 +39,13 @@ const (
 	SyncFailed           SyncStatus = "SYNC_FAILED"
 )
 
-// Assignment is the verified signed appliance assignment scope. It is the ONLY source of Tenant/Site
-// identity — never environment or client input.
+// Assignment is the only source of Tenant/Site identity, never environment or client input.
 type Assignment struct {
 	ApplianceID string
 	TenantID    string
 	SiteID      string
 }
 
-// Interface is a PMS Interface as discovered/re-read within the assigned scope.
 type Interface struct {
 	TenantID          string
 	SiteID            string
@@ -66,8 +55,7 @@ type Interface struct {
 	CurrentRevisionID string
 }
 
-// Revision carries the fully-typed pinned connector configuration. Nothing here defaults implicitly;
-// Validate() fails closed on any missing/incoherent field.
+// Revision is the pinned connector configuration; nothing defaults implicitly and Validate fails closed.
 type Revision struct {
 	ID                       string
 	ConnectorKind            string
@@ -86,32 +74,26 @@ type Revision struct {
 	Published                bool
 	CredentialMode           string // "NONE" (no-auth transport, e.g. Protel FIAS) | "AUTH_KEY"
 	ActiveSecretGenerationID string
-	// ProviderConfig is the revision's config.provider object (raw JSON), carried only by REST connectors.
-	// Empty for protel-fias, whose configuration is entirely the typed fields above.
+	// ProviderConfig is the raw config.provider JSON, REST connectors only.
 	ProviderConfig []byte
-	// TLS wraps the FIAS socket in TLS (GDPR plan C8). TLSCertSHA256, when set, pins the PMS certificate by its
-	// SHA-256 fingerprint (lower-case hex) instead of verifying it against the system's authorities.
+	// TLSCertSHA256, when set, pins the PMS certificate by lower-case hex SHA-256 instead of system roots.
 	TLS           bool
 	TLSCertSHA256 string
 }
 
-// Credential modes. Protel FIAS is a no-auth transport → NONE (no Secret Generation is fabricated,
-// required, decrypted or pinned). AUTH_KEY connectors MUST carry a Secret Generation.
+// Protel FIAS is no-auth (NONE: no Secret Generation exists); AUTH_KEY connectors must carry one.
 const (
 	CredentialNone    = "NONE"
 	CredentialAuthKey = "AUTH_KEY"
 )
 
-// supportedConnectorKinds derives from the provider registry (internal/pmsprovider), the single catalogue
-// edged's authoring allowlist also derives from. protel-fias is a member exactly as before.
+// supportedConnectorKinds derives from the provider registry, which edged's authoring allowlist shares.
 var supportedConnectorKinds = pmsprovider.KindSet()
 var supportedCredentialModes = map[string]struct{}{CredentialNone: {}, CredentialAuthKey: {}}
 
-// RequiresSecret reports whether this revision's credential mode needs a Secret Generation.
 func (r Revision) RequiresSecret() bool { return r.CredentialMode == CredentialAuthKey }
 
-// Validate enforces the typed connector configuration. Missing read-only capability FAILS — it is never
-// treated as true. Every timeout/threshold must be a positive duration.
+// Validate fails closed: a missing read-only capability is never treated as true.
 func (r Revision) Validate() error {
 	switch {
 	case !r.Published:
@@ -132,8 +114,6 @@ func (r Revision) Validate() error {
 	if _, ok := supportedCredentialModes[r.CredentialMode]; !ok {
 		return coded(CodeRevisionInvalid, errors.New("credential mode must be explicit (NONE or AUTH_KEY)"))
 	}
-	// a Secret Generation is REQUIRED only for AUTH_KEY; a NONE connector must NOT carry one (no fabricated
-	// secret for a no-auth transport).
 	if r.RequiresSecret() && r.ActiveSecretGenerationID == "" {
 		return coded(CodeSecretMissing, errors.New("AUTH_KEY connector requires an active secret generation"))
 	}
@@ -176,8 +156,6 @@ func (s *SecretMaterial) Zero() {
 	s.b = nil
 }
 
-// GenerationRequest atomically allocates the next runtime generation and pins the selected revision +
-// secret generation.
 type GenerationRequest struct {
 	TenantID                 string
 	SiteID                   string
@@ -187,7 +165,6 @@ type GenerationRequest struct {
 	CredentialMode           string // "NONE" | "AUTH_KEY"
 }
 
-// axisBase is the common identity + CAS guard for every independent-axis update.
 type axisBase struct {
 	TenantID           string
 	SiteID             string
@@ -196,7 +173,7 @@ type axisBase struct {
 	At                 time.Time
 }
 
-// TransportUpdate mutates ONLY the transport axis (never continuity/sync columns).
+// Each axis update touches only its own columns.
 type TransportUpdate struct {
 	axisBase
 	Status               TransportStatus
@@ -207,7 +184,6 @@ type TransportUpdate struct {
 	ErrorCode            Code
 }
 
-// ContinuityUpdate mutates ONLY the feed-continuity axis.
 type ContinuityUpdate struct {
 	axisBase
 	Status             ContinuityStatus
@@ -217,7 +193,6 @@ type ContinuityUpdate struct {
 	LastEventCursor    string
 }
 
-// SyncUpdate mutates ONLY the complete-sync axis.
 type SyncUpdate struct {
 	axisBase
 	Status             SyncStatus
@@ -228,12 +203,11 @@ type SyncUpdate struct {
 	FailureCode        Code
 }
 
-// InboxRow is the typed, provenance-bound evidence appended to the durable inbox (iam_v2.stay_events) for a
-// single admitted/staged domain Event. It NEVER carries the raw STX/ETX frame — only the bounded typed
-// fields Increment 4 consumes. AdmissionKind is "LIVE" (immediately consumable) or "RESYNC" (staged under a
-// typed ResyncGeneration, consumable only once the interface's published boundary reaches it).
+// InboxRow is the durable inbox evidence (iam_v2.stay_events) for one domain Event; it never carries the raw
+// frame. AdmissionKind is "LIVE" (consumable now) or "RESYNC" (staged, consumable once the published
+// boundary reaches its ResyncGeneration).
 type InboxRow struct {
-	axisBase              // tenant/site/interface + ExpectedGeneration (the pinned runtime generation) + At
+	axisBase
 	AdmissionKind         string
 	ResyncGeneration      int64 // 0 for LIVE; >0 for RESYNC
 	ExternalEventIdentity string
@@ -249,163 +223,115 @@ type InboxRow struct {
 	Payload               []byte // typed JSON payload (bounded; no raw frame / no secret)
 }
 
-// GapResyncRequest drives the ATOMIC two-axis "feed gap detected → full resync required" transition. Both
-// the continuity axis (→ GAP_DETECTED) and the sync axis (→ RESYNC_REQUIRED) move together, in ONE
-// transaction, guarded by the exact runtime_generation. Reason is a bounded typed code persisted where the
-// schema supports it (never raw text/PII).
+// GapResyncRequest drives the atomic continuity→GAP_DETECTED and sync→RESYNC_REQUIRED transition. Reason is
+// a bounded code, never raw text or PII.
 type GapResyncRequest struct {
 	axisBase
 	Reason Code
 }
 
-// Repo is the typed, assignment-scoped PMS repository. Every method takes/embeds Tenant+Site; nothing is
-// constructed while the connector is dark. Each Update uses an EXACT compare-and-set on runtime_generation.
+// Repo is the assignment-scoped repository; every write is a compare-and-set on the exact runtime_generation
+// and returns ErrStaleGeneration when ownership moved.
 type Repo interface {
 	ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error)
 	LoadInterface(ctx context.Context, tenantID, siteID, interfaceID string) (Interface, Revision, SecretGeneration, error)
-	// AllocateRuntimeGeneration atomically sets runtime_generation = stored+1, pins the revision + secret
-	// generation, and returns the new generation.
 	AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error)
 	UpdateTransport(ctx context.Context, u TransportUpdate) error
 	UpdateContinuity(ctx context.Context, u ContinuityUpdate) error
 	UpdateSync(ctx context.Context, u SyncUpdate) error
-	// MarkGapAndRequireResync atomically transitions continuity→GAP_DETECTED AND sync→RESYNC_REQUIRED in ONE
-	// transaction under the exact generation guard (both axes change or neither). It preserves unrelated
-	// transport evidence, returns ErrStaleGeneration when ownership changed, and returns every database error.
+	// MarkGapAndRequireResync moves both axes in one transaction (both change or neither).
 	MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error
 
-	// ---- §G durable inbox + typed resync generation (all guarded by the exact runtime generation) ----
-
-	// AllocateResyncGeneration bumps the interface's monotonic resync_generation_seq by 1 (a NEW typed resync
-	// generation) under the exact runtime-generation CAS and returns it. ErrStaleGeneration if ownership moved.
 	AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error)
-	// AdmitLiveEvent APPENDS a durable LIVE inbox row inside ONE transaction that first proves the caller still
-	// owns the exact runtime generation, then inserts. It returns the durable row id (the ONLY thing exposed to
-	// the Stay engine). A stale owner inserts nothing and gets ErrStaleGeneration.
+	// AdmitLiveEvent proves ownership and inserts in one transaction; a stale owner inserts nothing.
 	AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error)
-	// StageResyncEvent APPENDS a durable RESYNC inbox row (immutable, STAGED) under the same ownership proof +
-	// runtime-generation CAS. Staged rows are invisible to the Stay engine until publication.
+	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication.
 	StageResyncEvent(ctx context.Context, row InboxRow) (string, error)
-	// PublishResyncGeneration advances published_resync_generation to g in ONE atomic row update (never a mass
-	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
-	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
-	// LoadConnectionSettings reads the operator-set reconnect bounds for THIS INTERFACE. The connector
-	// READS these and never writes them: a daemon that could widen its own backoff is a daemon whose
-	// configuration means nothing.
-	//
-	// The interface id is part of the key, not decoration. Two connections at one property are precisely
-	// where one link needs patient backoff and the other must not be slowed to match.
+	// LoadConnectionSettings is read-only for the connector (a daemon that could widen its own backoff
+	// makes the configuration meaningless), keyed per interface so a flaky link doesn't slow a healthy one.
 	LoadConnectionSettings(ctx context.Context, tenantID, siteID, interfaceID string) (ConnectionSettings, error)
-	// RecordResyncCoverage stores what one completed sweep observed: distinct rooms named, the occupied
-	// records among them, and the vacant rooms seen but deliberately not admitted as departures.
 	RecordResyncCoverage(ctx context.Context, req ResyncScope, generation int64, rooms []string, roster, vacant, conflicts int) error
-	// ReconcileRoster closes the stays a COMPLETE published roster no longer lists. Called once per published
-	// generation; a refusal is a decision the run ledger records, not an error.
+	// ReconcileRoster runs once per published generation; a refusal is recorded in the run ledger, not an error.
 	ReconcileRoster(ctx context.Context, req ResyncScope, generation int64) (ReconcileOutcome, error)
+	// PublishResyncGeneration atomically advances the boundary (g must not exceed the allocated seq).
 	PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error
-	// ClaimResyncCommand takes an operator's pending full-resync request if this worker may run it, clearing
-	// it in the same statement. Returns (nil, nil) when there is nothing pending, when the command belongs to
-	// a generation this worker has replaced, or when a resync is already in progress — three refusals that
-	// are deliberately indistinguishable, because the correct response to all of them is to carry on.
+	// ClaimResyncCommand returns (nil, nil) when nothing is pending, the command belongs to a replaced
+	// generation, or a resync is running; the caller treats all three the same.
 	ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error)
-	// UpdateSyncStage records durable operator-visible progress under the same ownership CAS.
 	UpdateSyncStage(ctx context.Context, u StageUpdate) error
 	Close() error
 }
 
-// ResyncScope identifies an interface + the pinned runtime generation for a resync-lifecycle operation.
 type ResyncScope struct {
 	axisBase
 }
 
-// Locker is a session-level single-owner advisory lock bound to a dedicated DB connection.
 type Locker interface {
 	TryLock(ctx context.Context, key int64) (bool, error)
 	Lost() <-chan struct{}
 	Close() error
 }
 
-// DialParams carries everything the adapter needs to open a read-only connection. Secret is zeroed by the
-// worker after Dial returns.
+// Secret is zeroed by the worker after Dial returns.
 type DialParams struct {
 	Iface  Interface
 	Rev    Revision
 	Secret SecretMaterial
 }
 
-// Conn is an owned read-only PMS protocol connection.
 type Conn interface {
-	// Serve runs the read-only protocol loop until ctx is cancelled or the link fails, invoking sink as
-	// real protocol evidence is observed. It NEVER sends a financial (PS/PA) record.
+	// Serve never sends a financial (PS/PA) record.
 	Serve(ctx context.Context, sink AxisSink) error
 	Close() error
 }
 
-// AxisSink receives real protocol evidence. The worker implements it, translating control observations into
-// independent-axis CAS updates and domain records into typed queue events. All methods use the worker
-// context and the pinned generation.
+// AxisSink is implemented by the worker; all methods use the worker context and the pinned generation.
 type AxisSink interface {
 	OnConnected(at time.Time) error
 	OnHeartbeat(at time.Time) error
-	// RequireInitialResync raises the application barrier at connect: sync→RESYNC_REQUIRED and no LIVE
-	// admission until a complete DS→DE generation is published. The adapter then sends the initial DR.
+	// RequireInitialResync bars LIVE admission until a complete DS→DE generation is published.
 	RequireInitialResync(at time.Time) error
 	OnResyncStart(at time.Time) error
 	OnResyncComplete(at time.Time, cursor string) error
 	OnDisconnected(at time.Time, code Code) error
-	// OnDomainEvent validates + enqueues a typed guest Stay mutation. On queue overflow it drives
-	// continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and returns a QUEUE_OVERFLOW error so the adapter
-	// stops normal application until a verified resync.
+	// OnDomainEvent enqueues a guest Stay mutation; on queue overflow it drives GAP_DETECTED/RESYNC_REQUIRED
+	// and returns QUEUE_OVERFLOW so the adapter stops applying until a verified resync.
 	OnDomainEvent(ctx context.Context, ev Event) error
-	// OnContinuityFault records a feed-continuity fault for a record the adapter could NOT admit as a valid
-	// typed event (malformed framing, overlong/identity-truncating field, failed normalization). It DRIVES
-	// continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and PERSISTS both under the pinned generation; the
-	// adapter must never silently drop such a record. A persist failure is returned so the transport closes
-	// (a fault we cannot durably record must not be swallowed).
+	// OnContinuityFault records a record the adapter could not admit (malformed, overlong, failed
+	// normalization) and persists GAP_DETECTED/RESYNC_REQUIRED. The adapter must never silently drop one; a
+	// persist failure is returned so the transport closes.
 	OnContinuityFault(ctx context.Context, code Code) error
-	// ClaimOperatorResync returns an operator's pending full-resync request if this owner may run it, and nil
-	// otherwise. The adapter polls this between frames; the sink performs the claim, so the adapter never
-	// needs to know that the command channel is a database row.
+	// ClaimOperatorResync hides from the adapter that the command channel is a database row.
 	ClaimOperatorResync() *ResyncCommand
-	// RecordSkipped reports the running count of well-formed records that describe no keyable Stay, so the
-	// operator sees real rejected-record evidence rather than a number nobody can source.
+	// RecordSkipped reports the running count of well-formed records describing no keyable Stay.
 	RecordSkipped(n int64)
-	// RecordCoverage reports what the sweep now ending OBSERVED: distinct rooms named, the occupied records
-	// among them, and the vacant rooms it saw and deliberately did not admit. It is called once per DS..DE,
-	// before the generation publishes, because a published roster with no recorded observation is one
-	// reconciliation can never judge complete.
+	// RecordCoverage is called once per DS..DE before publication: a published roster with no recorded
+	// observation can never be judged complete by reconciliation.
 	RecordCoverage(rooms []string, rosterRecords, vacantRecords, conflictingRooms int)
-	// OnFullSyncRequested marks the moment a DR has been accepted by the serialized writer and the connector
-	// is waiting for the PMS to begin. Called for the AUTOMATIC initial sync as well as for an operator's,
-	// because an operator watching a reconnect needs to see the same stages either way.
+	// OnFullSyncRequested is called for the automatic initial sync as well as an operator's, so operators see
+	// the same stages either way.
 	OnFullSyncRequested()
 }
 
-// Deps injects every external effect so flags-OFF and failure paths are provable with spies.
+// Deps injects every external effect. None is called while the connector is dark.
 type Deps struct {
-	// LoadAssignment loads + cryptographically verifies the signed appliance assignment. NOT called while
-	// dark. Returns assigned=false for a factory-clean/unassigned appliance.
+	// LoadAssignment returns assigned=false for a factory-clean appliance.
 	LoadAssignment func(ctx context.Context) (Assignment, bool, error)
-	// OpenRepo constructs the DB-backed repository scoped to the assignment. NOT called while dark.
-	OpenRepo func(ctx context.Context, a Assignment) (Repo, error)
-	// NewLocker creates a dedicated single-owner lock session. NOT called while dark / before ownership.
-	NewLocker func(ctx context.Context) (Locker, error)
-	// DecryptSecret decrypts the selected secret generation AFTER ownership. Lock losers never call it.
+	OpenRepo       func(ctx context.Context, a Assignment) (Repo, error)
+	NewLocker      func(ctx context.Context) (Locker, error)
+	// DecryptSecret runs only after ownership; lock losers never call it.
 	DecryptSecret func(ctx context.Context, iface Interface, rev Revision, sg SecretGeneration) (SecretMaterial, error)
-	// Dial opens the owned read-only PMS connection AFTER lock + re-read + allocate + decrypt. Not while dark.
+	// Dial runs after lock, re-read, allocate and decrypt.
 	Dial func(ctx context.Context, p DialParams) (Conn, error)
 
-	// NewStayApplier builds the Stay-Event application owner (the Stay Engine with its Checkout Converter).
-	// Called ONLY when the ingest flag is on; nil while dark. Returning an error, or a nil applier, is a
-	// startup failure: applying PMS events without the engine is the unverified path Phase 3 removed.
+	// NewStayApplier is called only when the ingest flag is on. An error or nil applier is a startup failure:
+	// applying PMS events without the engine is an unverified path.
 	NewStayApplier func(ctx context.Context, a Assignment) (StayApplier, error)
 
 	Now func() time.Time
 	Log *slog.Logger
 
-	// tuning (all bounded; zero -> sane defaults)
-	// ApplierReconcileInterval bounds how quickly the Stay-Event application loops notice an Interface being
-	// activated or withdrawn.
+	// Tuning; zero selects defaults. ApplierReconcileInterval bounds how fast applier loops notice an Interface change.
 	ApplierReconcileInterval time.Duration
 	ReconcileInterval        time.Duration
 	BackoffMin               time.Duration
@@ -422,14 +348,9 @@ var (
 	ErrStaleGeneration = errors.New("pmsd: stale runtime generation (a newer owner exists)")
 	ErrConnectorDark   = errors.New("pmsd: connector flag OFF")
 	ErrNoAssignment    = errors.New("pmsd: no verified signed appliance assignment (factory-clean)")
-	// ErrAssignmentNotGranting is the OTHER failure: an assignment document exists but confers no scope —
-	// it failed verification against the trust registry, is bound to a different appliance, or its state is
-	// revoked/unassigned/decommissioned. It is deliberately distinct from ErrNoAssignment so that "this
-	// appliance was rejected" can never be read as "this appliance is new".
+	// Distinct from ErrNoAssignment so "this appliance was rejected" is never read as "this appliance is new".
 	ErrAssignmentNotGranting = errors.New("pmsd: appliance assignment present but grants no tenant/site scope")
-	// ErrIdentityUnreadable is the identity-layer counterpart: identity.json exists and cannot be trusted.
-	// Kept separate from "no identity" so a corrupt or tampered identity can never be reported as a
-	// never-enrolled appliance.
+	// Distinct from "no identity" so a corrupt or tampered identity is never reported as never-enrolled.
 	ErrIdentityUnreadable = errors.New("pmsd: appliance identity present but unreadable or invalid")
 )
 
@@ -469,15 +390,8 @@ func (d *Deps) withDefaults() {
 	}
 }
 
-// startStayApplier launches one application loop per assigned PMS Interface and returns a channel closed
-// when they have all drained. With the ingest flag OFF it starts nothing and closes immediately, so a
-// connector-only deployment pays nothing for a surface it does not run.
-// buildStayApplier constructs and validates the Stay Applier before anything else starts. It returns a
-// bounded startup error rather than a nil applier, so a caller cannot accidentally proceed with one.
-//
-// It also rejects a TYPED NIL — an interface holding a nil concrete pointer is non-nil to `== nil` but panics
-// (or silently does nothing) on first use, and "the connector ran but no event was ever applied" is precisely
-// the outcome this check exists to make impossible.
+// buildStayApplier validates the applier before anything starts, rejecting a typed nil (non-nil to `== nil`,
+// but it would silently apply nothing).
 func buildStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, deps *Deps) (StayApplier, error) {
 	if !cfg.IngestOn() {
 		return nil, nil // dark: nothing is constructed and nothing will run
@@ -495,8 +409,6 @@ func buildStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, de
 	return ap, nil
 }
 
-// isTypedNil reports whether an interface value holds a nil pointer/map/slice/func/channel. Without this, a
-// factory that returns (*processor)(nil) would pass an `ap == nil` check and fail only at the first event.
 func isTypedNil(v any) bool {
 	if v == nil {
 		return true
@@ -510,8 +422,7 @@ func isTypedNil(v any) bool {
 	}
 }
 
-// startStayApplier launches one application loop per assigned PMS Interface and returns a channel closed when
-// they have all drained. The applier itself was already constructed and validated by buildStayApplier.
+// startStayApplier returns a channel closed when all per-Interface application loops have drained.
 func startStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, repo Repo, ap StayApplier, deps *Deps) <-chan struct{} {
 	done := make(chan struct{})
 	if !cfg.IngestOn() || ap == nil {
@@ -525,31 +436,22 @@ func startStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, re
 	return done
 }
 
-// Run is the daemon entry point. Fail-closed and DARK-gated: with the connector flag OFF it loads NO
-// assignment, constructs NO repository/lock/worker/socket and reads NO secret, returning nil. With the flag
-// ON it verifies the signed assignment (fail-closed if unassigned), opens the scoped repository, and serves
-// until ctx is cancelled.
+// Run fails closed: with the flags off nothing is loaded or opened; unassigned appliances do no PMS work.
 func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	// Nothing is constructed unless at least one Phase-3 surface this daemon owns is live. With both the
-	// connector and the ingest flags OFF there is no assignment load, no database handle, no worker and no
-	// socket — the process starts and immediately reports that it has nothing to do.
 	if !cfg.ConnectorOn() && !cfg.IngestOn() {
 		deps.log().Info("pmsd: connector and ingest flags OFF; no assignment, DB, secret, worker or PMS socket",
 			"flags", cfg.SafeFlagSummary())
 		return nil
 	}
-	// The ingest surface REQUIRES an applier. Failing closed here means a misconfigured deployment cannot end
-	// up admitting events that nothing applies (a silently growing inbox), nor applying checkouts without the
-	// Converter that derives their boundary.
+	// Ingest requires an applier, else events would be admitted that nothing applies (a growing inbox).
 	if cfg.IngestOn() && deps.NewStayApplier == nil {
 		return ErrApplierRequired
 	}
 	deps.withDefaults()
-	// Loop so an assignment rotation drains the old scope and re-scopes to the new one. ctx cancellation
-	// or an unassigned state ends the loop.
+	// Loops so an assignment rotation drains the old scope and re-scopes.
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -566,18 +468,14 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 		if err != nil {
 			return err
 		}
-		// The Stay Applier is constructed SYNCHRONOUSLY, BEFORE any connector worker starts. Building it in a
-		// goroutine meant a construction failure only logged and exited while the connector kept running and
-		// kept admitting events nothing would ever apply — a silently growing inbox, which is exactly the
-		// failure this daemon exists to prevent. If it cannot be built, nothing else starts: no worker, no PMS
-		// socket, no admitted event, and the repository is released before returning.
+		// Build the applier synchronously before any worker: a goroutine failure would leave the connector
+		// admitting events nothing applies.
 		ap, aerr := buildStayApplier(ctx, cfg, assignment, &deps)
 		if aerr != nil {
 			_ = repo.Close()
 			return aerr
 		}
-		// The applier is supervised ALONGSIDE the connector workers, not inside one: it owns a different job
-		// (applying the durable inbox) and must keep running while a PMS socket is down.
+		// Supervised alongside the workers, not inside one: it must keep running while a PMS socket is down.
 		appCtx, stopApplier := context.WithCancel(ctx)
 		applierDone := startStayApplier(appCtx, cfg, assignment, repo, ap, &deps)
 
@@ -585,8 +483,8 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 		serr := sup.run(ctx) // drains all workers before returning
 
 		stopApplier()
-		<-applierDone    // drain: no application is left half-running when the scope ends
-		_ = repo.Close() // §9 explicit repository ownership + close (per scope)
+		<-applierDone
+		_ = repo.Close()
 		if errors.Is(serr, errAssignmentChanged) {
 			logEvent(deps.log(), EventSupervisorAssignChange, CodeAssignmentChanged, SafeFields{Stage: StageShutdown})
 			continue // re-scope to the new assignment
@@ -595,7 +493,6 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 	}
 }
 
-// ReconcileOutcome is what one automatic reconciliation decided, as the run ledger recorded it.
 type ReconcileOutcome struct {
 	Outcome          string
 	RosterSize       int
@@ -607,9 +504,8 @@ type ReconcileOutcome struct {
 	Protected        int
 }
 
-// ConnectionSettings are the operator-set reconnect bounds. The connector retries INDEFINITELY on purpose --
-// a hotel's PMS coming back at 3am must be picked up with nobody present -- so what these bound is the
-// interval between attempts, never the number of them.
+// ConnectionSettings bound the interval between reconnect attempts, never their number: the connector retries
+// indefinitely so a PMS returning at 3am is picked up unattended.
 type ConnectionSettings struct {
 	BackoffMin       time.Duration
 	BackoffMax       time.Duration

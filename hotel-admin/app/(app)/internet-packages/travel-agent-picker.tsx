@@ -1,16 +1,8 @@
 "use client";
 
-// TRAVEL AGENTS ARE CHOSEN, NOT TYPED.
-//
-// A travel-agent rule matches the name the PMS sends on each guest record. Typed by hand, "Sunny Tour" for
-// "Sunny Tours" silently matches nobody and the package is never offered. So the rule is built from a list of
-// the travel agents the PMS has actually named on stays (with how many are in house under each), searchable,
-// several at a time. A name the PMS has not sent yet can still be added -- an agent whose first guests arrive
-// next week -- but it is shown as such.
-//
-// The value is a LIST of names, exactly the stored rule's shape, and a name is never split: a PMS may name an
-// agent "Sun Tours, Ltd", and that is one agent. The server matches names case-insensitively, ignoring
-// surrounding spaces.
+// A travel-agent rule matches the exact name the PMS sends, so agents are picked from those the PMS has named
+// (a typo would silently match nobody). Unseen names can still be added and are flagged. The value is a list
+// and a name is never split on commas ("Sun Tours, Ltd" is one agent); the server matches case-insensitively.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, TravelAgent } from "@/lib/api";
@@ -26,7 +18,6 @@ export function TravelAgentPicker({
   label,
   testId,
 }: {
-  /** The chosen names, as the rule stores them. */
   value: string[];
   onChange: (v: string[]) => void;
   label: string;
@@ -66,7 +57,6 @@ export function TravelAgentPicker({
   }, [agents, query]);
 
   const typed = query.trim();
-  // A typed name is ONE name, commas and all -- it is shown as one chip and stored as one list entry.
   const canAddTyped =
     typed !== "" && !(agents ?? []).some((a) => same(a.name, typed)) && !isSelected(typed);
 
@@ -146,8 +136,7 @@ export function TravelAgentPicker({
           {options.map((a, i) => {
             const on = isSelected(a.name);
             return (
-              // The keyboard is the combobox input's (onKeyDown above, aria-activedescendant): options are never
-              // focused, so a key handler here could not fire. The click is the pointer path only.
+              // The keyboard belongs to the combobox input; options are never focused.
               // eslint-disable-next-line jsx-a11y/click-events-have-key-events
               <li
                 key={a.name}
@@ -167,7 +156,6 @@ export function TravelAgentPicker({
             );
           })}
           {canAddTyped && (
-            // Same as the options above: the input owns the keyboard.
             // eslint-disable-next-line jsx-a11y/click-events-have-key-events
             <li
               role="option"

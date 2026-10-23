@@ -2,22 +2,10 @@
 
 package main
 
-// POISON TESTS FOR THE CONTROLLED ACTIVATION OPERATION.
-//
-// `iam_v2.activate_session_enforcement` is what moves a Session from PENDING_ENFORCEMENT to active, and a
-// Session that says active is read by everything downstream as "this guest is authorized AND their traffic is
-// being accounted". Until these checks existed, the accounting half of that sentence was only an ordering
-// convention in netd's Go code: register the origin, activate the class, then call this. An ordering
-// convention is exactly as strong as the process that follows it, and this operation is reachable by anything
-// holding the controlled-writer capability — a future caller, a repaired daemon, a retry quoting a stale
-// generation. Any of them could produce an `active` Session whose traffic was metered from a baseline that
-// does not exist.
-//
-// So these tests call the operation DIRECTLY, with fabricated and mismatched claims, and require the database
-// to refuse. They are not testing netd; they are testing that netd could not lie to the database even if it
-// tried to.
-//
-// They run against the disposable PG16 harness (PHASE3_TEST_DSN) and skip without it.
+// Poison tests for iam_v2.activate_session_enforcement, which moves a Session from PENDING_ENFORCEMENT to active (read
+// downstream as "authorized AND accounted"). They call the operation directly with fabricated and mismatched claims and
+// require the database to refuse, so no caller can produce an active Session metered from a nonexistent baseline.
+// Needs PHASE3_TEST_DSN; skipped otherwise.
 
 import (
 	"bytes"
@@ -35,7 +23,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
-// activationFixture is one PENDING_ENFORCEMENT session with a known source tuple, ready to be poisoned.
 type activationFixture struct {
 	f       *authFixture
 	pool    *pgxpool.Pool
@@ -45,7 +32,6 @@ type activationFixture struct {
 	minor   int
 }
 
-// activate calls the controlled operation exactly as netd's recorder does, and returns the outcome or error.
 func (a *activationFixture) activate(t *testing.T, bridge string, minor int, epoch int64) (string, error) {
 	t.Helper()
 	var outcome string
@@ -74,19 +60,13 @@ func (a *activationFixture) state(t *testing.T) string {
 	return st
 }
 
-// newActivationFixture grants a real Phase-3 session with NO enforcement owner running, so it is left in
-// PENDING_ENFORCEMENT — the exact state the activation operation is supposed to judge.
-//
-// The grant is issued under a short deadline on purpose. With no owner it can never be confirmed, and the
-// handler correctly waits out whatever budget it is given before returning the uniform non-success; a request
-// with no deadline at all would spend the full maximum doing that, several times per test.
+// newActivationFixture grants a real Phase-3 session with no enforcement owner running, leaving it PENDING_ENFORCEMENT.
+// The grant uses a short deadline because it can never be confirmed and the handler waits out its whole budget.
 func newActivationFixture(t *testing.T) *activationFixture {
 	t.Helper()
 	f := newAuthFixture(t)
 
-	// A REQUEST ID OF ITS OWN PER FIXTURE. The constant one made resolution idempotent across RUNS as well as
-	// within one: a disposable database that had seen this suite before already held that resolution, so
-	// every activation test failed to resolve and the suite could only ever be run once.
+	// A request id of its own per fixture: a constant one made resolution idempotent across runs, so a reused database could run the suite only once.
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", mustUUID(t, f.pool)))
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("the fixture could not resolve: %+v", res)
@@ -117,10 +97,7 @@ func newActivationFixture(t *testing.T) *activationFixture {
 	return &activationFixture{f: f, pool: f.pool, session: session, device: device, bridge: bridge, minor: minor}
 }
 
-// ---- the poison matrix -------------------------------------------------------
-
-// NO ORIGIN AT ALL. The commonest way for this to go wrong in practice: a caller that performed the kernel
-// work but never registered the accounting baseline.
+// No origin at all: a caller did the kernel work but never registered the accounting baseline.
 func TestActivationRefusedWithoutARegisteredAccountingOrigin(t *testing.T) {
 	a := newActivationFixture(t)
 	_, err := a.activate(t, a.bridge, a.minor, 1)
@@ -135,13 +112,8 @@ func TestActivationRefusedWithoutARegisteredAccountingOrigin(t *testing.T) {
 	}
 }
 
-// A FABRICATED origin belonging to another session does not make this one accountable.
-//
-// WHERE THE REFUSAL HAPPENS HAS MOVED, and the test says so rather than pretending otherwise. It used to be
-// possible to register an origin naming one session on a class another session owns, and the ACTIVATION was
-// what refused. The class-origin writer now refuses the registration itself -- the origin must describe the
-// session it names -- so the fabrication cannot be created in the first place. Both facts are asserted: the
-// forgery is rejected at the door, and the session it was meant to help is still not activatable.
+// A fabricated origin belonging to another session does not make this one accountable. The class-origin writer now refuses
+// the registration itself (the origin must describe the session it names); both that and the non-activatability are asserted.
 func TestActivationRefusedWhenTheOriginBelongsToAnotherSession(t *testing.T) {
 	a := newActivationFixture(t)
 	otherSession := a.f.secondSessionOnSameClass(t)
@@ -186,8 +158,7 @@ func TestActivationRefusedWhenTheOriginIsADifferentGeneration(t *testing.T) {
 	}
 }
 
-// A MISMATCHED BRIDGE OR CLASS is refused before the origin is even considered: the enforcement being reported
-// does not describe this session's source.
+// A mismatched bridge or class is refused before the origin is considered.
 func TestActivationRefusedOnASourceThatDoesNotDescribeTheSession(t *testing.T) {
 	a := newActivationFixture(t)
 	a.registerOrigin(t, a.session, a.device, a.bridge, a.minor, 1)
@@ -212,8 +183,7 @@ func TestActivationRefusedWithoutAClassGeneration(t *testing.T) {
 	}
 }
 
-// THE HAPPY PATH, so the refusals above are known to be discriminating rather than universal — and it is
-// IDEMPOTENT, which is what makes a lost acknowledgement recoverable without a second grant.
+// The happy path, so the refusals above are known to discriminate; idempotent, so a lost acknowledgement is recoverable without a second grant.
 func TestActivationSucceedsAndIsIdempotentWhenAccountable(t *testing.T) {
 	a := newActivationFixture(t)
 	a.registerOrigin(t, a.session, a.device, a.bridge, a.minor, 1)
@@ -237,8 +207,7 @@ func TestActivationSucceedsAndIsIdempotentWhenAccountable(t *testing.T) {
 	}
 }
 
-// AN ENDED SESSION IS NEVER RESURRECTED, however accountable it looks. A delayed plan arriving after a
-// checkout must not put the guest back online.
+// An ended session is never resurrected: a delayed plan after checkout must not put the guest back online.
 func TestActivationRefusedForAnEndedSession(t *testing.T) {
 	a := newActivationFixture(t)
 	a.registerOrigin(t, a.session, a.device, a.bridge, a.minor, 1)
@@ -255,8 +224,6 @@ func TestActivationRefusedForAnEndedSession(t *testing.T) {
 	}
 }
 
-// secondSessionOnSameClass creates another PENDING_ENFORCEMENT session for this fixture's own device, so a
-// test can talk about "another session on the same traffic class" without needing a second tenant.
 func (f *authFixture) secondSessionOnSameClass(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
@@ -276,8 +243,6 @@ func (f *authFixture) secondSessionOnSameClass(t *testing.T) string {
 	return sess
 }
 
-// tryRegisterOrigin attempts a registration and RETURNS the error text instead of failing the test, so a
-// caller can assert that the database refused it.
 func (a *activationFixture) tryRegisterOrigin(t *testing.T, session, device, bridge string, minor int, epoch int64) string {
 	t.Helper()
 	_, err := a.pool.Exec(context.Background(), `

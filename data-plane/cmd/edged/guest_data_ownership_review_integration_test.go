@@ -12,9 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The adversarial review of migration 0145 (2026-10-20) found these holes. Each test builds the exact situation
-// the review described and proves it stays closed.
-
 // pmsEvent adds a PMS message on an interface. stay != "" makes it an applied message of that stay; otherwise it
 // never resolved to a stay (waiting when pending, else sent to manual review).
 func pmsEvent(t *testing.T, f *apiFixture, iface, stay, payload string, pending bool, receivedAgo time.Duration) string {
@@ -71,7 +68,7 @@ func ifaceOf(t *testing.T, f *apiFixture, stay string) string {
 	return gdStr(t, f, `SELECT pms_interface_id::text FROM iam_v2.stays WHERE id=$1`, stay)
 }
 
-// H1: erasing a guest rewrites the activity-log entries about them, never an entry that merely contains a room
+// Erasing a guest rewrites the activity-log entries about them, never an entry that merely contains a room
 // number or a surname.
 func TestIntegration_OwnershipReview_TheActivityLogIsNotRewrittenForARoomOrASurname(t *testing.T) {
 	f := newAPI(t)
@@ -111,7 +108,7 @@ func TestIntegration_OwnershipReview_TheActivityLogIsNotRewrittenForARoomOrASurn
 	}
 }
 
-// H2: erasing one guest of a shared stay changes only that guest's name in the stay's PMS messages. A message
+// Erasing one guest of a shared stay changes only that guest's name in the stay's PMS messages. A message
 // still waiting is never given up, and a co-guest's data in an applied message stays.
 func TestIntegration_OwnershipReview_AGuestOfASharedStayCannotDestroyAnotherGuestsMessage(t *testing.T) {
 	f := newAPI(t)
@@ -142,7 +139,7 @@ func TestIntegration_OwnershipReview_AGuestOfASharedStayCannotDestroyAnotherGues
 	_ = ctx
 }
 
-// H3: a reservation number means something only inside one PMS interface; a message that merely repeats it on
+// A reservation number means something only inside one PMS interface; a message that merely repeats it on
 // another interface is another reservation's.
 func TestIntegration_OwnershipReview_AReservationNumberOnAnotherInterfaceIsAnotherReservation(t *testing.T) {
 	f := newAPI(t)
@@ -168,7 +165,7 @@ func TestIntegration_OwnershipReview_AReservationNumberOnAnotherInterfaceIsAnoth
 	}
 }
 
-// M1: a staff-issued account may be given to a whole party, so what other people typed or paid through it is not
+// A staff-issued account may be given to a whole party, so what other people typed or paid through it is not
 // attributed to the account holder; a self-registered account's own purchases are.
 func TestIntegration_OwnershipReview_AStaffIssuedCredentialsAttemptsAndPaymentsAreNotTheHolders(t *testing.T) {
 	f := newAPI(t)
@@ -197,14 +194,13 @@ func TestIntegration_OwnershipReview_AStaffIssuedCredentialsAttemptsAndPaymentsA
 	if got := gdStr(t, f, `SELECT host(device_ip) || '|' || device_mac::text FROM iam_v2.sign_in_attempts WHERE entitlement_id=$1`, staffEnt); got != "10.5.5.2|02:dd:00:00:00:02" {
 		t.Errorf("an attempt made through the shared credential was changed: %s", got)
 	}
-	// A self-registered account's own attempts and purchases are its holder's.
 	st, raw = f.doRaw(t, "POST", "/guest-data-rights/export", gdReq(f, "account", own, "guest asked"))
 	if st != 200 || !strings.Contains(raw, "10.5.5.3") || !strings.Contains(raw, "ADMIN_GRANT") {
 		t.Errorf("a self-registered account's own attempt and purchase are missing: %d %s", st, raw)
 	}
 }
 
-// M2: a namesake without a PMS number cannot be told from the guest who has one; refused, never guessed.
+// A namesake without a PMS number cannot be told from the guest who has one; refused, never guessed.
 func TestIntegration_OwnershipReview_ANamesakeWithoutANumberMakesTheGuestAmbiguous(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -231,7 +227,7 @@ func TestIntegration_OwnershipReview_ANamesakeWithoutANumberMakesTheGuestAmbiguo
 	_ = b1
 }
 
-// M3: a device where someone else proved an address, or used another person's access, is not this person's;
+// A device where someone else proved an address, or used another person's access, is not this person's;
 // their own one-time codes tie a verification and a code binding to them whatever device it happened on.
 func TestIntegration_OwnershipReview_ADeviceSomeoneElseVerifiedOnIsNotThePersons(t *testing.T) {
 	f := newAPI(t)
@@ -267,12 +263,10 @@ func TestIntegration_OwnershipReview_ADeviceSomeoneElseVerifiedOnIsNotThePersons
 	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.otp_device_bindings(challenge_id, tenant_id, device_mac) VALUES ($1::uuid,$2,$3::macaddr)`, mine, f.tenant, mac); err != nil {
 		t.Fatalf("seed binding: %v", err)
 	}
-	// Only the person's own codes touch the device: it is theirs, and the records follow their codes.
 	st, raw := f.doRaw(t, "POST", "/guest-data-rights/export", gdReq(f, "account", acct, "guest asked"))
 	if st != 200 || !strings.Contains(raw, mac) || !strings.Contains(raw, `"verification_access": [{`) || !strings.Contains(raw, `"code_device_bindings": [{`) {
 		t.Fatalf("a device only the person's codes touched must be theirs: %d %s", st, raw)
 	}
-	// Someone else proves an address on it: now it is shared, and neither it nor their records are the person's.
 	grant(theirs, "10.77.9.60")
 	st, raw = f.doRaw(t, "POST", "/guest-data-rights/export", gdReq(f, "account", acct, "guest asked"))
 	if st != 200 || strings.Contains(raw, "10.77.9.1\"") || strings.Contains(raw, "10.77.9.60") ||
@@ -293,7 +287,7 @@ func TestIntegration_OwnershipReview_ADeviceSomeoneElseVerifiedOnIsNotThePersons
 	}
 }
 
-// L1 and L2: a surname shared with a relative is neither handed over nor removed; a reservation with one named
+// A surname shared with a relative is neither handed over nor removed; a reservation with one named
 // guest still never lists other people's sharer entries in the holder's export.
 func TestIntegration_OwnershipReview_ASharedSurnameIsNobodysAndSharersAreFiltered(t *testing.T) {
 	f := newAPI(t)

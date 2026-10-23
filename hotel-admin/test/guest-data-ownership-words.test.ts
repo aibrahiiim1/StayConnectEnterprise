@@ -1,9 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
 
-// Decision D-R5 (migration 0145): room credentials prove eligibility, not identity. What the console tells staff a
-// request covers must match what the database does: a reservation's own data for a stay request, a person's own
-// data for an account or identity request, and never the access that several people share.
+// Room credentials prove eligibility, not identity: what staff are told a request covers must match the database, never
+// shared access.
 
 describe("what a guest-data request says it covers", () => {
   it("a stay request covers the reservation and says the room's access is shared and left alone", () => {
@@ -26,7 +25,6 @@ describe("what a guest-data request says it covers", () => {
       const text = eraseConsequences(kind).join(" ");
       expect(text).toMatch(/Only this person’s own records go/);
       expect(text).toMatch(/reservation an account is linked to/);
-      // The old promise, now false: an account's erasure no longer takes its reservation with it.
       expect(text).not.toMatch(/Linked records go too/);
     }
   });

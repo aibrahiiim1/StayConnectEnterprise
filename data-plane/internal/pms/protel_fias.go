@@ -1,26 +1,9 @@
 package pms
 
-// Protel / Opera / Suite8 — all speak FIAS (Oracle Hospitality
-// HGBU-IFC8-FIAS Interface Specification 2.20.24).
-//
-// FIAS is push-based: the PMS streams GI (guest in), GO (guest out), GC
-// (guest change) records over a persistent TCP connection. We maintain an
-// in-memory cache keyed by room number; ValidateGuest queries the cache.
-//
-// Wire format (TCP):
-//
-//   STX (0x02)  <ascii record>  ETX (0x03)
-//
-// Records are pipe-separated fields. The first token is the 2-letter
-// Record-ID; subsequent tokens are 2-letter Field-ID + value, e.g.
-//
-//   GI|RN103|G#12345|GNRogers|GFMr|GA260420|GD260425|
-//
-// Spec sections used:
-//   - 7 FIPS / TCP framing            (STX/ETX delimiters)
-//   - 6 Record-ID types  → LS,LD,LR    (link start handshake)
-//                         GI/GO/GC     (guest data we subscribe to)
-//   - Appendix C  → field IDs (RN, G#, GN, GF, GA, GD, GS)
+// Protel / Opera / Suite8 speak FIAS (Oracle Hospitality HGBU-IFC8-FIAS 2.20.24). FIAS is push-based: the PMS streams
+// GI/GO/GC records over a persistent TCP connection, framed STX (0x02) ... ETX (0x03), as pipe-separated tokens of a
+// 2-letter Field-ID plus value (GI|RN103|G#12345|GNRogers|...). We keep an in-memory cache keyed by room number and
+// ValidateGuest queries it.
 
 import (
 	"bufio"
@@ -40,36 +23,28 @@ const (
 	etx = 0x03
 )
 
-// ProtelFIAS connects to a Protel/Opera/Suite8 PMS over plain TCP and keeps
-// a local cache of currently-checked-in guests fed by GI/GC/GO notifications.
 type ProtelFIAS struct {
 	providerName string
 
-	// Connection (set by Configure).
 	addr         string
 	useTLS       bool
 	authKey      string
-	ifcName      string // sent in LD as IFPB; defaults to "IFPB"
-	version      string // sent in LD as V#; defaults to "1.13"
+	ifcName      string
+	version      string
 	dialTimeout  time.Duration
 	writeTimeout time.Duration
 	readTimeout  time.Duration
 
-	// Field map: canonical → FIAS Field-ID. Defaults from
-	// DefaultFIASFieldMap, merged with per-tenant overrides by the loader.
 	fmap FieldMap
 	cfg  ProviderConfig
 
 	mu     sync.RWMutex
-	rooms  map[string]*Reservation // key = NormalizeRoom(room)
+	rooms  map[string]*Reservation
 	health Health
 
-	// Connection lifecycle.
 	cancel context.CancelFunc
 }
 
-// NewProtelFIAS returns an unconfigured instance. The loader calls
-// Configure() before Start() to apply the pms_providers row.
 func NewProtelFIAS(name string) *ProtelFIAS {
 	return &ProtelFIAS{
 		providerName: name,
@@ -87,12 +62,7 @@ func NewProtelFIAS(name string) *ProtelFIAS {
 func (p *ProtelFIAS) Name() string { return p.providerName }
 func (p *ProtelFIAS) Kind() string { return "protel-fias" }
 
-// Configure applies a pms_providers row. Call before Start().
-//
-//	Connection.Host / Port — TCP target (required)
-//	Connection.UseTLS      — wrap in tls.Dial when true (4.5.5b will wire it)
-//	Connection.AuthKey     — FIAS IfcAuthKey for the LD CG/RT4 dance (4.5.5b)
-//	Connection.Extra["ifc_name"] / ["version"] — LD record overrides
+// Configure applies a pms_providers row before Start(). Extra["ifc_name"] / ["version"] override the LD record.
 func (p *ProtelFIAS) Configure(cfg ProviderConfig) error {
 	if cfg.Name != "" {
 		p.providerName = cfg.Name
@@ -109,15 +79,12 @@ func (p *ProtelFIAS) Configure(cfg ProviderConfig) error {
 	if v, ok := cfg.Connection.Extra["version"].(string); ok && v != "" {
 		p.version = v
 	}
-	// Merge the per-tenant FieldMap on top of the FIAS defaults. The loader
-	// hands us the raw overrides; defaults live here so each kind owns its
-	// own protocol vocabulary.
+	// Defaults live here so each kind owns its protocol vocabulary; the loader passes only raw overrides.
 	p.fmap = MergeFieldMap(DefaultFIASFieldMap(), cfg.FieldMap)
 	p.cfg = cfg
 	return nil
 }
 
-// Health returns a live snapshot. Safe to call from any goroutine.
 func (p *ProtelFIAS) Health() Health {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -126,7 +93,6 @@ func (p *ProtelFIAS) Health() Health {
 	return h
 }
 
-// Config returns the last-applied bundle.
 func (p *ProtelFIAS) Config() ProviderConfig { return p.cfg }
 
 func (p *ProtelFIAS) setStatus(status string) {
@@ -149,9 +115,7 @@ func (p *ProtelFIAS) recordError(err error) {
 	p.mu.Unlock()
 }
 
-// TestConnection performs a one-shot dial + LS handshake to validate
-// connectivity and protocol compatibility. Doesn't disturb the persistent
-// connect loop.
+// TestConnection does a one-shot dial and LS handshake without disturbing the persistent connect loop.
 func (p *ProtelFIAS) TestConnection(ctx context.Context) error {
 	if p.addr == "" {
 		return fmt.Errorf("protel-fias: not configured")
@@ -165,13 +129,11 @@ func (p *ProtelFIAS) TestConnection(ctx context.Context) error {
 	if err := p.writeRecord(conn, p.recordLS()); err != nil {
 		return fmt.Errorf("write LS: %w", err)
 	}
-	// We don't wait for the LS echo — many PMS dev configs delay it. A
-	// successful TCP dial + first record write is sufficient signal that
-	// the host:port reaches a FIAS-speaking peer.
+	// Don't wait for the LS echo: many PMS dev configs delay it; a successful dial and first write is enough to show a
+	// FIAS peer.
 	return nil
 }
 
-// CacheSnapshot returns up to limit cached reservations.
 func (p *ProtelFIAS) CacheSnapshot(limit int) []Reservation {
 	if limit <= 0 {
 		limit = 200
@@ -188,11 +150,8 @@ func (p *ProtelFIAS) CacheSnapshot(limit int) []Reservation {
 	return out
 }
 
-// Start launches the connect-and-receive goroutine. Safe to call once after
-// Configure(). Use Stop to cancel.
 func (p *ProtelFIAS) Start(parent context.Context) {
 	if p.addr == "" {
-		// Configure wasn't called or the row was incomplete; skip silently.
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -252,8 +211,6 @@ func (p *ProtelFIAS) ValidateGuest(_ context.Context, q Query) (*Result, error) 
 	}, nil
 }
 
-// ---- Connection lifecycle --------------------------------------------------
-
 func (p *ProtelFIAS) runLoop(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -281,7 +238,6 @@ func (p *ProtelFIAS) connectAndServe(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	// Link Start handshake.
 	if err := p.writeRecord(conn, p.recordLS()); err != nil {
 		return fmt.Errorf("write LS: %w", err)
 	}
@@ -304,7 +260,6 @@ func (p *ProtelFIAS) connectAndServe(ctx context.Context) error {
 				return io.EOF
 			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				// Link idle past ReadTimeout — heartbeat by sending LA.
 				if werr := p.writeRecord(conn, "LA|"); werr != nil {
 					return fmt.Errorf("LA write: %w", werr)
 				}
@@ -323,13 +278,10 @@ func (p *ProtelFIAS) handleRecord(rec string) {
 	}
 	rid := rec[:2]
 	switch rid {
-	case "LA": // alive — already handled by re-arming timeout
-	case "LE": // link end — let the read loop notice & reconnect
+	case "LA":
+	case "LE":
 	case "GI", "GC":
 		fields := parseFields(rec[2:])
-		// Pull each canonical field through the merged FieldMap. Empty / unmapped
-		// codes are skipped. Tenants override e.g. last_name → "GG" by setting
-		// the map column on pms_providers.
 		room := strings.TrimSpace(p.fieldStr(fields, FRoomNumber))
 		if room == "" {
 			return
@@ -380,8 +332,6 @@ func (p *ProtelFIAS) handleRecord(rec string) {
 	}
 }
 
-// fieldStr looks up a canonical field via the merged FieldMap and returns
-// the raw value from the parsed FIAS record. Empty when unmapped or absent.
 func (p *ProtelFIAS) fieldStr(fields map[string]string, canonical string) string {
 	id := p.fmap[canonical]
 	if id == "" {
@@ -389,8 +339,6 @@ func (p *ProtelFIAS) fieldStr(fields map[string]string, canonical string) string
 	}
 	return fields[id]
 }
-
-// ---- Outbound records (handshake + subscriptions) -------------------------
 
 func (p *ProtelFIAS) recordLS() string {
 	now := time.Now()
@@ -403,17 +351,13 @@ func (p *ProtelFIAS) recordLD() string {
 		now.Format("060102"), now.Format("150405"), p.ifcName, p.version)
 }
 
-// recordLRs subscribes to the records we care about + tells the PMS which
-// fields to include.
 func (p *ProtelFIAS) recordLRs() []string {
 	return []string{
-		"LR|RIGI|FLRNG#GNGFGAGD|", // Guest In: room, reservation, last name, first name, arrival, departure
-		"LR|RIGC|FLRNG#GNGFGAGD|", // Guest Change: same set
-		"LR|RIGO|FLRNG#|",         // Guest Out: room + reservation
+		"LR|RIGI|FLRNG#GNGFGAGD|",
+		"LR|RIGC|FLRNG#GNGFGAGD|",
+		"LR|RIGO|FLRNG#|",
 	}
 }
-
-// ---- Wire helpers ----------------------------------------------------------
 
 func (p *ProtelFIAS) writeRecord(c net.Conn, body string) error {
 	_ = c.SetWriteDeadline(time.Now().Add(p.writeTimeout))
@@ -425,8 +369,7 @@ func (p *ProtelFIAS) writeRecord(c net.Conn, body string) error {
 	return err
 }
 
-// readFramedRecord reads one STX..ETX-bracketed record from the stream.
-// Bytes outside the frame are ignored (stream may carry handshake noise).
+// Bytes outside the frame are ignored (the stream may carry handshake noise).
 func readFramedRecord(br *bufio.Reader) (string, error) {
 	for {
 		b, err := br.ReadByte()
@@ -440,7 +383,6 @@ func readFramedRecord(br *bufio.Reader) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		// body includes the trailing ETX — strip it.
 		if n := len(body); n > 0 && body[n-1] == etx {
 			body = body[:n-1]
 		}
@@ -448,9 +390,6 @@ func readFramedRecord(br *bufio.Reader) (string, error) {
 	}
 }
 
-// parseFields walks a "|FFvalue|FFvalue|" tail and returns a map of
-// 2-character field-id → value. The first character pair of each segment is
-// the field id; the remainder is the value.
 func parseFields(tail string) map[string]string {
 	out := map[string]string{}
 	for _, seg := range strings.Split(tail, "|") {
@@ -462,8 +401,7 @@ func parseFields(tail string) map[string]string {
 	return out
 }
 
-// parseFiasDate parses YYMMDD (e.g. "260420") as midnight UTC.
-// Per FIAS Field type "D".
+// parseFiasDate parses YYMMDD as midnight UTC (FIAS field type D).
 func parseFiasDate(s string) (time.Time, error) {
 	if len(s) != 6 {
 		return time.Time{}, fmt.Errorf("not a YYMMDD date: %q", s)

@@ -10,8 +10,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
 )
 
-// otpDB connects the disposable OTP-metadata database (public.otp_hmac_key_generations + auth_otps
-// with 0008 applied). Set OTPBOOT_TEST_DSN to run; skipped otherwise.
+// otpDB connects the disposable OTP database; set OTPBOOT_TEST_DSN to run.
 func otpDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("OTPBOOT_TEST_DSN")
@@ -23,7 +22,6 @@ func otpDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// clean state each test
 	if _, err := db.Exec(context.Background(),
 		`TRUNCATE public.auth_otps; DELETE FROM public.otp_hmac_key_generations;`); err != nil {
 		t.Fatalf("reset: %v", err)
@@ -59,7 +57,6 @@ func TestBootstrapOTPFreshCreatesGenerationOne(t *testing.T) {
 	if countActive(t, db) != 1 {
 		t.Fatalf("want exactly 1 active, got %d", countActive(t, db))
 	}
-	// idempotent re-run: no new key, no new row, still one active gen 1
 	res2, err := BootstrapOTP(ctx, db, dir)
 	if err != nil {
 		t.Fatalf("idempotent re-run: %v", err)
@@ -74,9 +71,9 @@ func TestBootstrapOTPFreshCreatesGenerationOne(t *testing.T) {
 
 func TestBootstrapOTPDBMetaButNoKeyFails(t *testing.T) {
 	db := otpDB(t)
-	dir := t.TempDir() // empty: no key files
+	dir := t.TempDir()
 	ctx := context.Background()
-	// DB says generation 1 is active, but the key file is absent -> must fail closed, never fabricate.
+	// DB says generation 1 is active but the key file is absent: fail closed.
 	if _, err := db.Exec(ctx,
 		`INSERT INTO public.otp_hmac_key_generations (generation, active) VALUES (1, true)`); err != nil {
 		t.Fatal(err)
@@ -112,7 +109,6 @@ func TestBootstrapOTPKeyPresentNoDBReconciles(t *testing.T) {
 	db := otpDB(t)
 	dir := t.TempDir()
 	ctx := context.Background()
-	// A lone generation-1 key exists but DB has no generation -> controlled reconcile inserts gen 1.
 	if _, err := localkeys.EnsureGeneration(dir, OTPPrefix, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +128,6 @@ func TestBootstrapOTPAmbiguousKeysNoDBFails(t *testing.T) {
 	db := otpDB(t)
 	dir := t.TempDir()
 	ctx := context.Background()
-	// Two key files, no DB rows -> ambiguous, refuse to reconcile.
 	if _, err := localkeys.EnsureGeneration(dir, OTPPrefix, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -148,12 +143,10 @@ func TestBootstrapOTPReferencedGenMissingKeyFails(t *testing.T) {
 	db := otpDB(t)
 	dir := t.TempDir()
 	ctx := context.Background()
-	// gen 1 bootstrapped normally...
 	if _, err := BootstrapOTP(ctx, db, dir); err != nil {
 		t.Fatalf("initial bootstrap: %v", err)
 	}
-	// ...then a gen-2 metadata row exists (retired, inactive) and an UNEXPIRED OTP pins gen 2, but no
-	// gen-2 key file: those OTPs could never verify -> bootstrap must fail closed.
+	// A retired gen-2 row pinned by an unexpired OTP has no key file: bootstrap must fail closed.
 	if _, err := db.Exec(ctx,
 		`INSERT INTO public.otp_hmac_key_generations (generation, active, retired_at) VALUES (2, false, now())`); err != nil {
 		t.Fatal(err)

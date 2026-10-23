@@ -1,15 +1,7 @@
 package main
 
-// THE PRODUCER SIDE OF THE SHAPING CONTRACT.
-//
-// acctd states a COMPLETE desired state, scoped to exactly one tenant/site/appliance, stamped with a
-// monotonically increasing generation and a short expiry, and hashed so a truncated body cannot be mistaken
-// for a smaller desired state (which would read as "revoke everyone who is missing").
-//
-// The generation is durable. If it lived only in memory a restarted acctd would start again at 1, and netd —
-// correctly refusing anything older than what it already applied — would ignore every plan the new process
-// produced. Access would then be frozen at whatever the pre-restart plan said, indefinitely, and nothing would
-// look broken. The counter therefore survives the process that produces it.
+// The plan generation is durable: in memory only, a restarted acctd would start at 1 and netd would ignore
+// every plan as stale, freezing access at the pre-restart state with nothing looking broken.
 
 import (
 	"encoding/json"
@@ -18,7 +10,6 @@ import (
 	"sync"
 )
 
-// planScope is the appliance's authoritative identity for shaping submissions.
 type planScope struct {
 	TenantID     string
 	SiteID       string
@@ -27,13 +18,11 @@ type planScope struct {
 	AssignmentGe int64
 }
 
-// planCounter is the durable monotonic generation source.
 type planCounter struct {
 	mu   sync.Mutex
 	path string
 	gen  int64
-	// runtime distinguishes one acctd process from the next. netd does not gate on it; it exists so an
-	// operator reading two plans can tell "the same process re-derived" from "a new process took over".
+	// runtime tells operators one acctd process from the next; netd does not gate on it.
 	runtime int64
 	loaded  bool
 }
@@ -45,9 +34,8 @@ type counterState struct {
 
 func newPlanCounter(path string) *planCounter { return &planCounter{path: path} }
 
-// start loads the persisted counter and claims a new runtime generation. A missing or unreadable file is
-// treated as "never produced": starting at 1 is correct for a fresh appliance, and for a corrupted file netd's
-// stale-generation refusal is what surfaces the problem instead of it being silently overwritten.
+// start loads the counter and claims a new runtime generation. A missing or unreadable file means "never
+// produced"; for a corrupt one, netd's stale-generation refusal surfaces the problem.
 func (c *planCounter) start() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -69,9 +57,8 @@ func (c *planCounter) start() {
 	c.runtime = st.Runtime + 1
 }
 
-// next allocates the generation for the plan about to be submitted, persisting it BEFORE it is used. Writing
-// after a successful submission would leave a window in which netd has accepted a generation the producer does
-// not know it issued, and the next restart would re-issue it with different contents.
+// next persists the generation BEFORE it is used: persisting after submission would let netd accept a
+// generation the producer does not know it issued, and a restart would re-issue it with different contents.
 func (c *planCounter) next() (int64, int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

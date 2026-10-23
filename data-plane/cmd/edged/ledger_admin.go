@@ -1,16 +1,6 @@
 package main
 
-// THE ERASURE LEDGER AND THE BACKUP STATUS, ON THE BACKUPS SCREEN (GDPR final mission).
-//
-//	GET  /edge/v1/backups/ledger                       the state of the two copies, and whether erasure is available
-//	POST /edge/v1/backups/ledger/destination/probe     an SFTP server's host key fingerprint, to confirm before saving
-//	POST /edge/v1/backups/ledger/destination/test      try a secondary storage without saving it
-//	PUT  /edge/v1/backups/ledger/destination           save it (password step-up) and make the first copy
-//	POST /edge/v1/backups/ledger/recover               bring the ledger back from the secondary storage (password + a key holder's key)
-//	GET  /edge/v1/backups/status                       the backups, the schedule, the next due and the last result
-//	POST /edge/v1/backups/earlier/remove               remove the earlier backups (password + typed confirmation, audited)
-//
-// scd owns the two copies, the sealing of the storage credentials and the backups; this only authorises, audits and relays.
+// scd owns the two ledger copies, the sealing of storage credentials and the backups; this only authorises, audits and relays.
 // Credentials travel one way (browser to scd) and are never returned or audited.
 
 import (
@@ -43,7 +33,6 @@ func (s *server) ledgerStatusGet(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// readLedgerBody reads a JSON object, takes the step-up password out of it, and returns the rest for scd.
 func (s *server) readLedgerBody(w http.ResponseWriter, r *http.Request, needPassword bool) (map[string]any, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	var in map[string]any
@@ -57,9 +46,8 @@ func (s *server) readLedgerBody(w http.ResponseWriter, r *http.Request, needPass
 		s.reauthRefused(w, r, "password confirmation required")
 		return nil, false
 	}
-	// "password" is the operator's own step-up password; an SFTP server's password travels as "sftp_password" so the two cannot
-	// collide (found on PRE-LIVE: with one name, the server's password was taken for the step-up and never reached scd, so password
-	// authentication could not work at all). scd knows it as "password".
+	// "password" is the operator's step-up password; the SFTP server's travels as "sftp_password" so the two cannot
+	// collide, and scd knows it as "password".
 	if v, ok := in["sftp_password"]; ok {
 		delete(in, "sftp_password")
 		in["password"] = v
@@ -101,7 +89,6 @@ func (s *server) ledgerDestinationSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if code == http.StatusOK {
-		// What was chosen, never the credentials.
 		s.audit(r, "backup.ledger_storage_changed", "ledger", "", map[string]any{"kind": kind})
 	} else {
 		s.audit(r, "backup.ledger_storage_refused", "ledger", "", map[string]any{"kind": kind, "status": code})
@@ -128,12 +115,10 @@ func (s *server) backupStatusGet(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// earlierBackupsConfirmation is what the administrator types to remove the earlier backups.
 const earlierBackupsConfirmation = "remove earlier backups"
 
-// earlierBackupsRemove deletes the backups the retired mechanisms left behind. It is the only way they ever go: rotation and the
-// retention sweep never touch them. Password step-up AND a typed confirmation, audited; scd refuses unless a verified backup of the
-// current kind exists and every stored backup still matches its checksum.
+// earlierBackupsRemove is the only way the earlier backups are deleted (rotation and retention never touch them).
+// scd refuses unless a verified current backup exists and every stored backup matches its checksum.
 func (s *server) earlierBackupsRemove(w http.ResponseWriter, r *http.Request) {
 	in, ok := s.readLedgerBody(w, r, true)
 	if !ok {

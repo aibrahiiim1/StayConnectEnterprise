@@ -1,9 +1,3 @@
-// SYSTEM → MODULES on a site licensed for nothing optional (a café that was once a hotel).
-//
-// Pinned: every module the appliance reports has a card (WhatsApp included, and an unknown one too); an
-// unlicensed module shows "—" for switched on and ready rather than a Yes that means nothing; no configure link
-// is offered for an unlicensed module; hotel records still served are reachable from the Hotel card.
-
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -25,8 +19,6 @@ const mod = (id: string, label: string, extra: Record<string, unknown> = {}) => 
   enabled: false, ready: true, effective: false, manageable: false, reasons: ["NOT_LICENSED", "DISABLED_BY_SITE"], ...extra,
 });
 
-// AUDIT O-25: an identity module the site switched OFF on Sign-in methods read "Switched on: Yes", because the
-// page printed Yes for every module without a switch here. scd reports the Sign-in methods setting as `enabled`.
 describe("Modules — identity modules say what Sign-in methods says", () => {
   it("shows No for a licensed identity module that is switched off, Yes when on, and where it is set", async () => {
     (api.get as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
@@ -67,7 +59,6 @@ describe("Modules on a café", () => {
     expect(screen.getByText("Something new")).toBeInTheDocument();
 
     const hotel = screen.getByText("Hotel").closest("div.flex.flex-col, [class*='flex-col']") as HTMLElement;
-    // Available is a fact (Yes); switched on and ready answer nothing without the licence.
     expect(within(hotel).getAllByText("—", { selector: "dd" })).toHaveLength(2);
     expect(screen.queryByText("Switched off at this site.")).toBeNull();
     expect(within(hotel).queryByText("PMS connection")).toBeNull();

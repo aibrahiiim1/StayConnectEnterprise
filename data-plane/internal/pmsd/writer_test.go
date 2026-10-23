@@ -13,8 +13,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// pipePeer is the far side of a net.Pipe used to observe/inject FIAS frames. It CONTINUOUSLY reads (so the
-// adapter's single serialized writer never blocks) and forwards every received record id on recv.
+// pipePeer reads continuously so the adapter's writer never blocks, forwarding each received record id on recv.
 type pipePeer struct {
 	conn net.Conn
 	recv chan string
@@ -38,7 +37,6 @@ func newPipePeer(conn net.Conn) *pipePeer {
 
 func (p *pipePeer) send(body string) error { return pms.WriteFramedRecord(p.conn, body) }
 
-// waitFor drains recv until it has seen `want` occurrences of id or the deadline passes; returns the count.
 func (p *pipePeer) waitFor(id string, want int, d time.Duration) int {
 	deadline := time.After(d)
 	got := 0
@@ -58,8 +56,7 @@ func (p *pipePeer) waitFor(id string, want int, d time.Duration) int {
 	return got
 }
 
-// errConn is a net.Conn whose Write ALWAYS fails, to prove a write failure terminates the writer/Serve. Reads
-// block until Close so the failure path is attributable to the write, not a read error.
+// errConn's Write always fails; Read blocks until Close so the failure is attributable to the write.
 type errConn struct {
 	closed chan struct{}
 	once   sync.Once
@@ -80,8 +77,6 @@ type dummyAddr struct{}
 func (dummyAddr) Network() string { return "pipe" }
 func (dummyAddr) String() string  { return "pipe" }
 
-// TestWriter_StartupAndAcks proves the single writer emits the LS/LD/LR startup handshake and replies to an
-// incoming LS with a bare LA and to an incoming LA with a bare LA.
 func TestWriter_StartupAndAcks(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	adapter.rev.HeartbeatInterval = time.Hour // no idle LA during this test
@@ -118,8 +113,6 @@ func TestWriter_StartupAndAcks(t *testing.T) {
 	}
 }
 
-// TestWriter_IdleKeepaliveAndLinkAlive proves the writer emits >=3 periodic bare LA keepalives when the link
-// is idle, and that the link stays alive (Serve does not return) across those periods.
 func TestWriter_IdleKeepaliveAndLinkAlive(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
 	adapter.rev.HeartbeatInterval = 25 * time.Millisecond
@@ -145,8 +138,6 @@ func TestWriter_IdleKeepaliveAndLinkAlive(t *testing.T) {
 	}
 }
 
-// TestWriter_CancellationEmitsLEAndNoLeak proves cancellation stops the writer/ticker cleanly, emits a
-// controlled LE, and leaks no goroutine.
 func TestWriter_CancellationEmitsLEAndNoLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
 	adapter, server := newAdapterOverPipe(t)
@@ -175,7 +166,6 @@ func TestWriter_CancellationEmitsLEAndNoLeak(t *testing.T) {
 	}
 }
 
-// TestWriter_WriteFailureTerminatesServe proves a socket write failure ends the ownership cycle: Serve returns.
 func TestWriter_WriteFailureTerminatesServe(t *testing.T) {
 	k := testKeys()
 	adapter := &fiasAdapter{
@@ -199,9 +189,6 @@ func TestWriter_WriteFailureTerminatesServe(t *testing.T) {
 	}
 }
 
-// TestWriter_ConcurrentRequestsSerialized fires many concurrent submit() calls at ONE serialWriter and proves
-// every frame arrives intact and correctly framed — i.e. no two writes ever overlapped. Run under -race, the
-// single-owner design has no data race on the socket.
 func TestWriter_ConcurrentRequestsSerialized(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()

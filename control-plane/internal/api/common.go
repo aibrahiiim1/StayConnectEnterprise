@@ -37,16 +37,13 @@ type Base struct {
 	ClientValid time.Duration      // issued client-cert lifetime
 	Lic         *licensing.Service // hardware-bound licence issuance; nil when no vendor key
 
-	// PortalTLS owns portal hostnames and certificates. nil only in tools and tests that never retire an
-	// appliance through the API; the lifecycle path's database half works without it.
+	// PortalTLS owns portal hostnames and certificates; nil only in tools and tests that never retire an appliance.
 	PortalTLS *portaltls.Service
 
-	// MFA names an account's sign-in locks (auth.MFA.SigninName) so resetting a user's two-step sign-in can lift
-	// them too. nil works: the name then falls back to the plain hash ctrlapi also uses without the key.
+	// MFA names an account's sign-in locks so resetting two-step sign-in can lift them; nil falls back to the plain hash.
 	MFA *auth.MFA
 }
 
-// issueAssignment signs + persists a new current assignment for the appliance (bumping its version).
 func (b *Base) issueAssignment(ctx context.Context, applianceID, state string) error {
 	if b.AssignKey == nil {
 		return errors.New("assignment signing key not configured")
@@ -55,8 +52,6 @@ func (b *Base) issueAssignment(ctx context.Context, applianceID, state string) e
 	_, err := ab.Issue(ctx, applianceID, state)
 	return err
 }
-
-// ----- Response shaping ------------------------------------------------------
 
 type ListMeta struct {
 	HasMore bool   `json:"has_more"`
@@ -82,13 +77,11 @@ func WriteList[T any](w http.ResponseWriter, rows []T, meta ListMeta) {
 	WriteJSON(w, http.StatusOK, listEnvelope[T]{Data: rows, Meta: meta})
 }
 
-// WriteErr is kept for backwards-compat with non-request-aware call sites.
-// Prefer Fail(w, r, status, code, msg) for new code — it includes trace_id.
+// WriteErr is for call sites without a request; prefer Fail, which includes trace_id.
 func WriteErr(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
-// ----- Cursor pagination -----------------------------------------------------
 // Cursor = base64url(JSON {t: RFC3339Nano, i: id})
 // Keyset is ordered by (created_at DESC, id DESC). Stable on ties.
 
@@ -121,7 +114,6 @@ func DecodeCursor(s string) (time.Time, string, error) {
 	return t, c.I, nil
 }
 
-// ParseLimit clamps ?limit= to [1, 200] with a default of 50.
 func ParseLimit(r *http.Request, def, max int) int {
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -137,8 +129,6 @@ func ParseLimit(r *http.Request, def, max int) int {
 	return def
 }
 
-// ----- Body decode -----------------------------------------------------------
-
 func DecodeJSON(r *http.Request, dst any) error {
 	if r.Body == nil {
 		return errors.New("empty body")
@@ -148,18 +138,14 @@ func DecodeJSON(r *http.Request, dst any) error {
 	return dec.Decode(dst)
 }
 
-// ----- DB error sniffing ----------------------------------------------------
-
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
-// ----- Context helper to pass the request's Ctx with a reasonable DB budget.
 func DBCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), 10*time.Second)
 }
 
-// AssignmentBaseFrom exposes the assignment signer to other API bases that must mint a signed assignment as
-// part of a larger operation — offline first activation, which has to put one inside its package. It returns
-// nil when no assignment key is configured, so callers disable the feature rather than emit an unsigned one.
+// AssignmentBaseFrom exposes the assignment signer to bases that mint one inside a larger operation (offline
+// first activation). It returns nil without an assignment key, so callers disable the feature rather than emit an unsigned one.
 func AssignmentBaseFrom(b *Base) *AssignmentBase {
 	if b == nil || b.AssignKey == nil {
 		return nil

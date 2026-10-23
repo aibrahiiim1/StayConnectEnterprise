@@ -16,16 +16,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// SFTPDest keeps the ledger on an SFTP server: a NAS, or a server the hotel or its IT provider runs.
-//
-// The server's identity is PINNED: the host key's SHA-256 fingerprint is confirmed by an administrator when the destination
-// is set up, and a connection to a server presenting any other key is refused. (An unpinned destination can only be probed
-// for its fingerprint.)
+// SFTPDest keeps the ledger on an SFTP server. The host key's SHA-256 fingerprint is pinned by an administrator at
+// setup and any other key is refused; an unpinned destination can only be probed for its fingerprint.
 type SFTPDest struct {
 	Host        string
 	Port        int
 	User        string
-	Dir         string // absolute directory on the server
+	Dir         string
 	Password    string
 	PrivateKey  []byte // PEM, alternative to Password
 	Fingerprint string // "SHA256:..." as ssh-keygen prints it
@@ -210,7 +207,6 @@ func (d *SFTPDest) Get(ctx context.Context, name string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, maxObject))
 }
 
-// Remove deletes an object (used to clean the probe up).
 func (d *SFTPDest) Remove(ctx context.Context, name string) error {
 	p, err := d.objectPath(name)
 	if err != nil {

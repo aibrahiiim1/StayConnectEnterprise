@@ -13,11 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Migration 0144 (GDPR branch review 2026-10-20, Product-Owner decisions D-R2 and D-R4): a guest-data request
-// stays with the guest who asked. Each test builds the exact situation the review found and proves the other
-// guest is neither exported nor erased.
-
-// guestRow sets one stay's (only) guest row to the given PMS number and name.
 func guestRow(t *testing.T, f *apiFixture, stay, ext, first, last string) string {
 	t.Helper()
 	var id string
@@ -31,7 +26,6 @@ func guestRow(t *testing.T, f *apiFixture, stay, ext, first, last string) string
 	return id
 }
 
-// addGuest adds a guest row to a stay.
 func addGuest(t *testing.T, f *apiFixture, stay, ext, first, last string) string {
 	t.Helper()
 	var id string
@@ -46,7 +40,6 @@ func addGuest(t *testing.T, f *apiFixture, stay, ext, first, last string) string
 	return id
 }
 
-// linkStays records a room move from one stay to another.
 func linkStays(t *testing.T, f *apiFixture, from, to string) {
 	t.Helper()
 	if err := controlled(context.Background(), f.pool, []string{"stay"}, func(tx pgx.Tx) error {
@@ -111,8 +104,7 @@ func TestIntegration_GuestDataIsolation_AWalkStopsAtASharedStay(t *testing.T) {
 	}
 }
 
-// D-R4: two guests are one person by PMS number, or by a full name only when it is unique; a surname alone, or a
-// full name two guests share, never merges them.
+// Two guests are one person by PMS number, or by a unique full name; a surname alone, or a shared full name, never merges them.
 func TestIntegration_GuestDataIsolation_OnePersonNotOneName(t *testing.T) {
 	f := newAPI(t)
 	sfx := fmt.Sprint(time.Now().UnixNano())
@@ -160,7 +152,7 @@ func TestIntegration_GuestDataIsolation_OnePersonNotOneName(t *testing.T) {
 	}
 }
 
-// The reason is kept in the erasure and activity logs, so it may not name the guest (0144, D-C4).
+// The reason is kept in the erasure and activity logs, so it may not name the guest.
 func TestIntegration_GuestDataIsolation_AReasonNamingTheGuestIsRefused(t *testing.T) {
 	f := newAPI(t)
 	sfx := fmt.Sprint(time.Now().UnixNano())
@@ -179,7 +171,7 @@ func TestIntegration_GuestDataIsolation_AReasonNamingTheGuestIsRefused(t *testin
 	}
 }
 
-// D-R2: erasure keeps an activity entry's who and when, takes out what names the guest (including a staff search
+// Erasure keeps an activity entry's who and when, takes out what names the guest (including a staff search
 // for part of their name), and leaves entries about another guest whose address merely contains theirs.
 func TestIntegration_GuestDataIsolation_TheActivityLogKeepsWhoAndWhen(t *testing.T) {
 	f := newAPI(t)

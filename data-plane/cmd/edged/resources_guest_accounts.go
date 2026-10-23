@@ -1,16 +1,6 @@
 package main
 
-// Guest account operator surface. IAM-v2 is the authority and the only implementation.
-//
-// The superseded half of this file is REMOVED: the public.guest_accounts CRUD, its argon2 password writes,
-// its bind-to-an-access-plan validation against public.ticket_templates, and its live-device count taken
-// from public.sessions. With one implementation left there is nothing to dispatch between, so the authority
-// switch that used to wrap every route is gone too -- a switch with one destination is a claim that a second
-// one might come back.
-//
-// What survives is credential VALIDATION (username and password rules, and the generated password), which is
-// policy rather than storage and is shared by the IAM-v2 create path, plus the portal visibility toggle,
-// which is tenant configuration rather than account storage.
+// Guest account operator surface: credential validation and the portal visibility toggle; IAM-v2 owns storage.
 
 import (
 	"fmt"
@@ -26,14 +16,12 @@ func (s *server) guestAccountsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listGuestAccountsIAMv2)
 	r.Post("/", s.createGuestAccount)
-	// Portal visibility toggle (static segment; chi matches it before "/{id}").
 	r.Get("/portal", s.getGuestAccountPortal)
 	r.Post("/portal", s.setGuestAccountPortal)
 	r.Get("/{id}", s.getGuestAccountIAMv2)
 	r.Patch("/{id}", s.patchGuestAccountIAMv2)
 	r.Post("/{id}/set-password", s.setGuestAccountPasswordIAMv2)
 	r.Post("/{id}/disconnect", s.disconnectGuestAccountSessionsIAMv2)
-	// Self-service email accounts (contract §7): ask scd to send the verification email again.
 	r.Post("/{id}/resend-verification", s.resendGuestAccountVerification)
 	r.Get("/{id}/manage", s.getGuestAccountManage)
 	r.Post("/{id}/verify-email", s.markGuestAccountEmailVerified)
@@ -42,14 +30,11 @@ func (s *server) guestAccountsRoutes() http.Handler {
 	return r
 }
 
-// getGuestAccountPortal reports whether the Username & Password tab is shown on
-// the captive portal (tenants.auth_methods -> guest_account.enabled).
 func (s *server) getGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var enabled *bool
-	// A failed read is reported, not answered as "hidden": the switch would otherwise show a state the appliance
-	// never said it was in.
+	// A failed read is reported, not answered as "hidden", so the switch never shows a state the appliance did not report.
 	if err := s.db.QueryRow(ctx,
 		`SELECT (auth_methods #>> '{guest_account,enabled}')::boolean FROM tenants WHERE id=$1`, s.tenantID).Scan(&enabled); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the sign-in configuration could not be read")
@@ -59,12 +44,9 @@ func (s *server) getGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 		"can_change": permFor(sessRoles(r), "auth-methods", permWrite)})
 }
 
-// setGuestAccountPortal enables/disables the portal tab.
-//
-// IT IS A SIGN-IN METHOD SWITCH, so it is governed like one. The route sits under guest-accounts (the desk and
-// the voucher station hold WRITE there to create accounts), but which ways a client may sign in is the
-// auth-methods decision, read-only for those roles -- so the handler requires auth-methods WRITE as well, and
-// records the change as the same auth_methods.updated audit the Sign-in methods screen writes.
+// A sign-in method switch, so it is governed like one: the route sits under guest-accounts (desk and voucher
+// station hold WRITE there), but which sign-in ways exist is the auth-methods decision, so auth-methods WRITE is
+// required too and the change is audited as auth_methods.updated.
 func (s *server) setGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 	if !permFor(sessRoles(r), "auth-methods", permWrite) {
 		jsonErr(w, http.StatusForbidden, "forbidden",
@@ -92,7 +74,6 @@ func (s *server) setGuestAccountPortal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": in.Enabled})
 }
 
-// sessRoles is the calling operator's roles, or none.
 func sessRoles(r *http.Request) []string {
 	if sess := sessFrom(r.Context()); sess != nil {
 		return sess.Roles
@@ -100,11 +81,8 @@ func sessRoles(r *http.Request) []string {
 	return nil
 }
 
-// validUsername: 1..64 chars, letters/digits/._-@ and no spaces or control
-// chars. One letter ("A") or one digit ("1") is allowed. Usernames are
-// case-INSENSITIVE — uniqueness is enforced by a lower(username) DB index and
-// login folds case — while passwords stay case-sensitive. Callers trim
-// leading/trailing whitespace before validating.
+// Usernames are case-insensitive (lower(username) unique index; login folds case); passwords stay case-sensitive.
+// Callers trim whitespace first.
 func validUsername(u string) bool {
 	if len(u) < 1 || len(u) > 64 {
 		return false
@@ -119,10 +97,8 @@ func validUsername(u string) bool {
 	return !isRemovedUsername(u)
 }
 
-// validPassword: 1..128 chars. Very short passwords are allowed (these are
-// hotel-managed temporary guest credentials); the UI shows a non-blocking
-// weak-password warning. We reject only ASCII control characters, which cannot
-// be entered reliably through the captive portal — nothing else is stripped.
+// Short passwords are allowed (hotel-managed temporary credentials); only ASCII control characters are rejected
+// because the captive portal cannot enter them reliably.
 func validPassword(p string) (bool, string) {
 	if len(p) < 1 {
 		return false, "password must be at least 1 character"
@@ -138,9 +114,7 @@ func validPassword(p string) (bool, string) {
 	return true, ""
 }
 
-// THE GENERATED PASSWORD is drawn in account_password_format.go, in the site's operator-chosen format
-// (migration 0104; default mixed, 14 -- what this file used to hardcode). It is returned to the operator ONCE
-// in the create/reset response and never stored in plaintext.
+// The generated password is returned to the operator once and never stored in plaintext.
 
 func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -175,8 +149,7 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("notes are limited to %d characters", accountNotesMax))
 		return
 	}
-	// Password: operator-typed, or server-generated when generate=true. The
-	// plaintext is returned ONCE below and never stored.
+	// Operator-typed or server-generated; the plaintext is returned once and never stored.
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	generated := false
@@ -192,16 +165,8 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
-	// NO ACCESS-PLAN BINDING.
-	//
-	// A superseded guest account carried a ticket_template ("guest access plan") that decided what it may
-	// do. IAM-v2 does not work that way: what a subject may acquire is decided by PACKAGE ELIGIBILITY RULES
-	// (AUTH_METHOD, SUBJECT_KIND, DATE_WINDOW, SITE_NETWORK, ...) evaluated when packages are listed, so the
-	// package declares who is eligible rather than the credential declaring what it gets. iam_v2 has no
-	// template column at all -- it has an OPTIONAL assigned_package_id for direct assignment.
-	//
-	// The template_id field is still accepted on the wire and ignored, so an older client posting it gets a
-	// created account rather than a 400. It is not stored, because there is nowhere left to store it.
+	// No access-plan binding: eligibility is decided by package rules, not by the credential. template_id is still
+	// accepted on the wire and ignored so older clients get an account rather than a 400.
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled

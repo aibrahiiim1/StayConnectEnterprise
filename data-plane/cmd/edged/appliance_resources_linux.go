@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// collectApplianceResources reads the kernel's own accounting. Each figure is independent: one that cannot be
-// read is recorded in Errors and the rest are still returned.
+// Each figure is independent: one that cannot be read goes to Errors and the rest are still returned.
 func collectApplianceResources() applianceResources {
 	out := applianceResources{CollectedAt: time.Now().UTC(), Disks: []diskFigures{}}
 
@@ -46,8 +45,6 @@ func collectApplianceResources() applianceResources {
 	for _, p := range resourcePaths {
 		var st syscall.Statfs_t
 		if err := syscall.Statfs(p, &st); err != nil {
-			// A path that does not exist on this unit (a development box without /opt/stayconnect) is simply
-			// not reported.
 			continue
 		}
 		d, err := diskFromStatfs(p, st.Blocks, st.Bfree, st.Bavail, int64(st.Bsize))

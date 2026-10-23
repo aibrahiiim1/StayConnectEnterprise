@@ -2,13 +2,8 @@ package pmsd
 
 import "fmt"
 
-// Phase-3 pmsd is READ-ONLY. Outbound FIAS records are restricted to a hard allowlist of the verified
-// read-only startup / subscription / heartbeat / resync records (Protel-FIAS spike §9/Gate-3A). Any
-// financial Posting record (PS) or anything outside the allowlist is rejected at construction time.
-//
-// This allowlist is the single chokepoint every outbound frame must pass; TestOutboundAllowlist_RejectsPS
-// and the dependency-graph check assert that no PS record can be built or transmitted by pmsd, and that
-// pmsd allocates no P#, performs no financial retry, and has no Posting/Settlement/payment path.
+// pmsd's FIAS adapter is read-only: this allowlist is the single chokepoint every outbound frame passes, and a
+// financial Posting record (PS) or anything else outside it is rejected.
 var allowedOutboundRecords = map[string]struct{}{
 	"LS": {}, // link start
 	"LD": {}, // link description
@@ -18,22 +13,19 @@ var allowedOutboundRecords = map[string]struct{}{
 	"DR": {}, // database resync request (read-only)
 }
 
-// forbiddenOutboundRecords are never constructible by pmsd (financial / posting). Listed explicitly so a
-// regression that reintroduces one is caught by the guard + tests rather than by review.
+// forbiddenOutboundRecords are never constructible by pmsd; listed so a regression is caught by the guard.
 var forbiddenOutboundRecords = map[string]struct{}{
-	"PS": {}, // financial Posting (Phase 4 only)
+	"PS": {}, // financial Posting
 	"PA": {}, // posting answer (financial)
 }
 
-// ErrOutboundNotAllowed is returned for any record type not on the read-only allowlist.
 type ErrOutboundNotAllowed struct{ Record string }
 
 func (e ErrOutboundNotAllowed) Error() string {
 	return fmt.Sprintf("pmsd: outbound record %q is not permitted (read-only connector; no financial posting)", e.Record)
 }
 
-// CheckOutbound validates a 2-letter FIAS record code against the read-only allowlist. It is the ONLY
-// sanctioned way for the pmsd adapter to emit a frame; a forbidden/unknown record is rejected.
+// CheckOutbound is the only sanctioned way for the adapter to emit a frame; forbidden and unknown records are rejected.
 func CheckOutbound(record string) error {
 	code := record
 	if len(record) >= 2 {
@@ -48,7 +40,6 @@ func CheckOutbound(record string) error {
 	return nil
 }
 
-// IsFinancialRecord reports whether a record code is a financial/posting type that Phase 3 must never emit.
 func IsFinancialRecord(code string) bool {
 	if len(code) >= 2 {
 		code = code[:2]

@@ -1,26 +1,9 @@
 "use client";
 
-// THE PREVIEW IS THE REAL PORTAL.
-//
-// The obvious way to build this is to draw an approximation of the sign-in page in the admin. That is a second
-// implementation of a page whose entire purpose is to be exactly what the guest sees: it would agree on the
-// day it was written and drift from then on, and a preview that is subtly wrong is worse than no preview,
-// because it is believed.
-//
-// So edged hands the admin portald's OWN landing page and this renders it in a sandboxed frame with the
-// settings currently being edited injected into it. The template, the stylesheet and the script are the real
-// ones -- including all six layouts, which is why the template gallery's thumbnails are this same page at a
-// small scale rather than pictures of it. What is stubbed is only the appliance the page would otherwise talk to.
-//
-// SANDBOXING. The frame is `sandbox="allow-scripts"` — an opaque origin with no form submission, no access to
-// the admin page around it, and no cookies. It needs no network either: window.fetch is replaced before the
-// portal's own script runs, so every call it makes is answered locally from the settings under edit. Images
-// are injected as data: URIs for the same reason — /assets/<name> is a GUEST-network path that resolves to
-// nothing from the admin origin.
-//
-// WHAT THE FRAME SHOWS FOR THE ADVANCED FIELDS. When the server has answered /validate, the preview renders
-// the SANITISED fragment and stylesheet -- what a guest would actually receive -- rather than the raw text in
-// the editor. An operator who pastes an <img onerror> sees the image without the handler, which is the truth.
+// The preview renders portald's own landing page (handed over by edged) in a sandboxed frame with the settings
+// under edit injected, never an approximation that would drift. Sandbox="allow-scripts" gives an opaque origin
+// with no forms or cookies; window.fetch is stubbed so no network is needed, and images are inlined as data: URIs
+// because /assets/<name> is a guest-network path. Advanced fields render the server's sanitised output, not the raw text.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -32,33 +15,22 @@ import { Design } from "./strings";
 
 type Device = "desktop" | "tablet" | "mobile";
 
-/** The shapes a captive portal is actually met on.
- *
- *  1180 rather than 1440 for the desktop frame. Both are desktop as far as the portal is concerned — its last
- *  breakpoint is 1024 — but a 1440 frame scaled into this column spends a third of its pixels on empty
- *  background and leaves the card too small to read. */
+/** 1180 rather than 1440 for desktop: both pass the portal's last breakpoint (1024), but a scaled 1440 frame leaves the card too small to read. */
 export const DEVICES: Record<Device, { w: number; h: number; label: string }> = {
   desktop: { w: 1180, h: 820, label: "Desktop" },
   tablet: { w: 820, h: 1100, label: "Tablet" },
   mobile: { w: 390, h: 844, label: "Mobile" },
 };
 
-// THE PREVIEW SHOWS THE SIGN-IN METHODS CLIENTS ACTUALLY SEE.
-//
-// It used to answer the portal's /api/auth-methods with a fixed "room, voucher and account are all on", so a
-// site with no hospitality licence was shown a Room tab its clients never get -- the preview made an office or
-// a campus look like a hotel. The answer is now the site's own sign-in methods (edged's /auth-methods, the same
-// document Sign-in methods edits), with each optional method kept only while its module is licensed here: a
-// method switched on under a licence that has since lapsed is not offered to clients either. The shape is the
-// one portald's /api/auth-methods relays from scd, because the portal's own script is what reads it.
+// The preview answers /api/auth-methods with the site's own methods (edged's /auth-methods), keeping each optional
+// method only while its module is licensed, in the shape portald relays from scd.
 
-/** The tenant's auth_methods document, as edged returns it. Only what the portal reads is typed. */
+/** Only what the portal reads is typed. */
 type Toggle = { enabled?: boolean };
 export type AuthMethodsDoc = {
   voucher?: Toggle;
   guest_account?: Toggle;
   open?: Toggle;
-  /** Email accounts (email + password). The email one-time code and its `email` key are gone. */
   email_account?: Toggle;
   sms?: Toggle;
   whatsapp?: Toggle;
@@ -69,8 +41,7 @@ export type AuthMethodsDoc = {
   internet_packages_available?: boolean;
 };
 
-/** The optional methods, each with the module that must be licensed for a client to be offered it. Voucher,
- *  personal account and open package selection are core and need none. */
+/** Optional methods and the module that must be licensed for each; voucher, personal account and open selection are core. */
 const OPTIONAL: { key: "pms" | "email_account" | "sms" | "whatsapp" | "social"; module: string; label: string }[] = [
   { key: "pms", module: "hospitality", label: "Room" },
   { key: "email_account", module: "email_otp", label: "Email" },
@@ -79,9 +50,7 @@ const OPTIONAL: { key: "pms" | "email_account" | "sms" | "whatsapp" | "social"; 
   { key: "social", module: "social_login", label: "Social" },
 ];
 
-/** The answer the preview gives the portal's /api/auth-methods: what is switched on, less anything whose
- *  module is not licensed here. `doc` null means the methods could not be read, and the preview then offers no
- *  method rather than inventing one. */
+/** `doc` null means the methods could not be read, so none is offered rather than invented. */
 export function previewMethods(doc: AuthMethodsDoc | null, caps: Capabilities | null): AuthMethodsDoc {
   const on = (m?: Toggle) => !!m && m.enabled === true;
   const out: AuthMethodsDoc = {
@@ -99,7 +68,7 @@ export function previewMethods(doc: AuthMethodsDoc | null, caps: Capabilities | 
       if (providers.length) out.social = Object.fromEntries(providers.map(([k]) => [k, { enabled: true }]));
     } else if (o.key === "pms") {
       if (on(doc.pms)) out.pms = { enabled: true, mode: doc.pms?.mode };
-      // Post-stay is its own gate on the portal, but it is hospitality all the same.
+      // Post-stay is its own gate on the portal but still hospitality.
       if (doc.phase3_pms) out.phase3_pms = true;
       if (doc.phase5_poststay) out.phase5_poststay = true;
     } else if (on(doc[o.key])) {
@@ -109,14 +78,12 @@ export function previewMethods(doc: AuthMethodsDoc | null, caps: Capabilities | 
   return out;
 }
 
-/** The optional methods a preview answer offers, by name -- for the sentence under the frame. */
 export function optionalMethodsShown(m: AuthMethodsDoc): string[] {
   return OPTIONAL.filter((o) => (o.key === "social" ? Object.keys(m.social ?? {}).length > 0 : !!m[o.key]?.enabled))
     .map((o) => o.label);
 }
 
-// ONE READ OF THE SIGN-IN METHODS, SHARED by the main preview and the six thumbnails, and kept briefly: an
-// operator who switches a method on in another tab sees it here on the next visit without reloading the app.
+// One short-lived read shared by the main preview and the thumbnails.
 const METHODS_TTL_MS = 30_000;
 let methodsDoc: Promise<AuthMethodsDoc | null> | null = null;
 let methodsAt = 0;
@@ -129,9 +96,7 @@ function loadMethods(): Promise<AuthMethodsDoc | null> {
   return methodsDoc;
 }
 
-/** The preview's /api/auth-methods answer, or null until both the methods and the module state are known: the
- *  frame waits rather than drawing a tab that is about to disappear. `unreadable` is set when the methods could
- *  not be read. */
+/** Null until both the methods and module state are known, so the frame does not draw a tab that then disappears. */
 export function usePreviewMethods(): { methods: AuthMethodsDoc | null; unreadable: boolean } {
   const caps = useCapabilities();
   const [doc, setDoc] = useState<AuthMethodsDoc | null | undefined>(undefined);
@@ -147,10 +112,9 @@ export function usePreviewMethods(): { methods: AuthMethodsDoc | null; unreadabl
   return { methods, unreadable: doc === null };
 }
 
-/** buildSrcDoc injects the stub and the settings ahead of the portal's own script. `methodsAnswer` is what the
- *  portal's /api/auth-methods receives -- see previewMethods. */
+/** Injects the stub and settings ahead of the portal's own script; `methodsAnswer` is the /api/auth-methods reply. */
 export function buildSrcDoc(html: string, design: Design, methodsAnswer: AuthMethodsDoc) {
-  // "</" is escaped so no value in the design can close the shim's <script> element early.
+  // Escape "</" so no design value can close the shim's <script> early.
   const payload = JSON.stringify({ design }).replace(/<\//g, "<\\/");
   const methods = JSON.stringify(methodsAnswer).replace(/<\//g, "<\\/");
   const shim = `<script>
@@ -184,12 +148,11 @@ export function buildSrcDoc(html: string, design: Design, methodsAnswer: AuthMet
   } catch (e) { /* older engines: the sandbox is still the real guard */ }
 })();
 </script>`;
-  // Before </head>, so the stub is installed before the page's own script at the end of <body> runs.
+  // Before </head> so the stub is installed before the page's script at the end of <body>.
   return html.includes("</head>") ? html.replace("</head>", shim + "</head>") : shim + html;
 }
 
-// ONE FETCH OF THE PORTAL PAGE, SHARED. The main preview and six gallery thumbnails all render the same
-// document; it changes when portald is redeployed, not when a colour is picked.
+// One shared fetch: the preview and gallery thumbnails render the same document, which changes only when portald is redeployed.
 let portalPage: Promise<string> | null = null;
 
 export function usePortalHTML() {
@@ -211,8 +174,7 @@ export function usePortalHTML() {
 
 const assetCache = new Map<string, string>();
 
-/** Images referenced as /assets/<name> are read back through the operator API and inlined. Fetched per asset,
- *  once, and kept -- switching device or template should not re-download a background photograph. */
+/** Reads /assets/<name> images through the operator API and inlines them, once per asset. */
 export function useInlinedDesign(design: Design): Design {
   const [loaded, bump] = useState(0);
   const urls = [design.logo_url, design.background_url, design.hero_image_url];
@@ -238,7 +200,7 @@ export function useInlinedDesign(design: Design): Design {
           });
           assetCache.set(name, data);
           if (live) bump((n) => n + 1);
-        } catch { /* an asset that will not load simply does not appear in the preview */ }
+        } catch { /* an asset that will not load does not appear */ }
       }
     })();
     return () => { live = false; };
@@ -258,8 +220,7 @@ export function useInlinedDesign(design: Design): Design {
   }, [design, loaded]);
 }
 
-/** The value, once it has stopped changing for `ms`. Frames reload when their document changes, so they follow
- *  the operator's edits a moment after the typing stops rather than on every keystroke. */
+/** The value once it has stopped changing for `ms`; frames reload on change, so this avoids a reload per keystroke. */
 export function useSettled<T>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
@@ -269,8 +230,7 @@ export function useSettled<T>(value: T, ms: number): T {
   return settled;
 }
 
-/** A frame rendered at the device's REAL pixel width and scaled to fit, so what is on screen is the true layout
- *  rather than a narrow viewport pretending to be a phone. */
+/** Rendered at the device's real pixel width and scaled to fit, so the layout is true. */
 export function PortalFrame({
   srcDoc, width, height, scale, title, interactive = true,
 }: {
@@ -296,7 +256,6 @@ export function PortalFrame({
 
 export function PortalPreview({ design, sanitized }: {
   design: Design;
-  /** The server's sanitised Advanced fields, when it has answered for the current text. */
   sanitized?: { custom_css: string; custom_html: string } | null;
 }) {
   const [device, setDevice] = useState<Device>("desktop");
@@ -305,8 +264,6 @@ export function PortalPreview({ design, sanitized }: {
   const box = useRef<HTMLDivElement>(null);
   const [boxWidth, setBoxWidth] = useState(0);
 
-  // A light re-render: the frame reloads a quarter-second after the operator stops changing things, not on
-  // every keystroke of a hex value.
   const settled = useSettled(design, 250);
 
   const inlined = useInlinedDesign(settled);
@@ -331,7 +288,7 @@ export function PortalPreview({ design, sanitized }: {
   }, []);
 
   const spec = DEVICES[device];
-  // Tall devices are also bounded by height, so a tablet does not become a scroll of its own.
+  // Tall devices are also bounded by height.
   const scale = boxWidth > 0 ? Math.min(1, boxWidth / spec.w, device === "desktop" ? 1 : 760 / spec.h) : 0.3;
 
   return (

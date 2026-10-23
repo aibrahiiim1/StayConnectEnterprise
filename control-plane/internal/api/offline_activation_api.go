@@ -1,19 +1,10 @@
 package api
 
-// OFFLINE FILES — activation and licence for an appliance with no route to Central.
+// Offline files for an appliance with no route to Central. Offline activation is the same Activate step as
+// online: the imported request makes the appliance WAITING, the operator activates it, and the package carries
+// the resulting assignment and licence. An imported request has no authority over customer or site.
 //
-//	POST /cloud/v1/offline-activation/requests                  import an appliance's signed activation request
-//	POST /cloud/v1/appliances/{id}/offline-activation-package   the activation package (after Activate)
-//	POST /cloud/v1/appliances/{id}/offline-license              a signed licence file for an activated appliance
-//
-// Offline activation is the SAME Activate step as online, with a file in each direction: the imported request
-// makes the appliance WAITING; the operator activates it (customer, site, licence); the package carries the
-// signed assignment and licence that activation produced. An imported request carries no authority over
-// customer or site — a file on a USB stick can announce that a box exists, it cannot decide whose hotel it
-// belongs to.
-//
-// Both envelopes (package activation and package offline) are unchanged; their signed bytes must match the
-// appliance byte for byte.
+// The envelopes' signed bytes must match the appliance byte for byte.
 
 import (
 	"crypto/ed25519"
@@ -35,20 +26,18 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/offline"
 )
 
-// OfflineBase mints the offline files. It is nil (and the routes answer 503) when the vendor key is missing.
+// OfflineBase mints the offline files; nil (routes answer 503) when the vendor key is missing.
 type OfflineBase struct {
 	*Base
 	priv  ed25519.PrivateKey
 	caPEM string
-	// centralBase is the APPLIANCE-FACING endpoint carried into an activation package so an offline
-	// appliance learns where to reconcile. A stable HTTPS FQDN, never an IP. Empty disables activation
-	// packages (not offline licences), rather than minting packages naming an endpoint nobody operates.
+	// centralBase is the appliance-facing endpoint carried into a package (a stable HTTPS FQDN, never an IP).
+	// Empty disables activation packages, not offline licences.
 	centralBase string
 }
 
-// NewOfflineBase loads the vendor signing key and the CA bundle handed to appliances. It returns nil when the
-// vendor key is unavailable. The CA bundle is read from caBundlePath; when that file is absent the appliance
-// CA chain Central issues certificates from is used instead.
+// NewOfflineBase returns nil when the vendor key is unavailable. The CA bundle comes from caBundlePath, falling
+// back to the appliance CA chain.
 func NewOfflineBase(base *Base, vendorKeyPath, caBundlePath, centralBase string) *OfflineBase {
 	raw, err := os.ReadFile(vendorKeyPath)
 	if err != nil || len(raw) != ed25519.PrivateKeySize {
@@ -85,8 +74,7 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "this activation request uses an unsupported version")
 		return
 	}
-	// PROOF OF POSSESSION: without it an operator could be handed another appliance's hardware facts with an
-	// attacker's public key, and Central would bind the package to a key the attacker holds.
+	// Proof of possession: otherwise another appliance's hardware facts could arrive with an attacker's key.
 	if !activation.VerifyRequest(&req) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request is not signed by the key it carries")
 		return
@@ -95,8 +83,7 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request carries no serial")
 		return
 	}
-	// holds_customer_id is covered by the request's self-signature when present (package activation), and
-	// is applied exactly as an online registration's: stored, and enforced by activate.
+	// holds_customer_id is self-signed when present and applied as in an online registration.
 	held, ok := normalizeHeldCustomer(req.HoldsCustomerID)
 	if !ok {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "the activation request carries an invalid holds_customer_id")
@@ -116,15 +103,13 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	var appID, lifecycle, existingPub string
 	err := b.DB.QueryRow(ctx,
-		// Only a LIVE row (waiting or activated) is this hardware; a retired row with the same serial is history
-		// and stays untouched -- the request then creates a new appliance, exactly like registration.
+		// Only a live row is this hardware; a retired row with the same serial is history and a new appliance is created.
 		`SELECT id::text, lifecycle_state, COALESCE(public_key,'') FROM appliances
           WHERE serial=$1 AND lifecycle_state NOT IN ('revoked','decommissioned')`, req.Serial).
 		Scan(&appID, &lifecycle, &existingPub)
 	switch {
 	case err == nil && existingPub != "" && existingPub != req.PublicKey:
-		// A different key claiming an existing serial is a clone or a rebuild; an offline import may not
-		// resolve that on its own.
+		// A different key claiming an existing serial is a clone or rebuild; an offline import may not resolve that.
 		Fail(w, r, http.StatusConflict, CodeConflict,
 			"an appliance with this serial is already registered with a different identity key")
 		return
@@ -150,7 +135,6 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Whose customer data the appliance holds, as of this (signed) request. NULL when it reports none.
 	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET held_customer_id=NULLIF($2,'')::uuid, updated_at=now() WHERE id=$1`,
 		appID, held); err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "could not register the appliance")
@@ -169,9 +153,7 @@ func (b *OfflineBase) importRequest(w http.ResponseWriter, r *http.Request) {
 	b.writeAppliance(w, r, http.StatusOK, appID)
 }
 
-// activationPackage mints the one file that completes an offline first activation. The appliance must
-// already be activated; the package carries the signed assignment and the licence that activation issued,
-// bound to the imported request.
+// activationPackage mints the file that completes an offline first activation of an already-activated appliance.
 func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "id")
 	var body struct {
@@ -216,8 +198,6 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// THE SIGNED ASSIGNMENT the activation produced. It is what binds the appliance to a hotel; the envelope
-	// only carries it.
 	var asgRaw []byte
 	if err := b.DB.QueryRow(ctx, `SELECT signed_doc FROM appliance_signed_assignments WHERE appliance_id=$1`, appID).Scan(&asgRaw); err != nil {
 		Fail(w, r, http.StatusConflict, CodeConflict, "the appliance has no signed assignment; activate it first")
@@ -230,7 +210,7 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	asgRaw, _ = json.Marshal(&asg) // the document exactly as Issue produced it (jsonb reorders keys)
-	// The appliance's OWN current licence (F10: never another appliance's licence at the same site).
+	// The appliance's own current licence, never another's at the same site.
 	licEnv, ok := b.currentEnvelope(w, r, appID)
 	if !ok {
 		return
@@ -277,7 +257,7 @@ func (b *OfflineBase) activationPackage(w http.ResponseWriter, r *http.Request) 
 	writeFile(w, "activation-package-"+serial+".json", map[string]any{"package_id": pkg.PackageID, "package": pkg})
 }
 
-// offlineLicense signs a licence file for an activated appliance: its own current licence (F10).
+// offlineLicense signs a licence file for an activated appliance: its own current licence.
 func (b *OfflineBase) offlineLicense(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "id")
 	var body struct {
@@ -325,12 +305,11 @@ func (b *OfflineBase) offlineLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	audit.Op(r.Context(), b.DB, r, "offline_license.generated", "appliance", appID, map[string]any{
 		"_tenant_id": pkg.TenantID, "package_id": pkg.PackageID, "expires_at": pkg.ExpiresAt})
-	// The downloadable document is under "license" (the activation package's is under "package").
 	writeFile(w, "license-"+serial+".json", map[string]any{"package_id": pkg.PackageID, "license": pkg})
 }
 
-// currentEnvelope is the appliance's own current signed licence, or writes the refusal. Fail closed: only a
-// verified "no licence" is reported as such; licensing being unavailable or the lookup failing is a 503.
+// currentEnvelope is the appliance's current signed licence, or writes the refusal. Fails closed: only a verified
+// "no licence" is reported as such; unavailable licensing or a failed lookup is a 503.
 func (b *OfflineBase) currentEnvelope(w http.ResponseWriter, r *http.Request, appID string) (string, bool) {
 	if b.Lic == nil {
 		Fail(w, r, http.StatusServiceUnavailable, "licensing_unavailable", "Licensing is unavailable on Central right now. Try again later.")
@@ -348,13 +327,11 @@ func (b *OfflineBase) currentEnvelope(w http.ResponseWriter, r *http.Request, ap
 	return env, true
 }
 
-// writeFile answers with a JSON document the browser saves as a file.
 func writeFile(w http.ResponseWriter, name string, v any) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	WriteJSON(w, http.StatusCreated, v)
 }
 
-// unavailable answers 503 for a route whose signing material is not configured.
 func unavailable(code, msg string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusServiceUnavailable, code, msg)

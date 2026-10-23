@@ -87,8 +87,7 @@ func serve() {
 		os.Exit(1)
 	}
 	logLevel.Set(cfg.LogLevel)
-	// Host hardening is checked before anything listens: a production Central does not start with the operator
-	// API on every interface or with an insecure session cookie (config.Validate).
+	// Checked before anything listens: production refuses the operator API on every interface or an insecure session cookie.
 	hardenErrs, hardenWarns := cfg.Validate()
 	for _, w := range hardenWarns {
 		slog.Warn("configuration is not hardened", "problem", w)
@@ -124,9 +123,7 @@ func serve() {
 	defer rdb.Close()
 	slog.Info("redis connected")
 
-	// NO APPLIANCE TRANSPORT. Central serves this product for LICENSING ONLY (CLAUDE.md §0E): what an
-	// appliance needs from Central -- identity, its certificate, its licence, the signed assignment -- is
-	// all HTTPS on this API. There is no message bus connection.
+	// Appliances reach Central over HTTPS on this API only; there is no message bus.
 	met := metrics.New(version)
 
 	// Vendor licence signing key. Without it ctrlapi serves everything except licence issuing/fetching.
@@ -140,9 +137,8 @@ func serve() {
 			"path", vendorKeyPath, "err", err)
 	}
 
-	// DEDICATED assignment-signing key. Deliberately a separate key from the licence and CA keys: an
-	// assignment must never be signable by any of those, and the appliance enforces this by trusting only
-	// the keys in its local assignment trust registry. Absent → activation, moves and retirement refuse.
+	// Dedicated assignment-signing key, never the licence or CA key: appliances trust only keys in their assignment
+	// trust registry. Absent: activation, moves and retirement refuse.
 	assignKeyPath := envOrDefault("CTRLAPI_ASSIGN_KEY", "/etc/stayconnect/assignment-signing.key")
 	var assignKey ed25519.PrivateKey
 	if raw, err := os.ReadFile(assignKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
@@ -176,11 +172,8 @@ func serve() {
 		}
 	}
 
-	// Housekeeping, every minute: a retirement never acknowledged within policy becomes
-	// terminal_delivery_failed + a security alert (credentials are NOT revoked); an elapsed replacement
-	// window raises an alert; and, hourly, assignment-fetch log rows older than 30 days are deleted and
-	// certificates superseded by a rotation more than a day ago are recorded as revoked, and Central's own
-	// records are removed or anonymised at the end of their retention periods (migration 0054).
+	// Housekeeping: an unacknowledged retirement becomes terminal_delivery_failed plus an alert (credentials are NOT
+	// revoked); hourly, old fetch logs are deleted, superseded certificates recorded revoked, and retention applied.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
@@ -223,10 +216,8 @@ func serve() {
 		}
 	}()
 
-	// Portal hostnames and certificates (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md). The
-	// worker always runs and does nothing until an operator has configured the ACME contact and the DNS token
-	// from the console, so a fresh Central needs no extra step to start. The TEST-ONLY overrides let the whole
-	// chain run against Pebble + challtestsrv; when any is on, every start says so.
+	// The worker always runs but does nothing until the ACME contact and DNS token are configured. The TEST-ONLY
+	// overrides point the chain at Pebble + challtestsrv; every start says when one is on.
 	ptlsOpts, ptlsOverrides := portaltls.OptionsFromEnv()
 	var ptls *portaltls.Service
 	if err := ptlsOpts.Check(); err != nil {
@@ -271,9 +262,7 @@ func serve() {
 		slog.Warn("appliance CA unavailable — PKI/mTLS disabled", "path", intKeyPath, "err", err)
 	}
 
-	// CONSOLE TWO-STEP SIGN-IN (0052, GDPR plan C10). Without the key no operator can sign in: the console
-	// refuses rather than letting a password alone through. central-install.sh creates it; the export bundle
-	// carries it, so moving Central keeps everyone's authenticator.
+	// Console two-step sign-in. Without the key no operator can sign in: the console refuses rather than accept a password alone.
 	mfaKeyPath := envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath)
 	var mfaSvc *auth.MFA
 	if raw, err := auth.LoadMFAKeyFile(mfaKeyPath); err != nil {
@@ -352,9 +341,7 @@ func envOrDefault(k, d string) string {
 	return d
 }
 
-// relocateRootOffline moves the root CA private key out of the runtime PKI directory into a restricted
-// offline holding area once the intermediate has been signed. The runtime never opens it again. In
-// production it should be physically moved to cold storage.
+// relocateRootOffline moves the root CA key out of the runtime PKI directory once the intermediate is signed.
 func relocateRootOffline(rootKeyPath string) {
 	offlineDir := envOrDefault("CTRLAPI_ROOT_CA_OFFLINE_DIR", "/etc/stayconnect/pki-offline")
 	if _, err := os.Stat(rootKeyPath); err != nil {
@@ -420,11 +407,8 @@ func runAssignmentKey(args []string) error {
 	return nil
 }
 
-// runGenVendorKey creates the vendor license-signing keypair. The private
-// key stays on the cloud host (0600); the public key file is what gets
-// installed on appliances (/etc/stayconnect/vendor-license.pub). Refuses to
-// overwrite an existing key — rotating means issuing a new key file and
-// re-signing licenses, never silently replacing the trust root.
+// runGenVendorKey creates the vendor license-signing keypair. It refuses to overwrite an existing key:
+// rotating means a new key file and re-signed licenses, never silently replacing the trust root.
 func runGenVendorKey(args []string) error {
 	fs := flag.NewFlagSet("gen-vendor-key", flag.ExitOnError)
 	out := fs.String("out", "/etc/stayconnect/vendor-license.key", "private key output path (cloud only)")
@@ -446,8 +430,7 @@ func runGenVendorKey(args []string) error {
 	return nil
 }
 
-// runSeedAdmin upserts a platform_admin operator with an argon2id-hashed
-// password. Safe to run repeatedly; updates password on each invocation.
+// runSeedAdmin upserts a platform_admin operator; each run updates the password.
 func runSeedAdmin(args []string) error {
 	fs := flag.NewFlagSet("seed-admin", flag.ExitOnError)
 	email := fs.String("email", "", "admin email")
@@ -525,15 +508,14 @@ func runSeedAdmin(args []string) error {
 		return err
 	}
 
-	slog.Info("seeded platform admin", "id", id) // the id, not the email: the journal is outside retention (GDPR audit C6)
+	slog.Info("seeded platform admin", "id", id) // the id, not the email: the journal is outside retention
 	return nil
 }
 
 // defaultMFAKeyPath is where central-install.sh puts the console two-step sign-in key.
 const defaultMFAKeyPath = "/etc/stayconnect/operator-mfa.key"
 
-// runGenMFAKey writes a new 32-byte console two-step sign-in key (0052). It refuses to overwrite one: replacing
-// the key makes every operator's authenticator unreadable, and every operator would need a reset.
+// runGenMFAKey writes a new console two-step key. It refuses to overwrite one: replacing it makes every authenticator unreadable.
 func runGenMFAKey(args []string) error {
 	fs := flag.NewFlagSet("gen-mfa-key", flag.ExitOnError)
 	out := fs.String("out", defaultMFAKeyPath, "where to write the key (0600)")
@@ -560,9 +542,8 @@ func runGenMFAKey(args []string) error {
 	return nil
 }
 
-// runResetMFA removes one operator's authenticator from Central's own command line (0052): the break-glass for
-// the last platform administrator, when nobody is left to reset them in the console. The operator's sessions
-// end, and they set up a new authenticator at their next sign-in. Audited as user.mfa_reset.
+// runResetMFA removes one operator's authenticator: the break-glass for the last platform administrator.
+// Their sessions end; audited as user.mfa_reset.
 func runResetMFA(args []string) error {
 	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
 	email := fs.String("email", "", "the operator's email")
@@ -607,13 +588,10 @@ func runResetMFA(args []string) error {
 	return nil
 }
 
-// runUnlockSignin lifts every wrong-password lock on one sign-in name, from every address, from Central's own
-// command line (0056, Product-Owner decision D-R1): the way back in for an administrator locked out when nobody
-// is left to reset them in the console. The name need not have an account -- locks on unknown names are kept
-// exactly like real ones -- so it is cleared either way. Audited as user.signin_unlocked.
+// runUnlockSignin lifts every wrong-password lock on one sign-in name, from every address. The name need not
+// have an account (locks on unknown names are kept like real ones). Audited as user.signin_unlocked.
 //
-// The lock rows are keyed by an HMAC under the two-step sign-in key, so the key is read as ctrlapi reads it
-// (CTRLAPI_OPERATOR_MFA_KEY); without one, the plain-hash names a keyless ctrlapi writes are cleared instead.
+// Lock rows are keyed by an HMAC under the two-step key (CTRLAPI_OPERATOR_MFA_KEY); without one, the plain-hash names are cleared.
 func runUnlockSignin(args []string) error {
 	fs := flag.NewFlagSet("unlock-signin", flag.ExitOnError)
 	email := fs.String("email", "", "the sign-in name (email) to unlock")
@@ -648,8 +626,7 @@ func runUnlockSignin(args []string) error {
 	return nil
 }
 
-// unlockSignin clears every lock on email and audits it. The audit row names the account by its id and never
-// carries the email; for a name with no account it names no account.
+// unlockSignin clears every lock on email and audits it by account id, never by email.
 func unlockSignin(ctx context.Context, pool *pgxpool.Pool, mfa *auth.MFA, email, reason string) (id string, n int64, err error) {
 	n, err = auth.ClearSigninLocks(ctx, pool, mfa.SigninName(email))
 	if err != nil {
@@ -661,14 +638,11 @@ func unlockSignin(ctx context.Context, pool *pgxpool.Pool, mfa *auth.MFA, email,
 	return id, n, nil
 }
 
-// runCheckMFAKey proves the console two-step sign-in key before a release depends on it (central-deploy.sh runs it
-// with the NEW binary before switching releases, and central-install.sh after creating or carrying the key):
+// runCheckMFAKey checks the console two-step key before a release depends on it (central-deploy.sh runs it with the new binary).
 //
 //	ctrlapi check-mfa-key [--key <path>] [--no-db]
 //
-// It fails when the key is missing or malformed, or -- unless --no-db -- when the database holds confirmed
-// authenticators and the key opens none of them (a wrong key would refuse every operator who set up the app).
-// The database is CTRLAPI_DB_URL, as for every subcommand.
+// It fails when the key is missing or malformed, or (without --no-db) when confirmed authenticators exist and the key opens none.
 func runCheckMFAKey(args []string) error {
 	fs := flag.NewFlagSet("check-mfa-key", flag.ExitOnError)
 	keyPath := fs.String("key", envOrDefault("CTRLAPI_OPERATOR_MFA_KEY", defaultMFAKeyPath), "the key file")

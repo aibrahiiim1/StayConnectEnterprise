@@ -13,10 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Regressions for the independent review of migration 0146 (2026-10-20): each of these was a way a record of another
-// person, or of nobody in particular, could be offered to the requester, or a way the activity log could keep what
-// the check refuses.
-
 // asstWithoutTriggers runs fn in a transaction with triggers off: a history row a guard would make awkward to build.
 func asstWithoutTriggers(t *testing.T, f *apiFixture, fn func(tx pgx.Tx) error) {
 	t.Helper()
@@ -37,7 +33,7 @@ func asstWithoutTriggers(t *testing.T, f *apiFixture, fn func(tx pgx.Tx) error) 
 	}
 }
 
-// H1: the PMS matched an attempt on the stated address to a guest who is not the stated one.
+// The PMS matched an attempt on the stated address to a guest who is not the stated one.
 func TestIntegration_Assisted_AnAttemptTheMatchedToAnotherGuestIsNotTheStatedGuests(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -81,7 +77,7 @@ func TestIntegration_Assisted_AnAttemptTheMatchedToAnotherGuestIsNotTheStatedGue
 	}
 }
 
-// H2: one address, two device rows. The answer is about the address.
+// One address, two device rows. The answer is about the address.
 func TestIntegration_Assisted_AnAddressWithTwoDeviceRowsIsJudgedWhole(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -98,7 +94,6 @@ func TestIntegration_Assisted_AnAddressWithTwoDeviceRowsIsJudgedWhole(t *testing
 		f.tenant, f.site, b.room, d2); err != nil {
 		t.Fatalf("register to the other reservation: %v", err)
 	}
-	// Whatever order the rows are read in, the answer is the same.
 	for i := 0; i < 6; i++ {
 		id, ref := asstOpen(t, f, asstDefaults("ACCESS", a.macs, a.anchor()))
 		rv := asstReviewOf(t, f, id)
@@ -111,7 +106,7 @@ func TestIntegration_Assisted_AnAddressWithTwoDeviceRowsIsJudgedWhole(t *testing
 	}
 }
 
-// H3: past use leaves a trace even when no session or binding remains.
+// Past use leaves a trace even when no session or binding remains.
 func TestIntegration_Assisted_PastUseByAnotherAccessLeavesTheAddressUnclaimable(t *testing.T) {
 	for name, seed := range map[string]func(t *testing.T, f *apiFixture, otherEnt, dev string){
 		"an authorisation that was released": func(t *testing.T, f *apiFixture, otherEnt, dev string) {
@@ -160,7 +155,7 @@ func TestIntegration_Assisted_PastUseByAnotherAccessLeavesTheAddressUnclaimable(
 	}
 }
 
-// H4: a sign-in pass in force is not anonymised, which would end it early.
+// A sign-in pass in force is not anonymised, which would end it early.
 func TestIntegration_Assisted_APassInForceIsNotErased(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -193,7 +188,7 @@ func TestIntegration_Assisted_APassInForceIsNotErased(t *testing.T) {
 	}
 }
 
-// H5: a reason the check refuses is never written to the activity log.
+// A reason the check refuses is never written to the activity log.
 func TestIntegration_Assisted_ARefusedReasonNeverReachesTheActivityLog(t *testing.T) {
 	f := newAPI(t)
 	r := seedAsstRoom(t, f, "RV5", asstMACs("3c:22:fb:e5:00", 1), "10.91.7")
@@ -218,7 +213,7 @@ func TestIntegration_Assisted_ARefusedReasonNeverReachesTheActivityLog(t *testin
 	}
 }
 
-// H6: a record keyed only by the address says nothing about the stated context when nothing ties the two.
+// A record keyed only by the address says nothing about the stated context when nothing ties the two.
 func TestIntegration_Assisted_AnAddressNothingTiesToTheContextIsLeftAlone(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -334,7 +329,6 @@ func TestIntegration_Assisted_AddressSpellings(t *testing.T) {
 			t.Errorf("%q: %d %v, want %d", in, st, body, want)
 		}
 	}
-	// Whatever the spelling, the request is about the one address.
 	o := asstDefaults("ACCESS", []string{"3C-22-FB-E9-00-01", "3c22fbe90001", "3c:22:fb:e9:00:01"}, r.anchor())
 	id, _ := asstOpen(t, f, o)
 	if got := asstStatus(t, f, id)["addresses"]; fmt.Sprint(got) != "[3c:22:fb:e9:00:01]" {

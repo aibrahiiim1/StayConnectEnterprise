@@ -45,9 +45,7 @@ func TestSealOpenRoundTrip(t *testing.T) {
 	}
 }
 
-// NO PLAINTEXT SURVIVES IN THE CIPHERTEXT. The point of sealing is that a copy of the database yields
-// nothing, so this asserts it directly against every sensitive field rather than trusting that AES did its
-// job.
+// No sensitive field's plaintext may appear in the ciphertext.
 func TestSealedBytesCarryNoPlaintext(t *testing.T) {
 	kr, id := testKeyring()
 	in := sample()
@@ -70,8 +68,7 @@ func TestSealedBytesCarryNoPlaintext(t *testing.T) {
 	}
 }
 
-// THE OWNER BINDING. A ciphertext lifted from one attempt, one site or one tenant and pasted into another
-// must fail rather than quietly describe the wrong guest to an operator.
+// A ciphertext moved to another attempt, site or tenant must fail rather than describe the wrong guest.
 func TestSealedMaterialIsBoundToItsOwner(t *testing.T) {
 	kr, id := testKeyring()
 	sealed, err := Seal(kr, id, "t1", "s1", "a1", sample())
@@ -115,8 +112,7 @@ func TestOpenRefusesAnotherKeyAndATamperedBlob(t *testing.T) {
 	}
 }
 
-// FAIL TOWARDS "NO SENSITIVE HALF", NEVER TOWARDS PLAINTEXT. Every way of not having a usable key returns an
-// error and no ciphertext, so a caller that ignores the error writes nulls rather than the guest's data.
+// Fail towards "no sensitive half", never plaintext: an unusable key returns an error and no ciphertext.
 func TestAnUnusableKeyProducesNothingRatherThanPlaintext(t *testing.T) {
 	_, id := testKeyring()
 	cases := map[string]Keyring{

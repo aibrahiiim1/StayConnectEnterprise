@@ -1,5 +1,4 @@
-// SITE TYPES. Descriptive only: what kind of place a site is. A site type never grants or gates anything — the
-// license's modules do. Central accepts exactly these values for writes (control-plane site_types.go).
+// Site types are descriptive; only license modules grant capabilities.
 
 export const SITE_TYPES = [
   { value: "HOTEL", label: "Hotel" },
@@ -18,7 +17,7 @@ export type SiteType = (typeof SITE_TYPES)[number]["value"];
 
 export const DEFAULT_SITE_TYPE: SiteType = "UNSPECIFIED";
 
-/** The label of a site type. A type this console does not know yet is shown as Central sent it. */
+/** Show unknown site types as Central sends them. */
 export function siteTypeLabel(v: string | null | undefined): string {
   if (!v) return "Not specified";
   return SITE_TYPES.find((t) => t.value === v)?.label ?? v;

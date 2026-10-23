@@ -11,26 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// A ROOM IS NOT A GUEST, AND THE APPLIANCE MUST NEVER BEHAVE AS IF IT WERE.
-//
-// Room 412 will be occupied by a different person tonight than it was this morning, and for a stretch in the
-// middle both of them have a claim on it: the departing guest is inside their checkout grace while the
-// arriving guest is already checking in. Every serious failure this file guards has the same shape -- some
-// piece of state keyed on the room instead of on the person, so one guest's arrival silently reaches into
-// the other's entitlement.
-//
-// The failure would be quiet and awful. A guest whose grace was cut short by a stranger's arrival just sees
-// the wifi stop; a guest who inherits the previous occupant's allowance gets somebody else's data; and a
-// grace timer reset by a check-in hands out free access nobody agreed to. None of it raises an error.
-//
-// The conversion path itself never reads a room -- grep it and there is no such column in the query. That is
-// the design. These tests exist because "the code does not currently do that" is a weaker guarantee than
-// "the code cannot do that without turning a test red", and room reuse is where the temptation to key on a
-// room number is strongest.
+// A room is not a guest: while the departing guest is in grace the arriving guest checks in, and state keyed on
+// the room instead of the person would let one reach into the other's entitlement (cut-short grace, inherited
+// allowance, reset grace timer) without any error. The conversion path never reads a room; these tests keep
+// it that way.
 
-// secondStayInSameRoom creates an INDEPENDENT Stay -- its own stay id, its own reservation identity -- on the
-// same tenant, site and PMS interface as f, and puts it in the same room. It is deliberately a sibling, not a
-// copy: the only thing it shares with the first guest is the four walls.
+// secondStayInSameRoom creates an independent Stay (own id and reservation identity) in the same room.
 func secondStayInSameRoom(t *testing.T, p *pgxpool.Pool, f fixture, room, reservation string) string {
 	t.Helper()
 	var stay string
@@ -47,9 +33,7 @@ func secondStayInSameRoom(t *testing.T, p *pgxpool.Pool, f fixture, room, reserv
 	return stay
 }
 
-// seedEventTyped seeds and applies an event of an arbitrary TYPE for this stay. seedEvent hardcodes 'GO',
-// which is right for every test that needs a boundary and useless for the tests that need to prove a
-// non-checkout event is refused as one.
+// seedEventTyped seeds an event of any type; seedEvent hardcodes 'GO'.
 func seedEventTyped(t *testing.T, p *pgxpool.Pool, f fixture, eventType string) string {
 	t.Helper()
 	ts := f.boundary
@@ -69,9 +53,8 @@ func seedEventTyped(t *testing.T, p *pgxpool.Pool, f fixture, eventType string) 
 	return eid
 }
 
-// checkoutEventFor builds an APPLIED GO for a SPECIFIC stay with its own external identity. checkoutEvent
-// derives the identity from a fixed sequence number, so calling it twice in one test -- which is exactly what
-// two guests sharing a room requires -- collides on the live-identity uniqueness constraint.
+// checkoutEventFor builds an APPLIED GO for a specific stay; checkoutEvent's fixed sequence collides on the
+// live-identity uniqueness constraint when called twice in one test.
 func checkoutEventFor(t *testing.T, p *pgxpool.Pool, f fixture, stay string, seq int) BoundarySource {
 	t.Helper()
 	eid := seedEvent(t, p, f, &f.boundary, false, seq, "LIVE", 0, stay)
@@ -79,7 +62,6 @@ func checkoutEventFor(t *testing.T, p *pgxpool.Pool, f fixture, stay string, seq
 	return BoundarySource{StayEventID: eid}
 }
 
-// entForStay gives an arbitrary Stay a live entitlement, the way a fresh guest signing in would.
 func entForStay(t *testing.T, p *pgxpool.Pool, f fixture, stay string) string {
 	t.Helper()
 	g := f
@@ -87,19 +69,13 @@ func entForStay(t *testing.T, p *pgxpool.Pool, f fixture, stay string) string {
 	return activeEnt(t, p, g)
 }
 
-// GUEST A IS IN GRACE. GUEST B CHECKS INTO THE SAME ROOM. NEITHER NOTICES THE OTHER.
-//
-// This is the scenario the product decision is written for, and the one a hotel actually runs every
-// afternoon. A departs at 11:00 and keeps working in the lobby on their grace hour; B arrives at 11:20 and
-// signs in upstairs. Both are entitled at the same moment, in the same room, and the two must be completely
-// independent.
+// Guest A is in grace while guest B checks into the same room; the two must be completely independent.
 func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrace(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 
-	// Put the departing guest in room 412 so the two stays genuinely collide on the room.
 	if err := guardedExec(p, stayFamily, `UPDATE iam_v2.stays SET normalized_room_number='412' WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +87,7 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 	}
 	graceID := res.NewEntitlementID
 	var graceEndsAt time.Time
-	// NULLABLE ON PURPOSE: a grace entitlement with no data cap stores NULL, not 0, and the two mean
-	// different things. Scanning it as a plain int64 asserts a cap exists, which is not this test's claim.
+	// Nullable: a grace with no data cap stores NULL, not 0.
 	var graceQuota *int64
 	if err := p.QueryRow(ctx,
 		`SELECT window_ends_at, data_quota_bytes FROM iam_v2.entitlements WHERE id=$1`, graceID).
@@ -120,11 +95,9 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 		t.Fatal(err)
 	}
 
-	// GUEST B ARRIVES IN THE SAME ROOM and signs in normally.
 	arrivingStay := secondStayInSameRoom(t, p, f, "412", "RES-B")
 	arrivingEnt := entForStay(t, p, f, arrivingStay)
 
-	// A's grace is untouched: same deadline, same allowance, still live, still theirs.
 	var afterEnds time.Time
 	var afterQuota *int64
 	var afterStatus, afterStay string
@@ -147,7 +120,6 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 		t.Fatalf("the grace changed owner: %s -> %s", f.stay, afterStay)
 	}
 
-	// B's entitlement is B's: a different row, a different stay, and NOT descended from A's.
 	if arrivingEnt == graceID {
 		t.Fatal("the arriving guest was handed the departing guest's entitlement")
 	}
@@ -169,12 +141,8 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 		t.Fatal("a fresh arrival must start a normal package, not inherit a grace entitlement")
 	}
 
-	// AND BOTH ARE LIVE AT ONCE. The room now legitimately carries two live entitlements belonging to two
-	// different people -- which is exactly what "one live entitlement per SUBJECT" permits and what a
-	// room-keyed implementation could not express.
-	// SCOPED TO THIS SITE. The integration database is shared and persists across runs, so an unscoped count
-	// over "room 412" silently accumulates every previous execution -- which is how this assertion first
-	// reported 29. A room number is only meaningful inside one site, which is the point of the whole file.
+	// Both are live at once: one live entitlement per subject, two people. The count is scoped to this site
+	// because the integration database persists across runs.
 	if n := count(t, p, `
 		SELECT count(*) FROM iam_v2.entitlements e
 		  JOIN iam_v2.stays s ON s.id = e.stay_id
@@ -190,11 +158,7 @@ func TestIntegration_RoomReuse_ArrivingGuestDoesNotDisturbTheDepartingGuestsGrac
 	}
 }
 
-// THE ARRIVING GUEST'S CHECKOUT IS THEIRS ALONE.
-//
-// The mirror of the first test, and the one that would bite later: B eventually checks out too. Their
-// conversion must act on B's entitlement and leave A's grace -- which may still be running -- completely
-// alone, including not counting as a second grace for the room.
+// B's checkout must act only on B's entitlement and leave A's running grace alone.
 func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -215,7 +179,6 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 		t.Fatal(err)
 	}
 
-	// B arrives, uses the wifi, and departs while A is still in grace.
 	bStay := secondStayInSameRoom(t, p, f, "412", "RES-B")
 	entForStay(t, p, f, bStay)
 	resB, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, bStay, checkoutEventFor(t, p, f, bStay, 6))
@@ -226,7 +189,6 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 		t.Fatal("guest B's checkout reused guest A's grace entitlement")
 	}
 
-	// A's window is still exactly where it was.
 	var aEndsAfter time.Time
 	var aStatus string
 	if err := p.QueryRow(ctx,
@@ -241,7 +203,6 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 		t.Fatalf("guest B's checkout ended guest A's grace (%s)", aStatus)
 	}
 
-	// Each stay has exactly one grace. The room has two, belonging to two people, which is correct.
 	for _, s := range []string{f.stay, bStay} {
 		if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, s); n != 1 {
 			t.Fatalf("stay %s has %d grace entitlements, want exactly 1", s, n)
@@ -249,26 +210,9 @@ func TestIntegration_RoomReuse_SecondGuestsCheckoutDoesNotTouchTheFirstsGrace(t 
 	}
 }
 
-// THE SAME-SUBJECT RE-CHECK-IN TEST THAT USED TO SIT HERE HAS BEEN REMOVED, DELIBERATELY.
-//
-// It was called TestIntegration_SameSubjectRecheckIn_DoesNotProduceTwoLiveEntitlements and it never
-// performed a re-check-in: it ran a checkout and then asserted the post-checkout state, which proves a
-// precondition and takes the test's own name as the claim. A reader scanning names would have believed the
-// scenario was covered when nothing had constructed it.
-//
-// The real transitions now live in reinstatement_episode_integration_test.go, where a new Stay and a new
-// entitlement are actually created, and where reinstatement is actually performed before a second checkout.
-
-// A CHECK-IN IS NOT A CHECKOUT, AND THE CONVERTER MUST REFUSE TO TREAT ONE AS THE OTHER.
-//
-// This is the stale/out-of-order case with teeth. After a checkout the PMS may re-send an arrival: a delayed
-// GI from before the departure, a duplicate from a resync, or a genuine reinstatement. Whatever it is, it is
-// not a GO, and using it as the boundary for a conversion would date the grace from the wrong moment -- or
-// resurrect a closed episode.
-//
-// The converter derives its boundary from a typed GO for this exact stay and interface, APPLIED. Everything
-// else is refused. That is asserted here rather than assumed, because the refusal is what stops an
-// out-of-order message corrupting a lifecycle.
+// After a checkout the PMS may re-send an arrival (delayed GI, resync duplicate, reinstatement). Only an
+// APPLIED GO for this exact stay and interface may be the boundary, or the grace would be dated wrongly or a
+// closed episode resurrected.
 func TestIntegration_NonCheckoutEventCannotBeUsedAsABoundary(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -276,15 +220,13 @@ func TestIntegration_NonCheckoutEventCannotBeUsedAsABoundary(t *testing.T) {
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	activeEnt(t, p, f)
 
-	// A GI for this very stay, applied and perfectly valid as an arrival -- and useless as a checkout.
 	gi := seedEventTyped(t, p, f, "GI")
 	if _, err := NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay,
 		BoundarySource{StayEventID: gi}); err == nil {
 		t.Fatal("a GI was accepted as a checkout boundary; an arrival must never date a grace period")
 	}
 
-	// Nothing was created by the refusal. A rejected boundary that still left a grace behind would be worse
-	// than accepting it, because it would be invisible.
+	// A rejected boundary must leave no grace behind.
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, f.stay); n != 0 {
 		t.Fatalf("a refused boundary still created %d grace entitlement(s)", n)
 	}
@@ -292,18 +234,13 @@ func TestIntegration_NonCheckoutEventCannotBeUsedAsABoundary(t *testing.T) {
 		t.Fatalf("a refused boundary wrote %d audit row(s)", n)
 	}
 
-	// And the real checkout still works afterwards: the refusal must not have poisoned the episode.
 	res, err := NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
 	if err != nil || !res.GraceCreated {
 		t.Fatalf("the genuine checkout after a refused GI: %+v err=%v", res, err)
 	}
 }
 
-// ANOTHER STAY'S CHECKOUT EVENT IS NOT THIS STAY'S BOUNDARY.
-//
-// The room-reuse failure in its sharpest form: two stays exist at once, and the arriving guest's departure
-// event must not be usable to convert the departing guest -- or the reverse. The boundary query is scoped to
-// the stay, and this is what that scoping is for.
+// Another stay's checkout event must not be usable as this stay's boundary.
 func TestIntegration_CrossStayCheckoutEventIsRefused(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -316,9 +253,7 @@ func TestIntegration_CrossStayCheckoutEventIsRefused(t *testing.T) {
 
 	other := secondStayInSameRoom(t, p, f, "412", "RES-B")
 	entForStay(t, p, f, other)
-	othersCheckout := checkoutEventFor(t, p, f, other, 6) // a real GO, for the OTHER guest
-
-	// Same room, same interface, a genuine applied GO -- and it belongs to somebody else.
+	othersCheckout := checkoutEventFor(t, p, f, other, 6)
 	if _, err := NewConverter(p).ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, othersCheckout); err == nil {
 		t.Fatal("one guest's checkout event converted a different guest sharing the room")
 	}

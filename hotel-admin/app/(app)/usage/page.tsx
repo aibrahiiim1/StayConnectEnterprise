@@ -1,34 +1,9 @@
 "use client";
 
-// USAGE EXPLORER — the screen you open when a client is arguing about their data.
-//
-// It is built around the two sentences that actually arrive at the site team:
-//
-//     "My access stopped and I never got what I was given."
-//     "Something on our network downloaded 40 GB last night."
-//
-// The first is an ACCESS SOURCE question and the second is a DEVICE question, so those are the two tabs.
-//
-// AN ACCESS SOURCE is whatever granted the access: a client account, a voucher, or — in the Hotel module — a
-// room/stay. It is the subject of the entitlement a session ran under. Each type is searched by what it can
-// honestly be searched by: an account by its username, a voucher by its card reference, a stay by room number
-// or reservation. (Email, phone and social sign-ins are not listed: what identifies them is not readable by
-// this console's service, so they would appear as bare ids. Their devices are still under "By device".)
-//
-// EVERY FIGURE IS TRACEABLE. A source's total is the sum of its sessions; each session can be opened to show
-// the durable accounting samples it was summed from, with their own total printed next to the session's so
-// the two can be seen to agree. Nothing here is estimated, and a source with no measured usage says so rather
-// than showing a confident zero.
-//
-// ROOM IS NOT IDENTITY and MAC IS NOT A PERSON. Room and stay words appear only on a Hotel room/stay source,
-// and every room is shown with the PMS connection that gives it meaning. The device view says "device"
-// throughout — it lists the stays a device was associated with, which is what the data supports, rather than
-// naming anyone, which it does not.
-//
-// NO SECRETS. A voucher is shown by its card reference (what the voucher sheet already prints), never its code;
-// a client account by the username operators already see on Client accounts, never its display name.
-//
-// Read-only for every role that can open it: there is nothing to change here, only evidence to read.
+// Email, phone and social sign-ins are not listed as sources: their identifiers are not readable by this console's service.
+// Nothing is estimated; a source with no measured usage says so rather than showing zero.
+// Never show secrets: vouchers by card reference (not code), client accounts by username (not display name).
+// Room words appear only on a Hotel room/stay source, always with its PMS connection.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Search, Smartphone } from "lucide-react";
@@ -71,12 +46,11 @@ type DeviceDetail = {
   totals: Totals; sessions: SessionRow[]; stays: StayRow[];
 };
 
-/** The access-source types edged serves: GET /usage/sources?type=… and /usage/sources/{type}/{id}. */
 type SourceType = "account" | "voucher" | "stay" | "open";
 type SourceRow = {
   source_type: SourceType; source_id: string;
   account_username?: string;
-  // Hotel room/stay only. The room always travels with its PMS connection.
+  // Hotel room/stay only; a room always travels with its PMS connection.
   room?: string; pms_interface?: string; reservation?: string; stay_status?: string;
   arrival?: string; departure?: string; effective_checkout_at?: string;
   totals: Totals; quota_bytes?: number | null; consumed_bytes?: number | null; end_reason?: string;
@@ -85,13 +59,11 @@ type SourceRow = {
 type SourceDetail = {
   source: SourceRow; service_plan?: string; access_status?: string;
   devices: DeviceRow[]; sessions: SessionRow[];
-  // The period the totals cover -- the same one the list used.
   from?: string; to?: string;
 };
 
 type Tab = "sources" | "devices";
 
-/** Access sources per page. edged pages the list (?page, ?page_size). */
 const USAGE_PAGE = 50;
 type TypeFilter = "all" | SourceType;
 
@@ -99,7 +71,6 @@ const SOURCE_LABEL: Record<SourceType, string> = {
   account: "Client account",
   voucher: "Voucher",
   stay: "Hotel room/stay",
-  // A package chosen without signing in: an anonymous access subject, known only by its reference.
   open: "Without sign-in",
 };
 
@@ -114,13 +85,11 @@ const SEARCH_HINT: Record<TypeFilter, { label: string; placeholder: string }> = 
   open: { label: "Access reference", placeholder: "Access reference — the first characters are enough" },
 };
 
-/** The "All" search where rooms do not exist here: the same search, without inviting a room number. */
 const SEARCH_HINT_NO_ROOMS = {
   label: "Username or card reference",
   placeholder: "Username or card reference — or leave empty for the heaviest users",
 };
 
-// The stay lifecycle in the words Stays uses.
 const STAY_WORDS: Record<string, string> = {
   IN_HOUSE: "In house",
   RESERVED: "Arriving",
@@ -131,7 +100,6 @@ const STAY_WORDS: Record<string, string> = {
 };
 const stayWords = (s: string) => STAY_WORDS[s] ?? s.replace(/_/g, " ").toLowerCase();
 
-// The entitlement lifecycle, for sources that are not stays.
 const ACCESS_WORDS: Record<string, string> = {
   PENDING: "Not started",
   ACTIVE: "Active",
@@ -142,7 +110,6 @@ const accessWords = (s: string) => ACCESS_WORDS[s] ?? s.replace(/_/g, " ").toLow
 
 const shortRef = (id: string) => (id.length > 12 ? `${id.slice(0, 8)}…` : id);
 
-/** What an access source is called on screen. Room words only for a stay. */
 function sourceTitle(s: SourceRow): string {
   switch (s.source_type) {
     case "stay": return s.room ? `Room ${s.room}` : "Stay";
@@ -181,8 +148,7 @@ export default function UsageExplorerPage() {
   const [toDay, setToDay] = useState("");
   const range = periodQuery(period, fromDay, toDay);
 
-  // PAGED ON THE SERVER: one page of access sources at a time, heaviest first. A new search or type starts at
-  // the first page; only the newest request's answer is applied.
+  // Only the newest request's answer is applied.
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const latest = useRef(0);
@@ -193,8 +159,7 @@ export default function UsageExplorerPage() {
     try {
       const t = type === "all" ? "" : type;
       const page = Math.floor(at / USAGE_PAGE) + 1;
-      // The search text travels in a header, not the URL: edged logs request lines, and this is a username or
-      // a room number.
+      // Header, not URL: edged logs request lines.
       const needle = q.trim();
       const r = await api.get<{ data: SourceRow[]; meta?: { has_more?: boolean } }>(
         `/usage/sources?type=${encodeURIComponent(t)}&page=${page}&page_size=${USAGE_PAGE}&${range.qs}`,
@@ -219,9 +184,7 @@ export default function UsageExplorerPage() {
     finally { setBusy(false); }
   }
 
-  // DEEP LINK: /usage?stay=<id> opens that stay directly. Internet packages → Client activity links here, so
-  // "see what this stay used" lands on the stay rather than on an empty search. Read from the location once,
-  // on mount, rather than through useSearchParams, which would need a Suspense boundary for the static build.
+  // Deep link /usage?stay=<id>; read from location, not useSearchParams, which needs a Suspense boundary for the static build.
   useEffect(() => {
     const id = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("stay");
     if (id) void openSource("stay", id);
@@ -235,8 +198,6 @@ export default function UsageExplorerPage() {
     finally { setBusy(false); }
   }
 
-  /** THE SAMPLES BEHIND ONE SESSION. Fetched only when an operator asks, because this is the step that turns
-   *  "the system says 209 MB" into something they can show a client. */
   async function openSamples(sessionID: string) {
     setSamples((p) => ({ ...p, [sessionID]: "loading" }));
     try {
@@ -249,9 +210,7 @@ export default function UsageExplorerPage() {
 
   const src = source?.source;
   const isStay = src?.source_type === "stay";
-  // HOTEL ROOM/STAY IS A HOSPITALITY SOURCE. The type filter, the room/reservation search hint and the help
-  // that describes it appear only where hospitality is licensed or has left records to trace -- usage history
-  // stays reachable after a licence lapses. A stay row that the server returns is data and is shown regardless.
+  // Room/stay options show only where hospitality is licensed or has history (usage stays reachable after a lapse).
   const caps = useCapabilities();
   const stays = moduleHasHistory(caps, "hospitality");
   const hint = typeFilter === "all" && !stays ? SEARCH_HINT_NO_ROOMS : SEARCH_HINT[typeFilter];
@@ -332,7 +291,6 @@ export default function UsageExplorerPage() {
           <TabsTrigger value="devices"><Smartphone className="size-4" aria-hidden /> By device</TabsTrigger>
         </TabsList>
 
-        {/* ---------------------------------------------------------------- BY ACCESS SOURCE --------------- */}
         <TabsContent value="sources" className="mt-5 space-y-5">
           {!source && (
             <Card className="overflow-hidden">
@@ -384,7 +342,6 @@ export default function UsageExplorerPage() {
                               {sourceTitle(r)}
                             </div>
                             <div className="text-caption text-muted-foreground">
-                              {/* For a stay the connection is not decoration: a room number only means something inside one. */}
                               {r.source_type === "stay" ? `${SOURCE_LABEL.stay} · ${r.pms_interface ?? ""}` : SOURCE_LABEL[r.source_type]}
                             </div>
                           </TD>
@@ -435,7 +392,6 @@ export default function UsageExplorerPage() {
             </Card>
           )}
 
-          {/* ---------------------------------------------------------------- ONE ACCESS SOURCE -------------- */}
           {source && src && (
             <div className="space-y-5">
               <Button variant="ghost" size="sm" onClick={() => setSource(null)}>
@@ -553,7 +509,6 @@ export default function UsageExplorerPage() {
           )}
         </TabsContent>
 
-        {/* ---------------------------------------------------------------- BY DEVICE ---------------------- */}
         <TabsContent value="devices" className="mt-5 space-y-5">
           <Card>
             <CardHeader><CardTitle>Look up a device</CardTitle></CardHeader>
@@ -621,11 +576,7 @@ export default function UsageExplorerPage() {
   );
 }
 
-/** The sessions, with the accounting samples behind each one available on request.
- *
- *  This is the part that makes the screen usable in a real dispute: the operator can say "209 MB, across
- *  1,204 recorded samples between 14:02 and 23:51", and the sample total is printed next to the session
- *  total so the two can be seen to agree rather than taken on trust. */
+/** Sample totals print next to the session total so the two can be seen to agree. */
 function SessionsCard({ sessions, samples, onOpenSamples }: {
   sessions: SessionRow[];
   samples: Record<string, { bytes_total: number; sample_count: number; truncated?: boolean } | "loading">;

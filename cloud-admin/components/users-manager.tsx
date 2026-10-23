@@ -20,8 +20,7 @@ const MIN_PASSWORD = 10;
 
 type UserField = "email" | "password" | "reason";
 
-/** Which field a refusal to add a user is about: a taken email (409), or the email or password the server
- *  rejected (400, named in its sentence). Anything else stays in the banner. */
+/** Only known email or password refusals attach to fields; other failures stay in the banner. */
 function fieldOfCreate(e: ApiError): UserField | null {
   if (e.status === 409) return "email";
   if (e.status === 400 && /email/i.test(e.message)) return "email";
@@ -40,17 +39,12 @@ function saveJSON(doc: unknown, name: string) {
   URL.revokeObjectURL(url);
 }
 
-/** A user's roles, whether the server sends names or `{role}` rows. */
 export function roleNames(u: { roles?: unknown }): string[] {
   const rs = Array.isArray(u.roles) ? u.roles : [];
   return rs.map((r) => (typeof r === "string" ? r : (r as { role?: string })?.role ?? "")).filter(Boolean);
 }
 
-/**
- * Central sign-ins, in one place for both kinds: the platform Team (base /cloud/v1/team) and a customer's own
- * users (base /cloud/v1/customers/{id}/users). Each user has one role. Disabling keeps the account (and its
- * audit trail) and stops it signing in; Remove deletes it.
- */
+/** Disabling preserves an account and audit trail; removing deletes the account. */
 export function UsersManager({
   base,
   roles,
@@ -64,9 +58,9 @@ export function UsersManager({
   roles: readonly string[];
   canManage: boolean;
   meId: string;
-  /** The Team has a password-reset route; a customer's users do not (§6). */
+  /** Only platform Team users can be reset here. */
   canResetPassword: boolean;
-  /** Downloading one person's data (GDPR Art. 15/20, audit B5) is the platform's: Team management only. */
+  /** Personal-data export is restricted to platform Team management. */
   canExportData?: boolean;
   noun?: string;
 }) {
@@ -116,14 +110,13 @@ export function UsersManager({
     setDialog(d);
   }
 
-  /** `fieldOf` names the field a refusal is about (a taken email, a short password); that refusal is shown under
-   *  the field, which takes focus, instead of in the banner. */
+  /** Focus the specific field for recognized validation refusals. */
   async function run(fn: () => Promise<unknown>, done: string, detail?: string, fieldOf?: (e: ApiError) => UserField | null) {
     setBusy(true);
     setDErr(null);
     fields.clear();
     try {
-      // Central requires a recent password re-entry for every change to a sign-in; the prompt appears once.
+      // Sign-in changes require recent password confirmation.
       await withStepUp(fn);
       toast.success(done, detail);
       setDialog(null);

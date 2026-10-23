@@ -3,9 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-// D-R3: new recovery codes need the password AND a current code from the authenticator app. The button stays
-// off until a 6-digit code is typed, the code is sent with the password, and a refused code is said at the field.
-
 vi.mock("@/lib/api", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };

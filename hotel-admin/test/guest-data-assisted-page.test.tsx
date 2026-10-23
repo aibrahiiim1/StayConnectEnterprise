@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 
-// The assisted workflow (migration 0146): open a request that states whose records these are said to be, review what
-// the database made of every record, select only what it allows, and confirm with the password, a reason and the
-// request reference. What decides a record is the database's; this page must show it faithfully and send exactly
-// the selection and the review signature it was shown.
-
 const get = vi.fn();
 const post = vi.fn();
 vi.mock("@/lib/api", async () => {
@@ -85,7 +80,6 @@ describe("Assisted guest data request", () => {
     fireEvent.click(screen.getByRole("button", { name: /new request/i }));
     const submit = await screen.findByRole("button", { name: /^open request$/i }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
-    // A device address alone is not enough.
     fireEvent.change(screen.getByLabelText(/device addresses/i), { target: { value: "3C:22:FB:0A:11:7E" } });
     expect(screen.getByText(/name the reservation, guest or account/i)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Search for the guest"), { target: { value: "lovelace" } });

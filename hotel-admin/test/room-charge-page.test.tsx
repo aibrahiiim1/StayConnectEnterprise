@@ -1,14 +1,4 @@
-// HOTEL → ROOM CHARGE.
-//
-// Pinned here: each interface's readiness reads in words, only a FIAS interface is offered the approval and only
-// to a site administrator, the approval sends exactly what edged requires (expected_revision_id from the row, the
-// fixed RESERVATION posting target, no exponent), a revision conflict reloads the list, and the posting-withheld
-// note appears when the room_charge module reports PMS_POSTING_NOT_AUTHORISED.
-//
-// Phase-0 Amendment A1: there is no folio strategy to choose. The page shows the fixed posting target, asks for
-// the vendor's confirmation that reservation numbers are never reused, and lists the vendor-confirmed answer
-// meanings (NP/NG/NR/NA/RY) per FIAS interface, which a site administrator confirms or withdraws with evidence,
-// a reason and a password.
+// FIAS approval requires vendor evidence that reservation numbers are never reused.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -19,8 +9,7 @@ vi.mock("@/lib/api", async (orig) => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() } };
 });
 
-// Until the Delivery Owner adds "pms-financial-onboarding" to the role table, a synthetic reader stands in for a
-// role that may see the approvals.
+// Use a synthetic reader role until pms-financial-onboarding is represented in the role table.
 vi.mock("@/lib/roles", async (orig) => {
   const actual = await (orig() as Promise<typeof import("@/lib/roles")>);
   return {
@@ -149,7 +138,6 @@ describe("Hotel → Room charge", () => {
       reason: "Enable room charge",
       password: "pw",
     });
-    // Reloaded after the approval.
     await waitFor(() => expect(g.mock.calls.filter((c) => c[0] === "/pms-financial-onboarding")).toHaveLength(2));
   });
 
@@ -195,7 +183,6 @@ describe("Hotel → Room charge", () => {
     expect(within(rows[0]).getByText(/not confirmed — unknown/i)).toBeInTheDocument();
     expect(screen.getByText(/UR always, is treated as\s+unknown/i)).toBeInTheDocument();
     expect(screen.getByText(/recording these does not switch posting on or off/i)).toBeInTheDocument();
-    // Confirm on the unconfirmed ones, Withdraw on the confirmed one.
     expect(within(rows[0]).getByRole("button", { name: "Confirm NP on Protel main" })).toBeInTheDocument();
     expect(within(rows[3]).getByRole("button", { name: "Withdraw confirmation of NA on Protel main" })).toBeInTheDocument();
   });
@@ -211,7 +198,6 @@ describe("Hotel → Room charge", () => {
     fireEvent.change(within(dialog).getByLabelText(/^Vendor evidence/), { target: { value: "short" } });
     fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: "Vendor answered" } });
     fireEvent.change(within(dialog).getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
-    // Evidence under 20 characters is refused before it is sent.
     expect(submit).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText(/^Vendor evidence/), {
       target: { value: "Protel support, 2026-09-22, FIAS spec v2.1 section 7.4" },
@@ -251,7 +237,6 @@ describe("Hotel → Room charge", () => {
     expect(await screen.findByText("Protel main")).toBeInTheDocument();
     expect(screen.getByText(/site administrator decision/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
-    // The answer meanings are visible, but not changeable.
     expect(screen.getByRole("table", { name: "Answer meanings for Protel main" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^confirm np/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();

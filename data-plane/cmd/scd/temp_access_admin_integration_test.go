@@ -17,9 +17,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/sealbox"
 )
 
-// STAFF HELP FOR SMS / WHATSAPP CODES AGAINST THE DATABASE (temp_access_admin.go, migrations 0113/0114).
-// Needs PHASE3_TEST_DSN; skipped otherwise. The temporary-internet window and its "clear" are removed with the
-// email code, and so are their tests.
+// Staff help for SMS / WhatsApp codes against the database (temp_access_admin.go). Needs PHASE3_TEST_DSN; skipped otherwise.
 
 func adminCall(t *testing.T, s *server, method, path, body string) (int, map[string]any) {
 	t.Helper()
@@ -45,8 +43,7 @@ func codeAdminFixture(t *testing.T) (*server, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	const tenant, site = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
-	// The shared integration tenant and site, created if this suite is the first to need them (auth_otps has a
-	// tenant foreign key). Idempotent, and never removed: other suites in the same database use them too.
+	// The shared integration tenant and site, created if this suite is first (auth_otps has a tenant FK); never removed, other suites use them.
 	_, _ = pool.Exec(context.Background(), `INSERT INTO public.tenants (id, slug, name) VALUES ($1::uuid, $2, 'integration')
 	     ON CONFLICT DO NOTHING`, tenant, tenant)
 	_, _ = pool.Exec(context.Background(), `INSERT INTO public.sites (id, tenant_id, code, name) VALUES ($2::uuid, $1::uuid, $3, 'integration')
@@ -183,8 +180,7 @@ func TestIntegration_AnExistingClientsCodeIsNeverShown(t *testing.T) {
 	}
 }
 
-// A code's device binding older than a day is removed by the minute sweep, not only when the next code is sent,
-// so a site where nobody asks for a code does not keep every device MAC it bound (GDPR plan C1 gap).
+// A device binding older than a day is removed by the minute sweep, not only when the next code is sent.
 func TestIntegration_OldDeviceBindingsAreSweptWithoutANewCode(t *testing.T) {
 	s, pool := codeAdminFixture(t)
 	ctx := context.Background()

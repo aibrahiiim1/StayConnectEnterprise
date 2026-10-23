@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// CLIENT NETWORKS: SEVERAL VLANS AT ONCE, AND A TOPOLOGY CHANGE THAT IS STAGED BEFORE IT IS LIVE.
-
 func netBody(name, typ, parent string, vlan int, subnet, gw, poolStart, poolEnd string) map[string]any {
 	b := map[string]any{
 		"name": name, "network_type": typ, "parent_interface": parent,
@@ -56,7 +54,6 @@ func (f *apiFixture) replacementState(t *testing.T, replID string) (state string
 	return
 }
 
-// seedReplaceable creates an untagged network with a pool, a reservation and a PMS route.
 func (f *apiFixture) seedReplaceable(t *testing.T, parent, subnet, gw string) (id, iface string) {
 	t.Helper()
 	ctx := context.Background()
@@ -117,7 +114,7 @@ func TestIntegration_Network_BatchCreatesATrunkOfVLANsAllOrNothing(t *testing.T)
 	}
 }
 
-// THE CENTRAL PROPERTY: staging changes nothing at all.
+// Staging changes nothing at all.
 func TestIntegration_Network_StagingAReplacementChangesNothing(t *testing.T) {
 	f := newAPI(t)
 	parent := uniqueParent()
@@ -138,7 +135,6 @@ func TestIntegration_Network_StagingAReplacementChangesNothing(t *testing.T) {
 		t.Fatalf("carries = %v, want 1/1/1", carries)
 	}
 
-	// Nothing moved: the network is still enabled, still untagged, and no successor exists.
 	enabled, netType, vlan, _ := f.networkState(t, id)
 	if !enabled || netType != "untagged" || vlan != nil {
 		t.Fatalf("staging changed the live network: enabled=%v type=%s vlan=%v", enabled, netType, vlan)
@@ -152,13 +148,11 @@ func TestIntegration_Network_StagingAReplacementChangesNothing(t *testing.T) {
 		t.Fatal("staging disturbed the PMS route")
 	}
 
-	// A second request for the same network is refused.
 	if st, b := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "vlan", "parent_interface": parent, "vlan_id": 31, "reason": "second attempt"}); st != 409 || b["error"] != "replacement_exists" {
 		t.Fatalf("second staged replacement = %d %v", st, b)
 	}
 
-	// It is listed, and cancelling it leaves nothing behind.
 	st, list := f.do(t, "GET", "/network/guest-network-replacements", nil)
 	if st != 200 || len(list["data"].([]any)) != 1 {
 		t.Fatalf("list = %d %v", st, list)
@@ -175,18 +169,15 @@ func TestIntegration_Network_StagingRefusesAConflictUpFront(t *testing.T) {
 	f := newAPI(t)
 	parent := uniqueParent()
 	id, _ := f.seedReplaceable(t, parent, "10.131.0.0/24", "10.131.0.1")
-	// A second, tagged network already on that trunk.
 	if st, b := f.do(t, "POST", "/network/guest-networks",
 		netBody("Ext2", "vlan", parent, 40, "10.132.0.0/24", "10.132.0.1", "10.132.0.100", "10.132.0.200")); st != 201 {
 		t.Fatalf("seed vlan = %d %v", st, b)
 	}
-	// ...so moving the first onto VLAN 40 of the same trunk is refused before anything is staged.
 	st, b := f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "vlan", "parent_interface": parent, "vlan_id": 40, "reason": "clashing vlan"})
 	if st != 409 || b["error"] != "topology_conflict" || !strings.Contains(fmt.Sprint(b["message"]), "VLAN 40") {
 		t.Fatalf("clashing VLAN = %d %v", st, b)
 	}
-	// An overlapping new subnet is refused the same way.
 	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "vlan", "parent_interface": parent, "vlan_id": 41, "reason": "clashing subnet",
 		"subnet_cidr": "10.132.0.0/25", "gateway_ip": "10.132.0.1",
@@ -194,13 +185,11 @@ func TestIntegration_Network_StagingRefusesAConflictUpFront(t *testing.T) {
 	if st != 409 || b["error"] != "topology_conflict" {
 		t.Fatalf("overlapping subnet = %d %v", st, b)
 	}
-	// The same topology it already has is not a replacement.
 	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "untagged", "parent_interface": parent, "reason": "no change at all"})
 	if st != 400 || b["error"] != "no_topology_change" {
 		t.Fatalf("same topology = %d %v", st, b)
 	}
-	// And a reason is required.
 	st, b = f.do(t, "POST", "/network/guest-networks/"+id+"/replace", map[string]any{
 		"network_type": "vlan", "parent_interface": parent, "vlan_id": 42})
 	if st != 400 || b["error"] != "reason_required" {
@@ -208,7 +197,7 @@ func TestIntegration_Network_StagingRefusesAConflictUpFront(t *testing.T) {
 	}
 }
 
-// THE APPLY MOMENT, AND ITS UNDO. Materialising is what moves the rows; reverting puts them all back.
+// Materialising moves the rows; reverting puts them all back.
 func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -238,7 +227,6 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 	}
 	succ := mats[0].SuccessorID
 
-	// The successor is live with the new topology, the original is retired, and everything followed.
 	if enabled, _, _, _ := f.networkState(t, id); enabled {
 		t.Fatal("the original is still enabled after materialisation")
 	}
@@ -258,7 +246,6 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 		t.Fatalf("replacement state=%s successor=%v", state, s)
 	}
 
-	// ...and the undo is complete.
 	if err := f.app.revertMaterialised(ctx, []string{replID}, "test rollback"); err != nil {
 		t.Fatalf("revert: %v", err)
 	}
@@ -273,7 +260,6 @@ func TestIntegration_Network_MaterialiseCarriesEverythingAndRevertRestoresIt(t *
 	if state, s := f.replacementState(t, replID); state != "PENDING" || s != nil {
 		t.Fatalf("after revert state=%s successor=%v, want PENDING/nil so it can be retried", state, s)
 	}
-	// The original keeps its own reservation and route.
 	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM dhcp_reservations WHERE guest_network_id=$1`, id).Scan(&reservations)
 	_ = f.pool.QueryRow(ctx, `SELECT pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, id).Scan(&routed)
 	if reservations != 1 || routed != iface {

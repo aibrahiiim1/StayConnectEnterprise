@@ -11,9 +11,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // data-product="central" swaps only the accent (teal) so the vendor console can never be mistaken for a
-    // hotel's appliance; every other token is shared with Hotel Admin (design-system/README.md).
-    // suppressHydrationWarning: next-themes stamps the stored theme onto <html> before React hydrates.
+    // The distinct accent keeps Central recognizable beside a hotel's appliance.
+    // next-themes stamps the stored theme before React hydrates.
     <html lang="en" dir="ltr" data-product="central" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: SIDEBAR_INIT_SCRIPT }} />

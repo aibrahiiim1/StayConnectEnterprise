@@ -13,7 +13,6 @@ type ctxKey int
 
 const authCtxKey ctxKey = 1
 
-// FromContext returns the session attached by RequireAuth (or nil).
 func FromContext(ctx context.Context) *Session {
 	s, _ := ctx.Value(authCtxKey).(*Session)
 	return s
@@ -23,25 +22,21 @@ func withSession(ctx context.Context, s *Session) context.Context {
 	return context.WithValue(ctx, authCtxKey, s)
 }
 
-// ContextWithSession attaches a session the way RequireAuth does. For callers that drive a handler without
-// the HTTP middleware in front of it (tests, internal jobs).
+// ContextWithSession is for callers that drive a handler without the middleware (tests, internal jobs).
 func ContextWithSession(ctx context.Context, s *Session) context.Context { return withSession(ctx, s) }
 
-// SessionBackend is where sessions live (Redis in production).
 type SessionBackend interface {
 	Get(ctx context.Context, token string) (*Session, error)
 	Destroy(ctx context.Context, token string) error
-	// Touch records activity (LastSeenAt) on a session that passed the policy (0052).
+	// Touch records activity (LastSeenAt) on a session that passed the policy.
 	Touch(ctx context.Context, s *Session) error
 }
 
-// RequireAuth extracts the sc_session cookie and attaches the Session to the request context.
-// Unauthenticated requests get 401.
+// RequireAuth attaches the sc_session Session to the request; unauthenticated requests get 401.
 //
-// With a checker, every request is re-authorised against the database (session_policy.go): a session whose
-// operator was disabled, demoted, removed or re-passworded, or that is past the absolute lifetime, is
-// destroyed and refused, and the roles attached to the request are the operator's CURRENT roles. A database
-// failure refuses the request (fail closed) rather than trusting the stored snapshot.
+// With a checker, every request is re-authorised against the database (session_policy.go): a disabled, demoted,
+// removed or re-passworded operator, or a session past the absolute lifetime, is destroyed and refused, and the
+// request carries the operator's current roles. A database failure refuses the request (fail closed).
 func RequireAuth(store SessionBackend, checker SessionChecker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,20 +76,17 @@ func RequireAuth(store SessionBackend, checker SessionChecker) func(http.Handler
 	}
 }
 
-// BackgroundHeader marks a request the console sent on its own, from a timer -- a list refreshing itself every
-// 30 seconds, the sign-in-ending check -- rather than because the person did something. The appliance's Admin
+// BackgroundHeader marks a request the console sent from a timer rather than a user action. The appliance Admin
 // Console uses the same name and value.
 const BackgroundHeader = "X-OneGate-Background"
 
-// CountsAsActivity reports whether a request moves the idle limit. Background requests do not: counting them
-// would keep every open tab signed in for ever, and the idle limit would never fire. whoami never counts,
-// whoever sends it.
+// CountsAsActivity reports whether a request moves the idle limit. Background requests and whoami never do, or
+// every open tab would stay signed in for ever.
 func CountsAsActivity(r *http.Request) bool {
 	return r.URL.Path != "/v1/auth/whoami" && r.Header.Get(BackgroundHeader) != "1"
 }
 
-// jsonErr writes the standard StayConnect error envelope. Codes here are
-// intentionally string-literal (we don't import api to avoid a cycle).
+// jsonErr writes the standard error envelope; codes are literals to avoid importing api (import cycle).
 func jsonErr(w http.ResponseWriter, status int, code, msg string, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

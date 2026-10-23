@@ -1,12 +1,7 @@
 package main
 
-// THE POST-STAY PAGE'S OWN REQUESTS, THROUGH portald, TO THE BODIES scd DECODES.
-//
-// The post-stay PIN could never succeed because the page's second call carried no package_revision_id and
-// portald took scd's answer at its word. These tests read the request bodies OUT OF THE REAL PAGE SCRIPT
-// (landingHTML) -- the keys the script puts in each postStayCall({...}) -- send exactly those to the handler,
-// and assert what portald forwards to scd. The scd half (that those forwarded bodies produce an enforced
-// session against a real database) is cmd/scd/phase5_poststay_integration_test.go.
+// These tests read the request bodies out of the real page script (landingHTML), send exactly those to the
+// handler and assert what portald forwards to scd. The scd half is cmd/scd/phase5_poststay_integration_test.go.
 
 import (
 	"bytes"
@@ -18,7 +13,6 @@ import (
 	"testing"
 )
 
-// pathStub answers by scd path, and records every hop.
 type pathStub struct {
 	answers map[string]any
 	calls   []string
@@ -41,7 +35,6 @@ func pathStubHandler(t *testing.T, s *pathStub) *handler {
 	return h
 }
 
-// pageBodies returns the key lists of every postStayCall({...}) in the real page script, in order.
 func pageBodies(t *testing.T) [][]string {
 	t.Helper()
 	ms := regexp.MustCompile(`postStayCall\(\{([^}]*)\}\)`).FindAllStringSubmatch(landingHTML, -1)
@@ -70,7 +63,6 @@ func TestPostStayPageSendsThePINThenTheContextAndTheChosenPackage(t *testing.T) 
 		t.Fatalf("the choice call sends %v, want {auth_context_id, package_revision_id}: without the package "+
 			"the conversion can never succeed", bodies[1])
 	}
-	// The page acts on the fields portald returns.
 	for _, frag := range []string{"j.needs_choice", "j.choices", "j.session_id", "res.j.session_id",
 		"c.package_revision_id", `id="ps-choices"`} {
 		if !strings.Contains(landingHTML, frag) {
@@ -79,7 +71,6 @@ func TestPostStayPageSendsThePINThenTheContextAndTheChosenPackage(t *testing.T) 
 	}
 }
 
-// build turns a key list from the page into the JSON the page sends, with the values the guest would have.
 func build(keys []string, vals map[string]string) string {
 	m := map[string]string{}
 	for _, k := range keys {
@@ -100,7 +91,6 @@ func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 	}}
 	h := pathStubHandler(t, s)
 
-	// FIRST CALL, the page's PIN body.
 	_, out := postStayPost(t, h, "/auth/post-stay-pin", build(bodies[0], map[string]string{"pin": "K7M4RTQX"}))
 	if !out.OK || !out.NeedsChoice || out.AuthContextID != "ctx-1" || len(out.Choices) != 2 {
 		t.Fatalf("a verified PIN with two packages did not ask the guest to choose: %+v", out)
@@ -109,7 +99,6 @@ func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 		t.Fatalf("verify hop = %v %v", s.calls, s.bodies)
 	}
 
-	// SECOND CALL, the page's choice body, with the context and the package the guest picked.
 	_, out2 := postStayPost(t, h, "/auth/post-stay-pin", build(bodies[1], map[string]string{
 		"auth_context_id": out.AuthContextID, "package_revision_id": out.Choices[1].PackageRevisionID}))
 	if !out2.OK || out2.SessionID != "sess-1" || out2.RedirectTo != "/success" {
@@ -125,13 +114,13 @@ func TestPostStayChoiceFlowThroughPortald(t *testing.T) {
 	if dev, _ := conv["device"].(map[string]any); dev["mac"] != "02:00:00:aa:00:01" {
 		t.Fatalf("convert hop device = %v, want the server-derived one", conv["device"])
 	}
-	// Exactly the keys scd's decoder accepts (it refuses unknown fields).
+	// scd's decoder refuses unknown fields.
 	if len(conv) != 3 {
 		t.Fatalf("convert hop carried extra keys: %v", conv)
 	}
 }
 
-// ONE OFFER IS NOT A CHOICE: portald converts it in the same request, and the page goes straight to success.
+// One offer is not a choice: portald converts it in the same request.
 func TestPostStaySingleOfferConvertsAtOnce(t *testing.T) {
 	s := &pathStub{answers: map[string]any{
 		"/v1/phase5/auth/post-stay-pin": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
@@ -148,8 +137,7 @@ func TestPostStaySingleOfferConvertsAtOnce(t *testing.T) {
 	}
 }
 
-// A "GRANTED" WITHOUT A REAL SESSION IS NOT ACCESS. The old scd returned the entitlement id as the session id;
-// portald must never send a guest to the success page on that.
+// GRANTED without a real session is not access (the entitlement id is not a session id).
 func TestPostStayGrantWithoutASessionIsRefused(t *testing.T) {
 	for _, answer := range []map[string]any{
 		{"outcome": "GRANTED", "session_id": "", "entitlement_id": "ent-1"},
@@ -164,7 +152,6 @@ func TestPostStayGrantWithoutASessionIsRefused(t *testing.T) {
 	}
 }
 
-// A verified PIN with no offers is a contract break; the guest gets the uniform answer, not a dead context.
 func TestPostStayVerifiedWithoutOffersIsTheUniformAnswer(t *testing.T) {
 	s := &pathStub{answers: map[string]any{
 		"/v1/phase5/auth/post-stay-pin": map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1"}}}

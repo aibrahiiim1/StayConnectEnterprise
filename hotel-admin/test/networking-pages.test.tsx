@@ -1,18 +1,12 @@
-// NETWORKING (Hotel Admin → Networking): the redesigned screens keep every request they made before, and the
-// safety pattern — apply → confirm → automatic rollback — is on screen wherever a network change is live.
-//
-// What is asserted here is mostly what must NOT regress: no native browser dialog guards a destructive action,
-// the pending change shows its countdown with Keep / Roll back, the heaviest action (rotating the certificate)
-// still needs a reason, the password and the typed word ROTATE, a WAN change still needs the password, and a
-// role that may only read sees no button it cannot use.
+// Networking screens keep every request they made and the apply -> confirm -> automatic rollback pattern; no native
+// dialogs, and read-only roles see no unusable button.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// jsdom has no ResizeObserver and Radix's Switch measures itself on mount. Scoped to this file, as the other
-// suites that need it do, so the shared environment is unchanged.
+// jsdom has no ResizeObserver and Radix's Switch measures itself on mount; scoped to this file.
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver ??= ResizeObserverStub;
 
@@ -124,7 +118,6 @@ describe("Client networks", () => {
     const box = banner.closest("section")!;
     expect(within(box).getByLabelText(/seconds left/)).toBeTruthy();
     fireEvent.click(within(box).getByRole("button", { name: "Keep this change" }));
-    // Keeping a configuration needs the operator's password (N-15), typed into the dialog -- not sent without it.
     const dialog = await screen.findByRole("dialog");
     expect(post).not.toHaveBeenCalled();
     fireEvent.change(within(dialog).getByLabelText(/Confirm your password/), { target: { value: "s3cret-pass" } });
@@ -175,7 +168,6 @@ describe("Client networks", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/disable"));
   });
 
-  // Found on PRE-LIVE: a disabled network offered Edit and Delete and no way back.
   it("a disabled network can be enabled again, as a staged change", async () => {
     route({
       "/auth/whoami": IT,
@@ -202,7 +194,6 @@ describe("Client networks", () => {
     expect(screen.queryByText("New client network")).toBeNull();
     expect(screen.queryByRole("button", { name: /Apply changes/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Disable/ })).toBeNull();
-    // The countdown is still shown; the actions are not.
     expect(await screen.findByText(/Revision #9/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Keep this change" })).toBeNull();
   });
@@ -356,7 +347,6 @@ describe("TLS certificate", () => {
     post.mockResolvedValue({ ok: true, exit: 0 });
     render(<CertificatePage />);
     expect(await screen.findByText(/Healthy · 300 days left/)).toBeTruthy();
-    // The internal certificate authority is not shown.
     expect(screen.queryByText("Internal CA")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Rotate/ }));

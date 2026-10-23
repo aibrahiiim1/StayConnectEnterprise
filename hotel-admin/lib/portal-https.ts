@@ -1,9 +1,4 @@
-// PORTAL HTTPS — the shapes edged returns for /edge/v1/portal-https and the words they are shown with
-// (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §4, §5, §8).
-//
-// One place for the words, so the Portal HTTPS page, the Identity providers page and Diagnostics never
-// describe the same fallback three different ways. Unknown codes are shown verbatim: a newer appliance may
-// report a condition this bundle has no sentence for, and hiding it would be worse than showing the code.
+// Shapes edged returns for /edge/v1/portal-https and the words they are shown with; unknown codes are shown verbatim.
 
 export type PortalDNSRecord = { type: string; name: string; value: string };
 
@@ -63,7 +58,6 @@ export type PortalHTTPSDoc = {
   health: PortalHealth;
 };
 
-/** Why the HTTP fallback is in force, in the administrator's words. */
 export const FALLBACK_WORDS: Record<string, string> = {
   NOT_CONFIGURED: "OneGate Central has not been set up to issue portal certificates yet.",
   NO_HOSTNAME: "This appliance has not been given its portal hostname yet.",
@@ -97,7 +91,6 @@ export const DNS_STATE_WORDS: Record<string, string> = {
   ERROR: "Error",
 };
 
-/** The portal's HTTPS headline, from edged's portal_https check. */
 export function portalHeadline(doc: Pick<PortalHTTPSDoc, "state" | "health">): {
   tone: "success" | "warning" | "danger";
   title: string;
@@ -111,7 +104,6 @@ export function portalHeadline(doc: Pick<PortalHTTPSDoc, "state" | "health">): {
   return { tone: "warning", title: "The Client Portal is on the HTTP fallback" };
 }
 
-/** Whether a client-supplied name looks like a hotel portal domain; the server is the authority. */
 export function looksLikePortalDomain(raw: string): string | null {
   const v = raw.trim().toLowerCase().replace(/\.$/, "");
   if (!v) return "Enter a domain such as wifi.yourhotel.com.";
@@ -124,10 +116,6 @@ export function looksLikePortalDomain(raw: string): string | null {
   return null;
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* Social sign-in                                                                                          */
-/* ------------------------------------------------------------------------------------------------------ */
-
 export const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
   apple: "Apple",
@@ -135,7 +123,6 @@ export const PROVIDER_LABELS: Record<string, string> = {
   microsoft: "Microsoft",
 };
 
-/** Why a provider is not offered to clients right now (edged's offered_reason). */
 export function offeredWords(reason: string | null | undefined, provider: string): string {
   switch (reason) {
     case undefined:
@@ -150,7 +137,6 @@ export function offeredWords(reason: string | null | undefined, provider: string
       return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} needs your hotel portal domain (see Portal HTTPS).`;
     case "callback_not_registered":
       return "Not offered: the callback URL of the portal's current address is not ticked as registered.";
-    // The Sign-in methods switch for this provider (edged applySocialSwitch).
     case "method_off":
       return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} is switched off under Sign-in methods.`;
     case "method_unknown":
@@ -160,7 +146,6 @@ export function offeredWords(reason: string | null | undefined, provider: string
   }
 }
 
-/** What the hotel has to do in the provider's own console. Short on purpose. */
 export const PROVIDER_CONSOLE_HELP: Record<string, string> = {
   google:
     "Google Cloud console: verify your hotel portal domain in Google Search Console, add that domain as an authorized domain on the OAuth consent screen, and add the callback URL of the hotel domain as an authorized redirect URI. Google does not accept the OneGate hostname.",
@@ -172,7 +157,6 @@ export const PROVIDER_CONSOLE_HELP: Record<string, string> = {
     "Meta for Developers: in Facebook Login settings, keep Strict Mode on and add the callback URL under Valid OAuth Redirect URIs.",
 };
 
-/** The ticked host names that still exist. A host name the appliance no longer has cannot be registered. */
 export function keepAvailable(hosts: string[], available: Pick<PortalCallbackURL, "hostname">[]): string[] {
   const known = new Set(available.map((c) => c.hostname));
   return hosts.filter((h) => known.has(h));

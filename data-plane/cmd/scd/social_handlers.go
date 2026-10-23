@@ -21,15 +21,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
-// ---- /v1/auth/social/start --------------------------------------------------
-
 type socialStartReq struct {
 	Provider string `json:"provider"`
 	IP       string `json:"ip"`
 	MAC      string `json:"mac"`
-	// RedirectURI is portald's own view of its callback URL. It is NOT what a real provider is sent: that is
-	// always https://<canonical>/auth/social/callback (offerSocial). It is read only for the development stub
-	// on plain HTTP.
+	// portald's own view of its callback: read only by the development stub on plain HTTP; real providers get the canonical HTTPS URI (offerSocial).
 	RedirectURI string `json:"redirect_uri"`
 }
 
@@ -53,7 +49,6 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The same switch record the portal's listing reads (methodSwitches is the test seam for it).
 	load := s.methodSwitches
 	if load == nil {
 		load = func(ctx context.Context) (*tenantcfg.AuthMethods, error) { return tenantcfg.Load(ctx, s.db, s.tenID) }
@@ -69,10 +64,8 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OFFERED ONLY OVER HTTPS, AND ONLY ON A CALLBACK HOST THE HOTEL REGISTERED (contract §5). The redirect URI
-	// is derived here from the canonical hostname -- not from the Host header portald saw and not from the
-	// provider row's stored redirect_uri -- and the attempt row stores it, so the exchange uses the very value
-	// the provider was sent.
+	// OFFERED ONLY OVER HTTPS, ON A CALLBACK HOST THE HOTEL REGISTERED. The redirect URI is derived from the canonical hostname, not the Host header
+	// or the provider row, and stored on the attempt so the exchange uses the value the provider was sent.
 	offer := s.offerSocial(req.Provider, req.RedirectURI)
 	if !offer.ok {
 		slog.Info("social sign-in start refused", "provider", req.Provider, "reason", offer.reason)
@@ -100,10 +93,8 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 	}
 	expires := time.Now().Add(10 * time.Minute)
 
-	// The state row is an OAuth HANDSHAKE record: it binds the callback to the device that started the flow
-	// (anti-CSRF; never identity) and carries the attempt's PKCE verifier and OIDC nonce, which only scd ever
-	// holds. It no longer carries an access-plan id -- in the current model the guest authenticates first and
-	// chooses a package afterwards in the commerce flow.
+	// An OAuth handshake record: binds the callback to the device that started the flow (anti-CSRF, never identity) and carries the PKCE
+	// verifier and OIDC nonce, which only scd holds.
 	_, err = s.db.Exec(r.Context(), `
         INSERT INTO social_oauth_states
           (state, tenant_id, appliance_id, provider,
@@ -128,8 +119,7 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authorizeURLFor builds the consent URL of one attempt: the PKCE challenge is derived from the verifier here,
-// so the verifier itself never leaves scd except on the server-to-server token request.
+// The PKCE challenge is derived here so the verifier never leaves scd except on the server-to-server token request.
 func authorizeURLFor(p social.Provider, state, redirectURI, verifier, nonce string) string {
 	a := social.AuthRequest{State: state, RedirectURI: redirectURI, Nonce: nonce}
 	if verifier != "" {
@@ -137,8 +127,6 @@ func authorizeURLFor(p social.Provider, state, redirectURI, verifier, nonce stri
 	}
 	return p.AuthorizeURL(a)
 }
-
-// ---- /v1/sessions/authorize-social -----------------------------------------
 
 type socialAuthorizeReq struct {
 	Provider string `json:"provider"`
@@ -173,8 +161,7 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up + consume state atomically. UPDATE ... RETURNING gives us the
-	// row on first fetch, then sets consumed_at; second call sees it consumed.
+	// Look up and consume state atomically: UPDATE ... RETURNING, so a second call sees it consumed.
 	var (
 		stTenant, stProvider, stRedirect string
 		stVerifier, stNonce              string
@@ -212,11 +199,8 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusGone, "state expired")
 		return
 	}
-	// The provider is the one the state row was started for. A real IdP
-	// returns only code + state to the callback (the redirect_uri registered
-	// with it is the bare /auth/social/callback), so portald may send no
-	// provider at all; when it does send one — the Stub round-trips it — it
-	// must agree with the state.
+	// The provider is the one the state row was started for. A real IdP returns only code and state, so portald may send no provider; if it
+	// sends one (the Stub does) it must agree with the state.
 	if req.Provider == "" {
 		req.Provider = stProvider
 	}
@@ -225,8 +209,7 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if stTenant != s.tenID {
-		// Should be impossible in single-tenant scd, but defends against
-		// cross-tenant state replay if scd is ever multi-tenanted.
+		// Defends against cross-tenant state replay if scd is ever multi-tenanted.
 		httpErr(w, http.StatusForbidden, "tenant mismatch")
 		return
 	}
@@ -246,17 +229,14 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "unknown provider")
 		return
 	}
-	// The exchange uses the attempt's OWN redirect URI, verifier and nonce -- the values the provider was sent
-	// at start -- never anything the callback request carries. The provider refuses an attempt that lacks the
-	// binding it uses, and an id_token whose nonce is not this attempt's.
+	// The exchange uses the attempt's OWN redirect URI, verifier and nonce, never anything the callback carries; the provider refuses a missing
+	// binding or an id_token whose nonce is not this attempt's.
 	exchStart := time.Now()
 	info, err := prov.Exchange(r.Context(), social.ExchangeRequest{
 		Code: req.Code, RedirectURI: stRedirect, CodeVerifier: stVerifier, Nonce: stNonce})
 	s.met.SocialLoginDuration.WithLabelValues(req.Provider).Observe(time.Since(exchStart).Seconds())
 	if err != nil {
-		// social.ErrEmailUnverified is returned WITH a populated UserInfo
-		// (so callers can show a friendlier "verify your email" prompt);
-		// every other error is a hard failure.
+		// ErrEmailUnverified is returned WITH a populated UserInfo (for a friendlier prompt); every other error is a hard failure.
 		if errors.Is(err, social.ErrEmailUnverified) {
 			s.met.SocialLoginTotal.WithLabelValues(req.Provider, "email_unverified").Inc()
 			httpErr(w, http.StatusForbidden, "email not verified by provider")
@@ -284,22 +264,9 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// THE IDENTITY IS VERIFIED BY THE PROVIDER; THE PRINCIPAL IS IAM-v2's.
-	//
-	// social_oauth_states is the OAuth handshake nonce store and is deliberately not part of the IAM-v2
-	// identity model, exactly as public.auth_otps is not: the provider exchange happens here and only the
-	// verified, issuer-scoped subject crosses into iam_v2, where authSocialIdentity maps it to a principal
-	// identity in iam_v2.guest_principal_identities.
-	//
-	// What was REMOVED is the superseded pipeline that followed: a legacy access-plan lookup for duration
-	// and shaping, a public.sessions row, and direct nft/shaping calls. Access comes from the package the
-	// guest selects after authenticating, not from the credential they used.
-	//
-	// THE SUBJECT IS THE IDENTITY (contract §2.1). The previous code stored the email string as the social
-	// subject and discarded info.Sub, which contradicted the Phase-0 contract ("issuer-scoped social subject")
-	// and made an email change at the provider a brand-new Client. The provider's sub is now the factor; a
-	// TRUSTED issuer's verified email is a second factor on the same Client (identity.go), which is what joins a
-	// Google sign-in to the Client an email code created. Facebook asserts no verification and links nothing.
+	// The provider verifies the identity; the principal is IAM-v2. social_oauth_states is only the handshake nonce store: just the verified,
+	// issuer-scoped subject crosses into iam_v2 (authSocialIdentity). The provider sub is the identity factor, so an email change at the provider
+	// is not a new Client; a trusted issuer's verified email is a second factor on the same Client (identity.go). Facebook asserts no verification and links nothing.
 	primary, secondary := iamv2.SocialFactors(req.Provider, info.Sub, info.Email, info.EmailVerified, info.Claims)
 	s.authorizeViaIAMv2(w, r, iamv2.MethodSocial, iamv2.Request{
 		Provider:         req.Provider,
@@ -312,8 +279,6 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 	}, ip)
 }
 
-// ---- helpers ----------------------------------------------------------------
-
 func newSocialState() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -322,9 +287,7 @@ func newSocialState() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// applySocialOffering removes from the portal's method list every social provider that may not be started
-// right now (offerSocial): the portal then renders a button only for a provider whose start would succeed.
-// Under the HTTP fallback that is none of the real ones.
+// Removes every social provider that may not be started now (offerSocial), so the portal renders a button only for a start that would succeed.
 func (s *server) applySocialOffering(cfg *tenantcfg.AuthMethods) {
 	if cfg == nil {
 		return
@@ -339,8 +302,7 @@ func (s *server) applySocialOffering(cfg *tenantcfg.AuthMethods) {
 	}
 }
 
-// stubOfferable: in a development build the stub is reachable over plain HTTP through portald's own callback,
-// which the method list cannot know; the button stays, as it always did there.
+// In a development build the stub is reachable over plain HTTP through portald's own callback, which the method list cannot know, so its button stays.
 func (s *server) stubOfferable(provider string) bool {
 	set := s.currentSocial()
 	p, err := set.reg.Get(provider)

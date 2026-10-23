@@ -22,7 +22,6 @@ type Status = {
   keep_binaries: number; keep_releases: number; keep_db: number; keep_config: number;
   protected_items?: string[]; pinned_items?: string[]; retained_items?: string[]; delete_items?: string[];
 };
-/** The database backups themselves: the newest finished dump on disk and the last run of the daily backup. */
 type DatabaseBackup = {
   newest_file?: string | null; newest_at?: string | null; newest_bytes?: number;
   last_attempt_at?: string | null; last_success_at?: string | null; last_failure_at?: string | null;
@@ -66,11 +65,6 @@ function ItemTable({
   );
 }
 
-/**
- * Backup / rollback retention health for Central's own host. Read-only view of what the backup cleanup tool
- * retained, pinned, protected and would delete, plus disk usage, last run, failures and whether a valid rollback
- * path exists.
- */
 export default function BackupHealthPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -189,7 +183,6 @@ export default function BackupHealthPage() {
               hint={s.failure_detail || "None"}
             />
           </section>
-
 
           <ItemTable title="Protected" description="Never deleted." items={s.protected_items} tone="ok" />
           {(s.pinned ?? 0) > 0 && <ItemTable title="Operator-pinned" items={s.pinned_items} tone="warn" />}

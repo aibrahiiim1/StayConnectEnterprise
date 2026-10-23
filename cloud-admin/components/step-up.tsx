@@ -1,11 +1,6 @@
 "use client";
 
-// PASSWORD CONFIRMATION, as a designed dialog.
-//
-// License, certificate and appliance actions are gated server-side: when the operator has not re-entered their
-// password recently the API answers 403 reauth_required, and lib/api.ts withStepUp() asks for the password,
-// re-authenticates and retries once. It used to ask with window.prompt, which shows the password in clear text
-// and cannot say what it is for. This provider registers a real dialog in its place; the contract is the same.
+// Sensitive writes require a recent password; this masked dialog supplies it for one retry.
 
 import * as React from "react";
 import { setStepUpPrompter } from "@/lib/api";
@@ -33,7 +28,7 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
   function finish(value: string | null) {
     pending?.resolve(value);
     setPending(null);
-    // The password never outlives the dialog that collected it.
+    // Clear the password when the dialog closes.
     setPassword("");
   }
 

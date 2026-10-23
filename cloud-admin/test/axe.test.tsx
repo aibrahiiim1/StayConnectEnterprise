@@ -6,10 +6,7 @@ import { mockFetch, PLATFORM_ME, renderAs } from "./helpers";
 import { nav } from "./navigation";
 import { CUSTOMER, SITE } from "./fixtures";
 
-// AUTOMATED ACCESSIBILITY CHECKS (axe-core) over the main screens and components the other tests already render.
-// Every WCAG 2.0/2.1/2.2 A and AA rule axe has runs, and any violation fails the test. Only colour contrast is
-// switched off: jsdom does no layout or painting, so axe cannot compute it here (the tokens' contrast is checked
-// in design-tokens-sync.test.ts and by hand).
+// jsdom cannot measure color contrast because it does not paint or lay out pages.
 
 vi.mock("next/navigation", async () => (await import("./navigation")).navigationModule);
 vi.mock("qrcode", () => ({ default: { toDataURL: async () => "data:image/png;base64,AAAA" } }));

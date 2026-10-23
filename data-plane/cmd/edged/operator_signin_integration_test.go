@@ -2,13 +2,8 @@
 
 package main
 
-// ADMIN CONSOLE SIGN-IN, AGAINST A REAL DATABASE (audit N-1, N-2, N-8, N-23, N-24; migration 0119).
-//
-// The live audit measured the defect this closes: 20 wrong passwords in 2.6 s, then the right one signed in,
-// no lockout, no rate limit and no audit row. These tests drive the real handlers through the real router,
-// the real throttle functions and a real audit log. "Time passing" is simulated by moving the counters'
-// timestamps back as the superuser fixture -- the only way a test can wait out a fifteen-minute lockout --
-// never by changing what the product does.
+// Drives the real handlers, router, throttle functions and audit log. "Time passing" is simulated by moving the
+// counters' timestamps back as the superuser fixture, since a test cannot wait out a fifteen-minute lockout.
 
 import (
 	"context"
@@ -36,7 +31,6 @@ type signinFixture struct {
 	keys  []string // throttle keys this test may have created, removed at cleanup
 }
 
-// newSigninAPI mounts the sign-in surface exactly as main.go does, on the shared disposable database.
 func newSigninAPI(t *testing.T, roles ...string) *signinFixture {
 	t.Helper()
 	f := newAPI(t, roles...)
@@ -72,7 +66,7 @@ func newSigninAPI(t *testing.T, roles ...string) *signinFixture {
 	return sf
 }
 
-// testIP is a documentation address unique to the calling test, so no two tests share a source-address counter.
+// testIP is unique per test so no two share a source-address counter.
 func testIP() string { return fmt.Sprintf("198.51.100.%d", 1+rand.Intn(250)) }
 
 func (sf *signinFixture) track(scope, value string) {
@@ -80,12 +74,11 @@ func (sf *signinFixture) track(scope, value string) {
 }
 
 type resp struct {
-	code   int
-	body   map[string]any
-	raw    string
-	header http.Header
-	cookie string
-	// pending is the "password accepted" cookie of a first sign-in step (0132).
+	code    int
+	body    map[string]any
+	raw     string
+	header  http.Header
+	cookie  string
 	pending string
 }
 
@@ -136,14 +129,12 @@ func (sf *signinFixture) call(t *testing.T, method, path, ip, cookie string, bod
 	return out
 }
 
-// passwordStep is the first sign-in step alone: on success it answers which second step comes, and opens no session.
 func (sf *signinFixture) passwordStep(t *testing.T, email, pw, ip string) resp {
 	sf.track(scopeAccount, email)
 	sf.track(scopeIP, ip)
 	return sf.call(t, "POST", "/auth/login", ip, "", map[string]any{"email": email, "password": pw}, nil)
 }
 
-// codeStep sends a code with the "password accepted" cookie.
 func (sf *signinFixture) codeStep(t *testing.T, pending, code, ip string) resp {
 	return sf.call(t, "POST", "/auth/login/code", ip, "", map[string]any{"code": code}, map[string]string{"pending": pending})
 }
@@ -173,7 +164,6 @@ func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
 	return sf.codeStep(t, first.pending, sf.mfa.codeFor(id), ip)
 }
 
-// age moves a counter's clock back by d: the test's way of letting time pass.
 func (sf *signinFixture) age(t *testing.T, scope, value string, d time.Duration) {
 	t.Helper()
 	if _, err := sf.pool.Exec(context.Background(), `UPDATE public.operator_signin_throttle
@@ -228,7 +218,6 @@ func TestIntegrationLogin_LockoutAfterFiveFailuresAuditedWithoutThePassword(t *t
 	if leaks != 0 || withIP != 5 {
 		t.Fatalf("audit rows: %d contain the password, %d carry reason+source address (want 0 and 5)", leaks, withIP)
 	}
-	// The lockout runs out; the right password signs in and clears the account's count.
 	sf.age(t, scopeAccount, sf.email, 16*time.Minute)
 	if r := sf.login(t, sf.email, sf.password, ip); r.code != 200 || r.cookie == "" {
 		t.Fatalf("sign-in after the lockout window: %d %s", r.code, r.raw)
@@ -248,7 +237,6 @@ func TestIntegrationLogin_BackOffFromTheSecondFailure(t *testing.T) {
 			t.Fatalf("failure %d: %d", i+1, r.code)
 		}
 	}
-	// Immediately after the second failure: refused before the password is even checked.
 	if r := sf.login(t, sf.email, sf.password, ip); r.code != 429 {
 		t.Fatalf("no back-off after two failures: %d %s", r.code, r.raw)
 	}
@@ -288,7 +276,6 @@ func TestIntegrationLogin_UnknownAccountIsIndistinguishable(t *testing.T) {
 	if unknown < known/3 {
 		t.Fatalf("an unknown account answers measurably faster (%s vs %s): the timing names real accounts", unknown, known)
 	}
-	// ...and it locks like a real one, so a lockout does not name real accounts either.
 	for i := 0; i < 2; i++ {
 		sf.login(t, ghost, "wrong-password-zz", ip)
 		sf.age(t, scopeAccount, ghost, time.Minute)
@@ -387,7 +374,6 @@ func TestIntegrationStepUp_ThrottledAuditedAndGuardsTheBackupDownload(t *testing
 		t.Fatal("the authorization and the download must both be audited")
 	}
 
-	// A desk role sees no download at all, password or not.
 	desk := newSigninAPI(t, "front_office_operator")
 	if r := desk.call(t, "POST", "/backup-download/"+name+"/ticket", ip, desk.sessTok, map[string]any{"password": desk.password}, nil); r.code != 403 {
 		t.Fatalf("a desk role was offered a backup download: %d %s", r.code, r.raw)
@@ -478,7 +464,6 @@ func TestIntegrationAdminResetAndDisableEndTheOperatorsSessions(t *testing.T) {
 		admin.login(t, email, "wrong-wrong-wrong", ip)
 		admin.age(t, scopeAccount, email, time.Minute)
 	}
-	// B7: changing a colleague's account asks for the administrator's own password.
 	if r := admin.call(t, "POST", "/operators/"+id+"/set-password", ip, admin.sessTok, map[string]any{"password": "reset-by-admin-22"}, nil); r.code != 401 {
 		t.Fatalf("a reset without the administrator's password: %d %s", r.code, r.raw)
 	}
@@ -587,8 +572,7 @@ func TestIntegrationCrossSiteRequestsAreRefused(t *testing.T) {
 	}
 }
 
-// LEAST PRIVILEGE, AS svc_edged ITSELF. The policy can change only through its setter (which writes the change
-// row), a counter only through fail/clear, and an address counter cannot be cleared at all.
+// As svc_edged itself: the policy changes only through its setter, a counter only through fail/clear, and an address counter cannot be cleared.
 func TestIntegrationSigninThrottlePrivilegesUnderEdgedsOwnLogin(t *testing.T) {
 	dsn := os.Getenv("EDGED_ROLE_TEST_DSN")
 	if dsn == "" {
@@ -634,8 +618,7 @@ func TestIntegrationSigninThrottlePrivilegesUnderEdgedsOwnLogin(t *testing.T) {
 	}
 }
 
-// PROVISIONING'S --allow-weak IS USABLE EXACTLY ONCE: the seeded account must change its password, and a
-// break-glass re-seed ends a running lockout on that account.
+// --allow-weak is usable exactly once: the seeded account must change its password, and a break-glass re-seed ends a lockout.
 func TestIntegrationSeedAdminAllowWeakMustChange(t *testing.T) {
 	sf := newSigninAPI(t, "site_admin")
 	t.Setenv("EDGED_DB_URL", os.Getenv("PHASE3_TEST_DSN"))

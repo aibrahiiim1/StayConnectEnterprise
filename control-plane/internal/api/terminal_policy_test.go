@@ -10,12 +10,10 @@ import (
 	"testing"
 )
 
-// These tests pin the retirement policy in the code itself: an appliance's credentials are revoked only after
-// it acknowledged its terminal assignment, or on an explicit emergency — never by a path that is merely
-// retiring it. Revoking first makes the retirement undeliverable: the assignment channel (strictMTLSSelf)
-// refuses a revoked certificate, so the box never learns it was retired and keeps serving.
+// These tests pin the retirement policy: credentials are revoked only after the terminal-assignment ack or on an
+// explicit emergency. Revoking first makes the retirement undeliverable (strictMTLSSelf refuses a revoked
+// certificate), so the box would keep serving.
 
-// callersOf maps each top-level function in the package to the calls it makes to target.
 func callersOf(t *testing.T, target string) map[string][]*ast.CallExpr {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -104,8 +102,6 @@ func TestEmergencyIsTheOnlyImmediateRevocationInBeginTerminalDelivery(t *testing
 	t.Fatal("beginTerminalDelivery not found")
 }
 
-// Replacement completion retires the old appliance through the normal, NON-emergency terminal delivery and
-// never revokes its certificate itself.
 func TestReplacementUsesAcknowledgedRetirement(t *testing.T) {
 	for _, forbidden := range []string{"phase2ShutCredentials", "revokeActiveCertificates", "issueAssignment"} {
 		if calls := callersOf(t, forbidden)["completeReplacementIfPending"]; len(calls) > 0 {

@@ -2,23 +2,11 @@
 
 package main
 
-// THE FOUR CONTROL COMBINATIONS, end to end, over real HTTP, against a real PostgreSQL carrying the
-// authoritative chain — and the local-first guarantee that goes with them.
-//
-// Phase 6 has TWO controls that decide whether a guest can manage their own devices, and they are checked in
-// different places, at different times, by different mechanisms:
-//
-//   the DEPLOYMENT GATE   decides whether the routes are MOUNTED. Read once at startup. Off means the path
-//                         is ABSENT — a 404 — not a handler that refuses.
-//   the PRODUCT SETTING   decides whether this hotel OFFERS the capability. Read from the local database on
-//                         every request, so an operator switching it off takes effect without a restart and
-//                         so the decision survives with no Central Control Plane.
-//
-// Only the fourth combination may give a guest the capability. The other three must not, and each must fail
-// in its OWN way: absent when the software does not carry the feature, uniformly unavailable when the hotel
-// has not asked for it. Proving that requires all four to be exercised against the same real subject, which
-// is what this file does — the entitlement, the devices and the session are created by the REAL Phase-3
-// grant path, not seeded into a shape convenient for the assertion.
+// The four gate/setting combinations over real HTTP, plus the local-first guarantee. The deployment gate
+// (read at startup) decides whether routes are mounted (off is a 404); the product setting (read from the
+// local database per request) decides whether the hotel offers the feature. Only the fourth combination
+// gives a guest the capability, and the others fail differently (absent vs uniformly unavailable). All four
+// run against one subject created by the real grant path.
 
 import (
 	"bytes"
@@ -36,13 +24,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// ---- the fixture: one real guest with two real devices --------------------------------------------------
-
 type p6E2E struct {
 	*authFixture
-	ent      string // the entitlement the grant produced
-	online   string // device 1: the device that walked the Phase-3 path and holds a live session
-	offline  string // device 2: authorized through the real admission primitive, no session
+	ent      string
+	online   string // holds a live session
+	offline  string // authorized through the admission primitive, no session
 	operator string
 }
 
@@ -52,7 +38,6 @@ func newP6E2E(t *testing.T) *p6E2E {
 	t.Cleanup(f.startEnforcementOwner(t))
 	ctx := context.Background()
 
-	// A REAL grant. Everything downstream operates on what the product actually produces.
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000006-0000-4000-8000-000000000000"))
 	if res.Outcome != outcomeVerified || res.AuthContextID == "" {
 		t.Fatalf("the fixture guest could not resolve: %+v", res)
@@ -77,11 +62,8 @@ func newP6E2E(t *testing.T) *p6E2E {
 		t.Fatalf("the granted session has no device: %v", err)
 	}
 
-	// The appliance and the operator this setting will be scoped to. Both are platform rows the appliance
-	// already has in production; the composite foreign key on the setting is what makes "an appliance of
-	// this tenant and site" a database fact rather than a convention.
-	// The serial is built in Go: passing the same placeholder as both a uuid and a text would make
-	// PostgreSQL deduce two types for one parameter, which is an error rather than a coercion.
+	// The setting's composite foreign key makes "an appliance of this tenant and site" a database fact.
+	// The serial is built in Go: one placeholder used as both uuid and text makes PostgreSQL deduce two types.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO public.appliances(id,tenant_id,site_id,serial,name)
 		VALUES ($1,$2,$3,$4,'phase6-e2e') ON CONFLICT (id) DO NOTHING`,
 		f.appliance, f.tenant, f.site, "E2E-"+f.appliance[:8]); err != nil {
@@ -93,9 +75,7 @@ func newP6E2E(t *testing.T) *p6E2E {
 		t.Fatalf("seed operator: %v", err)
 	}
 
-	// A SECOND device on the SAME entitlement, admitted through the approved primitive and left OFFLINE
-	// (no session). This is the device a guest is allowed to remove, and it exists because a fixture with
-	// only an online device could never demonstrate a successful release.
+	// A second, offline device on the same entitlement: the one a guest may remove.
 	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.devices (id,tenant_id,site_id,appliance_id,mac,last_seen)
 		VALUES (gen_random_uuid(),$1,$2,$3,$4::macaddr, now() - interval '2 hours') RETURNING id::text`,
 		f.tenant, f.site, f.appliance, secondMAC(f.net.mac)).Scan(&e.offline); err != nil {
@@ -108,17 +88,12 @@ func newP6E2E(t *testing.T) *p6E2E {
 	return e
 }
 
-// secondMAC derives a distinct MAC from the fixture's own, because device identity is
-// (tenant, site, appliance, MAC) and a collision would silently make one device out of two.
+// secondMAC derives a distinct MAC: device identity is (tenant, site, appliance, MAC), so a collision merges two devices.
 func secondMAC(mac string) string {
 	return strings.Replace(mac, "02:00:00:aa:", "02:00:00:bb:", 1)
 }
 
-// ---- the two controls -----------------------------------------------------------------------------------
-
-// mount builds the router EXACTLY as main.go does: the constructor decides, and when it returns nil no route
-// is registered at all. That is the difference between an absent capability and a refusing one, and it can
-// only be observed if the test mounts the same way the service does.
+// mount builds the router exactly as main.go does: a nil constructor result registers no route at all.
 func (e *p6E2E) mount(t *testing.T, gateOn bool) *httptest.Server {
 	t.Helper()
 	env := map[string]string{}
@@ -142,8 +117,7 @@ func (e *p6E2E) mount(t *testing.T, gateOn bool) *httptest.Server {
 	return srv
 }
 
-// setSetting writes the per-appliance product setting through the real controlled boundary, then reads it
-// back — so a combination can never pass merely because the write silently did nothing.
+// setSetting writes the setting through the real controlled boundary and reads it back, so a no-op write cannot pass.
 func (e *p6E2E) setSetting(t *testing.T, on bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -203,11 +177,7 @@ func (e *p6E2E) bindingStatus(t *testing.T, device string) string {
 	return st
 }
 
-// ---- combinations 1 and 2: the deployment gate is OFF ---------------------------------------------------
-
-// With the gate off the routes DO NOT EXIST, and the product setting cannot change that. Combination 2 is
-// the one that matters: an operator can switch the property setting on — the screen even lets them — and no
-// guest capability appears, because the setting is a hotel decision and the gate is a deployment fact.
+// Combinations 1 and 2, gate off: the routes do not exist, whatever the property setting says.
 func TestIntegration_Phase6_GateOff_NoCapability(t *testing.T) {
 	for _, settingOn := range []bool{false, true} {
 		name := "setting_off"
@@ -227,7 +197,6 @@ func TestIntegration_Phase6_GateOff_NoCapability(t *testing.T) {
 						"not present-and-refusing: %s", path, got.status, got.body)
 				}
 			}
-			// Nothing moved, whatever the hotel's setting says.
 			if st := e.bindingStatus(t, e.offline); st != "AUTHORIZED" {
 				t.Fatalf("a device binding became %s while the gate was off", st)
 			}
@@ -235,7 +204,7 @@ func TestIntegration_Phase6_GateOff_NoCapability(t *testing.T) {
 	}
 }
 
-// ---- combination 3: deployed, but this hotel has not asked for it ---------------------------------------
+// Combination 3: deployed, but the hotel has not asked for it.
 
 func TestIntegration_Phase6_GateOnSettingOff_UniformlyUnavailable(t *testing.T) {
 	e := newP6E2E(t)
@@ -257,7 +226,7 @@ func TestIntegration_Phase6_GateOnSettingOff_UniformlyUnavailable(t *testing.T) 
 	if st := e.bindingStatus(t, e.offline); st != "AUTHORIZED" {
 		t.Fatalf("a device was released while the hotel had the capability switched off (status %s)", st)
 	}
-	// The refusal is the SAME refusal a guest with no entitlement would get: one answer for every reason.
+	// the same refusal a guest with no entitlement gets
 	unknown := e.call(t, srv, "/v1/phase6/devices/list",
 		map[string]any{"device": map[string]string{"ip": e.net.otherIP, "mac": secondMAC(e.net.mac)}})
 	if unknown.body != list.body {
@@ -266,7 +235,7 @@ func TestIntegration_Phase6_GateOnSettingOff_UniformlyUnavailable(t *testing.T) 
 	}
 }
 
-// ---- combination 4: the only one that gives a guest the capability ---------------------------------------
+// Combination 4: the only one that gives a guest the capability.
 
 func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 	e := newP6E2E(t)
@@ -291,7 +260,7 @@ func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 	if off, ok := byID[e.offline]; !ok || off.Online || !off.Removable {
 		t.Fatalf("the OFFLINE device is missing or not presented as removable: %+v", off)
 	}
-	// No MAC and no internal identity on the wire, whatever the database holds.
+	// no MAC or internal identity on the wire
 	low := strings.ToLower(list.body)
 	for _, forbidden := range []string{"mac", "02:00:00", "entitlement", "stay", "room", "pms", "tenant", "site"} {
 		if strings.Contains(low, forbidden) {
@@ -299,7 +268,7 @@ func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 		}
 	}
 
-	// AN ONLINE DEVICE IS NEVER REMOVABLE, and asking anyway is the ordinary refusal.
+	// an online device is never removable
 	if rel := e.releaseCall(t, srv, e.online); rel.parsed.Outcome != p6OutcomeUnavailable {
 		t.Fatalf("an ONLINE device was released: %s", rel.body)
 	}
@@ -307,7 +276,6 @@ func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 		t.Fatalf("the online device's binding became %s", st)
 	}
 
-	// The offline device is released, exactly once.
 	rel := e.releaseCall(t, srv, e.offline)
 	if rel.parsed.Outcome != p6OutcomeReleased {
 		t.Fatalf("the guest could not release their own offline device: %s", rel.body)
@@ -319,8 +287,7 @@ func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 		t.Fatalf("releasing the same device twice succeeded twice: %s", again.body)
 	}
 
-	// The identity, the accounting and the audit all survive the release: the slot is freed, the history is
-	// not erased.
+	// Identity, accounting and audit survive the release; only the slot is freed.
 	var devices, authorizations, actions int
 	if err := e.pool.QueryRow(ctx, `SELECT
 		 (SELECT count(*) FROM iam_v2.devices WHERE id=$1),
@@ -339,25 +306,16 @@ func TestIntegration_Phase6_GateOnSettingOn_TheGuestCapability(t *testing.T) {
 		t.Fatalf("the release produced %d audit rows, expected exactly 1", actions)
 	}
 
-	// ...and the guest's own listing now shows only what they still hold.
 	after := e.listCall(t, srv)
 	if len(after.parsed.Devices) != 1 || after.parsed.Devices[0].ID != e.online {
 		t.Fatalf("the listing after the release is %s", after.body)
 	}
 }
 
-// ---- local-first: the whole capability works with Central unreachable -----------------------------------
-
-// THE POINT OF THE PER-APPLIANCE SETTING IS THAT IT IS THE APPLIANCE'S. A hotel whose uplink is down must
-// still offer, refuse and record device self-service exactly as before — the guest network does not depend
-// on the internet.
-//
-// Every Central-facing endpoint is pointed at a port that is closed, so any code that reached for one would
-// fail or hang rather than quietly succeed against a real service. The flow is then run in full, under a
-// deadline: a path that waited on Central would blow the deadline even if it eventually recovered.
+// Local-first: with every Central-facing endpoint pointed at a closed port, the full flow must still work
+// under a deadline (a path waiting on Central would blow it).
 func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
-	// A listener that is opened and immediately closed gives an address nothing is serving — better than an
-	// invented one, because the port is real and the refusal is immediate and local.
+	// A closed listener gives a real address nothing serves, so refusal is immediate and local.
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	deadURL := dead.URL
 	dead.Close()
@@ -369,8 +327,6 @@ func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
 
 	done := make(chan string, 1)
 	go func() {
-		// The complete flow: the operator switches the property setting on, the guest lists, the guest
-		// releases, the guest lists again.
 		e.setSetting(t, true)
 		if got := e.listCall(t, srv); got.parsed.Outcome != p6OutcomeListed {
 			done <- "LIST failed with Central unreachable: " + got.body
@@ -384,7 +340,6 @@ func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
 			done <- "the listing did not settle: " + got.body
 			return
 		}
-		// And the operator can switch it back off, offline, with the change durably recorded.
 		e.setSetting(t, false)
 		if got := e.listCall(t, srv); got.parsed.Outcome != p6OutcomeUnavailable {
 			done <- "switching the setting off did not take effect: " + got.body
@@ -403,8 +358,6 @@ func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
 			"something in this path is waiting on the Control Plane")
 	}
 
-	// The durable record of both setting changes is on the APPLIANCE, which is where an operator will look
-	// for it when the uplink comes back.
 	var changes int
 	if err := e.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM iam_v2.appliance_product_setting_changes
@@ -416,8 +369,7 @@ func TestIntegration_Phase6_WorksWithCentralUnreachable(t *testing.T) {
 	}
 }
 
-// A property that never had the setting written at all is OFF: the guest capability is opt-in, and a missing
-// row is a decision the hotel has not made rather than a default in the guest's favour.
+// A missing setting row means OFF: the capability is opt-in.
 func TestIntegration_Phase6_UnwrittenSettingIsOff(t *testing.T) {
 	e := newP6E2E(t)
 	srv := e.mount(t, true)

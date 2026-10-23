@@ -1,15 +1,6 @@
 package main
 
-// THE HELP SHEET AND THE PRODUCT ATTRIBUTION, IN EVERY SHIPPED LANGUAGE.
-//
-// The sign-in page used to carry its explanations on the page itself. They now live behind a small lightbulb
-// button (help.*) that opens a sheet of tips for the ways in this hotel actually offers; field labels, the
-// short hints needed to fill a field, every error and every notice stay on the page. brand.by is the prefix of
-// the discreet "Wi-Fi by OneGate" line at the foot of every guest page -- "OneGate" is a product name and is
-// never translated, so it is not in this dictionary.
-//
-// These join builtinStrings at start-up like pageStrings, so there is still one dictionary: the page renders
-// it, /api/languages serves it, and Hotel Admin (portal-branding/strings.ts) offers every key for override.
+// The help sheet and product attribution in every shipped language; "OneGate" is a product name and never translated.
 var helpStrings = map[string]map[string]string{
 	"en": {
 		"brand.by":      "Wi-Fi by",
@@ -91,7 +82,7 @@ var helpStrings = map[string]map[string]string{
 	},
 }
 
-// The help words join the one dictionary at start-up; a key defined twice is refused loudly, as for pageStrings.
+// A key defined twice is refused loudly.
 func init() {
 	for code, words := range helpStrings {
 		dst := builtinStrings[code]

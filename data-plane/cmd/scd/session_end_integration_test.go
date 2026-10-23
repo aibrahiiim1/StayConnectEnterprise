@@ -2,14 +2,8 @@
 
 package main
 
-// ENDING SESSIONS AS svc_scd (audit B-4 / F-14) AND THE RECONNECT SHORTCUT (audit B-19), against the full
-// appliance schema with the server running as svc_scd.
-//
-// B-4: the sessions guard refuses a non-owner write that moves a session out of PENDING_ENFORCEMENT, so scd's raw
-// UPDATE answered 500 for exactly the sessions whose enforcement never converged; they stayed PENDING and held
-// their licensed slot. scd now ends sessions through iam_v2.end_session_enforcement.
-//
-// B-19: a device coming back to its package at a NEW address was handed its old session, pinned to the old one.
+// Ending sessions as svc_scd (the sessions guard refuses a non-owner raw UPDATE out of PENDING_ENFORCEMENT, so scd ends them through
+// iam_v2.end_session_enforcement) and the reconnect shortcut (a device returning at a NEW address must not keep its old session), on the full schema.
 
 import (
 	"bytes"
@@ -62,7 +56,7 @@ func TestIntegration_RevokeEndsAPendingEnforcementSession(t *testing.T) {
 	acc := f.seedAccount(t, "pend-"+randHex(3))
 	ent, _, session := f.seedPendingSession(t, acc, f.ip(50), "02:19:00:00:"+randHex(1)+":01")
 
-	// The raw UPDATE scd used to issue is what the guard refuses for svc_scd -- the defect, reproduced.
+	// The raw UPDATE is what the guard refuses for svc_scd.
 	if _, err := f.s.db.Exec(context.Background(), `UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='admin'
 	     WHERE id=$1::uuid`, session); err == nil {
 		t.Fatal("expected the sessions guard to refuse a raw svc_scd UPDATE out of PENDING_ENFORCEMENT")
@@ -114,8 +108,7 @@ func TestIntegration_EndSessionNowEndsAPendingEnforcementSession(t *testing.T) {
 	}
 }
 
-// seedAcquiredEntitlement is an ACTIVE package of the account acquired by device (purchase -> auth context ->
-// device), with the device seen on the fixture's guest network and holding its place: what activation requires.
+// An ACTIVE package of the account acquired by a device seen on the fixture guest network and holding its place, as activation requires.
 func (f *ssFixture) seedAcquiredEntitlement(t *testing.T, accountID, mac string) (ent, device string) {
 	t.Helper()
 	ctx := context.Background()

@@ -1,11 +1,4 @@
-// STAY-LENGTH TIERS AND THE PER-NIGHT ALLOWANCE, as the Product Owner specified them.
-//
-//   1–7 nights → Package A, 8–10 → Package B, 11+ → Package C
-//   1 GB a night, at least 5 GB, at most 20 GB
-//
-// The preview arithmetic here must agree with the server's exactly. It is duplicated deliberately — the
-// operator has to see the result before publishing an immutable revision — so the same worked example is
-// asserted on both sides, and a divergence fails a test rather than a guest's entitlement.
+// Keep preview arithmetic independent of the server so mismatches fail before publishing immutable revisions.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -36,7 +29,6 @@ describe("the approved stay-length tiers", () => {
   it("warns when two enabled packages claim the same nights, naming both and what will happen", () => {
     const w = stayLengthWarnings([...tiers,
       { package_id: "d", name: "Package D", active: true, range: { min: 5, max: 9 } }]);
-    // D overlaps both A (1–7) and B (8–10).
     expect(w).toHaveLength(2);
     expect(w[0]).toContain("Package A");
     expect(w[0]).toContain("Package D");
@@ -74,7 +66,6 @@ describe("the PMS eligibility dimensions are selectable and serialize correctly"
       expect(SUPPORTED_RULE_TYPES as readonly string[]).toContain(t);
       expect(isPMSRuleType(t)).toBe(true);
     }
-    // ...and still refuses the ones the engine cannot answer, which would make a package eligible for nobody.
     expect(FORBIDDEN_RULE_TYPES as readonly string[]).toContain("LOYALTY_TIER");
     for (const f of FORBIDDEN_RULE_TYPES) {
       expect(SUPPORTED_RULE_TYPES as readonly string[]).not.toContain(f);
@@ -82,8 +73,7 @@ describe("the PMS eligibility dimensions are selectable and serialize correctly"
   });
 
   it("omits an empty stay-length bound instead of sending zero", () => {
-    // {min_nights: 0} reads as "at least zero nights" — a rule that constrains nothing while looking like one
-    // that does, which is how an 11+ package silently becomes available to everybody.
+    // A zero-night minimum looks constrained but admits every stay.
     expect(serializeRule({ type: "STAY_LENGTH", min_nights: "11", max_nights: "" }))
       .toEqual({ type: "STAY_LENGTH", value: { min_nights: 11 } });
     expect(serializeRule({ type: "STAY_LENGTH", min_nights: "", max_nights: "7" }))
@@ -125,10 +115,8 @@ describe("the per-night data allowance", () => {
   it("sends the policy the server expects, and sends NOTHING for a fixed allowance", () => {
     expect(serializeAllocation(approved))
       .toEqual({ mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5, max_gb: 20 });
-    // FIXED publishes no policy at all, so the revision is byte-identical to one published before this
-    // feature existed.
+    // Fixed plans omit the policy field for wire compatibility.
     expect(serializeAllocation({ mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" })).toBeUndefined();
-    // An omitted ceiling is omitted, not zero.
     expect(serializeAllocation({ ...approved, max_gb: "" }))
       .toEqual({ mode: "PER_STAY_NIGHT", gb_per_night: 1, min_gb: 5 });
   });
@@ -139,9 +127,7 @@ describe("the per-night data allowance", () => {
     expect(validateAllocation({ ...approved, gb_per_night: "0" })).toMatch(/how many GB/i);
     expect(validateAllocation({ ...approved, min_gb: "30", max_gb: "20" })).toMatch(/below the minimum/i);
     expect(validateAllocation({ ...approved, max_gb: "0" })).toMatch(/greater than zero/i);
-    // A per-night rate on its own is legitimate: no floor and no ceiling is a valid product.
     expect(validateAllocation({ mode: "PER_STAY_NIGHT", gb_per_night: "2", min_gb: "", max_gb: "" })).toBeNull();
-    // FIXED is never validated against per-night fields.
     expect(validateAllocation({ mode: "FIXED", gb_per_night: "", min_gb: "", max_gb: "" })).toBeNull();
   });
 

@@ -11,10 +11,9 @@ import (
 	"strings"
 )
 
-// A SECOND COPY ON THE SAME DISK IS NOT A SECOND COPY. When the secondary storage is a folder, the folder must be an external
-// disk or a network share, not a directory on the appliance's own storage, and not a partition of the disk the appliance
-// runs from. This is decided from the kernel's own view (the mount table and the block-device tree), not from the name of
-// the folder, so a USB disk that is not plugged in, or a mount point that is just a directory on the root disk, is refused.
+// A second copy on the same disk is not a second copy: a folder destination must be an external disk or network
+// share, decided from the kernel's mount table and block-device tree, not the folder name (so an unplugged USB mount
+// point on the root disk is refused).
 
 type mountEntry struct {
 	id      string
@@ -27,7 +26,6 @@ type mountEntry struct {
 
 var networkFS = map[string]bool{"nfs": true, "nfs4": true, "cifs": true, "smb3": true, "smbfs": true, "fuse.sshfs": true, "9p": true, "ceph": true, "glusterfs": true, "fuse.glusterfs": true}
 
-// parseMountinfo reads /proc/self/mountinfo.
 func parseMountinfo(text string) []mountEntry {
 	var out []mountEntry
 	for _, line := range strings.Split(text, "\n") {
@@ -84,12 +82,10 @@ func mountOf(ms []mountEntry, p string) *mountEntry {
 	return best
 }
 
-// BlockTree answers which whole physical disks sit under a block device.
 type BlockTree interface {
 	Disks(devno string) ([]string, error)
 }
 
-// sysBlock is the real tree, read from /sys.
 type sysBlock struct{ root string }
 
 func (s sysBlock) Disks(devno string) ([]string, error) {

@@ -10,9 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The "not yourself" checks compare the operator id in the URL with the session's. An upper-case spelling of
-// one's own id is the same row to Postgres, so it must be refused as yourself; a braced or otherwise
-// non-canonical spelling is refused as a bad id. Neither may reach the database.
+// Own-id comparison: an upper-case spelling is the same row to Postgres and must be refused as yourself; a
+// non-canonical spelling is a bad id. Neither may reach the database.
 func TestOperatorSelfChecksCanonicaliseTheID(t *testing.T) {
 	const me = "3f2b8c1e-5d4a-4e6f-9a0b-1c2d3e4f5a6b"
 	s := &server{}

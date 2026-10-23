@@ -1,20 +1,9 @@
 package main
 
-// ADMIN CONSOLE AUTHENTICATOR (migration 0132; GDPR remediation plan C10, decision D-C10).
-//
-// edged authenticates the operator's password, applies the throttle and audits; it cannot open the authenticator
-// secret, because the key is here. These routes are what edged cannot do itself: seal a new secret, check a code
-// against it, keep a code from being used twice, and make and spend recovery codes. They sit under /v1/admin/, so
-// peerGate admits edged alone (admin_surface.go) -- the guest portal on the same socket can never reach them.
-//
-//	POST /v1/admin/operator-mfa/enrol           {operator_id, issuer, account} -> {secret, otpauth_uri}
-//	POST /v1/admin/operator-mfa/confirm         {operator_id, code}            -> {confirmed, recovery_codes}
-//	POST /v1/admin/operator-mfa/verify          {operator_id, code}            -> {ok, method, recovery_codes_left}
-//	POST /v1/admin/operator-mfa/recovery-codes  {operator_id, code}            -> {ok, recovery_codes}
-//	POST /v1/admin/operator-mfa/reset           {operator_id}                  -> {removed}
-//
-// The secret leaves this process exactly once, in the enrol answer, for the QR code; after that only codes come
-// in. Recovery codes leave exactly once, when made, and are stored as an HMAC under the same key.
+// Admin Console authenticator. edged authenticates the password, throttles and audits, but cannot open the authenticator
+// secret (the key is here); these routes seal a new secret, check a code, stop a code being used twice, and make and spend
+// recovery codes. Under /v1/admin/, so peerGate admits edged alone.
+// The secret leaves this process once, in the enrol answer (for the QR code); recovery codes leave once, when made, and are stored as an HMAC under the same key.
 
 import (
 	"context"
@@ -42,8 +31,7 @@ import (
 const (
 	operatorMFAKeyFile = "operator_totp_dek.key"
 	operatorMFADomain  = "operator-totp-aead:v1"
-	// recoveryCodeCount is D-C10's ten.
-	recoveryCodeCount = 10
+	recoveryCodeCount  = 10
 	// recoveryAlphabet has no 0/O, 1/I/L: a code is read off paper and typed.
 	recoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 	recoveryCodeLen  = 10
@@ -91,7 +79,6 @@ type operatorMFAReq struct {
 	Account    string `json:"account"`
 }
 
-// operatorMFARequest decodes and checks what every route needs: a well-formed operator id, the key and the database.
 func (s *server) operatorMFARequest(w http.ResponseWriter, r *http.Request) (operatorMFAReq, bool) {
 	var req operatorMFAReq
 	if err := decodeJSONBody(r, &req); err != nil {
@@ -156,7 +143,6 @@ func (s *server) operatorMFAEnrol(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// openOperatorSecret reads and opens the operator's authenticator. confirmed says which one is wanted.
 func (s *server) openOperatorSecret(ctx context.Context, q pgx.Tx, operatorID string, confirmed bool) ([]byte, *int64, error) {
 	var keyID string
 	var ver int
@@ -270,10 +256,9 @@ func spendTOTP(ctx context.Context, tx pgx.Tx, operatorID string, secret []byte,
 	return err
 }
 
-// operatorMFARecoveryCodes makes a new set only against a current authenticator code (Product-Owner decision
-// D-R3): a stolen session plus the password must not be enough to mint codes that later sign in with the
-// password alone. Only the authenticator's 6 digits count -- a recovery code is refused here and NOT spent --
-// and the code is spent in the same transaction that replaces the set, with the same replay rule as sign-in.
+// operatorMFARecoveryCodes makes a new set only against a current authenticator code: a stolen session plus the password
+// must not mint codes that later sign in with the password alone. A recovery code is refused here and not spent; the code
+// is spent in the same transaction that replaces the set.
 func (s *server) operatorMFARecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.operatorMFARequest(w, r)
 	if !ok {
@@ -339,7 +324,6 @@ func (s *server) operatorMFAReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
 }
 
-// replaceRecoveryCodes makes a fresh set, replacing every earlier code, used or not.
 func (s *server) replaceRecoveryCodes(ctx context.Context, tx pgx.Tx, operatorID string) ([]string, error) {
 	if _, err := tx.Exec(ctx, `DELETE FROM public.operator_mfa_recovery_codes WHERE operator_id = $1`, operatorID); err != nil {
 		return nil, err

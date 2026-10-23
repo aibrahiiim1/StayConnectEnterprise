@@ -12,8 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// rollbackManifest is written as manifest.json next to the per-table CSVs so
-// an operator can see exactly what the dest held before this run touched it.
 type rollbackManifest struct {
 	GeneratedAt time.Time            `json:"generated_at"`
 	Tool        string               `json:"tool"`
@@ -29,10 +27,7 @@ type rollbackTableEntry struct {
 	File string `json:"file"`
 }
 
-// dumpRollback snapshots the DEST database's current scoped rows, one CSV per
-// table (COPY ... TO STDOUT WITH CSV HEADER), before anything is written.
-// COPY does not take bind parameters, so the (already UUID-validated) tenant
-// and site are inlined as literals.
+// COPY does not take bind parameters, so the already UUID-validated tenant and site are inlined as literals.
 func dumpRollback(ctx context.Context, dst *pgx.Conn, cfg config, log *slog.Logger) error {
 	if err := os.MkdirAll(cfg.RollbackDir, 0o755); err != nil {
 		return fmt.Errorf("create rollback dir: %w", err)

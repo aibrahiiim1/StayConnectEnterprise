@@ -1,8 +1,7 @@
 package iamv2
 
-// The repository half of policy-driven system grace publication (D32). Kept in its own file because it is a
-// distinct boundary from the operator admin repository: it may create the reserved system plan and package
-// revisions, and it may do nothing else.
+// A separate boundary from the operator admin repository: it may create the reserved system grace plan and
+// package revisions and nothing else.
 
 import (
 	"context"
@@ -24,11 +23,9 @@ func (r *PgCommerceAdminRepository) WithGracePublishTx(ctx context.Context, fn f
 
 type pgGracePublishTx struct{ tx pgx.Tx }
 
-// EnsureSystemGracePlanRevision returns a system plan revision carrying EXACTLY the policy scalars.
-//
-// Revisions are immutable and the checkout matcher demands exact equality, so a policy change means a NEW
-// revision rather than an edit. An identical policy reuses the existing revision: republishing the same
-// policy must not fork history, and the current-revision pointer moves only when the scalars actually differ.
+// EnsureSystemGracePlanRevision returns a plan revision carrying exactly the policy scalars. Revisions are
+// immutable and the checkout matcher demands exact equality, so a changed policy needs a new revision, while an
+// identical one reuses the existing revision (no forked history).
 func (t *pgGracePublishTx) EnsureSystemGracePlanRevision(ctx context.Context, tenantID, siteID string, p SystemGracePolicy) (string, error) {
 	var planID string
 	if err := t.tx.QueryRow(ctx, `
@@ -38,8 +35,7 @@ func (t *pgGracePublishTx) EnsureSystemGracePlanRevision(ctx context.Context, te
 	    RETURNING id::text`, tenantID, siteID, systemGracePlanCode).Scan(&planID); err != nil {
 		return "", err
 	}
-	// VALIDITY_WINDOW because the matcher requires it: grace is a window after checkout, not an
-	// aggregate-time budget.
+	// The matcher requires VALIDITY_WINDOW: grace is a window after checkout, not an aggregate-time budget.
 	var revID string
 	err := t.tx.QueryRow(ctx, `
 	    SELECT id::text FROM iam_v2.service_plan_revisions
@@ -84,7 +80,6 @@ func (t *pgGracePublishTx) EnsureSystemGracePlanRevision(ctx context.Context, te
 	return revID, nil
 }
 
-// EnsureSystemGracePackageRevision returns the CURRENT system grace package revision expressing this policy.
 func (t *pgGracePublishTx) EnsureSystemGracePackageRevision(ctx context.Context, tenantID, siteID, planRevisionID string, p SystemGracePolicy) (string, error) {
 	var pkgID string
 	if err := t.tx.QueryRow(ctx, `
@@ -147,9 +142,8 @@ func (t *pgGracePublishTx) GraceMismatchReason(ctx context.Context, tenantID, si
 	return *reason, nil
 }
 
-// PublishGracePolicy goes through the CANONICAL audited, versioned boundary rather than the raw config
-// writer: actor, bounded reason code, optimistic version, the same matcher the conversion uses, and an
-// append to iam_v2.checkout_grace_policy_publications.
+// PublishGracePolicy uses the audited, versioned boundary (actor, reason code, optimistic version, the
+// conversion's matcher) rather than the raw config writer.
 func (t *pgGracePublishTx) PublishGracePolicy(ctx context.Context, req GracePublishRequest, packageRevisionID string) (int, error) {
 	var v int
 	err := t.tx.QueryRow(ctx,

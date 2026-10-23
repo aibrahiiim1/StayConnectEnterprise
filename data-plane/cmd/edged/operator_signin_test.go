@@ -11,8 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ---- the same-origin guard (N-23) ------------------------------------------------------------------------------
-
 func TestSameOriginGuardRefusesAnotherSite(t *testing.T) {
 	reached := 0
 	h := sameOrigin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached++; w.WriteHeader(204) }))
@@ -52,8 +50,6 @@ func TestSameOriginGuardRefusesAnotherSite(t *testing.T) {
 	}
 }
 
-// ---- must change the password ----------------------------------------------------------------------------------
-
 func TestMustChangeSessionReachesOnlyThePasswordChange(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	tok := s.sessions.create(&session{OperatorID: "op-1", Email: "a@b.c", Roles: []string{"site_admin"}, MustChangePassword: true})
@@ -91,8 +87,6 @@ func TestMustChangeSessionReachesOnlyThePasswordChange(t *testing.T) {
 		}
 	}
 }
-
-// ---- the throttle arithmetic -----------------------------------------------------------------------------------
 
 func TestBackoffDoublesFromTheSecondFailureAndIsCapped(t *testing.T) {
 	for n, want := range map[int]time.Duration{0: 0, 1: 0, 2: time.Second, 3: 2 * time.Second, 4: 4 * time.Second,
@@ -141,8 +135,6 @@ func TestThrottleKeyNeverStoresTheValue(t *testing.T) {
 	}
 }
 
-// ---- the password policy and the constant-time dummy -----------------------------------------------------------
-
 func TestOperatorPasswordPolicy(t *testing.T) {
 	for pw, ok := range map[string]bool{
 		"admin":                          false,
@@ -180,8 +172,6 @@ func TestDummyHashCostsTheSameAsARealOne(t *testing.T) {
 	}
 }
 
-// ---- the request bodies are bounded (N-13) -----------------------------------------------------------------------
-
 func TestLoginRefusesAnOversizedBodyBeforeTouchingTheDatabase(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)} // no database: reaching it would panic
 	body := `{"email":"a@b.c","password":"` + strings.Repeat("x", authBodyLimit) + `"}`
@@ -191,8 +181,6 @@ func TestLoginRefusesAnOversizedBodyBeforeTouchingTheDatabase(t *testing.T) {
 		t.Fatalf("oversized login body: got %d", w.Code)
 	}
 }
-
-// ---- logout requires the session, and still clears a stale cookie --------------------------------------------
 
 func TestLogoutWithoutASessionChangesNothingButClearsTheCookie(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
@@ -211,8 +199,6 @@ func TestLogoutWithoutASessionChangesNothingButClearsTheCookie(t *testing.T) {
 		t.Fatal("a logout without a session ended somebody else's session")
 	}
 }
-
-// ---- health detail only for the signed-in or the appliance itself (C-21) --------------------------------------
 
 func TestHealthDetailOnlyForASessionOrTheApplianceItself(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
@@ -243,8 +229,6 @@ func TestHealthDetailOnlyForASessionOrTheApplianceItself(t *testing.T) {
 		t.Fatal("a non-loopback caller without a session must not see the detail")
 	}
 }
-
-// ---- logs (N-22) -------------------------------------------------------------------------------------------------
 
 func TestLogsNeedDiagnosticsWrite(t *testing.T) {
 	s := &server{}
@@ -282,8 +266,6 @@ func TestSanitizeLogRedactsGuestIdentity(t *testing.T) {
 	}
 }
 
-// ---- backup download (N-2 / D-B) ---------------------------------------------------------------------------------
-
 func TestBackupDownloadIsSiteAdminAndITManagerOnly(t *testing.T) {
 	for role, want := range map[string]bool{
 		"site_admin": true, "hotel_it_manager": true, "front_office_operator": false,
@@ -293,7 +275,6 @@ func TestBackupDownloadIsSiteAdminAndITManagerOnly(t *testing.T) {
 			t.Errorf("%s backup-download write = %v, want %v", role, got, want)
 		}
 	}
-	// The list stays readable to every role that had it.
 	for _, role := range []string{"hotel_it_manager", "front_office_operator", "guest_relations_operator", "site_viewer"} {
 		if !permFor([]string{role}, "backups", permRead) {
 			t.Errorf("%s lost the backups list", role)
@@ -339,8 +320,6 @@ func TestBackupDownloadWithoutATicketIsRefused(t *testing.T) {
 	}
 }
 
-// The step-up refusal keeps the caller's wording when nothing is throttled, and becomes a 429 that says how
-// long to wait when it is.
 func TestReauthRefusedSaysWhy(t *testing.T) {
 	s := &server{}
 	r := httptest.NewRequest("POST", "/x", nil)
@@ -380,8 +359,7 @@ func TestSigninProtectionBoundsMatchTheMigration(t *testing.T) {
 	}
 }
 
-// The per-address throttle counts the address Caddy accepted the connection from (X-Real-IP, which the vhost
-// sets), not a value a browser could put first in X-Forwarded-For.
+// The throttle counts the address Caddy sets in X-Real-IP, not a value a browser could put first in X-Forwarded-For.
 func TestClientIPPrefersTheAddressCaddySets(t *testing.T) {
 	r := httptest.NewRequest("POST", "/edge/v1/auth/login", nil)
 	r.Header.Set("X-Forwarded-For", "10.9.9.9, 198.51.100.7")

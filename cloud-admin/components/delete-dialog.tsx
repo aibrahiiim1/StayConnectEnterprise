@@ -14,14 +14,7 @@ export type Blocker = {
   ids?: string[];
 };
 
-/**
- * DeleteDialog — the one permanent-delete flow (customer, site, appliance record).
- *
- * DELETE {deleteUrl} with { [confirmField]: typed value, reason }, wrapped in withStepUp: every delete in §6 is a
- * step-up write. It NEVER cascades — while dependent records exist the server answers 409 with the blocking
- * list, which is shown (with a link to each when the caller knows where they are listed). The action enables
- * only after the exact name/code/serial and a reason are typed.
- */
+/** Deletes require password step-up and exact confirmation; dependencies block deletion instead of cascading. */
 export function DeleteDialog({
   open, onClose, onDeleted,
   title, what, expected, confirmHint, deleteUrl,
@@ -30,16 +23,14 @@ export function DeleteDialog({
   open: boolean;
   onClose: () => void;
   onDeleted: () => void;
-  title: string;                 // e.g. 'Delete customer "Semantics"'
-  what: string;                  // e.g. "Customer" | "Site" | "Appliance record"
-  expected: string;              // the exact string the user must type
-  confirmHint: string;           // e.g. "Type the customer name"
-  deleteUrl: string;             // DELETE endpoint
-  /** What this delete does. The last item should be "It cannot be undone." */
+  title: string;
+  what: string;
+  expected: string;
+  confirmHint: string;
+  deleteUrl: string;
   consequences?: React.ReactNode[];
-  /** The body field that carries the typed value: "confirm", or "confirm_serial" for an appliance. */
+  /** Appliances use confirm_serial; other deletes use confirm. */
   confirmField?: string;
-  /** Where a blocking record is listed. Without it the blocker is named but not linked. */
   blockerHref?: (b: Blocker) => string | null;
 }) {
   const [busy, setBusy] = useState(false);

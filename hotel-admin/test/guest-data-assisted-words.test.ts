@@ -5,9 +5,8 @@ import {
   BLOCK_WORDS, CLASS_WORDS, KIND_WORDS, REASON_WORDS, REFUSAL_WORDS, describeDetail, isGroupAddress, isPrivateAddress, parseAddresses,
 } from "@/lib/guest-data-assisted-words";
 
-// Migration 0146 decides what a record is; this console only explains it. These tests keep the two in step: every
-// class, reason, kind, block and refusal the database or edged can produce has words, and no word describes
-// something they never produce.
+// Keeps the words in step with the database: every class, reason, kind, block and refusal it can produce has words, and
+// none describes what it never produces.
 
 const root = path.resolve(__dirname, "../..");
 const migDir = path.join(root, "data-plane/migrations");

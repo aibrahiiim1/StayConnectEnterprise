@@ -1,7 +1,6 @@
 package main
 
-// THE HTTPS PORTAL FROM PORTALD'S SIDE: the redirects in both states, the canonical-hostname rule on the TLS
-// listener, the RFC 8908 API, certificates by SNI (and their reload), and the absence of HSTS.
+// The HTTPS portal from portald's side: redirects in both states, the canonical-hostname rule, the RFC 8908 API, SNI certificates and reload, no HSTS.
 
 import (
 	"context"
@@ -57,8 +56,6 @@ func httpsHandler(t *testing.T, st portalTLSState, scd scdFunc) *handler {
 var activeState = portalTLSState{HTTPSActive: true, Canonical: tCustom, OneGateHostname: tOG, CustomDomain: tCustom,
 	Hostnames: []string{tOG, tCustom}, PortalIP: "10.255.255.1"}
 
-// ---- the HTTP listener ---------------------------------------------------------------------------------------
-
 func TestOnTheFallbackTheHTTPPortalIsExactlyAsBefore(t *testing.T) {
 	for name, st := range map[string]*tlsStateHolder{
 		"no state":     nil,
@@ -80,7 +77,6 @@ func TestOnTheFallbackTheHTTPPortalIsExactlyAsBefore(t *testing.T) {
 				t.Fatalf("%s %s: redirected to HTTPS on the fallback: %s", name, path, loc)
 			}
 		}
-		// The Android/Windows probes keep today's http://<fqdn>/ target.
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/generate_204", nil))
 		if loc := rec.Header().Get("Location"); loc != "http://portal.stayconnect.local/" {
@@ -111,7 +107,6 @@ func TestWhileHTTPSIsActiveHTTPGoesToTheCanonicalOrigin(t *testing.T) {
 			t.Errorf("%s: %d %q, want %q", in, rec.Code, rec.Header().Get("Location"), want)
 		}
 	}
-	// A form posted to the HTTP page keeps its method and body.
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "http://10.0.0.1:8380/auth/voucher", strings.NewReader("code=X")))
 	if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != "https://"+tCustom+"/auth/voucher" {
@@ -137,8 +132,6 @@ func TestARedirectNeverCarriesAForeignHost(t *testing.T) {
 	}
 }
 
-// ---- the TLS listener ----------------------------------------------------------------------------------------
-
 func tlsReq(method, host, path string) *http.Request {
 	r := httptest.NewRequest(method, "https://"+host+path, nil)
 	r.TLS = &tls.ConnectionState{ServerName: host}
@@ -160,7 +153,6 @@ func TestTheTLSListenerKeepsGuestsOnTheCanonicalHostname(t *testing.T) {
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://"+tCustom+"/packages?a=1" {
 		t.Fatalf("non-canonical portal host: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	// The captive API and social sign-in are answered on every portal hostname.
 	for _, p := range []string{"/captive-portal/api", "/auth/social/callback?state=x", "/auth/social/start?provider=apple"} {
 		rec = httptest.NewRecorder()
 		srv.ServeHTTP(rec, tlsReq(http.MethodGet, tOG, p))
@@ -198,8 +190,6 @@ func TestNoResponseEverCarriesHSTS(t *testing.T) {
 		}
 	}
 }
-
-// ---- RFC 8908 --------------------------------------------------------------------------------------------------
 
 func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	var askedIP atomic.Value
@@ -254,8 +244,7 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 		t.Fatal("custom tabs are only asked for while captive")
 	}
 
-	// NO PRE-AUTH INTERNET EXISTS (self-service contract section 1). A device without a session is captive even
-	// if scd still sent the retired verification-window fields, and nothing "remaining" is reported for it.
+	// A device without a session is captive, even if scd still sends the retired verification-window fields.
 	online, window = false, true
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, tlsReq(http.MethodGet, tCustom, "/captive-portal/api"))
@@ -266,7 +255,6 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 	}
 	window = false
 
-	// scd unreachable: captive (the recoverable mistake).
 	h.scd = &http.Client{Transport: scdFunc(func(*http.Request) (int, any) { return 0, nil })}
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, tlsReq(http.MethodGet, tCustom, "/captive-portal/api"))
@@ -276,8 +264,6 @@ func TestTheCaptiveAPIAnswersForTheConnectingDevice(t *testing.T) {
 		t.Fatalf("scd down: %v", got)
 	}
 }
-
-// ---- scd's state -----------------------------------------------------------------------------------------------
 
 func TestTheStateComesFromSCDAndFallsBackWhenSCDIsGone(t *testing.T) {
 	up := true
@@ -307,13 +293,10 @@ func TestTheStateComesFromSCDAndFallsBackWhenSCDIsGone(t *testing.T) {
 	if st.HTTPSActive || st.Canonical != tOG || len(st.Hostnames) != 1 {
 		t.Fatalf("scd gone: fallback, but certificates still known: %+v", st)
 	}
-	// Active without a canonical hostname is not active.
 	if (portalTLSState{HTTPSActive: true, Canonical: "Bad Host"}).sanitize().HTTPSActive {
 		t.Fatal("an invalid canonical hostname cannot be active")
 	}
 }
-
-// ---- certificates by SNI ---------------------------------------------------------------------------------------
 
 func installFor(t *testing.T, store *portaltls.Store, ca *portaltlstest.CA, host string, now time.Time) string {
 	t.Helper()
@@ -362,7 +345,6 @@ func TestCertificatesAreServedBySNIAndReloadedWhenReplaced(t *testing.T) {
 		}
 	}
 
-	// A renewal replaces the files: the next handshake serves the new certificate, without a restart.
 	time.Sleep(20 * time.Millisecond) // a distinct modification time on coarse filesystems
 	newSerial := installFor(t, store, ca, tOG, now)
 	c, err := cs.GetCertificate(&tls.ClientHelloInfo{ServerName: tOG})

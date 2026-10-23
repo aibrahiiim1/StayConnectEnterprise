@@ -17,7 +17,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 )
 
-// Fixture is one appliance's assignment chain on disk.
 type Fixture struct {
 	Root        string
 	IdentityDir string
@@ -34,8 +33,7 @@ const (
 	SiteID   = "0d40f7c8-4a98-428a-a2f5-74f0cabf5d42"
 )
 
-// New writes a registered identity and a legacy plain trust registry holding one active assignment-signing key.
-// No assignment is written; call WriteAssignment.
+// Writes a registered identity and a legacy plain trust registry holding one active assignment-signing key; no assignment (see WriteAssignment).
 func New(t *testing.T) *Fixture {
 	t.Helper()
 	root := t.TempDir()
@@ -75,7 +73,6 @@ func New(t *testing.T) *Fixture {
 	return f
 }
 
-// Doc returns a correctly bound document in the given state, signed by the trusted key.
 func (f *Fixture) Doc(state string, version int64) *assignment.Document {
 	d := &assignment.Document{
 		AssignmentID: "asg-1", ApplianceID: f.ApplianceID, IdentityKeyFpr: f.IdentityFpr, Serial: f.Serial,

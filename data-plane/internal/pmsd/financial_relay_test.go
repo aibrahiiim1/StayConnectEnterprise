@@ -1,10 +1,7 @@
 package pmsd
 
-// THE FINANCIAL RELAY IS TRANSPORT (decision D45). These tests pin what pmsd may and may not do with a posting
-// command: it carries the exact authorised bytes on a steady link and returns the PA whose P# matches,
-// verbatim; it answers NOT_TRANSMITTED only when it provably wrote nothing; and every other doubt -- a
-// duplicate P#, an incomplete write, a timeout, a lost link -- is UNKNOWN, so nothing upstream can mistake a
-// possibly-posted charge for an unsent one and send it again.
+// The relay is transport only: NOT_TRANSMITTED only when it provably wrote nothing, UNKNOWN for every other doubt
+// (duplicate P#, incomplete write, timeout, lost link), so a possibly-posted charge is never sent again.
 
 import (
 	"bufio"
@@ -39,8 +36,7 @@ type fakeLink struct {
 	after   func(body string) // runs after a successful write (e.g. the PMS answering)
 }
 
-// submit mirrors the real single writer: the guard is evaluated immediately before the first byte, and a
-// refusal writes nothing.
+// submit mirrors the real single writer: the guard runs just before the first byte and a refusal writes nothing.
 func (f *fakeLink) submit(_ context.Context, body string, guard func() string) (bool, error) {
 	f.mu.Lock()
 	if !f.enqueue {
@@ -218,8 +214,7 @@ func TestRelayTransmitDeployedNeedsAllThreeFlags(t *testing.T) {
 	}
 }
 
-// The single writer still refuses PS for every ordinary caller; only the financial path writes one, and that
-// path writes nothing but PS.
+// The single writer refuses PS for ordinary callers; only the financial path writes one, and only PS.
 func TestFinancialFrameIsPSOnlyAndOrdinaryFramesStillRefusePS(t *testing.T) {
 	client, server := pipePair(t)
 	g := &guardedConn{c: client, writeTimeout: time.Second}
@@ -245,9 +240,7 @@ func pipePair(t *testing.T) (net.Conn, net.Conn) {
 	return a, b
 }
 
-// THE WHOLE LINK: the real FIAS adapter, its single writer and read loop, and a fake PMS. The PS is carried
-// only once the initial DS..DE generation is published, reaches the PMS byte for byte on the SAME connection
-// the roster arrives on, and the PMS's PA comes back to the command verbatim. The feed keeps working.
+// Whole link: the PS is carried only after the initial DS..DE is published, reaches the PMS verbatim on the roster's connection, and the PA returns verbatim.
 func TestAdapter_CarriesAnAuthorisedPSOnItsOwnLinkAndReturnsThePA(t *testing.T) {
 	client, server := net.Pipe()
 	relay := NewFinancialRelay(true, authorised, nil)
@@ -327,16 +320,12 @@ func TestAdapter_CarriesAnAuthorisedPSOnItsOwnLinkAndReturnsThePA(t *testing.T) 
 	}
 }
 
-// ---- ROOM MOVES AT THE FIRST-BYTE BOUNDARY (Phase-0 Amendment A1, rule 7; acceptance E18) -----------------
-
-// psFor builds a PS for one reservation and room, as the posting engine would.
 func psFor(rn, g, pn string) string {
 	return "PS|RN" + rn + "|G#" + g + "|TA1500|PTD|SOWIFI|CTWIFI|P#" + pn + "|WSSTAYCONNECT|"
 }
 
-// E18 case 3, at pmsd: the attempt was built for RN101/G#5000, then the link read a GC moving G#5000 to
-// RN205. The prepared RN101 command is never written; the answer is NOT_TRANSMITTED with the reason, and the P#
-// is not recorded as carried, so the financial path records NOT_SENT and may build RN205/G#5000.
+// A room move read on the link before the write: the stale command is never written, answered NOT_TRANSMITTED,
+// and its P# is not recorded as carried.
 func TestRelay_RoomMovedOnTheLinkBeforeTheWriteIsNeverWritten(t *testing.T) {
 	link := &fakeLink{enqueue: true}
 	r, _ := newRelayWithLink(t, authorised, link)
@@ -352,7 +341,6 @@ func TestRelay_RoomMovedOnTheLinkBeforeTheWriteIsNeverWritten(t *testing.T) {
 	if r.wasCarried(relayIface, 21) {
 		t.Fatal("a command refused before its first byte is not recorded as carried")
 	}
-	// The fresh attempt, with the new room and the same reservation, is carried.
 	link.after = func(string) {}
 	resp = r.Handle(context.Background(), cmd(22, psFor("205", "5000", "22")))
 	if link.count() != 1 || !strings.HasPrefix(link.written[0], "PS|RN205|G#5000|") {
@@ -387,9 +375,7 @@ func TestRelay_SameRoomOrUnseenReservationIsCarried(t *testing.T) {
 	}
 }
 
-// E18 case 4: the room moves WHILE the PS is being written. The guard already passed and the write began, so
-// the attempt is immutable: its outcome is whatever the PMS answers (here, nothing: UNKNOWN), and no second PS
-// is ever written for the new room.
+// A room move during the write: the attempt is immutable, so its outcome is the PMS's answer (UNKNOWN here) and no second PS is written.
 func TestRelay_RoomMoveDuringTheWriteDoesNotRebuildOrResend(t *testing.T) {
 	link := &fakeLink{enqueue: true}
 	r, _ := newRelayWithLink(t, authorised, link)
@@ -404,10 +390,8 @@ func TestRelay_RoomMoveDuringTheWriteDoesNotRebuildOrResend(t *testing.T) {
 	}
 }
 
-// E18 cases 3 and 5 on the REAL link: the real FIAS adapter, its single writer and read loop, and a scripted
-// PMS. Case 3: the PMS moves G#5000 to RN205 BEFORE the command arrives; the RN101 PS never reaches the PMS.
-// Case 5: the PS for RN205 is written, then the PMS moves the guest again and never answers; the command is
-// UNKNOWN and no further PS is written.
+// On the real link: a move before the command means the RN101 PS never reaches the PMS; a move after the RN205
+// write with no answer leaves the command UNKNOWN and writes no further PS.
 func TestAdapter_RoomMoveRacesOnTheRealLink(t *testing.T) {
 	client, server := net.Pipe()
 	relay := NewFinancialRelay(true, authorised, nil)
@@ -431,8 +415,7 @@ func TestAdapter_RoomMoveRacesOnTheRealLink(t *testing.T) {
 				return
 			}
 		}
-		// The room move is live (after DE) and arrives before any PS. LA goes last: the adapter acknowledges it
-		// synchronously, and this unbuffered pipe would otherwise deadlock the scripted PMS against that ack.
+		// LA goes last: the adapter acks it synchronously and this unbuffered pipe would otherwise deadlock.
 		for _, rec := range []string{"DS|", "GI|RN101|G#5000|GNDoe|GA260101|GD260105|", "DE|",
 			"GC|RN205|G#5000|GNDoe|GA260101|GD260105|", "LA|"} {
 			_ = pms.WriteFramedRecord(server, rec)
@@ -447,7 +430,6 @@ func TestAdapter_RoomMoveRacesOnTheRealLink(t *testing.T) {
 				mu.Lock()
 				sawPS = append(sawPS, got)
 				mu.Unlock()
-				// Case 5: after the write, the guest moves again and the PMS never answers.
 				_ = pms.WriteFramedRecord(server, "GC|RN310|G#5000|GNDoe|GA260101|GD260105|")
 			}
 		}
@@ -469,7 +451,6 @@ func TestAdapter_RoomMoveRacesOnTheRealLink(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	<-moved
-	// wait until the read loop has read the GC: the relay's view of G#5000 is now RN205
 	for deadline = time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
 		relay.mu.Lock()
 		lr := relay.seen[ifaceID]["5000"]

@@ -1,16 +1,5 @@
 "use client";
 
-// THE SIDE SHEET.
-//
-// A dialog is right for a decision ("suspend this license?"). It is wrong for reference text that
-// should sit beside the page: the tips behind a lightbulb. That wants the page to stay visible, so the operator
-// can read and act at once, and it wants the full viewport height, because an explanation does not
-// fit in a centred box.
-//
-// Built on the same Radix Dialog as `dialog.tsx`, so focus trapping, Escape, restoring focus to the row that
-// opened it and the inert background are correct rather than approximated. Below `sm` it becomes a full-width
-// panel, since a 420px drawer on a 390px phone is a clipped page.
-
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -68,7 +57,6 @@ export function SheetContent({
   );
 }
 
-/** The fixed top of the sheet: an optional icon/eyebrow, the title, a description and status badges. */
 export function SheetHeader({
   eyebrow,
   title,
@@ -107,7 +95,7 @@ export function SheetHeader({
               {description}
             </DialogPrimitive.Description>
           ) : (
-            // Radix warns when a Content has no Description; an empty one satisfies it without adding text.
+            // Radix requires a Description even when no visible description is supplied.
             <DialogPrimitive.Description className="sr-only">{typeof title === "string" ? title : ""}</DialogPrimitive.Description>
           )}
           {badges && <div className="flex flex-wrap items-center gap-1.5 pt-1">{badges}</div>}
@@ -118,7 +106,6 @@ export function SheetHeader({
   );
 }
 
-/** The scrolling middle. */
 export function SheetBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5", className)} {...p} />;
 }

@@ -1,12 +1,7 @@
 import type { Config } from "tailwindcss";
 import plugin from "tailwindcss/plugin";
 
-// THE TOKEN MAP. Every colour here resolves to a CSS variable defined in app/globals.css, so switching theme
-// is a class on <html> and not a second copy of the palette.
-//
-// `token` exists because Tailwind needs to be able to write `bg-primary/10`. The `<alpha-value>` placeholder is
-// Tailwind's own substitution point: it becomes the modifier when one is used and `1` when it is not, which is
-// what makes a CSS-variable colour support opacity utilities at all.
+// Tailwind substitutes <alpha-value> so CSS-variable colors support opacity modifiers.
 const token = (variable: string) => `hsl(var(${variable}) / <alpha-value>)`;
 
 const config: Config = {
@@ -34,16 +29,7 @@ const config: Config = {
           DEFAULT: token("--surface"),
           foreground: token("--surface-foreground"),
         },
-        // `text-muted` IS THE MOST-USED UTILITY ON THIS ADMIN, and it pointed at the wrong token.
-        //
-        // --muted is a quiet SURFACE (212 22% 95% -- very nearly white) and --muted-foreground is a quiet
-        // LABEL (218 13% 44%). globals.css defines both precisely so "a quiet label and a quiet panel" can be
-        // styled independently. But Tailwind resolves `text-muted` to muted.DEFAULT, which was the surface --
-        // so 517 secondary labels across these screens were rendering near-white text on a white card. That
-        // is the illegible grey the operator has been reading around, and it was one mapping, not 517 pages.
-        //
-        // DEFAULT is therefore the quiet label. The three places that genuinely wanted the quiet panel use
-        // `muted-surface` below and say so by name.
+        // text-muted must resolve to label ink; --muted is a surface and makes text illegible on light cards.
         muted: {
           DEFAULT: token("--muted-foreground"),
           foreground: token("--muted-foreground"),
@@ -117,13 +103,7 @@ const config: Config = {
           6: token("--chart-6"),
         },
 
-        // ------------------------------------------------------------------------------------------------
-        // COMPATIBILITY ALIASES — the vocabulary the existing forty screens are written in.
-        //
-        // These are not a second palette. Each one points at the role token above that means the same thing,
-        // so a page still using `bg-panel text-muted border-border` renders correctly in BOTH themes without
-        // being touched. They stay until the last screen is refitted; new code should use the role names.
-        // ------------------------------------------------------------------------------------------------
+        // Aliases map older class names to role tokens so existing screens work in both themes.
         bg: token("--background"),
         panel: token("--card"),
         panel2: token("--surface"),
@@ -134,9 +114,6 @@ const config: Config = {
         warn: token("--warning"),
         err: token("--destructive"),
       },
-      // THE ONEGATE RADIUS SCALE, by role (design-system/tokens.css). `md` is every control, `lg` every card
-      // and sheet, `xl` every overlay. Screens written against the old scale keep working because the names
-      // did not change -- only what they mean became the brand's.
       borderRadius: {
         sm: "5px",
         md: "var(--radius-control)",
@@ -156,7 +133,6 @@ const config: Config = {
           "Consolas", "monospace",
         ],
       },
-      // THE ONEGATE TYPE SCALE, by role. One family (Inter), ten roles; nothing in between.
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
         title: ["1.625rem", { lineHeight: "1.3", letterSpacing: "-0.025em", fontWeight: "700" }],
@@ -170,8 +146,6 @@ const config: Config = {
         micro: ["0.6875rem", { lineHeight: "1.45", fontWeight: "700" }],
         nano: ["0.625rem", { lineHeight: "1.45", fontWeight: "700" }],
       },
-      // ELEVATION IS ONLY FOR WHAT FLOATS OR RESPONDS (design-system/tokens.css). Flat lists get none: their
-      // depth comes from hairlines and tonal layers, so urgency reads without shadows competing for it.
       boxShadow: {
         xs: "var(--shadow-card)",
         sm: "var(--shadow-card)",
@@ -205,9 +179,7 @@ const config: Config = {
   },
   plugins: [
     require("tailwindcss-animate"),
-    // TOUCH TARGETS GROW ONLY WHERE A FINGER IS THE POINTER. The desktop console is dense on purpose; a 44px
-    // floor there would cost every table a third of its rows. `pointer-coarse:` is Tailwind 4.1's name for the
-    // same media query, so the call sites will not change when this config moves to v4.
+    // Grow touch targets only for coarse pointers so dense desktop tables remain compact.
     plugin(({ addVariant }) => {
       addVariant("pointer-coarse", "@media (pointer: coarse)");
     }),

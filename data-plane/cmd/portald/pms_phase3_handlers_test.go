@@ -1,8 +1,7 @@
 package main
 
-// The guest-facing Phase-3 handler, driven with a stand-in scd. What is being proven is not that the proxy
-// works — it is that NOTHING a guest can observe distinguishes one failure from another. The reasons scd
-// returns are deliberately varied and detailed; every one of them must come out the other side identical.
+// Driven with a stand-in scd: nothing a guest can observe may distinguish one failure from another,
+// however varied the reasons scd returns.
 
 import (
 	"bytes"
@@ -17,7 +16,6 @@ import (
 	"time"
 )
 
-// scdStub answers the two Phase-3 hops with whatever the test wants.
 type scdStub struct {
 	resolve  any
 	grant    any
@@ -60,15 +58,13 @@ func stubHandler(t *testing.T, stub *scdStub) *handler {
 	return h
 }
 
-// stubHandlerWithClock installs the recording clock so a failing case does not spend the real response-time
-// budget. Every failure test in this file goes through the budget, and six of them at 1.2 real seconds each
-// would be a suite nobody runs. The clock is also what makes the budget ASSERTABLE — see phase3_budget_test.go.
+// stubHandlerWithClock installs the recording clock so failure cases do not spend the real budget, and so the
+// budget is assertable (see pms_phase3_budget_test.go).
 func stubHandlerWithClock(t *testing.T, stub *scdStub) (*handler, *recordingClock) {
 	t.Helper()
 	clk := newRecordingClock()
 	h := &handler{scd: &http.Client{Transport: stub}, clock: clk}
-	// A fixed neighbour lookup stands in for the appliance's ARP table: the identity is server-derived in
-	// production and must be server-derived here too, or the test would prove the wrong thing.
+	// Stands in for the ARP table: identity must be server-derived here as in production.
 	h.arpCache = func(ip net.IP) (net.HardwareAddr, bool) {
 		mac, _ := net.ParseMAC("02:00:00:aa:00:01")
 		return mac, true
@@ -90,8 +86,6 @@ func phase3Post(t *testing.T, h *handler, body map[string]any) (*httptest.Respon
 	return rec, out
 }
 
-// A single offer is granted without a second round trip: presenting one option is not a choice, it is a
-// second request on the guest's worst network.
 func TestPhase3SingleOfferGrantsImmediately(t *testing.T) {
 	stub := &scdStub{
 		resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-1",
@@ -106,14 +100,12 @@ func TestPhase3SingleOfferGrantsImmediately(t *testing.T) {
 	if len(stub.calls) != 2 {
 		t.Fatalf("hops = %v, want resolve then grant", stub.calls)
 	}
-	// the identity scd received must be the SERVER's view, not anything the guest sent
 	dev, _ := stub.bodies[0]["device"].(map[string]any)
 	if dev["ip"] != "10.77.0.25" || dev["mac"] != "02:00:00:aa:00:01" {
 		t.Fatalf("the forwarded identity was not server-derived: %v", dev)
 	}
 }
 
-// More than one offer is a real choice, and it is presented WITHOUT disclosing anything about the stay.
 func TestPhase3MultipleOffersAskTheGuest(t *testing.T) {
 	stub := &scdStub{
 		resolve: map[string]any{"outcome": "VERIFIED", "auth_context_id": "ctx-2",
@@ -134,15 +126,9 @@ func TestPhase3MultipleOffersAskTheGuest(t *testing.T) {
 	}
 }
 
-// THE CONTRACT, as it now stands. Everything that could describe ONE ROOM is byte-identical; only the
-// site-wide conditions are allowed their own sentence.
-//
-// It used to be every failure without exception, and that made the portal useless to a guest whose details
-// were correct on a property whose mirror could not answer. The line moved, and this is where it moved TO:
-// scd decides the class (internal/signinattempt.GuestClass, which is where the reasoning lives), portald
-// forwards it, and every case below that names a room shares one class and therefore one body.
+// Everything that could describe one room is byte-identical; only site-wide conditions get their own
+// sentence. scd decides the class (internal/signinattempt.GuestClass) and portald forwards it.
 func TestPhase3EveryPerRoomFailureIsIndistinguishable(t *testing.T) {
-	// scd answers CREDENTIAL for all of these: no such room, wrong name, two candidates, an ineligible stay.
 	cred := map[string]any{"outcome": "NOT_VERIFIED", "failure_class": "CREDENTIAL"}
 	cases := []struct {
 		name string
@@ -199,11 +185,7 @@ func TestPhase3EveryPerRoomFailureIsIndistinguishable(t *testing.T) {
 	}
 }
 
-// THE SITE-WIDE FAILURES may say so, and this pins WHICH ones portald decides for itself.
-//
-// portald only ever knows what IT could not do. It never sees a room, a stay or a name, so it can never
-// legitimately answer "your details are wrong" on its own — every one of these is technical, and a
-// credential answer here would be a guess about a guest it knows nothing about.
+// portald never judges a room, stay or name, so every failure it decides on its own is technical.
 func TestPhase3PortaldsOwnFailuresAreTechnicalAndDiscloseNothing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -232,14 +214,12 @@ func TestPhase3PortaldsOwnFailuresAreTechnicalAndDiscloseNothing(t *testing.T) {
 	}
 }
 
-// scd's class is FORWARDED, never re-derived. Two mappings from a reason to a guest class would drift, and
-// the one that lives in internal/signinattempt is the one that carries the reasoning.
+// scd's class is forwarded, never re-derived (two mappings would drift).
 func TestPhase3ForwardsScdsClassVerbatim(t *testing.T) {
 	for class, want := range map[string]string{
 		"CREDENTIAL": guestAuthMessage,
 		"TECHNICAL":  guestAuthTechnicalMessage,
-		// RATE_LIMITED carries the SERVER's remaining seconds. The number below is scd's, and the sentence
-		// the guest reads has to be built from that same number rather than from anything portald decided.
+		// The sentence must be built from scd's remaining seconds.
 		"RATE_LIMITED": guestAuthRateLimitedMessage(37),
 	} {
 		h := stubHandler(t, &scdStub{resolve: map[string]any{
@@ -251,21 +231,8 @@ func TestPhase3ForwardsScdsClassVerbatim(t *testing.T) {
 	}
 }
 
-// A DEVICE THE APPLIANCE CANNOT PLACE IS STILL RECORDED, AND STILL TOLD THE TECHNICAL ANSWER.
-//
-// This case used to assert that such a request never reached scd, on the reasoning that forwarding it "would
-// ask scd to trust an address portald could not verify". That reasoning does not hold: the address is the TCP
-// peer's, which portald can verify, and scd re-derives the guest network from it and refuses an address on no
-// enabled network regardless. What portald could not establish was the HARDWARE address, not the address.
-//
-// Meanwhile the cost was real and was found on PRE-LIVE: because portald answered alone, the refusal was written
-// NOWHERE. The guest was told to contact the front desk, and the front desk opened the sign-in attempt log --
-// the screen that exists for this exact question -- and saw nothing at all. Two such requests were measured
-// producing the technical sentence and zero rows.
-//
-// So it is forwarded, and scd refuses and records through the same classifier as every other refusal. The
-// property that mattered is kept and is asserted below: the guest is told the TECHNICAL answer, never to
-// re-check typing that was never the problem.
+// An unplaceable device is forwarded so scd records the refusal in the sign-in attempt log; the address is
+// the TCP peer's (verifiable) and scd re-derives the network. The guest still gets the TECHNICAL answer.
 func TestPhase3UnplaceableDeviceIsForwardedSoItIsRecorded(t *testing.T) {
 	stub := &scdStub{resolve: map[string]any{
 		"outcome": "NOT_VERIFIED", "failure_class": "TECHNICAL", "reason_code": "ROUTING_OR_INTERFACE_FAILURE"}}
@@ -279,12 +246,10 @@ func TestPhase3UnplaceableDeviceIsForwardedSoItIsRecorded(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.authPMSPhase3(rec, req)
 
-	// IT REACHES scd, which is the only component that records an attempt.
 	if len(stub.calls) == 0 {
 		t.Fatal("an unplaceable device was refused without being recorded anywhere")
 	}
-	// ...carrying the source address it could establish, and NO hardware address it could not. A MAC is never
-	// taken from the client, so an empty one is the honest thing to send.
+	// A MAC is never taken from the client, so an empty one is sent.
 	dev, _ := stub.bodies[0]["device"].(map[string]any)
 	if dev == nil || dev["ip"] != "10.77.0.25" {
 		t.Fatalf("the source address was not forwarded for the record: %v", stub.bodies[0]["device"])
@@ -294,28 +259,24 @@ func TestPhase3UnplaceableDeviceIsForwardedSoItIsRecorded(t *testing.T) {
 	}
 	var out phase3Out
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	// TECHNICAL, not credential: a device the appliance cannot place on a guest network has a networking
-	// problem, and nothing the guest types will ever fix it.
 	if out.OK || out.Message != guestAuthTechnicalMessage {
 		t.Fatalf("an unplaceable device was told to re-check what it typed: %s", rec.Body.String())
 	}
 }
 
-// ...AND A COLD NEIGHBOUR CACHE IS NOT AN UNPLACEABLE DEVICE. A client that has just taken a DHCP lease and
-// submitted immediately has no cache entry yet; the kernel is asked, the entry appears, and the sign-in goes
-// through. Before this, that guest was refused and sent to Reception for a reason that was not about them.
+// A cold neighbour cache (fresh DHCP lease) is not an unplaceable device: the kernel is asked to resolve.
 func TestPhase3AColdNeighbourCacheIsResolvedNotRefused(t *testing.T) {
 	stub := &scdStub{resolve: map[string]any{"outcome": "VERIFIED"}}
 	h := stubHandler(t, stub)
 	appeared := false
 	h.arpCache = func(net.IP) (net.HardwareAddr, bool) {
 		if !appeared {
-			return nil, false // cold: nothing cached yet
+			return nil, false
 		}
 		mac, _ := net.ParseMAC("02:00:00:ab:cd:01")
 		return mac, true
 	}
-	h.arpNudge = func(net.IP) { appeared = true } // the kernel resolves it once asked
+	h.arpNudge = func(net.IP) { appeared = true }
 	h.arpSleep = func(time.Duration) {}
 	raw, _ := json.Marshal(map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/pms/phase3", bytes.NewReader(raw))
@@ -332,9 +293,6 @@ func TestPhase3AColdNeighbourCacheIsResolvedNotRefused(t *testing.T) {
 	}
 }
 
-// A transport failure is not an error page, and it is not the guest's fault either. They are told the
-// property cannot check right now — which is true, is the same for every guest in the building at that
-// moment, and identifies nobody.
 func TestPhase3TransportFailureIsTechnical(t *testing.T) {
 	h := stubHandler(t, &scdStub{failWith: errors.New("scd socket unavailable")})
 	_, out := phase3Post(t, h, map[string]any{"room": "412", "last_name": "Okonkwo", "request_id": "r"})

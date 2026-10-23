@@ -1,18 +1,8 @@
 package main
 
-// Roster reconciliation: the operator surface for closing stays the PMS no longer lists.
-//
-// WHY THIS IS A SEPARATE KEY FROM pms-reconciliation. Reading "which guests does the PMS and the mirror
-// disagree about" is a question the desk asks hourly. Closing three hundred stays in one action is not the
-// same power, and a role that may do the first has no business doing the second by accident. So the case
-// list stays where it was, read-only for everyone, and this resource carries the action.
-//
-// WHAT CHANGED SINCE THE CASE LIST WAS WRITTEN. Its comment said there is no local action, because
-// stay_events is one-way and a checkout boundary must be an APPLIED GO event. That is still true of an
-// individual recorded departure, and nothing here rewrites one. What is new is that a COMPLETE published
-// roster is authoritative evidence in its own right: it is the PMS stating, in full, who is in the building.
-// Closing a stay it does not mention is a deduction from a complete statement, not a re-interpretation of a
-// departure the engine already refused.
+// Roster reconciliation: closes stays a complete published PMS roster no longer lists.
+// A separate resource key from pms-reconciliation: closing many stays is a stronger power than reading the case list.
+// Individual departures stay governed by applied GO events; only a COMPLETE roster is evidence to close absent stays.
 
 import (
 	"context"
@@ -42,22 +32,13 @@ func (s *server) rosterReconciliationRoutes() http.Handler {
 	r.Get("/", s.rosterReconciliationState)
 	r.Get("/runs", s.listReconciliationRuns)
 	r.Post("/preview", s.previewRosterReconcile)
-	// NO APPLY AND NO DISPOSE ROUTE. Reconciliation runs automatically on every complete published
-	// generation, and the historical snapshot disposition was a one-time migration that has been executed
-	// and can never have new input -- the connector no longer admits the records that created it. A manual
-	// trigger for either would be a repair button for work that is not outstanding.
+	// No apply/dispose route: reconciliation runs automatically on every complete published generation.
 	r.Put("/settings", s.updateReconciliationSettings)
-	// NO CONNECTION-SETTINGS ROUTE HERE ANY MORE. The recovery bounds are per interface now, so they live
-	// under the interface they govern: PUT /pms-interfaces/{id}/connection-settings. A site-level route
-	// would have to answer "which connection?" by guessing.
+	// No site-level connection-settings route: recovery bounds are per interface (PUT /pms-interfaces/{id}/connection-settings).
 	return r
 }
 
-// rosterReconciliationState answers what the screen opens with: the settings, what is standing in the way, the
-// connections a run can be about, and the LAST run recorded for the chosen one. It runs nothing (audit H-13):
-// a dry run writes its own row to the run ledger, so running one on every page open made a READ permission
-// write, and the ledger grow, every time anybody looked. "Run dry run" is an explicit action (POST /preview,
-// write permission).
+// rosterReconciliationState answers what the screen opens with. It runs nothing: a dry run writes a ledger row, which a READ must not do.
 func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -87,8 +68,7 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The most recent run of either kind for this connection: pmsd's automatic APPLY, or a dry run an
-	// operator asked for. Shown as what it is -- a record with a time -- never recomputed on read.
+	// The most recent run for this connection (pmsd's automatic APPLY or an operator dry run), never recomputed on read.
 	var last *reconcileRunOut
 	var lastMode string
 	var lastAt *time.Time
@@ -105,8 +85,7 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 		last = &lr
 	}
 
-	// ELIGIBLE SNAPSHOT ARTIFACTS ONLY, which is narrower than "unanswered" and deliberately so: only a
-	// resync-admitted departure carrying no reservation is a roster snapshot.
+	// Eligible snapshot artifacts only: a resync-admitted departure carrying no reservation.
 	var pending int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.pms_unanswered_review_events e
 		 WHERE e.tenant_id=$1 AND e.site_id=$2
@@ -148,7 +127,6 @@ func (s *server) rosterReconciliationState(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// rosterInterface is one connection a reconciliation can be about.
 type rosterInterface struct {
 	ID                  string     `json:"id"`
 	Label               string     `json:"label"`
@@ -158,10 +136,7 @@ type rosterInterface struct {
 	LastCompleteSyncAt  *time.Time `json:"last_complete_sync_at,omitempty"`
 }
 
-// rosterInterfaces lists every connection with a runtime, the one a run should default to first: ACTIVE before
-// anything else, then the one that most recently completed a sync. It used to take whichever runtime row had
-// the highest generation number (audit H-21) -- on a site with two connections that is an arbitrary choice,
-// because generation numbers are per connection and say nothing about which one is in service.
+// rosterInterfaces lists connections with a runtime, ACTIVE first, then most recent sync. Generation numbers are per connection, so they cannot order connections.
 func (s *server) rosterInterfaces(ctx context.Context) ([]rosterInterface, error) {
 	rows, err := s.db.Query(ctx, `SELECT rt.pms_interface_id::text, COALESCE(i.display_label,''),
 			COALESCE(i.connector_kind,''), COALESCE(i.lifecycle_state,''),
@@ -189,7 +164,6 @@ func (s *server) rosterInterfaces(ctx context.Context) ([]rosterInterface, error
 	return out, rows.Err()
 }
 
-// pickRosterInterface resolves the requested connection (it must be one of this site's) or the default.
 func (s *server) pickRosterInterface(w http.ResponseWriter, ifaces []rosterInterface, requested string) (string, int64, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested != "" && !uuidRe.MatchString(requested) {
@@ -209,9 +183,7 @@ func (s *server) pickRosterInterface(w http.ResponseWriter, ifaces []rosterInter
 	return "", 0, false
 }
 
-// runReconcile is the single call site for the reconcile function. Everything that reaches it from here is a
-// DRY RUN: the screen shows what a run would do, and the run that actually closes stays is pmsd's, on a
-// complete published generation.
+// runReconcile is the single call site of the reconcile function; from here every call is a DRY RUN (pmsd does the closing).
 func (s *server) runReconcile(w http.ResponseWriter, r *http.Request, iface string, gen int64,
 	apply bool, reason string) (*reconcileRunOut, bool) {
 	ctx, cancel := dbCtx(r)
@@ -309,9 +281,7 @@ func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
 }
 
-// updateReconciliationSettings changes the roster-trust settings (audit H-5): password step-up, the version the
-// operator was looking at, a reason, bounds re-checked by the database, the change appended to the settings
-// change log by the definer, and an audit_log row with the actor.
+// updateReconciliationSettings requires step-up, the version seen and a reason; bounds are re-checked by the database and the change is audited.
 func (s *server) updateReconciliationSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ExpectedVersion    *int64 `json:"expected_config_version"`
@@ -346,7 +316,6 @@ func (s *server) updateReconciliationSettings(w http.ResponseWriter, r *http.Req
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// Read current values so a partial update changes only what was sent.
 	var floor, tol, look, cap_ int
 	var version int64
 	var isDefault bool
@@ -396,7 +365,6 @@ func (s *server) updateReconciliationSettings(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"config_version": newVersion})
 }
 
-// operatorLabel is how a definer records who acted: the operator's e-mail, or their id when none is known.
 func operatorLabel(r *http.Request) string {
 	sess := sessFrom(r.Context())
 	if sess == nil {
@@ -408,8 +376,7 @@ func operatorLabel(r *http.Request) string {
 	return strings.TrimSpace(sess.OperatorID)
 }
 
-// boundedDBMessage returns the operator-facing part of a definer's RAISE ("CODE: sentence"), never a driver
-// prefix, SQL state or stack: "ERROR: RECON_SETTINGS_BOUNDS: the ... (SQLSTATE 23514)" becomes "the ...".
+// boundedDBMessage returns only the operator-facing sentence of a definer's RAISE, never the driver prefix or SQL state.
 func boundedDBMessage(msg string) string {
 	if i := strings.Index(msg, " (SQLSTATE"); i >= 0 {
 		msg = msg[:i]

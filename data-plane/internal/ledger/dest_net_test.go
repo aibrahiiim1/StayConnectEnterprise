@@ -24,8 +24,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// ---- a fake S3 that VERIFIES the signature, written separately from the signer -----------------------------------------
-
 type fakeS3 struct {
 	mu      sync.Mutex
 	objects map[string][]byte
@@ -52,7 +50,6 @@ func code2(c int) string {
 func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	auth := r.Header.Get("Authorization")
-	// parse "AWS4-HMAC-SHA256 Credential=AK/day/region/s3/aws4_request, SignedHeaders=..., Signature=..."
 	parts := strings.Split(strings.TrimPrefix(auth, "AWS4-HMAC-SHA256 "), ", ")
 	if len(parts) != 3 {
 		f.deny(w, 0, 403)
@@ -168,8 +165,6 @@ func keys(m map[string][]byte) []string {
 	return k
 }
 
-// ---- an in-process SFTP server ---------------------------------------------------------------------------------------
-
 func startSFTP(t *testing.T, root, password string) (host string, port int, fingerprint string) {
 	t.Helper()
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -267,13 +262,11 @@ func TestSFTPDest_PinnedHostKeyRoundTripAndRefusals(t *testing.T) {
 	if _, err := d.Get(ctx, "nothing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
-	// a different host key is refused
 	wrong := *d
 	wrong.Fingerprint = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if err := wrong.Put(ctx, "x", []byte("y")); err == nil || !strings.Contains(err.Error(), "host key changed") {
 		t.Fatalf("a changed host key was accepted: %v", err)
 	}
-	// a wrong password is refused
 	badpw := *d
 	badpw.Password = "nope"
 	if err := badpw.Put(ctx, "x", []byte("y")); err == nil {

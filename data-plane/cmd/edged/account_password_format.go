@@ -1,17 +1,10 @@
 package main
 
-// THE GENERATED CLIENT-ACCOUNT PASSWORD FORMAT (migration 0104).
+// The generated-password format is a per-site setting that affects only passwords generated afterwards.
 //
-// A client account can be given a server-generated password on create and on set-password. What that password
-// looks like -- which characters, and how many -- is a per-site operational setting, persisted, bounded,
-// defaulted and audited (docs/OPERATIONAL_SETTINGS_POLICY.md). It affects ONLY passwords generated after a
-// change: no existing credential is touched, and operator-typed passwords keep their own rules
-// (validPassword: 1-128 characters, no control characters).
-//
-// THE SECURITY FLOOR. Every style must reach at least 40 bits of estimated entropy, so its minimum length is
-// ceil(40 / log2(alphabet size)); every style is capped at 32. The same numbers are enforced by the SQL setter
-// and by the table CHECK, and a unit test holds the constants below to the formula. They are sent to the UI
-// in the GET response, so the browser never carries its own copy.
+// Security floor: every style needs at least 40 bits of entropy (minimum length ceil(40 / log2(alphabet))),
+// capped at 32. The SQL setter and table CHECK enforce the same numbers, a unit test holds the constants to
+// the formula, and the GET response sends them so the browser carries no copy.
 
 import (
 	"context"
@@ -33,7 +26,6 @@ const (
 	pwStyleLowerDigits = "lower_digits"
 	pwStyleDigits      = "digits"
 
-	// The default is exactly what the hardcoded generator produced before 0104.
 	defaultPasswordStyle  = pwStyleMixed
 	defaultPasswordLength = 14
 
@@ -41,8 +33,7 @@ const (
 	maxGeneratedPasswordLen  = 32
 )
 
-// Every alphabet leaves out the characters people misread from a slip or a screen: 0/O, 1/I/l and lowercase o.
-// Digits-only therefore uses 2-9, so a printed password means the same thing in every style.
+// Alphabets omit characters people misread from a slip or screen (0/O, 1/I/l, o), so digits-only is 2-9.
 const (
 	pwUpper  = "ABCDEFGHJKMNPQRSTUVWXYZ"  // 23: no I, L, O
 	pwLower  = "abcdefghijkmnpqrstuvwxyz" // 24: no l, o
@@ -53,12 +44,11 @@ type passwordStyle struct {
 	Key      string
 	Label    string
 	Alphabet string
-	// MinLength is ceil(40 / log2(len(Alphabet))). Held as a constant so the SQL CASE and this table are
-	// visibly the same numbers; TestPasswordStyleMinimumsMeetTheEntropyFloor recomputes it.
+	// MinLength is ceil(40 / log2(len(Alphabet))), kept literal to match the SQL CASE.
 	MinLength int
 }
 
-// passwordStyles, in the order the UI offers them.
+// passwordStyles is in the order the UI offers them.
 var passwordStyles = []passwordStyle{
 	{pwStyleMixed, "Upper and lower case letters and digits", pwUpper + pwLower + pwDigits, 7},
 	{pwStyleUpperDigits, "Upper case letters and digits", pwUpper + pwDigits, 9},
@@ -75,7 +65,6 @@ func lookupPasswordStyle(key string) (passwordStyle, bool) {
 	return passwordStyle{}, false
 }
 
-// entropyBits is the estimated entropy of a uniformly random password of this style and length.
 func (p passwordStyle) entropyBits(length int) float64 {
 	return float64(length) * math.Log2(float64(len(p.Alphabet)))
 }
@@ -95,9 +84,7 @@ func validatePasswordFormat(style string, length int) (passwordStyle, string, bo
 	return p, "", true
 }
 
-// generatePasswordWith draws length characters uniformly from the style's alphabet with crypto/rand. It
-// refuses a format below the floor rather than producing a weak password: a stored row that somehow escaped
-// both the setter and the CHECK must not be honoured.
+// generatePasswordWith refuses a format below the floor even if a stored row escaped the setter and the CHECK.
 func generatePasswordWith(style string, length int) (string, error) {
 	p, _, ok := validatePasswordFormat(style, length)
 	if !ok {
@@ -115,8 +102,6 @@ func generatePasswordWith(style string, length int) (string, error) {
 	return string(b), nil
 }
 
-// ---- the stored setting ---------------------------------------------------------------------------------
-
 type accountPasswordFormat struct {
 	Style     string     `json:"password_style"`
 	Length    int        `json:"password_length"`
@@ -125,8 +110,8 @@ type accountPasswordFormat struct {
 	UpdatedBy *string    `json:"updated_by,omitempty"`
 }
 
-// accountPasswordFormat reads the site's format. A site with no row gets the defaults (config_version 0); a
-// DATABASE ERROR is returned, never papered over with a default -- the generator then refuses.
+// accountPasswordFormat: a site with no row gets the defaults; a database error is returned, never papered over
+// with a default, so the generator refuses.
 func (s *server) accountPasswordFormat(ctx context.Context) (accountPasswordFormat, error) {
 	var f accountPasswordFormat
 	err := s.db.QueryRow(ctx, `
@@ -136,8 +121,7 @@ func (s *server) accountPasswordFormat(ctx context.Context) (accountPasswordForm
 	return f, err
 }
 
-// generateAccountPassword answers the "Generate" action of create and set-password. It writes the HTTP error
-// itself and reports false when it could not produce a password.
+// generateAccountPassword writes the HTTP error itself and reports false when it could not generate.
 func (s *server) generateAccountPassword(w http.ResponseWriter, ctx context.Context) (string, bool) {
 	f, err := s.accountPasswordFormat(ctx)
 	if err != nil {
@@ -152,8 +136,6 @@ func (s *server) generateAccountPassword(w http.ResponseWriter, ctx context.Cont
 	}
 	return pw, true
 }
-
-// ---- the operator surface -------------------------------------------------------------------------------
 
 type passwordStyleOut struct {
 	Key         string  `json:"key"`
@@ -199,7 +181,6 @@ func (s *server) accountPasswordSettingsRoutes() http.Handler {
 
 func (s *server) getAccountPasswordSettings(w http.ResponseWriter, r *http.Request) {
 	if s.tenantID == "" || s.siteID == "" {
-		// No site yet: nothing can be generated or saved, but the screen can still show the defaults and bounds.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"password_style": defaultPasswordStyle, "password_length": defaultPasswordLength, "config_version": 0,
 			"awaiting_assignment": true, "limits": passwordFormatLimits(),
@@ -238,8 +219,7 @@ func (s *server) setAccountPasswordSettings(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, code, msg)
 		return
 	}
-	// Required here (0085 left it optional): changing how strong every future generated password is, is a
-	// security decision and must say why.
+	// A reason is required: this sets the strength of every future generated password.
 	reason := strings.TrimSpace(in.Reason)
 	if !validReason(reason) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason (4-500 characters) is required")

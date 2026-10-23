@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// routedScd answers scd paths from a table and records what was asked.
 type routedScd struct {
 	mu     sync.Mutex
 	routes map[string]func(body []byte) (int, any)
@@ -55,7 +54,6 @@ func acqFixture(t *testing.T, routes map[string]func([]byte) (int, any)) (*handl
 	return h, sc
 }
 
-// A voucher is redeemed in one step: no package list, and the client lands online only when enforced.
 func TestVoucherRedeemsInOneStep(t *testing.T) {
 	h, sc := acqFixture(t, map[string]func([]byte) (int, any){
 		"/v1/commerce/redeem": func([]byte) (int, any) { return 200, map[string]any{"entitlement_id": "e-1"} },
@@ -80,7 +78,6 @@ func TestVoucherRedeemsInOneStep(t *testing.T) {
 	}
 }
 
-// A voucher that cannot be redeemed says so, and never claims the client is online.
 func TestVoucherRedeemFailureIsNotSuccess(t *testing.T) {
 	h, _ := acqFixture(t, map[string]func([]byte) (int, any){
 		"/v1/commerce/redeem": func([]byte) (int, any) { return 409, map[string]any{"error": "unavailable"} },
@@ -94,8 +91,7 @@ func TestVoucherRedeemFailureIsNotSuccess(t *testing.T) {
 	}
 }
 
-// The pay status bridge identifies the device from the CONNECTION (never the page) and activates only a
-// purchase scd says is granted.
+// The pay status bridge identifies the device from the connection and activates only a purchase scd says is granted.
 func TestPayStatusActivatesOnlyAGrantedPurchase(t *testing.T) {
 	state := "pending"
 	h, sc := acqFixture(t, map[string]func([]byte) (int, any){
@@ -159,7 +155,6 @@ func TestPriceAndMethodRows(t *testing.T) {
 	}
 }
 
-// Card payment: the client is sent to the provider's HTTPS page; nothing is activated on the way.
 func TestCardPurchaseRedirectsToTheProvider(t *testing.T) {
 	h, sc := acqFixture(t, map[string]func([]byte) (int, any){
 		"/v1/commerce/quote": func([]byte) (int, any) { return 200, map[string]any{"quote_id": "q-1"} },

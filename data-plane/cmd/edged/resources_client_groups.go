@@ -1,15 +1,8 @@
 package main
 
-// CLIENT GROUPS: the Admin Console's half of docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §3.
-//
-// A group is a site policy object -- name, priority (lower wins), enabled -- with OR-ed membership rules. The
-// Admin Console owns the groups and their append-only history (iam_v2.client_group_changes); it decides nothing
-// about any Client: who is in a group is evaluated by scd at sign-in from the Client's verified factors, and
-// edged reads NO identity table.
-//
-// Every rule is validated with the SAME function scd's evaluator uses (iamv2.ValidateClientGroupRule), so a
-// rule that cannot be evaluated cannot be saved. A group an Internet Package still names as its audience cannot
-// be deleted: deleting it would silently turn that audience into nobody.
+// Client groups (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §3): priority (lower wins),
+// OR-ed membership rules. Membership is evaluated by scd at sign-in; edged reads no identity table. Rules are
+// validated with scd's own function (iamv2.ValidateClientGroupRule), so an unevaluable rule cannot be saved.
 
 import (
 	"context"
@@ -47,11 +40,10 @@ type clientGroupWrite struct {
 	Description *string            `json:"description,omitempty"`
 	Priority    *int               `json:"priority,omitempty"`
 	Enabled     *bool              `json:"enabled,omitempty"`
-	Rules       *[]clientGroupRule `json:"rules,omitempty"` // replaces the whole rule set
+	Rules       *[]clientGroupRule `json:"rules,omitempty"`
 	Reason      string             `json:"reason,omitempty"`
 }
 
-// validateClientGroupWrite returns an operator-readable refusal, or "".
 func validateClientGroupWrite(in clientGroupWrite, creating bool) string {
 	if creating && (in.Name == nil || strings.TrimSpace(*in.Name) == "") {
 		return "a group needs a name"
@@ -339,11 +331,8 @@ func (s *server) patchClientGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, after[0])
 }
 
-// packagesNamingGroup lists the active packages whose CURRENT revision names this group as its audience.
-//
-// Through the scoped reader iam_v2.p2_package_current_conditions, never a direct read of
-// package_eligibility_rules: edged holds INSERT on that table for publishing and deliberately no SELECT, so a
-// direct join is a permission error that would have made every group undeletable (found live).
+// packagesNamingGroup lists active packages whose current revision names this group as audience. It must go
+// through iam_v2.p2_package_current_conditions: edged has INSERT but no SELECT on package_eligibility_rules.
 func (s *server) packagesNamingGroup(ctx context.Context, q rowQuerier, groupID string) ([]string, error) {
 	rows, err := q.Query(ctx, `
 		SELECT p.code FROM iam_v2.internet_packages p
@@ -370,7 +359,7 @@ func (s *server) packagesNamingGroup(ctx context.Context, q rowQuerier, groupID 
 func (s *server) deleteClientGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in clientGroupWrite
-	_ = decodeJSON(r, &in) // an optional reason
+	_ = decodeJSON(r, &in)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tx, err := s.db.Begin(ctx)
@@ -388,8 +377,7 @@ func (s *server) deleteClientGroup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "group not found")
 		return
 	}
-	// A group that is still somebody's audience is not deletable: the package would silently offer itself to
-	// nobody. The operator changes the package first, then deletes the group.
+	// A group still used as a package audience is not deletable (the package would silently offer itself to nobody).
 	if named, err := s.packagesNamingGroup(ctx, tx, id); err == nil && len(named) > 0 {
 		jsonErr(w, http.StatusConflict, "in_use", "this group is the audience of: "+strings.Join(named, ", ")+". Change those packages first.")
 		return
@@ -401,10 +389,8 @@ func (s *server) deleteClientGroup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "history failed")
 		return
 	}
-	// Deleting the group sets client_group_id to NULL on every auth context that still carries it (the FK's
-	// ON DELETE SET NULL): those contexts fall back to Public, and their evidence keeps the group's name. That
-	// referential action is an UPDATE on auth_contexts, which the Phase-3 writer guard refuses unless the
-	// auth_context operation scope is open in this transaction -- found live as a bare "delete failed".
+	// ON DELETE SET NULL updates auth_contexts, which the writer guard refuses unless the auth_context
+	// operation scope is open in this transaction.
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "delete failed (scope)")
 		return

@@ -3,9 +3,7 @@ import { act, render } from "@testing-library/react";
 import { api, BACKGROUND_HEADER } from "@/lib/api";
 import { usePoll } from "@/lib/use-poll";
 
-// A request the console makes on its own, from a timer, says so (X-OneGate-Background: 1, the same header as the
-// appliance's Admin Console), so Central does not count it as activity and the idle limit still fires with a
-// screen left open. A request the person caused does not carry it.
+// Timer requests carry X-OneGate-Background so idle sessions expire even with a screen open.
 
 type Sent = { method: string; url: string; headers: Record<string, string>; body: unknown };
 

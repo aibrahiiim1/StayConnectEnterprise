@@ -9,8 +9,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// `ctrlapi unlock-signin` (0056, decision D-R1) clears every wrong-password lock on one name, from every address,
-// and only that name's; it is audited by account id, never by email.
 func TestUnlockSigninClearsEveryLockOnTheName(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()

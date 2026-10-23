@@ -1,29 +1,17 @@
 package main
 
-// RESTORING THE SITE DATABASE — the one operation here that can lose a hotel's data.
+// Restoring the site database, the one operation here that can lose a hotel's data. The destructive step is
+// a rename, not a load (dropping the live database loses everything if the dump is truncated):
 //
-// Everything in this file is shaped by one decision: THE DESTRUCTIVE STEP IS A RENAME, NOT A LOAD.
+//   1. the dump loads into a STAGING database while the live one is untouched; a bad dump fails here;
+//   2. once staging is complete the two swap by rename; the live database is renamed aside and kept;
+//   3. integrity is checked on the newly-live database; on failure the rename is undone.
 //
-// The obvious implementation is to drop the live database and load the dump into a fresh one. It is also the
-// one that loses everything when the dump turns out to be truncated at 80%, because by then the only copy of
-// the real data is gone. So instead:
+// A safety dump is taken first, since a rename-back does not protect against a bad appliance.
 //
-//   1. the dump is loaded into a STAGING database while the live one is untouched. A dump that will not load
-//      fails here, having destroyed nothing, and the appliance goes back to serving.
-//   2. only once staging holds a complete database do the two swap, by rename. The live database is not
-//      dropped -- it is renamed aside and kept.
-//   3. integrity is checked on the newly-live database. If it fails, the rename is undone, which is fast,
-//      certain, and does not depend on a second dump being good.
+// No silent retry: every step runs once; a failure stops the sequence, rolls back and reports.
 //
-// A safety dump is taken before any of this as well, because a rename-back protects against a bad restore
-// and not against a bad appliance.
-//
-// WHAT "NO SILENT RETRY" MEANS HERE. Nothing in this file loops. Every step runs once; a failure stops the
-// sequence, rolls back what was already done, and reports. An operator who wants another attempt makes
-// another decision.
-//
-// AUTHORISATION IS edged'S JOB. It performs the password step-up, the RBAC check and the audit record before
-// calling this, over scd's private socket, which is not reachable from the network.
+// Authorisation is edged's job (step-up, RBAC, audit) before calling this over scd's private socket.
 
 import (
 	"context"
@@ -43,35 +31,21 @@ import (
 	"time"
 )
 
-// maintenanceFile and restoreResultFile are vars rather than consts so tests can redirect them. Nothing in
-// the product reassigns them.
+// maintenanceFile and restoreResultFile are vars only so tests can redirect them.
 //
-// maintenanceFile is the appliance's "not serving" flag. It lives under /run because a restore must not
-// survive a reboot as a permanently closed appliance: if the machine dies mid-restore, it comes back
-// serving from whichever database is live, which is either the original or the fully-loaded replacement --
-// never a half-written one, because no step here ever writes into a live database.
+// maintenanceFile is the "not serving" flag. It lives under /run so a reboot mid-restore does not leave a
+// permanently closed appliance: it comes back serving the original or the fully-loaded replacement, never a
+// half-written database, because no step writes into a live database.
 var maintenanceFile = "/run/stayconnect/maintenance"
 
-// restoreResultFile is where the outcome is written BEFORE any service restart, so the answer survives the
-// restart that follows it.
+// restoreResultFile is written before any service restart so the answer survives it.
 var restoreResultFile = "/run/stayconnect/last-restore.json"
 
-// verifiedMarker is written by a successful verification and REQUIRED by restore.
-//
-// IT RECORDS THE SHA-256 OF THE ARCHIVE IT VOUCHES FOR. It used to record only the size and the modification
-// time, and that was not an integrity check -- it was a change NOTICE. Both are metadata: anybody able to
-// write the file is able to write them back. Truncate an archive, restore its length with padding and put
-// the timestamp back with `touch -r`, and a corrupt backup presented itself as verified. That is not a
-// theoretical objection; it is how the deliberate failure proof for this feature had to be built.
-//
-// A digest is a statement about the BYTES. Size and modification time are still recorded, and are still
-// checked first -- they are free, they catch the ordinary case, and they let the refusal say something more
-// useful than "the digest differs". But the digest is what the answer rests on, and it is recomputed at the
-// restore boundary rather than trusted from the marker.
-//
-// A marker with no digest is NOT VERIFIED. Markers written before this existed carry no sha256, and there is
-// no way to know what they vouched for; treating them as verified would be trusting the one field that was
-// never recorded. Re-verifying costs one command and eleven seconds.
+// verifiedMarker is written by a successful verification and required by restore. It records the SHA-256 of
+// the archive: size and mtime are only metadata anyone able to write the file can put back (padding plus
+// `touch -r` made a corrupt backup look verified). Size and mtime are still checked first (cheap, clearer
+// message) but the digest is what the answer rests on, recomputed at the restore boundary. A marker with no
+// digest is NOT verified.
 func verifiedMarker(name string) string { return filepath.Join(scdBackupDir, name+".verified") }
 
 type verifiedRecord struct {
@@ -82,7 +56,7 @@ type verifiedRecord struct {
 	SHA256     string    `json:"sha256"`
 }
 
-// fileDigest is the hex SHA-256 of a file, streamed so a 27 MB archive costs no more memory than a 27 KB one.
+// fileDigest is the hex SHA-256 of a file, streamed.
 func fileDigest(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -102,8 +76,7 @@ func writeVerifiedMarker(name string, tables int) error {
 	if err != nil {
 		return fmt.Errorf("the backup could not be read to mark it verified: %w", err)
 	}
-	// NO DIGEST, NO MARKER. A marker that omitted it would be indistinguishable from a pre-digest one, and
-	// would be read as unverified anyway -- writing it would only mislead whoever read the file by hand.
+	// No digest, no marker: one without it would read as unverified anyway.
 	sum, err := fileDigest(full)
 	if err != nil {
 		slog.Error("verification marker not written: the archive could not be digested", "backup", name, "err", err)
@@ -118,13 +91,8 @@ func writeVerifiedMarker(name string, tables int) error {
 		slog.Error("verification marker not written", "backup", name, "err", err)
 		return fmt.Errorf("the verification marker could not be written: %w", err)
 	}
-	// HAND IT TO THE SERVICE GROUP, exactly as the dump itself is handed over.
-	//
-	// Found on the appliance: verify reported ok and 141 tables, the marker was written, and the operator
-	// screen still showed the backup as unverified. scd writes as root; edged reads as `stayconnect`. The
-	// archives are chowned root:stayconnect at 0640 so the unprivileged side can read them, and the marker
-	// -- which is now the thing Restore eligibility depends on -- was left root:root. It was a fact nobody
-	// could read, which is indistinguishable from no fact at all.
+	// Hand it to the service group like the dump: scd writes as root but edged reads as `stayconnect`, so a
+	// root:root marker is unreadable and the backup would show as unverified.
 	if gid, ok := serviceGroupID(); ok {
 		if err := os.Chown(path, 0, gid); err != nil {
 			slog.Error("verification marker not handed to the service group", "backup", name, "err", err)
@@ -133,12 +101,9 @@ func writeVerifiedMarker(name string, tables int) error {
 	return nil
 }
 
-// readVerifiedMarker returns the record only if the archive on disk is still, byte for byte, the one that
-// was verified.
-//
-// THIS IS THE RESTORE BOUNDARY. The screen checks too, and the screen is not the security boundary: it can
-// be stale, it can be a second tab, it can be a curl. Everything that decides whether a restore may begin is
-// decided here, immediately before it begins, from the bytes as they are now.
+// readVerifiedMarker returns the record only if the archive on disk is still, byte for byte, the one verified.
+// This is the restore boundary: the screen is not a security boundary (stale, second tab, curl), so
+// eligibility is decided here, just before the restore begins, from the bytes as they are now.
 func readVerifiedMarker(name string) (*verifiedRecord, error) {
 	b, err := os.ReadFile(verifiedMarker(name))
 	if err != nil {
@@ -157,13 +122,10 @@ func readVerifiedMarker(name string) (*verifiedRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the backup file is missing")
 	}
-	// Cheap first, and it produces the clearer message when it is the ordinary case.
 	if fi.Size() != rec.SizeBytes || !fi.ModTime().UTC().Equal(rec.ModTime) {
 		return nil, fmt.Errorf("this backup has changed since it was verified; verify it again")
 	}
-	// THE BINDING CHECK. Size and time are metadata and can be restored by whoever changed the file; the
-	// digest cannot. ~250ms on a 27 MB archive, against a restore that takes half a minute and is
-	// irreversible in every way except the one this file goes to such lengths to preserve.
+	// The binding check: size and time can be put back by whoever changed the file; the digest cannot.
 	sum, err := fileDigest(full)
 	if err != nil {
 		return nil, fmt.Errorf("this backup could not be read to confirm its contents")
@@ -237,10 +199,9 @@ func (s *server) lastRestore(w http.ResponseWriter, r *http.Request) {
 
 type restoreReq struct {
 	Name string `json:"name"`
-	// Identity is a backup key holder's private key, needed for an encrypted backup. It lives in memory for
-	// the length of the restore and is never stored or logged.
+	// Identity is a backup key holder's private key for an encrypted backup; held in memory only, never stored or logged.
 	Identity string `json:"identity"`
-	// By is the operator who asked (edged fills it from the signed-in session); it is recorded with the restore.
+	// By is the operator who asked, from edged's session.
 	By string `json:"by"`
 }
 
@@ -256,11 +217,8 @@ var dependentServices = []string{
 	"stayconnect-edged", "stayconnect-portald", "stayconnect-pmsd", "stayconnect-acctd",
 }
 
-// restoreInFlight is the in-process single-flight guard.
-//
-// The maintenance flag is the DURABLE guard -- it survives a crash and fails closed -- but it is only raised
-// after the safety dump, which leaves a window where a second request would start a second restore. One
-// destructive operation at a time is not negotiable, so the window is closed here.
+// restoreInFlight is the in-process single-flight guard. The durable maintenance flag is only raised after the
+// safety dump, so this closes the window where a second request could start a second restore.
 var restoreInFlight atomic.Bool
 
 func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
@@ -274,15 +232,14 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ONLY A VERIFIED BACKUP. Checked here as well as in the UI, because the UI is not the security boundary.
+	// Only a verified backup, checked here as well as in the UI.
 	rec, err := readVerifiedMarker(in.Name)
 	if err != nil {
 		httpErr(w, http.StatusPreconditionFailed, err.Error())
 		return
 	}
 
-	// AN ENCRYPTED BACKUP NEEDS A KEY THAT OPENS IT, and that is checked now, before the safety dump and
-	// maintenance: a wrong key must cost the hotel nothing, not a closed appliance.
+	// The key is checked now, before the safety dump and maintenance: a wrong key must not close the appliance.
 	src, closer, err := openBackup(filepath.Join(scdBackupDir, in.Name), in.Identity)
 	if err != nil {
 		if msg, isKey := keyProblem(err); isKey {
@@ -304,18 +261,10 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// THE ANSWER IS THE RECORD ON DISK, NOT THIS RESPONSE.
-	//
-	// Found on the appliance, and it was the worst possible way to be wrong. edged's socket call gave up after
-	// fifteen seconds and told the operator the restore had FAILED; scd finished it successfully ten seconds
-	// later. An operator reading "failed" while a destructive operation is still running is one keystroke away
-	// from starting a second one -- and the deliberate design decision not to retry destructive steps is worth
-	// nothing if the screen invites the human to do it instead.
-	//
-	// A restore can take 45 minutes. No HTTP client, no reverse proxy and no browser tab should be load-bearing
-	// for that long. So the request STARTS the restore and returns; the durable record in
-	// /run/stayconnect/last-restore.json is where the outcome lives, and it is already the thing that survives
-	// the edged restart the restore itself performs. The screen polls it.
+	// The answer is the record on disk, not this response: a restore can take 45 minutes and a client timing out
+	// early would report "failed" while it runs, inviting a second destructive attempt. The request only STARTS
+	// the restore; the outcome lives in /run/stayconnect/last-restore.json (which survives the edged restart) and
+	// the screen polls it.
 	started := time.Now().UTC()
 	s.markRestoreRunning(in.Name, started)
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -323,8 +272,7 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 		"detail": "the restore is running; its outcome is recorded on the appliance",
 	})
 
-	// Its own deadline and its own context. A restore outlives any client, and a caller giving up -- or a
-	// request whose context ends the moment this handler returns -- must not kill it halfway.
+	// Its own deadline and context: a caller giving up, or the request ending, must not kill it halfway.
 	ctx, cancel := context.WithTimeout(context.Background(), restoreOverallDeadline())
 	go func() {
 		defer cancel()
@@ -333,25 +281,14 @@ func (s *server) backupRestore(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// runRestore performs the restore. It reports only durably: by the time it finishes, the HTTP request that
-// asked for it is long gone and edged has been restarted.
+// runRestore performs the restore and reports only durably (the HTTP request is long gone and edged restarted).
 func (s *server) runRestore(ctx context.Context, name, identity, by string, rec *verifiedRecord, started time.Time) {
 	in := restoreReq{Name: name}
 	steps := []restoreStep{}
 	stamp := started.Format("20060102T150405Z")
 
-	// LOWERCASE, because an unquoted SQL identifier is folded and a connection name is not.
-	//
-	// Found on the appliance. `CREATE DATABASE restore_20260920T090146Z` succeeded and created
-	// `restore_20260920t090146z`; `psql -d restore_20260920T090146Z` then reported that the database did not
-	// exist, and the restore failed at the load step with a message about a missing database it had just
-	// created. The two halves disagreed because only one of them folds case: SQL folds unquoted identifiers,
-	// libpq passes the dbname through verbatim.
-	//
-	// The timestamp is the right name -- it ties the staging database, the set-aside database and the safety
-	// dump to one restore -- so the fix is to make the name one that survives both paths unchanged. Every
-	// database identifier in this function is now lowercase (pgDatabase already was), which makes folding a
-	// no-op rather than something each call site has to remember.
+	// Lowercase: SQL folds unquoted identifiers but libpq passes the dbname verbatim, so a mixed-case name
+	// is created under one spelling and looked up under another.
 	dbStamp := strings.ToLower(stamp)
 	staging := "restore_" + dbStamp
 	aside := pgDatabase + "_before_" + dbStamp
@@ -371,9 +308,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 
 	// ---- 0. what the services are allowed to do, captured while the live database still says it ---------
 	//
-	// A backup does not contain this: dumps are taken --no-owner --no-privileges. Read first, because it is a
-	// read -- failing here costs nothing, and discovering it after the swap would mean an appliance that
-	// cannot serve and no record of what it was allowed to do. See privileges.go.
+	// Dumps carry no privileges. Read first: failing here costs nothing, after the swap it would leave an
+	// appliance that cannot serve. See privileges.go.
 	if kinds, err := unhandledPrivileges(ctx, pgDatabase); err != nil {
 		fail("privileges", "the database's access rules could not be inspected, so the restore was not attempted: "+err.Error())
 		return
@@ -398,8 +334,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	}
 
 	// ---- 1. a safety dump of the CURRENT state, before anything is touched ------------------------------
-	// THE SAME ENGINE AS EVERY OTHER BACKUP: encrypted, proven restorable, noted. The restoring key holder's key is a recipient too,
-	// so a replacement appliance with no registered holder yet is still protected. No plaintext fallback exists.
+	// Same engine as every backup (encrypted, proven restorable); the restoring key holder is a recipient too.
+	// No plaintext fallback exists.
 	safetyMeta, err := s.takeBackup(ctx, backupOpts{Kind: kindPreRestore, Reason: "before restoring " + in.Name, By: by, Identity: identity})
 	if err != nil {
 		fail("safety_backup", "the safety backup failed, so the restore was not attempted: "+err.Error())
@@ -431,7 +367,6 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 
 	if out, err := loadBackupInto(ctx, filepath.Join(scdBackupDir, in.Name), identity, staging); err != nil {
 		dropStaging()
-		// NOTHING WAS LOST. The live database was never opened.
 		detail := firstProblem(string(out))
 		if msg, isKey := keyProblem(err); isKey {
 			detail = msg
@@ -453,9 +388,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	}
 
 	// ---- 3c. the erasure ledger is verified and applied to the STAGING database, before the swap -------------------
-	// Everything the hotel already told a guest was erased is erased again, and every request it had closed is closed again,
-	// in the restored data, BEFORE that data is the live data. One verified, complete copy of the ledger is enough
-	// (ledger_restore.go); if none can be trusted the restore stops here with nothing replaced.
+	// Erasures already promised to guests are re-applied to the restored data before it goes live
+	// (ledger_restore.go); if no ledger copy can be trusted the restore stops with nothing replaced.
 	if detail, good := s.carryLedgerDestination(ctx, staging); !good {
 		dropStaging()
 		fail("ledger_storage", detail)
@@ -472,8 +406,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	}
 
 	// ---- 3d. retention is applied to the staging data, to the end, with the periods in force HERE (restore_retention.go) -------------
-	// Not after the swap: a run that fails, times out or is interrupted must leave the live data exactly as it was, never a restored
-	// database that serves personal data its retention period has ended.
+	// Not after the swap: a failed run must leave live data as it was, never a restored database serving
+	// personal data past its retention period.
 	if detail, good := s.restoreRetention(ctx, staging); !good {
 		dropStaging()
 		fail("retention", detail)
@@ -484,12 +418,11 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 
 	// ---- 4. the swap: rename aside, rename in ----------------------------------------------------------
 	//
-	// Connections must be gone first or the rename is refused. The dependent services are stopped rather
-	// than merely disconnected, because a service that reconnects during the swap would reopen the database
-	// being renamed.
+	// Connections must be gone first or the rename is refused; services are stopped, not just disconnected,
+	// since one reconnecting mid-swap would reopen the database being renamed.
 	//
-	// FINANCIAL GUARANTEES (restore_financial.go): the quiesce is PROVEN, not assumed, and the management marker is advanced before
-	// anything is replaced. Both happen here, while the live database is still the live database.
+	// Financial guarantees (restore_financial.go): the quiesce is proven and the marker advanced before anything
+	// is replaced.
 	markerGen, err := readMarkerGeneration()
 	if err != nil {
 		dropStaging()
@@ -523,7 +456,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		return
 	}
 	if out, err := admin("ALTER DATABASE " + staging + " RENAME TO " + pgDatabase); err != nil {
-		// ROLL BACK THE HALF-DONE SWAP IMMEDIATELY: put the original name back.
+		// Roll back the half-done swap: put the original name back.
 		if out2, err2 := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err2 != nil {
 			s.startDependents(ctx)
 			fail("swap", "CRITICAL: the restored database could not be renamed in AND the original could not "+
@@ -540,10 +473,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 
 	// ---- 5. put the access rules back, and prove they took ---------------------------------------------
 	//
-	// The restored database arrived owned by the superuser with PUBLIC holding the default EXECUTE on every
-	// function. Replaying is only half the job: the same capture is run again and compared, because a replay
-	// that half-worked leaves an appliance that starts and then fails on whichever table the operator reaches
-	// last -- which is worse than one that fails now and puts the original data back.
+	// The restored database arrives superuser-owned with default PUBLIC EXECUTE. The capture is rerun and
+	// compared, since a half-worked replay fails later, which is worse than failing now with the data put back.
 	rollback := func(step, detail string) {
 		if out, err := admin("ALTER DATABASE " + pgDatabase + " RENAME TO " + staging); err == nil {
 			if out2, err2 := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err2 == nil {
@@ -578,7 +509,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	// ---- 6. integrity, on what is now live -------------------------------------------------------------
 	detail, good := s.restoreIntegrity(ctx)
 	if !good {
-		// ROLL BACK. A rename back is fast and certain, and does not depend on a second dump being good.
+		// A rename back is fast and certain, and does not depend on a second dump being good.
 		_, _ = admin("ALTER DATABASE " + pgDatabase + " RENAME TO " + staging)
 		if out, err := admin("ALTER DATABASE " + aside + " RENAME TO " + pgDatabase); err != nil {
 			s.startDependents(ctx)
@@ -595,8 +526,7 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	ok("integrity", detail)
 
 	// ---- 6-fin. financial recovery: hypertables registered, and the restore recorded so money movement is HELD -----------
-	// Both failures roll the swap back. The marker has already advanced, so the appliance comes up holding money movement in either
-	// case, which is the safe direction.
+	// Both failures roll the swap back; the marker has already advanced, so money movement stays held (the safe direction).
 	if hdetail, herr := assertHypertables(ctx, pgDatabase); herr != nil {
 		rollback("hypertables", herr.Error()+" Money movement stays held.")
 		return
@@ -617,8 +547,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	ok("financial_recovery", "the restore is recorded: the site is in financial recovery mode and no money moves until an operator has reconciled what was in flight")
 
 	// ---- 6a. the missing copies of the ledger are rebuilt and synchronised ------------------------------------------
-	// The restored database now holds the whole ledger. The primary copy on the appliance and the secondary storage are
-	// brought into step with it; an unreachable secondary does not undo the restore, it is reported and retried every hour.
+	// Both ledger copies are brought into step with the restored database; an unreachable secondary does not
+	// undo the restore, it is reported and retried every hour.
 	if st := s.ledgerReconcileAfterRestore(ctx); st != "" {
 		steps = append(steps, restoreStep{Step: "ledger_synced", OK: false, Detail: st})
 	} else {
@@ -626,9 +556,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 	}
 
 	// ---- 6a2. the hourly run is made once more, straight away ------------------------------------------------------------------
-	// Retention was already applied to the staging data before the swap (step 3d). What can be left is the few minutes since then:
-	// records that crossed their cutoff meanwhile. This run takes them now rather than at the next hour; it cannot expose anything
-	// the staging run did not already deal with, so its failure is only reported.
+	// Takes records that crossed their cutoff since the staging run (step 3d) rather than waiting an hour; it
+	// cannot expose anything staging did not handle, so its failure is only reported.
 	{
 		rctx, rcancel := context.WithTimeout(ctx, 10*time.Minute)
 		s.runDataRetention(rctx)
@@ -638,13 +567,8 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 
 	// ---- 6b. keep exactly ONE database aside -----------------------------------------------------------
 	//
-	// The database just replaced is kept so a restore can be undone, which is the point. But nothing removed
-	// the PREVIOUS one, so each restore left another full copy of the site behind: three restores, three
-	// copies, and a disk gauge climbing on the Backups page with nothing on that page to explain it.
-	//
-	// One step back is the guarantee that was designed; two was an accident of never cleaning up. Older
-	// set-aside databases are dropped now that this restore has passed its integrity and privilege checks --
-	// after, never before, because until those pass the thing being kept may be the only good copy.
+	// The replaced database is kept so a restore can be undone; older set-aside ones are dropped only after this
+	// restore passed its integrity and privilege checks, since until then the kept copy may be the only good one.
 	if out, err := admin("SELECT datname FROM pg_database WHERE datname LIKE '" + pgDatabase +
 		`\_before\_%' AND datname <> '` + aside + "'"); err == nil {
 		dropped := 0
@@ -671,13 +595,9 @@ func (s *server) runRestore(ctx context.Context, name, identity, by string, rec 
 		"restored from "+in.Name+"; the previous database is kept as "+aside)
 }
 
-// resetPool replaces scd's own database connections after the swap.
-//
-// A PostgreSQL connection follows the database OID, not the name. After the rename, every connection scd
-// already held is still talking to the database that was renamed ASIDE -- the old data -- while the name now
-// resolves to the restored one. Reads would look plausible and be wrong, which is the worst available
-// outcome. pgxpool has no "reconnect"; closing the idle connections forces new ones, which resolve the name
-// afresh.
+// resetPool replaces scd's own database connections after the swap. A connection follows the database OID, not
+// the name, so held connections still talk to the renamed-aside old data; closing idle ones forces new connections
+// that resolve the name afresh.
 func (s *server) resetPool() {
 	if s.db == nil {
 		return
@@ -685,9 +605,7 @@ func (s *server) resetPool() {
 	s.db.Reset()
 }
 
-// startDependents brings the stopped services back. Failures are logged rather than returned: by the time
-// this runs the database question is already settled, and an operator needs to be told which service did not
-// come back rather than have it hidden behind an earlier error.
+// startDependents brings the stopped services back; failures are logged so an operator learns which did not return.
 func (s *server) startDependents(ctx context.Context) {
 	for _, svc := range dependentServices {
 		if out, err := exec.CommandContext(ctx, "systemctl", "start", svc).CombinedOutput(); err != nil {
@@ -696,11 +614,8 @@ func (s *server) startDependents(ctx context.Context) {
 	}
 }
 
-// restoreIntegrity asks whether what is now live is a usable StayConnect database.
-//
-// Deliberately structural rather than exhaustive: the tables the appliance cannot run without, the migration
-// ledger, and a readable row count. A deep consistency check would be slower, would still not prove the data
-// is the RIGHT data, and would delay the moment the hotel is serving again.
+// restoreIntegrity asks whether what is now live is a usable StayConnect database. Deliberately structural
+// (required tables, migration ledger, readable row count): a deep check is slower and cannot prove the data is right.
 func (s *server) restoreIntegrity(ctx context.Context) (string, bool) {
 	q := func(sql string) string {
 		out, err := exec.CommandContext(ctx, "docker", "exec", pgContainer,
@@ -729,8 +644,7 @@ func (s *server) restoreIntegrity(ctx context.Context) (string, bool) {
 	return "the restored database holds " + tables + " tables and every table the appliance needs", true
 }
 
-// finishRestore writes the outcome durably BEFORE responding, so the answer survives the service restarts,
-// and audits it on the way out.
+// finishRestore writes the outcome durably so it survives the service restarts, and audits it.
 func (s *server) finishRestore(name string, started time.Time,
 	steps []restoreStep, success bool, summary string) {
 
@@ -745,9 +659,7 @@ func (s *server) finishRestore(name string, started time.Time,
 		"steps":    steps,
 	}
 	if b, err := json.Marshal(res); err == nil {
-		// WRITE THEN RENAME. This file is polled every few seconds by a screen waiting to be told what
-		// happened to a hotel's data; os.WriteFile truncates first, so a reader arriving mid-write sees
-		// half a document. A rename is atomic, so a reader sees either the old answer or the new one.
+		// Write then rename: the file is polled, and os.WriteFile truncates first so a reader could see half a document.
 		if err := writeResultAtomically(b); err != nil {
 			slog.Error("restore result not written", "err", err)
 		}
@@ -759,11 +671,6 @@ func (s *server) finishRestore(name string, started time.Time,
 	}
 }
 
-// markRestoreRunning replaces the previous outcome with an in-progress record, the moment the restore starts.
-//
-// Without it the screen would keep showing the PREVIOUS restore's result while a new one ran -- and if that
-// previous one said "ok", an operator would be reading a success banner about a database currently being
-// replaced. The record is overwritten by finishRestore either way.
 // writeResultAtomically replaces the outcome record in one step, so a poller never reads a partial document.
 func writeResultAtomically(b []byte) error {
 	tmp := restoreResultFile + ".partial"
@@ -777,6 +684,8 @@ func writeResultAtomically(b []byte) error {
 	return nil
 }
 
+// markRestoreRunning replaces the previous outcome with an in-progress record, so the screen never shows a
+// previous "ok" banner while a database is being replaced.
 func (s *server) markRestoreRunning(name string, started time.Time) {
 	b, err := json.Marshal(map[string]any{
 		"backup": name, "started": started, "running": true, "ok": false,

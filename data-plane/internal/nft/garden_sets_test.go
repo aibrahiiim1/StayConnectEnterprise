@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// THREE SETS, ONE TRANSACTION, and a port-restricted element that survives a read-back.
 func TestGardenScriptFlushesAndAddsEverySetInOneTransaction(t *testing.T) {
 	plan := GardenPlan{IP: []string{"198.51.100.7"}, TCP: []string{"8.8.8.8 . 53", "203.0.113.9 . 443"}, UDP: []string{"8.8.8.8 . 53"}}
 	all := map[string]bool{GardenV4: true, GardenTCP: true, GardenUDP: true}

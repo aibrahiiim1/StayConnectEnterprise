@@ -3,14 +3,6 @@ import { render, screen, waitFor, within, cleanup } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { fakeAudit } from "./fake-paged";
 
-// THE SYSTEM SCREENS (Diagnostics, Alerts, Activity, Appliance & licence, Backups, Operators), redesigned.
-//
-// What is asserted is behaviour an operator relies on, not markup: every page carries the menu label as its
-// title under the "System" eyebrow; write actions are offered only to a role the server will let use them;
-// the confirmations that exist on the server (reason + password for a restart, typed name + password for a
-// restore, password for a backup) are collected and sent exactly as before; and the licence screen says in
-// words that existing guest sessions survive a licence problem.
-
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
@@ -79,7 +71,6 @@ describe("Diagnostics", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Restart scd" }));
 
     const dialog = await screen.findByRole("dialog");
-    // The per-service impact is the decision the operator is making.
     expect(within(dialog).getByText(/Every client currently online is disconnected/)).toBeTruthy();
     const confirm = within(dialog).getByRole("button", { name: "Restart now" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
@@ -139,8 +130,6 @@ describe("Activity", () => {
     expect(security.getAttribute("aria-checked")).toBe("true");
     expect(await screen.findByText("1 entry")).toBeTruthy();
 
-    // Expand the row: the exact record is there, and the payload sits behind "Raw payload".
-    // (The page's Tips lightbulb is also a collapsed disclosure; the first ROW is what is wanted here.)
     const row = screen
       .getAllByRole("button", { expanded: false })
       .filter((b) => !(b.getAttribute("aria-label") ?? "").startsWith("Tips"))[0];
@@ -195,7 +184,6 @@ describe("Backups", () => {
 
     await waitFor(() => expect(post).toHaveBeenCalledWith(
       `/backups/artifacts/${encodeURIComponent(name)}/restore`, { password: "pw", confirm: name }));
-    // Progress stays on screen until the appliance reports the outcome.
     expect(await within(dialog).findByText(/this window stays open until it finishes/i)).toBeTruthy();
   });
 
@@ -274,11 +262,9 @@ describe("Operators", () => {
     render(<Page />);
     const select = await screen.findByLabelText("Give desk@hotel another role");
     await userEvent.selectOptions(select, "site_viewer");
-    // Nothing is granted by the choice alone.
     expect(post).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Give this role\?/)).toBeTruthy();
-    // B7: the administrator's own password confirms it.
     expect(within(dialog).getByRole("button", { name: "Add role" })).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText(/Your password/), "admin-pass-1");
     await userEvent.click(within(dialog).getByRole("button", { name: "Add role" }));

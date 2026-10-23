@@ -1,16 +1,9 @@
 package main
 
-// Phase-3 Hotel-Admin surface: Stays, Stay Events (including the review queue), Folios, PMS resolutions,
-// Checkout-Grace configuration and OPERATIONAL ALERTS.
-//
-// Two rules shape everything here:
-//
-//   - DARK BY DEFAULT. These routes are mounted only when the Phase-3 master flag AND its admin flag are both
-//     ON. While dark the appliance issues zero Phase-3 SQL and the paths simply do not exist (404), rather
-//     than existing and returning "disabled" — an unmounted route cannot leak a schema that is not live yet.
-//   - NO GUEST PII IN RESOLUTION EVIDENCE. Resolution rows expose outcome codes and identifiers only; a guest's
-//     name or room never appears in an operator's resolution list. Stay detail is a different, role-gated
-//     surface where the operator is legitimately looking at one guest's stay.
+// Hotel-Admin surface: Stays, Stay Events, Folios, PMS resolutions, Checkout-Grace and operational alerts.
+// Mounted only when the Phase-3 master and admin flags are both on; while dark the paths do not exist, so an
+// unmounted route cannot leak a schema that is not live. Resolution rows carry outcome codes and identifiers only,
+// never a guest's name or room; stay detail is a separate role-gated surface.
 
 import (
 	"context"
@@ -30,8 +23,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/grace"
 )
 
-// ---------- Stays ----------
-
 type stayRow struct {
 	ID                  string     `json:"id"`
 	Interface           string     `json:"pms_interface_id"`
@@ -46,58 +37,38 @@ type stayRow struct {
 	PostingAllowed      bool       `json:"posting_allowed"`
 	Occupants           int        `json:"occupants"`
 
-	// THE PRIMARY GUEST'S NAME, and the operational fields the domain already stores.
-	//
-	// The list previously identified a stay by its reservation string and room only, so an operator looking
-	// for "the Andersons in 412" had to open rows until they found it. The name is already persisted on
-	// stay_guests and already shown on the detail view, so surfacing the primary occupant here exposes
-	// nothing new — it just stops the list being unusable for the lookup operators actually perform.
+	// The primary guest's name, already persisted on stay_guests and shown on the detail view.
 	PrimaryGuest *string `json:"primary_guest,omitempty"`
 
-	// Why posting is blocked, and where that decision came from. Persisted since the Stay domain shipped and
-	// never exposed: an operator could see posting_allowed = false and had no way to learn why.
+	// Why posting is blocked, and where that decision came from.
 	PostingBlockReason *string `json:"posting_block_reason,omitempty"`
 	PostingSource      *string `json:"posting_permission_source,omitempty"`
 
-	// OCCUPANCY FRESHNESS — how recently the PMS confirmed this stay. This is the evidence guest
-	// authentication is judged against, so when a guest cannot sign in it is the first thing worth seeing.
+	// Occupancy freshness: how recently the PMS confirmed this stay; the evidence guest authentication is judged against.
 	OccupancyEvidenceAt *time.Time `json:"occupancy_evidence_at,omitempty"`
 
-	// Hotel attributes the SCHEMA carries. Whether they are populated depends entirely on the connector: the
-	// Protel FIAS feed commissioned here sends room, reservation, names, arrival and departure and nothing
-	// else, so on that interface these stay null. They are emitted omitempty rather than as blanks, and the
-	// UI renders them only when present — a column of permanent dashes would imply the PMS is failing to
-	// send something it was never asked for.
+	// Hotel attributes the schema carries; they depend on the connector (the Protel FIAS feed leaves them null), so
+	// they are omitempty and the UI renders them only when present.
 	VIP         *bool   `json:"vip,omitempty"`
 	RoomType    *string `json:"room_type,omitempty"`
 	RatePlan    *string `json:"rate_plan,omitempty"`
 	TravelAgent *string `json:"travel_agent,omitempty"`
 
-	// WHAT INTERNET THIS ROOM HAS BEEN GIVEN.
-	//
-	// An operator asked "which package is room 412 on?" and the product had no screen that could answer it. The
-	// Stays list knew the room, the Internet packages list knew the packages, and nothing joined the two — so the
-	// answer existed only as a database query.
-	//
-	// It is the LIVE entitlement: PENDING, ACTIVE or SUSPENDED. A stay whose access has ended reports none, which
-	// is the correct answer rather than a stale one — iam_v2 enforces at most one live entitlement per stay
-	// (ent_live_stay), so there is never an ambiguous choice to make here.
-	AccessStatus      *string `json:"access_status,omitempty"`
-	AccessPackageCode *string `json:"access_package_code,omitempty"`
-	AccessPackageName *string `json:"access_package_name,omitempty"`
-	AccessPlanCode    *string `json:"access_plan_code,omitempty"`
-	AccessDownKbps    *int32  `json:"access_down_kbps,omitempty"`
-	AccessUpKbps      *int32  `json:"access_up_kbps,omitempty"`
-	AccessMaxDevices  *int32  `json:"access_max_devices,omitempty"`
-	// Devices currently online under that entitlement, so "the family says the Wi-Fi is full" is answerable.
-	AccessActiveDevices int `json:"access_active_devices"`
-	// Devices HOLDING A PLACE on the entitlement (entitlement_devices AUTHORIZED). This, not the online count, is
-	// what the device limit is enforced against: a device keeps its place after it signs out, so a stay can be
-	// "at the limit" with nobody online (audit H-14).
+	// The live entitlement (PENDING, ACTIVE or SUSPENDED); a stay whose access has ended reports none. iam_v2
+	// enforces at most one live entitlement per stay (ent_live_stay).
+	AccessStatus        *string `json:"access_status,omitempty"`
+	AccessPackageCode   *string `json:"access_package_code,omitempty"`
+	AccessPackageName   *string `json:"access_package_name,omitempty"`
+	AccessPlanCode      *string `json:"access_plan_code,omitempty"`
+	AccessDownKbps      *int32  `json:"access_down_kbps,omitempty"`
+	AccessUpKbps        *int32  `json:"access_up_kbps,omitempty"`
+	AccessMaxDevices    *int32  `json:"access_max_devices,omitempty"`
+	AccessActiveDevices int     `json:"access_active_devices"`
+	// Devices holding a place (entitlement_devices AUTHORIZED): the device limit is enforced against this, not the
+	// online count, since a device keeps its place after signing out.
 	AccessAuthorizedDevices int `json:"access_authorized_devices"`
 
-	// IdentityHidden is true when the caller lacks pms-stay-identity: the guest names and the reservation number
-	// -- with the room, the room sign-in credential -- are withheld (audit H-7).
+	// True when the caller lacks pms-stay-identity: guest names, the reservation number and the room sign-in credential are withheld.
 	IdentityHidden bool `json:"identity_hidden,omitempty"`
 }
 
@@ -118,13 +89,8 @@ const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label
        COALESCE((SELECT count(*) FROM iam_v2.entitlement_devices ed
                   WHERE ed.entitlement_id = ent.id AND ed.status = 'AUTHORIZED'), 0)::int`
 
-// stayFrom is the FROM clause every stay query shares. Every join is LEFT so a Stay whose interface row is
-// somehow missing — or which has no internet entitlement at all — still lists rather than vanishing from the
-// operator's view.
-//
-// The entitlement join is filtered to the LIVE statuses in the ON clause rather than the WHERE clause. In a
-// WHERE it would stop being a left join: a stay with no live entitlement would be excluded from the listing
-// entirely, which is the opposite of what this projection is for.
+// The FROM clause every stay query shares. Every join is LEFT so a stay with no interface row or entitlement still
+// lists. The entitlement join filters live statuses in the ON clause: in a WHERE it would stop being a left join.
 const stayFrom = `FROM iam_v2.stays s
        LEFT JOIN iam_v2.pms_interfaces i ON i.id = s.pms_interface_id
        LEFT JOIN iam_v2.entitlements ent
@@ -152,14 +118,12 @@ func scanStay(row interface{ Scan(...any) error }, e *stayRow) error {
 		&e.AccessActiveDevices, &e.AccessAuthorizedDevices)
 }
 
-// canSeeStayIdentity: may this caller see guest names and reservation numbers (audit H-7)? The IT manager and
-// the desk roles may; a site viewer may not. site_admin always may.
+// May this caller see guest names and reservation numbers? IT manager and desk roles; site_admin always; site viewers not.
 func canSeeStayIdentity(r *http.Request) bool {
 	sess := sessFrom(r.Context())
 	return sess != nil && permFor(sess.Roles, "pms-stay-identity", permRead)
 }
 
-// hideStayIdentity withholds the room-credential fields from a stay row.
 func hideStayIdentity(e *stayRow) {
 	e.Reservation = ""
 	e.PrimaryGuest = nil
@@ -174,17 +138,9 @@ func (s *server) pmsStaysRoutes() http.Handler {
 	return r
 }
 
-// STAYS ARE PAGED ON THE SERVER, AND SEARCHED THERE TOO.
-//
-// The list used to stop at the 200 most recent arrivals and search only those, in the browser. A property with
-// 400 rooms in house saw half of them, and the counters above the table counted the half it saw -- so the Stays
-// screen said 200 in-house stays while the mirror held 403. The page now asks for one page at a time, and the
-// totals are counted over every stay that matches, not over the rows on screen.
-//
-// THE SEARCH TEXT TRAVELS IN A HEADER (X-Stay-Search), NOT THE URL. An operator searches by guest name, and edged
-// logs every request line through chi's request logger; a name in the query string would be a guest name in the
-// log. Headers are not logged there. The stays surface is read-only for the roles that use it, so a POST body is
-// not an option either.
+// Stays are paged and searched on the server; totals count every matching stay. The search text travels in a
+// header (X-Stay-Search), not the URL, because chi's request logger logs every request line and a name in the
+// query string would land in the log. The surface is read-only, so a POST body is not an option.
 const (
 	staysPageSizeDefault = 50
 	staysPageSizeMax     = 200
@@ -208,8 +164,7 @@ type staysPage struct {
 	Summary  staysSummary `json:"summary"`
 }
 
-// stayFilter is the WHERE clause the page, and the totals over it, share. $1 tenant, $2 status, $3 search
-// pattern, $4 VIP only, $5 travel agent (exact).
+// The WHERE clause the page and its totals share. $1 tenant, $2 status, $3 search pattern, $4 VIP only, $5 travel agent (exact).
 const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
 		  AND ($5::text IS NULL OR s.travel_agent = $5)
@@ -223,9 +178,7 @@ const stayFilter = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		                   WHERE g.stay_id = s.id
 		                     AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))`
 
-// stayFilterNoIdentity is stayFilter for a caller who may not see names or reservations: searching by them
-// would answer "is a guest called X staying here" without ever showing the name, so the search covers only
-// what the caller can see.
+// For a caller who may not see names or reservations: searching by them would reveal whether a guest is staying here, so search covers only what they can see.
 const stayFilterNoIdentity = `WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		  AND ($4::bool IS NOT TRUE OR s.vip IS TRUE)
 		  AND ($5::text IS NULL OR s.travel_agent = $5)
@@ -290,7 +243,6 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// The totals are over EVERY matching stay, so the counters above the table mean the property, not the page.
 	var sum staysSummary
 	if err := s.db.QueryRow(ctx, `SELECT count(*)::int,
 		       count(*) FILTER (WHERE ent.id IS NOT NULL)::int,
@@ -304,8 +256,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ORDERED BY ARRIVAL, because iam_v2.stays HAS NO updated_at (an earlier query ordered by that missing
-	// column and failed on every request). Room number breaks ties so a page boundary is stable.
+	// Ordered by arrival because iam_v2.stays has no updated_at; room number breaks ties so a page boundary is stable.
 	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` `+stayFrom+`
 		`+filter+`
 		ORDER BY s.arrival DESC NULLS LAST, s.normalized_room_number, s.id
@@ -338,8 +289,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, staysPage{Data: out, Meta: listMeta{HasMore: more}, Page: page, PageSize: size, Summary: sum})
 }
 
-// listTravelAgents answers the package editor's travel-agent picker: every travel agent the PMS has named on a
-// stay, with how many stays are in house under it now. Company names, not guest data.
+// Every travel agent the PMS has named on a stay, with how many stays are in house under it. Company names, not guest data.
 func (s *server) listTravelAgents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -378,8 +328,7 @@ type stayOccupant struct {
 	IsPrimary bool    `json:"is_primary"`
 }
 
-// stayPostingBlock is one reasoned stop on room charging for the stay (Phase-0 Amendment A1), active or
-// cleared. There are no folios: a room charge targets the reservation.
+// One reasoned stop on room charging for the stay, active or cleared. There are no folios: a room charge targets the reservation.
 type stayPostingBlock struct {
 	Reason          string     `json:"reason"`
 	Source          string     `json:"source"`
@@ -397,14 +346,13 @@ type stayDetail struct {
 	stayRow
 	Occupants     []stayOccupant     `json:"occupant_list"`
 	PostingBlocks []stayPostingBlock `json:"posting_blocks"`
-	// RoomChargeOpen: a room charge for this stay is pending, being sent or under review. Only one may exist at
-	// a time (Phase-0 Amendment A1), so a new one is not offered until it concludes.
+	// A room charge for this stay is pending, being sent or under review; only one may exist at a time.
 	RoomChargeOpen bool `json:"room_charge_open"`
 }
 
 func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// A malformed id is "no such stay", not a database cast error rendered as a 500 (audit H-22).
+	// A malformed id is "no such stay", not a cast error rendered as a 500.
 	if !uuidRe.MatchString(id) {
 		jsonErr(w, http.StatusNotFound, "not_found", "stay not found")
 		return
@@ -463,14 +411,10 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// ---------- Stay events (including the MANUAL_REVIEW queue) ----------
-
 type stayEventRow struct {
 	ID        string `json:"id"`
 	Interface string `json:"pms_interface_id"`
-	// The PMS's OWN identifier for this message. It is retained because it is the only handle support and the
-	// PMS vendor share, but it is not an answer to "what is this event about" -- which is what the operator
-	// screen was using it as, having nothing else to show.
+	// The PMS's own identifier for this message; kept as the handle support and the PMS vendor share.
 	Identity   string     `json:"external_event_identity"`
 	Type       string     `json:"event_type"`
 	Status     string     `json:"processing_status"`
@@ -479,28 +423,17 @@ type stayEventRow struct {
 	PMSAt      *time.Time `json:"pms_timestamp_utc,omitempty"`
 	ReceivedAt time.Time  `json:"received_at"`
 
-	// WHAT THE EVENT IS ABOUT, when it has been matched to a stay.
-	//
-	// The PMS activity list showed a column headed "Identity" containing a connector-generated token such as
-	// `PROTEL:GI:8831:2026-09-09T18:22:04Z`. An operator cannot tell from that whether the event concerns room
-	// 412 or room 1207, which makes the screen unusable for the job it exists for: checking that the feed is
-	// carrying the arrivals and departures the front desk just processed.
-	//
-	// The stay is already linked by stay_id on applied events, so the room, reservation and primary guest are a
-	// LEFT JOIN away. They are absent -- not blank -- on an event that has not been matched to a stay, which is
-	// itself the meaningful state for a PENDING or MANUAL_REVIEW row: "we could not tell which stay this is
-	// about" is exactly why it is waiting.
+	// What the event is about, when matched to a stay (room, reservation, primary guest via LEFT JOIN). Absent, not
+	// blank, on an unmatched event: that is why a PENDING or MANUAL_REVIEW row is waiting.
 	InterfaceLabel string  `json:"pms_interface_label,omitempty"`
 	Room           *string `json:"room,omitempty"`
 	Reservation    *string `json:"external_reservation_id,omitempty"`
 	PrimaryGuest   *string `json:"primary_guest,omitempty"`
 	StayStatus     *string `json:"stay_status,omitempty"`
 
-	// Decided: a review message that carries a decision (acknowledged, linked, expired, or answered by the
-	// roster) -- it no longer needs one (audit H-15). Decision is that disposition.
-	Decided  bool    `json:"decided"`
-	Decision *string `json:"decision,omitempty"`
-	// Matchable: the reservation or room this message names, so an operator can link it (empty when hidden).
+	// A review message that carries a decision (acknowledged, linked, expired, or answered by the roster) no longer needs one.
+	Decided            bool    `json:"decided"`
+	Decision           *string `json:"decision,omitempty"`
 	MessageReservation *string `json:"message_reservation,omitempty"`
 	MessageRoom        *string `json:"message_room,omitempty"`
 	IdentityHidden     bool    `json:"identity_hidden,omitempty"`
@@ -512,23 +445,16 @@ func (s *server) pmsEventsRoutes() http.Handler {
 	return r
 }
 
-// PMS ACTIVITY IS PAGED AND SEARCHED ON THE SERVER.
-//
-// The list used to be the newest 200 messages, searched and counted in the browser -- on a property whose feed
-// carries a few hundred messages an hour, that is the last few minutes. The search text (a room, a reservation,
-// a guest's name) travels in X-Pms-Event-Search, never the URL, because edged logs request lines.
+// PMS activity is paged and searched on the server. The search text travels in X-Pms-Event-Search, never the URL, because edged logs request lines.
 const pmsEventSearchHeader = "X-Pms-Event-Search"
 
-// stayEventFrom: both joins are LEFT, and that is the point rather than defensive habit: an event NOT matched to
-// a stay is the one an operator most needs to see, so it must list with its stay columns empty instead of being
-// filtered out by an inner join.
+// Both joins are LEFT: an event not matched to a stay is the one an operator most needs to see.
 const stayEventFrom = `FROM iam_v2.stay_events ev
 		LEFT JOIN iam_v2.pms_interfaces i ON i.id = ev.pms_interface_id
 		LEFT JOIN iam_v2.stays st
 		       ON st.tenant_id = ev.tenant_id AND st.site_id = ev.site_id AND st.id = ev.stay_id`
 
-// stayEventMatch is the status and search filter. $2 processing status (NULL for every one), $3 the ILIKE
-// pattern (NULL for no search).
+// The status and search filter. $2 processing status (NULL for every one), $3 the ILIKE pattern (NULL for no search).
 const stayEventMatch = `($2::text IS NULL OR ev.processing_status = $2)
 		  AND ($4::bool IS NOT TRUE OR (ev.processing_status = 'MANUAL_REVIEW'
 		       AND NOT EXISTS (SELECT 1 FROM iam_v2.pms_case_resolutions x WHERE x.stay_event_id = ev.id)))
@@ -543,13 +469,11 @@ const stayEventMatch = `($2::text IS NULL OR ev.processing_status = $2)
 		                       WHERE g.stay_id = st.id
 		                         AND (g.display_name ILIKE $3 OR g.last_name_norm ILIKE $3)))))`
 
-// stayEventsSummary counts EVERY message this appliance holds, whatever the filter: the tiles answer "is the
-// feed alive and is anything waiting", which a filtered count cannot.
+// Counts every message the appliance holds whatever the filter, so the tiles answer "is the feed alive and is anything waiting".
 type stayEventsSummary struct {
 	Applied int `json:"applied"`
 	Pending int `json:"pending"`
-	// Review counts every message ever placed in review; Undecided only those still waiting for a decision
-	// (no disposition). The "needs a decision" tile is Undecided (audit H-15).
+	// Review counts every message ever placed in review; Undecided only those with no disposition (the "needs a decision" tile).
 	Review    int        `json:"manual_review"`
 	Undecided int        `json:"undecided"`
 	Rejected  int        `json:"rejected"`
@@ -654,20 +578,11 @@ func (s *server) listStayEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stayEventsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
-// ---------- PMS resolutions (evidence only, never guest PII) ----------
-
 type resolutionRow struct {
 	ID           string `json:"id"`
 	GuestNetwork string `json:"guest_network_id"`
-	// THE NETWORK'S NAME, which is the only thing the operator can act on in this list.
-	//
-	// The screen printed a bare uuid in a column headed "Guest network". Nothing in the product maps a uuid to a
-	// network by eye, so "all the failures are on one network" -- the single most useful pattern this page can
-	// show -- was invisible: every row looked equally opaque. The name is on public.guest_networks, which this
-	// service already reads to manage those networks, so this adds no new access.
-	//
-	// The uuid is still sent, because it is the handle for a support ticket and for cross-referencing the
-	// networking screens. It just stops being the only thing shown.
+	// The network's name is what an operator can act on (a bare uuid hides "all failures are on one network"); the
+	// uuid is still sent as the handle for support and cross-referencing.
 	GuestNetworkName *string   `json:"guest_network_name,omitempty"`
 	Outcome          string    `json:"outcome_code"`
 	Resolved         bool      `json:"resolved"`
@@ -680,10 +595,7 @@ func (s *server) pmsResolutionsRoutes() http.Handler {
 	return r
 }
 
-// resolutionSummaryWindow is how many of the most recent checks the summary describes. The breakdown answers
-// "what is happening now" -- one network failing while the others succeed -- and counting a year of history
-// would bury a fault that started this morning under months of successes. It is the window the screen always
-// summarised; the table below it now pages through every check.
+// How many of the most recent checks the summary describes; a year of history would bury a fault that started this morning.
 const resolutionSummaryWindow = 200
 
 type resolutionOutcomeCount struct {
@@ -719,12 +631,8 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// deliberately NO stay identity, guest name, room or reservation: a resolution list is operational
-	// evidence, and a failed resolution must not become a way to enumerate who is staying at the property.
-	//
-	// The guest NETWORK's name is not guest data and is added: it names a piece of this property's own
-	// infrastructure, which is the thing an operator is being asked to draw a conclusion about. The constraint
-	// this page is built around is that no row identifies a PERSON, and that is unchanged.
+	// Deliberately no stay identity, guest name, room or reservation: a failed resolution must not become a way to
+	// enumerate who is staying. The guest network's name is infrastructure, not guest data, so it is included.
 	rows, err := s.db.Query(ctx, `SELECT ar.id::text, ar.guest_network_id::text, gn.name, ar.outcome_code,
 			(ar.resolved_stay_id IS NOT NULL), ar.resolved_at
 		FROM iam_v2.auth_resolutions ar
@@ -761,8 +669,7 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The summary, over the most recent window. One grouped read gives both breakdowns: GROUPING SETS keeps
-	// the per-outcome and per-network counts in a single pass over the same window.
+	// One grouped read (GROUPING SETS) gives both breakdowns in a single pass over the same window.
 	sum := resolutionsSummary{Window: resolutionSummaryWindow, Outcomes: []resolutionOutcomeCount{}, Networks: []resolutionNetworkCount{}}
 	srows, err := s.db.Query(ctx, `WITH recent AS (
 			SELECT ar.guest_network_id::text AS gnid, gn.name AS gname, ar.outcome_code,
@@ -792,7 +699,7 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
-		// GROUPING() is 0 for the column a row is grouped BY: an outcome row, a network row, or the total.
+		// GROUPING() is 0 for the column a row is grouped by: an outcome row, a network row, or the total.
 		switch {
 		case byOutcome == 0:
 			sum.Outcomes = append(sum.Outcomes, resolutionOutcomeCount{Outcome: outcome, Count: n})
@@ -809,8 +716,6 @@ func (s *server) listResolutions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resolutionsPage{pagedList: newPagedList(out, more, pg, &total), Summary: sum})
 }
 
-// ---------- Checkout-Grace configuration ----------
-
 type checkoutGraceConfig struct {
 	PackageRevisionID    *string `json:"grace_package_revision_id,omitempty"`
 	DurationSeconds      int     `json:"grace_duration_seconds"`
@@ -823,9 +728,8 @@ type checkoutGraceConfig struct {
 	ConfigVersion        int     `json:"config_version"`
 }
 
-// checkoutGracePublishReq is what publishing REQUIRES beyond the policy itself: the version the operator was
-// looking at, a password step-up, and a bounded reason. Publishing changes what every departing guest gets,
-// so it is treated like the other privileged, destructive operations on this appliance.
+// Publishing requires the version the operator was looking at, a password step-up and a bounded reason, because it
+// changes what every departing guest gets.
 type checkoutGracePublishReq struct {
 	checkoutGraceConfig
 	ExpectedConfigVersion *int   `json:"expected_config_version"`
@@ -833,13 +737,10 @@ type checkoutGracePublishReq struct {
 	ReasonCode            string `json:"reason_code"`
 }
 
-// supportedDeviceLimitPolicies lists what the enforcement path can actually honour. DISCONNECT_OLDEST and
-// ADMIN_APPROVAL stay capability-disabled: offering them would let an operator publish a policy that silently
-// degrades to something else at the boundary.
+// What the enforcement path can honour. DISCONNECT_OLDEST and ADMIN_APPROVAL stay capability-disabled: offering them would publish a policy that silently degrades.
 var supportedDeviceLimitPolicies = []string{"REJECT_NEW_DEVICE"}
 
-// graceEligibilityWindowUnused is what a publication stores for eligibility_window_seconds when the console sends
-// none: 24 hours, the value every fixture and the original form used. The converter does not read it (H-19).
+// Stored for eligibility_window_seconds when the console sends none; the converter does not read it.
 const graceEligibilityWindowUnused = 86400
 
 func (s *server) checkoutGraceConfigRoutes() http.Handler {
@@ -851,9 +752,7 @@ func (s *server) checkoutGraceConfigRoutes() http.Handler {
 	return r
 }
 
-// gracePackageOption is one selectable Checkout-Grace Package Revision, described by its own IMMUTABLE
-// attributes. The operator picks a package; they never type a UUID and never invent the numbers — the numbers
-// ARE the pinned revision's, which is what makes the published policy and the package agree by construction.
+// One selectable Checkout-Grace Package Revision, described by its own immutable attributes, so the published policy and the package agree by construction.
 type gracePackageOption struct {
 	PackageRevisionID string `json:"package_revision_id"`
 	PackageCode       string `json:"package_code"`
@@ -876,11 +775,8 @@ type gracePackageOption struct {
 	Selected          bool   `json:"selected"`
 }
 
-// listGracePackages returns exactly the revisions PUBLICATION would accept — it does not re-implement a
-// second, weaker idea of "publishable". iam_v2.selectable_grace_packages judges every candidate with the same
-// validator publication uses, against the candidate's own pinned values, and hands back a bounded mismatch
-// reason for the ones that fail. Those are logged (an operator can be told WHY a package is missing) and
-// omitted; a malformed duration policy excludes that one candidate rather than failing the whole endpoint.
+// Returns exactly the revisions publication would accept: iam_v2.selectable_grace_packages applies the same
+// validator. Failures are logged with a bounded reason and omitted; a malformed duration policy excludes only that candidate.
 func (s *server) listGracePackages(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -913,7 +809,6 @@ func (s *server) listGracePackages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mismatch != nil {
-			// bounded, operator-visible diagnostic — never a silent disappearance and never a 500
 			excluded[o.PackageCode] = *mismatch
 			continue
 		}
@@ -937,14 +832,8 @@ func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		Scan(&c.PackageRevisionID, &c.DurationSeconds, &c.DownKbps, &c.UpKbps, &c.DataQuotaBytes,
 			&c.DeviceLimit, &c.DeviceLimitPolicy, &c.EligibilityWindowSec, &c.ConfigVersion)
 	if isNoRows(err) {
-		// A site with nothing published yet is a starting point, not a failure: version 0 says exactly that,
-		// and the operator can send it back as their expected version.
-		//
-		// BUT "nothing published" IS NOT "nothing happening", and that is what this endpoint used to imply.
-		// Guests who check out of an unconfigured site still get a grace -- the built-in Emergency fallback --
-		// and the screen said only "(nothing published yet)", so an operator could not learn what their
-		// departing guests were actually being given, or that it had already happened. The effective policy is
-		// therefore always reported, whichever it is.
+		// Nothing published is version 0, not a failure. The effective policy is always reported, because guests of
+		// an unconfigured site still get the built-in Emergency fallback and the operator must be able to see that.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"published":                 false,
 			"config_version":            0,
@@ -974,18 +863,13 @@ func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 			"eligibility_window_seconds": c.EligibilityWindowSec,
 			"config_version":             c.ConfigVersion,
 		},
-		// Reported even when a policy IS published: a site that published one last week may still have
-		// conversions from before it, and hiding them would make the alert history unexplainable.
+		// Reported even when a policy is published: earlier conversions may exist, and hiding them would make the alert history unexplainable.
 		"emergency_history": s.emergencyGraceHistory(ctx),
 	})
 }
 
-// emergencyEffective describes what a departing guest ACTUALLY receives at a site with no published policy.
-//
-// The numbers are read from grace.BuiltinEmergencyPolicy() rather than restated here. That is not fussiness:
-// the licence provisioning gate in this same binary drifted precisely because a second hand-written copy of a
-// rule fell out of step with the rule, and a screen quoting stale grace terms to an operator would be the
-// same defect wearing a different hat.
+// What a departing guest actually receives at a site with no published policy. Numbers come from
+// grace.BuiltinEmergencyPolicy(), not a second copy, which would drift.
 func emergencyEffective() map[string]any {
 	p := grace.BuiltinEmergencyPolicy()
 	return map[string]any{
@@ -1000,13 +884,8 @@ func emergencyEffective() map[string]any {
 	}
 }
 
-// emergencyGraceHistory counts the conversions that have ALREADY fallen back, so the screen can say "this has
-// happened N times, most recently X" instead of leaving an operator to discover it on the alerts page.
-//
-// LAYERED AND ALLOWED TO BE MISSING, for the same reason the PMS revision provenance is: the audit table is
-// not present in every schema this endpoint must serve, and a configuration screen that 500s because a
-// history table is absent would be a worse failure than the one it reports. A read error yields a zero
-// count, never an error page.
+// Counts conversions that already fell back. The audit table is not present in every schema, so a read error
+// yields a zero count, never an error page.
 func (s *server) emergencyGraceHistory(ctx context.Context) map[string]any {
 	out := map[string]any{"count": 0}
 	var n int
@@ -1040,16 +919,9 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to publish")
 		return
 	}
-	// THE PACKAGE IS DERIVED, NOT CHOSEN. The operator publishes POLICY; the system materialises the service
-	// plan revision and package revision that express it exactly, in the same transaction as the publication.
-	//
-	// It used to be the other way round, and that was a dead end rather than a preference. The checkout
-	// validator demands EXACT equality between the typed policy and the pinned revision, so the only package
-	// that can ever be selected is one built from the policy -- and on a site with no such package the page
-	// told the operator to "publish one through the commercial catalog first", which is not something the
-	// catalog can do: the grace package is a reserved system package the operator publisher refuses to create.
-	// An operator following that instruction could not succeed, and PRE-LIVE sat on the emergency fallback
-	// with zero selectable packages as a result.
+	// The package is derived, not chosen: the operator publishes policy, and the plan and package revisions that
+	// express it exactly are materialised in the same transaction. The checkout validator demands exact equality
+	// between policy and pinned revision, and the grace package is a reserved system package the operator publisher refuses to create.
 	if in.PackageRevisionID != nil && strings.TrimSpace(*in.PackageRevisionID) != "" {
 		jsonErr(w, http.StatusBadRequest, "package_not_accepted",
 			"grace_package_revision_id is not accepted: publish the policy and the system derives the package "+
@@ -1057,7 +929,6 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 				"checkout validator")
 		return
 	}
-	// Step-up: publishing changes what every departing guest receives.
 	if !s.reauth(r, in.Password) {
 		s.reauthRefused(w, r, "password confirmation required")
 		return
@@ -1067,15 +938,11 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusUnauthorized, "unauthorized", "an operator identity is required")
 		return
 	}
-	// THE ELIGIBILITY WINDOW IS NOT AN OPERATOR CHOICE (audit H-19). The column is part of the published policy
-	// row, but the checkout converter never reads it: eligibility is proven from the entitlement's state AT the
-	// boundary (internal/checkout eligibleOriginalAtBoundary). The console therefore no longer asks for it; a
-	// request that omits it publishes the value the schema has always defaulted to, so nothing an operator sees
-	// claims to control a rule that does not exist.
+	// The eligibility window is not an operator choice: the checkout converter never reads it (eligibility is proven
+	// from the entitlement's state at the boundary), so an omitted value publishes the schema default.
 	if in.EligibilityWindowSec == 0 {
 		in.EligibilityWindowSec = graceEligibilityWindowUnused
 	}
-	// Shape checks only — the database re-validates everything and owns the authoritative decision.
 	if in.DurationSeconds <= 0 || in.DownKbps <= 0 || in.UpKbps <= 0 || in.DeviceLimit <= 0 || in.EligibilityWindowSec <= 0 {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "duration, rates, device limit and eligibility window must be positive")
 		return
@@ -1106,8 +973,7 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// One transaction end to end: plan revision, package revision and the audited publication. A refusal
-	// leaves no half-built grace catalog behind claiming to be something nobody validated.
+	// One transaction end to end, so a refusal leaves no half-built grace catalog.
 	version, pkgRev, err := iamv2.PublishSystemGracePolicy(ctx, repo, iamv2.GracePublishRequest{
 		TenantID: s.tenantID, SiteID: s.siteID,
 		Policy: iamv2.SystemGracePolicy{
@@ -1123,8 +989,7 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		ExpectedVersion: *in.ExpectedConfigVersion,
 	})
 	if err != nil {
-		// A bad policy is the operator's to fix and is reported as such; a stale version is a 409 so the UI
-		// reloads what actually changed instead of overwriting somebody else's publication.
+		// A bad policy is the operator's to fix; a stale version is a 409 so the UI reloads instead of overwriting a publication.
 		var de *iamv2.Error
 		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
 			jsonErr(w, http.StatusBadRequest, "validation", de.Msg)
@@ -1134,17 +999,14 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, status, code, "the checkout-grace policy was refused")
 		return
 	}
-	// The derived revision is recorded because it is the provenance of what guests will receive; it is not
-	// returned as something the operator is expected to handle.
+	// The derived revision is recorded as provenance of what guests will receive.
 	s.audit(r, "checkout_grace.published", "site_checkout_grace_config", s.siteID,
 		map[string]any{"config_version": version, "reason_code": in.ReasonCode,
 			"derived_package_revision_id": pkgRev})
 	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
 }
 
-// graceHistoryEntry is one published version, as an operator reads provenance: who, when, why, and the exact
-// terms that version put in force. The package revision is the system's own derivation and is reported as
-// provenance rather than as anything the operator chose or can act on.
+// One published version as provenance: who, when, why, and the exact terms it put in force.
 type graceHistoryEntry struct {
 	ConfigVersion     int            `json:"config_version"`
 	PublishedAt       time.Time      `json:"published_at"`
@@ -1154,20 +1016,12 @@ type graceHistoryEntry struct {
 	DerivedRevisionID string         `json:"derived_package_revision_id,omitempty"`
 }
 
-// listGraceHistory returns the append-only publication ledger, newest first.
-//
-// The snapshot is what that version actually put in force, read from the row rather than recomputed: a
-// history that re-derived its own numbers from today's config would agree with itself and describe nothing.
+// Newest first. The snapshot is read from the row, not recomputed: a history re-derived from today's config describes nothing.
 func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// FAIL SOFT, AND SAY SO. The ledger is written by a SECURITY DEFINER function, so the service role has
-	// never needed to READ it -- svc_edged holds no SELECT on it, and the appliance answered 500 on every load
-	// of this page. A test fixture cannot catch that: it connects as the owner, which can read everything.
-	//
-	// Until the grant exists this reports availability honestly rather than either 500ing the page or, worse,
-	// returning an empty list -- "no policy has ever been published" is a different claim from "I cannot see
-	// the record", and only one of them is true here.
+	// Fail soft, and say so. The ledger is written by a SECURITY DEFINER function and svc_edged holds no SELECT on
+	// it, so availability is reported honestly: "no policy ever published" differs from "I cannot see the record".
 	unavailable := func(err error) {
 		slog.Error("checkout-grace: publication history unreadable; the page is served without it",
 			"site_id", s.siteID, "err", err)
@@ -1201,8 +1055,7 @@ func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(snap, &e.Policy)
 		out = append(out, e)
 	}
-	// pgx defers most query errors to here, which is why the original 500 said only "history read failed"
-	// and named neither the table nor the privilege. The error is now logged.
+	// pgx defers most query errors to here; log them so the table or privilege is named.
 	if err := rows.Err(); err != nil {
 		unavailable(err)
 		return
@@ -1210,8 +1063,7 @@ func (s *server) listGraceHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "available": true})
 }
 
-// graceFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. A version conflict is
-// a 409 so the UI can reload and show the operator what actually changed instead of overwriting it.
+// A version conflict is a 409 so the UI can reload and show what changed instead of overwriting it.
 func graceFailureStatus(msg string) (int, string) {
 	switch {
 	case strings.Contains(msg, "GRACE_VERSION_CONFLICT"):
@@ -1227,8 +1079,6 @@ func graceFailureStatus(msg string) (int, string) {
 	}
 }
 
-// ---------- Operational alerts ----------
-
 type alertRow struct {
 	AuditID          string    `json:"audit_id"`
 	StayID           string    `json:"stay_id"`
@@ -1239,8 +1089,7 @@ type alertRow struct {
 	BoundaryAt       time.Time `json:"boundary_at"`
 	ClockSuspect     bool      `json:"boundary_clock_suspect"`
 	CreatedAt        time.Time `json:"created_at"`
-	// State + Seq are what an operator must send back on the next action. Without them two operators can
-	// each act on a stale view and one silently overwrites the other.
+	// State + Seq are what an operator sends back on the next action; without them two operators could overwrite each other.
 	State          string     `json:"state"`
 	Seq            int64      `json:"seq"`
 	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
@@ -1257,8 +1106,7 @@ func (s *server) operationalAlertsRoutes() http.Handler {
 func (s *server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// the view returns only alerts whose lifecycle head is not RESOLVED — an operator's queue is what still
-	// needs attention — and carries that head state so the next action can be optimistic.
+	// Only alerts whose lifecycle head is not RESOLVED, with that head state so the next action can be optimistic.
 	rows, err := s.db.Query(ctx, `SELECT audit_id::text, stay_id::text, lifecycle_version, alert_code, trigger,
 			reason_code, boundary_at, boundary_clock_suspect, created_at, alert_state, alert_seq, state_changed_at
 		FROM iam_v2.active_operational_alerts WHERE tenant_id=$1 AND site_id=$2
@@ -1283,16 +1131,13 @@ func (s *server) listAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 type alertActionReq struct {
-	// ExpectedState is what the operator was looking at. It is REQUIRED: an action sent without it is an
-	// action taken on an unknown world, and this API refuses to guess on the operator's behalf.
+	// Required: an action sent without it is taken on an unknown world and the API refuses to guess.
 	ExpectedState string `json:"expected_state"`
 	ReasonCode    string `json:"reason_code"`
 }
 
-// alertAction records an ACKNOWLEDGED or RESOLVED action through the ONE controlled database operation, which
-// owns the lock, the contiguous sequence, the legal edges, the actor check and the optimistic state match.
-// This handler's only jobs are to identify the operator and to map the operation's bounded failure prefixes
-// onto the right HTTP status.
+// Records ACKNOWLEDGED or RESOLVED through the one controlled database operation, which owns the lock,
+// sequence, legal edges, actor check and optimistic state match.
 func (s *server) alertAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auditID := chi.URLParam(r, "auditID")
@@ -1332,8 +1177,7 @@ func (s *server) alertAction(action string) http.HandlerFunc {
 	}
 }
 
-// alertFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. The database is the
-// authority on WHY something was refused; this only decides how to say it over HTTP.
+// The database is the authority on why something was refused; this only maps the prefixes to HTTP.
 func alertFailureStatus(msg string) (int, string) {
 	switch {
 	case strings.Contains(msg, "ALERT_NOT_FOUND"):

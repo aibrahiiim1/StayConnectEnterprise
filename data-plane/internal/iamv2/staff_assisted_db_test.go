@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// STAFF-ASSISTED VERIFICATION (contract §6.7) against a real database. A code a staff member showed the client
-// may create a NEW Client, marked staff_assisted, labelled *_ASSISTED, in no email-domain group; it never signs in
-// to an existing Client and leaves that Client untouched; the client's own later proof clears the marker.
-// Needs IAMV2_TEST_DSN; skipped otherwise.
+// A staff-shown code may create a new Client (marked staff_assisted, in no email-domain group) but never signs
+// in to an existing one; the client's own later proof clears the marker. Needs IAMV2_TEST_DSN.
 func TestAStaffShownCodeNeverReachesAnExistingClient(t *testing.T) {
 	db := scratchDB(t)
 	seedGuestNetwork(t, db)
@@ -46,7 +44,6 @@ func TestAStaffShownCodeNeverReachesAnExistingClient(t *testing.T) {
 		return m
 	}
 
-	// 1. An existing Client, who proved their address themselves.
 	owner := signIn("ann@example.com", false)
 	if owner.Decision != DecisionAllow || owner.ClientGroupID != gid {
 		t.Fatalf("self-verified sign-in: %+v", owner)
@@ -57,7 +54,7 @@ func TestAStaffShownCodeNeverReachesAnExistingClient(t *testing.T) {
 	var contexts int
 	_ = db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.auth_contexts WHERE guest_principal_id=$1::uuid`, owner.Subject.PrincipalID).Scan(&contexts)
 
-	// 2. A staff-shown code for the SAME address: refused, and nothing about the Client changes.
+	// A staff-shown code for the same address is refused and the Client is unchanged.
 	denied := signIn("Ann@Example.com", true)
 	if denied.Decision != DecisionDeny || denied.Reason != "assisted_existing_client" {
 		t.Fatalf("a staff-shown code must never sign in to an existing Client: %+v", denied)
@@ -71,7 +68,6 @@ func TestAStaffShownCodeNeverReachesAnExistingClient(t *testing.T) {
 		t.Fatal("the existing Client's factor must be left exactly as it was")
 	}
 
-	// 3. A staff-shown code for a NEW address: a new Client, marked, labelled, in no email-domain group.
 	assisted := signIn("bob@example.com", true)
 	if assisted.Decision != DecisionAllow || assisted.ClientGroupID != "" {
 		t.Fatalf("a staff-assisted new Client is allowed but in no email-domain group: %+v", assisted)
@@ -85,7 +81,6 @@ func TestAStaffShownCodeNeverReachesAnExistingClient(t *testing.T) {
 		t.Fatalf("the sign-in is labelled as staff-assisted, got %q", cred)
 	}
 
-	// 4. The client later proves the address themselves: the same Client, the marker cleared, the group earned.
 	proved := signIn("bob@example.com", false)
 	if proved.Decision != DecisionAllow || proved.Subject.PrincipalID != assisted.Subject.PrincipalID || proved.ClientGroupID != gid {
 		t.Fatalf("the client's own proof upgrades the same Client: %+v", proved)

@@ -1,19 +1,8 @@
 package main
 
-// STAFF HELP FOR CLIENTS WHO ASKED FOR A CODE (Product Owner, 2026-10-12; contract §6.7).
-//
-// Two resource keys, deliberately not one (auth.go):
-//
-//	code-requests  GET  /code-requests              recent SMS / WhatsApp code requests and the code's state
-//	code-reveal    POST /code-reveal/{id}           read a LIVE code to the client it was sent to
-//
-// The temporary internet that used to accompany an EMAIL code, and the "let them try again" action that cleared
-// a device's windows, are REMOVED with the email code itself (Email + Password self-service contract §1). Code
-// requests remain for the SMS and WhatsApp codes they still serve; historical email rows may still be listed.
-//
-// The reveal takes the operator's password (step-up) and a reason, and is audited here. The code itself is
-// never written to the audit record, the log or any other response. scd owns the data and the sealed copy;
-// edged never holds the key. Scope is the appliance's own tenant and site, bound inside scd.
+// Two resource keys (auth.go): code-requests (list recent SMS/WhatsApp code requests) and code-reveal (read a
+// live code to the client it was sent to). The reveal takes step-up and a reason; the code is never written to
+// the audit record, log or any other response. scd owns the sealed copy; edged never holds the key.
 
 import (
 	"encoding/json"
@@ -48,9 +37,7 @@ func (s *server) relayScd(w http.ResponseWriter, st int, raw []byte) {
 	_, _ = w.Write(raw)
 }
 
-// The scd list route. It was named after the temporary-internet windows it also reported; with those gone it is
-// /v1/admin/code-requests. An scd that still answers only under the former name is asked there, so the desk's
-// list does not depend on which of the two components was upgraded first.
+// The legacy path is tried when an older scd answers 404 on the current one.
 const (
 	scdCodeRequestsPath       = "/v1/admin/code-requests"
 	scdCodeRequestsLegacyPath = "/v1/admin/temporary-access"
@@ -69,9 +56,7 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadGateway, "scd_unreachable", "the sign-in service could not be reached")
 		return
 	}
-	// WHO SEES WHAT (contract §6.7). The full address and the device's hardware address are shown only to a
-	// role that may also show a code -- the desk that has the client in front of it. Every other role that may
-	// read the list (guest relations, viewer) sees them masked; the state, window and limits are the same.
+	// The full address and device MAC are shown only to a role that may also reveal a code; other readers see them masked.
 	if st == http.StatusOK {
 		var roles []string
 		if sess := sessFrom(r.Context()); sess != nil {
@@ -84,8 +69,7 @@ func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	s.relayScd(w, st, raw)
 }
 
-// maskCodeRequests masks every request's destination and device address. Fails closed: a body it cannot
-// parse is replaced by an empty list rather than relayed unmasked.
+// maskCodeRequests fails closed: an unparseable body becomes an empty list, never relayed unmasked.
 func maskCodeRequests(raw []byte) []byte {
 	var body map[string]any
 	if json.Unmarshal(raw, &body) != nil {
@@ -144,7 +128,7 @@ func (s *server) revealCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st < 300 {
-		// The record names the challenge and the reason; never the code.
+		// Never audit the code itself.
 		s.audit(r, "otp_code.revealed", "otp_challenge", id, map[string]any{"reason": reason})
 	}
 	s.relayScd(w, st, raw)

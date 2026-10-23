@@ -1,12 +1,5 @@
 package main
 
-// WHAT THIS APPLIANCE SERVES, AND WHAT HAPPENS TO THE PARTS IT DOES NOT.
-//
-// The sweep of the PRE-LIVE Hotel Admin found eight navigation destinations that answered 404 because the
-// bundle was built with every capability compiled in and the appliance mounts a subset. These pin the two
-// halves of the fix: the appliance reports what it actually mounted, and a disabled feature says so instead
-// of being misread as something else.
-
 import (
 	"encoding/json"
 	"net/http"
@@ -19,8 +12,7 @@ import (
 	"testing"
 )
 
-// readSourceFile reads a file from this package, for the assertions that are about WIRING rather than
-// behaviour -- where a surface is registered, and whether the registration records itself.
+// readSourceFile supports assertions about wiring rather than behaviour.
 func readSourceFile(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(name)
@@ -54,8 +46,6 @@ func TestCapabilitiesReportsWhatWasMounted(t *testing.T) {
 }
 
 func TestCapabilitiesOmitsWhatWasNotMounted(t *testing.T) {
-	// The point of the endpoint. An appliance that does not mount financial-review must not report it, or the
-	// navigation goes on offering a destination that 404s -- which is the defect, restated.
 	s := &server{surfaces: newMountedSurfaces()}
 	s.surfaces.add("sessions")
 	w := httptest.NewRecorder()
@@ -65,10 +55,7 @@ func TestCapabilitiesOmitsWhatWasNotMounted(t *testing.T) {
 	}
 }
 
-// THE SURFACE LIST COMES FROM mountResource ITSELF.
-//
-// A hand-maintained list would be a second thing to remember, and the one that drifts. This asserts the
-// recording happens where a surface actually becomes reachable, so the two cannot disagree.
+// Recording must happen in mountResource itself, so a hand-maintained list cannot drift.
 func TestMountResourceRecordsEverySurfaceItMounts(t *testing.T) {
 	src := readSourceFile(t, "main.go")
 	i := strings.Index(src, "func mountResource(")
@@ -84,17 +71,9 @@ func TestMountResourceRecordsEverySurfaceItMounts(t *testing.T) {
 	}
 }
 
-// EVERY DESTINATION THE ADMIN OFFERS MUST BE A SURFACE THIS SERVICE CAN REPORT.
-//
-// /capabilities is only useful if the names in it are the names the navigation asks about. The first live
-// sweep after it shipped found the gap the hard way: the License destination named the resource "license",
-// which is registered as a plain route rather than through mountResource, so it was never recorded -- and an
-// appliance that serves the licence screen perfectly well reported it as not enabled.
-//
-// This reads the navigation's resource names and checks each one is either mounted through mountResource or
-// explicitly recorded. It deliberately does NOT check whether the surface is enabled on any particular
-// appliance -- that is the runtime answer /capabilities exists to give. It checks that the name is one edged
-// knows how to say at all.
+// Every navigation resource must be mounted through mountResource or explicitly recorded (a plain route such as
+// "license" would otherwise be reported as not enabled). It checks the name is one edged can report, not that
+// it is enabled on any appliance.
 func TestEveryNavigationResourceIsASurfaceEdgedCanReport(t *testing.T) {
 	nav, err := os.ReadFile(filepath.Join("..", "..", "..", "hotel-admin", "components", "nav.tsx"))
 	if err != nil {

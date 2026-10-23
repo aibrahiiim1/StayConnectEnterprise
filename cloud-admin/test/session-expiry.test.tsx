@@ -8,9 +8,7 @@ import {
 } from "@/lib/session-expiry";
 import { SessionExpiryWarning } from "@/components/session-expiry";
 
-// AN ENDING SIGN-IN (WCAG 2.2.1, 3.3.7): warned two minutes ahead, able to stay when the idle limit is the one
-// coming, told plainly when it is the fixed lifetime, and returned to the page afterwards by a `next` that can
-// never leave this console.
+// The return path must stay within this console after either session deadline.
 
 describe("safeNext", () => {
   it("follows a same-origin relative path", () => {
@@ -50,7 +48,7 @@ describe("safeNext", () => {
 
 describe("deadlines from whoami", () => {
   it("moves them onto this browser's clock", () => {
-    // The server's clock is an hour ahead of the browser's; the warning must still come at the right moment.
+    // Server clock drift must not shift the warning.
     const received = Date.parse("2026-10-19T10:00:00Z");
     const d = deadlinesFrom({
       server_time: "2026-10-19T11:00:00Z",
@@ -108,7 +106,6 @@ describe("the warning before a sign-in ends", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  /** The app shell's part: deadlines in state, re-read on request, moved by activity. */
   function Harness({ start, extended, onExpired, keepAlive }: {
     start: Deadlines;
     extended?: Deadlines;
@@ -148,7 +145,7 @@ describe("the warning before a sign-in ends", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1 * MIN + 1000); });
     const dialog = screen.getByRole("alertdialog", { name: "Are you still there?" });
     expect(dialog).toHaveAccessibleDescription(/no activity/);
-    // The ticking countdown is hidden from screen readers; it is not read out every second.
+    // Do not announce every countdown tick to screen readers.
     expect(screen.getByText(/^\d:\d\d$/)).toHaveAttribute("aria-hidden", "true");
 
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stay signed in" })); });

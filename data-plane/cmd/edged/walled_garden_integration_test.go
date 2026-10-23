@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// N-7 against the real schema (migration 0125): the policy, its audited change, rule create/edit refusals.
 func TestIntegration_WalledGarden_PolicyAndRuleChecks(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()

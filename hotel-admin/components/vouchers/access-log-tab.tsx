@@ -1,7 +1,6 @@
 "use client";
 
-// ACCESS LOG — every time an operator read a code in the clear: single reveals and batch exports.
-// Append-only on the server; nothing here can edit or remove an entry.
+// Reveals and batch exports are recorded in an append-only server log.
 
 import * as React from "react";
 import { ShieldCheck } from "lucide-react";

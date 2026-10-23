@@ -1,13 +1,6 @@
 "use client";
 
-// TOASTS — the confirmation that an action happened.
-//
-// Before this, a successful save said nothing: the dialog closed and the operator had to infer from the table
-// whether the change took. On a slow appliance that inference is wrong often enough to cause a second click, and a
-// second click on "Issue 50 vouchers" is 100 vouchers.
-//
-// Deliberately small and dependency-free. A toast confirms or reports — it never carries the only copy of
-// information the operator needs later (a revealed code, an error explaining what to fix). Those stay in the page.
+// Keep durable information on the page; toasts only confirm or report actions.
 
 import * as React from "react";
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from "lucide-react";
@@ -26,7 +19,7 @@ const Ctx = React.createContext<ToastApi | null>(null);
 
 const NOOP: ToastApi = { toast: () => {}, success: () => {}, error: () => {} };
 
-/** Safe outside a provider (tests render pages bare): the calls simply do nothing. */
+/** Bare page tests may render without a provider. */
 export function useToast(): ToastApi {
   return React.useContext(Ctx) ?? NOOP;
 }
@@ -45,8 +38,7 @@ const TONE: Record<Tone, string> = {
   info: "text-info",
 };
 
-// How long a confirmation stays up. Errors have no entry: they stay until the operator dismisses them, because
-// they are the ones most needed to finish reading and a timer cannot know how fast anyone reads.
+// Errors stay until dismissed so they cannot vanish before the operator reads them.
 const DISMISS_AFTER_MS: Partial<Record<Tone, number>> = { ok: 4500, info: 4500, warn: 7000 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -70,11 +62,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {children}
-      {/*
-        The stack itself is NOT a live region. Each toast is its own -- role="status" for a confirmation,
-        role="alert" for a failure -- and wrapping those in an aria-live container made a live region inside a
-        live region, which some screen readers announce twice and others not at all.
-      */}
+      {/* Each toast owns its live role; nesting live regions causes duplicate announcements. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6">
         {items.map((t) => (
           <ToastCard key={t.id} item={t} onDismiss={dismiss} />
@@ -84,8 +72,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// A toast's timer PAUSES while the pointer or keyboard focus is on it, and restarts in full when they leave. An
-// operator halfway through the description, or tabbing to Dismiss, should not have it vanish underneath them.
+// Pause the timer while the pointer or keyboard focus is on the toast.
 function ToastCard({ item: t, onDismiss }: { item: ToastItem; onDismiss: (id: number) => void }) {
   const [paused, setPaused] = React.useState(false);
   const after = DISMISS_AFTER_MS[t.tone];

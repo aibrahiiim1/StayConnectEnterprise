@@ -1,26 +1,10 @@
 package main
 
-// STAFF HELP FOR CLIENTS WHO ASKED FOR A CODE (Product Owner, 2026-10-12; contract §6.7, migration 0113).
-//
-// Two admin-socket routes, reached only through edged, which checks the operator's permission, takes the
-// password step-up for the reveal and writes the audit record:
-//
-//	GET  /v1/admin/code-requests               recent SMS / WhatsApp code requests: the device, the number and
-//	                                           the code's state (also answered at its old path,
-//	                                           /v1/admin/temporary-access)
-//	POST /v1/admin/otp/{id}/reveal             read a LIVE code to the client it was sent to
-//
-// The temporary-internet window, its columns, its limits and the "clear" action are REMOVED with the email code
-// they served (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1). Their history rows
-// (verification_access_grants) are kept and no longer read.
-//
-// THE CODE COPY. A code is stored as a keyed hash and cannot be read back, so each code that was SENT also gets
-// a sealed copy (sealbox, domain otp-code-escrow:v1, the appliance's local notify key, bound to tenant, site and
-// challenge). It exists only while the code can still be used: scd deletes it when the code is verified and
-// prunes it once the code has expired, been used or been locked by wrong attempts. A revealed code still works
-// only on the device that asked (0110), once, within its ten minutes. Revealing it is an operator vouching for
-// the client: the address was not proven by the client reading their own mail. That trade-off is the Product
-// Owner's decision and is written in the contract.
+// Staff help for clients who asked for a code: admin-socket routes reached only through edged (which checks permission, takes the password step-up
+// for the reveal and writes the audit): GET /v1/admin/code-requests (also /v1/admin/temporary-access) and POST /v1/admin/otp/{id}/reveal.
+// A code is stored as a keyed hash, so each SENT code also gets a sealed copy (sealbox, otp-code-escrow:v1, bound to tenant, site and challenge) that
+// exists only while the code is usable: deleted on verify, pruned once expired, used or locked. A revealed code still works only on the asking device,
+// once, within ten minutes; revealing is an operator vouching for the client, a trade-off documented in the contract.
 
 import (
 	"context"
@@ -41,15 +25,13 @@ import (
 const otpEscrowDomain = "otp-code-escrow:v1"
 
 func (s *server) tempAccessAdminRoutes(r chi.Router) {
-	// /v1/admin/code-requests is the name for what the list now is; the old path answers the same so an edged
-	// that has not moved yet keeps working.
+	// The old path answers the same so an edged that has not moved yet keeps working.
 	r.Get("/v1/admin/code-requests", s.listCodeRequests)
 	r.Get("/v1/admin/temporary-access", s.listCodeRequests)
 	r.Post("/v1/admin/otp/{id}/reveal", s.revealOTPCode)
 }
 
-// escrowOTPCode keeps a sealed copy of a code that was just sent. Failure is logged and costs nothing but the
-// operator's ability to read this one code.
+// Failure is logged and costs only the operator's ability to read this one code.
 func (s *server) escrowOTPCode(ctx context.Context, challengeID, code string, expires time.Time) {
 	if s.db == nil || !s.otpEscrowKey.Present() || challengeID == "" || code == "" {
 		return
@@ -67,7 +49,6 @@ func (s *server) escrowOTPCode(ctx context.Context, challengeID, code string, ex
 	}
 }
 
-// dropOTPEscrow removes a code's copy the moment the code is used.
 func (s *server) dropOTPEscrow(ctx context.Context, challengeID string) {
 	if s.db == nil || challengeID == "" {
 		return
@@ -75,14 +56,12 @@ func (s *server) dropOTPEscrow(ctx context.Context, challengeID string) {
 	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_escrow WHERE challenge_id=$1::uuid`, challengeID)
 }
 
-// pruneOTPEscrow removes every copy whose code can no longer be used: expired, used, or locked.
 func (s *server) pruneOTPEscrow(ctx context.Context) {
 	if s.db == nil {
 		return
 	}
 	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_code_reveals WHERE revealed_at < now() - interval '1 day'`)
-	// A code's device binding (0110) is pruned when the next code is issued, so a site where nobody asks for a
-	// code kept every device MAC it ever bound. Swept here too, on the same one-day rule (GDPR plan C1 gap).
+	// A code's device binding is pruned when the next code is issued; swept here too on the same one-day rule so a quiet site keeps no device MAC.
 	_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.otp_device_bindings WHERE issued_at < now() - interval '1 day'`)
 	// Devices staff confirmed during a network pause (0136): their MAC goes a day after the pause ends.
 	if _, err := s.db.Exec(ctx, `SELECT iam_v2.guest_signin_network_prune()`); err != nil {
@@ -108,19 +87,13 @@ type codeRequest struct {
 	State         string     `json:"state"` // PENDING | USED | EXPIRED | LOCKED
 	DeviceMAC     string     `json:"device_mac,omitempty"`
 	CodeAvailable bool       `json:"code_available"`
-	// ExistingClient: the number already belongs to a Client here. A staff-shown code cannot sign it in
-	// (contract §6.7), so the code is not offered for showing.
+	// ExistingClient: the number already belongs to a Client, so a staff-shown code cannot sign it in and is not offered.
 	ExistingClient bool `json:"existing_client"`
-	// StaffRevealed: a staff member has already shown this code.
-	StaffRevealed bool `json:"staff_revealed"`
+	StaffRevealed  bool `json:"staff_revealed"`
 }
 
-// GET /v1/admin/code-requests?hours=N (1..72, default 24); also /v1/admin/temporary-access
-//
-// The path keeps its historical name so edged's proxy does not move; what it lists is the SMS and WhatsApp code
-// requests. Email code requests are history only (the email channel is removed) and are not listed, and the
-// temporary-internet window columns, its limits and the "clear" action are removed with the window itself
-// (contract docs/architecture/ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE.md §1).
+// GET /v1/admin/code-requests?hours=N (1..72, default 24); also the old /v1/admin/temporary-access path so edged's proxy does not move. Lists SMS and WhatsApp
+// code requests only; email code requests are history.
 func (s *server) listCodeRequests(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
 		httpErr(w, http.StatusServiceUnavailable, "no database")

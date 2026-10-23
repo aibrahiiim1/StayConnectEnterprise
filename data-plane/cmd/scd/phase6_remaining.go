@@ -5,36 +5,16 @@ import (
 	"time"
 )
 
-// WHAT A GUEST ON AN AGGREGATE PACKAGE IS TOLD ABOUT THEIR TIME.
-//
-// A guest with an online-time budget has two clocks and needs both, because either can end their access and
-// they behave nothing alike:
-//
-//   REMAINING ONLINE TIME  counts down only while they are connected. Ten minutes left means ten minutes of
-//                          use, whenever they use them.
-//   HARD EXPIRY            is a calendar instant, immutable, and arrives whether or not they were ever
-//                          online. Minutes left after it are worth nothing.
-//
-// Showing only the first would be the more comfortable half-truth: a guest with 90 minutes left and a window
-// closing in ten would plan their evening around a number that is about to stop mattering. Showing only the
-// second is the ordinary validity-window display, which is what every other package already gets.
-//
-// The numbers come from durable state and are computed the same way the accrual does -- budget minus
-// consumption, clamped at zero -- so the screen and the enforcement can never disagree about whether a guest
-// still has time.
-
-// aggregateStatus is what the status endpoint adds for a guest whose entitlement is in AGGREGATE_ONLINE_TIME
-// mode. Every field is guest-facing: no entitlement id, no plan revision, no internal identity of any kind.
+// aggregateStatus is what the status endpoint adds for online-time entitlements. A guest has two clocks:
+// remaining online time (counts down only while connected) and hard expiry (an immutable calendar instant).
+// Both are computed as the accrual does (budget minus consumption, clamped at zero); every field is guest-facing.
 type aggregateStatus struct {
 	TimeMode string `json:"time_mode"`
-	// RemainingOnlineSeconds is what is left of the budget. Clamped at zero: a guest is never told they owe
-	// time, and a negative number would in any case mean the accounting had failed.
+	// RemainingOnlineSeconds is clamped at zero; a guest is never told they owe time.
 	RemainingOnlineSeconds int64 `json:"remaining_online_seconds"`
-	// HardExpiry is the outer window, RFC3339, empty when the package has none. It is the immutable instant
-	// stamped at grant and never moved.
+	// HardExpiry is the immutable outer window (RFC3339), empty when the package has none.
 	HardExpiry string `json:"hard_expiry,omitempty"`
-	// OnlineTimeAllowance is always true when this view is present: it tells the portal that
-	// remaining_online_seconds is a time allowance to show, whatever the time mode.
+	// OnlineTimeAllowance is always true when present: remaining_online_seconds is an allowance to show.
 	OnlineTimeAllowance bool `json:"online_time_allowance"`
 }
 
@@ -44,13 +24,9 @@ func countsOnlineTime(mode string, budget int64) bool {
 	return mode == "AGGREGATE_ONLINE_TIME" || (mode == "VALIDITY_WINDOW" && budget > 0)
 }
 
-// aggregateStatusFor returns the online-time view of a session, or nil when the session's entitlement is not
-// accounted in online time. That is an AGGREGATE_ONLINE_TIME entitlement, or -- since 0122 -- a VALIDITY_WINDOW
-// one whose plan carries a time allowance: the same budget-minus-consumption the accrual enforces, so the
-// portal's "time left" and the moment access ends agree. TimeMode stays the entitlement's real mode.
-//
-// A failure to read returns nil rather than an error: the status endpoint's job is to tell the guest whether
-// they are online, and losing the extra detail must not cost them that answer.
+// aggregateStatusFor returns the online-time view of a session, or nil when it is not accounted in online time
+// (AGGREGATE_ONLINE_TIME, or VALIDITY_WINDOW with a time allowance). A read failure returns nil so the guest
+// still gets the online answer.
 func (s *server) aggregateStatusFor(ctx context.Context, sessionID string) *aggregateStatus {
 	if sessionID == "" || s.db == nil {
 		return nil

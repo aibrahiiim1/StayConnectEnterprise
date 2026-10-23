@@ -4,8 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// Central's tokens are a GENERATED copy of design-system/tokens.css (tools/sync-design-tokens.mjs). This test
-// fails when the copy drifts, so Central and Hotel Admin cannot become two palettes.
+// The generated token copy must match the shared design system.
 const here = dirname(fileURLToPath(import.meta.url));
 const consoleRoot = join(here, "..");
 const repoRoot = join(consoleRoot, "..");
@@ -42,7 +41,6 @@ describe("design tokens", () => {
     "node tools/sync-design-tokens.mjs --check reports no drift for cloud-admin",
     () => {
       const r = spawnSync(process.execPath, [toolPath, "--check"], { cwd: consoleRoot, encoding: "utf8" });
-      // The tool checks every console; this test owns only Central's copy.
       expect(r.stderr).not.toMatch(/cloud-admin\/app\/tokens\.css differs/);
     },
   );

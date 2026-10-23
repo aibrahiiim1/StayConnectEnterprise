@@ -1,12 +1,8 @@
 package main
 
-// ADMIN CONSOLE SIGN-IN PROTECTION, AS A SETTING (docs/OPERATIONAL_SETTINGS_POLICY.md; migration 0119).
-//
-// How many wrong passwords per account and per source address, within how long, and how long the lockout
-// lasts. Read by everyone who can read Operators; changed by whoever can change Operators (site_admin), with a
-// reason and the password step-up, and every change is a row in public.operator_signin_protection_changes
-// written by the same definer function that changes the value. The throttle reads the same function on every
-// attempt, so a saved change applies to the next attempt with no restart.
+// Sign-in protection thresholds are a setting: changes need a reason and the password step-up, and are recorded in
+// public.operator_signin_protection_changes by the same definer function that changes the value. The throttle
+// reads that function on every attempt, so a change applies without a restart.
 
 import (
 	"context"
@@ -39,7 +35,7 @@ type signinBound struct {
 	Explains string `json:"explains"`
 }
 
-// signinBounds mirror the CHECKs in migration 0119 exactly; the API sends them so the form cannot drift.
+// signinBounds mirror the table CHECKs exactly; the API sends them so the form cannot drift.
 var signinBounds = []signinBound{
 	{"account_max_failures", "Wrong passwords before an account is locked", "attempts", 3, 20, 5,
 		"Counted per account within the window below. From the second wrong password, each one doubles the wait before the next try (1 s, 2 s, 4 s ...)."},
@@ -69,7 +65,6 @@ func (p signinProtection) value(key string) int {
 	return 0
 }
 
-// validateSigninProtection reports the first value outside its bounds, in the operator's words.
 func validateSigninProtection(p signinProtection) (string, bool) {
 	for _, b := range signinBounds {
 		if v := p.value(b.Key); v < b.Min || v > b.Max {

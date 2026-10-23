@@ -15,7 +15,6 @@ import { SITE_TYPES } from "@/lib/site-types";
 import AppliancePage from "@/app/(app)/appliances/[id]/page";
 import CustomerPage from "@/app/(app)/customers/[id]/page";
 
-/** The registry exactly as GET /cloud/v1/modules serves it (license/modules.go). */
 const CATALOG: ModuleCatalog = {
   modules: [
     { id: "hospitality", label: "Hotel (PMS, Room sign-in, stays)", requires: [] },

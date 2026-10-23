@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// AUDIT H-8. A DRAINING interface is listed for a worker only while it has room charges to finish; with an empty
-// outbox it is not, so wind down still ends the link once there is nothing left to send. An ACTIVE one is listed.
+// A DRAINING interface is listed for a worker only while it has room charges to finish; an ACTIVE one always is.
 func TestIntegration_DrainingWithoutQueuedChargesIsNotListed(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()

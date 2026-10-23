@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// THE IDENTITY, GROUP AND FREE-ALLOWANCE RULES OF docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md,
-// pinned as behaviour.
-
 func TestSocialFactorsKeyTheSubjectAndLinkOnlyATrustedVerifiedEmail(t *testing.T) {
 	// Google: subject is the identity; the verified email is a second factor AND a legacy lookup.
 	p, sec := SocialFactors("Google", "110234", "Alice@Example.com", true, map[string]string{"hd": "example.com"})

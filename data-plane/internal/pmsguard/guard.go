@@ -1,14 +1,4 @@
-// Package pmsguard enforces brute-force protection on PMS verify attempts.
-//
-// Two independent rules:
-//
-//  1. Per-room lockout — too many failed attempts on a single room number
-//     within the lockout window blocks further tries until the window slides.
-//  2. Per-IP rate limit — too many attempts (success or failure) from a
-//     single source IP suggests scanning; throttle.
-//
-// All limits read from a single config struct so tenants can override the
-// defaults via tenants.auth_methods.pms.
+// Package pmsguard throttles PMS verify attempts: a per-room failure lockout and a per-IP attempt limit.
 package pmsguard
 
 import (
@@ -48,7 +38,6 @@ var (
 	ErrIPRateLimited = errors.New("pmsguard: too many requests from your network — try again later")
 )
 
-// CheckRoom returns ErrRoomLocked if the room has exceeded the failure budget.
 func CheckRoom(ctx context.Context, db *pgxpool.Pool, cfg Config, tenantID, roomNumber string) error {
 	cfg = cfg.withDefaults()
 	var failures int
@@ -67,7 +56,6 @@ func CheckRoom(ctx context.Context, db *pgxpool.Pool, cfg Config, tenantID, room
 	return nil
 }
 
-// CheckIP returns ErrIPRateLimited when an IP has exceeded the attempt budget.
 func CheckIP(ctx context.Context, db *pgxpool.Pool, cfg Config, tenantID, ip string) error {
 	cfg = cfg.withDefaults()
 	if ip == "" {
@@ -88,8 +76,6 @@ func CheckIP(ctx context.Context, db *pgxpool.Pool, cfg Config, tenantID, ip str
 	return nil
 }
 
-// Record persists an attempt. Caller passes success=true once validation
-// has actually returned a valid Result.
 func Record(ctx context.Context, db *pgxpool.Pool, tenantID, applianceID, roomNumber, secondaryKind, ip, errCode string, success bool) {
 	var errArg any
 	if errCode != "" {
@@ -104,7 +90,7 @@ func Record(ctx context.Context, db *pgxpool.Pool, tenantID, applianceID, roomNu
            $6, $7)
     `, tenantID, applianceID, roomNumber, secondaryKind, ip, success, errArg)
 	if err != nil {
-		// Logged at the call site; never block auth on telemetry write failure.
+		// Never block auth on an attempt-log write failure.
 		_ = err
 	}
 }

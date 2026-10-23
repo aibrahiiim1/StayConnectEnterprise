@@ -3,9 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-// SIGN-IN METHODS: a method whose sender is gone can be switched OFF (audit C-13), and an identity provider whose
-// switch is on but whose application is gone is still listed so it can be switched off (C-14).
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -32,7 +29,6 @@ function routes(methods: Record<string, unknown>, httpsActive?: boolean) {
     if (path === "/portal-https" && httpsActive !== undefined) return Promise.resolve({ state: { https_active: httpsActive } });
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     if (path === "/auth-methods") return Promise.resolve(methods);
-    // No SMS sender any more, and no identity provider application.
     if (path === "/notification-providers") return Promise.resolve(list([]));
     if (path === "/social-providers") return Promise.resolve(list([]));
     return Promise.resolve(list([]));

@@ -8,32 +8,19 @@ import (
 	"unicode/utf8"
 )
 
-// THE CUSTOM STYLESHEET.
+// The custom stylesheet is sanitised against three things:
+//  1. Loading: @import, url(), image-set() make the guest's browser request an address. Only the hotel's
+//     uploads, https and inline images may be named, only through a checked url(). (https is acceptable
+//     because outside hosts are unreachable to a device not yet signed in.)
+//  2. Execution: expression(), behavior:, -moz-binding and javascript: URLs are refused however escaped.
+//  3. Breaking sign-in: the page wraps this sheet in `@layer hotel` under an unlayered guard sheet, and a
+//     layered !important would outrank the guard, so !important is removed (a warning, not a refusal).
 //
-// CSS cannot run script in any browser a guest owns today, but it can still do three things that matter on a
-// page that collects credentials, and the rules below exist for exactly those:
+// The output is rebuilt from parsed rules, so braces balance by construction; a stray "}" must not close
+// `@layer hotel {` early and put the rest outside the layer.
 //
-//  1. LOAD SOMETHING. @import pulls in a stylesheet nobody reviewed; url(), image-set() and friends make the
-//     guest's browser request an address. Only the hotel's own uploads, https and inline images may be named,
-//     and only through url(), whose argument is checked. (Everything beyond the walled garden is unreachable
-//     to a device that has not signed in yet, which is what makes an https image acceptable at all.)
-//  2. EXECUTE SOMETHING, in the engines that once allowed it: expression(), behavior:, -moz-binding and
-//     javascript: URLs. Refused wherever they appear, however they are escaped.
-//  3. BREAK THE SIGN-IN. The page wraps this stylesheet in `@layer hotel` and keeps an unlayered guard sheet
-//     over the controls a guest needs (see the portal template). That only holds if a rule here cannot outrank
-//     the guard -- and an !important declaration in a layer DOES outrank every normal unlayered declaration.
-//     So !important is removed. It is reported as a warning rather than refused, because it is almost always
-//     habit rather than intent, and without it the hotel's rules still beat the portal's own styling (which
-//     is layered underneath them).
-//
-// THE OUTPUT IS REBUILT, NOT PATCHED. The sheet is parsed into rules and declarations and written back out, so
-// braces are balanced by construction. That matters for the layer wrapper: a sheet containing a stray "}"
-// could otherwise close `@layer hotel {` early and put everything after it outside the layer, guard and all.
-//
-// ESCAPES ARE DECODED BEFORE ANY CHECK. "\65 xpression(" is expression(, "u\72l(" is url(, and "@\69mport" is
-// @import to a browser; a check against the raw text would be checking a different stylesheet.
+// Escapes are decoded before any check ("\65 xpression(" is expression( to a browser).
 
-// MaxCSSNesting bounds rule nesting (@media inside @supports inside a nested rule…).
 const MaxCSSNesting = 12
 
 type finding struct {
@@ -44,8 +31,7 @@ type finding struct {
 type cssSan struct {
 	found          []finding
 	stripImportant bool
-	// selectors is the chain of style-rule selectors enclosing the declaration being read (more than one with
-	// CSS nesting); at-rules are not on it.
+	// selectors is the enclosing style-rule chain (at-rules excluded).
 	selectors []string
 }
 
@@ -56,8 +42,6 @@ func (c *cssSan) warnf(format string, a ...any) {
 	c.found = append(c.found, finding{SeverityWarning, sprintf(format, a...)})
 }
 
-// SanitizeCSS returns the custom stylesheet rebuilt from allowed rules and declarations only, and a finding for
-// everything removed or changed.
 func SanitizeCSS(in string) (string, []Issue) {
 	return sanitizeCSSField("custom_css", in)
 }
@@ -85,8 +69,7 @@ func sanitizeCSSField(field, in string) (string, []Issue) {
 	return out, is.list()
 }
 
-// sanitizeDeclarationList is the same rule set applied to one declaration list -- the style="" attribute on
-// an element in the custom fragment.
+// sanitizeDeclarationList applies the same rules to a style="" attribute.
 func sanitizeDeclarationList(in string, stripImportant bool) (string, []finding) {
 	c := &cssSan{stripImportant: stripImportant}
 	clean := stripCSSComments(strings.ToValidUTF8(in, "�"))
@@ -106,8 +89,7 @@ func sprintf(format string, a ...any) string {
 	return fmt.Sprintf(format, a...)
 }
 
-// stripCSSComments removes /* comments */ and NUL bytes while leaving string literals exactly as written. An
-// unterminated comment swallows the rest of the sheet, as it does in a browser.
+// stripCSSComments leaves string literals alone; an unterminated comment swallows the rest, as in a browser.
 func stripCSSComments(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -134,8 +116,7 @@ func stripCSSComments(s string) string {
 	return b.String()
 }
 
-// scanString returns the index just past the string literal starting at s[i] (a quote). A backslash escapes
-// the next byte; an unescaped newline ends a string in CSS, and so does the end of the input.
+// scanString: an unescaped newline ends a CSS string.
 func scanString(s string, i int) int {
 	q := s[i]
 	j := i + 1
@@ -154,8 +135,6 @@ func scanString(s string, i int) int {
 	return len(s)
 }
 
-// scanTo returns the index of the first top-level byte in stop, skipping strings and parenthesised groups, or
-// len(s) if none.
 func scanTo(s string, i int, stop string) int {
 	depth := 0
 	for i < len(s) {
@@ -181,7 +160,6 @@ func scanTo(s string, i int, stop string) int {
 	return len(s)
 }
 
-// matchBrace returns the index of the "}" that closes the "{" at s[open], or -1.
 func matchBrace(s string, open int) int {
 	depth := 0
 	for i := open; i < len(s); {
@@ -212,7 +190,6 @@ var blockAtRules = map[string]string{
 	"font-face": "decls", "page": "decls", "counter-style": "decls", "property": "decls",
 }
 
-// rules sanitises a list of rules (a stylesheet, or the body of @media and friends).
 func (c *cssSan) rules(s string, depth int) string {
 	if depth > MaxCSSNesting {
 		c.errorf("rules are nested more than %d levels deep; the deeper rules were removed", MaxCSSNesting)
@@ -275,8 +252,7 @@ func (c *cssSan) statement(prelude string) string {
 	case "namespace":
 		c.errorf("@namespace is not allowed")
 	case "layer":
-		// "@layer a, b;" only orders sub-layers of the hotel's own layer; the portal's layers were ordered
-		// before this sheet was ever read and a later statement cannot re-order them.
+		// Only orders sub-layers of the hotel's own layer; the portal's layers are already fixed.
 		if strings.ContainsAny(prelude, "(){}") {
 			c.errorf("@layer must name layers only")
 			return ""
@@ -327,7 +303,6 @@ func (c *cssSan) rule(prelude, body string, depth int) string {
 	return prelude + " {\n" + inner + "\n}"
 }
 
-// focusSelector is the enclosing selector that styles a focused element, or "".
 func (c *cssSan) focusSelector() string {
 	for i := len(c.selectors) - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(decodeCSSEscapes(c.selectors[i])), ":focus") {
@@ -337,8 +312,7 @@ func (c *cssSan) focusSelector() string {
 	return ""
 }
 
-// hidesOutline says whether an outline declaration takes the focus ring away: none, hidden, zero width, or a
-// transparent colour.
+// hidesOutline: none, hidden, zero width or a transparent colour.
 func hidesOutline(name, value string) bool {
 	v := strings.ToLower(strings.Join(strings.Fields(decodeCSSEscapes(value)), " "))
 	zero := func(w string) bool {
@@ -364,7 +338,6 @@ func hidesOutline(name, value string) bool {
 	return false
 }
 
-// declarations sanitises a declaration list, which (with CSS nesting) may also hold nested rules.
 func (c *cssSan) declarations(s string, depth int) string {
 	var out []string
 	for i := 0; i < len(s); {
@@ -426,7 +399,7 @@ func (c *cssSan) declaration(d string) string {
 		return ""
 	}
 
-	// !important, found on the DECODED text but cut from the raw one so escapes elsewhere are preserved.
+	// !important is found on the decoded text but cut from the raw one so other escapes survive.
 	if bang := lastTopLevelBang(value); bang >= 0 {
 		tail := strings.ToLower(strings.Join(strings.Fields(decodeCSSEscapes(value[bang+1:])), ""))
 		if tail == "important" {
@@ -443,8 +416,7 @@ func (c *cssSan) declaration(d string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
 	}
-	// A FOCUS RING TAKEN AWAY. Served as written -- the portal's guard sheet keeps its own ring on every focused
-	// control whatever this says -- but the operator is told, because on their own markup nothing keeps it.
+	// Served as written (the guard sheet keeps its own ring), but the operator is warned.
 	if sel := c.focusSelector(); sel != "" && hidesOutline(name, value) {
 		c.warnf("%s: %s on %q removes the focus outline that keyboard users follow; the portal still draws its own focus ring on links, buttons and fields", name, clip(value), clip(sel))
 	}
@@ -453,8 +425,7 @@ func (c *cssSan) declaration(d string) string {
 
 var reLoader = regexp.MustCompile(`(^|[^a-z0-9_-])(image-set|-webkit-image-set|image|src|cross-fade|-webkit-cross-fade)\(`)
 
-// valueProblems inspects a value (or a selector or at-rule prelude) with escapes decoded and whitespace
-// removed, and describes the first thing wrong with it, or returns "".
+// valueProblems checks decoded text (value, selector or at-rule prelude) and describes the first problem.
 func (c *cssSan) valueProblems(raw string) string {
 	dec := strings.ToLower(decodeCSSEscapes(raw))
 	flat := strings.Join(strings.Fields(dec), "")
@@ -470,8 +441,7 @@ func (c *cssSan) valueProblems(raw string) string {
 	case reLoader.MatchString(flat):
 		return "image-set(), image() and src() are not allowed; name an image with url() instead"
 	}
-	// Every url( … ), each argument checked -- on the decoded text AND on the same text with whitespace
-	// removed, so "u/**/rl(" (a comment, now a space) is read as the url( an older engine would see.
+	// Checked on the decoded text and the whitespace-stripped text, so "u/**/rl(" reads as the url( an older engine sees.
 	for _, src := range []string{dec, flat} {
 		for i := 0; ; {
 			k := strings.Index(src[i:], "url(")
@@ -488,7 +458,6 @@ func (c *cssSan) valueProblems(raw string) string {
 	return ""
 }
 
-// cssURLArg reads the argument of url( starting at s[i]: a quoted string or an unquoted run up to ")".
 func cssURLArg(s string, i int) (string, int) {
 	for i < len(s) && isCSSSpace(s[i]) {
 		i++
@@ -508,7 +477,6 @@ func cssURLArg(s string, i int) (string, int) {
 	return strings.TrimSpace(s[i : i+j]), i + j + 1
 }
 
-// lastTopLevelBang finds the last "!" outside strings and parentheses.
 func lastTopLevelBang(s string) int {
 	last := -1
 	depth := 0
@@ -535,7 +503,6 @@ func lastTopLevelBang(s string) int {
 	return last
 }
 
-// atName is the decoded, lower-cased name of the at-rule a prelude starts with.
 func atName(prelude string) string {
 	rest := prelude[1:]
 	end := 0
@@ -556,9 +523,7 @@ func atName(prelude string) string {
 	return strings.ToLower(decodeCSSEscapes(rest[:end]))
 }
 
-// decodeCSSEscapes resolves CSS escapes the way the tokenizer does: a backslash and one to six hex digits
-// (plus one optional whitespace) is that code point; a backslash before a newline is a line continuation;
-// a backslash before anything else is that character.
+// decodeCSSEscapes follows the CSS tokenizer: \ plus 1-6 hex digits (and one optional space) is a code point.
 func decodeCSSEscapes(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s

@@ -20,9 +20,7 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// THE SMS CARRIES A TAP-TO-CONNECT LINK into the phone's real browser (portald otp_pending.go), so a client who
-// left the captive browser to read the code never has to find it again. The email one-time code is REMOVED
-// (Email accounts replace it); these tests pin that it stays removed.
+// The SMS carries a tap-to-connect link into the phone's real browser; the email one-time code is removed and these tests pin that it stays removed.
 
 type capturedMail struct{ msgs []mail.Message }
 
@@ -31,7 +29,6 @@ func (c *capturedMail) Send(_ context.Context, m mail.Message) error {
 	return nil
 }
 
-// portalTLSWith is an agent that reports st (no cycle runs).
 func portalTLSWith(st PortalTLSState) *portalTLSAgent {
 	a := newPortalTLSAgent(nil, nil, nil, "")
 	a.snap = st
@@ -66,8 +63,7 @@ func smsFixture(t *testing.T) (*server, *capturedSMS) {
 	}, cs
 }
 
-// The SMS carries the same link while the portal is on HTTPS, and the code alone -- its unchanged wording -- on
-// the fallback (contract section 4: "Email/SMS code message").
+// The SMS carries the link while the portal is on HTTPS and the code alone on the fallback.
 func TestTheSMSCodeCarriesTheHTTPSLinkOnlyWhileHTTPSIsActive(t *testing.T) {
 	s, cs := smsFixture(t)
 	issue := func() string {
@@ -92,8 +88,7 @@ func TestTheSMSCodeCarriesTheHTTPSLinkOnlyWhileHTTPSIsActive(t *testing.T) {
 	}
 }
 
-// AN EMAIL CODE IS NEVER ISSUED, whatever the switches say: the channel is gone, nothing is generated, nothing is
-// sent and no window is opened.
+// An email code is never issued, whatever the switches say: nothing is generated or sent.
 func TestAnEmailCodeIsNoLongerIssued(t *testing.T) {
 	s, cs := smsFixture(t)
 	issued := false
@@ -123,8 +118,7 @@ func TestOTPLinkBaseIsTheCanonicalHTTPSOriginOrNothing(t *testing.T) {
 	}
 }
 
-// A CODE IS ISSUED TO A DEVICE OR NOT AT ALL (migration 0110): without the kernel-resolved hardware address the
-// challenge could not be bound, so the issue is refused -- nothing is generated and nothing is sent.
+// A code is issued to a device or not at all (migration 0110): without the kernel-resolved MAC the issue is refused, nothing generated or sent.
 func TestACodeIsNeverIssuedWithoutADevice(t *testing.T) {
 	s, cs := smsFixture(t)
 	for _, mac := range []string{"", "not-a-mac"} {

@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestStrictParse_Grammar exercises the strict FIAS record grammar: the normal trailing pipe is accepted,
-// while internal empty tokens, one-character tokens, malformed field ids and control bytes are rejected
-// (typed ErrRecordMalformed, never silent skipping). Valid unknown/duplicate/reordered fields are preserved.
 func TestStrictParse_Grammar(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -48,16 +45,12 @@ func TestStrictParse_Grammar(t *testing.T) {
 	}
 }
 
-// TestStrictParse_ControlBytesRejected proves a control byte in a value is rejected (it belongs only inside
-// the raw frame, never a parsed record).
 func TestStrictParse_ControlBytesRejected(t *testing.T) {
 	if _, err := parseStrictRecord("GI|RN14\x0208|G#1|"); !errors.Is(err, ErrRecordMalformed) {
 		t.Errorf("control byte in value must be rejected, got %v", err)
 	}
 }
 
-// TestStrictParse_PreservesOrderDuplicatesEmpty proves the parser keeps source order, duplicate occurrences
-// and present-but-empty values (the fingerprint depends on all three).
 func TestStrictParse_PreservesOrderDuplicatesEmpty(t *testing.T) {
 	pr, err := parseStrictRecord("GI|RN1408|ZQa|ZQ|ZQb|G#1|")
 	if err != nil {
@@ -74,8 +67,6 @@ func TestStrictParse_PreservesOrderDuplicatesEmpty(t *testing.T) {
 	}
 }
 
-// TestStrictParse_ExactRetransmissionSameFingerprint proves that a byte-identical record retransmission
-// yields the same complete-record fingerprint (idempotent), while a reordering yields a different one.
 func TestStrictParse_ExactRetransmissionSameFingerprint(t *testing.T) {
 	a := testAdapter()
 	base := "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|"
@@ -90,8 +81,6 @@ func TestStrictParse_ExactRetransmissionSameFingerprint(t *testing.T) {
 	}
 }
 
-// TestStrictParse_MalformedProducesNoEvent proves a malformed record yields NO Event from the adapter (the
-// caller turns the typed parse error into a continuity fault + resync; nothing reaches the queue).
 func TestStrictParse_MalformedProducesNoEvent(t *testing.T) {
 	a := testAdapter()
 	for _, bad := range []string{
@@ -107,10 +96,6 @@ func TestStrictParse_MalformedProducesNoEvent(t *testing.T) {
 	}
 }
 
-// TestDuplicateTypedFields_FailClosed proves §2: an ambiguous duplicate of any IDENTITY or typed-evidence
-// field (RN/G#/GN/GF/FO/GA/GD) fails closed — the adapter yields NO Event (first-wins/last-wins is never
-// used), so a continuity fault is driven and zero events are admitted. The complete-record fingerprint still
-// preserves the duplicate occurrences (verified by the parser tests); only the TYPED projection rejects.
 func TestDuplicateTypedFields_FailClosed(t *testing.T) {
 	a := testAdapter()
 	cases := map[string]string{
@@ -135,8 +120,6 @@ func TestDuplicateTypedFields_FailClosed(t *testing.T) {
 	}
 }
 
-// TestDuplicateUnknownField_Allowed proves an unknown well-formed field may repeat freely (it stays
-// fingerprint-only and never blocks a valid domain record).
 func TestDuplicateUnknownField_Allowed(t *testing.T) {
 	a := testAdapter()
 	rec := "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|ZQx|ZQy|"

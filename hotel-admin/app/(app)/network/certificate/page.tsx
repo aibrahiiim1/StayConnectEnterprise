@@ -80,8 +80,7 @@ export default function CertificatePage() {
         setResult({ tone: "success", text: detail ? `Certificate validated. ${detail}` : "Certificate validated — no problems found." });
         toast.success("Certificate checked", detail || "No problems found.");
       } else {
-        // The validator's own reason, not a bare exit code: "the served chain does not verify against the
-        // Caddy local root", "missing/incorrect IP SAN", "cert not currently valid", ...
+        // Show the validator's reason rather than only its exit code.
         setResult({ tone: "danger", text: detail ? `Validation found a problem: ${detail}.` : `Validation found a problem (code ${r.exit}).` });
       }
       await load();
@@ -92,8 +91,7 @@ export default function CertificatePage() {
   async function rotate({ reason, password }: { reason: string; password: string }) {
     setBusy("rotate"); setRotateErr(null); setResult(null);
     try {
-      // The server requires the typed word itself: `confirmation` must be exactly ROTATE. The dialog only
-      // enables its button once that is what was typed.
+      // The server requires the exact typed confirmation ROTATE.
       const r = await api.post<{ ok: boolean; exit: number }>("/hotel-admin-cert/rotate", {
         reason, password, confirmation: "ROTATE",
       });

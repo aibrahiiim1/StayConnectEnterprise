@@ -1,13 +1,6 @@
-// Package localkeys manages appliance-local HMAC secret material for the durable throttle (D4) and
-// keyed-HMAC OTP (D7). Keys are:
-//
-//   - generated with crypto/rand (>= 32 bytes);
-//   - persisted to protected 0600 files so they are STABLE across service restart and appliance
-//     reboot (a service must not mint a new key on every start, which would orphan existing buckets
-//     and reset enforcement);
-//   - never placed in Git, the database, logs, command arguments, evidence, or reports.
-//
-// The write path is atomic (temp + fsync + rename + chmod 0600), matching the appliancecert pattern.
+// Package localkeys manages appliance-local HMAC secrets for the durable throttle and keyed-HMAC OTP. Keys are
+// crypto/rand (>= 32 bytes) and persisted 0600 so they are stable across restarts (a new key per start would orphan
+// buckets and reset enforcement); they never enter source control, the database, logs or arguments. Writes are atomic.
 package localkeys
 
 import (
@@ -22,11 +15,9 @@ import (
 	"time"
 )
 
-// MinKeyLen is the minimum accepted key length in bytes.
 const MinKeyLen = 32
 
-// checkFile refuses a key path that is not a regular file (e.g. a symlink or device) and, on POSIX,
-// that is group/world accessible.
+// checkFile refuses a key path that is not a regular file and, on POSIX, one that is group/world accessible.
 func checkFile(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -44,7 +35,6 @@ func checkFile(path string) error {
 	return nil
 }
 
-// fsyncDir fsyncs a directory so a create/rename is durable across power loss / reboot.
 func fsyncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -57,10 +47,8 @@ func fsyncDir(dir string) error {
 	return nil
 }
 
-// createExclKey atomically creates path (O_CREATE|O_EXCL, 0600) with a fresh crypto-random key, then
-// fsyncs the file and its parent directory. Returns (created=true, key) on success, (false, existing)
-// if another writer won the race (EEXIST) — in which case the single persisted winner is reloaded so
-// no two callers ever retain different keys for the same path.
+// createExclKey atomically creates path (O_EXCL, 0600) with a fresh key and fsyncs it and its directory; if another
+// writer won the race the persisted winner is reloaded so no two callers hold different keys.
 func createExclKey(path string) (bool, []byte, error) {
 	key := make([]byte, MinKeyLen)
 	if _, err := rand.Read(key); err != nil {
@@ -69,10 +57,8 @@ func createExclKey(path string) (bool, []byte, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
-			// Another caller won the O_EXCL create. It may still be mid-write (the winner created the file
-			// but has not written the key yet), so retry-read until the file is complete (>= MinKeyLen)
-			// rather than returning a partial/empty key. The budget is generous (~5s) because under heavy
-			// concurrency/CI load the winner goroutine can be scheduling-starved between create and write.
+			// Another caller won the O_EXCL create and may still be mid-write: retry-read until the key is complete (~5s, as the
+			// winner can be scheduling-starved under CI load).
 			for i := 0; i < 1000; i++ {
 				b, rerr := os.ReadFile(path)
 				if rerr == nil && len(b) >= MinKeyLen {
@@ -86,7 +72,6 @@ func createExclKey(path string) (bool, []byte, error) {
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-			// If it exists but is genuinely short (not a mid-write), surface that.
 			if b, rerr := os.ReadFile(path); rerr == nil && len(b) < MinKeyLen {
 				return false, nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
 			}
@@ -107,9 +92,8 @@ func createExclKey(path string) (bool, []byte, error) {
 	return true, key, nil
 }
 
-// LoadExistingKey returns a stable key from path for NORMAL RUNTIME. It NEVER creates a key: an
-// absent file is a startup failure (so a service can never silently mint a replacement and reset
-// enforcement). It rejects symlinks/non-regular files, insecure permissions and short keys.
+// LoadExistingKey returns the key from path for normal runtime and never creates one: an absent file is a startup
+// failure so a service cannot mint a replacement and reset enforcement.
 func LoadExistingKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -127,10 +111,8 @@ func LoadExistingKey(path string) ([]byte, error) {
 	return b, nil
 }
 
-// CreateKeyIfAbsent is the DEPLOYMENT/BOOTSTRAP operation: it returns the existing key or, if absent,
-// creates a fresh crypto-random key (>= MinKeyLen, 0600, parent dir 0700, fsync'd, race-safe
-// single-winner). It never overwrites an existing key. Use it only from a controlled bootstrap
-// helper — never on the normal service-start path.
+// CreateKeyIfAbsent is the bootstrap operation: it returns the existing key or creates one (race-safe, never
+// overwrites). Never use it on the normal service-start path.
 func CreateKeyIfAbsent(path string) ([]byte, error) {
 	if b, err := os.ReadFile(path); err == nil {
 		if len(b) >= MinKeyLen {
@@ -139,24 +121,22 @@ func CreateKeyIfAbsent(path string) ([]byte, error) {
 			}
 			return b, nil
 		}
-		// The file EXISTS but is short/empty: a concurrent bootstrap won the O_EXCL create and has not
-		// finished writing the key yet. This is NOT a corrupt key — fall through to the race-safe create,
-		// whose EEXIST path retry-reads the complete single winner. (Treating an empty mid-write file as
-		// "too short" here was a concurrency bug that could fail a losing bootstrapper.)
+		// The file exists but is short: a concurrent bootstrap won the O_EXCL create and is still writing. Not corrupt; fall
+		// through to the race-safe create.
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	_, key, err := createExclKey(path) // race-safe: returns the single persisted winner
+	_, key, err := createExclKey(path)
 	return key, err
 }
 
 var genFileRe = regexp.MustCompile(`^(.+?)_(\d+)\.key$`)
 
-// LoadGenerationKeys reads all generation key files "<prefix>_<gen>.key" from dir into a
-// generation->key map. Every key must be >= MinKeyLen and 0600. Missing dir is not an error (empty).
+// LoadGenerationKeys reads the generation key files from dir into a generation->key map; each key must be
+// >= MinKeyLen and 0600; a missing dir yields an empty map.
 func LoadGenerationKeys(dir, prefix string) (map[int][]byte, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -191,8 +171,7 @@ func LoadGenerationKeys(dir, prefix string) (map[int][]byte, error) {
 	return out, nil
 }
 
-// EnsureGeneration creates the key file for generation gen if absent (crypto-random, 0600). Returns
-// the key. Used for atomic rotation (create the new generation before flipping the DB active flag).
+// EnsureGeneration creates the key for generation gen if absent, for atomic rotation (create before flipping the DB active flag).
 func EnsureGeneration(dir, prefix string, gen int) ([]byte, error) {
 	if gen < 1 {
 		return nil, fmt.Errorf("localkeys: invalid generation %d", gen)
@@ -209,20 +188,16 @@ func EnsureGeneration(dir, prefix string, gen int) ([]byte, error) {
 		return b, nil
 	}
 	if err != nil && !os.IsNotExist(err) {
-		return nil, err // surface every read error other than not-exist
+		return nil, err
 	}
-	// The file is absent OR present-but-short (a concurrent bootstrapper won the O_EXCL create and is still
-	// mid-write — treating that 0-byte snapshot as "too short" here was the concurrency bug). Fall through to
-	// the race-safe, no-overwrite create, which O_EXCL-fails on an existing file and retry-reads the winner's
-	// completed key, so no two callers ever retain different keys for the same generation.
+	// Absent or present-but-short (a concurrent bootstrapper is mid-write): fall through to the race-safe no-overwrite
+	// create, which retry-reads the winner.
 	_, key, cerr := createExclKey(path)
 	return key, cerr
 }
 
-// ValidateOTPGenerations fails closed when key material and database metadata disagree:
-//   - the active generation (from DB) must have key material present;
-//   - every generation still referenced by an unexpired OTP (referenced, from DB) must have key
-//     material present (a missing referenced key means those OTPs can never verify -> refuse startup).
+// ValidateOTPGenerations fails closed when keys and DB metadata disagree: the active generation and every generation
+// referenced by an unexpired OTP must have key material.
 func ValidateOTPGenerations(keys map[int][]byte, activeGen int, referenced []int) error {
 	if len(keys) == 0 {
 		return fmt.Errorf("localkeys: no OTP key generations present")
@@ -238,7 +213,6 @@ func ValidateOTPGenerations(keys map[int][]byte, activeGen int, referenced []int
 	return nil
 }
 
-// SortedGenerations returns the generations present in keys, ascending.
 func SortedGenerations(keys map[int][]byte) []int {
 	gs := make([]int, 0, len(keys))
 	for g := range keys {

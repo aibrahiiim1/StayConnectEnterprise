@@ -12,9 +12,7 @@ import (
 	"time"
 )
 
-// statusCentral answers /v1/appliance/certificate with whatever status the test sets, and counts CSRs.
-// "none" is the only status that authorises a CSR, so every other case here is really asking: did the
-// client keep its hands off the request table?
+// statusCentral answers /v1/appliance/certificate with whatever status the test sets and counts CSRs; "none" is the only status that authorises a CSR.
 type statusCentral struct {
 	status         atomic.Value // string
 	csrSubmissions atomic.Int32
@@ -47,12 +45,8 @@ func newStatusCentral(status string) (*statusCentral, *httptest.Server) {
 	return c, srv
 }
 
-// A status the client does not recognise must NEVER be read as "none".
-//
-// "none" is the one state that authorises posting a CSR, and Central files a new request row for every one
-// it receives. Guessing, on a word this build has never heard of, is how a protocol change on Central turns
-// into a pile of duplicate requests across the fleet — each one looking equally current to whoever has to
-// approve them.
+// A status the client does not recognise must NEVER be read as "none": it is the one state that authorises posting a CSR, and guessing would file
+// duplicate requests across the fleet.
 func TestUnknownStatusNeverSubmitsACSR(t *testing.T) {
 	for _, status := range []string{"awaiting_review", "quarantined", "", "ISSUED", "Pending", "unknown"} {
 		t.Run("status="+status, func(t *testing.T) {
@@ -74,8 +68,7 @@ func TestUnknownStatusNeverSubmitsACSR(t *testing.T) {
 	}
 }
 
-// Case matters: the contract is lower-case. "ISSUED" must not be accepted as issued — above it is proven to
-// fail closed; here we confirm it never installs anything.
+// Case matters: the contract is lower-case, so "ISSUED" must not be accepted as issued and must never install anything.
 func TestUnknownStatusIsNotTerminalSoTheFleetRecovers(t *testing.T) {
 	central, srv := newStatusCentral("something_new")
 	defer srv.Close()
@@ -85,8 +78,7 @@ func TestUnknownStatusIsNotTerminalSoTheFleetRecovers(t *testing.T) {
 	if !errors.Is(err, ErrCertUnknownState) {
 		t.Fatalf("expected unknown-state error, got %v", err)
 	}
-	// Deliberately NOT terminal: a Central that starts reporting one new status must not stop the
-	// certificate lifecycle on every appliance in the fleet at once.
+	// Deliberately NOT terminal: one new Central status must not stop the certificate lifecycle on every appliance at once.
 	if errors.Is(err, ErrCertTerminal) {
 		t.Fatal("an unrecognised status must not be terminal — the appliance has to be able to recover")
 	}
@@ -111,8 +103,7 @@ func TestUnknownStatusIsNotTerminalSoTheFleetRecovers(t *testing.T) {
 	}
 }
 
-// A rejected or revoked request cannot be advanced by retrying, so the loop must stop and say why rather
-// than polling forever and burying the reason.
+// A rejected or revoked request cannot be advanced by retrying, so the loop must stop and say why.
 func TestTerminalStatusStopsTheBootstrap(t *testing.T) {
 	for status, want := range terminalStatuses {
 		t.Run("status="+status, func(t *testing.T) {
@@ -163,13 +154,8 @@ func TestOnlyNoneSubmitsACSR(t *testing.T) {
 	}
 }
 
-// ROTATION IDEMPOTENCE.
-//
-// MaybeRotate runs every six hours through the last fourteen days of a certificate's life. Central
-// auto-issues for a healthy appliance, so rotation normally completes at once — but a suspended, revoked or
-// decommissioned appliance is not auto-issued, and its request is simply filed as pending. Submitting
-// unconditionally would file a fresh CSR every six hours for a fortnight: ~56 duplicate rotation requests
-// for one appliance, and an operator guessing which is current.
+// Rotation idempotence: MaybeRotate runs every six hours through the last fourteen days, and a suspended, revoked or decommissioned appliance is not
+// auto-issued, so unconditional submits would file ~56 duplicate requests.
 func TestPendingRotationDoesNotFileDuplicateRequests(t *testing.T) {
 	central, srv := newStatusCentral(statusIssued)
 	defer srv.Close()
@@ -178,7 +164,6 @@ func TestPendingRotationDoesNotFileDuplicateRequests(t *testing.T) {
 	if err := m.ensureMTLSKey(); err != nil {
 		t.Fatalf("mtls key: %v", err)
 	}
-	// An appliance holding a current certificate.
 	oldCert, caPEM := mintCertFor(t, m.mtlsPriv.Public().(ed25519.PublicKey))
 	central.caPEM = caPEM
 	central.certPEM.Store(oldCert)
@@ -189,8 +174,7 @@ func TestPendingRotationDoesNotFileDuplicateRequests(t *testing.T) {
 		t.Fatal("installing an already-issued certificate should not submit a CSR")
 	}
 
-	// Rotation begins. Central keeps returning the SAME certificate — the request is filed but not issued,
-	// exactly as it would be for a suspended appliance.
+	// Rotation begins; Central keeps returning the SAME certificate (request filed, not issued), as for a suspended appliance.
 	if err := m.rotateCert(context.Background()); !errors.Is(err, ErrCertPending) {
 		t.Fatalf("first rotation should report pending, got %v", err)
 	}
@@ -208,7 +192,6 @@ func TestPendingRotationDoesNotFileDuplicateRequests(t *testing.T) {
 		t.Fatalf("a pending rotation must not be resubmitted; got %d CSRs", got)
 	}
 
-	// Central issues the new certificate. It is collected, and still no extra CSR.
 	newCert, _ := mintCertFor(t, m.mtlsPriv.Public().(ed25519.PublicKey))
 	central.certPEM.Store(newCert)
 	if err := m.rotateCert(context.Background()); err != nil {
@@ -222,8 +205,7 @@ func TestPendingRotationDoesNotFileDuplicateRequests(t *testing.T) {
 	}
 }
 
-// A rotation left outstanding for longer than the resubmit window may be filed again — a CSR lost in
-// transit must not stall rotation until the certificate expires.
+// A rotation outstanding longer than the resubmit window may be filed again, so a CSR lost in transit cannot stall rotation until expiry.
 func TestStaleRotationMayBeResubmitted(t *testing.T) {
 	central, srv := newStatusCentral(statusIssued)
 	defer srv.Close()

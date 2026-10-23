@@ -2,24 +2,15 @@ package main
 
 import "strings"
 
-// fkRef describes one foreign-key-like edge used for the orphan pre-scan and
-// for the FK-order unit test. RefTable must appear BEFORE the owning table in
-// migrationTables.
+// One foreign-key-like edge for the orphan pre-scan and the FK-order test; RefTable must appear BEFORE the owning table in migrationTables.
 type fkRef struct {
 	Col      string // column on the owning table (may be nullable)
 	RefTable string // referenced table (must be part of the migration set)
 	RefCol   string // referenced column (always the ref table's PK here)
 }
 
-// tableSpec describes one table to migrate.
-//
-// Where is a predicate valid against BOTH databases (the edge schema is
-// shape-compatible), parameterised as $1 = tenant UUID, $2 = site UUID.
-// PK is the single-column primary key used as the ON CONFLICT target;
-// empty PK marks a TimescaleDB hypertable WITHOUT a primary key
-// (accounting_records, audit_log) — those cannot be deduped by ON CONFLICT,
-// so if dest already has scoped rows the table is skipped entirely unless
-// --force-append is given.
+// Where is valid against BOTH databases, parameterised $1 = tenant UUID, $2 = site UUID. Empty PK marks a PK-less TimescaleDB hypertable (accounting_records,
+// audit_log): ON CONFLICT cannot dedupe it, so it is skipped if dest already has scoped rows unless --force-append.
 type tableSpec struct {
 	Name  string
 	Where string
@@ -31,28 +22,14 @@ type tableSpec struct {
 // scoped-appliance subquery used by accounting_records.
 const siteAppliances = "(SELECT id FROM appliances WHERE tenant_id = $1 AND site_id = $2)"
 
-// keepOperators: the tenant's operators MINUS those whose ONLY role is
-// platform_admin (platform admins are a cloud concern; they must not become
-// local site operators — and the edge operator_roles CHECK constraint does
-// not even allow the platform_admin role value).
+// keepOperators: the tenant operators minus those whose ONLY role is platform_admin (a cloud concern; the edge operator_roles CHECK does not allow it).
 const keepOperators = `tenant_id = $1 AND (
     NOT EXISTS (SELECT 1 FROM operator_roles r WHERE r.operator_id = operators.id AND r.role = 'platform_admin')
     OR EXISTS (SELECT 1 FROM operator_roles r WHERE r.operator_id = operators.id AND r.role <> 'platform_admin'))`
 
-// migrationTables lists every table to copy, in FK-safe order: each entry's
-// FK targets appear earlier in the slice (enforced by TestFKOrder).
-//
-// Scoping rules:
-//   - tenants / sites: the single row for this tenant / site.
-//   - appliances: this site's rows.
-//   - accounting_records: rows whose appliance belongs to this
-//     site (they carry appliance scoping in addition to tenant_id).
-//   - pms_providers / walled_garden_rules: tenant-wide rows
-//     (site_id IS NULL) plus rows explicitly for this site.
-//   - everything else: tenant-scoped. NOTE for multi-site tenants: tables
-//     without a site_id column (auth_otps, pms_attempts, provider configs, ...)
-//     cannot be split automatically — all tenant rows are copied. Split
-//     manually before migrating a second site of the same tenant.
+// Every table to copy, in FK-safe order (enforced by TestFKOrder). Scoping: tenants/sites and appliances by this tenant/site; accounting_records by
+// appliance; pms_providers and walled_garden_rules tenant-wide (site_id IS NULL) plus this site; everything else tenant-scoped. Tables without site_id
+// cannot be split for a multi-site tenant: all tenant rows are copied.
 var migrationTables = []tableSpec{
 	{
 		Name:  "tenants",
@@ -82,9 +59,7 @@ var migrationTables = []tableSpec{
 	},
 	{
 		Name: "operator_roles",
-		// Roles of the kept operators, minus platform_admin role rows (the
-		// edge CHECK constraint rejects that value; skipped operators only
-		// ever had platform_admin rows, so none of their rows survive).
+		// Roles of the kept operators minus platform_admin rows (the edge CHECK rejects that value).
 		Where: "role <> 'platform_admin' AND operator_id IN (SELECT id FROM operators WHERE " + keepOperators + ")",
 		PK:    "id",
 		FKs:   []fkRef{{"operator_id", "operators", "id"}, {"tenant_id", "tenants", "id"}},
@@ -166,8 +141,6 @@ var migrationTables = []tableSpec{
 	},
 }
 
-// specFor returns the spec for a table name (used by the orphan scanner to
-// resolve the referenced table's scope predicate).
 func specFor(name string) (tableSpec, bool) {
 	for _, s := range migrationTables {
 		if s.Name == name {
@@ -177,10 +150,7 @@ func specFor(name string) (tableSpec, bool) {
 	return tableSpec{}, false
 }
 
-// intersectColumns returns the columns present in BOTH src and dst, in src
-// order. This is what makes the copy tolerant of schema drift in either
-// direction (extra edge-only columns like tenants.branding, or central-only
-// columns the edge schema dropped).
+// Columns present in BOTH src and dst, in src order, which tolerates schema drift in either direction.
 func intersectColumns(src, dst []string) []string {
 	in := make(map[string]bool, len(dst))
 	for _, c := range dst {
@@ -195,9 +165,7 @@ func intersectColumns(src, dst []string) []string {
 	return out
 }
 
-// whereArgs returns the positional args a Where predicate needs. Every
-// predicate uses $1 (tenant); only some use $2 (site) — Postgres rejects
-// unused bind parameters, so we must not over-supply.
+// Every predicate uses $1; only some use $2, and Postgres rejects unused bind parameters, so do not over-supply.
 func whereArgs(where, tenant, site string) []any {
 	if strings.Contains(where, "$2") {
 		return []any{tenant, site}
@@ -205,9 +173,7 @@ func whereArgs(where, tenant, site string) []any {
 	return []any{tenant}
 }
 
-// inlineParams substitutes validated UUID literals for $1/$2 so a predicate
-// can be used where bind parameters are unavailable (COPY ... TO STDOUT).
-// Callers must have validated tenant/site with isUUID first.
+// Substitutes validated UUID literals for $1/$2 where bind parameters are unavailable (COPY ... TO STDOUT); callers must validate with isUUID first.
 func inlineParams(where, tenant, site string) string {
 	where = strings.ReplaceAll(where, "$1", "'"+tenant+"'::uuid")
 	where = strings.ReplaceAll(where, "$2", "'"+site+"'::uuid")

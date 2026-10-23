@@ -27,8 +27,7 @@ func TestClassifyAckStatus(t *testing.T) {
 	}
 }
 
-// ackFixture is an appliance holding a TERMINAL assignment, and a Central that answers the acknowledgement
-// with the scripted statuses in order (the last one repeats).
+// ackFixture is an appliance holding a TERMINAL assignment and a Central answering with scripted statuses (the last repeats).
 type ackFixture struct {
 	srv   *server
 	pub   ed25519.PublicKey
@@ -72,8 +71,6 @@ func newAckFixture(t *testing.T, state string, answers ...int) *ackFixture {
 	return f
 }
 
-// The acknowledgement is retried through Central outages until Central confirms it, and then never again --
-// not by this process and not by a restarted one.
 func TestTerminalAckIsRetriedUntilCentralConfirms(t *testing.T) {
 	f := newAckFixture(t, assignment.StateRevoked, 503, 502, 200)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -86,7 +83,6 @@ func TestTerminalAckIsRetriedUntilCentralConfirms(t *testing.T) {
 	if !f.srv.terminalAckSettled(f.doc) {
 		t.Fatal("a confirmed acknowledgement was not recorded")
 	}
-	// Idempotent: a re-executed or restarted scd sees the confirmation and sends nothing.
 	restarted := &server{applID: "appl-1", idPriv: f.srv.idPriv, centralTransport: f.srv.centralTransport}
 	restarted.ensureTerminalAck(ctx)
 	time.Sleep(50 * time.Millisecond)
@@ -95,7 +91,6 @@ func TestTerminalAckIsRetriedUntilCentralConfirms(t *testing.T) {
 	}
 }
 
-// A definitive refusal ends the retries: Central will not accept this acknowledgement however often it is sent.
 func TestTerminalAckStopsOnADefinitiveRefusal(t *testing.T) {
 	f := newAckFixture(t, assignment.StateDecommissioned, 409)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -109,14 +104,13 @@ func TestTerminalAckStopsOnADefinitiveRefusal(t *testing.T) {
 	}
 }
 
-// No transport yet (the mTLS certificate is still being collected) is not an answer: keep trying.
 func TestTerminalAckWaitsForTheTransport(t *testing.T) {
 	f := newAckFixture(t, assignment.StateUnassigned, 200)
 	var ready atomic.Bool
 	real := f.srv.centralTransport
 	f.srv.centralTransport = func() (*http.Client, string, bool) {
 		if !ready.Load() {
-			ready.Store(true) // available from the next attempt on
+			ready.Store(true)
 			return nil, "", false
 		}
 		return real()
@@ -129,7 +123,6 @@ func TestTerminalAckWaitsForTheTransport(t *testing.T) {
 	}
 }
 
-// Only a TERMINAL assignment is acknowledged, and a newer non-terminal one supersedes a pending retry.
 func TestTerminalAckOnlyForAnAdoptedTerminalAssignment(t *testing.T) {
 	f := newAckFixture(t, assignment.StateAssigned, 200)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -142,8 +135,6 @@ func TestTerminalAckOnlyForAnAdoptedTerminalAssignment(t *testing.T) {
 	}
 }
 
-// ---- offline-package reconciliation --------------------------------------------------------------------------
-
 func TestOfflineReconcilePassStampsOnlyWhatCentralConfirmed(t *testing.T) {
 	marked := map[string]bool{}
 	rec := offlineReconciler{
@@ -155,7 +146,7 @@ func TestOfflineReconcilePassStampsOnlyWhatCentralConfirmed(t *testing.T) {
 			case "p2":
 				return false, errors.New("connection reset")
 			default:
-				return false, nil // Central answered but not 200
+				return false, nil
 			}
 		},
 		mark: func(_ context.Context, id string) error { marked[id] = true; return nil },

@@ -1,10 +1,6 @@
 package main
 
-// WHAT A RESTRICTED GUEST IS TOLD.
-//
-// The Product Owner asked for one sentence, word for word, carrying the number of seconds still to wait, and
-// for the countdown on the page to be driven by the SERVER's expiry rather than by anything the browser
-// decided. These tests pin both halves of that: the sentence, and the fact that the number is the server's.
+// A restricted guest is told one approved sentence carrying the server's remaining seconds.
 
 import (
 	"encoding/json"
@@ -12,9 +8,7 @@ import (
 	"testing"
 )
 
-// The exact wording, as approved. It is written out here rather than built from the production constant on
-// purpose — a test that composes the sentence the same way the code does would pass after somebody rewrote
-// both, which is exactly the change that should have to be noticed.
+// Written out literally, not built from the production constant, so rewriting both is noticed.
 const approvedRestrictionSentence = "Too many attempts. Please wait 42 seconds and try again."
 
 func TestARestrictedGuestIsToldExactlyHowLongToWait(t *testing.T) {
@@ -39,9 +33,7 @@ func TestARestrictedGuestIsToldExactlyHowLongToWait(t *testing.T) {
 	}
 }
 
-// The sentence must be identical whoever is behind it. A guest who mistyped their own surname five times and
-// somebody working through room numbers are told the same thing, because the restriction is about the rate
-// of attempts and not about whether any of them were close.
+// The restriction is about the rate of attempts, so the sentence is identical whoever is behind it.
 func TestTheRestrictionSentenceSaysNothingAboutTheProperty(t *testing.T) {
 	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "RATE_LIMITED", "RATE_LIMITED", "", "", 60)
 	raw, err := json.Marshal(body)
@@ -55,9 +47,7 @@ func TestTheRestrictionSentenceSaysNothingAboutTheProperty(t *testing.T) {
 	}
 }
 
-// A RETRY HINT ON ANY OTHER ANSWER IS AN ORACLE. Telling a guesser how long to wait between guesses is the
-// one thing the control exists to take away from them, so the number is attached to the restricted answer
-// and refused everywhere else — even if a server somewhere sent one.
+// A retry hint on any other answer tells a guesser how long to wait between guesses, even if a server sent one.
 func TestOnlyTheRestrictedAnswerCarriesAWait(t *testing.T) {
 	for _, class := range []string{classCredential, classTechnical, classPostStay, "", "SOMETHING_NEW"} {
 		_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "internal", class, "", "", 42)
@@ -70,9 +60,7 @@ func TestOnlyTheRestrictedAnswerCarriesAWait(t *testing.T) {
 	}
 }
 
-// WHEN THE SERVER QUOTES NO TIME, THE PAGE INVENTS NONE. A number this daemon made up would be the one thing
-// on the page the appliance is not actually standing behind, and a guest who waited it out and was refused
-// again would have been misled by us rather than by the control.
+// When the server quotes no time, no number is invented.
 func TestNoInventedWait(t *testing.T) {
 	_, body, _ := buildGuestPMSResponse(outcomeNoMatch, "RATE_LIMITED", "RATE_LIMITED", "", "", 0)
 	if body.Message != guestAuthRateLimitedUnknownMessage {
@@ -86,8 +74,7 @@ func TestNoInventedWait(t *testing.T) {
 	}
 }
 
-// scd's number crosses portald UNTOUCHED. portald does not compute, round, extend or shorten a restriction —
-// the appliance holds the expiry, and a second opinion here would be a second thing to keep correct.
+// The appliance holds the expiry; portald never computes, rounds, extends or shortens it.
 func TestPortaldForwardsTheServersWaitUntouched(t *testing.T) {
 	h := stubHandler(t, &scdStub{resolve: map[string]any{
 		"outcome": "NOT_VERIFIED", "failure_class": "RATE_LIMITED", "retry_after_seconds": 17}})
@@ -101,8 +88,7 @@ func TestPortaldForwardsTheServersWaitUntouched(t *testing.T) {
 	}
 }
 
-// The page's countdown is a convenience; the refusal is the server's. This is the contract that keeps that
-// true: portald never decides a wait is over, it only reports what scd last said.
+// The page's countdown is a convenience; portald only reports what scd last said.
 func TestPortaldNeverShortensAWait(t *testing.T) {
 	h := stubHandler(t, &scdStub{resolve: map[string]any{
 		"outcome": "NOT_VERIFIED", "failure_class": "RATE_LIMITED", "retry_after_seconds": 60}})

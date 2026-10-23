@@ -1,16 +1,7 @@
 package main
 
-// Resolving the voucher blind-index key from its GENERATION.
-//
-// A voucher pins code_key_generation_id, and that generation row carries the per-generation HMAC key sealed
-// as hmac_key_ciphertext under encryption_key_id. Authentication therefore cannot know which key indexed a
-// submitted code until it has looked -- so it computes the index under every generation that is still usable
-// and lets the repository match.
-//
-// That "try each generation" shape is what makes rotation safe: after a new generation supersedes the old
-// one, vouchers issued under the old key keep authenticating until they are redeemed or expire, exactly as
-// the accepted design requires ("old-unsuperseded/unredeemed voucher usability"). A single-key scheme cannot
-// express that, which is why the raw-file approach this replaces was wrong.
+// Resolves the voucher blind-index key from its GENERATION: authentication cannot know which key indexed a submitted code, so it computes the index
+// under every usable generation and lets the repository match. That is what keeps old, unredeemed vouchers authenticating after a rotation.
 
 import (
 	"context"
@@ -24,15 +15,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// generationKeyCache holds the opened blind-index keys for one (tenant, site).
-//
-// KEYED BY OWNER, not global. An earlier version used a single package-level cache with no tenant or site in
-// the key: on a multi-site appliance the first site to authenticate would populate it and every other site
-// would then index submitted codes under the WRONG site's key. Every lookup would miss, so vouchers would
-// appear invalid rather than leak across sites -- a fail-closed bug, but a total outage for every site but
-// one, and invisible on a single-site appliance like this DEVELOPMENT one.
-//
-// Keys are held in memory only, never logged, and vanish with the process.
+// Opened blind-index keys for one (tenant, site), KEYED BY OWNER: a global cache would index codes under the WRONG site's key on a multi-site appliance and
+// every other site's vouchers would read as invalid. Keys are held in memory only and never logged.
 type generationKeyCache struct {
 	mu sync.RWMutex
 	m  map[string]cachedGenerationKeys
@@ -47,29 +31,16 @@ var vkCache = generationKeyCache{m: map[string]cachedGenerationKeys{}}
 
 func vkKey(tenantID, siteID string) string { return tenantID + "|" + siteID }
 
-// invalidateVoucherKeyCache drops this owner's cached generation keys.
-//
-// Minting a generation makes the cache WRONG, not merely stale: a code issued under the new key indexes to
-// something none of the cached keys can produce, so it authenticates as "invalid_code" until the TTL expires.
-// That was observable -- the rotation proof needed a 60-second sleep between issuing under a new generation
-// and redeeming, which is not a property any real deployment should have to live with.
-//
-// Issuance runs in this process, so it invalidates directly. The TTL remains as the backstop for a
-// generation minted by some other process or by an operator working in SQL: that case still self-heals
-// within the TTL rather than requiring a restart.
+// Drops this owner's cached generation keys. Minting a generation makes the cache WRONG, not merely stale: a code under the new key would read as
+// invalid_code until the TTL. Issuance invalidates directly; the TTL is the backstop for a generation minted by another process.
 func invalidateVoucherKeyCache(tenantID, siteID string) {
 	vkCache.mu.Lock()
 	delete(vkCache.m, vkKey(tenantID, siteID))
 	vkCache.mu.Unlock()
 }
 
-// newGenerationVoucherHMAC returns the candidate-index function the authenticator calls.
-//
-// It returns ONE INDEX PER USABLE GENERATION, newest first, including superseded ones. That is what makes a
-// rotation safe: a voucher issued under generation 1 keeps its generation-1 index forever, so after a
-// rotation to generation 2 the only way it can still be found is for the lookup to try generation 1's key
-// too. Returning just the active key -- which an earlier version did -- silently invalidates every
-// unredeemed voucher the moment a new generation is created.
+// Returns ONE INDEX PER USABLE GENERATION, newest first, including superseded ones: a voucher keeps its original generation index forever, so returning
+// only the active key would invalidate every unredeemed voucher at rotation.
 func newGenerationVoucherHMAC(pool *pgxpool.Pool, kr iamv2.VoucherKeyring) iamv2.VoucherHMACCandidates {
 	return func(ctx context.Context, tenantID, siteID, code string) ([][]byte, error) {
 		if pool == nil {
@@ -87,10 +58,7 @@ func newGenerationVoucherHMAC(pool *pgxpool.Pool, kr iamv2.VoucherKeyring) iamv2
 	}
 }
 
-// generationKeys opens every generation's HMAC key for this owner, newest generation first.
-//
-// Superseded generations are INCLUDED: supersession stops new issuance under a key, it does not invalidate
-// vouchers already indexed with it. They drop out naturally when their vouchers are redeemed or expire.
+// Opens every generation's HMAC key, newest first, superseded ones INCLUDED: supersession stops new issuance, it does not invalidate vouchers already indexed.
 func generationKeys(ctx context.Context, pool *pgxpool.Pool, kr iamv2.VoucherKeyring,
 	tenantID, siteID string) ([][]byte, error) {
 
@@ -122,8 +90,7 @@ func generationKeys(ctx context.Context, pool *pgxpool.Pool, kr iamv2.VoucherKey
 		}
 		nonce, derr := decodeB64(nonceB64)
 		if derr != nil {
-			// One malformed generation must not blind the others: skip it and keep going, so a single bad
-			// row cannot lock out every voucher at the site.
+			// One malformed generation must not blind the others: skip it so a bad row cannot lock out every voucher at the site.
 			continue
 		}
 		clear, oerr := iamv2.OpenVoucherHMACKey(kr, keyID, tenantID, siteID, genNo, sealed, nonce)

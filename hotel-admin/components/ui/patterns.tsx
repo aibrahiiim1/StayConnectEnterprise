@@ -1,17 +1,5 @@
 "use client";
 
-/*
-  ONEGATE PRODUCT PATTERNS — the recurring states every screen needs, designed once.
-
-  The primitives (Button, Card, Badge, Dialog…) say how a thing looks. These say how a SITUATION looks:
-  a secret shown once, a network change waiting for confirmation, data that refreshes on its own, a role
-  that may look but not touch, a block the operator's role cannot see. Before these existed each screen
-  answered those situations in its own words and its own layout, which is how the same product ended up
-  with four different "this is read-only" treatments.
-
-  See design-system/README.md, "Patterns".
-*/
-
 import * as React from "react";
 import {
   AlertTriangle, Check, Copy, Eye, EyeOff, Lock, RefreshCw, ShieldAlert, Timer, EyeOff as Hidden,
@@ -21,10 +9,6 @@ import { Button } from "./button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "./dialog";
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* CopyButton                                                                                              */
-/* ------------------------------------------------------------------------------------------------------ */
 
 export function CopyButton({
   value,
@@ -57,7 +41,7 @@ export function CopyButton({
           await navigator.clipboard.writeText(value);
           setCopied(true);
         } catch {
-          /* Clipboard refused (insecure context, permission). The value is on screen; nothing to do. */
+          /* The value remains visible if clipboard access is denied. */
         }
       }}
     >
@@ -67,16 +51,7 @@ export function CopyButton({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* OneTimeReveal — "this is the only time you will see this"                                              */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/**
- * A secret the appliance will never show again: a new guest-account password, a reset post-stay PIN, an
- * enrollment token. The design makes that unmissable: a modal (it cannot scroll away), a warning band that
- * says it in words, the value large and monospaced, copy beside it, and an explicit acknowledgement as the
- * ONLY way out other than Escape. It never offers "view again", because there is no such thing.
- */
+/** One-time secrets require explicit acknowledgement because the appliance cannot reveal them again. */
 export function OneTimeReveal({
   open,
   title,
@@ -94,7 +69,7 @@ export function OneTimeReveal({
   value: string;
   valueLabel?: string;
   acknowledgeLabel?: string;
-  /** Let the operator hide the value on a screen others can see. It starts visible. */
+  /** Permit hiding a visible secret from nearby observers. */
   concealable?: boolean;
   onAcknowledge: () => void;
   children?: React.ReactNode;
@@ -153,11 +128,6 @@ export function OneTimeReveal({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* Countdown + PendingChangeBanner — apply → confirm → automatic rollback                                  */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/** Seconds left until `deadline` (ISO or epoch ms), ticking once a second. Never negative. */
 export function useSecondsLeft(deadline: string | number | null | undefined): number | null {
   const target = React.useMemo(() => {
     if (deadline === null || deadline === undefined || deadline === "") return null;
@@ -180,12 +150,7 @@ export function formatCountdown(seconds: number): string {
   return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
 }
 
-/**
- * The one banner every network change shows between Apply and Confirm. The countdown is the point: an
- * applied change that nobody confirms is rolled back by the appliance on its own, so the operator must be
- * able to see, at a glance and from across the room, how long they have. The actions are the only two that
- * mean anything in this state.
- */
+/** Unconfirmed network changes roll back automatically, so show the remaining confirmation window. */
 export function PendingChangeBanner({
   title,
   description,
@@ -202,7 +167,6 @@ export function PendingChangeBanner({
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
-  /** When the appliance rolls back on its own. Either this or secondsLeft. */
   deadline?: string | number | null;
   secondsLeft?: number | null;
   onConfirm?: () => void;
@@ -267,10 +231,6 @@ export function PendingChangeBanner({
   );
 }
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* LiveStatus — "Updated x ago" for polling screens                                                        */
-/* ------------------------------------------------------------------------------------------------------ */
-
 function relative(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 5) return "just now";
@@ -281,11 +241,7 @@ function relative(ms: number): string {
   return `${h} h ago`;
 }
 
-/**
- * Tells the operator the numbers are live and how fresh they are, without moving anything else on the
- * screen. A polling screen DIMS its content while refreshing (see `refreshingClass`) rather than blanking
- * it, so a reload never makes rows jump.
- */
+/** Keep prior content visible while a refresh runs so rows do not jump. */
 export function LiveStatus({
   updatedAt,
   refreshing,
@@ -334,17 +290,9 @@ export function LiveStatus({
   );
 }
 
-/** Apply to a container while it reloads: it stays readable and in place, just visibly quieter. */
 export const refreshingClass = "opacity-60 transition-opacity duration-base";
 
-/* ------------------------------------------------------------------------------------------------------ */
-/* ReadOnlyNotice / RestrictedBlock                                                                        */
-/* ------------------------------------------------------------------------------------------------------ */
-
-/**
- * The one line a read-only screen shows. The server enforces the permission; this is what stops the
- * operator wondering why the fields are grey.
- */
+/** The server enforces read-only access; this explains disabled controls. */
 export function ReadOnlyNotice({
   children = "Your role can view this but not change it.",
   className,
@@ -366,10 +314,6 @@ export function ReadOnlyNotice({
   );
 }
 
-/**
- * A block of a screen the operator's role may not see, or a figure that is not available. Dashed, so it is
- * visibly an absence and not an empty result; always with the reason.
- */
 export function NotAvailable({
   title = "Not available",
   reason,
@@ -396,10 +340,6 @@ export function NotAvailable({
     </div>
   );
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* ConsequenceList — what a destructive action will do                                                     */
-/* ------------------------------------------------------------------------------------------------------ */
 
 export function ConsequenceList({
   items,
@@ -431,10 +371,6 @@ export function ConsequenceList({
     </div>
   );
 }
-
-/* ------------------------------------------------------------------------------------------------------ */
-/* SettingField — an operational number with a unit, a default, a range and an explanation                */
-/* ------------------------------------------------------------------------------------------------------ */
 
 export function SettingField({
   id,

@@ -1,19 +1,8 @@
 package main
 
-// WHAT A VERIFIED STAY IS ACTUALLY OFFERED.
-//
-// The first version of this listed every free, visible package on the site. That is not an offer set — it is
-// a catalogue. A property that publishes "suites get the premium tier" or "corporate rate plans get the
-// business package" wrote those rules expecting them to decide something, and a site-wide list silently
-// grants the best of them to whoever asks first.
-//
-// So the offer set is computed by the real Phase-2 eligibility engine, against SERVER-PINNED Stay evidence
-// read from the resolved Stay under the pinned Interface Revision. Two Stays at the same property, verified a
-// second apart, can legitimately get different offers — that is the point.
-//
-// Everything decided here is snapshotted into the Quote, because an offer is a statement about a moment: the
-// Stay can change afterwards (a room move, a rate change, a checkout), and a Quote that silently re-evaluated
-// would mean the guest agreed to one thing and received another.
+// The offer set is computed by the eligibility engine against server-pinned Stay evidence, not a site-wide
+// catalogue (which would grant the best package to whoever asks first). What is decided here is snapshotted
+// into the Quote, which must not re-evaluate if the Stay later changes.
 
 import (
 	"context"
@@ -36,15 +25,12 @@ type offerDecision struct {
 	DurationPolicy    []byte
 	DownKbps          int
 	UpKbps            int
-	// MatchedTier is the first-match grant tier, when the package has tiers. Recorded because the tier is
-	// part of what the guest was offered, not an implementation detail of how it was computed.
+	// MatchedTier is the first-match grant tier; it is part of what the guest was offered.
 	MatchedTier    *int
 	MatchedTierRaw []byte
-	// EvidenceVersion is the occupancy-evidence version the decision was made under, carried so the offer
-	// record and the Quote can both be re-justified against the exact evidence that produced them.
+	// EvidenceVersion is the occupancy-evidence version the decision was made under.
 	EvidenceVersion int64
-	// Price and acquisition: what the package costs and every method THIS stay may use for it now
-	// (phase3_paid.go). An included package has exactly NOT_REQUIRED.
+	// Price and the acquisition methods this stay may use now (phase3_paid.go); an included package has exactly NOT_REQUIRED.
 	PriceMinor        int64
 	Currency          string
 	CurrencyExponent  int
@@ -52,9 +38,7 @@ type offerDecision struct {
 	Methods           []string
 }
 
-// stayEvidenceFor reads the authoritative Stay facts an eligibility rule may test. It reads them from the
-// Stay row under the pinned Interface, never from anything the guest sent, and carries the occupancy-evidence
-// version so the decision can be re-justified later against the exact evidence that produced it.
+// stayEvidenceFor reads the Stay facts a rule may test from the Stay row, never from the guest's request.
 func (p *phase3Auth) stayEvidenceFor(ctx context.Context, stayID string) (*iamv2.StayEvidence, error) {
 	var e iamv2.StayEvidence
 	var vip *bool
@@ -85,12 +69,8 @@ func (p *phase3Auth) stayEvidenceFor(ctx context.Context, stayID string) (*iamv2
 	return &e, nil
 }
 
-// networkLineage reads the client networks this one is the continuation of (iam_v2.guest_network_lineage, 0106).
-//
-// A read failure is an ERROR, not an empty lineage. Losing it would silently narrow the offer set back to the
-// defect this closes, and svc_scd's grant on the view is the kind of thing a Gate-P reconcile can take away --
-// the same class of mistake that once made a replacement report "no packages affected" because the reader had
-// no SELECT. Failing loudly is what makes that visible.
+// networkLineage reads the networks this one continues (iam_v2.guest_network_lineage). A read failure is an
+// error, not an empty lineage, which would silently narrow the offer set.
 func (p *phase3Auth) networkLineage(ctx context.Context, guestNetworkID string) ([]string, error) {
 	if strings.TrimSpace(guestNetworkID) == "" {
 		return nil, nil
@@ -114,29 +94,17 @@ func (p *phase3Auth) networkLineage(ctx context.Context, guestNetworkID string) 
 	return out, rows.Err()
 }
 
-// offersFor computes the exact set this verified Stay qualifies for.
+// offersFor computes the set this verified Stay qualifies for.
 //
-// guestNetworkID is the client network the appliance itself derived for this device from the source IP
-// (resolveNetwork, netcontext.go) — never anything the guest sent. It was already proven non-empty before this
-// handler could proceed, already used to scope the PMS resolver, and is written onto the Auth Context a few
-// lines later. It is passed HERE because it was not, and that was a defect with one plain consequence: a
-// SITE_NETWORK rule tests the subject's network id, an empty id matches no configured id, and so EVERY package
-// carrying a "this client network only" condition was dropped from the offer set of EVERY room sign-in. A
-// verified guest in a correctly configured room was then told "verified, but no eligible package", while the
-// voucher, client-account, OTP, social and open paths — which read the same id back off the Auth Context —
-// offered that package normally. The network must decide the same thing whoever the guest proved they are.
-//
-// deviceID is the appliance's own device row for the requesting MAC (device(), phase3_auth.go). It is what the
-// purchase-history limit counts against, beside the stay (see stayPriorPurchase).
+// guestNetworkID is the network the appliance derived from the source IP (resolveNetwork), never from the
+// guest. It must be passed: SITE_NETWORK rules test it, and an empty id would drop every network-restricted
+// package from every room sign-in. deviceID is the device row the purchase-history limit counts against.
 func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNetworkID, deviceID string, now time.Time) ([]offerDecision, error) {
 	evidence, err := p.stayEvidenceFor(ctx, stayID)
 	if err != nil {
 		return nil, err
 	}
-	// ...AND THE NETWORKS IT CONTINUES. A client network that was safely replaced for VLAN/port/addressing
-	// reasons (0105) keeps its logical identity (0106): a rule written against the retired id is satisfied by a
-	// device on its successor. Without this a cabling change would quietly narrow the offer set of every
-	// pinned revision — including the one an unused printed voucher redeems.
+	// A replaced network keeps its logical identity, so a rule written against the retired id matches its successor.
 	lineage, err := p.networkLineage(ctx, guestNetworkID)
 	if err != nil {
 		return nil, err
@@ -150,13 +118,8 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		Stay:                evidence,
 	}
 
-	// Only CURRENT revisions of ACTIVE, non-system, visible, zero-price packages are even candidates. The
-	// price and settlement filter is the same one staygrant enforces at grant time — two predicates that
-	// "should" agree are how a portal ends up offering something the grant then refuses.
-	//
-	// `active` is the operator's own switch and belongs here for the same reason: a package turned off in
-	// Hotel Admin that keeps appearing on the portal makes the admin UI a lie, and the operator's only
-	// remaining lever is visible_until, which dates a package rather than disabling it.
+	// Candidates are current revisions of active, non-system, visible packages. The price and settlement filter
+	// mirrors staygrant's, so the portal never offers what the grant then refuses.
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT ipr.id::text, ip.id::text, ip.code, ipr.service_plan_revision_id::text, ipr.package_type,
 		       ipr.duration_policy, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
@@ -224,9 +187,7 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		if err != nil {
 			return nil, err
 		}
-		// PURCHASE HISTORY (PRIOR_PURCHASE), like every other client (Product-Owner decision D-J): evaluated
-		// per stay and per device. It used to be evaluated against a subject that never carried any history,
-		// so "once per client" meant nothing to a room guest and "requires an earlier purchase" offered nothing.
+		// PRIOR_PURCHASE history is evaluated per stay and per device, like every other client.
 		pkgSubject := subject
 		evalRules := rules
 		if pol := iamv2.PriorPurchasePolicyOf(rules, d.PriceMinor); pol.Present {
@@ -236,9 +197,8 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 			}
 			pkgSubject.HasPriorPurchaseOfPackage = prior
 			if joins {
-				// Choosing the package behind the stay's LIVE access is not a second acquisition: the grant joins
-				// that entitlement (a second device of the room). The free-access limit is about acquisitions,
-				// so it must not lock the room's other devices out of the access the stay already holds.
+				// Choosing the package behind the stay's live access is a join, not a second acquisition, so the
+				// free-access limit must not lock the room's other devices out.
 				evalRules = withoutForbidsPrior(rules)
 			}
 		}
@@ -252,8 +212,7 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		if len(tiers) > 0 {
 			tier, matched := iamv2.FirstMatchTier(tiers, pkgSubject)
 			if !matched {
-				// The package is eligible but no tier matches this Stay, so there is nothing to grant. That
-				// is not an offer; offering it would produce a Quote the grant could not honour.
+				// No tier matches, so the Quote could not be honoured.
 				continue
 			}
 			order := tier.Order
@@ -264,18 +223,16 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID, guestNe
 		d.Currency = strings.TrimSpace(d.Currency)
 		d.Methods = p.stayMethods(ctx, stayID, interfaceID, d)
 		if len(d.Methods) == 0 {
-			continue // nothing this stay could complete: not an offer
+			continue
 		}
 		out = append(out, d)
 	}
 	return out, nil
 }
 
-// stayPriorPurchaseSQL answers, for one package (any revision -- the history is keyed on the package, as for
-// every other client, contract §5), whether this STAY has had it and, when the policy counts devices, whether
-// this DEVICE has had it under any identity; and whether the stay holds live access of the offered revision
-// right now (the join case). The window is measured from the grant, a pending grant counting as now -- the
-// same reading iamv2's HasPriorPurchase uses for the other clients.
+// stayPriorPurchaseSQL answers, for one package (any revision; history is keyed on the package), whether the
+// stay has had it, whether the device has (when the policy counts devices), and whether the stay holds live
+// access of the offered revision (the join case). The window runs from the grant, a pending grant counting as now.
 const stayPriorPurchaseSQL = `
 	SELECT EXISTS (SELECT 1 FROM iam_v2.entitlements e
 	                 JOIN iam_v2.internet_package_revisions r ON r.id = e.package_revision_id
@@ -371,11 +328,8 @@ func (p *phase3Auth) grantTiers(ctx context.Context, packageRevID string) ([]iam
 	return out, rows.Err()
 }
 
-// recordOfferSet persists what was offered, against the Auth Context that will redeem it.
-//
-// This is what makes a grant checkable. Without it the server can only ask "is this package generally
-// grantable?", which is a different question from "was this package offered to THIS verified Stay?" — and a
-// guest naming any other free package on the site would pass the first while failing the second.
+// recordOfferSet persists what was offered against the Auth Context, so a grant can check "was this offered
+// to this Stay?" rather than only "is this generally grantable?".
 func (p *phase3Auth) recordOfferSet(ctx context.Context, tx pgx.Tx, authContextID string,
 	evidenceVersion int64, offers []offerDecision, expiresAt time.Time) error {
 	for _, o := range offers {

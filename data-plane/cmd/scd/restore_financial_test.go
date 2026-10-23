@@ -57,7 +57,6 @@ func TestTheMarkerAdvancesIsWorldReadableAndNeverMovesBack(t *testing.T) {
 	if g, _ := readMarkerGeneration(); g != 2 {
 		t.Fatalf("generation = %d", g)
 	}
-	// an unreadable marker is refused, not treated as generation 0
 	_ = os.WriteFile(filepath.Join(dir, financialMarker), []byte("{not json"), 0o644)
 	if _, err := readMarkerGeneration(); err == nil {
 		t.Error("a corrupt marker was read as generation 0")
@@ -161,7 +160,6 @@ func TestTheFinancialStepsAreInTheirRequiredOrder(t *testing.T) {
 	if !strings.Contains(src, `rollback("financial_recovery"`) || !strings.Contains(src, `rollback("hypertables"`) {
 		t.Error("a failure to record the restore or to register the hypertables does not roll the swap back")
 	}
-	// the marker is never part of the configuration archive
 	if !strings.Contains(mustRead(t, "backups.go"), "financialMarker") {
 		t.Error("the configuration archive does not name the marker it must leave out")
 	}

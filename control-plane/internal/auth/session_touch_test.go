@@ -9,8 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// A request that read a session just before a sign-out deleted it must not write it back: Touch only updates a
-// session that still exists (SET ... XX). Needs a Redis: CTRLAPI_TEST_REDIS_URL (skipped without one).
+// Touch must not write back a session deleted by a sign-out meanwhile (SET ... XX). Needs CTRLAPI_TEST_REDIS_URL (skipped without one).
 func TestTouchDoesNotResurrectASignedOutSession(t *testing.T) {
 	url := os.Getenv("CTRLAPI_TEST_REDIS_URL")
 	if url == "" {
@@ -36,7 +35,6 @@ func TestTouchDoesNotResurrectASignedOutSession(t *testing.T) {
 	}
 	read.LastSeenAt = time.Now().Add(-2 * time.Minute) // old enough to be written
 
-	// Still there: the activity is recorded and the lifetime slides.
 	if err := store.Touch(ctx, read); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +46,6 @@ func TestTouchDoesNotResurrectASignedOutSession(t *testing.T) {
 		t.Fatalf("touch did not slide the lifetime: ttl %v", ttl)
 	}
 
-	// Signed out between the read and the touch: it stays gone.
 	if err := store.Destroy(ctx, sess.Token); err != nil {
 		t.Fatal(err)
 	}

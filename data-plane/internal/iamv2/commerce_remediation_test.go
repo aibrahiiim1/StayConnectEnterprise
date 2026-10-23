@@ -5,13 +5,11 @@ import (
 	"testing"
 )
 
-// O-2' / O-14: ONE card-currency rule, asked at listing, quote and confirm.
 func TestCardApplicableIsTheOneCurrencyRule(t *testing.T) {
 	site := SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"GBP"}}
 	if !site.CardApplicable("gbp") || site.CardApplicable("USD") || site.CardApplicable("") {
 		t.Fatal("without conversion only the default account's currency is accepted")
 	}
-	// A provider-converts default account accepts what its provider converts, and nothing else.
 	site.CardAccepts = func(cur string) bool { return cur == "USD" }
 	if !site.CardApplicable(" usd ") || site.CardApplicable("XYZ") {
 		t.Fatal("a converting account accepts exactly what the provider converts (upper-cased, trimmed)")
@@ -25,14 +23,13 @@ func TestConfirmReChecksTheCardCurrency(t *testing.T) {
 	if why := revalidateQuote(q, AcquireCard, ok); why != "" {
 		t.Fatalf("a settleable quote must confirm, got %q", why)
 	}
-	// The default account changed to GBP (no conversion) after the quote: refused BEFORE a purchase exists.
+	// The default account changed after the quote: refused before a purchase exists.
 	moved := SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"GBP"}}
 	if why := revalidateQuote(q, AcquireCard, moved); why != "card_currency_not_accepted" {
 		t.Fatalf("confirm must re-check the currency, got %q", why)
 	}
 }
 
-// O-4: a per-night allowance needs a stay; nothing on the non-room path has one.
 func TestPerNightPackageIsNeverOfferedWithoutAStay(t *testing.T) {
 	site := SiteMethods{PaidAccess: true, Card: true, CardCurrencies: []string{"USD"}}
 	for _, ac := range []AuthContextRow{
@@ -53,7 +50,6 @@ func TestPerNightPackageIsNeverOfferedWithoutAStay(t *testing.T) {
 	}
 }
 
-// O-10: each voucher is its own allowance; the device-counted free limit binds everyone else.
 func TestVoucherIsItsOwnAllowance(t *testing.T) {
 	rules := []EligibilityRule{{Type: RulePriorPurchase, Value: map[string]any{"forbids_prior": true}}}
 	pol := PriorPurchasePolicyOf(rules, 0)
@@ -70,7 +66,6 @@ func TestVoucherIsItsOwnAllowance(t *testing.T) {
 	}
 }
 
-// O-26 / O-4: a voucher that could never be redeemed is not issued.
 func TestVoucherBlocker(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -95,7 +90,6 @@ func TestVoucherBlocker(t *testing.T) {
 	}
 }
 
-// O-19: room guests are their own kind, and a rule may name the room sign-in method.
 func TestRuleVocabularyNamesRoomGuests(t *testing.T) {
 	if err := ValidateEligibilityRule(EligibilityRule{Type: RuleAuthMethod, Value: map[string]any{"methods": []any{"PMS"}}}); err != nil {
 		t.Fatalf("AUTH_METHOD PMS must be publishable: %v", err)
@@ -103,7 +97,6 @@ func TestRuleVocabularyNamesRoomGuests(t *testing.T) {
 	if err := ValidateEligibilityRule(EligibilityRule{Type: RuleSubjectKind, Value: map[string]any{"kinds": []any{"STAY"}}}); err != nil {
 		t.Fatalf("SUBJECT_KIND STAY must be publishable: %v", err)
 	}
-	// SUBJECT_KIND PRINCIPAL no longer matches a room guest.
 	room := EligibilitySubject{Kind: SubjectStay, AuthMethod: Method("PMS")}
 	if ok, _ := EvaluatePackageEligible([]EligibilityRule{{Type: RuleSubjectKind, Value: map[string]any{"kinds": []any{"PRINCIPAL"}}}}, room); ok {
 		t.Fatal("a PRINCIPAL-only rule matched a room guest")

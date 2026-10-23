@@ -1,11 +1,5 @@
 package http
 
-// THE SIGN-IN LOCKOUT AT THE HANDLERS (Central migrations 0053, 0056; auth/signin_throttle.go). A sign-in name
-// locked at the caller's address is refused before its password is checked, at sign-in and at the password
-// confirmation alike, and the refusal looks the same whether or not the name has an account. The address is
-// clientip.From: the TCP peer, or Caddy's X-Real-IP when Caddy on loopback relayed the request -- the same
-// address the per-address request limit counts.
-
 import (
 	"log/slog"
 	"net/http"
@@ -27,9 +21,8 @@ func refuseLocked(w http.ResponseWriter, r *http.Request, until time.Time) {
 		"Too many wrong passwords for this account. Try again in "+strconv.Itoa((secs+59)/60)+" minutes.")
 }
 
-// signinLocked refuses the request when email is locked. A lookup that fails lets the request through: the
-// per-address rate limit still applies, and refusing every sign-in because a counter cannot be read would lock
-// everyone out.
+// signinLocked refuses the request when email is locked at the caller's address, before any password check.
+// A failed lookup lets the request through: the rate limit still applies, and failing closed would lock everyone out.
 func (d authDeps) signinLocked(w http.ResponseWriter, r *http.Request, email, operatorID string) bool {
 	if d.DB == nil || email == "" {
 		return false
@@ -47,7 +40,6 @@ func (d authDeps) signinLocked(w http.ResponseWriter, r *http.Request, email, op
 	return true
 }
 
-// signinFailed counts a wrong password for email and, when that started a lockout, audits it and answers 429.
 func (d authDeps) signinFailed(w http.ResponseWriter, r *http.Request, email, operatorID string) bool {
 	if d.DB == nil || email == "" {
 		return false

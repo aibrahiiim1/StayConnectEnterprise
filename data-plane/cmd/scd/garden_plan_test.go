@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// THE GARDEN OPENS THE PORT A SIGN-IN NEEDS AND NOTHING ELSE (edge.go planGarden, internal/nft/garden.go).
-// Measured on PRE-LIVE 2026-10-11 before this: every port to every garden address, a rule's Ports ignored,
-// and DNS-over-HTTPS to the baseline resolvers reachable before sign-in.
+// The garden opens the port a sign-in needs and nothing else (edge.go planGarden, internal/nft/garden.go).
 func TestGardenPlanOpensExactlyTheNamedPorts(t *testing.T) {
 	resolve := func(name string) []string {
 		switch name {
@@ -42,15 +40,13 @@ func TestGardenPlanOpensExactlyTheNamedPorts(t *testing.T) {
 	}
 	wantTCP := []string{
 		"1.1.1.1 . 53", "10.9.0.0/24 . 8443",
-		// The identity provider's consent page on 443 only; no mail-service ports exist any more.
 		"142.251.209.197 . 443", "142.251.209.198 . 443",
 		"203.0.113.5 . 80", "203.0.113.9 . 443", "54.187.1.1 . 443", "8.8.4.4 . 53", "8.8.8.8 . 53",
 	}
 	if !reflect.DeepEqual(plan.TCP, wantTCP) {
 		t.Fatalf("tcp set:\n got %v\nwant %v", plan.TCP, wantTCP)
 	}
-	// UDP: the baseline resolvers' 53 and an operator's ported rules (a rule names no protocol); never a payment
-	// page or an identity provider.
+	// UDP: baseline resolvers' 53 and operator ported rules; never a payment page or identity provider.
 	wantUDP := []string{"1.1.1.1 . 53", "10.9.0.0/24 . 8443", "203.0.113.5 . 80", "203.0.113.9 . 443", "8.8.4.4 . 53", "8.8.8.8 . 53"}
 	if !reflect.DeepEqual(plan.UDP, wantUDP) {
 		t.Fatalf("udp set:\n got %v\nwant %v", plan.UDP, wantUDP)

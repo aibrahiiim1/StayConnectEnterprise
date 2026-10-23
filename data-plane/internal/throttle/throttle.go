@@ -1,14 +1,5 @@
-// Package throttle is a durable, local-first authentication throttle backed by the
-// public.auth_throttle_buckets table (decision D4). It replaces the process-only counters as the
-// AUTHORITATIVE attempt state — it survives service restart and appliance reboot, is safe across
-// multiple worker processes (atomic INSERT ... ON CONFLICT DO UPDATE), and stores only an
-// irreversible HMAC of each scope value (no raw identity / IP / MAC / username / OTP / credential).
-//
-// Every bucket carries an explicit normalized auth METHOD so unrelated methods never share a counter
-// for the same identity/IP/device. A hard block (blocked_until) applies across every later window for
-// that throttle identity until it expires. It has no Central/Redis dependency and uses only the local
-// site database. On database failure it FAILS CLOSED (denies the attempt) so a broken store can never
-// silently permit unlimited attempts.
+// Package throttle is a durable authentication throttle on public.auth_throttle_buckets. It stores only an
+// HMAC of each scope value, keeps counters per auth method, and fails closed on database errors.
 package throttle
 
 import (
@@ -26,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ScopeKind enumerates the throttle dimensions (must match the DB CHECK constraint).
+// ScopeKind must match the DB CHECK constraint.
 type ScopeKind string
 
 const (
@@ -45,42 +36,36 @@ func (s ScopeKind) valid() bool {
 	return false
 }
 
-// MethodAny is the deliberate global method value (a policy shared across all auth methods).
+// MethodAny is a policy shared across all auth methods.
 const MethodAny = "*"
 
 func validMethod(m string) bool {
 	switch m {
-	// post_stay_pin is its own method deliberately: a post-stay brute force must not consume (or be masked
-	// by) the budget the same guest, IP or device has for ordinary portal authentication.
+	// post_stay_pin is separate so post-stay brute force neither consumes nor is masked by the portal budget.
 	case "account", "otp", "voucher", "social", "pms", "post_stay_pin", MethodAny:
 		return true
 	}
 	return false
 }
 
-// Rule is one scope's limit for the current attempt. Method isolates the auth method (use MethodAny
-// only for policies intentionally shared across methods, e.g. an endpoint-wide damper).
+// Rule is one scope's limit for the current attempt. Method is required; MethodAny only for shared policies.
 type Rule struct {
 	Kind   ScopeKind
-	Value  string // raw value (hmac'd before storage; "" allowed only for endpoint)
-	Method string // account|otp|voucher|social|pms|* (defaults to "*")
+	Value  string // raw value, HMAC'd before storage; "" allowed only for endpoint
+	Method string // account|otp|voucher|social|pms|post_stay_pin|*
 	Limit  int
-	Block  time.Duration // if >0, once the cap is exceeded, hard-block for this long (across windows)
-	// Global marks a shared, appliance-wide damper (e.g. the endpoint-wide rule). A global rule is charged
-	// ONLY when every non-global rule in the same Allow call allowed the attempt: a client its own rules
-	// refuse (or that is hard-blocked) never consumes the budget every other client shares, so one client
-	// cannot exhaust it and lock everybody out (audit B-10).
+	Block  time.Duration // if >0, once the cap is exceeded, hard-block for this long across windows
+	// Global marks an appliance-wide damper. It is charged only when every non-global rule allowed the
+	// attempt, so one refused client cannot exhaust the shared budget and lock everybody out.
 	Global bool
 }
 
-// Decision is the result of charging an attempt.
 type Decision struct {
 	Allowed    bool
 	RetryAfter time.Duration
 	Reason     ScopeKind
 }
 
-// Store is the durable throttle repository.
 type Store struct {
 	db     *pgxpool.Pool
 	key    []byte
@@ -88,8 +73,7 @@ type Store struct {
 	now    func() time.Time
 }
 
-// New builds a Store. key must be non-empty (>=16B; production loaders require >=32B). window is the
-// fixed-window length.
+// New builds a Store. key must be at least 16 bytes; window is the fixed-window length.
 func New(db *pgxpool.Pool, key []byte, window time.Duration) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("throttle: nil db")
@@ -118,7 +102,6 @@ func (s *Store) scopeKey(kind ScopeKind, value string) string {
 
 func (s *Store) windowStart(now time.Time) time.Time { return now.Truncate(s.window).UTC() }
 
-// chargeable is a normalized, resolved throttle entry (scope key already HMAC'd).
 type chargeable struct {
 	kind   ScopeKind
 	sk     string
@@ -128,11 +111,8 @@ type chargeable struct {
 	global bool
 }
 
-// normalizeRules validates every rule, resolves its scope key, drops no-op rules (empty non-endpoint
-// value, non-positive limit), then SORTS by (scope_kind, scope_key, method) and DEDUPS identical
-// throttle identities — merging duplicates to the TIGHTEST limit and LONGEST block. The deterministic
-// order guarantees every concurrent Allow acquires the same row locks in the same sequence, so mixed
-// rule orders can never deadlock, and a duplicated scope is charged exactly once.
+// normalizeRules drops no-op rules, dedups identical identities (tightest limit, longest block) and sorts
+// deterministically so concurrent Allow calls take row locks in one order and cannot deadlock.
 func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 	merged := make(map[string]*chargeable, len(rules))
 	for _, r := range rules {
@@ -141,7 +121,6 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 		}
 		method := strings.ToLower(strings.TrimSpace(r.Method))
 		if method == "" {
-			// Explicit method is required; use MethodAny deliberately for a global policy.
 			return nil, errors.New("throttle: rule is missing an explicit method")
 		}
 		if !validMethod(method) {
@@ -162,7 +141,7 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 			if r.Block > e.block {
 				e.block = r.Block
 			}
-			// A scope both global and client-scoped in one call is treated as client-scoped (always charged).
+			// Both global and client-scoped in one call counts as client-scoped (always charged).
 			e.global = e.global && r.Global
 			continue
 		}
@@ -173,8 +152,7 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 		out = append(out, *e)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		// Client-scoped rules first, global ones last: a global rule's charge depends on the others' verdict.
-		// The order stays total and deterministic, so concurrent calls still take row locks in one sequence.
+		// Global rules last: their charge depends on the others' verdict.
 		if out[i].global != out[j].global {
 			return !out[i].global
 		}
@@ -189,9 +167,8 @@ func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
 	return out, nil
 }
 
-// Allow charges one attempt against every rule and returns whether the attempt may proceed. FAILS
-// CLOSED: any database error denies the attempt. A hard block is honored across window boundaries.
-// Rules are sorted+deduped first (see normalizeRules) so concurrent calls never deadlock.
+// Allow charges one attempt against every rule. Any database error denies the attempt (fail closed), and
+// a hard block holds across window boundaries.
 func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	entries, err := s.normalizeRules(rules)
 	if err != nil {
@@ -214,11 +191,10 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 		method := r.method
 		sk := r.sk
 		if r.global && !allowed {
-			continue // refused by its own rules: the shared damper is not charged
+			continue
 		}
 
-		// Cross-window active block: the greatest blocked_until for this throttle identity across ALL
-		// windows. A long block therefore stays effective after the fixed window rolls over.
+		// The greatest blocked_until across all windows, so a block outlives the fixed window.
 		var maxBlock *time.Time
 		if err := tx.QueryRow(ctx,
 			`SELECT max(blocked_until) FROM public.auth_throttle_buckets
@@ -232,7 +208,7 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 			if d := maxBlock.Sub(now); d > worstRetry {
 				worstRetry = d
 			}
-			continue // do not charge a new attempt while hard-blocked
+			continue
 		}
 
 		var count int
@@ -274,8 +250,7 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	return Decision{Allowed: allowed, RetryAfter: worstRetry, Reason: reason}, nil
 }
 
-// Cleanup deletes buckets whose window (plus grace) has fully expired and that hold no active block.
-// Bounded retention; never removes a bucket with an unexpired blocked_until.
+// Cleanup deletes expired buckets, never one with an unexpired blocked_until.
 func (s *Store) Cleanup(ctx context.Context, grace time.Duration) (int64, error) {
 	if grace < 0 {
 		grace = 0
@@ -292,7 +267,7 @@ func (s *Store) Cleanup(ctx context.Context, grace time.Duration) (int64, error)
 	return ct.RowsAffected(), nil
 }
 
-// RunCleanup runs Cleanup on a ticker until ctx is cancelled (safe shutdown).
+// RunCleanup runs Cleanup on a ticker until ctx is cancelled.
 func (s *Store) RunCleanup(ctx context.Context, every, grace time.Duration) {
 	if every <= 0 {
 		every = 5 * time.Minute

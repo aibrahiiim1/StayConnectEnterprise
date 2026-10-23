@@ -11,19 +11,7 @@ const OPTIONS = [
   { value: "system", label: "System", Icon: Monitor },
 ] as const;
 
-/**
- * ThemeToggle — the control the operator asked for: dark is an option, not the only mode.
- *
- * Three explicit states rather than a two-way switch. "System" matters on an appliance that is left open on a
- * front-desk machine all day: the screen should follow the desk's own light/dark schedule without anyone
- * touching it.
- *
- * `mounted` guards the render because the resolved theme is not knowable on the server. Showing the wrong
- * segment as selected for one frame is worse than showing a neutral strip for one frame.
- *
- * It is a radio group, so it behaves like one (WAI-ARIA APG): ONE tab stop, on the checked option, and the
- * arrow keys, Home and End move the choice. Three tab stops that ignore the arrows only looked like radios.
- */
+/** Wait for mount because the server cannot know the theme; keep one tab stop for the radio group. */
 export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
@@ -31,7 +19,6 @@ export function ThemeToggle({ className }: { className?: string }) {
   const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
   const checkedIndex = mounted ? OPTIONS.findIndex((o) => o.value === theme) : -1;
-  // Before mount (or for an unknown value) nothing is checked, so the first option carries the tab stop.
   const tabStop = checkedIndex >= 0 ? checkedIndex : 0;
 
   function choose(i: number) {
@@ -41,7 +28,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, i: number) {
-    // In right-to-left text the visual order flips, so Left/Right follow what the operator sees.
+    // Arrow direction follows visual order in right-to-left layouts.
     const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
     const forward = rtl ? "ArrowLeft" : "ArrowRight";
     const back = rtl ? "ArrowRight" : "ArrowLeft";

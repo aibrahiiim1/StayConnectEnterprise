@@ -12,20 +12,14 @@ import (
 	"time"
 )
 
-// fakeApaleo routes three endpoints on a single httptest server:
-//
-//	/connect/token          → OAuth client-credentials grant
-//	/inventory/v1/units     → paged units list
-//	/booking/v1/reservations → reservation lookup (expects bearer auth)
-//
-// It also counts how many token grants were issued so tests can assert
-// the cache-until-expiry behaviour.
+// fakeApaleo serves /connect/token, /inventory/v1/units and /booking/v1/reservations (bearer auth) and counts token
+// grants to assert cache-until-expiry.
 type fakeApaleo struct {
 	mu          sync.Mutex
 	units       []apaleoUnit
 	reservsByID map[string][]apaleoReservation
 	tokenIssued int
-	tokenTTL    int // seconds; 0 → 3600
+	tokenTTL    int
 	srv         *httptest.Server
 }
 
@@ -110,7 +104,7 @@ func newApaleoAt(t *testing.T, base string) *Apaleo {
 			PropertyID: "HTL",
 			Extra: map[string]any{
 				"client_id":    "cli-1",
-				"identity_url": base, // route /connect/token through the same fake
+				"identity_url": base,
 			},
 		},
 	}
@@ -124,7 +118,6 @@ func TestApaleoConfigureRequiresCreds(t *testing.T) {
 	a := NewApaleo("x")
 	err := a.Configure(ProviderConfig{Connection: ConnectionConfig{
 		BaseURL: "https://x", APIKey: "secret", PropertyID: "HTL",
-		// no client_id
 	}})
 	if err == nil {
 		t.Error("missing client_id should fail Configure")
@@ -140,11 +133,9 @@ func TestApaleoTokenCachedUntilExpiry(t *testing.T) {
 
 	a := newApaleoAt(t, f.srv.URL)
 
-	// First refresh triggers a token grant + a units call.
 	if err := a.refreshUnits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// Second refresh within TTL should reuse the cached token.
 	if err := a.refreshUnits(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +150,7 @@ func TestApaleoTokenCachedUntilExpiry(t *testing.T) {
 func TestApaleoTokenRefreshedWhenExpired(t *testing.T) {
 	f := newFakeApaleo(t)
 	defer f.Close()
-	// 1-second token TTL (minus apaleoTokenSkew=60s makes expiry "in the
-	// past" immediately, so every call re-fetches).
+	// A 1-second TTL minus apaleoTokenSkew makes every call re-fetch.
 	f.mu.Lock()
 	f.tokenTTL = 1
 	f.units = []apaleoUnit{{ID: "u-1", Name: "101"}}
@@ -264,18 +254,13 @@ func TestApaleoDropsTokenOn401(t *testing.T) {
 	a := newApaleoAt(t, f.srv.URL)
 	_ = a.refreshUnits(context.Background())
 
-	// Simulate credential rotation: the fake keeps issuing tokens but
-	// the "API" now rejects them. We swap in a handler that always 401s
-	// by stopping the existing server and standing a new one up isn't
-	// worth it — instead grab the token directly and check the cache
-	// drop by invoking doGET against a handler that forces 401.
+	// Simulate credential rotation by invoking doGET against a handler that always 401s.
 	rejectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer rejectSrv.Close()
 	a.apiBase = rejectSrv.URL
 
-	// Pre-seed a cached token.
 	a.mu.Lock()
 	a.token = "stale"
 	a.tokenExpiry = time.Now().Add(1 * time.Hour)

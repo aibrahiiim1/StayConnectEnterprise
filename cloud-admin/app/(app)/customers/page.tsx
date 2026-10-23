@@ -47,7 +47,7 @@ function Customers() {
   const [createErr, setCreateErr] = useState<unknown>(null);
   const nameErr = useFieldErrors<"name">();
 
-  // A customer's own user has exactly one customer: go straight to it.
+  // Customer users remain scoped to their own customer.
   const own = !can["customers.list"] ? subject.customerId : "";
   useEffect(() => {
     if (own) router.replace(`/customers/${own}`);
@@ -78,7 +78,6 @@ function Customers() {
       setCreating(false);
       router.push(`/customers/${c.id}`);
     } catch (e) {
-      // A refused name (400) or one already taken (409) is shown under the Name field, which takes focus.
       if (e instanceof ApiError && (e.status === 400 || e.status === 409)) nameErr.fail({ name: e.message });
       else setCreateErr(e);
     } finally {

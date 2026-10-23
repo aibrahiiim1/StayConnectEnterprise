@@ -18,61 +18,21 @@ import {
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
 
-// THERE IS NO BUILD-TIME GATE IN THIS FILE, AND THAT IS THE POINT.
-//
-// Navigation used to be gated a second time by NEXT_PUBLIC_PHASE*_ADMIN. Next substitutes those at BUILD
-// time, so a flag that is absent when `next build` runs is never substituted at all: the comparison compiles
-// to a permanent false, the routes still exist and still answer by URL, and the operator simply loses the
-// menu to them. Nothing crashes, nothing 404s, every structural check passes.
-//
-// That failure shipped twice. Once for five days, which is why capability-contract.json and the deployment
-// integrity checker exist. And again here — a bundle built with a plain `next build` removed ELEVEN
-// destinations an operator was entitled to: Internet packages, Service plans, Checkout grace, Stays, PMS
-// connection, Network routing, PMS activity, Guest sign-in checks, Guest sign-in attempts, Duplicate sources
-// and Alerts. Every one of those surfaces was mounted and answering on the appliance at the time.
-//
-// The second occurrence is what settled the design. A safety net that has to be REMEMBERED is not a
-// property of the system, and the unit test alongside this file asserted that the hiding was correct, so the
-// regression was indistinguishable from intent at the source level.
-//
-// So availability now has exactly one author: edged. It reports what it has mounted, that answer describes
-// the appliance in front of the operator, and it cannot go missing at build time because it is not compiled
-// in. A destination is offered when the appliance serves it AND the operator's role may read it — two
-// questions, each answered by the system that owns it.
-//
-// Surfaces that are deliberately dark are still dark, and by a stronger mechanism than a UI constant: edged
-// does not mount them, so surfaceAvailable() returns false for exactly the same set the old flags covered.
-// This was never an authorization control -- the previous comment here said so in as many words -- and
-// removing it takes nothing away. edged enforces server-side regardless of what any menu shows.
-
-// Each item names the edged resource that gates its visibility. Items the operator's roles cannot read are
-// hidden (edged still enforces server-side).
-//
-// `keywords` feeds the filter box only. An operator looking for "wifi speed" should find Service plans, and
-// one looking for "room sign in" should find the PMS resolution screen, without having to know what this
-// product decided to call either.
+// Build-time flags can hide mounted routes; use edged capabilities and role permissions for navigation.
+// edged enforces authorization even when a route is opened directly.
 type Item = {
   href: string;
   label: string;
   icon: any;
   resource: string;
-  /** The capability this destination needs, when that is narrower than the resource. Online-time budgets
-   *  live under the always-mounted "sessions" resource but need a sub-feature that most appliances do not
-   *  run, so the resource name alone would keep offering a screen with nothing behind it. */
+  /** Some destinations need a narrower capability than their always-mounted resource. */
   capability?: string;
-  /** Optional licence modules this destination belongs to: shown only when at least one is licensed. An
-   *  optional sign-in provider screen is not offered to a site that cannot offer that sign-in method. */
+  /** Hide optional provider screens unless a matching module is licensed. */
   modules?: string[];
   keywords?: string;
 };
 type Section = { title: string; items: Item[] };
 
-// THE SIDEBAR IS AN INFORMATION ARCHITECTURE, NOT A LIST OF BACKEND RESOURCES.
-//
-// It is grouped by the job an operator is doing. The previous grouping had a 16-item "Integrations" section
-// holding the PMS, the financial screens, post-stay, notifications and social login at one flat level, and an
-// "Access" section that mixed what a client can buy with who is currently online. Both are jobs; neither was
-// findable.
 const SECTIONS: Section[] = [
   {
     title: "Overview",
@@ -81,17 +41,12 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    // WHAT A CLIENT CAN BE GIVEN, AND THE SERVICE BEHIND IT. These are one job in two steps — a Service plan
-    // defines the technical service (speed, devices, duration/quota); an Internet package is the client-facing
-    // offer that uses it — so they sit adjacent instead of being buried in one tabbed screen.
     title: "Internet offering",
     items: [
       { href: "/internet-packages", label: "Internet packages", icon: Package, resource: "commercial-packages", keywords: "offer tariff price free paid" },
       { href: "/service-plans",     label: "Service plans",     icon: Gauge,   resource: "commercial-packages", keywords: "speed bandwidth quota devices mbps" },
-      // Vouchers sit with the offer rather than with the client: a voucher IS an internet package, printed.
       { href: "/vouchers",          label: "Vouchers",          icon: Ticket,  resource: "vouchers", keywords: "code card print batch redeem scratch prepaid" },
-      // How a client may get a package here: Free, Voucher, Card payment, Room charge. Under the always-mounted
-      // "modules" resource because the page explains a method that is NOT available as much as one that is.
+      // Keep this page under modules so it can explain unavailable payment methods too.
       { href: "/payment-methods",   label: "Payment methods",   icon: CreditCard, resource: "modules", keywords: "card stripe paymob provider price paid free voucher room charge checkout acquisition" },
     ],
   },
@@ -102,24 +57,14 @@ const SECTIONS: Section[] = [
       { href: "/sessions",       label: "Active sessions", icon: Monitor,  resource: "sessions", keywords: "online now devices connected who is on wifi disconnect guests" },
       { href: "/devices",        label: "Devices",         icon: Smartphone, resource: "sessions", keywords: "device mac phone laptop place slot release replace disconnect sign in again test reset remembered" },
       { href: "/usage",          label: "Usage explorer",  icon: ChartColumn, resource: "usage", keywords: "data used quota dispute how much room device mac gigabytes consumption investigate guests" },
-      // "Client devices" (the dark Phase-6 guest self-service switch) is RETIRED from the menu (decision D-K): since
-      // migration 0118 the portal's "Your devices" list is always on and does not read that switch, so the screen
-      // saved a setting that controlled nothing. Devices is the one place for client devices; its daily
-      // device-change limit is the setting that does govern the portal.
       { href: "/online-time",    label: "Online-time budgets", icon: Hourglass, resource: "sessions", capability: "sessions.aggregate-time", keywords: "time remaining allowance hours guests" },
     ],
   },
   {
-    // CLIENT ACCESS, ordered as the job is done (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md
-    // §9): which methods are on, who the clients are (groups), the providers behind the methods, how codes are
-    // delivered, then what the portal looks like and what it may reach. "Client Portal" stays in the keywords so
-    // the filter still finds every one of these under the old name.
     title: "Client access",
     items: [
-      // Sign-in methods leads the group: which ways a client may prove who they are is the first thing an
-      // operator sets up on the portal, and it was previously not settable anywhere in the product.
       { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods", keywords: "room number voucher otp sms email account register verification suspend grace social primary method remember device client portal guest portal" },
-      // Groups are core, not module-owned: an email-domain group needs no identity-provider module.
+      // Groups remain available without an identity-provider module.
       { href: "/client-groups",    label: "Client groups",   icon: UsersRound, resource: "client-groups", keywords: "employees partners organisation domain microsoft google workspace vip group audience client portal" },
       { href: "/social-providers", label: "Identity providers", icon: AtSign, resource: "social-providers", modules: ["social_login"], keywords: "google apple facebook microsoft oauth social login client portal guest portal" },
       { href: "/notifications",    label: "Delivery",        icon: MessageSquare, resource: "notification-providers", modules: ["email_otp", "sms_otp", "whatsapp_otp"], keywords: "sendgrid twilio otp whatsapp smtp mail server email sms delivery client portal guest portal" },
@@ -128,16 +73,6 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    // THE HOTEL MODULE: every screen whose meaning depends on hospitality or a PMS, in one place
-    // (docs/PRODUCT_TERMINOLOGY.md). It replaces the former "Property management system" and "Charges"
-    // sections; those words stay in the keywords so the filter still finds them.
-    //
-    // "PMS providers" is GONE rather than hidden. It was a second, older configuration model for the same
-    // property management system the PMS connection now owns, and offering an operator two ways to configure
-    // one PMS is worse than offering one imperfect way.
-    //
-    // Ordered connection-first: when guests cannot get online, "is the PMS connected" is the question and the
-    // stays are the symptom.
     title: "Hotel",
     items: [
       { href: "/pms-interfaces",       label: "PMS connection",       icon: Plug,  resource: "pms-interfaces", keywords: "protel fias connect sync resync opera status property management system hotel" },
@@ -154,9 +89,6 @@ const SECTIONS: Section[] = [
       { href: "/financial-settlements", label: "Package payments", icon: Receipt, resource: "financial-review", keywords: "settlements charges payment room charge card voucher free hotel" },
       { href: "/financial-recovery",    label: "Recovery",      icon: LifeBuoy, resource: "financial-review", keywords: "charges held restore epoch hotel" },
       { href: "/pms-routing",          label: "PMS routing",          icon: Route, resource: "pms-routing", keywords: "network routing which pms per network vlan mapping hotel" },
-      // RECONCILIATION IS NOT DAY-TO-DAY WORK. Both reconciliation screens are diagnostics with no action on
-      // them; they close the section, and the PMS connection page says plainly when there is something in
-      // them worth looking at.
       { href: "/pms-source-conflicts", label: "Duplicate sources",    icon: Layers, resource: "pms-source-conflicts", keywords: "conflict two interfaces same room hotel" },
       { href: "/stay-transfers",       label: "Cross-PMS transfer",   icon: ArrowLeftRight,   resource: "stay-transfers", keywords: "move stay between systems hotel" },
     ],
@@ -168,65 +100,32 @@ const SECTIONS: Section[] = [
       { href: "/network/dhcp",        label: "DHCP & leases",      icon: Wifi,      resource: "network", keywords: "ip address pool lease kea reservation" },
       { href: "/network/system",      label: "WAN / LAN settings", icon: Router,    resource: "network", keywords: "uplink gateway dns static management" },
       { href: "/network/revisions",   label: "Config history",     icon: History,   resource: "network", keywords: "rollback revision applied" },
-      // The Client Portal's own address, host names and publicly trusted certificates (HTTPS portal contract §8).
       { href: "/portal-https",        label: "Portal HTTPS",       icon: ShieldCheck, resource: "portal-https", keywords: "https ssl certificate captive portal address domain hostname letsencrypt client portal guest portal fallback" },
-      // "Cloud connection" is gone, and its keywords live on Activation so the search that found it still
-      // does. The link to Central exists ONLY to serve activation and licensing. Everything the page actually
-      // showed -- licence state, certificate health, reachability, appliance identity -- is licensing or
-      // identity, and both now have exactly one home. A page per backend component is how an operator ends up with three screens
-      // answering one question.
-      //
-      // The Hotel Admin TLS certificate stays, and stays HERE: it secures the local HTTPS an operator reaches
-      // this admin over, which has nothing to do with whether Central is reachable.
+      // Hotel Admin TLS secures local HTTPS independently of Central reachability.
       { href: "/network/certificate", label: "TLS certificate",    icon: Lock,      resource: "network", keywords: "https ssl rotate expiry" },
     ],
   },
   {
     title: "System",
-    // ORDERED BY THE JOB, NOT BY THE COMPONENT.
-    //
-    // Reviewed against the other System screens and none of them duplicates another: Diagnostics answers "is
-    // this appliance working", Alerts answers "did something happen that needs a person", Audit answers "who
-    // did what", and the three appliance screens answer "what is this appliance licensed and able to do".
-    // Nothing here was removed, because every one of them is the only place its evidence lives -- the
-    // duplication in this product was Cloud connection against License, and that is already resolved.
-    //
-    // What WAS wrong was the order: seven items in the sequence they happened to be added, so an operator
-    // looking for one scanned the whole list. They are now grouped by the question being asked -- watch it,
-    // run it, then the people who may.
     items: [
-      // Watching it.
       { href: "/health",             label: "Diagnostics", icon: Stethoscope,   resource: "diagnostics", keywords: "services health checks scd netd kea" },
       { href: "/operational-alerts", label: "Alerts",      icon: Bell,     resource: "operational-alerts", keywords: "warnings acknowledge" },
       { href: "/audit",              label: "Activity",    icon: ScrollText, resource: "audit", keywords: "audit log who did what history trail security changes" },
-      // Running it.
       { href: "/appliance",          label: "Appliance & licence", icon: ServerCog, resource: "license", keywords: "enrol claim serial activate setup cloud connection central licence capacity expiry plan offline renewal first-time" },
       { href: "/modules",            label: "Modules",     icon: Blocks,     resource: "modules", keywords: "licence licensed features hospitality paid access card payment room charge switch on off site type" },
       { href: "/backups",            label: "Backups",     icon: Archive,    resource: "backups", keywords: "restore snapshot database retention schedule" },
       { href: "/guest-data",         label: "Guest data requests", icon: UserSearch, resource: "guest-data-rights", keywords: "gdpr privacy personal data erase delete forget export copy access request subject" },
-      // Who may.
       { href: "/operators",          label: "Operators",   icon: Users,      resource: "operators", keywords: "staff users roles password" },
     ],
   },
 ];
 
-/** Flattened once, for the breadcrumb/title lookup the top bar does on every navigation. */
 export const NAV_ITEMS: Item[] = SECTIONS.flatMap((s) => s.items);
 export const NAV_SECTION_OF: Record<string, string> = Object.fromEntries(
   SECTIONS.flatMap((s) => s.items.map((i) => [i.href, s.title])),
 );
 
-/**
- * activeNavHref — the LONGEST href this path matches, not every href it starts with.
- *
- * `path.startsWith(it.href)` marked several items active at once, because these are siblings rather than a
- * parent and its children: "/network" is the Guest networks LEAF, so standing on "/network/dhcp" lit up both
- * "DHCP & leases" and "Guest networks". Two highlighted rows in a menu is not a cosmetic issue — the
- * highlight is the only thing telling an operator which screen they are on.
- *
- * The "/" in the child test matters too: plain startsWith would make a hypothetical "/networkfoo" light up
- * "/network", matching on a shared prefix that is not a path boundary at all.
- */
+/** Match the longest route at a path boundary so nested pages highlight only their own item. */
 export function activeNavHref(path: string): string | null {
   const matches = NAV_ITEMS.map((it) => it.href).filter(
     (href) => path === href || path.startsWith(href + "/"),
@@ -240,41 +139,27 @@ export function Nav({
   onLogout: () => void;
   email?: string;
   roles: string[];
-  /** Called after a link is followed, so the mobile drawer can close itself. */
   onNavigate?: () => void;
-  /**
-   * Render as an icon rail. THE DRAWER NEVER PASSES THIS. Below `lg` the navigation is a full-width overlay
-   * with room for labels, and these labels ("Duplicate sources", "Grace Period") are not guessable from an
-   * icon — so the phone gets the labelled list, exactly as it did before.
-   */
+  /** Keep labels visible in the mobile drawer; icons alone cannot identify every destination. */
   collapsed?: boolean;
-  /** Absent in the drawer, which has no width to reclaim and therefore no control to offer. */
   onToggleCollapsed?: () => void;
 }) {
   const path = usePathname();
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
-  // Set when the operator opens the filter FROM the rail, so focus lands in the input only once the expanded
-  // input actually exists. Focusing during the same render would target an element that is not mounted yet.
+  // Defer filter focus until expansion mounts the input.
   const focusFilterAfterExpand = useRef(false);
 
   const activeHref = useMemo(() => activeNavHref(path), [path]);
-  // Section heading ids. Prefixed per instance: the desktop column and the phone drawer are both Navs.
+  // Prefix heading IDs because desktop and mobile Nav instances coexist.
   const navId = useId();
   const sectionId = (title: string) => `${navId}-section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-  // A FILTER, NOT A SEARCH ENGINE. Thirty-four screens in eight groups is past the point where scanning is
-  // reliable, and the operator who needs "the page with the resync button" should not have to remember that it
-  // lives under Hotel.
-  // WHAT THIS APPLIANCE SERVES, not what the bundle was built with. See lib/capabilities.ts: these two
-  // disagreed about eight destinations on PRE-LIVE, and the menu was the half that was wrong.
   const caps = useCapabilities();
 
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // A SITE WITHOUT HOSPITALITY IS NOT A HOTEL, so its menu has no Hotel section at all. Records it kept from
-    // before (stays, PMS activity, sign-in history, charge review) stay reachable from the Hotel card on the
-    // Modules page, not from day-to-day navigation.
+    // Keep historical Hotel records reachable through Modules when Hospitality is unavailable.
     const hotel = moduleLicensed(caps, "hospitality");
     return SECTIONS.map((sec) => ({
       title: sec.title,
@@ -293,8 +178,7 @@ export function Nav({
     })).filter((sec) => sec.items.length > 0);
   }, [query, roles, caps]);
 
-  // Opening the filter is also a request to SEE it. From the rail there is no input to focus, so the column
-  // expands first and the focus is deferred to the render in which the input exists.
+  // Expand the rail before focusing its filter input.
   const openFilter = () => {
     if (collapsed && onToggleCollapsed) {
       focusFilterAfterExpand.current = true;
@@ -303,7 +187,6 @@ export function Nav({
     }
     searchRef.current?.focus();
   };
-  // Read through a ref by the Ctrl+K listener, so that listener is registered once rather than on every render.
   const openFilterRef = useRef(openFilter);
   useEffect(() => {
     openFilterRef.current = openFilter;
@@ -316,10 +199,7 @@ export function Nav({
     }
   }, [collapsed]);
 
-  // Ctrl+K (Cmd+K on a Mac) focuses the filter, the one shortcut worth having on a screen whose primary cost is
-  // finding a page. It used to be a bare "/", which WCAG 2.1.4 rules out: a single printable key cannot be turned
-  // off, and speech-input users trigger it by dictating any text with a slash in it. With a modifier it is safe
-  // even while typing in a field, so it no longer needs to stand aside for one.
+  // Use a modifier shortcut so speech input cannot trigger navigation by typing a slash.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
@@ -340,9 +220,6 @@ export function Nav({
       data-collapsed={collapsed ? "true" : undefined}
       className={cn(
         "sidebar-motion flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
-        // The DRAWER is always a full 16rem overlay; only the desktop column follows the width token.
-        // 160ms (the base motion token): long enough to read as a state change, short enough not to be waited
-        // for. Reduced motion drops the transition outright; the width still changes, instantly.
         onToggleCollapsed
           ? "w-[var(--sidebar-width)] transition-[width] duration-base ease-out motion-reduce:transition-none"
           : "w-64",
@@ -354,12 +231,9 @@ export function Nav({
           collapsed ? "flex-col gap-2 px-2" : "px-4",
         )}
       >
-        {/* The mark is drawn rather than loaded: one fewer asset to ship to an appliance, and it inherits the
-            brand token so it is never out of step with the rest of the product. */}
         <OneGateLockup product="Admin Console" collapsed={collapsed} inverse className={collapsed ? undefined : "flex-1"} />
         {onToggleCollapsed && (
-          // ONE control, and its accessible name states what activating it will DO, which is what a screen
-          // reader user needs — not what the current state is. aria-expanded carries the state.
+          // Name the action; aria-expanded reports the current state separately.
           <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} side="right">
             <button
               type="button"
@@ -381,8 +255,7 @@ export function Nav({
 
       <div className={cn("border-b border-sidebar-border py-2.5", collapsed ? "px-2" : "px-3")}>
         {collapsed ? (
-          // The rail keeps the filter REACHABLE rather than hiding it: finding a screen is the sidebar's main
-          // job, and losing it would be the strongest argument against ever collapsing.
+          // Keep the filter reachable in the collapsed rail.
           <Tooltip content="Find a screen" side="right">
             <button
               type="button"
@@ -446,18 +319,13 @@ export function Nav({
           visibleSections.map((sec) => (
             <div key={sec.title} className="mb-3 last:mb-0">
               {collapsed ? (
-                // The heading text goes, but the GROUPING stays: a hairline keeps the eight groups legible as
-                // groups, which is most of what the headings were doing for someone who already knows the
-                // product. It is decorative, so it is hidden from assistive tech — the accessible grouping
-                // still comes from each item's own label.
-                // The heading itself stays for assistive tech, visually hidden, so the list keeps its name.
+                // Keep hidden heading text for assistive technology when the rail collapses.
                 <>
                   <div className="mx-2 mb-1.5 mt-1 border-t border-sidebar-border/70 first:mt-0 first:border-t-0" aria-hidden />
                   <h2 id={sectionId(sec.title)} className="sr-only">{sec.title}</h2>
                 </>
               ) : (
-                // A real heading (WCAG 1.3.1), so a screen-reader user can jump between the groups, and the list
-                // below is named by it. Styled exactly as the plain label it replaces.
+                // Real headings let screen-reader users navigate groups.
                 <h2
                   id={sectionId(sec.title)}
                   className="px-2.5 pb-1.5 pt-2 text-nano font-normal uppercase tracking-[0.12em] text-sidebar-muted"
@@ -474,11 +342,7 @@ export function Nav({
                       href={it.href}
                       onClick={onNavigate}
                       aria-current={active ? "page" : undefined}
-                      // WITHOUT A VISIBLE LABEL, THE ACCESSIBLE NAME MUST COME FROM SOMEWHERE. In the rail the
-                      // only text in the anchor is the sr-only span below, kept as REAL TEXT rather than
-                      // replaced by aria-label. That keeps the accessible name identical in both modes, so
-                      // getByRole("link", { name }) and aria-current continue to work unchanged — the
-                      // collapse is a visual change, not a semantic one.
+                      // Keep real hidden text so collapsed links retain the same accessible name.
                       className={cn(
                         "group relative flex items-center rounded-md text-[0.8125rem] transition-colors duration-press",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
@@ -488,10 +352,7 @@ export function Nav({
                           : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
                       )}
                     >
-                      {/* The active rail. A background tint alone was the only active signal and it is two
-                          steps off the surrounding colour — easy to miss on a dim front-desk monitor. In the
-                          collapsed rail it matters MORE, because the tint is the only other cue and there is
-                          no label to read. */}
+                      {/* Keep an active marker visible when labels are hidden. */}
                       <span
                         className={cn(
                           "absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full bg-sidebar-active transition-opacity",
@@ -512,8 +373,7 @@ export function Nav({
                   return (
                     <li key={it.href}>
                       {collapsed ? (
-                        // Radix opens this on hover AND on keyboard focus, which is the requirement: a rail
-                        // whose labels are mouse-only would be unusable from the keyboard.
+                        // Tooltips must open on keyboard focus as well as hover.
                         <Tooltip content={it.label} side="right">{link}</Tooltip>
                       ) : (
                         link
@@ -527,8 +387,7 @@ export function Nav({
         )}
       </nav>
 
-      {/* PROFILE AND SIGN OUT SURVIVE THE COLLAPSE. Who you are signed in as, and the way out, are the two
-          things an operator must never have to expand a menu to find. */}
+      {/* Keep identity and sign-out controls visible in the collapsed rail. */}
       <div className={cn("border-t border-sidebar-border", collapsed ? "p-2" : "p-2.5")}>
         {collapsed ? (
           <Tooltip
@@ -540,10 +399,9 @@ export function Nav({
               </span>
             }
           >
-            {/* Not a button: it does nothing when activated. tabIndex makes it focusable so the tooltip is
-                reachable from the keyboard, and the role/label make it announce as the status it is. */}
+            {/* Keep the status tooltip focusable without presenting an inactive button. */}
             <div
-              // jsx-a11y does not know focusable tooltip triggers, which WCAG 1.4.13 needs reachable without a mouse.
+              // Focusable tooltip triggers must remain reachable without a mouse.
               // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
               tabIndex={0}
               role="img"
@@ -569,8 +427,7 @@ export function Nav({
               <div className="truncate text-xs font-medium text-sidebar-foreground" title={email}>
                 {email ?? "—"}
               </div>
-              {/* The ROLE, named. An operator refused a button needs to know which hat they are wearing; the
-                  product knew and did not say. */}
+              {/* Name the active role so denied controls have context. */}
               <div className="truncate text-2xs text-sidebar-muted" title={roleLabel}>
                 {roleLabel || "No site role"}
               </div>
@@ -578,8 +435,6 @@ export function Nav({
           </div>
         )}
 
-        {/* The operator's own password (edged POST /auth/password). Next to Sign out because it is about the
-            person signed in, not the site. */}
         {(() => {
           const change = (
             <Link
@@ -600,7 +455,6 @@ export function Nav({
           return collapsed ? <Tooltip content="Change my password" side="right">{change}</Tooltip> : change;
         })()}
 
-        {/* The operator's own two-step sign-in (0132): its state and new recovery codes. */}
         {(() => {
           const twoStep = (
             <Link
@@ -641,7 +495,6 @@ export function Nav({
           return collapsed ? <Tooltip content="Sign out" side="right">{signOut}</Tooltip> : signOut;
         })()}
 
-        {/* The company line. The rail has no room for words; the expanded sidebar ends with it. */}
         {!collapsed && (
           <div className="mt-2 border-t border-sidebar-border/70 px-2.5 pt-2">
             <BySemantics className="text-2xs text-sidebar-muted" />

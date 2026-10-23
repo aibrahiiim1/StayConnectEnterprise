@@ -1,15 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
-// Browser-level E2E for the Phase-4 (DARK) financial operator surface. edged is fully mocked at the network
-// layer -- no real backend, no database, no production data, no PMS and no payment provider. The Next server
-// under test runs with NEXT_PUBLIC_PHASE4_ADMIN=1, a TEST-only flag-ON profile that is never the deployed
-// dark bundle.
-//
-// What a browser proves that jsdom cannot: the recovery screen is genuinely OPERABLE end to end -- an
-// operator can read the situation, reach a conclusion, submit it and see the queue change -- and that what
-// the network actually receives is what the screen said it would send.
-
 type Mutations = { method: string; path: string; body: any }[];
 
 const HEALTH_HELD = {
@@ -65,8 +56,6 @@ async function installBackend(
 ) {
   let resolved = 0;
   let authorized = 0;
-  // The middleware gates every page on a session cookie. Setting one is what makes these specs exercise the
-  // real routes rather than the login redirect; the value is never validated here because edged is mocked.
   await page.context().addCookies([
     { name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" },
   ]);
@@ -128,7 +117,6 @@ async function installBackend(
       case path === "/financial-review/postings/p1":
         return json(REVIEW_DETAIL);
       case path === "/financial-ops/settlements":
-        // edged pages this list and counts every payment for the tiles; the mock answers the same shape.
         return json({
           settlements: [SETTLEMENT], limit: 50, meta: { has_more: false }, page: 1, page_size: 50, total: 1,
           summary: { all: 1, attention: 0, paid: 1, voucher: 0, free: 0,
@@ -150,19 +138,17 @@ test.describe("Phase 4 financial operator surface", () => {
     await installBackend(page, mutations);
     await page.goto("/financial-health");
 
-    // exact: the metric label "Held (recovery)" also contains the word, and the assertion is about the badge
+    // Match the badge exactly because the metric label contains the same word.
     await expect(page.getByText("Held", { exact: true })).toBeVisible();
     await expect(
       page.getByText(/money movement is deliberately held until every item in flight has been reconciled/i),
     ).toBeVisible();
     await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
 
-    // No real provider may be named anywhere on a screen that has not integrated one.
     const body = (await page.locator("body").innerText()).toLowerCase();
     for (const name of ["stripe", "adyen", "checkout.com", "paypal", "braintree"]) {
       expect(body).not.toContain(name);
     }
-    // A read-only screen performs no writes.
     expect(mutations).toHaveLength(0);
   });
 
@@ -171,18 +157,8 @@ test.describe("Phase 4 financial operator surface", () => {
     await installBackend(page, mutations);
     await page.goto("/financial-recovery");
 
-    // Scoped to the content region on purpose. getByText() matches a SUBSTRING and is CASE-INSENSITIVE, so
-    // "FINANCIAL RECOVERY" also matched the navigation link "Financial recovery" -- two elements, and Playwright
-    // fails strict mode. Which one resolved first depended on render timing, so the same commit produced both a
-    // passing and a failing run. The banner is what this asserts, and the banner is inside <main>; the nav link
-    // is outside it. Nothing in the product changed to accommodate the test.
+    // Scope to main so the banner cannot be confused with the navigation link.
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toBeVisible();
-    // The ambiguity itself, asserted so it cannot come back silently: exactly ONE banner inside the content
-    // region, and exactly one navigation LINK for the same destination. The sidebar item is now "Recovery"
-    // under the "Hotel" group — the group supplies the word the label used to carry — so the nav matcher is
-    // anchored to that label rather than to /financial recovery/. The property under test is unchanged: if
-    // the banner is ever rendered twice, or the nav moves inside <main>, this fails here with a clear reason
-    // instead of surfacing as an intermittent strict-mode violation.
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toHaveCount(1);
     await expect(page.getByRole("navigation").getByRole("link", { name: /^recovery$/i })).toHaveCount(1);
     await expect(page.getByText(/2 items still to reconcile/i)).toBeVisible();
@@ -205,7 +181,7 @@ test.describe("Phase 4 financial operator surface", () => {
       note: "checked the provider dashboard; no charge exists",
       password: "hunter2",
     });
-    // the author is the session, never the request
+    // Derive the audit author from the session, never the request body.
     expect(Object.keys(resolve!.body)).not.toContain("actor");
   });
 
@@ -228,12 +204,7 @@ test.describe("Phase 4 financial operator surface", () => {
     await expect(page.getByText(/money movement has resumed/i)).toBeVisible();
   });
 
-  // ---------------------------------------------------------------- the zero-attempt path
-  //
-  // The one state a restore can produce that no other screen can decide: a charge held BEFORE anything was
-  // sent. It has no attempt, so the Manual Review queue -- which keys on attempts -- cannot list it. What a
-  // browser proves that jsdom cannot is that the whole authorization is genuinely completable: real form
-  // controls, a real submit, and the exact body that leaves the page.
+  // A charge held before transmission has no attempt and cannot enter attempt-keyed Manual Review.
   const ZERO_ROW = {
     posting_id: "11111111-1111-1111-1111-111111111111", outbox_id: "o1", pms_interface_id: "i1",
     amount_minor: 2500, currency: "USD", currency_exponent: 2,
@@ -269,11 +240,9 @@ test.describe("Phase 4 financial operator surface", () => {
       evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 4471" },
       password: "hunter2",
     });
-    // the audit author comes from the session, and no amount travels with an authorization
     for (const forbidden of ["actor", "operator_id", "amount_minor", "attempt_no"]) {
       expect(Object.keys(sent[0].body as object)).not.toContain(forbidden);
     }
-    // it is offered exactly once
     await expect(page.getByRole("button", { name: /authorize one attempt/i })).toHaveCount(0);
   });
 
@@ -303,11 +272,7 @@ test.describe("Phase 4 financial operator surface", () => {
   test("the recovery screen offers no way to replay anything", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-recovery");
-    // Scoped to the content region on purpose. getByText() matches a SUBSTRING and is CASE-INSENSITIVE, so
-    // "FINANCIAL RECOVERY" also matched the navigation link "Financial recovery" -- two elements, and Playwright
-    // fails strict mode. Which one resolved first depended on render timing, so the same commit produced both a
-    // passing and a failing run. The banner is what this asserts, and the banner is inside <main>; the nav link
-    // is outside it. Nothing in the product changed to accommodate the test.
+    // Scope to main so the banner cannot be confused with the navigation link.
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toBeVisible();
     for (const forbidden of [/retry/i, /re-?send/i, /replay/i, /force/i]) {
       await expect(page.getByRole("button", { name: forbidden })).toHaveCount(0);
@@ -317,11 +282,7 @@ test.describe("Phase 4 financial operator surface", () => {
   test("every control in the real accessibility tree has a name", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-recovery");
-    // Wait for the HELD TABLE, not merely the banner. The banner renders as soon as the recovery status
-    // arrives, while the controls this test enumerates come from the holds request -- so anchoring on the
-    // banner leaves a window in which the accessibility tree is legitimately still empty. On a fast local
-    // machine the two responses land together; on a slower runner they do not, and that is a race in the
-    // test rather than a defect in the screen.
+    // Wait for holds to load; the banner can render before the table controls arrive.
     await expect(page.getByRole("button", { name: /^record$/i }).first()).toBeVisible();
 
     for (const role of ["button", "combobox", "textbox"] as const) {
@@ -354,7 +315,6 @@ test.describe("Phase 4 financial operator surface", () => {
 
     const select = page.getByLabel(/what did you establish/i);
     await expect(select.locator('option[value="CONFIRM_POSTED"]')).toHaveCount(1);
-    // available_actions did not include it, so the screen must not offer it
     await expect(select.locator('option[value="CREATE_REVERSAL"]')).toHaveCount(0);
 
     await select.selectOption("CONFIRM_POSTED");
@@ -373,8 +333,6 @@ test.describe("Phase 4 financial operator surface", () => {
   test("the settlement browser shows the charge and offers no refund", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-settlements");
-    // The Package payments redesign (93a56f34) names each row's button after the package ("Details of ...") and
-    // shows payment statuses in words; what the screen must never offer is unchanged.
     await page.getByRole("button", { name: /^details of/i }).first().click();
     await expect(page.getByText(/^captured$/i)).toBeVisible();
     for (const forbidden of [/refund/i, /chargeback/i, /reverse/i]) {

@@ -25,7 +25,6 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	if !Verify(pub, d) {
 		t.Fatal("valid signature rejected")
 	}
-	// tamper
 	d.SiteID = "site-2"
 	if Verify(pub, d) {
 		t.Fatal("modified document verified")
@@ -51,17 +50,13 @@ func TestAcceptForMatrix(t *testing.T) {
 	if r := AcceptFor(pub, base(), "app-1", "SN-1", "fpr-OTHER", 1, now); r == "" {
 		t.Fatal("wrong identity fpr accepted")
 	}
-	// replay/superseded: haveVersion >= doc version
 	if r := AcceptFor(pub, base(), "app-1", "SN-1", "fpr-1", 2, now); r == "" {
 		t.Fatal("superseded (equal) version accepted")
 	}
 	if r := AcceptFor(pub, base(), "app-1", "SN-1", "fpr-1", 5, now); r == "" {
 		t.Fatal("older version accepted")
 	}
-	// EXPIRED IS NOT A REJECTION. The assignment is durable configuration, not an
-	// auth token: rejecting it on expiry would strand a hotel whenever Central is
-	// unreachable. Expiry only marks the assignment stale (see IsExpired /
-	// Store.Status). See offline_test.go.
+	// Expiry is not a rejection: it would strand a hotel whenever Central is unreachable.
 	exp := mkDoc()
 	exp.ExpiresAt = now.Add(-time.Hour).Unix()
 	Sign(priv, exp)
@@ -71,7 +66,6 @@ func TestAcceptForMatrix(t *testing.T) {
 	if !IsExpired(exp, now) {
 		t.Fatal("expired document not reported as expired")
 	}
-	// assigned without tenant/site
 	bad := mkDoc()
 	bad.TenantID = ""
 	Sign(priv, bad)

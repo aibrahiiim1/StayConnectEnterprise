@@ -1,12 +1,4 @@
-// Package licensing issues vendor-signed licences, one appliance at a time.
-//
-// A licence is bound to ONE appliance: its id, serial, hardware fingerprint, identity key and WAN MAC. Its
-// only commercial terms are a concurrent-online-guest cap, a validity window and a grace period. The Service
-// signs the document with the vendor key and persists both the queryable projection and the exact signed
-// envelope in the licenses table. Appliances fetch the envelope over their authenticated channel and verify
-// it offline; nothing in the guest path ever calls back here.
-//
-// Licence state is never written into the appliance lifecycle. ctrlapi derives it on read.
+// Package licensing issues vendor-signed licences, each bound to one appliance.
 package licensing
 
 import (
@@ -25,11 +17,9 @@ import (
 	lic "github.com/stayconnect/enterprise/license"
 )
 
-// PlanCode is the commercial_plan_code field of every signed licence document. There are no plans; the field
-// stays in the document because deployed appliances verify that exact signed format (license/doc.go).
+// PlanCode stays in the signed document because deployed appliances verify that exact format.
 const PlanCode = "direct"
 
-// newUUID returns a random RFC 4122 v4 UUID string (avoids an extra dep).
 func newUUID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -48,8 +38,6 @@ var (
 	ErrNoLicense = errors.New("no current licence")
 )
 
-// IssueParams describes ONE licence: bound to one appliance, one concurrent-online-guest cap, one validity
-// window with an explicit grace period.
 type IssueParams struct {
 	TenantID    string
 	SiteID      string
@@ -60,20 +48,17 @@ type IssueParams struct {
 	ValidFrom                 time.Time // zero = now
 	ValidUntil                time.Time // required (or derive via ValidFor)
 	ValidFor                  time.Duration
-	GracePeriodDays           int // grace AFTER valid_until (new sessions still allowed)
-	OfflineGraceDays          int // cloud-staleness allowance (default 30)
+	GracePeriodDays           int // after valid_until; new sessions still allowed
+	OfflineGraceDays          int // default 30
 
-	// Modules are the registered module ids the licence authorises (license/modules.go). Empty = core only.
-	// They are the SOLE commercial authority of the v4 document; the legacy Features block is their
-	// projection. A preserved-terms re-issue carries exactly what is stored, never an invented module.
+	// Modules are the sole commercial authority of the document; Features is only their projection. Empty = core only.
 	Modules []string
 
 	Status lic.DocStatus // zero value -> active
 }
 
-// PreservedTerms is the re-issue rule used whenever a licence is re-signed WITHOUT the operator changing its
-// terms (suspend, resume, WAN-MAC rebind, same-customer move): every term and the status carry over unchanged; only
-// the actor differs, and issue() assigns the next licence_version.
+// PreservedTerms re-signs a licence without changing its terms (suspend, resume, rebind, same-customer move);
+// only the actor differs.
 func PreservedTerms(cur IssueParams, createdBy string) IssueParams {
 	p := cur
 	p.CreatedBy = createdBy
@@ -82,9 +67,8 @@ func PreservedTerms(cur IssueParams, createdBy string) IssueParams {
 	return p
 }
 
-// ModuleTerms validates module ids against the registry (unknown ids and unmet dependencies are refused) and
-// returns the signed Modules map, its Features projection and the sorted, de-duplicated ids to persist. It
-// never returns a nil map: a core-only v4 licence carries an explicit empty modules object.
+// ModuleTerms validates module ids against the registry and returns the signed Modules map, its Features
+// projection and the sorted, de-duplicated ids. The map is never nil: a core-only licence carries an empty object.
 func ModuleTerms(ids []string) (lic.Modules, lic.Features, []string, error) {
 	m, err := lic.ModulesFromIDs(ids)
 	if err != nil {
@@ -96,7 +80,6 @@ func ModuleTerms(ids []string) (lic.Modules, lic.Features, []string, error) {
 	return m, lic.ProjectFeatures(m), m.ModuleIDs(), nil
 }
 
-// applianceBinding reads the per-appliance binding facts from the appliances row.
 type applianceBinding struct {
 	serial, wanMAC, hwFingerprint, identityFpr, tenantID, siteID string
 }
@@ -127,8 +110,7 @@ func applianceBindingTx(ctx context.Context, q pgx.Tx, applianceID string) (appl
 	return b, nil
 }
 
-// identityFprFromB64 computes the identity-key fingerprint the appliance uses
-// (hex of sha256(pubkey)[:8]) from the stored base64-raw Ed25519 public key.
+// identityFprFromB64 returns the appliance's identity fingerprint: hex of sha256(pubkey)[:8].
 func identityFprFromB64(pubB64 string) string {
 	raw, err := base64.RawStdEncoding.DecodeString(pubB64)
 	if err != nil || len(raw) != 32 {
@@ -141,7 +123,6 @@ func identityFprFromB64(pubB64 string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// Issue signs and persists a licence in its own transaction.
 func (s *Service) Issue(ctx context.Context, p IssueParams) (*lic.Document, *lic.Envelope, error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -158,12 +139,9 @@ func (s *Service) Issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 	return doc, env, nil
 }
 
-// IssueTx builds, signs and persists one licence inside the caller's transaction, superseding the
-// appliance's current licence. Activation uses it so the assignment and the licence commit together.
-//
-// Anti-rollback: license_version is a per-appliance MONOTONIC sequence assigned under a transaction-scoped
-// advisory lock on the appliance, so concurrent issuance can never mint two current documents or reuse a
-// version.
+// IssueTx signs and persists one licence inside the caller's transaction, superseding the current one.
+// Anti-rollback: license_version is monotonic per appliance, assigned under an advisory lock so concurrent
+// issuance cannot mint two current documents or reuse a version.
 func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.Document, *lic.Envelope, error) {
 	if s.Signer == nil {
 		return nil, nil, ErrNoSigner
@@ -210,8 +188,7 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	if err != nil {
 		return nil, nil, fmt.Errorf("appliance binding: %w", err)
 	}
-	// The licence is scoped to where the appliance IS, never to a caller-supplied site: the appliance row,
-	// read inside this transaction, is the authority.
+	// The appliance row read in this transaction, not the caller, decides the customer and site.
 	if bind.tenantID == "" || bind.siteID == "" {
 		return nil, nil, errors.New("appliance is not activated at a customer site")
 	}
@@ -232,9 +209,7 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
          WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
          ORDER BY issued_at DESC LIMIT 1`, p.ApplianceID).Scan(&prevID)
 
-	// The commercial controls are the binding, the concurrent cap, the validity window and the modules.
-	// Features is only the modules' compatibility projection. The legacy Limits mirror carries the cap so
-	// pre-v3 appliances enforce it.
+	// The legacy Limits mirror carries the cap so pre-v3 appliances enforce it.
 	lims := lic.Limits{MaxConcurrentGuestSessions: p.MaxConcurrentOnlineGuests}
 	applianceIDs := []string{p.ApplianceID}
 
@@ -290,8 +265,7 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	if p.Status == lic.DocSuspended {
 		rowStatus = "suspended"
 	}
-	// The queryable projection, including the module ids a preserved-terms re-issue reads back. Features,
-	// limits and the plan code live only in the signed envelope.
+	// Features, limits and the plan code live only in the signed envelope.
 	if _, err := tx.Exec(ctx, `
         INSERT INTO licenses (id, tenant_id, site_id, status,
                               issued_at, valid_until, valid_from, offline_grace_days, appliance_ids,
@@ -309,7 +283,6 @@ func (s *Service) IssueTx(ctx context.Context, tx pgx.Tx, p IssueParams) (*lic.D
 	return doc, env, nil
 }
 
-// CurrentEnvelopeForAppliance returns the signed envelope of the current licence bound to THIS appliance.
 func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID string) (string, string, error) {
 	var envelope, licenseID string
 	err := s.DB.QueryRow(ctx, `
@@ -324,7 +297,6 @@ func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID s
 	return envelope, licenseID, err
 }
 
-// Revoke marks a licence revoked. The appliance learns of it from the revocation list on its next fetch.
 func (s *Service) Revoke(ctx context.Context, licenseID string) error {
 	tag, err := s.DB.Exec(ctx, `
         UPDATE licenses SET status = 'revoked', revoked_at = now()
@@ -364,16 +336,15 @@ func scanTerms(row pgx.Row) (p IssueParams, err error) {
 	return p, nil
 }
 
-// CurrentTerms reads the terms of a CURRENT (active or suspended) licence, including its status, so it can
-// be re-signed unchanged. ErrNoLicense means verified: there is no current licence with that id.
+// CurrentTerms reads a current (active or suspended) licence's terms so it can be re-signed unchanged.
+// ErrNoLicense means verified absent.
 func (s *Service) CurrentTerms(ctx context.Context, licenseID string) (IssueParams, error) {
 	return scanTerms(s.DB.QueryRow(ctx, `SELECT `+currentTermsColumns+`
           FROM licenses WHERE id = $1 AND status IN ('active','suspended')`, licenseID))
 }
 
-// CurrentTermsForApplianceTx reads the appliance's current licence terms inside the caller's transaction,
-// holding the same per-appliance lock IssueTx takes, so what is read cannot change before it is re-signed.
-// ErrNoLicense means verified: the appliance has no current licence. Any other error means unknown.
+// CurrentTermsForApplianceTx reads the terms under the same per-appliance lock IssueTx takes, so they cannot
+// change before re-signing. ErrNoLicense means verified absent; any other error means unknown.
 func (s *Service) CurrentTermsForApplianceTx(ctx context.Context, tx pgx.Tx, applianceID string) (IssueParams, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, applianceID); err != nil {
 		return IssueParams{}, err
@@ -383,7 +354,6 @@ func (s *Service) CurrentTermsForApplianceTx(ctx context.Context, tx pgx.Tx, app
          ORDER BY issued_at DESC LIMIT 1`, applianceID))
 }
 
-// CurrentLicenseID returns the id of the appliance's current licence, or ErrNoLicense.
 func (s *Service) CurrentLicenseID(ctx context.Context, applianceID string) (string, error) {
 	var id string
 	err := s.DB.QueryRow(ctx, `
@@ -396,15 +366,13 @@ func (s *Service) CurrentLicenseID(ctx context.Context, applianceID string) (str
 	return id, err
 }
 
-// Reissue re-signs the current licence with every term preserved (PreservedTerms) and the next version —
-// used after a WAN-MAC rebind so the new document carries the new hardware binding.
+// Reissue re-signs the current licence with terms preserved, e.g. after a WAN-MAC rebind.
 func (s *Service) Reissue(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
 	return s.reissueLocked(ctx, licenseID, createdBy, nil)
 }
 
-// reissueLocked reads the licence's terms and re-signs them in ONE transaction, under the per-appliance lock
-// IssueTx takes, and only while that licence is still the current one. Reading the terms outside the lock
-// let a suspend racing a Set licence re-sign the OLD terms over the new licence.
+// reissueLocked reads and re-signs the terms in one transaction under the per-appliance lock; reading them
+// outside it lets a racing suspend re-sign old terms over a new licence.
 func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string, mutate func(*IssueParams) error) (*lic.Document, error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -425,7 +393,7 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 	cur, err := scanTerms(tx.QueryRow(ctx, `SELECT `+currentTermsColumns+`
           FROM licenses WHERE id::text = $1 AND status IN ('active','suspended')`, licenseID))
 	if err != nil {
-		return nil, err // ErrNoLicense: it was superseded or revoked meanwhile
+		return nil, err
 	}
 	p := PreservedTerms(cur, createdBy)
 	if mutate != nil {
@@ -443,13 +411,10 @@ func (s *Service) reissueLocked(ctx context.Context, licenseID, createdBy string
 	return doc, nil
 }
 
-// Suspend re-issues the current licence as a signed 'suspended' document. The appliance evaluates
-// StateSuspended offline.
 func (s *Service) Suspend(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
 	return s.reissueStatus(ctx, licenseID, createdBy, lic.DocSuspended)
 }
 
-// Resume re-issues the current licence as a signed 'active' document.
 func (s *Service) Resume(ctx context.Context, licenseID, createdBy string) (*lic.Document, error) {
 	return s.reissueStatus(ctx, licenseID, createdBy, lic.DocActive)
 }

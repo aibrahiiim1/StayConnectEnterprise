@@ -1,24 +1,10 @@
-// Package keybootstrap performs the CONTROLLED, DEPLOYMENT-TIME bootstrap of appliance-local HMAC
-// secret material and its database lifecycle metadata for the durable throttle (D4) and keyed-HMAC
-// OTP (D7).
+// Package keybootstrap performs the deployment-time bootstrap of the appliance-local HMAC keys and the
+// otp_hmac_key_generations metadata row; scd only loads existing keys, never creates them.
 //
-// It is intentionally separate from the service runtime: scd only ever LOADS existing keys
-// (localkeys.LoadExistingKey / LoadGenerationKeys) and never creates them. Key creation and the
-// otp_hmac_key_generations metadata row are established here, once, by an operator/deploy step using
-// a privileged (migration/operational) role — never by svc_scd at runtime.
-//
-// Fail-closed invariants enforced here:
-//   - DB metadata present but its key file absent  => fail (never fabricate a key for a known gen);
-//   - key file present but DB has no generation     => controlled reconcile ONLY for a lone gen 1;
-//     any other shape fails (ambiguous);
-//   - more than one active generation               => fail;
-//   - a generation referenced by an unexpired OTP but missing its key => fail;
-//   - rotation is an explicit operational action, never an implicit side effect of bootstrap.
-//
-// Ordering guarantees a safe rollback: the key file is created FIRST and never deleted, then the DB
-// row is written inside a transaction that only commits after an in-transaction single-active check.
-// A failed bootstrap therefore leaves the key file (harmless, reused on retry) and makes no partial
-// DB change.
+// Fails closed: metadata without its key file, ambiguous key/DB shapes, several active generations, or an
+// unexpired OTP generation missing its key. Rotation is never an implicit side effect. The key file is created
+// first and never deleted, then the row commits in a transaction after a single-active check, so a failed
+// bootstrap leaves only a harmless key file.
 package keybootstrap
 
 import (
@@ -32,47 +18,39 @@ import (
 // OTPPrefix is the generation-key file prefix (files are "<prefix>_<gen>.key").
 const OTPPrefix = "otp_hmac"
 
-// VoucherHMACKeyFile is the appliance-local blind-index key for iam_v2.vouchers.
-//
-// iam_v2.vouchers stores no plaintext code -- only code_hmac, which the authenticator recomputes from the
-// submitted code to find the row. scd loads this key at startup when IAM-v2 VOUCHER is the configured
-// authority and refuses to start without it, so it is created here at deploy time exactly like the OTP and
-// throttle keys: minted once, never overwritten, never minted by the running daemon.
+// VoucherHMACKeyFile is the appliance-local blind-index key for iam_v2.vouchers (code_hmac). scd refuses to
+// start without it, so it is minted here, never overwritten and never by the daemon.
 const VoucherHMACKeyFile = "voucher_hmac.key"
 
-// BootstrapVoucherHMACKey creates the voucher blind-index key file if absent (deployment). It never
-// overwrites an existing key -- doing so would orphan every voucher already indexed under the old key --
-// and is safe to run repeatedly.
+// BootstrapVoucherHMACKey creates the voucher key file if absent. It never overwrites: that would orphan every
+// indexed voucher.
 func BootstrapVoucherHMACKey(path string) error {
 	_, err := localkeys.CreateKeyIfAbsent(path)
 	return err
 }
 
-// DB is the minimal database surface keybootstrap needs (satisfied by *pgxpool.Pool).
 type DB interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-// OTPResult reports what the bootstrap observed/did (no secret material).
 type OTPResult struct {
 	ActiveGeneration int
 	Referenced       []int
 	KeyGenerations   []int
-	CreatedKey       bool // a gen-1 key file was created this run
-	InsertedRow      bool // a generation metadata row was inserted this run
+	CreatedKey       bool
+	InsertedRow      bool
 }
 
-// BootstrapThrottleKey creates the durable-throttle key file if absent (deployment). It never
-// overwrites an existing key and is safe to run repeatedly.
+// BootstrapThrottleKey creates the durable-throttle key file if absent; it never overwrites an existing key.
 func BootstrapThrottleKey(path string) error {
 	_, err := localkeys.CreateKeyIfAbsent(path)
 	return err
 }
 
-// BootstrapOTP establishes OTP key generation 1 (or reconciles/validates an existing lifecycle) and
-// proves that key material and DB metadata agree before scd is allowed to start. It is idempotent.
+// BootstrapOTP establishes OTP key generation 1 or validates the existing lifecycle so key material and DB
+// metadata agree; idempotent.
 func BootstrapOTP(ctx context.Context, db DB, keyDir string) (OTPResult, error) {
 	var res OTPResult
 
@@ -94,7 +72,7 @@ func BootstrapOTP(ctx context.Context, db DB, keyDir string) (OTPResult, error) 
 
 	switch {
 	case len(dbGens) == 0 && len(keys) == 0:
-		// First-time bootstrap of generation 1: create the key file FIRST, then insert the row.
+		// Create the key file first, then insert the row.
 		if _, err := localkeys.EnsureGeneration(keyDir, OTPPrefix, 1); err != nil {
 			return res, err
 		}
@@ -105,7 +83,7 @@ func BootstrapOTP(ctx context.Context, db DB, keyDir string) (OTPResult, error) 
 		res.InsertedRow = true
 
 	case len(dbGens) == 0 && len(keys) > 0:
-		// Key present, DB empty: reconcile ONLY the unambiguous lone-generation-1 case.
+		// Key present, DB empty: reconcile only the lone generation-1 case.
 		if len(keys) == 1 {
 			if _, ok := keys[1]; ok {
 				if err := insertActiveGeneration(ctx, db, 1, "phase1b reconcile from key"); err != nil {
@@ -118,11 +96,9 @@ func BootstrapOTP(ctx context.Context, db DB, keyDir string) (OTPResult, error) 
 		return res, fmt.Errorf("keybootstrap: key files %v present but no DB generation; refusing ambiguous reconcile", localkeys.SortedGenerations(keys))
 
 	default:
-		// DB already has generations. Do NOT create any key here — a known generation whose key is
-		// missing must fail (handled by the ValidateOTPGenerations check below), never be fabricated.
+		// Never create a key for a known generation; a missing one must fail in the validation below.
 	}
 
-	// Re-read authoritative state after any controlled change.
 	active, err = activeGenerations(ctx, db)
 	if err != nil {
 		return res, err
@@ -160,8 +136,7 @@ func activeGenerations(ctx context.Context, db DB) ([]int, error) {
 	return scanInts(ctx, db, `SELECT generation FROM public.otp_hmac_key_generations WHERE active ORDER BY generation`)
 }
 
-// referencedGenerations returns the distinct non-NULL key generations pinned by OTPs that are not yet
-// expired — their key material must remain present or those OTPs could never verify.
+// referencedGenerations returns the key generations pinned by unexpired OTPs; their keys must stay present.
 func referencedGenerations(ctx context.Context, db DB) ([]int, error) {
 	return scanInts(ctx, db,
 		`SELECT DISTINCT otp_key_generation FROM public.auth_otps
@@ -186,9 +161,8 @@ func scanInts(ctx context.Context, db DB, sql string) ([]int, error) {
 	return out, rows.Err()
 }
 
-// insertActiveGeneration writes one active generation row inside a transaction that commits only after
-// verifying (in-tx) that exactly one generation is active — so a concurrent bootstrap can never leave
-// two active. The unique partial index otp_hmac_key_generations_one_active is the hard backstop.
+// insertActiveGeneration commits one active row only after verifying in-tx that exactly one generation is active;
+// the unique partial index otp_hmac_key_generations_one_active is the backstop.
 func insertActiveGeneration(ctx context.Context, db DB, gen int, note string) error {
 	tx, err := db.Begin(ctx)
 	if err != nil {

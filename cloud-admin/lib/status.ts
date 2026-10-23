@@ -1,20 +1,12 @@
-/*
-  THE ONE PLACE A STATE BECOMES WORDS AND A COLOUR.
-
-  ctrlapi computes every appliance and license state (docs/CENTRAL_CONTROL_PLANE.md §3); the console only
-  translates. Every badge, filter chip, overview row and sentence in the console reads from here, so "Expiring"
-  cannot be amber on one screen and red on the next, and no screen invents its own label.
-*/
+// The server computes state; shared wording keeps badges and filters consistent across screens.
 
 import type { Activation, ApplianceLicense, ApplianceRow, AttentionKind, Connection, LicenseState } from "./api";
 
 export type Tone = "ok" | "warn" | "err" | "info" | "default";
 
 export type StateInfo = {
-  /** The word on a badge. */
   label: string;
   tone: Tone;
-  /** One sentence for someone who does not know the system. */
   explain: string;
 };
 
@@ -39,7 +31,7 @@ export const ACTIVATION: Record<Activation, StateInfo> = {
     tone: "warn",
     explain: "Retirement is signed; waiting for the appliance to confirm. Its credentials stay valid until it does.",
   },
-  // A normal retirement (decommissioned) and an emergency one (revoked) both read as Retired.
+  // Both ordinary and emergency retirement show the same status.
   retired: {
     label: "Retired",
     tone: "default",
@@ -85,14 +77,12 @@ export function licenseInfo(v: string | null | undefined): StateInfo {
   return LICENSE[v as LicenseState] ?? unknown(v);
 }
 
-/** Customer and site records. */
 export function recordStatusInfo(v: string | null | undefined): StateInfo {
   if (v === "active") return { label: "Active", tone: "ok", explain: "" };
   if (v === "archived") return { label: "Archived", tone: "default", explain: "Hidden from new activations; nothing is deleted." };
   return unknown(v);
 }
 
-/** Central sign-ins (Team, customer users). */
 export function userStatusInfo(v: string | null | undefined): StateInfo {
   if (v === "active") return { label: "Active", tone: "ok", explain: "" };
   if (v === "disabled") return { label: "Disabled", tone: "err", explain: "Cannot sign in." };
@@ -100,7 +90,6 @@ export function userStatusInfo(v: string | null | undefined): StateInfo {
   return unknown(v);
 }
 
-/** Security-alert triage status. */
 export function alertStatusInfo(v: string | null | undefined): StateInfo {
   switch (v) {
     case "open": return { label: "Open", tone: "err", explain: "Blocks activation of this appliance." };
@@ -112,7 +101,6 @@ export function alertStatusInfo(v: string | null | undefined): StateInfo {
   }
 }
 
-/** Certificates and signing keys, read-only on Trust & keys. */
 export function credentialStatusInfo(v: string | null | undefined): StateInfo {
   switch (v) {
     case "active": return { label: "Active", tone: "ok", explain: "" };
@@ -125,7 +113,6 @@ export function credentialStatusInfo(v: string | null | undefined): StateInfo {
   }
 }
 
-/** A portal hostname's public A record (System → Portal certificates). */
 export function portalDNSInfo(v: string | null | undefined): StateInfo {
   switch (v) {
     case "SYNCED": return { label: "Published", tone: "ok", explain: "The name resolves to the appliance's portal address." };
@@ -136,7 +123,6 @@ export function portalDNSInfo(v: string | null | undefined): StateInfo {
   }
 }
 
-/** A hotel's own portal domain. */
 export function portalDomainInfo(v: string | null | undefined): StateInfo {
   switch (v) {
     case "VERIFIED": return { label: "Verified", tone: "ok", explain: "All three records are published and seen by both resolvers." };
@@ -147,7 +133,6 @@ export function portalDomainInfo(v: string | null | undefined): StateInfo {
   }
 }
 
-/** A portal certificate order. */
 export function portalCertInfo(v: string | null | undefined, revoked = false): StateInfo {
   if (revoked && v !== "REVOKED") return { label: "Revoking", tone: "warn", explain: "Revocation is queued; Central sends it to the CA on its next pass." };
   switch (v) {
@@ -161,18 +146,14 @@ export function portalCertInfo(v: string | null | undefined, revoked = false): S
   }
 }
 
-/** Sentence-case a machine word ("false_positive" → "False positive"). */
 export function sentenceCase(s?: string | null): string {
   if (!s) return "—";
   const t = s.replace(/[_.-]+/g, " ").trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-// ---- time, in words ----
-
 const DAY = 86_400_000;
 
-/** Whole days from now until `iso` (negative when past). */
 export function daysUntil(iso: string | null | undefined, now: number = Date.now()): number | null {
   if (!iso) return null;
   const t = new Date(iso).getTime();
@@ -187,9 +168,7 @@ export function formatDay(iso: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-// A licence ends at the END of a calendar day, sent as 23:59:59Z. Shown in the viewer's own time zone that
-// day would read as the next one east of UTC ("Dec 2" for a licence chosen to end on Dec 1), so licence dates
-// are shown as the UTC calendar day they were issued for.
+// Display the signed UTC calendar day so local time zones cannot shift the license end date.
 export function formatLicenseDay(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -204,7 +183,6 @@ export function formatDateTime(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-/** "just now", "12 min ago", "3 h ago", "2 days ago". */
 export function ago(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return "—";
   const t = new Date(iso).getTime();
@@ -226,7 +204,6 @@ function inDays(n: number): string {
   return `in ${n} days`;
 }
 
-/** "Connected", "Last seen 3 h ago", "Offline · last seen 4 days ago", "Never connected". */
 export function connectionSentence(a: Pick<ApplianceRow, "connection" | "last_seen_at">, now: number = Date.now()): string {
   switch (a.connection) {
     case "connected": return "Connected";
@@ -237,7 +214,6 @@ export function connectionSentence(a: Pick<ApplianceRow, "connection" | "last_se
   }
 }
 
-/** The one line under a license badge: "Expires in 12 days", "Valid until 3 Mar 2027", "Grace ends in 5 days". */
 export function licenseSentence(l: ApplianceLicense | null | undefined, now: number = Date.now()): string {
   if (!l || l.state === "none") return "No license issued";
   const left = daysUntil(l.valid_until, now);
@@ -255,13 +231,9 @@ export function licenseSentence(l: ApplianceLicense | null | undefined, now: num
   }
 }
 
-// ---- needs attention ----
-
 export type AttentionInfo = {
-  /** What is wrong, in words. */
   title: string;
   tone: Tone;
-  /** The action button for someone who can act, and for someone who can only look. */
   action: string;
   viewAction: string;
 };
@@ -280,8 +252,6 @@ export const ATTENTION: Record<AttentionKind, AttentionInfo> = {
 export function attentionInfo(kind: string): AttentionInfo {
   return ATTENTION[kind as AttentionKind] ?? { title: sentenceCase(kind), tone: "default", action: "View", viewAction: "View" };
 }
-
-// ---- audit actions, in words ----
 
 const ACTION_WORDS: Record<string, string> = {
   "appliance.registered": "Appliance registered",
@@ -320,12 +290,11 @@ const ACTION_WORDS: Record<string, string> = {
   "site.deleted": "Site deleted",
 };
 
-/** "license.suspended" → "License suspended". Unknown actions are sentence-cased, never hidden. */
+/** Show unknown actions in readable words instead of hiding them. */
 export function actionWords(action: string): string {
   return ACTION_WORDS[action] ?? sentenceCase(action);
 }
 
-/** Tone of an audit action, from its verb. */
 export function actionTone(action: string): Tone {
   const verb = action.split(".").pop() ?? "";
   if (/deleted|revoked|retired|failed/.test(verb)) return "err";

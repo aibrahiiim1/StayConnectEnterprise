@@ -14,11 +14,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 )
 
-// Health checks below are deliberately MEANINGFUL — they probe the service's
-// real surface (socket/API/DNS/DB), not merely "is the process running", so an
-// active-but-wedged service is caught. Each returns (ok, sanitized-detail, dep).
-
-// unixGet does a short GET over a unix-socket HTTP server.
 func unixGet(ctx context.Context, sock, path string) (int, []byte, error) {
 	cl := &http.Client{
 		Timeout: 3 * time.Second,
@@ -38,13 +33,9 @@ func unixGet(ctx context.Context, sock, path string) (int, []byte, error) {
 	return resp.StatusCode, buf[:n], nil
 }
 
-// tcpGet does a short GET to a loopback TCP address.
-//
-// IT NEVER FOLLOWS A REDIRECT. A redirect is the probed listener's own answer, which is what is being measured.
-// Following one took the probe somewhere else entirely: portald's HTTP listener answers 302
-// https://<canonical portal hostname>/ once HTTPS is active, and from the appliance host that name reaches Caddy's
-// :443 (guests reach portald :8343 only through the guest-interface DNAT), which has no certificate for it -- so
-// a portal serving clients perfectly was reported "degraded" from the moment HTTPS went live.
+// tcpGet never follows a redirect: the listener's own answer is what is measured. portald answers 302 to its
+// canonical hostname once HTTPS is active, and from the appliance host that name reaches Caddy, which has no
+// certificate for it, so following it would report a healthy portal as degraded.
 func tcpGet(ctx context.Context, url string) (int, error) {
 	cl := &http.Client{Timeout: 3 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -88,13 +79,11 @@ func checkNetd(ctx context.Context, s *server) (bool, string, string) {
 	return false, fmt.Sprintf("netd /v1/health http %d", code), ""
 }
 
-// portaldHTTPSAddr is portald's TLS listener (PORTALD_HTTPS_ADDR); guests reach it through the DNAT of the portal
-// address's 443 (netcfg.PortalAddressTLSPort).
+// portaldHTTPSAddr is portald's TLS listener (PORTALD_HTTPS_ADDR).
 const portaldHTTPSAddr = "127.0.0.1:8343"
 
 func checkPortald(ctx context.Context, s *server) (bool, string, string) {
-	// The captive portal's HTTP listener must answer. Any HTTP response (including its redirect to the HTTPS
-	// portal) means portald is serving.
+	// Any HTTP response, including the redirect to the HTTPS portal, means portald is serving.
 	code, err := tcpGet(ctx, "http://127.0.0.1:8380/")
 	if err != nil {
 		return false, "captive portal not responding: " + errShort(err), ""
@@ -102,10 +91,8 @@ func checkPortald(ctx context.Context, s *server) (bool, string, string) {
 	if code <= 0 {
 		return false, "captive portal no response", ""
 	}
-	// WHILE HTTPS IS ACTIVE, every client is sent to the TLS listener, so that is the portal clients actually use:
-	// it must complete a handshake for the canonical hostname with a certificate that verifies (system roots,
-	// hostname, validity) -- what a client's browser checks. The HTTPS state itself (fallback, expiry) is the
-	// separate portal_https check.
+	// While HTTPS is active clients use the TLS listener, so it must handshake for the canonical hostname with a
+	// verifying certificate. HTTPS state (fallback, expiry) is the separate portal_https check.
 	if s != nil && s.db != nil {
 		if st, err := s.loadPortalTLSState(ctx); err == nil && st.HTTPSActive && st.CanonicalHostname != "" {
 			tcode, terr := tlsListenerGet(ctx, portaldHTTPSAddr, st.CanonicalHostname)
@@ -118,8 +105,7 @@ func checkPortald(ctx context.Context, s *server) (bool, string, string) {
 	return true, fmt.Sprintf("captive portal responding (http %d)", code), ""
 }
 
-// tlsListenerGet GETs https://<host>/ from the listener at addr, presenting host as SNI and verifying the served
-// certificate against the system roots and host. Redirects are not followed.
+// tlsListenerGet presents host as SNI and verifies the served certificate against the system roots; redirects are not followed.
 func tlsListenerGet(ctx context.Context, addr, host string) (int, error) {
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -146,13 +132,10 @@ func checkAcctd(ctx context.Context, s *server) (bool, string, string) {
 	if !ok {
 		return false, "no accounting-loop heartbeat yet", ""
 	}
-	// acctd ticks ~1s; allow generous slack for load.
 	if age > 15*time.Second {
 		return false, fmt.Sprintf("accounting loop stalled (%.0fs since last tick)", age.Seconds()), ""
 	}
-	// A loop that is ticking on time can still be failing every observation it makes — unreadable counters,
-	// refused ingestion, a shaping plan netd would not apply. That is not healthy, and it is invisible from
-	// the heartbeat alone.
+	// A loop ticking on time can still fail every observation; the heartbeat alone cannot show it.
 	if reason, reported := livez.Status("acctd"); reported && reason != "" {
 		return false, "accounting loop is progressing but degraded: " + reason, ""
 	}
@@ -171,15 +154,12 @@ func checkHotelAdmin(ctx context.Context, s *server) (bool, string, string) {
 }
 
 func checkCaddy(ctx context.Context, s *server) (bool, string, string) {
-	// THE PROXY IS ASKED THE QUESTION OPERATORS CARE ABOUT: does it answer TLS on 443? Its admin API is a unix
-	// socket only Caddy's own account can open (audit N-10), so it is no longer edged's to probe -- and a loaded
-	// admin API never proved the console's vhost was being served anyway.
+	// Probe TLS on 443; Caddy's admin API is a unix socket only Caddy's own account can open.
 	return caddyServesTLS(ctx, "127.0.0.1:443")
 }
 
-// caddyServesTLS reports whether a TLS server answers at addr. A completed handshake, or a TLS alert (which only
-// a TLS server sends -- e.g. no certificate for the name), both mean Caddy is serving; a refused or silent
-// connection means it is not. Certificate validity is the TLS-certificate check's job, not this one's.
+// caddyServesTLS: a completed handshake or a TLS alert (only a TLS server sends one) means Caddy is serving.
+// Certificate validity is the TLS-certificate check's job.
 func caddyServesTLS(ctx context.Context, addr string) (bool, string, string) {
 	dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -196,7 +176,6 @@ func caddyServesTLS(ctx context.Context, addr string) (bool, string, string) {
 	return false, "Caddy is not answering TLS on " + addr + ": " + errShort(err), ""
 }
 
-// keaView is netd's answer to both Kea questions: is it configured to run here yet, and is it healthy.
 type keaView struct {
 	KeaConfigured bool   `json:"kea_configured"`
 	KeaHealthy    bool   `json:"kea_healthy"`
@@ -215,21 +194,14 @@ func keaFromNetd(ctx context.Context, s *server) (keaView, bool) {
 	return v, true
 }
 
-// keaApplicable reports whether Kea is supposed to be running on this appliance yet.
-//
-// It is not, until a guest network has been applied and confirmed: Kea binds the LAN bridge, which does not
-// exist before that. netd owns that fact, so it is asked rather than guessed.
-//
-// When netd cannot be reached the answer is APPLICABLE. We do not know the prerequisite is absent, and
-// assuming it is would let an unreachable netd silently suppress a genuinely broken Kea. The check below
-// then reports the netd dependency, which is the honest description of that situation.
+// keaApplicable: Kea runs only once a guest network is applied (it binds the LAN bridge); netd owns that fact.
+// An unreachable netd means APPLICABLE, so it can never silently suppress a broken Kea.
 func keaApplicable(ctx context.Context, s *server) (bool, string) {
 	v, reachable := keaFromNetd(ctx, s)
 	return keaApplicableFrom(v, reachable)
 }
 
-// keaApplicableFrom is the decision alone, separated from the transport so the fail-open rule can be
-// tested: an unreachable netd must never be able to turn a broken Kea into a quiet "waiting".
+// keaApplicableFrom is split from the transport so the fail-open rule can be tested.
 func keaApplicableFrom(v keaView, reachable bool) (bool, string) {
 	if !reachable || v.KeaConfigured {
 		return true, ""
@@ -241,10 +213,8 @@ func keaApplicableFrom(v keaView, reachable bool) (bool, string) {
 	return false, detail
 }
 
-// checkKea runs only once Kea IS expected to be running (see keaApplicable), so a failure here is a real
-// failure and is reported as one.
+// checkKea runs only once Kea is expected (see keaApplicable), so a failure here is real.
 func checkKea(ctx context.Context, s *server) (bool, string, string) {
-	// netd owns Kea and reports its health from its own control-channel probe.
 	code, body, err := unixGet(ctx, "/run/stayconnect/netd.sock", "/v1/health")
 	if err != nil {
 		return false, "cannot assess Kea (netd unreachable): " + errShort(err), "netd"
@@ -261,8 +231,7 @@ func checkKea(ctx context.Context, s *server) (bool, string, string) {
 }
 
 func checkUnbound(ctx context.Context, s *server) (bool, string, string) {
-	// A real DNS round-trip: any DNS response (even NXDOMAIN) proves Unbound is
-	// answering. Only a timeout / connection refused is unhealthy.
+	// Any DNS response, even NXDOMAIN, proves Unbound is answering.
 	if dnsResponds(ctx, "127.0.0.1:53") {
 		return true, "Unbound answering DNS on 127.0.0.1:53", ""
 	}
@@ -278,8 +247,6 @@ func checkPostgres(ctx context.Context, s *server) (bool, string, string) {
 	return true, "site DB ready (ping ok)", ""
 }
 
-// dnsResponds sends a minimal DNS A query for "localhost." and returns true if
-// the server sends any well-formed response with the matching id.
 func dnsResponds(ctx context.Context, addr string) bool {
 	d := net.Dialer{Timeout: 2 * time.Second}
 	conn, err := d.DialContext(ctx, "udp", addr)
@@ -288,7 +255,6 @@ func dnsResponds(ctx context.Context, addr string) bool {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	// DNS query: id=0x1234, RD=1, 1 question, "localhost" A IN.
 	q := []byte{
 		0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		9, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't', 0x00,

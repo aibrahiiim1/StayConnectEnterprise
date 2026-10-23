@@ -1,19 +1,11 @@
 package main
 
-// THE GUEST-FACING POST-STAY SURFACE.
+// Guest-facing post-stay surface. The guest never names their subject: no stay, room, PMS-interface or
+// profile parameter exists (a room parameter would be an occupancy oracle, a profile id an identity oracle);
+// everything derives from the device scd resolved itself.
 //
-// Three endpoints, and the shape of all three is decided by one rule: the guest never names their own
-// subject. There is no Stay parameter, no room parameter, no PMS-interface parameter and no profile
-// parameter anywhere on this surface. Every one of them is derived from the DEVICE, which scd resolved
-// itself from the packet it received.
-//
-// That is what keeps post-stay off the room. An endpoint that accepted a room number would answer "is room
-// 412 occupied" to anyone who asked; an endpoint that accepted a profile id would answer "is this a real
-// post-stay identity". Neither question can be asked here, because neither parameter exists.
-//
-// UNIFORM NON-SUCCESS. Wrong PIN, no PIN, no post-stay identity for this device, a revoked profile, an
-// expired one, a locked-out device and a profile whose episode has moved on all return exactly the same
-// status and the same body. The real reason goes to the log, where an operator can see it and a guest cannot.
+// Uniform non-success: every refusal (wrong or missing PIN, no identity, revoked, expired, locked out,
+// moved-on episode) returns the same status and body; the reason goes only to the log.
 
 import (
 	"context"
@@ -28,8 +20,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/poststay"
 )
 
-// phase5PostStay is scd's Phase-5 arm. A nil value is inert: while the flags are off the routes are not
-// mounted at all, so the surface is ABSENT rather than present-and-refusing.
+// phase5PostStay is scd's post-stay arm. A nil value is inert: the routes are not mounted (absent, not refusing).
 type phase5PostStay struct {
 	srv        *server
 	p3         *phase3Auth
@@ -53,8 +44,6 @@ func newPhase5PostStay(cfg iamv2.Phase5Config, s *server, p3 *phase3Auth) *phase
 	}
 }
 
-// ---- the uniform envelope --------------------------------------------------
-
 const (
 	psOutcomeIssued    = "ISSUED"
 	psOutcomeVerified  = "VERIFIED"
@@ -64,27 +53,20 @@ const (
 
 type psResponse struct {
 	Outcome string `json:"outcome"`
-	// PIN is present on ISSUED and NOWHERE else. It is the one-time plaintext; scd does not store it, cannot
-	// re-derive it, and will never return it again for this generation.
+	// PIN is present on ISSUED only: the one-time plaintext, never stored or returned again for this generation.
 	PIN       string `json:"pin,omitempty"`
 	ExpiresAt string `json:"pin_expires_at,omitempty"`
-	// AuthContextID/ExpiresIn/Offers are present on VERIFIED only. Offers are the packages the conversion will
-	// grant (poststay.GrantableOffers); the guest names one of them on the conversion call.
+	// AuthContextID/ExpiresIn/Offers are present on VERIFIED only (poststay.GrantableOffers).
 	AuthContextID string           `json:"auth_context_id,omitempty"`
 	ExpiresIn     int              `json:"expires_in_seconds,omitempty"`
 	Offers        []poststay.Offer `json:"offers,omitempty"`
-	// SessionID/EntitlementID are present on GRANTED only: the session opened for this device, and the
-	// entitlement it runs on. They are different rows; a session id is what the portal's success page and the
-	// device's later sign-out name.
+	// SessionID/EntitlementID are present on GRANTED only and are different rows.
 	SessionID     string `json:"session_id,omitempty"`
 	EntitlementID string `json:"entitlement_id,omitempty"`
 }
 
-// unavailable is the single non-success answer for the whole surface. reason is for the log, never the guest.
-//
-// It is HTTP 200 with an outcome field, exactly like the Phase-3 auth surface: a 401/403/429 split would
-// re-introduce through status codes precisely the distinctions the body refuses to make, and a captive-portal
-// client handles a 200 far more predictably than a 4xx.
+// unavailable is the single non-success answer; reason is for the log only. HTTP 200 with an outcome field,
+// since a 401/403/429 split would reintroduce the distinctions the body refuses to make.
 func (p *phase5PostStay) unavailable(w http.ResponseWriter, reason string) {
 	slog.Info("phase5 post-stay: unavailable", "reason", reason)
 	writeJSONScd(w, http.StatusOK, psResponse{Outcome: psOutcomeUnavailab})
@@ -100,22 +82,13 @@ func (p *phase5PostStay) decode(w http.ResponseWriter, r *http.Request, dst any)
 	return true
 }
 
-// ---- issuance --------------------------------------------------------------
-
 type psIssueReq struct {
-	// Device is the ONLY input. There is deliberately no stay, room, interface or profile field: an unknown
-	// field is rejected by DisallowUnknownFields, so a client that tries to send one gets the uniform
-	// non-success rather than having it ignored.
+	// Device is the only input; unknown fields are rejected (DisallowUnknownFields).
 	Device wireDevice `json:"device"`
 }
 
-// issueHandler mints a post-stay PIN for the authenticated guest at this device and returns the plaintext
-// ONCE.
-//
-// A LOST RESPONSE IS NOT RECOVERABLE, and that is a property rather than a gap. pin_revealed_at records that
-// this server RETURNED the plaintext; it is not, and must never be read as, proof that the client received
-// it. A guest whose connection dropped mid-response does not get the same PIN again — nothing can produce it
-// — they get a NEW generation from a reset, which is a different secret and an audited act.
+// issueHandler mints a post-stay PIN and returns the plaintext once. A lost response is not recoverable:
+// pin_revealed_at records only that the server returned it, so the guest needs a reset (a new, audited secret).
 func (p *phase5PostStay) issueHandler(w http.ResponseWriter, r *http.Request) {
 	var req psIssueReq
 	if !p.decode(w, r, &req) {
@@ -127,7 +100,7 @@ func (p *phase5PostStay) issueHandler(w http.ResponseWriter, r *http.Request) {
 		p.unavailable(w, "device_identity: "+err.Error())
 		return
 	}
-	// TRUSTED LINEAGE. The Stay comes from this device's own authorization history, not from the request.
+	// The Stay comes from this device's authorization history, not the request.
 	stay, err := p.store.EligibleStayForDevice(ctx, dev.Tenant, dev.Site, dev.DeviceID)
 	if err != nil {
 		p.unavailable(w, "no_eligible_stay_for_device")
@@ -136,8 +109,7 @@ func (p *phase5PostStay) issueHandler(w http.ResponseWriter, r *http.Request) {
 	out, err := p.store.Issue(ctx, poststay.IssueRequest{
 		Tenant: dev.Tenant, Site: dev.Site, Stay: stay, ValidFor: p.pinValid})
 	if err != nil {
-		// Already has a profile for this episode, stay not eligible, or a database refusal. The guest sees
-		// one answer; the operator sees which.
+		// Existing profile, ineligible stay or database refusal: one guest answer; the log distinguishes.
 		p.unavailable(w, "issue_refused: "+err.Error())
 		return
 	}
@@ -146,22 +118,18 @@ func (p *phase5PostStay) issueHandler(w http.ResponseWriter, r *http.Request) {
 		Outcome: psOutcomeIssued, PIN: out.PIN, ExpiresAt: out.Expires.UTC().Format(time.RFC3339)})
 }
 
-// ---- PIN re-authentication -------------------------------------------------
-
 type psVerifyReq struct {
 	Device wireDevice `json:"device"`
 	PIN    string     `json:"pin"`
 }
 
-// verifyHandler is the post-stay PIN re-authentication. Success mints a one-time Auth Context and NEVER a
-// session — identical to every other credential method in the system.
+// verifyHandler is the post-stay PIN re-authentication; success mints a one-time Auth Context, never a session.
 func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	var req psVerifyReq
 	if !p.decode(w, r, &req) {
 		return
 	}
-	// The same licence decision every guest method takes first (see phase3_auth.go). Post-stay keeps its own
-	// uniform envelope, so the refusal reaches the guest as the post-stay answer and the reason goes to the log.
+	// The licence decision every guest method takes first; the refusal keeps the post-stay envelope.
 	if code, refused := p.p3.pmsLicenseRefusal(); refused {
 		p.unavailable(w, "license_refused: "+code)
 		return
@@ -172,9 +140,8 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		p.unavailable(w, "device_identity: "+err.Error())
 		return
 	}
-	// An empty PIN is NOT short-circuited. It goes through the same throttle charge and the same
-	// constant-work verification as a wrong one, because a cheap "no PIN" answer is a free probe for whether
-	// this device has a post-stay identity at all — and free probes are what an attacker automates.
+	// An empty PIN is not short-circuited: it takes the same throttle charge and constant-work verification,
+	// since a cheap answer would be a free probe for whether this device has a post-stay identity.
 	profile, err := p.store.VerifyForDevice(ctx, poststay.VerifyRequest{
 		Tenant: dev.Tenant, Site: dev.Site, PIN: req.PIN,
 		Device: dev.DeviceID, IP: ipString(dev)})
@@ -187,9 +154,7 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// WHAT THE GUEST MAY CHOOSE, read before a context is minted. A site with no grantable post-stay package can
-	// convert nobody, and a context that can be redeemed against nothing is not issued: the guest gets the same
-	// uniform answer and the operator reads why.
+	// A site with no grantable post-stay package issues no context (it could be redeemed against nothing).
 	offers, err := p.store.GrantableOffers(ctx, dev.Tenant, dev.Site)
 	if err != nil {
 		p.unavailable(w, "offers_unreadable: "+err.Error())
@@ -211,27 +176,20 @@ func (p *phase5PostStay) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		Outcome: psOutcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
 }
 
-// ---- zero-price conversion -------------------------------------------------
-
 type psConvertReq struct {
 	Device            wireDevice `json:"device"`
 	AuthContextID     string     `json:"auth_context_id"`
 	PackageRevisionID string     `json:"package_revision_id"`
 }
 
-// convertHandler consumes the post-stay context and grants the zero-price POST_STAY package.
-//
-// The profile and the Stay come from the CONSUMED context, never from the request — the guest names only
-// which offered package they want, and the conversion re-validates that choice against the same rules that
-// produced the offer.
+// convertHandler consumes the post-stay context and grants the zero-price POST_STAY package. Profile and Stay
+// come from the consumed context; the chosen package is re-validated against the rules that produced the offer.
 func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) {
 	var req psConvertReq
 	if !p.decode(w, r, &req) {
 		return
 	}
-	// Conversion grants access (an entitlement), so it answers to the licence exactly as the room grant does.
-	// It opens no session itself, so there is no concurrent-guest slot to reserve here: the slot is taken by
-	// whichever path turns that entitlement into a session.
+	// Conversion grants access, so it answers to the licence like the room grant.
 	if code, refused := p.p3.pmsLicenseRefusal(); refused {
 		p.unavailable(w, "license_refused: "+code)
 		return
@@ -242,10 +200,8 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		p.unavailable(w, "device_identity: "+err.Error())
 		return
 	}
-	// A RETRY OF A CONVERSION THIS DEVICE ALREADY MADE -- a response the phone never received, or one refused
-	// only because enforcement had not converged yet -- returns the session that conversion opened, once it is
-	// genuinely enforced. The context is one-time, so without this the guest would be stuck behind a consumed
-	// context with access that exists.
+	// A retry of a conversion this device already made returns its session once enforced; the context is one-time,
+	// so without this the guest would be stuck behind a consumed context.
 	if sid, ent, ok := p.alreadyConverted(ctx, req.AuthContextID, dev); ok {
 		if enforced, werr := p.p3.awaitEnforced(ctx, sid); werr != nil || !enforced {
 			p.unavailable(w, "retry_enforcement_not_confirmed")
@@ -255,11 +211,8 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// THE CONVERSION AND THE DEVICE'S SESSION COMMIT TOGETHER, exactly as the room grant's entitlement and
-	// session do (phase3_auth.go grantHandler): the context is consumed, the entitlement granted and the device
-	// admitted, the licensed concurrent-guest slot reserved, and the session opened PENDING_ENFORCEMENT -- or
-	// none of it. This used to commit the entitlement alone and return ITS id as the session id, so the guest was
-	// sent to the success page with no session at all and nothing would ever enforce their access.
+	// Conversion and the device's session commit together, as in the room grant: context consumed, entitlement
+	// granted, device admitted, licensed slot reserved, session opened PENDING_ENFORCEMENT -- or none of it.
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
 		p.unavailable(w, "begin: "+err.Error())
@@ -290,8 +243,7 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		p.unavailable(w, "commit: "+err.Error())
 		return
 	}
-	// Durable, but not yet online: the guest is told GRANTED only once the enforcement owner has promoted the
-	// session, the same truthfulness rule the room grant keeps.
+	// Report GRANTED only once the enforcement owner has promoted the session.
 	enforced, werr := p.p3.awaitEnforced(ctx, sessionID)
 	if werr != nil || !enforced {
 		slog.Warn("phase5 post-stay: converted but enforcement not confirmed",
@@ -304,9 +256,8 @@ func (p *phase5PostStay) convertHandler(w http.ResponseWriter, r *http.Request) 
 		Outcome: psOutcomeGranted, SessionID: sessionID, EntitlementID: out.Entitlement})
 }
 
-// alreadyConverted answers "did THIS device already turn THIS post-stay context into a live session?". The
-// purchase records the consuming context (poststay.ConvertTx), the context was issued to this device, and the
-// session belongs to this device and is still live -- the same clauses as the room path's alreadyGranted.
+// alreadyConverted reports whether this device already turned this context into a live session, with the same
+// clauses as alreadyGranted.
 func (p *phase5PostStay) alreadyConverted(ctx context.Context, contextID string, dev deviceIdentity) (string, string, bool) {
 	if !validRequestID(contextID) {
 		return "", "", false
@@ -330,8 +281,7 @@ func (p *phase5PostStay) alreadyConverted(ctx context.Context, contextID string,
 	return sid, ent, true
 }
 
-// postStaySessionMethod is the session's credential label (sessions.credential_method), read by the Admin
-// Console as "Post-stay access".
+// postStaySessionMethod is the session's credential_method label.
 const postStaySessionMethod = "POST_STAY"
 
 func ipString(d deviceIdentity) string {

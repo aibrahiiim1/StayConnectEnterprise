@@ -1,8 +1,4 @@
-/**
- * Saves a server answer as a file. A JSON answer is saved as formatted JSON; when the server wraps the document
- * in an envelope (`{package: …}` / `{license: …}`), the document itself is what is saved, because that is the
- * file Hotel Admin accepts.
- */
+/** Save the inner document because Hotel Admin cannot import Central's response envelope. */
 export function saveFile(filename: string, answer: unknown) {
   let text: string;
   if (typeof answer === "string") {

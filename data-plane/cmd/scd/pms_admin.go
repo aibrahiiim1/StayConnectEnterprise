@@ -12,8 +12,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// ---- /v1/admin/pms/{name}/test -- one-shot connectivity probe ---------------
-
 type pmsTestResp struct {
 	OK        bool   `json:"ok"`
 	LatencyMS int64  `json:"latency_ms"`
@@ -46,8 +44,6 @@ func (s *server) pmsAdminTest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- /v1/admin/pms/{name}/cache -- inspect the in-memory lookup table -------
-
 func (s *server) pmsAdminCache(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	prov, ok := s.currentPMSReg().Get(name)
@@ -70,8 +66,6 @@ func (s *server) pmsAdminCache(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- /v1/admin/pms/{name}/health -- live snapshot ---------------------------
-
 func (s *server) pmsAdminHealth(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	prov, ok := s.currentPMSReg().Get(name)
@@ -86,11 +80,7 @@ func (s *server) pmsAdminHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---- background loop: flush in-memory Health to pms_providers ---------------
-
-// pmsHealthFlushLoop periodically copies each registered provider's Health
-// into the matching pms_providers row so the admin UI can see status without
-// going through the appliance.
+// pmsHealthFlushLoop periodically copies each provider's Health into its pms_providers row.
 func (s *server) pmsHealthFlushLoop(ctx context.Context) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -131,14 +121,10 @@ func (s *server) pmsHealthFlushOnce(ctx context.Context) {
              WHERE tenant_id = $1 AND name = $2
         `, s.tenID, p.Name(), h.Status, lastRecord, lastErr, lastErrAt)
 
-		// Mirror the same snapshot into Prometheus gauges. Same cadence
-		// as the DB flush (30s) keeps both views in sync.
 		s.met.PMSStatus.WithLabelValues(p.Name(), p.Kind()).Set(metrics.PMSStatusValue(h.Status))
 		s.met.PMSCacheSize.WithLabelValues(p.Name(), p.Kind()).Set(float64(h.CacheSize))
 	}
 
-	// Active-sessions gauge — sampled here on the same 30s tick (cheap
-	// COUNT, partial index makes it constant-time).
 	var n int
 	if err := s.db.QueryRow(ctx, `
         SELECT count(*) FROM iam_v2.sessions

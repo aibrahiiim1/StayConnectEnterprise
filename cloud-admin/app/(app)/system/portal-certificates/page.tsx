@@ -27,17 +27,8 @@ import {
   ago, daysUntil, formatDateTime, formatDay, portalCertInfo, portalDNSInfo, portalDomainInfo, sentenceCase,
 } from "@/lib/status";
 
-/*
-  PORTAL CERTIFICATES — Central's half of the HTTPS client portal (docs/CENTRAL_CONTROL_PLANE.md §9).
-
-  Central gives every appliance a permanent name under gw.onegate.work, publishes its A record, verifies a hotel's
-  own portal domain, and obtains the certificates for the CSRs appliances send (the private keys never leave the
-  appliances). This page is where a platform admin configures that once (ACME directory, contact, the DNS zone,
-  the write-only DNS token, CAA) and then watches the fleet.
-
-  Everything that changes who may obtain certificates for the zone is a security.manage write behind a password
-  confirmation (withStepUp). The DNS token is write-only: the server only ever answers whether one is set.
-*/
+// Appliance private keys stay local; certificate authority changes require password confirmation.
+// The DNS token is write-only, and Central only reports whether one is set.
 
 const DIRECTORY_WORDS: Record<string, string> = { staging: "Staging", production: "Production", other: "Test CA" };
 
@@ -47,7 +38,6 @@ function dirBadge(c: PortalCert) {
   return <Badge tone={tone}>{DIRECTORY_WORDS[c.acme_directory] ?? sentenceCase(c.acme_directory)}</Badge>;
 }
 
-/** The certificate the fleet table leads with: the OneGate hostname's. */
 function mainCert(r: PortalFleetRow): PortalCert | undefined {
   return r.certificates.find((c) => c.kind === "ONEGATE") ?? r.certificates[0];
 }
@@ -61,12 +51,11 @@ export default function PortalCertificatesPage() {
   const [fleet, setFleet] = useState<PortalFleetRow[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
 
-  // Settings form (a draft of the server's values).
   const [draft, setDraft] = useState({ acme_directory: "staging", contact_email: "", zone_name: "", weekly_new_limit: "45" });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsErr, setSettingsErr] = useState<unknown>(null);
 
-  // DNS token: typed here, sent once, cleared at once.
+  // Clear the write-only DNS token after sending it.
   const [token, setToken] = useState("");
   const [savingToken, setSavingToken] = useState(false);
   const [tokenErr, setTokenErr] = useState<unknown>(null);
@@ -142,7 +131,7 @@ export default function PortalCertificatesPage() {
   }
 
   function onSaveSettings() {
-    // Production is a deliberate step: it is the CA browsers trust, with real rate limits.
+    // Production uses a browser-trusted CA with real rate limits, so switching requires confirmation.
     if (settings && draft.acme_directory === "production" && settings.acme_directory !== "production") {
       setConfirmProduction(true);
       return;

@@ -2,26 +2,8 @@
 
 package main
 
-// "DISCONNECT THIS ACCOUNT'S DEVICES NOW" MUST DO WHAT IT PROMISES, AND NOTHING MORE.
-//
-// Two defects are closed here and both are asserted against a real database and a real scd channel:
-//
-//  1. The Admin Console's set-password call always sends disconnect_sessions, and the handler's request struct
-//     did not have the field. decodeJSON uses DisallowUnknownFields, so SETTING A CLIENT ACCOUNT'S PASSWORD
-//     ANSWERED 400 "bad body" — the whole action failed, which is why TestIntegration_SetPassword_BodyWithDisconnectFlagIsAccepted
-//     exists as its own named case.
-//
-//  2. The row action ended sessions with a bare UPDATE from edged that set `ended` and left `state` at
-//     'active'. The device kept its nftables authorization, so it kept its traffic, and the API still answered
-//     with a count of "disconnected sessions". Ending now goes through scd — the one operator
-//     session-termination path, the same POST /v1/sessions/revoke that resources_sessions.go's per-session
-//     Disconnect uses — which denies the address on the device's bridge, deletes its shaping class and only
-//     then ends the row.
-//
-// WHAT MUST SURVIVE A DISCONNECT is asserted as carefully as what must change: the Entitlement's status, its
-// window, its consumed data and its consumed online seconds, the accounting ledger, and every OTHER account's
-// sessions. A disconnect that silently expired the Entitlement or reset the quota would be a far worse defect
-// than the one it replaced, because the guest would sign in again and find their allowance gone.
+// A disconnect ends sessions through scd and must leave the Entitlement, consumed usage, the accounting ledger
+// and every other account's sessions untouched, or the guest signs in again to find their allowance gone.
 
 import (
 	"context"
@@ -38,17 +20,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ---------------------------------------------------------------------------------------------------------
-// A STAND-IN FOR scd, PLAYING ITS PART HONESTLY.
-//
-// It serves /v1/sessions/revoke on a unix socket exactly as scd does, records the addresses it was asked to
-// revoke, and performs scd's own session-end statement (state='ended', ended, end_reason) against the real
-// database. That is the point: edged must not end the row itself, so the row can only become 'ended' because
-// something on the enforcement side did it. A test whose stub only answered 200 would pass against the broken
-// implementation.
-//
-// When `refuse` holds an address, that revoke answers 500 and the row is left alone — which is how the
-// "reported as a failure rather than folded into the success count" assertion is made.
+// fakeSCD serves /v1/sessions/revoke on a unix socket and performs scd's own session-end statement against the
+// real database, so a row can only become 'ended' if enforcement did it (a stub that only answered 200 would
+// pass against a broken implementation). An address in `refuse` answers 500 and leaves the row alone.
 type fakeSCD struct {
 	mu     sync.Mutex
 	ips    []string
@@ -87,8 +61,6 @@ func newFakeSCD(t *testing.T, f *apiFixture, refuse ...string) (*fakeSCD, *scdCl
 			_, _ = w.Write([]byte(`{"error":"nft deny failed"}`))
 			return
 		}
-		// scd's own endActiveSessionByIP, verbatim in shape: enforcement is withdrawn first and the row is
-		// ended last, by the component that owns the kernel state.
 		if _, err := f.pool.Exec(r.Context(), `
 		    UPDATE iam_v2.sessions
 		       SET state='ended', ended=GREATEST(now(), started), end_reason=$4
@@ -111,17 +83,12 @@ func (fs *fakeSCD) seen() []string {
 	return append([]string(nil), fs.ips...)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-
-// acctSession is one seeded live session: the row's id and the address enforcement is keyed on.
 type acctSession struct {
 	id string
 	ip string
 }
 
-// seedAccountWithSessions creates a client account, an ACTIVE Entitlement whose subject is that account (with
-// a real purchase, package revision and plan revision behind it, because the schema requires them), and one
-// live session per address given. It returns the account id, the entitlement id and the sessions.
+// seedAccountWithSessions returns the account id, entitlement id and one live session per address.
 func seedAccountWithSessions(t *testing.T, f *apiFixture, username string, consumedBytes int64, ips ...string) (
 	string, string, []acctSession) {
 	t.Helper()
@@ -164,8 +131,7 @@ func seedAccountWithSessions(t *testing.T, f *apiFixture, username string, consu
 		t.Fatalf("seed guest account: %v", err)
 	}
 
-	// The entitlement and its first transition are ONE transaction: status is backed by an append-only
-	// history and a deferred constraint checks the two agree at COMMIT.
+	// One transaction: a deferred constraint checks status against the append-only history at COMMIT.
 	tx, err := f.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +167,7 @@ func seedAccountWithSessions(t *testing.T, f *apiFixture, username string, consu
 			f.tenant, f.site, mac).Scan(&device); err != nil {
 			t.Fatalf("seed device: %v", err)
 		}
-		// A session is only storable for a device holding an authorization binding on its entitlement.
+		// A session needs a device holding an authorization binding on its entitlement.
 		if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
 			(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
 			VALUES ($1,$2,$3,$4,'AUTHORIZED',now(),now())`, f.tenant, f.site, ent, device); err != nil {
@@ -227,7 +193,7 @@ func seedAccountWithSessions(t *testing.T, f *apiFixture, username string, consu
 	return account, ent, out
 }
 
-// entitlementState reads everything a disconnect must NOT change.
+// entState is everything a disconnect must not change.
 type entState struct {
 	status     string
 	window     string
@@ -279,8 +245,6 @@ func auditCount(t *testing.T, f *apiFixture, action, target string) int {
 	return n
 }
 
-// ---------------------------------------------------------------------------------------------------------
-
 func TestIntegration_AccountDisconnect_EndsExactlyThisAccountsSessionsThroughSCD(t *testing.T) {
 	f := newAPI(t)
 	fs, client := newFakeSCD(t, f)
@@ -300,34 +264,29 @@ func TestIntegration_AccountDisconnect_EndsExactlyThisAccountsSessionsThroughSCD
 		t.Fatalf("a clean disconnect reported failures: %v", body)
 	}
 
-	// ENFORCEMENT WAS ACTUALLY ASKED, for exactly this account's two addresses and nothing else.
 	seen := fs.seen()
 	if len(seen) != 2 || !((seen[0] == "10.90.0.11" && seen[1] == "10.90.0.12") ||
 		(seen[0] == "10.90.0.12" && seen[1] == "10.90.0.11")) {
 		t.Fatalf("scd was asked to revoke %v, want exactly the account's two addresses", seen)
 	}
 
-	// The rows are ENDED, with the shared end-reason vocabulary — not left 'active' with a timestamp.
 	for ip, got := range sessionStates(t, f, sessions) {
 		if got[0] != "ended" || got[1] != "admin" {
 			t.Fatalf("session %s = state %q reason %q, want ended/admin", ip, got[0], got[1])
 		}
 	}
-	// The other account is untouched: still active, and scd was never asked about it.
 	for ip, got := range sessionStates(t, f, otherSessions) {
 		if got[0] != "active" {
 			t.Fatalf("another account's session %s became %q", ip, got[0])
 		}
 	}
 
-	// THE ENTITLEMENT AND THE USAGE SURVIVE. This is the promise behind "they can sign in again".
 	if after := readEntState(t, f, ent); after != before {
 		t.Fatalf("the disconnect changed the entitlement: %+v -> %+v", before, after)
 	}
 	if after := readEntState(t, f, otherEnt); after != otherBefore {
 		t.Fatalf("the disconnect changed ANOTHER account's entitlement: %+v -> %+v", otherBefore, after)
 	}
-	// No history was removed: the sessions are still there, ended, not deleted.
 	var remaining int
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT count(*)::int FROM iam_v2.sessions WHERE entitlement_id=$1`, ent).Scan(&remaining); err != nil {
@@ -350,7 +309,7 @@ func TestIntegration_AccountDisconnect_EndsExactlyThisAccountsSessionsThroughSCD
 		t.Fatalf("audit payload = %v", payload)
 	}
 
-	// A SECOND DISCONNECT IS A NO-OP WITH A COUNT OF ZERO, and audits nothing: there is nothing online.
+	// A second disconnect is a no-op that audits nothing.
 	st, body = f.do(t, "POST", "/guest-accounts/"+mine+"/disconnect", nil)
 	if st != 200 || body["disconnected_sessions"] != float64(0) {
 		t.Fatalf("second disconnect = %d %v", st, body)
@@ -363,7 +322,7 @@ func TestIntegration_AccountDisconnect_EndsExactlyThisAccountsSessionsThroughSCD
 	}
 }
 
-// A DEVICE scd COULD NOT TAKE OFF IS REPORTED, not folded into the success count.
+// A device scd could not take off is reported as a failure, not counted as ended.
 func TestIntegration_AccountDisconnect_CountsOnlyWhatActuallyEnded(t *testing.T) {
 	f := newAPI(t)
 	fs, client := newFakeSCD(t, f, "10.91.0.12")
@@ -391,7 +350,7 @@ func TestIntegration_AccountDisconnect_CountsOnlyWhatActuallyEnded(t *testing.T)
 	}
 }
 
-// THE REGRESSION THAT MATTERS MOST: the Admin Console's body is accepted at all.
+// decodeJSON disallows unknown fields, so the console's body (which always sends disconnect_sessions) must be accepted.
 func TestIntegration_SetPassword_BodyWithDisconnectFlagIsAccepted(t *testing.T) {
 	f := newAPI(t)
 	st, body := f.do(t, "POST", "/guest-accounts/", map[string]any{"username": "flag", "password": "pw-one"})
@@ -399,8 +358,6 @@ func TestIntegration_SetPassword_BodyWithDisconnectFlagIsAccepted(t *testing.T) 
 		t.Fatalf("create = %d %v", st, body)
 	}
 	id := body["account"].(map[string]any)["id"].(string)
-	// EXACTLY what hotel-admin sends. Before the field existed, DisallowUnknownFields answered 400 and setting
-	// a client account's password did not work at all.
 	st, body = f.do(t, "POST", "/guest-accounts/"+id+"/set-password",
 		map[string]any{"password": "pw-two", "generate": false, "disconnect_sessions": false})
 	if st != 200 || body["status"] != "password_set" {
@@ -422,8 +379,7 @@ func TestIntegration_SetPassword_DisconnectsOnlyWhenTicked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// UNTICKED: the password changes and the device stays online. Nothing is reported and nothing is audited
-	// as a disconnect.
+	// Unticked: the password changes and the device stays online.
 	st, body := f.do(t, "POST", "/guest-accounts/"+acct+"/set-password",
 		map[string]any{"password": "fresh-one", "disconnect_sessions": false})
 	if st != 200 {
@@ -450,8 +406,7 @@ func TestIntegration_SetPassword_DisconnectsOnlyWhenTicked(t *testing.T) {
 		t.Fatal("the password did not change")
 	}
 
-	// TICKED, with a generated password: the device goes off, the count is reported, and what the guest
-	// bought is untouched.
+	// Ticked, with a generated password: the device goes off and the entitlement is untouched.
 	st, body = f.do(t, "POST", "/guest-accounts/"+acct+"/set-password",
 		map[string]any{"generate": true, "disconnect_sessions": true})
 	if st != 200 || body["disconnected_sessions"] != float64(1) {
@@ -477,8 +432,7 @@ func TestIntegration_SetPassword_DisconnectsOnlyWhenTicked(t *testing.T) {
 	}
 }
 
-// A REFUSAL LEAVES EVERYTHING AS IT WAS. Without an enforcement channel nothing can be taken off the network,
-// so the whole call refuses -- and because the refusal happens FIRST, the password is not changed either.
+// Without an enforcement channel the whole call refuses before the password is changed.
 func TestIntegration_SetPassword_RefusesWhenEnforcementIsUnavailable(t *testing.T) {
 	f := newAPI(t)
 	f.app.scd = nil
@@ -507,7 +461,7 @@ func TestIntegration_SetPassword_RefusesWhenEnforcementIsUnavailable(t *testing.
 		t.Fatalf("a refused reset ended the session (state %q)", got)
 	}
 
-	// With NOTHING online the same unavailable channel is not a refusal: there is nothing to disconnect.
+	// With nothing online the unavailable channel is not a refusal.
 	acct2, _, _ := seedAccountWithSessions(t, f, "pwnoscd2", 1)
 	if st, b := f.do(t, "POST", "/guest-accounts/"+acct2+"/set-password",
 		map[string]any{"password": "applied-fine", "disconnect_sessions": true}); st != 200 ||
@@ -516,18 +470,14 @@ func TestIntegration_SetPassword_RefusesWhenEnforcementIsUnavailable(t *testing.
 	}
 }
 
-// A LIVE SESSION WITH NO ADDRESS IS REFUSED, NOT SILENTLY SKIPPED. Enforcement is keyed on the address, so
-// there is no honest way to take that device off from here -- and the refusal comes before anything else is
-// disconnected, so the operator can retry from a known state.
+// A live session with no address is refused, not skipped (enforcement is keyed on the address), before anything else is disconnected.
 func TestIntegration_AccountDisconnect_RefusesASessionWithNoAddress(t *testing.T) {
 	f := newAPI(t)
 	fs, client := newFakeSCD(t, f)
 	f.app.scd = client
 
 	acct, _, sessions := seedAccountWithSessions(t, f, "noaddr", 1, "10.94.0.11", "10.94.0.12")
-	// Blanking the address is not something any product path does — the guard on iam_v2.sessions says so, and
-	// correctly — so the fixture reaches it as the schema owner. This is a fixture-only shape, seeded to prove
-	// the handler refuses rather than guesses.
+	// No product path blanks the address; the fixture does it as the schema owner.
 	if err := asOwner(context.Background(), f.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE iam_v2.sessions SET ip=NULL WHERE id=$1`, sessions[1].id)
 		return err
@@ -556,12 +506,8 @@ func TestIntegration_AccountDisconnect_RefusesASessionWithNoAddress(t *testing.T
 	}
 }
 
-// THE LOCKOUT FICTION IS GONE FROM THE OPERATOR SURFACE.
-//
-// locked_until exists on the table and the authenticator honours it, but nothing in the product ever sets it:
-// repeated-failure protection is per DEVICE (migration 0068). The list used to report a "locked" count and
-// accept status=locked, which could only ever mean "0" and "nothing" -- an always-zero measurement an operator
-// reads as reassurance.
+// Nothing sets locked_until (protection is per device), so the list must not report a "locked" count or accept
+// status=locked: an always-zero measurement reads as reassurance.
 func TestIntegration_GuestAccounts_ReportNoAccountLockout(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -588,12 +534,11 @@ func TestIntegration_GuestAccounts_ReportNoAccountLockout(t *testing.T) {
 			t.Fatalf("a row still carries locked_until: %v", r)
 		}
 	}
-	// The filter is refused rather than answered with an empty page: an empty page reads as a measurement.
 	st, body = f.getAccounts(t, "?status=locked", "")
 	if st != 400 {
 		t.Fatalf("status=locked = %d %v", st, body)
 	}
-	// Even though the column HOLDS a value for lk-1, so this is not passing by accident.
+	// The column does hold a value for lk-1, so this is not passing by accident.
 	var stored int
 	if err := f.pool.QueryRow(ctx, `SELECT count(*)::int FROM iam_v2.guest_access_accounts
 	     WHERE tenant_id=$1 AND site_id=$2 AND locked_until IS NOT NULL`, f.tenant, f.site).Scan(&stored); err != nil {
@@ -602,7 +547,6 @@ func TestIntegration_GuestAccounts_ReportNoAccountLockout(t *testing.T) {
 	if stored != 1 {
 		t.Fatalf("the fixture stored %d locked_until values, want 1", stored)
 	}
-	// enabled/disabled still work.
 	if st, b := f.getAccounts(t, "?status=disabled", ""); st != 200 || len(b["data"].([]any)) != 1 {
 		t.Fatalf("disabled filter = %d %v", st, b)
 	}

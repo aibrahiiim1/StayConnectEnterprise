@@ -1,23 +1,7 @@
 "use client";
 
-// ROOM SIGN-IN — what a guest types besides their room number, configured in the Hotel module
-// (docs/PRODUCT_TERMINOLOGY.md, "The Hotel module"). Its meaning depends on the PMS stay record, so it lives
-// here; the on/off switch for the method stays with the other methods in Client access → Sign-in methods, and
-// this screen only reports that state.
-//
-// THE CHOICES ARE EXACTLY THE SERVER CONTRACT. edged accepts room_any, room_lastname, room_firstname and
-// room_reservation (data-plane/cmd/edged/resources_site.go, pmsSignInModes), and "either" only when it is
-// already stored. Every option is room number + ONE detail; nothing here offers two details at once, because
-// no mode asks for that.
-//
-// "either" is not offered. It is still honoured if already stored, but it means last-name-or-reservation
-// decided by a guess at the shape of what the guest typed, so a surname containing a digit is submitted as a
-// reservation number and fails. "Any one of" is not the same thing: the guest fills in ONE box and the SERVER
-// compares that value against all three fields, instead of the browser guessing which one was meant.
-//
-// A CHOICE SAVES IMMEDIATELY, as a merge of the "pms" key only (the server merges per top-level key), and it
-// does not switch the method on or off: choosing what guests will type is not the same decision as offering
-// room sign-in at all.
+// The options mirror edged's pmsSignInModes (data-plane/cmd/edged/resources_site.go); "either" is honoured
+// only if already stored, because it guesses surname vs reservation from the typed shape and rejects surnames with digits.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -38,8 +22,7 @@ import { useToast } from "@/components/ui/toast";
 type PMSMethod = { enabled?: boolean; mode?: string; provider?: string; template_id?: string };
 type AuthMethods = { pms?: PMSMethod; [key: string]: unknown };
 
-/** The supported credential choices, one per mode edged accepts. Order: the recommended one first. */
-// Not exported: a Next page module may export only its page and route config.
+// Recommended option first. Not exported: a Next page module may export only its page and route config.
 const ROOM_SIGN_IN_OPTIONS: { value: string; label: string; hint: string }[] = [
   {
     value: "room_any",
@@ -66,13 +49,12 @@ const ROOM_SIGN_IN_OPTIONS: { value: string; label: string; hint: string }[] = [
   },
 ];
 const LEGACY_EITHER = "either";
-// What the portal and resolver fall back to when nothing is stored.
+// Portal and resolver fallback when nothing is stored.
 const DEFAULT_MODE = "room_lastname";
 
 export default function RoomSignInPage() {
   const toast = useToast();
-  // The role is read once and FAILS CLOSED while it loads: an editable choice that appears and then turns
-  // read-only is worse than one that arrives read-only and unlocks. edged enforces the real gate either way.
+  // Read-only until the role loads; edged enforces the real gate.
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
@@ -108,7 +90,7 @@ export default function RoomSignInPage() {
       toast.success("Room sign-in saved", "Guests see the change the next time the sign-in page loads.");
     } catch (e) {
       setErr(e);
-      await load(); // never leave a choice showing a state the server did not accept
+      await load();
     } finally { setBusy(false); }
   }, [pms, load, toast]);
 
@@ -173,7 +155,6 @@ export default function RoomSignInPage() {
       )}
       <ErrorBanner err={err} className="mb-0" />
 
-      {/* Same rule as before the move: an outage is only worth announcing while the method is offered. */}
       {pms.enabled && <RoomSignInReadinessCallout readiness={readiness} />}
 
       <Card>
@@ -210,8 +191,6 @@ export default function RoomSignInPage() {
           <fieldset className="space-y-3">
             <legend className="sr-only">What the guest types, besides the room number</legend>
             {modeIsLegacy && (
-              // Shown rather than silently migrated: changing what a stored configuration does is the operator's
-              // decision, not this screen's.
               <Callout tone="warning">
                 This site currently uses an older setting that accepts a surname or a reservation number and
                 guesses which one was typed, so some surnames are rejected. Choosing one of the options below

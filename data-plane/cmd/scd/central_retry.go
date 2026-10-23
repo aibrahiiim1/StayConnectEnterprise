@@ -1,25 +1,7 @@
 package main
 
-// TWO MESSAGES TO CENTRAL THAT USED TO BE SENT ONCE.
-//
-// Both were fire-and-forget, and both matter more now that Central's replacement and retirement flows wait on
-// them:
-//
-//   - The TERMINAL-ASSIGNMENT ACKNOWLEDGEMENT. Central retires an appliance in two phases: it signs a terminal
-//     assignment, and only when the appliance acknowledges having adopted it does Central revoke the
-//     appliance's credentials and mark it retired (the acknowledged-retirement flow a hardware replacement now
-//     relies on). The ack was sent once, just before scd re-executed. A Central that was briefly unreachable,
-//     an mTLS transport still coming up, or a lost reply left Central waiting for an acknowledgement that
-//     would never be sent again -- the re-executed process holds the same terminal version, so the poll that
-//     sent it never fires again.
-//
-//   - The OFFLINE-PACKAGE RECONCILIATION. An offline package is single-use locally (edge_offline_packages);
-//     telling Central it was consumed is what lets Central account for it. That call ran once, in a goroutine,
-//     right after the import -- which is by definition a moment the appliance may well be offline -- and the
-//     "boot reconcile will retry" its comment promised did not exist.
-//
-// Both are now retried until Central confirms, idempotently. Neither is on a guest path: guest service never
-// waits for either, and a Central outage only delays them.
+// Terminal-assignment acks and offline-package reconciliation are retried idempotently until Central confirms (its retirement flow waits on the ack).
+// Neither is on a guest path: a Central outage only delays them.
 
 import (
 	"bytes"
@@ -45,9 +27,6 @@ func (s *server) centralMTLS() (*http.Client, string, bool) {
 	return s.mtlsTransport()
 }
 
-// ---- the terminal acknowledgement --------------------------------------------------------------------------
-
-// ackOutcome is what one delivery attempt learned.
 type ackOutcome int
 
 const (
@@ -55,14 +34,11 @@ const (
 	ackConfirmed ackOutcome = iota
 	// ackRetry: nothing definitive -- no transport yet, a network error, a timeout, 408/429 or a 5xx.
 	ackRetry
-	// ackRefused: Central answered definitively and will not accept this acknowledgement however often it is
-	// repeated: 409 (Central's current assignment is no longer this document -- the poll will fetch the new
-	// one), 404, 400, or 401/403 (after a processed ack Central has already revoked this appliance's
-	// credentials, so a repeat is refused at the door). Retrying would only hammer it.
+	// ackRefused: Central answered definitively and will not accept this ack however often it is repeated
+	// (409, 404, 400, 401/403); retrying would only hammer it.
 	ackRefused
 )
 
-// classifyAckStatus maps Central's answer to an outcome.
 func classifyAckStatus(code int) ackOutcome {
 	switch {
 	case code >= 200 && code < 300:
@@ -76,8 +52,7 @@ func classifyAckStatus(code int) ackOutcome {
 	}
 }
 
-// terminalAckBackoff is the wait before each retry: quick at first (a transport coming up), then settling at a
-// cadence that is gentle on a Central that is down. A var so tests can shorten it.
+// terminalAckBackoff is quick at first (a transport coming up), then gentle on a down Central. A var so tests can shorten it.
 var terminalAckBackoff = []time.Duration{
 	15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute,
 }
@@ -89,8 +64,7 @@ func backoffAt(steps []time.Duration, attempt int) time.Duration {
 	return steps[len(steps)-1]
 }
 
-// terminalAckRecord is the durable "Central has answered this acknowledgement" marker, kept beside the
-// assignment so a restart or re-exec does not resend a confirmed ack -- and does resend an unconfirmed one.
+// terminalAckRecord marks that Central has answered, so a restart or re-exec does not resend a confirmed ack but does resend an unconfirmed one.
 type terminalAckRecord struct {
 	Version     int64  `json:"assignment_version"`
 	Fingerprint string `json:"assignment_fingerprint"`
@@ -103,7 +77,6 @@ func (s *server) terminalAckPath() string {
 	return filepath.Join(s.assignmentStore().Dir, "terminal-ack.json")
 }
 
-// terminalAckSettled reports whether Central has already answered the acknowledgement for this document.
 func (s *server) terminalAckSettled(doc *assignment.Document) bool {
 	b, err := os.ReadFile(s.terminalAckPath())
 	if err != nil {
@@ -133,7 +106,6 @@ func (s *server) settleTerminalAck(doc *assignment.Document, outcome string, cod
 	}
 }
 
-// adoptedTerminal returns the terminal document this appliance currently holds, or nil.
 func (s *server) adoptedTerminal() (*assignment.Document, time.Time) {
 	rec, err := s.assignmentStore().Load()
 	if err != nil || rec == nil || rec.Current == nil || !assignment.Clears(rec.Current.State) {
@@ -143,8 +115,7 @@ func (s *server) adoptedTerminal() (*assignment.Document, time.Time) {
 	return rec.Current, at
 }
 
-// deliverTerminalAck makes ONE signed delivery attempt and classifies the answer. adoptedAt is the moment the
-// document was adopted (from the store), so every attempt states the same fact.
+// deliverTerminalAck makes ONE signed attempt and classifies the answer.
 func (s *server) deliverTerminalAck(ctx context.Context, doc *assignment.Document, adoptedAt time.Time) (ackOutcome, int) {
 	if s.idPriv == nil || s.applID == "" {
 		return ackRetry, 0
@@ -177,15 +148,12 @@ func (s *server) deliverTerminalAck(ctx context.Context, doc *assignment.Documen
 	return classifyAckStatus(resp.StatusCode), resp.StatusCode
 }
 
-// terminalAckRunner makes sure at most one retry loop exists per process.
 type terminalAckRunner struct {
 	mu      sync.Mutex
 	running bool
 }
 
-// ensureTerminalAck starts the retry loop when this appliance holds a terminal assignment Central has not
-// answered yet. Called when a terminal document is adopted and again whenever the assignment agent starts,
-// so an ack left unconfirmed by a re-exec, a restart or a reboot is picked up again. Idempotent.
+// ensureTerminalAck starts the retry loop when a terminal assignment is unanswered; called on adoption and agent start, idempotent.
 func (s *server) ensureTerminalAck(ctx context.Context) {
 	doc, _ := s.adoptedTerminal()
 	if doc == nil || s.terminalAckSettled(doc) {
@@ -240,17 +208,12 @@ func (s *server) runTerminalAck(ctx context.Context) {
 	}
 }
 
-// ---- offline-package reconciliation --------------------------------------------------------------------------
-
 // offlineReconcileEvery is how often unreconciled packages are offered to Central again. A var for tests.
 var offlineReconcileEvery = 10 * time.Minute
 
-// errNoCentralTransport means the mTLS transport is not established yet: nothing was sent.
 var errNoCentralTransport = errors.New("central mTLS transport not ready")
 
-// sendOfflineReconcile tells Central one package was consumed. Central answers 200 both when it recorded the
-// consumption and when it has no matching package, so 200 is the end of the matter either way; anything else
-// is retried later.
+// sendOfflineReconcile: Central answers 200 both when it recorded the consumption and when it has no matching package, so 200 ends it; anything else is retried.
 func (s *server) sendOfflineReconcile(ctx context.Context, packageID string) (bool, error) {
 	if s.idPriv == nil || s.applID == "" {
 		return false, errNoCentralTransport
@@ -275,16 +238,14 @@ func (s *server) sendOfflineReconcile(ctx context.Context, packageID string) (bo
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-// offlineReconciler is the retry pass over the local single-use ledger. Its three steps are functions so the
-// pass can be tested without a database or a Central.
+// offlineReconciler is the retry pass; its steps are functions so it can be tested without a database or Central.
 type offlineReconciler struct {
 	pending func(ctx context.Context) ([]string, error)
 	send    func(ctx context.Context, packageID string) (bool, error)
 	mark    func(ctx context.Context, packageID string) error
 }
 
-// runOnce offers every unreconciled package to Central and stamps the ones Central confirmed. It stops early
-// when the transport is not there: every remaining call would fail the same way.
+// runOnce stops early when the transport is missing: every remaining call would fail the same way.
 func (o offlineReconciler) runOnce(ctx context.Context) (reconciled, remaining int) {
 	ids, err := o.pending(ctx)
 	if err != nil {
@@ -339,8 +300,6 @@ func (s *server) offlineReconcilerFor() offlineReconciler {
 	}
 }
 
-// offlineReconcileLoop retries every unreconciled offline package until Central confirms it: shortly after
-// boot, after every import (kicked), and then every offlineReconcileEvery.
 func (s *server) offlineReconcileLoop(ctx context.Context) {
 	if s.db == nil {
 		return
@@ -374,7 +333,6 @@ func (s *server) offlineReconcileLoop(ctx context.Context) {
 	}
 }
 
-// kickOfflineReconcile asks the loop for an immediate pass (non-blocking).
 func (s *server) kickOfflineReconcile() {
 	if s.reconcileKick == nil {
 		return

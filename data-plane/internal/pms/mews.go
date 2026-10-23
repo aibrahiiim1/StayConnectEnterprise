@@ -1,25 +1,11 @@
 package pms
 
-// Mews Connector API provider (phase 10).
-//
-// Mews is a REST-first PMS. Every request is a plain HTTPS POST with a
-// JSON body that starts with { ClientToken, AccessToken, Client }.
-// There's no persistent link to maintain — which means no Start/Stop
-// goroutine is strictly required, but we do spin a small background
-// refresher for the room→space-id map so first-login latency stays low
-// and occupancy changes propagate without a restart.
-//
-// Validation flow:
-//   1. Resolve the room number to a Mews SpaceId (cached map).
-//   2. POST /reservations/getAll with CollidingUtc=now and
-//      AssignedResourceIds=[spaceId], States=[Processed,Started].
-//   3. For any matching reservation(s), POST /customers/getAll to
-//      resolve the guest name(s).
-//   4. Hand the candidate set to MatchesQuery — reuses the same
-//      first/last/reservation matching rules as FIAS.
-//
-// Endpoints are overridable via BaseURL so tests can drive the impl
-// through an httptest server.
+// Mews Connector API provider. REST-first: every request is an HTTPS POST whose JSON body starts with { ClientToken,
+// AccessToken, Client }. There is no persistent link, but a small background refresher keeps the room->space-id map
+// warm so first-login latency stays low.
+// Validation: resolve the room to a SpaceId, POST /reservations/getAll (CollidingUtc=now, AssignedResourceIds, States
+// Processed/Started), POST /customers/getAll for guest names, then MatchesQuery (same rules as FIAS). BaseURL is
+// overridable for httptest.
 
 import (
 	"bytes"
@@ -39,8 +25,7 @@ const (
 	mewsDefaultBaseURL    = "https://api.mews-demo.com"
 	mewsSpaceRefreshEvery = 15 * time.Minute
 	mewsRequestTimeout    = 10 * time.Second
-	// Mews APIs cap list responses; we don't expect many reservations per
-	// room at a single instant, but cap to be defensive.
+	// Mews caps list responses; cap defensively.
 	mewsListLimit = 100
 )
 
@@ -49,23 +34,21 @@ type Mews struct {
 	cfg          ProviderConfig
 
 	baseURL      string
-	clientToken  string // integration identifier (your Platform Client)
-	accessToken  string // per-enterprise token
-	clientName   string // arbitrary identifier, e.g. "StayConnect 0.1"
-	enterpriseID string // Mews enterprise/property UUID (ProviderConfig.PropertyID)
+	clientToken  string
+	accessToken  string
+	clientName   string
+	enterpriseID string
 
 	httpClient *http.Client
 
 	mu          sync.RWMutex
-	rooms       map[string]string // "101" → Mews SpaceId
+	rooms       map[string]string
 	lastRefresh time.Time
 	health      Health
 
 	cancel context.CancelFunc
 }
 
-// NewMews returns an unconfigured instance. The loader calls Configure()
-// before Start() to apply the pms_providers row.
 func NewMews(name string) *Mews {
 	return &Mews{
 		providerName: name,
@@ -89,10 +72,8 @@ func (m *Mews) Configure(cfg ProviderConfig) error {
 	if m.baseURL == "" {
 		m.baseURL = mewsDefaultBaseURL
 	}
-	// Mews's auth model expects both tokens. We map:
-	//   ClientToken → Extra["client_token"] (integration-wide; same across
-	//                 all enterprises that use this integration)
-	//   AccessToken → api_key (per-enterprise; rotated independently)
+	// Mews needs both tokens: ClientToken = Extra["client_token"] (integration-wide), AccessToken = api_key (per
+	// enterprise, rotated independently).
 	m.accessToken = cfg.Connection.APIKey
 	if v, ok := cfg.Connection.Extra["client_token"].(string); ok {
 		m.clientToken = v
@@ -116,8 +97,6 @@ func (m *Mews) Health() Health {
 	h.CacheSize = len(m.rooms)
 	return h
 }
-
-// ----- background refresh loop -----
 
 func (m *Mews) Start(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
@@ -168,9 +147,7 @@ func (m *Mews) setStatus(status, errMsg string) {
 	}
 }
 
-// refreshSpaces pulls the full Space list for the enterprise and rebuilds
-// the room→space-id map. Mews's Spaces are long-lived (they represent
-// physical rooms), so this is a cheap periodic refresh.
+// Spaces are long-lived physical rooms, so a periodic refresh is cheap.
 func (m *Mews) refreshSpaces(ctx context.Context) error {
 	type spaceReq struct {
 		ClientToken   string   `json:"ClientToken"`
@@ -222,8 +199,6 @@ func (m *Mews) refreshSpaces(ctx context.Context) error {
 	return nil
 }
 
-// ----- ValidateGuest -----
-
 func (m *Mews) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	norm := m.cfg.Normalization
 	queryRoom := NormalizeRoom(ApplyRoomFormat(norm.RoomFormat, q.RoomNumber))
@@ -254,7 +229,6 @@ func (m *Mews) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 		return nil, ErrNotFound
 	}
 
-	// Gather unique customer ids across the hit reservations.
 	seen := map[string]struct{}{}
 	var custIDs []string
 	for _, r := range res.Reservations {
@@ -284,9 +258,7 @@ func (m *Mews) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	qLast := ApplyNameNormalization(norm, q.LastName)
 	qRes := ApplyReservationCase(norm, q.ReservationNumber)
 
-	// Check every reservation × customer until one matches the query.
 	for _, r := range res.Reservations {
-		// Candidate customers for this reservation.
 		cids := r.CustomerIds
 		if r.CustomerId != "" {
 			cids = append(cids, r.CustomerId)
@@ -319,11 +291,8 @@ func (m *Mews) ValidateGuest(ctx context.Context, q Query) (*Result, error) {
 	return nil, ErrNotFound
 }
 
-// ----- Cacher + Tester -----
-
 func (m *Mews) CacheSnapshot(limit int) []Reservation {
-	// We don't cache reservations (too volatile); return the room map as
-	// stub Reservation rows so admins can sanity-check connectivity.
+	// Reservations are too volatile to cache; the room map is returned as stub rows so admins can check connectivity.
 	if limit <= 0 {
 		limit = 200
 	}
@@ -340,9 +309,7 @@ func (m *Mews) CacheSnapshot(limit int) []Reservation {
 }
 
 func (m *Mews) TestConnection(ctx context.Context) error {
-	// Resolve endpoint (any enterprise that echoes back proves auth). Mews
-	// provides /enterprises/get for this; using a single-row response
-	// keeps the probe cheap.
+	// Any enterprise echoed by /enterprises/get proves auth; a single-row response keeps the probe cheap.
 	body := map[string]any{
 		"ClientToken": m.clientToken,
 		"AccessToken": m.accessToken,
@@ -354,8 +321,6 @@ func (m *Mews) TestConnection(ctx context.Context) error {
 	var out map[string]any
 	return m.doPOST(ctx, "/api/connector/v1/enterprises/getAll", body, &out)
 }
-
-// ----- HTTP helpers -----
 
 type mewsReservation struct {
 	ID          string    `json:"Id"`
@@ -416,9 +381,7 @@ func (m *Mews) fetchCustomers(ctx context.Context, ids []string) ([]mewsCustomer
 	return out.Customers, nil
 }
 
-// doPOST is the single HTTP chokepoint. Every method on this struct goes
-// through it, so auth + error shape + latency tracking all live in one
-// place.
+// doPOST is the single HTTP chokepoint for auth, error shape and latency tracking.
 func (m *Mews) doPOST(ctx context.Context, path string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {

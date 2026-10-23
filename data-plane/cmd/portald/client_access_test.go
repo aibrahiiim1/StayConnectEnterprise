@@ -10,13 +10,7 @@ import (
 	"testing"
 )
 
-// THE CLIENT-ACCESS JOURNEY ON THE PORTAL (docs/architecture/ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §6).
-//
-// Three seams that used to be broken or missing:
-//   * a verified one-time code and an identity-provider callback now reach package selection through the
-//     same commerce session as a voucher or an account (they used to land on /success?s=&t=0);
-//   * a verified factor earns the device a resume credential, kept in an HttpOnly cookie;
-//   * the package page says who is signed in and why a free package is not on it.
+// Client-access journey: a verified code or IdP callback reaches package selection through the commerce session, a verified factor earns an HttpOnly resume cookie, and the package page says who is signed in.
 
 func otpPayload(extra string) []byte {
 	return []byte(`{"auth_context_id":"ac-1","device_id":"dev-1","guest_network_id":"gn-1",` +
@@ -27,7 +21,7 @@ func TestAVerifiedCodeStartsTheJourneyAsJSONAndKeepsTheDeviceCredential(t *testi
 	h := portalFixture()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/otp/verify", nil)
-	req.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"}) // the guest ticked "Remember this device"
+	req.AddCookie(&http.Cookie{Name: rememberCookie, Value: "1"})
 	if !h.tryIAMv2AuthMode(rec, req, otpPayload(`,"resume_token":"tok-1"`), true) {
 		t.Fatal("an IAM-v2 reply must be handled")
 	}
@@ -88,8 +82,7 @@ func TestNoResumeCookieWithoutACredential(t *testing.T) {
 	}
 }
 
-// clientAccessHandler is a full portal handler whose scd is the given mux (branding answers empty), with a
-// warm neighbour cache for aa:bb:cc:dd:ee:ff.
+// clientAccessHandler is a full portal handler over the given scd mux with a warm neighbour cache for aa:bb:cc:dd:ee:ff.
 func clientAccessHandler(t *testing.T, mux *http.ServeMux) *handler {
 	t.Helper()
 	mux.HandleFunc("/v1/tenant/branding", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"design":{}}`)) })
@@ -135,11 +128,9 @@ func TestTheLandingPageGreetsARememberedDeviceAndHidesTheForms(t *testing.T) {
 			t.Fatalf("landing page lacks %q", want)
 		}
 	}
-	// The ordinary sign-in forms stay in the page (noscript, and "Not you?") -- the script hides them.
 	if !strings.Contains(body, `id="form-voucher"`) {
 		t.Fatal("the sign-in forms must remain for Not-you and noscript")
 	}
-	// Without the cookie: no greeting.
 	rec = httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodGet, "https://portal.test/", nil)
 	req2.RemoteAddr = "10.20.0.50:4321"
@@ -173,7 +164,6 @@ func TestConnectGoesThroughTheResolvingDeviceLookupAndTheSameJourney(t *testing.
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/packages" {
 		t.Fatalf("Connect must lead to the same package choice as any sign-in, got %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	// A refused credential clears the cookie and shows the ordinary page.
 	refuse = true
 	rec = httptest.NewRecorder()
 	h.authResume(rec, req)
@@ -209,16 +199,13 @@ func TestThePackagePageSaysWhoAndWhyFreeIsGone(t *testing.T) {
 }
 
 func TestTheLandingScriptLeadsWithThePrimaryMethodAndQuickSignIn(t *testing.T) {
-	// The script is served inside the page; its contract is textual: the primary method is reordered to the
-	// front, the identity providers are moved above the tabs, and a remembered device hides the forms.
 	for _, want := range []string{"PRIMARY_MAP", "cfg.portal && cfg.portal.primary_method", "insertBefore(quick, tabsEl)",
 		"getElementById('welcome')", "delivery_failed", "j.next || '/packages'"} {
 		if !strings.Contains(landingHTML, want) {
 			t.Fatalf("landing script lacks %q", want)
 		}
 	}
-	// The one-time-code block specifically: it must no longer read the legacy session_id / duration_seconds
-	// reply shape (the Phase-3 room and post-stay paths legitimately return a session; they are not this seam).
+	// The one-time-code block must no longer read the legacy session_id / duration_seconds reply shape.
 	start := strings.Index(landingHTML, "codeForm.addEventListener('submit'")
 	end := strings.Index(landingHTML, "attach('sms')")
 	if start < 0 || end < start {
@@ -237,9 +224,7 @@ func mustMAC(s string) net.HardwareAddr {
 	return m
 }
 
-// GDPR audit B10: over the plain-HTTP fallback the device is not remembered. The credential is neither stored in a
-// cookie that would cross the network in clear text, nor honoured if an older portal stored one, and the guest
-// signs in as usual.
+// Over the plain-HTTP fallback the device is not remembered: no clear-text credential cookie is stored or honoured.
 func TestTheDeviceIsRememberedOverHTTPSOnly(t *testing.T) {
 	rec := httptest.NewRecorder()
 	setClientResumeCookie(rec, httptest.NewRequest(http.MethodPost, "http://portal.test/auth/otp/verify", nil), "tok-1", 30)
@@ -268,8 +253,7 @@ func TestTheDeviceIsRememberedOverHTTPSOnly(t *testing.T) {
 	}
 }
 
-// GDPR audit B10 (D-B10): a device is remembered only when the guest ticked "Remember this device". Unticked, the
-// credential scd issued is revoked at once and no cookie is set.
+// A device is remembered only when the guest ticked "Remember this device"; unticked, scd's credential is revoked and no cookie is set.
 func TestTheDeviceIsRememberedOnlyWhenTheGuestAsks(t *testing.T) {
 	var revoked []string
 	mux := http.NewServeMux()
@@ -301,8 +285,7 @@ func TestTheDeviceIsRememberedOnlyWhenTheGuestAsks(t *testing.T) {
 	}
 }
 
-// The box is offered for a code or an identity provider only. A tick is a session cookie, so it must not carry
-// over to a sign-in by a method the box was never offered for: that credential is revoked, not kept.
+// The box is offered for a code or identity provider only; a tick must not carry over to other methods, whose credential is revoked.
 func TestARememberTickDoesNotCarryOverToAMethodWithoutTheBox(t *testing.T) {
 	ticked := func() *http.Request {
 		r := httptest.NewRequest(http.MethodPost, "https://portal.test/auth/account", nil)

@@ -1,16 +1,7 @@
 package main
 
-// EVERY SIGN-IN PATH DERIVES THE SOURCE DEVICE THE SAME WAY.
-//
-// The cold-cache refusal was found on the PMS room path, but the mechanism was shared: eight other guest paths
-// read the kernel's neighbour cache once and treated a miss as "this device is not on a guest network". Fixing
-// one and leaving the rest would have left the same defect waiting on voucher, client account, OTP, social,
-// post-stay, open access, purchase status and session activation -- and the next report would have looked like a
-// new bug.
-//
-// This file pins the shared property at the source rather than re-testing nine handlers: every caller goes
-// through handler.deviceMAC, and deviceMAC resolves a cold cache. The guard below is what stops a tenth path
-// from being written against the raw cache read.
+// Every sign-in path derives the source device through handler.deviceMAC, which resolves a cold cache; the guard below
+// stops a path being written against the raw neighbour-cache read.
 
 import (
 	"os"
@@ -19,7 +10,6 @@ import (
 	"testing"
 )
 
-// portaldSources returns every non-test Go file in this package.
 func portaldSources(t *testing.T) map[string]string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
@@ -44,12 +34,8 @@ func portaldSources(t *testing.T) map[string]string {
 	return out
 }
 
-// NO SIGN-IN PATH READS THE NEIGHBOUR CACHE DIRECTLY.
-//
-// arp_resolve.go is the implementation and main.go holds exactly one deliberate exception: the landing page's
-// support line, which names the device so a guest can read it to reception. That page is served to every
-// captive-portal probe on the network every few seconds, it refuses nothing, and a missing address only omits a
-// line -- so it must NOT pay the resolve window. Every path where a cold cache costs the guest something does.
+// arp_resolve.go implements the resolve; main.go has one deliberate exception, the landing page's support line, which is
+// served to every captive probe, refuses nothing, and must not pay the resolve window.
 func TestEverySignInPathResolvesTheSourceDeviceThroughOnePlace(t *testing.T) {
 	const allowedInMain = 2 // the field declaration and the landing page's guarded best-effort read
 	for name, src := range portaldSources(t) {
@@ -80,10 +66,7 @@ func TestEverySignInPathResolvesTheSourceDeviceThroughOnePlace(t *testing.T) {
 	}
 }
 
-// ...AND THE RESOLVING LOOKUP IS ACTUALLY REACHED FROM THE PATHS THAT MATTER.
-//
-// A source check alone could pass with every call site deleted, so this asserts the callers are present: the
-// nine guest-visible paths that derive the device from the connection.
+// A source check alone could pass with every call site deleted, so assert the nine guest-visible callers are present.
 func TestTheGuestPathsCallTheResolvingLookup(t *testing.T) {
 	want := map[string]int{
 		"acquisition.go":              2, // open/package access, and the purchase-status poll
@@ -110,21 +93,15 @@ func TestTheGuestPathsCallTheResolvingLookup(t *testing.T) {
 	}
 }
 
-// A DEVICE THAT CANNOT BE PLACED IS NEVER A CREDENTIAL ANSWER.
-//
-// The post-stay path is the one that had to change: its wording is deliberately uniform for every
-// authentication outcome, because a departed guest with a PIN has no room or family name to re-check -- but that
-// sentence still says "check your details", and for a device the appliance could not place that is advice about
-// the one thing the guest cannot act on.
+// A device that cannot be placed is never a credential answer: the uniform post-stay wording says "check your details",
+// which is advice the guest cannot act on for such a device.
 func TestADeviceFailureIsNeverAnsweredAsCredentials(t *testing.T) {
 	src := portaldSources(t)["phase5_poststay_handlers.go"]
 	if !strings.Contains(src, "func (h *handler) poststayDeviceFail(") {
 		t.Fatal("post-stay has no device-specific refusal; a device that cannot be placed would be answered " +
 			"with the authentication wording")
 	}
-	// originDevice keeps its `fail` parameter -- its four callers are different surfaces and each has its own
-	// correct answer (the access-status poll says nothing at all; the device list has its own sentence). What
-	// matters is that POST-STAY now hands it the DEVICE answer instead of its authentication wording.
+	// originDevice keeps its `fail` parameter (four callers, each with its own answer); post-stay must hand it the device answer, not authentication wording.
 	if !strings.Contains(src, "h.originDevice(w, r, b, h.poststayDeviceFail)") {
 		t.Error("post-stay still derives its device with the authentication wording as the failure")
 	}

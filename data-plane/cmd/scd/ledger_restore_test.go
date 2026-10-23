@@ -25,7 +25,6 @@ func copyOfChain(name string, es []ledger.Entry) ledger.Copy {
 	return ledger.Copy{Name: name, Present: true, Parse: ledger.ParseChain(b)}
 }
 
-// A replacement appliance's brand-new ledger says nothing about erasures: it must not be read as a contradiction of the old one.
 func TestSettleFreshLedgers(t *testing.T) {
 	old, fresh := chainOf("11111111-1111-4111-8111-111111111111", 6), chainOf("22222222-2222-4222-8222-222222222222", 1)
 	copies := []ledger.Copy{copyOfChain("local", fresh), copyOfChain("external", old)}
@@ -33,7 +32,6 @@ func TestSettleFreshLedgers(t *testing.T) {
 		{Source: "the live database", Ledger: fresh[0].Ledger, Seq: 1, Hash: fresh[0].Hash},
 		{Source: "this backup", Ledger: old[0].Ledger, Seq: 4, Hash: old[3].Hash},
 	}
-	// without settling, the two ledgers contradict each other
 	if v := ledger.Assess(copies, wit); !v.Conflict {
 		t.Fatalf("setup: %+v", v)
 	}
@@ -53,7 +51,6 @@ func TestSettleFreshLedgers(t *testing.T) {
 	}
 }
 
-// A LONGER different ledger is a real contradiction and is never set aside: only a first entry can be "fresh".
 func TestSettleFreshLedgersKeepsARealContradiction(t *testing.T) {
 	a, b := chainOf("11111111-1111-4111-8111-111111111111", 6), chainOf("22222222-2222-4222-8222-222222222222", 3)
 	copies := []ledger.Copy{copyOfChain("local", b), copyOfChain("external", a)}

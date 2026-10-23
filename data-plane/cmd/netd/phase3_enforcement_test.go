@@ -1,20 +1,7 @@
 package main
 
-// ADVERSARIAL SYSTEM-BOUNDARY TESTS: nft authorization + accountable tc + durable Session, together.
-//
-// The provisioning suite proves the tc half. These prove the property that only exists where the two halves
-// meet, and that a tc-only test can never see:
-//
-//	THERE IS NO STATE IN WHICH A GUEST IS AUTHORIZED AT THE PACKET GATE WITHOUT AN ACCOUNTABLE, VERIFIED
-//	TC CLASS — because that is exactly the state in which traffic escapes through the bridge's DEFAULT class:
-//	forwarded, billed to nobody, with nothing reporting a problem.
-//
-// They drive the real reconciliation (submit → reconcileLocked → provisionSession) with a fake kernel that
-// models nft and tc as the separate things they are.
-//
-// These are FAKE-KERNEL tests. They prove orchestration and ordering, not that the appliance's real nft/tc
-// accept these commands; the command strings themselves are proven by the contract tests in internal/nft and
-// internal/shape. Nothing here is live evidence.
+// Fake-kernel tests of nft authorization, accountable tc and durable Session together. Invariant: a guest is
+// never authorized at the packet gate without a verified tc class, or traffic escapes through the default class unbilled.
 
 import (
 	"context"
@@ -28,28 +15,21 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
-// ---- a fake packet-authorization gate --------------------------------------
-
 type fakeGate struct {
 	mu sync.Mutex
-	// authorized models the Phase-3 nft set only. The legacy set is modelled separately (legacyAuth) and this
-	// gate can never reach it — which is the point of the two-set design.
+	// authorized models the Phase-3 nft set only; the gate can never reach the legacy set.
 	authorized map[string]bool // "bridge|ip"
 	calls      []string
 	failAllow  map[string]error
 	failRevoke map[string]bool
-	// loseAllowResult makes Authorize apply the change and THEN report an error, like a command that took
-	// effect but whose result was lost.
+	// loseAllowResult applies the change and then reports an error.
 	loseAllowResult map[string]bool
-	// allowSilentlyIgnored models an Allow that returns success without taking effect.
+	// allowSilentlyIgnored returns success without taking effect.
 	allowSilentlyIgnored map[string]bool
 	listErr              error
-	// leases is the REMAINING lease per element, as the kernel would report it. The gate is a leasing gate,
-	// so a fake that only remembered membership could not tell a renewed authorization from one about to
-	// disappear — which is the whole property the lease exists to provide.
+	// leases is the remaining lease per element, so renewal is distinguishable from about-to-expire.
 	leases map[string]time.Duration
-	// ttls records every lease length ever requested per element, so a test can assert that a guest whose
-	// durable activation is unproven is only ever given the SHORT provisional lease.
+	// ttls records every requested lease length, to assert unproven activation only gets the short lease.
 	ttls map[string][]time.Duration
 }
 
@@ -66,9 +46,7 @@ func (g *fakeGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, "authorize "+gk(bridge, ip))
-	// THE REAL GATE REFUSES A PERMANENT AUTHORIZATION, so the fake must too. An element with no timeout
-	// outlives every process that maintains it, and a fake that quietly accepted one would let a regression
-	// reintroducing unbounded access pass the entire suite.
+	// The real gate refuses a permanent authorization; the fake must too or unbounded access would pass the suite.
 	if ttl <= 0 {
 		return errors.New("nft: packet authorization must be a bounded lease (ttl > 0)")
 	}
@@ -77,7 +55,7 @@ func (g *fakeGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl 
 	}
 	g.ttls[gk(bridge, ip)] = append(g.ttls[gk(bridge, ip)], ttl)
 	if g.allowSilentlyIgnored[ip.String()] {
-		return nil // reports success, changes nothing
+		return nil
 	}
 	g.authorized[gk(bridge, ip)] = true
 	g.leases[gk(bridge, ip)] = ttl
@@ -151,9 +129,7 @@ func (g *fakeGate) put(bridge, ip string) {
 	g.leases[bridge+"|"+ip] = phase3LeaseTTL
 }
 
-// advance is THE KERNEL DOING ITS JOB WITH NOTHING ELSE RUNNING: every lease loses d, and anything that
-// reaches zero is removed by the kernel itself. It takes no lock ordering with the writer because that is
-// exactly the point — expiry does not need netd, acctd, the database or the network to happen.
+// advance ages every lease by d; the kernel removes expired ones with no help from netd, acctd or the database.
 func (g *fakeGate) advance(d time.Duration) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -182,22 +158,17 @@ func (g *fakeGate) requestedTTLs(bridge, ip string) []time.Duration {
 	return append([]time.Duration(nil), g.ttls[bridge+"|"+ip]...)
 }
 
-// ---- a fake enforcement recorder -------------------------------------------
-
 type fakeEnforcement struct {
 	mu        sync.Mutex
 	activated []string
 	ended     []string
 	err       error
-	// confirmErr makes the authoritative re-read fail too, which is the genuinely-unknown case: the promotion
-	// may or may not have committed and nothing can say which.
+	// confirmErr fails the re-read too: the promotion's outcome is genuinely unknown.
 	confirmErr error
-	// commitThenLoseAck models the ambiguity that matters most: the transaction COMMITS and the answer is
-	// lost. Activate reports failure; the re-read finds the session active.
+	// commitThenLoseAck commits, then Activate reports failure; the re-read finds the session active.
 	commitThenLoseAck map[string]bool
-	// state models the durable Session lifecycle so a test can assert what a guest-facing reader would see.
-	state    map[string]string
-	confirms int
+	state             map[string]string
+	confirms          int
 }
 
 func newFakeEnforcement() *fakeEnforcement {
@@ -210,7 +181,7 @@ func (e *fakeEnforcement) Activate(ctx context.Context, sessionID, bridge string
 	e.activated = append(e.activated, sessionID)
 	if e.commitThenLoseAck[sessionID] {
 		if e.state[sessionID] != "ended" {
-			e.state[sessionID] = "active" // it COMMITTED
+			e.state[sessionID] = "active"
 		}
 		return "", errors.New("connection reset after commit")
 	}
@@ -221,7 +192,7 @@ func (e *fakeEnforcement) Activate(ctx context.Context, sessionID, bridge string
 		return "", errors.New("ENFORCE_SESSION_ENDED")
 	}
 	if e.state[sessionID] == "active" {
-		return "ALREADY_ACTIVE", nil // idempotent
+		return "ALREADY_ACTIVE", nil
 	}
 	e.state[sessionID] = "active"
 	return "ACTIVATED", nil
@@ -267,7 +238,7 @@ func (e *fakeEnforcement) activateCount() int {
 	return len(e.activated)
 }
 
-// sysWriter builds a writer with BOTH enforcement halves wired, as netd's main does.
+// sysWriter builds a writer with both enforcement halves wired.
 func sysWriter(tc *fakeTC, g *fakeGate, gens *fakeGenerations, origins *fakeOrigins, enf *fakeEnforcement) *phase3Shaping {
 	p := liveWriter(tc)
 	p.generations = gens
@@ -284,8 +255,7 @@ func sysSetup() (*fakeTC, *fakeGate, *fakeGenerations, *fakeOrigins, *fakeEnforc
 	return tc, g, gens, origins, enf, sysWriter(tc, g, gens, origins, enf)
 }
 
-// assertNoUnaccountedAccess is THE system invariant: a guest is never authorized at the packet gate without a
-// verified, accountable tc class. Every failure test asserts it.
+// assertNoUnaccountedAccess asserts no guest is authorized without a verified tc class.
 func assertNoUnaccountedAccess(t *testing.T, tc *fakeTC, g *fakeGate) {
 	t.Helper()
 	for _, e := range mustList(t, g) {
@@ -309,10 +279,7 @@ func mustList(t *testing.T, g *fakeGate) []gateElem {
 	return els
 }
 
-// ---- the failure matrix: no half-enforced guest ever reaches the internet ----
-
-// Every stage that can fail BEFORE the gate is reached must leave the guest unauthorized. This is the test the
-// tc-only suite could not express: it asserts on the packet-authorization gate, not on tc.
+// Every stage that can fail before the gate must leave the guest unauthorized.
 func TestSystem_NoAuthorizationWhenAnyEarlierStageFails(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -352,7 +319,6 @@ func TestSystem_NoAuthorizationWhenAnyEarlierStageFails(t *testing.T) {
 			if g.count() != 0 {
 				t.Fatalf("the guest was AUTHORIZED despite %s — internet access without accountable metering", c.name)
 			}
-			// the gate must not even have been attempted: authorization comes after tc is proven
 			for _, call := range g.callLog() {
 				if len(call) > 9 && call[:9] == "authorize" {
 					t.Fatalf("authorization was attempted before tc was proven (%s)", c.name)
@@ -372,8 +338,7 @@ func TestSystem_NoAuthorizationWhenAnyEarlierStageFails(t *testing.T) {
 	}
 }
 
-// nft Allow fails AFTER tc succeeded. The tc work must be rolled back and the Session must not be active —
-// otherwise a metered-but-unauthorized class lingers and the guest is told nothing.
+// nft Allow failing after tc succeeded must roll tc back and leave the Session inactive.
 func TestSystem_AuthorizationFailureRollsBackTC(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	g.failAllow[provIP] = errors.New("nft add element failed")
@@ -397,7 +362,7 @@ func TestSystem_AuthorizationFailureRollsBackTC(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// nft Allow returns SUCCESS but did not take. Verification must catch it and fail closed.
+// An Allow that reports success but did not take must be caught by verification.
 func TestSystem_SilentlyIgnoredAuthorizationIsCaughtByVerification(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	g.allowSilentlyIgnored[provIP] = true
@@ -414,8 +379,7 @@ func TestSystem_SilentlyIgnoredAuthorizationIsCaughtByVerification(t *testing.T)
 	}
 }
 
-// nft Allow TOOK EFFECT but its result was lost. The retry must converge on exactly one authorization and one
-// active Session — no second Entitlement, generation, origin or element.
+// An Allow that took effect but lost its result must converge on one authorization and one active Session on retry.
 func TestSystem_LostAuthorizationResultRetryConvergesExactlyOnce(t *testing.T) {
 	tc, g, gens, origins, enf, p := sysSetup()
 	g.loseAllowResult[provIP] = true
@@ -425,10 +389,8 @@ func TestSystem_LostAuthorizationResultRetryConvergesExactlyOnce(t *testing.T) {
 	if res.Shaped != 0 || !res.Degraded {
 		t.Fatalf("a lost authorization result was treated as success: %+v", res)
 	}
-	// fail-closed removed the element it could not confirm, so nothing is authorized-but-unmetered
 	assertNoUnaccountedAccess(t, tc, g)
 
-	// the command now behaves; the SAME plan is retried
 	delete(g.loseAllowResult, provIP)
 	res2, _ := p.submit(context.Background(), plan, time.Now())
 	if res2.Shaped != 1 || res2.Degraded {
@@ -454,8 +416,7 @@ func TestSystem_LostAuthorizationResultRetryConvergesExactlyOnce(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// A CRASH between origin registration and tc activation. The next reconciliation must converge without a
-// second generation or origin, and the guest must never have been authorized in the meantime.
+// A crash between origin registration and tc activation converges without a second generation or origin.
 func TestSystem_CrashAfterOriginBeforeActivationConverges(t *testing.T) {
 	tc, g, gens, origins, enf, p := sysSetup()
 	tc.failActivate[provIP] = errors.New("crash before activation")
@@ -466,10 +427,9 @@ func TestSystem_CrashAfterOriginBeforeActivationConverges(t *testing.T) {
 		t.Fatal("the guest was authorized before tc activation")
 	}
 
-	// the process restarts: in-memory state is lost, durable state and the kernel are not
 	delete(tc.failActivate, provIP)
 	restarted := sysWriter(tc, g, gens, origins, enf)
-	restarted.pending = p.pending // a restart re-reads durable state; the pending generation is recoverable
+	restarted.pending = p.pending
 	res, _ := restarted.submit(context.Background(), plan, time.Now())
 	if res.Shaped != 1 || res.Degraded {
 		t.Fatalf("the post-crash reconciliation did not converge: %+v", res)
@@ -480,15 +440,13 @@ func TestSystem_CrashAfterOriginBeforeActivationConverges(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// A CRASH after tc activation but before nft Allow. The kernel has a metered class and no authorization —
-// which is SAFE (the guest simply has no internet) — and the next pass must complete the admission.
+// A crash after tc activation but before nft Allow is safe (no internet) and the next pass completes admission.
 func TestSystem_CrashAfterTCBeforeAuthorizationIsSafeAndConverges(t *testing.T) {
 	tc, g, gens, origins, enf, p := sysSetup()
 	g.failAllow[provIP] = errors.New("crash before nft")
 	plan := oneLive(1, provIP, 8000, 3000)
 
 	_, _ = p.submit(context.Background(), plan, time.Now())
-	// the intermediate state is safe by construction: no authorization exists
 	if g.count() != 0 {
 		t.Fatal("an authorization survived a crash before the gate step")
 	}
@@ -509,16 +467,13 @@ func TestSystem_CrashAfterTCBeforeAuthorizationIsSafeAndConverges(t *testing.T) 
 	}
 }
 
-// A CRASH after nft Allow but before the durable ACTIVE acknowledgement. Enforcement is correct and proven;
-// only the status write was lost. The retry must promote the Session WITHOUT tearing down working access.
+// A lost ACTIVE acknowledgement must be promoted on retry without tearing down working access.
 func TestSystem_CrashAfterAuthorizationBeforeAckPromotesOnRetry(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	enf.err = errors.New("connection lost before the ack")
 	plan := oneLive(1, provIP, 8000, 3000)
 
 	res, _ := p.submit(context.Background(), plan, time.Now())
-	// The kernel is correct: metered AND authorized. Only bookkeeping failed, so it is reported degraded but
-	// the guest is NOT torn down — that would turn a status-write problem into an outage.
 	if !res.Degraded {
 		t.Fatal("a failed activation ack was not reported")
 	}
@@ -537,14 +492,12 @@ func TestSystem_CrashAfterAuthorizationBeforeAckPromotesOnRetry(t *testing.T) {
 	}
 }
 
-// A REBOOT during any transitional state: the kernel is empty, so nothing is authorized and nothing is
-// metered. The next plan provisions cleanly with a strictly newer generation.
+// After a reboot mid-transition nothing is authorized, and the next plan provisions cleanly.
 func TestSystem_RebootDuringTransitionLeavesNothingAuthorized(t *testing.T) {
 	tc, g, gens, origins, enf, p := sysSetup()
 	g.failAllow[provIP] = errors.New("crash mid-admission")
 	_, _ = p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now())
 
-	// reboot: kernel state (both halves) is gone
 	tc.wipe()
 	g.mu.Lock()
 	g.authorized = map[string]bool{}
@@ -562,10 +515,7 @@ func TestSystem_RebootDuringTransitionLeavesNothingAuthorized(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// ---- teardown ordering ------------------------------------------------------
-
-// An ENDED entitlement must lose PACKET ACCESS FIRST, and before tc is touched. The reverse order would leave
-// a guest online because a tc delete failed.
+// An ended entitlement loses packet access before tc is touched; the reverse could leave a guest online if tc delete fails.
 func TestSystem_TeardownDeniesAccessBeforeTC(t *testing.T) {
 	tc, g, _, _, enf, p := sysSetup()
 	if _, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now()); err != nil {
@@ -575,7 +525,6 @@ func TestSystem_TeardownDeniesAccessBeforeTC(t *testing.T) {
 		t.Fatal("setup: the guest was never authorized")
 	}
 
-	// the entitlement ends: the same session, no longer entitled
 	tear := envelopeOn([]string{"br-guest"}, 2,
 		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-1", IP: provIP, Bridge: "br-guest", Entitled: false})
 	res, _ := p.submit(context.Background(), tear, time.Now())
@@ -591,7 +540,6 @@ func TestSystem_TeardownDeniesAccessBeforeTC(t *testing.T) {
 	if enf.sessionState("live-1") != "ended" {
 		t.Fatalf("durable state did not converge: %s", enf.sessionState("live-1"))
 	}
-	// ORDER: the revoke must precede any tc deletion for this address.
 	calls := g.callLog()
 	if len(calls) == 0 || calls[len(calls)-1] != "revoke br-guest|"+provIP {
 		t.Fatalf("no revocation was issued: %v", calls)
@@ -601,7 +549,6 @@ func TestSystem_TeardownDeniesAccessBeforeTC(t *testing.T) {
 	for _, c := range tcCalls {
 		if c.op == "delete" && c.ip == provIP {
 			if !revokeSeen {
-				// the gate call log is separate; assert ordering via the gate having already revoked
 				if g.isAuthorized("br-guest", provIP) {
 					t.Fatal("tc teardown ran while the guest was still authorized")
 				}
@@ -611,7 +558,7 @@ func TestSystem_TeardownDeniesAccessBeforeTC(t *testing.T) {
 	}
 }
 
-// A tc deletion failure AFTER access is denied is degraded CLEANUP, never continued guest access.
+// A tc deletion failure after access is denied is degraded cleanup, not continued access.
 func TestSystem_TCTeardownFailureAfterDenialIsNotContinuedAccess(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
 	if _, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now()); err != nil {
@@ -630,7 +577,7 @@ func TestSystem_TCTeardownFailureAfterDenialIsNotContinuedAccess(t *testing.T) {
 	}
 }
 
-// If revocation itself cannot be proven, that is the most serious outcome and must be reported as such.
+// An unproven revocation is the most serious outcome and must be reported.
 func TestSystem_UnprovenRevocationIsReportedNotSwallowed(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
 	if _, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now()); err != nil {
@@ -664,13 +611,10 @@ func contains(s, sub string) bool {
 	return false
 }
 
-// ---- reconciliation over BOTH halves ---------------------------------------
-
-// A stray Phase-3 authorization — one no live session claims, left by a crash — must be found and removed.
-// A stray nft element is worse than a stray tc class: it keeps a guest ONLINE.
+// A stray Phase-3 authorization no live session claims must be removed; unlike a stray tc class it keeps a guest online.
 func TestSystem_StrayAuthorizationIsRemoved(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
-	g.put("br-guest", "10.0.0.77") // nothing in any plan claims this
+	g.put("br-guest", "10.0.0.77")
 
 	res, _ := p.submit(context.Background(), envelopeOn([]string{"br-guest"}, 1), time.Now())
 	if g.isAuthorized("br-guest", "10.0.0.77") {
@@ -682,15 +626,13 @@ func TestSystem_StrayAuthorizationIsRemoved(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// THE LEGACY-SAFETY PROPERTY. Phase-3 reconciliation must never remove a legacy authorization. The gate can
-// only ever enumerate and mutate the Phase-3 set, so a legacy entry is not merely skipped — it is unreachable.
+// Phase-3 reconciliation must never remove a legacy authorization; the gate can only reach the Phase-3 set.
 func TestSystem_LegacyAuthorizationIsNeverTouched(t *testing.T) {
 	_, g, _, _, _, p := sysSetup()
-	// A legacy guest lives in the OTHER set. Modelled as a separate map the Phase-3 gate has no access to,
-	// exactly as auth_ipv4 is a different nft set from phase3_auth_ipv4.
+	// Legacy guests live in a separate set (auth_ipv4 vs phase3_auth_ipv4) the Phase-3 gate cannot access.
 	legacyAuth := map[string]bool{"br-guest|10.0.0.200": true}
 
-	g.put("br-guest", "10.0.0.77") // a Phase-3 stray, which SHOULD go
+	g.put("br-guest", "10.0.0.77")
 	res, _ := p.submit(context.Background(), envelopeOn([]string{"br-guest"}, 1), time.Now())
 
 	if !legacyAuth["br-guest|10.0.0.200"] {
@@ -702,7 +644,6 @@ func TestSystem_LegacyAuthorizationIsNeverTouched(t *testing.T) {
 	if res.Degraded {
 		t.Fatalf("stray removal should be clean: %+v", res)
 	}
-	// And structurally: every gate call names only Phase-3 addresses.
 	for _, c := range g.callLog() {
 		if contains(c, "10.0.0.200") {
 			t.Fatalf("the Phase-3 gate touched a legacy address: %s", c)
@@ -710,8 +651,7 @@ func TestSystem_LegacyAuthorizationIsNeverTouched(t *testing.T) {
 	}
 }
 
-// A re-rate keeps BOTH the authorization and the accounting epoch. Changing a guest's speed must not
-// interrupt their internet or restart their counter series.
+// A re-rate keeps both the authorization and the accounting epoch.
 func TestSystem_ReRateKeepsAuthorizationAndEpoch(t *testing.T) {
 	_, g, gens, origins, enf, p := sysSetup()
 	if _, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now()); err != nil {
@@ -739,8 +679,7 @@ func TestSystem_ReRateKeepsAuthorizationAndEpoch(t *testing.T) {
 	}
 }
 
-// The successful path, asserted as an ORDERING: tc is proven before the gate is opened, and the Session is
-// promoted only after both.
+// tc is proven before the gate opens, and the Session is promoted only after both.
 func TestSystem_HappyPathOrdersMeteringBeforeAdmission(t *testing.T) {
 	tc, g, _, origins, enf, p := sysSetup()
 	res, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now())
@@ -770,7 +709,6 @@ func TestSystem_HappyPathOrdersMeteringBeforeAdmission(t *testing.T) {
 		t.Fatal("the Session was not promoted to active")
 	}
 	assertNoUnaccountedAccess(t, tc, g)
-	// converged means BOTH halves
 	if !p.hasConverged {
 		t.Fatal("a fully enforced session did not record convergence")
 	}
@@ -780,15 +718,12 @@ func TestSystem_HappyPathOrdersMeteringBeforeAdmission(t *testing.T) {
 	}
 }
 
-// THE DEFAULT-CLASS BYPASS, asserted directly: at no point in a successful provisioning is the guest
-// authorized while the classifying filter is absent. This walks the recorded call order rather than the end
-// state, because the dangerous window is transient by nature.
+// The default-class bypass window is transient, so this checks the call order as well as the end state.
 func TestSystem_NoDefaultClassBypassWindowDuringProvisioning(t *testing.T) {
 	tc, g, _, _, _, p := sysSetup()
 	if _, err := p.submit(context.Background(), oneLive(1, provIP, 8000, 3000), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// Replay: find when the gate was opened and when tc began classifying.
 	authIdx := -1
 	for i, c := range g.callLog() {
 		if c == "authorize br-guest|"+provIP {
@@ -808,16 +743,13 @@ func TestSystem_NoDefaultClassBypassWindowDuringProvisioning(t *testing.T) {
 	if activateIdx < 0 {
 		t.Fatal("tc classification was never activated")
 	}
-	// The gate call happened after ActivateSession returned, which the code guarantees by sequencing; assert
-	// the resulting state is coherent — authorized AND classifying.
 	if !tc.hasForwarding("br-guest", 0x1001) {
 		t.Fatal("the authorized guest has no classifying filter — default-class bypass")
 	}
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// Idempotency under concurrency: 24 retries of the same plan converge on exactly one authorization, one
-// generation, one origin epoch and one active Session.
+// 24 concurrent retries of one plan converge on one authorization, generation, origin epoch and active Session.
 func TestSystem_ConcurrentRetriesConvergeExactlyOnce(t *testing.T) {
 	tc, g, gens, origins, enf, p := sysSetup()
 	plan := oneLive(1, provIP, 8000, 3000)
@@ -849,7 +781,7 @@ func TestSystem_ConcurrentRetriesConvergeExactlyOnce(t *testing.T) {
 	assertNoUnaccountedAccess(t, tc, g)
 }
 
-// A DARK appliance authorizes nobody, whatever it is sent.
+// A dark appliance authorizes nobody.
 func TestSystem_DarkApplianceNeverAuthorizes(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := &phase3Shaping{shp: tc, gate: g, mode: phase3Mode{Active: false},

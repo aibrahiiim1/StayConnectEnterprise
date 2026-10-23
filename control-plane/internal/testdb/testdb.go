@@ -1,15 +1,5 @@
-// Package testdb gives a database integration test its own throw-away copy of a fully migrated Central
-// schema.
-//
-// CTRLAPI_TEST_DB_URL names a database that central-migrate.sh has brought fully up to date (the template).
-// Each test gets a fresh database created FROM that template, so tests in different packages -- which `go
-// test ./...` runs in parallel -- never see each other's rows, and the template itself is never written to.
-// Without the variable the test is skipped: these tests need a real Postgres/TimescaleDB, never a stand-in.
-//
-//	docker run -d --name sc-stream7-pg -e POSTGRES_USER=stayconnect -e POSTGRES_PASSWORD=stream7 \
-//	    -e POSTGRES_DB=stayconnect -p 127.0.0.1:55407:5432 timescale/timescaledb:2.16.1-pg16
-//	deploy/scripts/central-migrate.sh --pg-exec "docker exec -i sc-stream7-pg" --db stayconnect up
-//	CTRLAPI_TEST_DB_URL=postgres://stayconnect:stream7@127.0.0.1:55407/stayconnect?sslmode=disable go test ./...
+// Package testdb gives each test a throw-away copy of a migrated Central database, created from the template
+// named by CTRLAPI_TEST_DB_URL; without it the test is skipped.
 package testdb
 
 import (
@@ -27,13 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// EnvVar is the template database URL.
 const EnvVar = "CTRLAPI_TEST_DB_URL"
 
-// CREATE DATABASE ... TEMPLATE needs the template to have no other session; serialise the copies.
+// CREATE DATABASE ... TEMPLATE needs the template idle, so copies are serialised.
 var createMu sync.Mutex
 
-// New returns a pool on a fresh copy of the template database, dropped when the test ends.
 func New(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	base := os.Getenv(EnvVar)

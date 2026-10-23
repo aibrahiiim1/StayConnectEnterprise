@@ -8,26 +8,11 @@ import (
 	"strings"
 )
 
-// FINANCIAL OBSERVABILITY (WS-I).
-//
-// The design constraint is stated as a prohibition -- no guest PII, no card data, no credentials, no
-// provider payloads, no raw PMS material in metrics, logs or audit output -- and the cheapest way to honour
-// a prohibition is to make the forbidden thing unrepresentable rather than to filter for it.
-//
-// So every field below is a COUNT, an AGE IN SECONDS, or a fixed enumerated word. There is no field of type
-// "string supplied by something else": no identifiers, no reasons, no messages, no folio numbers, no
-// provider bodies. A reader learns that seven postings are stuck and the oldest has been waiting nineteen
-// minutes; it cannot learn whose.
-//
-// That is a real guarantee about SHAPE, and it is worth being precise about what it is not. It does not
-// make leakage impossible for all time -- someone could add a string field tomorrow. The redaction test
-// exists for exactly that reason: it seeds recognisable secrets and guest data into the underlying rows and
-// asserts they cannot be found anywhere in the serialised output, and it is shown to FAIL against a build
-// where a raw field has been added back.
+// No guest PII, card data, credentials, provider payloads or raw PMS material in metrics, logs or audit output: every
+// field is a count, an age in seconds or a fixed enumerated word, so the forbidden data is unrepresentable.
+// The redaction test seeds secrets into the rows and asserts they cannot be found in the serialised output.
 
-// FinancialHealth is the complete operational picture of one site's financial subsystem.
 type FinancialHealth struct {
-	// --- posting rail -------------------------------------------------------
 	OutboxQueued     int `json:"outbox_queued"`
 	OutboxInFlight   int `json:"outbox_in_flight"`
 	OutboxHeld       int `json:"outbox_held_recovery"`
@@ -36,36 +21,30 @@ type FinancialHealth struct {
 	ReviewQueueOpen  int `json:"review_queue_open"`
 	ReviewOldestAgeS int `json:"review_oldest_age_seconds"`
 
-	// --- payment rail -------------------------------------------------------
 	PaymentsCreated    int `json:"payments_created"`
 	PaymentsPending    int `json:"payments_pending"`
 	PaymentsUnknown    int `json:"payments_unknown"`
 	PaymentsOldestAgeS int `json:"payments_oldest_age_seconds"`
 
-	// --- settlement ---------------------------------------------------------
 	SettlementsRequired     int `json:"settlements_required"`
 	SettlementsInProgress   int `json:"settlements_in_progress"`
 	SettlementsManualReview int `json:"settlements_manual_review"`
 	SettlementsFailed       int `json:"settlements_failed"`
 
-	// --- recovery -----------------------------------------------------------
 	RecoveryActive    bool  `json:"recovery_active"`
 	RecoveryEpoch     int64 `json:"recovery_epoch"`
 	RecoveryHoldsOpen int   `json:"recovery_holds_open"`
 
-	// --- configuration posture ---------------------------------------------
 	PaymentAccountConfigured bool `json:"payment_account_configured"`
 	ProviderEgressEnabled    bool `json:"provider_egress_enabled"`
 
-	// Status is one of OK, DEGRADED, ATTENTION_REQUIRED, HELD. It is a fixed word, never a message.
+	// Status is a fixed word (OK, DEGRADED, ATTENTION_REQUIRED, HELD), never a message.
 	Status string `json:"status"`
-	// Reasons are fixed enumerated codes explaining Status, so an alert can be actionable without any
-	// free text. Each is drawn from the closed set below and nothing else can appear here.
+	// Reasons are fixed codes from the closed set below; no free text.
 	Reasons []string `json:"reasons"`
 }
 
-// The closed vocabulary. A reason that is not in this list cannot be emitted, because AddReason is the only
-// way to add one and it refuses anything unknown.
+// The vocabulary is closed: AddReason refuses unknown codes.
 const (
 	ReasonRecoveryHeld       = "FINANCIAL_RECOVERY_MODE"
 	ReasonUnknownOutcomes    = "UNKNOWN_OUTCOMES_AWAITING_REVIEW"
@@ -84,7 +63,7 @@ var knownReasons = map[string]bool{
 
 func (h *FinancialHealth) addReason(code string) {
 	if !knownReasons[code] {
-		return // an unknown code is dropped rather than emitted; the vocabulary is closed on purpose
+		return
 	}
 	for _, r := range h.Reasons {
 		if r == code {
@@ -94,16 +73,14 @@ func (h *FinancialHealth) addReason(code string) {
 	h.Reasons = append(h.Reasons, code)
 }
 
-// Thresholds at which a condition becomes worth an operator's attention. They are constants rather than
-// configuration because a tunable threshold is a threshold somebody turns off.
+// Thresholds are constants, not configuration: a tunable threshold is one somebody turns off.
 const (
-	outboxStalledSeconds  = 900  // 15 minutes queued is no longer "in progress"
-	reviewBacklogSeconds  = 3600 // an hour unreviewed
-	paymentStuckSeconds   = 600  // a payment PENDING for ten minutes is not in flight, it is stranded
+	outboxStalledSeconds  = 900
+	reviewBacklogSeconds  = 3600
+	paymentStuckSeconds   = 600
 	reviewBacklogCountMax = 25
 )
 
-// Health reads the complete financial picture for a site in one round trip.
 func (e *Engine) Health(ctx context.Context, tenantID, siteID string) (FinancialHealth, error) {
 	var h FinancialHealth
 	err := e.pool.QueryRow(ctx, `
@@ -162,8 +139,7 @@ SELECT ob.queued::int, ob.inflight::int, ob.held::int, ob.oldest::int,
 	return h, nil
 }
 
-// classify turns counts into an actionable status. HELD outranks everything: a site in recovery is not
-// "degraded", it is deliberately stopped, and an operator needs to know the difference immediately.
+// HELD outranks everything: a site in recovery is deliberately stopped, not degraded.
 func (h *FinancialHealth) classify() {
 	h.Status = "OK"
 	worst := 0
@@ -199,11 +175,8 @@ func (h *FinancialHealth) classify() {
 	}
 }
 
-// PrometheusText renders the health as Prometheus exposition text.
-//
-// Note the absence of labels carrying identifiers. A metric labelled with a guest id or a folio number puts
-// that identifier into every scrape, every alert and every dashboard, and metrics stores are rarely
-// protected like a financial database is.
+// No labels carry identifiers: they would reach every scrape, alert and dashboard, and metrics stores are less
+// protected than a financial database.
 func (h FinancialHealth) PrometheusText(prefix string) string {
 	var b strings.Builder
 	m := func(name string, v int) {
@@ -241,16 +214,13 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// JSON renders the health for an operator API.
 func (h FinancialHealth) JSON() ([]byte, error) { return json.Marshal(h) }
 
-// identifierLike matches the shapes an identifier takes in this system: a uuid, a client reference, a long
-// opaque token. It exists for the redaction test, which asserts that NONE of them can appear in output.
+// identifierLike exists for the redaction test, which asserts none of these shapes appear in output.
 var identifierLike = regexp.MustCompile(
-	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}` + // uuid
-		`|sc_[0-9a-f]{32}` + // client reference
-		`|\bacct_[A-Za-z0-9]{6,}`) // merchant account reference
+	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}` +
+		`|sc_[0-9a-f]{32}` +
+		`|\bacct_[A-Za-z0-9]{6,}`)
 
-// ContainsIdentifier reports whether a rendered output carries anything identifier-shaped. The operator
-// surface and the metrics endpoint both assert this on their own output before returning it.
+// ContainsIdentifier: the operator surface and metrics endpoint assert this on their own output before returning it.
 func ContainsIdentifier(s string) bool { return identifierLike.MatchString(s) }

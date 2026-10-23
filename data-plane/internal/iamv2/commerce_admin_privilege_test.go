@@ -1,21 +1,7 @@
 package iamv2
 
-// THE PACKAGE LIST MUST ONLY READ WHAT svc_edged IS ALLOWED TO READ.
-//
-// This reproduces a real PRE-LIVE failure. The operator's package screen returned HTTP 500 and Hotel Admin
-// showed "List failed", because the list query counted rows in iam_v2.package_eligibility_rules and
-// iam_v2.package_grant_tiers. edged AUTHORS both tables — through the controlled SECURITY DEFINER writers —
-// and holds no SELECT on either, so the statement died with "permission denied for table
-// package_eligibility_rules" under the real runtime role while passing in every test, which runs as a
-// superuser.
-//
-// A privilege-guarded CASE does not fix it: PostgreSQL resolves permissions for every relation a statement
-// references, whichever branch would execute. The only correct fix without a grant is not to reference them,
-// so this asserts on the statement itself. It is the cheapest test that would have caught the outage, and it
-// keeps working with no database at all.
-//
-// If svc_edged is later granted SELECT on both tables, this test is what must be revisited first — deliberately,
-// rather than by someone quietly re-adding a subquery.
+// The package list must only read what svc_edged may read: it has no SELECT on package_eligibility_rules or package_grant_tiers.
+// Postgres checks permissions on every referenced relation even in an unexecuted CASE branch, and tests run as superuser, so this asserts on the statement text.
 
 import (
 	"errors"
@@ -26,8 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// deniedToEdged are the iam_v2 tables the Hotel-Admin service writes through controlled operations but may
-// not read back. Naming them here rather than in a comment is what makes the assertion below enforceable.
+// deniedToEdged are the iam_v2 tables edged writes through controlled operations but may not read.
 var deniedToEdged = []string{
 	"package_eligibility_rules",
 	"package_grant_tiers",
@@ -59,8 +44,7 @@ func TestPackageListQueryTouchesNoTableEdgedCannotRead(t *testing.T) {
 	}
 }
 
-// The list must still project what the screen is for, so removing the denied reads cannot be "fixed" by
-// quietly dropping everything else with them.
+// The list must still project what the screen needs.
 func TestPackageListStillProjectsWhatTheOperatorNeeds(t *testing.T) {
 	sql := withoutSQLComments(packagesListSQL())
 	for _, needed := range []string{
@@ -73,12 +57,7 @@ func TestPackageListStillProjectsWhatTheOperatorNeeds(t *testing.T) {
 	}
 }
 
-// CLASSIFYING THE DENIAL, WHEREVER pgx REPORTS IT.
-//
-// The first fix wrapped only the error returned by Query. pgx surfaces a denied SELECT when the rows are
-// DRAINED — from rows.Err() — so the real condition came back unwrapped and the operator was told "no current
-// configuration for this package": a missing-package message for a permission problem. These cases pin the
-// classifier itself, which is the part that was wrong.
+// pgx reports a denied SELECT from rows.Err() when rows are drained, not only from Query; the classifier must catch both.
 func TestWrapIfDenied(t *testing.T) {
 	if got := wrapIfDenied(nil); got != nil {
 		t.Fatalf("nil became %v", got)
@@ -100,12 +79,7 @@ func TestWrapIfDenied(t *testing.T) {
 	}
 }
 
-// LOADING A PACKAGE'S CONDITIONS MUST GO THROUGH THE SCOPED READER, NOT THE TABLES.
-//
-// Package Edit needs the current eligibility rules and grant tiers before it can republish, and svc_edged
-// holds INSERT on both tables and SELECT on neither. Reading them directly is what produced the 500 on the
-// list and, once that was fixed, a misleading "no current configuration" on Edit. The conditions now come
-// from iam_v2.p2_package_current_conditions, and this asserts the path never regresses to the tables.
+// Package conditions must load through iam_v2.p2_package_current_conditions: svc_edged has INSERT but no SELECT on the tables.
 func TestPackageConditionsAreReadThroughTheScopedReader(t *testing.T) {
 	sql := withoutSQLComments(packageConditionsSQL())
 	for _, table := range deniedToEdged {
@@ -119,9 +93,7 @@ func TestPackageConditionsAreReadThroughTheScopedReader(t *testing.T) {
 	}
 }
 
-// THE SCOPE IS THE FUNCTION'S, NOT THE CALLER'S. Three arguments — tenant, site, package — and deliberately
-// no revision argument: the current revision is resolved inside the function, so no argument exists that
-// could reach a historical one.
+// The function takes tenant, site and package only: the revision is resolved inside, so no argument can reach a historical one.
 func TestScopedReaderTakesTenantSiteAndPackageOnly(t *testing.T) {
 	sql := withoutSQLComments(packageConditionsSQL())
 	for _, arg := range []string{"$1::uuid", "$2::uuid", "$3::uuid"} {

@@ -7,19 +7,7 @@ import (
 	"time"
 )
 
-// parseJSON decodes the output of `nft -j list set …`.
-//
-// Example:
-//
-//	{ "nftables": [
-//	    { "metainfo": {...} },
-//	    { "set": {
-//	        "family":"inet","name":"auth_ipv4","table":"stayconnect",
-//	        "elem": [
-//	          { "elem": { "val":"10.10.0.100", "timeout":3600, "expires":3550 } }
-//	        ]
-//	    }}
-//	]}
+// parseJSON decodes the output of `nft -j list set`.
 func parseJSON(raw []byte) ([]Element, error) {
 	var root struct {
 		Nftables []map[string]any `json:"nftables"`
@@ -49,18 +37,10 @@ func parseJSON(raw []byte) ([]Element, error) {
 					inner = v
 				}
 				el := Element{}
-				// THE TWO SHAPES nft ACTUALLY EMITS.
-				//
-				// An element with stateful attributes (a timeout, an expiry, a counter) is wrapped:
-				//   {"elem": {"val": {"concat": ["br-g20","10.20.0.100"]}, "timeout": 90, "expires": 47}}
-				// An element with NONE — which is what a permanent authorization is — carries no wrapper and
-				// no "val" at all:
-				//   {"concat": ["br-g20","10.20.0.100"]}
-				//
-				// Reading only the first shape made every permanent concatenated element INVISIBLE to List and
-				// therefore to Authorized and Deny: a legacy guest could not be enumerated, and a Deny for one
-				// silently did nothing. The real-kernel suite is what surfaced it — the modelled tests all fed
-				// the wrapped shape, because that is the shape the code already understood.
+				// The two shapes nft emits: an element with stateful attributes is wrapped
+				// ({"elem": {"val": {"concat": [...]}, "timeout": 90, "expires": 47}}); one with none (a permanent authorization) is
+				// bare ({"concat": [...]}). Reading only the first shape made permanent concatenated elements invisible to List,
+				// Authorized and Deny.
 				value, hasVal := inner["val"]
 				if !hasVal {
 					value = inner
@@ -71,9 +51,8 @@ func parseJSON(raw []byte) ([]Element, error) {
 				case map[string]any:
 					if parts, ok := val["concat"].([]any); ok {
 						for _, p := range parts {
-							// A port-restricted garden element is `address . service`: the service arrives as a JSON
-							// number. Without reading it, a carry-over would re-add a bare address to a concatenated
-							// set and the whole structural replace would be refused by nft.
+							// A port-restricted garden element is `address . service` with the service as a JSON number; without it a carry-over
+							// would re-add a bare address and nft would refuse the replace.
 							if n, ok := p.(float64); ok && n > 0 && n <= 65535 {
 								el.Port = int(n)
 								continue
@@ -90,8 +69,7 @@ func parseJSON(raw []byte) ([]Element, error) {
 				if t, ok := inner["timeout"].(float64); ok {
 					el.Timeout = time.Duration(t) * time.Second
 				}
-				// "expires" is the REMAINING lease. It is what a renewal decision must read: an element with a
-				// 90s timeout says nothing about whether it is about to disappear.
+				// "expires" is the remaining lease, which renewal decisions must read.
 				if x, ok := inner["expires"].(float64); ok {
 					el.Expires = time.Duration(x) * time.Second
 				}
@@ -104,6 +82,5 @@ func parseJSON(raw []byte) ([]Element, error) {
 	return out, nil
 }
 
-// ParseSetJSON exposes the set-listing parser so other packages can read `nft -j list set` output without
-// duplicating the shape of it. One parser means one place where a change in nft's JSON has to be handled.
+// ParseSetJSON exposes the set-listing parser so other packages share one parser of nft's JSON.
 func ParseSetJSON(raw []byte) ([]Element, error) { return parseJSON(raw) }

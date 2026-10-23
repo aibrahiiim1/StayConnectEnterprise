@@ -8,17 +8,11 @@ import (
 	"time"
 )
 
-// GDPR plan C10 (migration 0132, decision D-C10): the Admin Console signs in with a password AND an authenticator
-// code, set up at the first sign-in with ten recovery codes; wrong codes are throttled and audited; sessions end
-// when idle or old, and the console's background check is not activity; an administrator can reset a colleague's
-// second step; the limits are an audited setting.
-
 func TestIntegrationMFA_FirstSignInSetsUpTheAppThenEveryOneAsksForTheCode(t *testing.T) {
 	sf := newSigninAPI(t, "site_admin")
 	ip := testIP()
 	since := time.Now().Add(-time.Second)
 
-	// The password alone opens nothing.
 	first := sf.passwordStep(t, sf.email, sf.password, ip)
 	if first.code != 200 || first.body["second_step"] != "enrol" || first.cookie != "" || first.pending == "" {
 		t.Fatalf("password step = %d %s cookie=%q", first.code, first.raw, first.cookie)
@@ -26,7 +20,6 @@ func TestIntegrationMFA_FirstSignInSetsUpTheAppThenEveryOneAsksForTheCode(t *tes
 	if r := sf.call(t, "GET", "/auth/whoami", ip, first.pending, nil, nil); r.code != 401 {
 		t.Fatalf("the pending sign-in reached the console: %d", r.code)
 	}
-	// Without the pending cookie there is no second step.
 	if r := sf.codeStep(t, "", "123456", ip); r.code != 401 || r.body["error"] != "signin_expired" {
 		t.Fatalf("code without a password step = %d %s", r.code, r.raw)
 	}
@@ -53,12 +46,10 @@ func TestIntegrationMFA_FirstSignInSetsUpTheAppThenEveryOneAsksForTheCode(t *tes
 		r.body["recovery_codes_left"] != float64(10) {
 		t.Fatalf("own two-step state = %d %s", r.code, r.raw)
 	}
-	// The pending sign-in was used up.
 	if r := sf.codeStep(t, first.pending, sf.mfa.codeFor(sf.operator), ip); r.code != 401 {
 		t.Fatalf("a used pending sign-in opened a second session: %d", r.code)
 	}
 
-	// From now on: the password, then the code.
 	again := sf.passwordStep(t, sf.email, sf.password, ip)
 	if again.body["second_step"] != "code" {
 		t.Fatalf("second sign-in = %s", again.raw)
@@ -66,7 +57,6 @@ func TestIntegrationMFA_FirstSignInSetsUpTheAppThenEveryOneAsksForTheCode(t *tes
 	if r := sf.call(t, "POST", "/auth/login/enrol", ip, "", nil, map[string]string{"pending": again.pending}); r.code != 409 {
 		t.Fatalf("set-up offered to an operator who has an app: %d", r.code)
 	}
-	// A recovery code works once.
 	rc := codes[0].(string)
 	if r := sf.codeStep(t, again.pending, rc, ip); r.code != 200 || r.cookie == "" || r.body["recovery_codes_left"] != float64(9) {
 		t.Fatalf("recovery code = %d %s", r.code, r.raw)
@@ -129,12 +119,10 @@ func TestIntegrationMFA_SessionsEndWhenIdleOrOldAndTheBackgroundCheckIsNotActivi
 	if w := sf.call(t, "GET", "/operators", ip, r.cookie, nil, nil); w.code != 200 || !sess.LastSeen.After(seen) {
 		t.Fatalf("a screen did not count as activity: %d", w.code)
 	}
-	// Idle past 30 minutes: ended.
 	back(31*time.Minute, 0)
 	if w := sf.call(t, "GET", "/operators", ip, r.cookie, nil, nil); w.code != 401 {
 		t.Fatalf("an idle session was still open: %d", w.code)
 	}
-	// Active, but older than 12 hours: ended.
 	r2 := sf.login(t, sf.email, sf.password, ip)
 	s2 := sf.app.sessions.peek(r2.cookie)
 	sf.app.sessions.mu.Lock()
@@ -191,7 +179,6 @@ func TestIntegrationMFA_AnAdministratorResetsAColleagueNotThemselves(t *testing.
 	ip := testIP()
 	ctx := context.Background()
 	admin := sf.login(t, sf.email, sf.password, ip)
-	// A colleague with an app and an open session.
 	var colleague string
 	hash, _ := hashPassword("colleague-password-2026")
 	if err := sf.pool.QueryRow(ctx, `INSERT INTO operators (email, display_name, password_hash, status)
@@ -239,8 +226,7 @@ func TestIntegrationMFA_AnAdministratorResetsAColleagueNotThemselves(t *testing.
 	}
 }
 
-// D-R3: new recovery codes need the password AND a current authenticator code -- never a recovery code -- and the
-// code is throttled, audited and accepted once, like the sign-in code.
+// New recovery codes need the password and a current authenticator code (never a recovery code), throttled, audited and accepted once.
 func TestIntegrationMFA_NewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing.T) {
 	sf := newSigninAPI(t, "site_admin")
 	ip := testIP()
@@ -288,9 +274,7 @@ func TestIntegrationMFA_NewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing
 	}
 }
 
-// The code step builds the session from the account as it is THEN, not from the password step's snapshot: roles
-// and must-change changed in between are what the session gets, a password changed in between ends the sign-in,
-// and an administrator's change drops the pending sign-in outright.
+// The code step builds the session from the account as it is then, not the password step's snapshot.
 func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
 	sf := newSigninAPI(t, "site_admin")
 	ip := testIP()
@@ -300,7 +284,6 @@ func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
 		t.Fatalf("set-up sign-in = %d %s", first.code, first.raw)
 	}
 
-	// Roles and must-change changed behind the pending sign-in.
 	p := sf.passwordStep(t, sf.email, sf.password, ip)
 	if _, err := sf.pool.Exec(ctx, `DELETE FROM operator_roles WHERE operator_id=$1`, sf.operator); err != nil {
 		t.Fatal(err)
@@ -323,7 +306,6 @@ func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A password changed behind the pending sign-in ends it.
 	p = sf.passwordStep(t, sf.email, sf.password, ip)
 	other, _ := hashPassword("another-password-2026")
 	var old string
@@ -338,7 +320,6 @@ func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// An administrator's change drops it: here a role added through the Operators screen.
 	admin := sf.login(t, sf.email, sf.password, ip)
 	p = sf.passwordStep(t, sf.email, sf.password, ip)
 	if r := sf.call(t, "POST", "/operators/"+sf.operator+"/roles", ip, admin.cookie,

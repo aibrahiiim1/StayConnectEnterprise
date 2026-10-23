@@ -2,9 +2,8 @@
 
 package main
 
-// RESTORE AND RETENTION (GDPR): a restored backup must never serve personal data whose retention period has ended, whatever happens to the
-// retention run -- it fails, it times out, it is interrupted -- and whichever period was in force when the backup was taken.
-// Runs inside the restore drill (scripts/ledger-restore-drill.sh): the real restore against a real PostgreSQL.
+// Restore and retention (GDPR): a restored backup never serves personal data past its retention period. Runs inside the restore drill
+// (scripts/ledger-restore-drill.sh) against a real PostgreSQL.
 
 import (
 	"context"
@@ -16,7 +15,6 @@ import (
 	"time"
 )
 
-// seedAgedAccount is a guest account whose last sign of life is days old.
 func (d *drill) seedAgedAccount(label string, days int) {
 	d.t.Helper()
 	d.stamp++
@@ -30,7 +28,6 @@ func (d *drill) seedAgedAccount(label string, days int) {
 	d.accts[label], d.emails[label] = id, email
 }
 
-// shortenInactive sets the live inactive-identity period (the hotel changing its policy after the backup was taken).
 func (d *drill) shortenInactive(days int) {
 	d.t.Helper()
 	if _, err := d.pool.Exec(context.Background(), `SELECT iam_v2.data_retention_set($1::uuid,$2::uuid, r.pms_stay_days, r.client_activity_days, $3, r.expired_record_days,
@@ -48,8 +45,7 @@ func (d *drill) stagingDatabases() string {
 	return strings.TrimSpace(out)
 }
 
-// THE PERIOD SHORTENED AFTER THE BACKUP. The backup carries the old, longer period. The restored data is judged by the period in force NOW,
-// so an account the hotel's current policy says is expired is anonymised before the data is live -- and the hotel's current period survives.
+// The period shortened after the backup: the data is judged by the period in force now, and that period survives.
 func TestDrill_RetentionPeriodShortenedAfterTheBackupAppliesToTheRestoredData(t *testing.T) {
 	d := newDrill(t)
 	d.seedAgedAccount("old", 100) // older than the 30 days the hotel will choose, younger than the 365 default
@@ -103,8 +99,7 @@ func TestDrill_NoPeriodSetHereMeansTheDefaultsNotTheBackupsPeriod(t *testing.T) 
 	}
 }
 
-// RETENTION FAILS (or times out, or is interrupted) ON THE STAGING DATA: nothing is replaced. The live database is exactly as it was, the
-// restore marker has not moved, the staging copy of the backup's personal data is gone, and the appliance serves again.
+// Retention fails on the staging data: nothing is replaced and the appliance serves again.
 func TestDrill_RetentionThatFailsStopsTheRestoreAndReplacesNothing(t *testing.T) {
 	d := newDrill(t)
 	d.seedAgedAccount("old", 100)
@@ -208,8 +203,7 @@ func TestDrill_AnInterruptedRestoresStagingDatabaseIsSweptWhenDead(t *testing.T)
 	}
 }
 
-// A backup whose retention functions differ from the ones in force has older rules: refused, nothing replaced. (The drill's migration ledger
-// is empty, as on a factory-clean appliance, which is why the comparison is of definitions and not of a version number.)
+// A backup whose retention functions differ from those in force has older rules: refused, nothing replaced. The drill's migration ledger is empty, so definitions are compared.
 func TestDrill_ABackupWithOlderRetentionRulesIsRefused(t *testing.T) {
 	d := newDrill(t)
 	backup := d.takeBackup()
@@ -221,7 +215,6 @@ func TestDrill_ABackupWithOlderRetentionRulesIsRefused(t *testing.T) {
 	if err != nil || err2 != nil || same != live || same == "" {
 		t.Fatalf("a backup of this very schema must carry the rules in force: %q vs %q (%v %v)", same, live, err, err2)
 	}
-	// make one retention function differ, as an older implementation would
 	if _, err := execPsql(ctx, db, `ALTER FUNCTION iam_v2.run_staff_note_retention(uuid,uuid,integer) SET search_path TO 'iam_v2'`); err != nil {
 		t.Fatal(err)
 	}

@@ -8,13 +8,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// PHASE-6 OPERATOR SURFACE — the identity boundary, treated as security rather than wiring.
-//
-// The setting write takes four identities and a caller may supply NONE of them: tenant and site from this
-// process's signed assignment, the appliance from its signed identity, the operator id and label from the
-// authenticated session. This asserts the wire contract that makes that true — a request carrying any of
-// them must be REFUSED rather than parsed-and-ignored, because a silently dropped identity field looks
-// exactly like an honoured one from the caller's side.
+// The setting write takes tenant, site, appliance and operator identity from the server, never the caller:
+// a request carrying any of them must be refused, not parsed-and-ignored.
 
 func decodeSetting(body string) error {
 	dec := json.NewDecoder(strings.NewReader(body))
@@ -23,7 +18,6 @@ func decodeSetting(body string) error {
 	return dec.Decode(&in)
 }
 
-// Every identity an operator might try to redirect the write with must be refused by the wire type.
 func TestPhase6SettingWireTypeRefusesEveryIdentity(t *testing.T) {
 	for name, body := range map[string]string{
 		"tenant_id":       `{"enabled":true,"tenant_id":"11111111-1111-1111-1111-111111111111"}`,
@@ -45,7 +39,7 @@ func TestPhase6SettingWireTypeRefusesEveryIdentity(t *testing.T) {
 	}
 }
 
-// The legitimate shape must still decode, or the test above would pass for a type that accepts nothing.
+// The legitimate shape must still decode.
 func TestPhase6SettingWireTypeAcceptsOnlyValueAndReason(t *testing.T) {
 	dec := json.NewDecoder(strings.NewReader(`{"enabled":true,"reason":"guests asked for it"}`))
 	dec.DisallowUnknownFields()
@@ -58,8 +52,7 @@ func TestPhase6SettingWireTypeAcceptsOnlyValueAndReason(t *testing.T) {
 	}
 }
 
-// `enabled` is a POINTER so that absent is distinguishable from false. A PUT that forgot the field must not
-// read as a request to turn a guest-facing capability off.
+// `enabled` is a pointer so absent differs from false; a PUT that omits it must not turn the capability off.
 func TestPhase6SettingDistinguishesAbsentFromFalse(t *testing.T) {
 	dec := json.NewDecoder(strings.NewReader(`{"reason":"forgot the value"}`))
 	dec.DisallowUnknownFields()
@@ -82,9 +75,7 @@ func TestPhase6SettingDistinguishesAbsentFromFalse(t *testing.T) {
 	}
 }
 
-// THE TWO CONTROLS MUST NOT BE CONFLATED IN THE RESPONSE. The screen has to be able to say "the setting is
-// on, and the capability is still not deployed", because an operator who turns something on, sees it
-// confirmed, and believes guests can use it has been misled by the product.
+// The response must keep setting and capability separate ("setting on, capability not deployed"), so an operator is not misled.
 func TestPhase6SettingResponseSeparatesTheProductSettingFromTheDeploymentGate(t *testing.T) {
 	b, err := json.Marshal(guestDeviceSettingResp{Enabled: true, Changed: true, PhaseGateEnabled: false})
 	if err != nil {
@@ -106,7 +97,7 @@ func TestPhase6SettingResponseSeparatesTheProductSettingFromTheDeploymentGate(t 
 	}
 }
 
-// The operator surface is itself gated: with the Phase-6 admin flag off, the routes are not mounted.
+// With the Phase-6 admin flag off, the routes are not mounted.
 func TestPhase6OperatorSurfaceIsGated(t *testing.T) {
 	off, err := iamv2.LoadPhase6ConfigFromEnv(func(string) string { return "" })
 	if err != nil {
@@ -123,9 +114,7 @@ func TestPhase6OperatorSurfaceIsGated(t *testing.T) {
 	if !on.DeviceAdminOn() {
 		t.Fatal("the operator surface did not open with master+admin on")
 	}
-	// ...and enabling the OPERATOR surface must not enable the GUEST one. They are separate flags because
-	// they are separate blast radii: a property that wants the setting screen has not thereby asked to serve
-	// device management to guests.
+	// Enabling the operator surface must not enable the guest one (separate blast radii).
 	if on.DeviceGuestOn() {
 		t.Fatal("enabling the operator surface also enabled the guest surface")
 	}

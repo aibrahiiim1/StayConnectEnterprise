@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// Migration 0054: with the default periods (audit log 24 months, people in the history 24 months, history and
-// licences 6 years, disabled accounts 24 months), old records go or lose the people in them, recent ones are
-// untouched, open alerts and live licences stay, and a second run finds nothing.
+// With the default periods old records go or lose the people in them; recent ones, open alerts and live licences
+// stay, and a second run finds nothing.
 func TestRetentionAppliesCentralPeriods(t *testing.T) {
 	f := newFixture(t)
 	exec := func(sql string, args ...any) string {
@@ -20,13 +19,11 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 	}
 	ago := func(s string) string { return "now() - interval '" + s + "'" }
 
-	// The audit log.
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO audit_log (ts, actor_type, action, ip) VALUES
         (`+ago("25 months")+`, 'operator', 'old.thing', '198.51.100.1'), (`+ago("23 months")+`, 'operator', 'recent.thing', '198.51.100.2')`); err != nil {
 		t.Fatal(err)
 	}
 
-	// Appliances: one retired 7 years ago, one retired a year ago, one live.
 	oldApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, lan_mac, hostname, last_public_ip, updated_at)
         VALUES ('RET-OLD','decommissioned','02:00:00:00:00:01','02:00:00:00:00:02','old-box','203.0.113.9',` + ago("7 years") + `)`)
 	newApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, hostname, updated_at)
@@ -34,7 +31,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 	liveApp := exec(`INSERT INTO appliances (serial, lifecycle_state, wan_mac, updated_at)
         VALUES ('LIVE-1','assigned','02:00:00:00:00:04',` + ago("8 years") + `)`)
 
-	// History on the live appliance.
 	exec(`INSERT INTO appliance_lifecycle_events (appliance_id, to_state, actor, source_ip, created_at)
         VALUES ($1,'assigned','someone@central.test','198.51.100.3',`+ago("7 years")+`)`, liveApp)
 	midEvent := exec(`INSERT INTO appliance_lifecycle_events (appliance_id, to_state, actor, source_ip, created_at)
@@ -50,8 +46,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Who moved the appliance, a certificate request, a settings change naming the certificate contact, and an
-	// idle wrong-password counter.
 	exec(`INSERT INTO appliance_assignments (appliance_id, operator_id, source_ip, created_at)
         VALUES ($1,$2::uuid,'198.51.100.7',`+ago("7 years")+`)`, liveApp, f.session.OperatorID)
 	midMove := exec(`INSERT INTO appliance_assignments (appliance_id, operator_id, source_ip, created_at)
@@ -67,7 +61,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Alerts: an old closed one, an old open one, a middle-aged acknowledged one.
 	exec(`INSERT INTO appliance_security_alerts (appliance_id, kind, status, resolved, source_ip, created_at)
         VALUES ($1,'x','resolved',true,'198.51.100.5',`+ago("7 years")+`)`, liveApp)
 	openOld := exec(`INSERT INTO appliance_security_alerts (appliance_id, kind, status, source_ip, created_at)
@@ -76,9 +69,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
         VALUES ($1,'x','acknowledged','198.51.100.5',$2::uuid,'{"last_source_ip":"198.51.100.6","repeats":3}',`+ago("3 years")+`)`,
 		liveApp, f.session.OperatorID)
 
-	// Licences: one revoked 7 years ago and expired 5 years ago, one revoked 7 years ago but still valid (an
-	// appliance may never have heard of the revocation), one revoked 7 years ago whose grace period has not run
-	// out, one superseded 7 years ago by a still-live one, one expired a year ago.
 	cust, site := f.customerSite("Retention Hotel")
 	lic := func(status, extra string, args ...any) string {
 		return exec(`INSERT INTO licenses (tenant_id, site_id, status, valid_until, signed_envelope, key_id, created_at`+extra,
@@ -91,7 +81,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 	live := lic("active", `, supersedes_license_id) VALUES ($1,$2,$3, now() + interval '1 year','e','k',`+ago("7 years")+`,$4::uuid)`, superseded)
 	expiredRecently := lic("active", `) VALUES ($1,$2,$3,`+ago("1 year")+`,'e','k',`+ago("2 years")+`)`)
 
-	// Accounts: one disabled 25 months ago (with authenticator and role), one disabled a month ago.
 	oldOp := exec(`INSERT INTO operators (email, display_name, password_hash, status) VALUES ('gone@central.test','Gone','h','disabled')`)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE operators SET disabled_at = `+ago("25 months")+` WHERE id=$1`, oldOp); err != nil {
 		t.Fatal(err)
@@ -170,11 +159,9 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 		}
 	}
 
-	// An anonymised account cannot come back.
 	if _, err := f.pool.Exec(f.ctx, `UPDATE operators SET status='active' WHERE id=$1`, oldOp); err == nil {
 		t.Error("an anonymised account was enabled again")
 	}
-	// The portal history is still append-only for everyone else.
 	if _, err := f.pool.Exec(f.ctx, `DELETE FROM portal_tls_events WHERE appliance_id=$1`, liveApp); err == nil {
 		t.Error("portal_tls_events accepted a delete outside retention")
 	}
@@ -184,7 +171,6 @@ func TestRetentionAppliesCentralPeriods(t *testing.T) {
 	}
 }
 
-// The periods are settings: bounded, needing a reason, audited with from and to.
 func TestRetentionSettings(t *testing.T) {
 	f := newFixture(t)
 	rec := f.operatorCall(f.base.getRetentionSettings, http.MethodGet, "", nil)

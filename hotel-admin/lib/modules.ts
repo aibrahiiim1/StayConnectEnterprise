@@ -1,8 +1,5 @@
-// THE MODULE REPORT edged relays from scd (GET /edge/v1/modules), and the words for its codes.
-//
-// One place for the words so the Modules, Payment methods and Room charge screens never describe the same
-// condition three different ways. Unknown codes are shown verbatim by the callers: a newer appliance may
-// report a condition this bundle has no sentence for, and hiding it would be worse than showing the code.
+// The module report edged relays from scd (GET /edge/v1/modules) and the words for its codes; unknown codes are shown
+// verbatim by callers.
 
 export type ModuleState = {
   id: string;

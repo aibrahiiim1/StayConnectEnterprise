@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// Audit B-10: one client could lock out sign-ins appliance-wide through the in-memory limiter's global counter.
-
 func fixedLimiter(at time.Time) *loginLimiter {
 	l := newLoginLimiter()
 	l.now = func() time.Time { return at }
@@ -18,8 +16,6 @@ func fixedLimiter(at time.Time) *loginLimiter {
 
 func TestOneClientFloodingDoesNotLockOutAnotherClient(t *testing.T) {
 	l := fixedLimiter(time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC))
-	// One device sends far more than the old global limit (200) of forgot/register requests, each for a
-	// different address, inside one minute.
 	refused := 0
 	for i := 0; i < 1000; i++ {
 		if !l.allow(fmt.Sprintf("forgot:x%d@example.org", i), "10.20.0.5", "02:00:00:00:00:05") {
@@ -61,7 +57,7 @@ func TestTheIdentityCapLandsOnTheClientMakingTheAttempts(t *testing.T) {
 func TestTheGlobalDamperStillActsOnAnApplianceWideFlood(t *testing.T) {
 	l := fixedLimiter(time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC))
 	allowed := 0
-	for c := 0; c < 100; c++ { // 100 distinct clients, each within its own cap
+	for c := 0; c < 100; c++ {
 		ip := net.IPv4(10, 21, byte(c/250), byte(c%250+1)).String()
 		mac := fmt.Sprintf("02:00:00:01:%02x:%02x", c/256, c%256)
 		for i := 0; i < loginClientPerMinute; i++ {

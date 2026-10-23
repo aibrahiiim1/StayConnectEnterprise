@@ -1,11 +1,6 @@
 package main
 
-// THE LIGHTBULB AND THE ATTRIBUTION, ON EVERY GUEST PAGE.
-//
-// Every guest page carries a lightbulb that opens a sheet of tips, and a small "Wi-Fi by OneGate" line at its
-// foot. These pin what that must never cost: every script still carries the response's CSP nonce, no inline
-// handler appears, the wordmark is never translated, Arabic still reads right to left, and the sheet's
-// English fallbacks are the shipped English.
+// The lightbulb and attribution on every guest page must not cost: every script carries the CSP nonce, no inline handler, the wordmark is never translated, Arabic stays right to left, and the sheet's English fallbacks are the shipped English.
 
 import (
 	"html/template"
@@ -23,7 +18,6 @@ type renderedPage struct {
 
 var reCSPNonce = regexp.MustCompile(`'nonce-([^']+)'`)
 
-// allGuestPages renders the sign-in page and every page after it, keeping each response's CSP nonce.
 func allGuestPages(t *testing.T, design map[string]any, header http.Header) map[string]renderedPage {
 	t.Helper()
 	h := designHandler(t, design)
@@ -81,7 +75,6 @@ func TestEveryGuestPageHasTheLightbulbSheetAndItsScriptCarriesTheNonce(t *testin
 			`aria-label="` + builtinStrings["en"]["help.close"] + `"`,
 			template.HTMLEscapeString(builtinStrings["en"]["help.fail"]),
 			`id="help-hotel"`, `Dial 9 for the front desk.`,
-			// The modal upgrade: role, focus kept inside, Esc to close.
 			`sheet.setAttribute('role', 'dialog')`, `sheet.setAttribute('aria-modal', 'true')`,
 			`e.key === 'Escape'`, `e.key !== 'Tab'`, `sum.focus()`,
 		} {
@@ -92,7 +85,6 @@ func TestEveryGuestPageHasTheLightbulbSheetAndItsScriptCarriesTheNonce(t *testin
 		if n := strings.Count(html, `id="sc-help"`); n != 1 {
 			t.Errorf("%s: the help sheet appears %d times", name, n)
 		}
-		// Every script carries this response's nonce, and nothing relies on an inline handler.
 		for _, tag := range reScriptOpen.FindAllString(html, -1) {
 			if !strings.Contains(tag, `nonce="`+p.nonce+`"`) {
 				t.Errorf("%s: %s does not carry the response's nonce, so the CSP would refuse it", name, tag)
@@ -111,24 +103,20 @@ func TestTheSignInSheetExplainsEveryMethodAndTheDevice(t *testing.T) {
 			t.Errorf("the help sheet has no tip for %s", m)
 		}
 	}
-	// The script hides the tips for methods this hotel does not offer.
 	if !strings.Contains(html, `el.hidden = enabled.indexOf(el.dataset.helpMethod) < 0`) {
 		t.Error("the tips do not follow the enabled methods")
 	}
-	// The device's addresses are in the sheet as well as behind the information button.
 	sheet := html[strings.Index(html, `id="sc-help"`):strings.Index(html, `id="info-btn"`)]
 	for _, want := range []string{"10.77.0.42", "aa:bb:cc:01:02:03", `data-i18n="info.help"`} {
 		if !strings.Contains(sheet, want) {
 			t.Errorf("the help sheet does not show %q", want)
 		}
 	}
-	// What stays on the page: the error slots, the notices, the field hints and the terms link.
 	for _, id := range []string{"access-ended", "site-notice", "pms-err", "ps-err", "pms-prompt", "ps-hint", "sms-hint", "brand-terms"} {
 		if !strings.Contains(html, `id="`+id+`"`) {
 			t.Errorf("%s left the page; it must stay visible", id)
 		}
 	}
-	// The social note moved into the sheet, and is still translatable there.
 	if strings.Count(html, `data-i18n="social.note"`) != 1 || !strings.Contains(sheet, `data-i18n="social.note"`) {
 		t.Error("the social note should be in the help sheet, once")
 	}
@@ -166,7 +154,6 @@ func TestOneGateAttributionOnEveryPageAndNeverTranslated(t *testing.T) {
 			}
 		}
 	}
-	// The wordmark's colours are the brand's, and the gradient has a solid fallback declared before it.
 	for _, frag := range []string{
 		`linear-gradient(95deg, #0b7a3b, #149c4a 38%, #3cc05a 70%, #8fdc5f)`,
 		`.og-gate { color: #0a0a0a; }`, `.og-one { color: #149c4a; }`,

@@ -1,11 +1,8 @@
 package main
 
-// PACKAGE ACTIVITY, CODE-EXISTS AND DELETABILITY — the pieces that can be proved without a database.
-//
-// The SQL itself is checked against the PRODUCTION BASELINE and the Gate-P grant files: every iam_v2 table the
-// activity queries name must be one svc_edged may SELECT, and every alias.column they read must exist on that
-// table. A typo or an ungranted table is otherwise a 500 on the appliance while every unit test passes, which is
-// exactly how the package list failed in PRE-LIVE once before.
+// The activity SQL is checked against the production baseline and Gate-P grants: every iam_v2 table must be
+// SELECT-granted to svc_edged and every alias.column must exist, since a typo would otherwise be a 500 on the
+// appliance while unit tests pass.
 
 import (
 	"context"
@@ -24,8 +21,6 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
-
-// ------------------------------------------------------------------------------------ filter parsing ----
 
 func mustFilter(t *testing.T, raw string) activityFilter {
 	t.Helper()
@@ -78,7 +73,7 @@ func TestActivityFilterRefusesWhatItCannotUse(t *testing.T) {
 	}
 }
 
-// THE SCOPE IS THE APPLIANCE'S, AND OPERATOR TEXT IS NEVER SPLICED INTO SQL.
+// Scope is the appliance's, and operator text is never spliced into SQL.
 func TestActivitySQLIsScopedAndParameterised(t *testing.T) {
 	q, _ := url.ParseQuery("q=4'; DROP TABLE x --&source=VOUCHER_REDEMPTION&status=active" +
 		"&package_id=11111111-2222-3333-4444-555555555555&tenant_id=evil&site_id=evil")
@@ -103,7 +98,6 @@ func TestActivitySQLIsScopedAndParameterised(t *testing.T) {
 			t.Errorf("activity SQL lacks %q", want)
 		}
 	}
-	// Paging is by parameter, newest first.
 	if !strings.Contains(sql, "ORDER BY f.occurred_at DESC NULLS LAST") {
 		t.Error("activity is not sorted most recent first")
 	}
@@ -116,7 +110,6 @@ func TestActivitySQLIsScopedAndParameterised(t *testing.T) {
 	}
 }
 
-// THE OFFER IS SAID ONLY WHEN IT HAPPENED, AND NO OFFER TIME IS INVENTED.
 func TestActivityRowNeverFabricatesAnOffer(t *testing.T) {
 	exp := time.Now()
 	x := activityRow{Source: "VOUCHER_REDEMPTION", PackageCode: "GOLD", HadOffer: false,
@@ -151,9 +144,6 @@ func TestActivityRowNeverFabricatesAnOffer(t *testing.T) {
 	}
 }
 
-// --------------------------------------------------------------------- schema and privilege checks ----
-
-// baselineColumns reads every CREATE TABLE iam_v2.<t> in the production baseline into table -> columns.
 func baselineColumns(t *testing.T) map[string]map[string]bool {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "migrations", "baseline", "0000_production_baseline.sql"))
@@ -184,7 +174,6 @@ func baselineColumns(t *testing.T) map[string]map[string]bool {
 	return out
 }
 
-// edgedSelectGrants reads the Gate-P allowlist: the tables svc_edged may SELECT after a reconcile.
 func edgedSelectGrants(t *testing.T) map[string]bool {
 	t.Helper()
 	files, _ := filepath.Glob(filepath.Join("..", "..", "..", "deploy", "gatep", "*.sql"))
@@ -204,7 +193,6 @@ func edgedSelectGrants(t *testing.T) map[string]bool {
 	return out
 }
 
-// checkSQLAgainstSchema asserts every iam_v2 table is SELECT-granted and every alias.column exists.
 func checkSQLAgainstSchema(t *testing.T, report func(string, ...any), name, sql string, cols map[string]map[string]bool, grants map[string]bool) {
 	t.Helper()
 	aliases := map[string]string{}
@@ -246,7 +234,6 @@ func TestActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 	f := mustFilter(t, "q=4202&source=GUEST_SELECTION&status=other&package_id=11111111-2222-3333-4444-555555555555")
 	list, _ := activityListSQL(f, "t", "s")
 	sum, _ := activitySummarySQL(f, "t", "s")
-	// The checker must be able to fail: a wrong column and an ungranted table are both caught.
 	var caught []string
 	collect := func(format string, a ...any) { caught = append(caught, format) }
 	checkSQLAgainstSchema(t, collect, "self-check",
@@ -257,7 +244,7 @@ func TestActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 	checkSQLAgainstSchema(t, t.Errorf, "activity list", list, cols, grants)
 	checkSQLAgainstSchema(t, t.Errorf, "activity summary", sum, cols, grants)
 
-	// The view must never read the tables that would identify a guest or a credential.
+	// The view must not read tables that identify a guest or a credential.
 	for _, s := range []string{list, sum} {
 		for _, forbidden := range []string{"stay_guests", "guest_access_accounts", "iam_v2.vouchers", "auth_contexts",
 			"guest_principals", "iam_v2.devices", ".mac", "username", "display_name"} {
@@ -267,8 +254,6 @@ func TestActivitySQLReadsOnlyGrantedTablesAndRealColumns(t *testing.T) {
 		}
 	}
 }
-
-// ------------------------------------------------------------------------------- handler behaviour ----
 
 type fakeCommerceRepo struct {
 	iamv2.CommerceAdminRepository
@@ -281,8 +266,7 @@ func (f *fakeCommerceRepo) WithTx(ctx context.Context, fn func(iamv2.CommerceAdm
 	return fn(f.tx)
 }
 
-// ListPackages: the fake catalogue is empty, so every publish in these tests is a NEW package (the republish
-// path's explicit-commercial-fields rule, O-1, has its own tests).
+// ListPackages: the fake catalogue is empty, so every publish here is a new package.
 func (f *fakeCommerceRepo) ListPackages(context.Context, string, string) ([]iamv2.PackageSummary, error) {
 	return nil, nil
 }
@@ -379,7 +363,6 @@ func TestDeletabilityRoutesCarryTheDatabasesAnswer(t *testing.T) {
 		t.Fatalf("an unused package must be deletable: %s", w0.Body.String())
 	}
 
-	// A malformed id is not a database error, and an unknown one is not found.
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/commercial-packages/zzz/deletability", nil))
 	if w.Code != http.StatusNotFound {
@@ -393,8 +376,7 @@ func TestDeletabilityRoutesCarryTheDatabasesAnswer(t *testing.T) {
 	}
 }
 
-// DELETE REFUSES BEFORE IT REACHES THE DATABASE without an id, a reason and a step-up. (The step-up itself
-// reads the operator table; the database's refusals are proven in scripts/catalogue-delete-integration.sh.)
+// DELETE refuses before reaching the database without an id, a reason and a step-up.
 func TestDeleteRoutesRefuseWithoutIdReasonAndStepUp(t *testing.T) {
 	repo := &fakeCommerceRepo{}
 	s := commerceTestServer(t, repo)

@@ -4,27 +4,17 @@ import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-// The variant set is unchanged in NAME — `primary | secondary | ghost | danger` — because four dozen call
-// sites pass those strings. What changed is everything they resolve to: role tokens instead of hard-coded
-// panel hexes, a real focus ring, and a disabled state that reads as unavailable rather than merely faded.
-//
-// `outline`, `subtle` and `link` are additions for the new screens. Nothing existing has to adopt them.
 const buttonVariants = cva(
   cn(
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium",
     "transition-[background-color,border-color,color,box-shadow] duration-press ease-onegate",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
-    // Icons sent in as children should never be squashed by a flex parent.
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
   ),
   {
     variants: {
       variant: {
-        // THE ONEGATE BUTTON FAMILY. primary: the brand fill, the ONE main action a screen exists for.
-        // secondary: surface with an ink border, every other real action. quiet (ghost): transparent with a
-        // slate label, for dismiss/cancel/tertiary. Hover lifts with a short shallow shadow; press sinks
-        // with an inset one over 80ms. No bounce, no spring.
         primary:
           "bg-primary text-primary-foreground shadow-control hover:bg-primary-hover hover:shadow-control-hover active:bg-primary-press active:shadow-control-press",
         secondary:
@@ -36,7 +26,7 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground shadow-control hover:bg-destructive/90 hover:shadow-control-hover active:shadow-control-press",
         link: "bg-transparent text-primary underline-offset-4 hover:underline px-0",
       },
-      // Desktop heights are 28/32/36; on a touch screen every size reaches the 44px target floor.
+      // Coarse pointers get a 44px touch target.
       size: {
         xs: "h-7 px-2 text-xs [&_svg]:size-3.5 pointer-coarse:h-11",
         sm: "h-8 px-3 text-label [&_svg]:size-4 pointer-coarse:h-11",
@@ -57,14 +47,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   { variant, size, className, type = "button", ...props },
   ref,
 ) {
-  // type defaults to "button". A bare <button> inside a <form> submits it, and several screens rely on
-  // Cancel NOT submitting — a default that was quietly wrong before.
+  // Native buttons submit forms by default; cancellation must not submit.
   return <button ref={ref} type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
 });
 
 export { buttonVariants };
 
-/** A link that looks like a button: navigation keeps its link semantics (open in a new tab, the URL on hover). */
+/** Keep link semantics for navigation, including open-in-new-tab. */
 export function LinkButton({
   href,
   variant,

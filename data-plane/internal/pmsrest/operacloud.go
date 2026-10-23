@@ -1,23 +1,9 @@
 package pmsrest
 
-// Oracle OPERA Cloud client, through the Oracle Hospitality Integration Platform (OHIP).
-//
-// Documentation (verified 2026-09-24 against Oracle's published OpenAPI specifications,
-// https://github.com/oracle/hospitality-api-docs):
-//   - rest-api-specs/security/v1/publishedoauth.json  POST {gateway}/oauth/v1/tokens, HTTP Basic
-//     (client id : client secret), form grant_type=client_credentials & scope, header x-app-key (UUID),
-//     optional header enterpriseId; response access_token, expires_in, token_type
-//   - rest-api-specs/property/v1/rsv.json             GET {gateway}/rsv/v1/hotels/{hotelId}/reservations
-//     (getHotelReservations): headers authorization (Bearer), x-app-key, x-hotelid; query limit, offset,
-//     searchType (… InHouse …), reservationIdList (collectionFormat multi); response
-//     reservations{reservationInfo[], hasMore, totalResults}; reservationInfo reservationIdList[]{id,type},
-//     roomStay{arrivalDate, departureDate, roomId}, reservationGuest{givenName, surname, id},
-//     reservationStatus [… InHouse, CheckedOut, DueOut …], lastModifyDateTime (hotel time zone)
-//   - https://docs.oracle.com/en/industries/hospitality/integration-platform/
-//
-// getHotelReservations documents no "modified since" filter, so this client does not implement Changes:
-// the connector compares successive in-house lists instead. OPERA's arrival/departure are calendar dates
-// already in the hotel's own time zone and are used as-is. The reservation API cannot enumerate rooms.
+// Oracle OPERA Cloud client through OHIP: OAuth client credentials plus an x-app-key header, then
+// getHotelReservations (limit/offset, searchType). That API has no "modified since" filter, so Changes is not
+// implemented and the connector compares successive in-house lists. Arrival/departure are calendar dates already
+// in the hotel's time zone, and the reservation API cannot enumerate rooms.
 
 import (
 	"context"
@@ -28,7 +14,7 @@ import (
 	"time"
 )
 
-var operaPage = 100 // a var only so contract tests can page with small pages
+var operaPage = 100 // var so tests can use small pages
 
 type operaClient struct {
 	o            Options
@@ -152,7 +138,7 @@ func (c *operaClient) list(ctx context.Context, q url.Values, max int) ([]operaR
 		}, &resp)
 		if KindOf(err) == KindAuth && status == http.StatusUnauthorized && !refreshed {
 			refreshed = true
-			c.token = "" // expired token: one fresh sign-in, then this page again
+			c.token = "" // expired token: sign in once, retry this page
 			if err2 := c.authenticate(ctx); err2 != nil {
 				return nil, err2
 			}
@@ -190,7 +176,7 @@ func (c *operaClient) normalise(raw []operaReservation) []Reservation {
 		res := Reservation{ID: r.id(), Stamp: r.LastModifyDateTime}
 		switch r.ReservationStatus {
 		case "InHouse", "DueOut":
-			res.State = StateInHouse // DueOut is an in-house guest expected to leave today
+			res.State = StateInHouse // DueOut is still in house
 		case "CheckedOut":
 			res.State = StateCheckedOut
 		}

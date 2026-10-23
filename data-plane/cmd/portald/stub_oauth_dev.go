@@ -2,13 +2,8 @@
 
 package main
 
-// THE DEVELOPMENT OAUTH STUB: a fake provider consent screen, compiled ONLY into a `-tags devlicense` build
-// (the same tag internal/buildprofile uses for a development binary). A production portald has no such route at
-// all (stub_oauth_prod.go), exactly as a production scd never registers the stub provider (HTTPS contract
-// section 11).
-//
-// Even here it is not an open redirect (audit P-2): it only ever sends the browser back to THIS portal's own
-// social callback on the origin the stub was reached on, and its page carries the portal's CSP.
+// Development OAuth stub, compiled only into `-tags devlicense` builds; production has none (stub_oauth_prod.go).
+// Even here it only redirects back to this portal's own social callback on the origin it was reached on.
 
 import (
 	"fmt"
@@ -26,8 +21,6 @@ func mountStubOAuth(r chi.Router, h *handler) {
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
 }
 
-// stubRedirectAllowed reports whether redirectURI is this portal's own social callback, on the origin this
-// request reached: http(s)://<r.Host>/auth/social/callback with nothing else in it.
 func stubRedirectAllowed(r *http.Request, redirectURI string) bool {
 	u, err := url.Parse(redirectURI)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
@@ -73,7 +66,6 @@ func (h *handler) stubAuthorize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = setPortalCSP(w)
-	// Template uses provider twice: page heading + hidden form field.
 	fmt.Fprintf(w, stubConsentHTML, htmlEscape(provider), htmlEscape(provider),
 		htmlEscape(state), htmlEscape(redirectURI))
 }

@@ -1,12 +1,6 @@
 "use client";
 
-// THE APPLIANCE PILL — health where the operator already is.
-//
-// `GET /health` was reachable from exactly two screens. Everything the admin does depends on the site database
-// and the session controller being up, so an operator configuring packages while scd is down was working
-// against a surface that could not take effect, with no indication anywhere on the page.
-//
-// The pill is deliberately terse — a dot and a word — and the tooltip carries the detail.
+// Keep appliance health visible while operators configure services that depend on it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -40,8 +34,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
     return <span className={cn("h-8 w-8 animate-pulse rounded-full bg-surface sm:w-24", className)} />;
   }
 
-  // THE WORST FACT WINS. A pill that says "ok" because the top-level status field says so, while the database
-  // is unreachable, is worse than no pill: it actively tells the operator not to look.
+  // The worst component status wins so an unreachable database cannot appear healthy.
   const down: string[] = [];
   if (failed) down.push("The admin service is not answering");
   if (health && !health.db) down.push("Site database unreachable");
@@ -52,8 +45,6 @@ export function ApplianceStatus({ className }: { className?: string }) {
   const tone = down.length > 0 ? "err" : degraded ? "warn" : "ok";
   const word = down.length > 0 ? "Attention" : degraded ? "Degraded" : "Healthy";
 
-  // What is worth checking when the appliance is running but not clean. Listed, so the tooltip names the
-  // problem rather than only a colour.
   const worth: string[] = [];
   if (down.length === 0 && health?.status === "degraded") worth.push("The admin service reports itself degraded");
 
@@ -97,8 +88,7 @@ export function ApplianceStatus({ className }: { className?: string }) {
         href="/health"
         aria-label={`Appliance health: ${word}. Open Diagnostics.`}
         className={cn(
-          // Visible at every width: on a phone the word collapses and the dot stays, so health is never one
-          // navigation away. The accessible name above carries the word either way.
+          // Keep the status dot visible on narrow screens; its accessible name retains the word.
           "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-semibold",
           "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           tone === "err" && "border-destructive/30 text-destructive-subtle-foreground",

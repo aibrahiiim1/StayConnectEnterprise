@@ -1,9 +1,5 @@
-// Package pki implements StayConnect's internal Appliance certificate
-// authority. The CA signs short-to-medium lived X.509 client certificates
-// that bind an appliance's key to its appliance_id / tenant / site, plus the
-// server certificate for the mTLS listener. The CA private key lives ONLY in
-// a file on the Central server (0600); only the CA certificate (public) is
-// persisted in the database and distributed to appliances as a trust anchor.
+// Package pki is the appliance certificate authority: client certificates bound to appliance, tenant and site,
+// and the mTLS server certificate. CA private keys stay in 0600 files; only public certificates are persisted.
 package pki
 
 import (
@@ -23,26 +19,20 @@ import (
 	"time"
 )
 
-// URIScheme is the SPIFFE-style identity encoded in the client cert's URI SAN:
-//
-//	stayconnect://appliance/<appliance_id>
+// uriScheme identifies the client cert's URI SAN: stayconnect://appliance/<appliance_id>
 const uriScheme = "stayconnect"
 
-// CA is a loaded certificate authority: its Ed25519 private key plus the
-// self-signed CA certificate and the CA-version number it represents.
 type CA struct {
-	// priv/cert are the ONLINE intermediate signer used for all runtime
-	// issuance. The root private key is NOT held here — it only ever signed the
-	// intermediate and is expected to live offline.
+	// priv/cert are the online intermediate signer; the root key is never held here.
 	priv    ed25519.PrivateKey
 	cert    *x509.Certificate
-	intPEM  []byte // intermediate certificate PEM
-	rootPEM []byte // root certificate PEM (public trust anchor)
-	certPEM []byte // full trust bundle: intermediate + root
-	Version int    // intermediate CA version
+	intPEM  []byte
+	rootPEM []byte
+	certPEM []byte // trust bundle: intermediate + root
+	Version int
 }
 
-// LoadOrCreate builds a single self-signed CA (legacy/dev path).
+// LoadOrCreate builds a single self-signed CA (dev path).
 func LoadOrCreate(keyPath string, version int) (*CA, error) {
 	priv, err := loadOrCreateKey(keyPath)
 	if err != nil {
@@ -55,16 +45,9 @@ func LoadOrCreate(keyPath string, version int) (*CA, error) {
 	return &CA{priv: priv, cert: cert, intPEM: certPEM, certPEM: certPEM, Version: version}, nil
 }
 
-// LoadCAChain builds the production two-tier CA:
-//
-//	offline Root CA  →  online Intermediate CA  →  appliance certs
-//
-// The root key is loaded ONLY to sign the intermediate on first setup; after
-// that it is not required at runtime (callers move it offline). All runtime
-// issuance uses the intermediate key. Returns a CA whose signer is the
-// intermediate and whose trust bundle is intermediate+root.
+// LoadCAChain builds the two-tier CA. The root key is needed only to sign the intermediate on first setup;
+// after that it is moved offline and all issuance uses the intermediate.
 func LoadCAChain(rootKeyPath, intKeyPath string, version int) (*CA, error) {
-	// Intermediate key is ALWAYS required at runtime (it is the online signer).
 	intPriv, err := loadOrCreateKey(intKeyPath)
 	if err != nil {
 		return nil, err
@@ -72,8 +55,7 @@ func LoadCAChain(rootKeyPath, intKeyPath string, version int) (*CA, error) {
 	rootCertPath := certSibling(rootKeyPath)
 	intCertPath := certSibling(intKeyPath)
 
-	// Fast path: the public certs are already persisted → the root PRIVATE key
-	// is NOT needed (it has been moved offline). Load and return.
+	// Persisted public certs mean the root private key is not needed.
 	rootPEM, rerr := os.ReadFile(rootCertPath)
 	intPEM, ierr := os.ReadFile(intCertPath)
 	if rerr == nil && ierr == nil {
@@ -85,7 +67,6 @@ func LoadCAChain(rootKeyPath, intKeyPath string, version int) (*CA, error) {
 		return &CA{priv: intPriv, cert: intCert, intPEM: intPEM, rootPEM: rootPEM, certPEM: bundle, Version: version}, nil
 	}
 
-	// First-setup path: the root key IS required to sign the intermediate.
 	rootPriv, err := loadOrCreateKey(rootKeyPath)
 	if err != nil {
 		return nil, err
@@ -98,14 +79,13 @@ func LoadCAChain(rootKeyPath, intKeyPath string, version int) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Persist the PUBLIC certs so subsequent boots never need the root key.
+	// Persist the public certs so later boots never need the root key.
 	_ = writeAtomic(rootCertPath, rootPEM2, 0o644)
 	_ = writeAtomic(intCertPath, intPEM2, 0o644)
 	bundle := append(append([]byte{}, intPEM2...), rootPEM2...)
 	return &CA{priv: intPriv, cert: intCert, intPEM: intPEM2, rootPEM: rootPEM2, certPEM: bundle, Version: version}, nil
 }
 
-// certSibling maps "/path/foo.key" → "/path/foo.crt".
 func certSibling(keyPath string) string {
 	ext := filepath.Ext(keyPath)
 	return keyPath[:len(keyPath)-len(ext)] + ".crt"
@@ -119,11 +99,8 @@ func parseCertPEM(p []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// IntermediatePEM returns just the intermediate certificate (appliances present
-// leaf+intermediate on the wire).
 func (c *CA) IntermediatePEM() []byte { return c.intPEM }
 
-// RootPEM returns the root certificate (trust anchor).
 func (c *CA) RootPEM() []byte { return c.rootPEM }
 
 func loadOrCreateKey(keyPath string) (ed25519.PrivateKey, error) {
@@ -146,7 +123,6 @@ func loadOrCreateKey(keyPath string) (ed25519.PrivateKey, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	// Generate a new CA key and persist atomically at 0600.
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
 		return nil, err
 	}
@@ -165,8 +141,7 @@ func loadOrCreateKey(keyPath string) (ed25519.PrivateKey, error) {
 	return priv, nil
 }
 
-// selfSignRoot builds the deterministic self-signed ROOT CA (pathlen=1 so it
-// may sign one intermediate). Its private key is used only at setup time.
+// selfSignRoot builds the deterministic root (pathlen=1: it signs one intermediate).
 func selfSignRoot(priv ed25519.PrivateKey) (*x509.Certificate, []byte, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -189,8 +164,7 @@ func selfSignRoot(priv ed25519.PrivateKey) (*x509.Certificate, []byte, error) {
 	return cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }
 
-// signIntermediate builds the deterministic intermediate CA cert, signed by the
-// root. pathlen=0 (issues only leaf certs). Version numbers the intermediate.
+// signIntermediate builds the deterministic intermediate (pathlen=0: leaf certificates only).
 func signIntermediate(intPriv ed25519.PrivateKey, rootCert *x509.Certificate, rootPriv ed25519.PrivateKey, version int) (*x509.Certificate, []byte, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(int64(1000 + version)),
@@ -214,13 +188,11 @@ func signIntermediate(intPriv ed25519.PrivateKey, rootCert *x509.Certificate, ro
 	return cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }
 
-// selfSign builds the deterministic self-signed CA certificate for a key.
 func selfSign(priv ed25519.PrivateKey, version int) (*x509.Certificate, []byte, error) {
 	tmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(int64(version)),
-		Subject:               pkix.Name{CommonName: fmt.Sprintf("StayConnect Appliance CA v%d", version), Organization: []string{"StayConnect"}},
-		// Deterministic, far-future validity so the CA certificate is stable
-		// across reloads (appliances pin the CA cert PEM as their trust anchor).
+		SerialNumber: big.NewInt(int64(version)),
+		Subject:      pkix.Name{CommonName: fmt.Sprintf("StayConnect Appliance CA v%d", version), Organization: []string{"StayConnect"}},
+		// Fixed validity keeps the cert byte-stable: appliances pin the CA cert PEM.
 		NotBefore:             time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
 		NotAfter:              time.Date(2045, 1, 1, 0, 0, 0, 0, time.UTC),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -241,30 +213,24 @@ func selfSign(priv ed25519.PrivateKey, version int) (*x509.Certificate, []byte, 
 	return cert, certPEM, nil
 }
 
-// CertPEM returns the CA certificate PEM (public trust anchor).
 func (c *CA) CertPEM() []byte { return c.certPEM }
 
-// Subject returns the CA subject CN.
 func (c *CA) Subject() string { return c.cert.Subject.CommonName }
 
-// KeyFingerprint is sha256 of the CA public key bytes.
 func (c *CA) KeyFingerprint() string {
 	sum := sha256.Sum256(c.priv.Public().(ed25519.PublicKey))
 	return fmt.Sprintf("%x", sum[:])
 }
 
-// SignedClient is a signed appliance client certificate result.
 type SignedClient struct {
 	CertPEM        []byte
 	SerialHex      string
-	FingerprintHex string // sha256 of DER
+	FingerprintHex string
 	NotBefore      time.Time
 	NotAfter       time.Time
 }
 
-// SignApplianceCSR verifies a CSR (proof of possession via its self-signature)
-// and issues a client certificate binding the appliance_id (URI SAN),
-// tenant and site (subject OU/O). validity bounds the cert lifetime.
+// SignApplianceCSR issues a client certificate binding appliance_id (URI SAN), tenant (OU) and site (O).
 func (c *CA) SignApplianceCSR(csrPEM []byte, applianceID, tenantID, siteID string, validity time.Duration) (*SignedClient, error) {
 	block, _ := pem.Decode(csrPEM)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
@@ -274,8 +240,7 @@ func (c *CA) SignApplianceCSR(csrPEM []byte, applianceID, tenantID, siteID strin
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse CSR: %w", err)
 	}
-	// Proof of possession: the CSR must be self-signed with the private key
-	// matching its embedded public key.
+	// Proof of possession.
 	if err := csr.CheckSignature(); err != nil {
 		return nil, fmt.Errorf("pki: CSR signature invalid (proof-of-possession failed): %w", err)
 	}
@@ -316,8 +281,6 @@ func (c *CA) SignApplianceCSR(csrPEM []byte, applianceID, tenantID, siteID strin
 	}, nil
 }
 
-// SignServer issues a server certificate for the mTLS listener, valid for the
-// given DNS names / IPs, signed by the CA (so appliances trust it via the CA).
 func (c *CA) SignServer(hosts []string, validity time.Duration) (certPEM, keyPEM []byte, err error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -357,8 +320,7 @@ func (c *CA) SignServer(hosts []string, validity time.Duration) (certPEM, keyPEM
 	return certPEM, keyPEM, nil
 }
 
-// ApplianceIDFromCert extracts the bound appliance_id from a verified client
-// certificate's URI SAN. Returns "" if the cert carries no StayConnect URI.
+// ApplianceIDFromCert returns the appliance_id in a verified client cert's URI SAN, or "".
 func ApplianceIDFromCert(cert *x509.Certificate) string {
 	for _, u := range cert.URIs {
 		if u.Scheme == uriScheme && u.Host == "appliance" {
@@ -368,7 +330,6 @@ func ApplianceIDFromCert(cert *x509.Certificate) string {
 	return ""
 }
 
-// FingerprintHex is sha256 of a certificate's DER bytes as hex.
 func FingerprintHex(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	return fmt.Sprintf("%x", sum[:])

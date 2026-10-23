@@ -1,27 +1,14 @@
 package main
 
-// WHAT THE BROWSER SENDS MUST REACH scd. THE HOP IS WHERE IT WAS LOST.
-//
-// portald decodes the guest's submission into phase3In and re-marshals it for scd. A field the browser sends
-// that phase3In does not name is decoded into nothing and forwarded as nothing — silently, with no error
-// anywhere. scd then sees a room with no evidence beside it, answers `incomplete_evidence`, and the guest
-// gets the uniform failure, which looks exactly like a wrong surname.
-//
-// That is not hypothetical. `verification` (room_any) and `first_name` (room_firstname) were added to the
-// portal script and to scd while phase3In was left alone, so two of the four sign-in modes were dead on the
-// real guest path. Every test passed, because they all called scd directly and none crossed this hop.
-//
-// So these tests assert the hop itself: for each mode, the value a guest types is present in the body scd
-// actually receives. They would have caught the defect on the day it landed, and they are the reason a fifth
-// mode cannot be added without noticing this file.
+// portald decodes the submission into phase3In and re-marshals it for scd, so a field phase3In does not name
+// is dropped silently and the guest sees the uniform failure. These assert the hop itself: for each sign-in
+// mode the typed value is present in the body scd receives.
 
 import (
 	"testing"
 )
 
-// modeCase is one sign-in mode: the key the portal script puts the typed value under, and the key scd must
-// receive it in. For every supported mode these are the same key — the portal does not translate, it forwards
-// — which is precisely why a missing struct field is invisible until a guest tries it.
+// The portal does not translate keys, it forwards, so a missing struct field is invisible until tried.
 type modeCase struct {
 	mode    string
 	sentKey string
@@ -30,15 +17,13 @@ type modeCase struct {
 }
 
 var forwardingModes = []modeCase{
-	// room_any: ONE box, and the server compares it against all three fields. The browser must not decide
-	// which kind of identifier it is, so it sends the raw value under `verification`.
+	// room_any: the server compares one value against all three fields; the browser sends it raw.
 	{"room_any", "verification", "verification", "271886"},
 	{"room_firstname", "first_name", "first_name", "Ibrahim"},
 	{"room_lastname", "last_name", "last_name", "Example"},
 	{"room_reservation", "reservation_number", "reservation_number", "ABC-99"},
 }
 
-// THE REGRESSION TEST. Each mode's typed value must arrive at scd intact.
 func TestPhase3ForwardsEveryVerificationFieldToSCD(t *testing.T) {
 	for _, tc := range forwardingModes {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -70,10 +55,8 @@ func TestPhase3ForwardsEveryVerificationFieldToSCD(t *testing.T) {
 	}
 }
 
-// The value is forwarded AS TYPED. room_any is safe because the SERVER compares one value against three
-// fields and refuses an ambiguous match; it would stop being safe the moment this hop started guessing which
-// field a value "looks like" and filling that one in. A reservation-shaped value and a name-shaped value must
-// travel identically.
+// room_any is safe only because the server compares and refuses ambiguity; the hop must never guess which
+// field a value "looks like".
 func TestPhase3DoesNotGuessIdentifierTypeFromValueShape(t *testing.T) {
 	for _, typed := range []string{"271886", "Ibrahim", "ABC-99", "O'Brien", "42"} {
 		stub := &scdStub{resolve: scdResolveResp{Outcome: "VERIFIED", AuthContextID: "ctx-1"},
@@ -89,7 +72,6 @@ func TestPhase3DoesNotGuessIdentifierTypeFromValueShape(t *testing.T) {
 		if got["verification"] != typed {
 			t.Fatalf("verification %q was altered in transit: %#v", typed, got["verification"])
 		}
-		// The hop must not have decided this value is "really" a reservation number or a name.
 		for _, k := range []string{"first_name", "last_name", "reservation_number"} {
 			if v, ok := got[k]; ok && v != "" {
 				t.Fatalf("the hop guessed from the value shape: %q was also placed in %q as %#v. Deciding the "+
@@ -100,9 +82,7 @@ func TestPhase3DoesNotGuessIdentifierTypeFromValueShape(t *testing.T) {
 	}
 }
 
-// THE SECURITY MODEL SURVIVES THE FIX. Widening phase3In widened what a guest can put in the body, so this
-// pins what they still cannot reach: the trusted identity is derived by the appliance from its own neighbour
-// table, and no guest-supplied key may override it.
+// The trusted identity is derived from the appliance's neighbour table; no guest-supplied key may override it.
 func TestPhase3GuestCannotSupplyTrustedIdentity(t *testing.T) {
 	stub := &scdStub{resolve: scdResolveResp{Outcome: "VERIFIED", AuthContextID: "ctx-1"},
 		grant: scdGrantResp{Outcome: "GRANTED", SessionID: "s-1", EntitlementID: "e-1"}}
@@ -111,8 +91,7 @@ func TestPhase3GuestCannotSupplyTrustedIdentity(t *testing.T) {
 	phase3Post(t, h, map[string]any{
 		"room": "7102", "verification": "271886",
 		"request_id": "11111111-2222-4333-8444-555555555555",
-		// Everything a guest might try to assert about themselves.
-		"ip": "10.9.9.9", "mac": "de:ad:be:ef:00:01",
+		"ip":         "10.9.9.9", "mac": "de:ad:be:ef:00:01",
 		"stay":             "00000000-0000-4000-8000-000000000001",
 		"pms_interface_id": "00000000-0000-4000-8000-000000000002",
 		"device":           map[string]any{"ip": "10.9.9.9", "mac": "de:ad:be:ef:00:01"},
@@ -135,8 +114,6 @@ func TestPhase3GuestCannotSupplyTrustedIdentity(t *testing.T) {
 	}
 }
 
-// An empty submission must still be refused at the hop rather than forwarded as a room with no evidence.
-// scd would refuse it anyway; not sending it keeps the refusal honest and cheap.
 func TestPhase3EmptyVerificationStillReachesSCDAsEmpty(t *testing.T) {
 	stub := &scdStub{resolve: scdResolveResp{Outcome: "NOT_VERIFIED"}}
 	h := stubHandler(t, stub)
@@ -155,10 +132,8 @@ func TestPhase3EmptyVerificationStillReachesSCDAsEmpty(t *testing.T) {
 	}
 }
 
-// ONLY FILLED FIELDS CROSS THE HOP, and each one as typed. scd enforces the site's Room sign-in mode and
-// refuses a request carrying a field that mode does not accept; a blank key forwarded beside the real one
-// must never look like a second kind of evidence, and a filled one must never be dropped here, because
-// deciding what the site accepts is scd's job, not this hop's.
+// Only filled fields cross the hop: a blank key must not look like a second kind of evidence, and a filled
+// one must not be dropped, since scd decides what the site's sign-in mode accepts.
 func TestPhase3ForwardsOnlyTheFieldsTheGuestFilled(t *testing.T) {
 	stub := &scdStub{resolve: scdResolveResp{Outcome: "NOT_VERIFIED", FailureClass: "CREDENTIAL"}}
 	h := stubHandler(t, stub)

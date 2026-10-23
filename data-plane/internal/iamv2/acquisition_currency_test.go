@@ -2,9 +2,7 @@ package iamv2
 
 import "testing"
 
-// A PACKAGE IS OFFERED BY CARD ONLY IN A CURRENCY AN ACTIVE ACCOUNT SETTLES. Found live on PRE-LIVE
-// (2026-10-11): a GBP Stripe test account and a USD package -- Card was listed, chosen, and refused at confirm
-// with PAYMENT_ACCOUNT_CURRENCY. The refusal was right; the offer was the defect.
+// Card must not be offered in a currency the account cannot settle (it would be refused at confirm).
 func TestCardIsOfferedOnlyInASettleableCurrency(t *testing.T) {
 	pkg := PackageRevisionRow{PriceMinor: 100, Currency: "USD", CurrencyExponent: 2, SettlementMethods: []string{AcquireVoucher, AcquireCard, AcquireRoomCharge}}
 	ac := AuthContextRow{Subject: CommerceSubject{Kind: SubjectPrincipal, PrincipalID: "p1"}}
@@ -23,7 +21,6 @@ func TestCardIsOfferedOnlyInASettleableCurrency(t *testing.T) {
 			t.Errorf("%s: card offered=%v, want %v", name, got, tc.card)
 		}
 	}
-	// A free package is unaffected: Free never needs an account.
 	free := PackageRevisionRow{PriceMinor: 0, Currency: "USD", CurrencyExponent: 2, SettlementMethods: []string{AcquireFree}}
 	if !containsMethod(applicableMethods(free, ac, SiteMethods{}), AcquireFree) {
 		t.Fatal("a free package is offered without any payment account")

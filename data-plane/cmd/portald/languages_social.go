@@ -1,11 +1,6 @@
 package main
 
-// THE "OPEN IN YOUR BROWSER" PAGE, IN EVERY SHIPPED LANGUAGE (social_browser.go).
-//
-// {p} is the provider's name (Google, Facebook): a brand, never translated, placed where each language's
-// grammar wants it. These join builtinStrings at start-up like pageStrings, so there is still one dictionary:
-// the page renders it, /api/languages serves it, and Hotel Admin (portal-branding/strings.ts) offers every key
-// for override.
+// The "Open in your browser" page in every shipped language; {p} is the provider's brand name, never translated.
 var socialBrowserStrings = map[string]map[string]string{
 	"en": {
 		"social.browser.title":  "Open this page in your browser",
@@ -51,7 +46,7 @@ var socialBrowserStrings = map[string]map[string]string{
 	},
 }
 
-// The words join the one dictionary at start-up; a key defined twice is refused loudly, as for pageStrings.
+// A key defined twice is refused loudly.
 func init() {
 	for code, words := range socialBrowserStrings {
 		dst := builtinStrings[code]

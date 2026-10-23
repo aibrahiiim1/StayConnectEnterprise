@@ -1,9 +1,7 @@
 package posting
 
-// THE HAND-OFF KEEPS THE UNKNOWN CONTRACT (decision D45). The engine settles on exactly three facts: a matched
-// PA, provably not sent (the only case it may queue again), or UNKNOWN (manual review, never resent). These
-// pin that pmsd's answers map onto them conservatively: only an unreachable pmsd or pmsd's own "wrote nothing"
-// is not-sent; everything else that is not a matched, well-formed PA for THIS P# is UNKNOWN.
+// Pins that pmsd answers map conservatively: only an unreachable pmsd or its own "wrote nothing" is
+// not-sent; anything that is not a matched, well-formed PA for this P# is UNKNOWN.
 
 import (
 	"context"
@@ -58,7 +56,6 @@ func TestHandoffTransport_Classification(t *testing.T) {
 					t.Fatal("an inconclusive hand-off must be UNKNOWN")
 				}
 			}
-			// The command carries exactly the engine's bytes and their hash.
 			if seen.Body != hoBody || seen.BodySHA256 != postinghandoff.BodyHash(hoBody) || seen.PNumber != 42 {
 				t.Fatalf("the command must be the exact authorised bytes: %+v", *seen)
 			}

@@ -1,11 +1,8 @@
 "use client";
 
-// Route shell for the Phase-4 (DARK) Manual Review screen. edged enforces the real gate on every request,
-// and every decision additionally requires a password step-up with the actor taken from the session.
-//
-// CARD DISPUTES ARE ALWAYS HERE. edged mounts the card-case routes under this surface whether or not the PMS
-// room-charge review is switched on, because a card dispute never ends access by itself and somebody has to
-// be able to decide it. When the review itself is not mounted (its queue answers 404), only the cases show.
+// edged enforces the real gate; every decision requires a password step-up.
+// Card disputes are always shown: edged mounts them even when room-charge review is off, as a dispute must remain
+// decidable.
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
@@ -15,7 +12,6 @@ import { CardCasesCard } from "@/components/phase4/card-cases";
 
 export default function FinancialReviewPage() {
   const [roles, setRoles] = useState<string[] | null>(null);
-  // null while unknown; false when the room-charge review queue is not mounted on this appliance.
   const [reviewMounted, setReviewMounted] = useState<boolean | null>(null);
   useEffect(() => {
     api

@@ -1,16 +1,10 @@
 package main
 
-// CARD PAYMENT AND ROOM CHARGE ADMINISTRATION (docs/architecture/ONEGATE_MODULES_AND_ACQUISITION.md).
-//
-// payment-providers: provider accounts, credentials, the extra hosted-payment domains and the card payment
-// settings. scd owns the payment key, so everything that touches a credential is proxied to scd's admin
-// socket and edged never sees a secret after the request that carried it. Credentials are write-only: the
-// list reports which keys are set, never their values. Every write needs password step-up, names the
-// operator, and is audited without the credential values.
-//
-// pms-financial-onboarding: approving a FIAS interface for room charge (posting target RN + G#, base
-// currency and an attestation of what was observed). Site_admin only; the approval is a new immutable
-// interface revision plus an append-only onboarding record, written by iam_v2.pms_interface_financial_onboard.
+// payment-providers: scd owns the payment key, so credential changes are proxied to scd's admin socket and
+// credentials are write-only (the list reports which keys are set, never values). Every write needs step-up
+// and is audited without credential values.
+// pms-financial-onboarding: site_admin-only room-charge approval of a FIAS interface (new immutable revision
+// plus an append-only record, written by iam_v2.pms_interface_financial_onboard).
 
 import (
 	"context"
@@ -42,7 +36,6 @@ func (s *server) paymentProvidersRoutes() http.Handler {
 	return r
 }
 
-// paymentStepUp checks the password and returns the operator label the change is recorded under.
 func (s *server) paymentStepUp(w http.ResponseWriter, r *http.Request, password string) (string, bool) {
 	if !s.reauth(r, password) {
 		s.reauthRefused(w, r, "password confirmation required")
@@ -225,7 +218,6 @@ func (s *server) putCardSettings(w http.ResponseWriter, r *http.Request) {
 	s.getCardSettings(w, r)
 }
 
-// paymentChanges is the change history of accounts, extra domains and card settings, newest first.
 func (s *server) paymentChanges(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -264,7 +256,6 @@ func (s *server) paymentChanges(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"changes": out})
 }
 
-// dbMessage returns the database's validation message without connection details.
 func dbMessage(err error) string {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) {
@@ -273,25 +264,21 @@ func dbMessage(err error) string {
 	return "the change was refused"
 }
 
-// ---- PMS financial onboarding (room charge) ----------------------------------------------------------------
-
 func (s *server) pmsFinancialOnboardingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listFinancialOnboarding)
 	// Approving an interface for room charge is a site_admin decision whatever the role matrix grants.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}", s.approveFinancialOnboarding)
-	// Vendor-confirmed PA meanings, per interface (Phase-0 Amendment A1): until a code is confirmed here it is
-	// UNKNOWN. Append-only; a site administrator records a CONFIRM or a WITHDRAW with the vendor evidence.
+	// Vendor-confirmed PA meanings per interface; UNKNOWN until confirmed. Append-only CONFIRM/WITHDRAW with evidence.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}/answer-confirmations", s.recordAnswerConfirmation)
-	// A stay's ADMIN_BLOCK: the only posting block an operator may set or clear. PMS_NO_POST and
-	// PMS_DATA_SUSPECT are cleared by PMS data only, and POSTING_UNRESOLVED by its charge's review.
+	// ADMIN_BLOCK is the only posting block an operator may set or clear (PMS_NO_POST/PMS_DATA_SUSPECT clear by PMS data,
+	// POSTING_UNRESOLVED by its charge's review).
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/stays/{stay}/admin-block", s.stayAdminBlock)
-	// The financial mirror maximum age (D48): an operational setting per interface, site_admin with step-up.
+	// Financial mirror maximum age: per-interface setting, site_admin with step-up.
 	r.With(s.requireRole("pms-financial-onboarding", permWrite), requireSiteAdmin).Post("/{id}/financial-mirror-max-age", s.setFinancialMirrorMaxAge)
 	return r
 }
 
-// requireSiteAdmin refuses anyone who is not a site administrator.
 func requireSiteAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := sessFrom(r.Context())
@@ -326,11 +313,9 @@ type financialOnboardingRow struct {
 	ApprovedAt        *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy        *string    `json:"approved_by,omitempty"`
 	Attestation       *string    `json:"attestation,omitempty"`
-	// AnswerMeanings lists, per PA status that can be confirmed, whether the vendor has confirmed it means
-	// "definitely not posted" on this interface, and its fixed stay effect. An unconfirmed status is UNKNOWN.
+	// Per PA status: whether the vendor confirmed it means "definitely not posted", and its fixed stay effect.
 	AnswerMeanings []answerMeaning `json:"answer_meanings"`
-	// FinancialMirror: how long the mirror stays good enough for room charge after a successful complete resync
-	// (D48), whether that is the default, and when the mirror was last proven.
+	// How long the mirror stays good for room charge after a complete resync, and whether that is the default.
 	FinancialMirror financialMirror `json:"financial_mirror"`
 }
 
@@ -340,7 +325,6 @@ type financialMirror struct {
 	LastCompleteSyncAt *time.Time `json:"last_complete_sync_at"`
 }
 
-// answerMeaning is one PA status's confirmation state on one interface.
 type answerMeaning struct {
 	ASStatus   string     `json:"as_status"`
 	Effect     string     `json:"effect"`
@@ -350,7 +334,7 @@ type answerMeaning struct {
 	RecordedBy *string    `json:"recorded_by,omitempty"` // operator e-mail
 }
 
-// answerEffects is the contract's fixed mapping (section 9a rule 9) for a vendor-confirmed status.
+// answerEffects is the contract's fixed mapping for a vendor-confirmed status.
 var answerEffects = []struct{ code, effect string }{
 	{"NP", "NO_POST_BLOCK"}, {"NG", "DATA_SUSPECT_BLOCK"}, {"NR", "DATA_SUSPECT_BLOCK"},
 	{"NA", "NO_STAY_BLOCK"}, {"RY", "NO_STAY_BLOCK"},
@@ -393,7 +377,7 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 	}
 	rows.Close()
 	for k := range out {
-		// Answer meanings exist only where room charge can post: a FIAS interface.
+		// Answer meanings exist only on FIAS interfaces (where room charge can post).
 		out[k].AnswerMeanings = []answerMeaning{}
 		if out[k].ConnectorKind == "protel-fias" {
 			out[k].AnswerMeanings = s.answerMeanings(ctx, out[k].InterfaceID)
@@ -405,7 +389,6 @@ func (s *server) listFinancialOnboarding(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// answerMeanings reads the latest confirmation per status for one interface.
 func (s *server) answerMeanings(ctx context.Context, iface string) []answerMeaning {
 	latest := map[string]answerMeaning{}
 	rows, err := s.db.Query(ctx, `
@@ -508,7 +491,6 @@ func (s *server) stayAdminBlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"result": res})
 }
 
-// setFinancialMirrorMaxAge changes how long room charge trusts the mirror after a successful complete resync.
 func (s *server) setFinancialMirrorMaxAge(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
@@ -594,10 +576,8 @@ func (s *server) approveFinancialOnboarding(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"revision_id": rev})
 }
 
-// setPaymentAccountConversion marks an account PROVIDER-CONVERTS (contract §9, migration 0112): the provider
-// presents a package's price in its own currency and settles it in the account's. A financial setting, so it
-// takes the same step-up as saving the account, is recorded in its own append-only log by the definer, and is
-// audited here. The definer refuses a provider that does not convert.
+// setPaymentAccountConversion marks an account PROVIDER-CONVERTS (the provider prices in its own currency and
+// settles in the account's). Same step-up as saving the account; the definer logs it and refuses a provider that does not convert.
 func (s *server) setPaymentAccountConversion(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ProviderConverts bool   `json:"provider_converts"`

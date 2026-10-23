@@ -13,36 +13,30 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
 )
 
-// ---- a simulated kernel ------------------------------------------------------------------------------------
-//
-// The point of these tests is not "did the right ruleset text get produced" — the renderer's own tests cover
-// that. It is "WHAT DID netd EXECUTE", because the production invariant is about execution: a restart of a
-// correct appliance must issue no nft mutation at all, and a converge must not drop authorization on the way
-// through. Only a fake that records commands can tell those apart.
-
+// fakeKernel records the commands netd executes: the production invariant is about execution (a steady-state
+// restart issues no nft mutation and a converge never drops authorization), which only a recording fake can tell.
 type fakeKernel struct {
 	t           *testing.T
 	tableExists bool
-	fp          string              // marker fingerprint; "" means a table with no marker (pre-fingerprint)
-	sets        map[string][]string // set name -> element keys, as "iface|ip" or "ip"
+	fp          string              // marker fingerprint; "" means a table with no marker
+	sets        map[string][]string // set name -> element keys, "iface|ip" or "ip"
 	timeouts    map[string]int      // element key -> remaining seconds
-	cmds        []string            // every command executed, in order
+	cmds        []string
 	failNftF    bool
 
-	// read-failure seams: each is a way nft can fail that does NOT mean "the object is absent"
-	failListTables   bool   // nft unusable / permission denied
-	garbleListTables bool   // output that cannot be parsed
-	failListTable    bool   // the table exists but the read failed
-	failReadSet      string // set name whose read fails
-	garbleReadSet    string // set name whose read returns unparseable output
+	// Read-failure seams: ways nft can fail that do not mean "the object is absent".
+	failListTables   bool
+	garbleListTables bool
+	failListTable    bool
+	failReadSet      string
+	garbleReadSet    string
 }
 
 func newFakeKernel(t *testing.T) *fakeKernel {
 	return &fakeKernel{t: t, sets: map[string][]string{}, timeouts: map[string]int{}}
 }
 
-// legacyJulyTable seeds the exact condition the pilot appliance was in: a stayconnect table that predates the
-// Phase-3 renderer — auth_ipv4 present and populated, no marker, and no phase3_auth_ipv4 at all.
+// legacyJulyTable seeds a pre-Phase-3 table: auth_ipv4 populated, no marker, no phase3_auth_ipv4.
 func (k *fakeKernel) legacyJulyTable(guests ...string) {
 	k.tableExists = true
 	k.fp = ""
@@ -71,8 +65,7 @@ func (k *fakeKernel) run(_ context.Context, name string, args ...string) error {
 	return nil
 }
 
-// loadScript models `nft -f`: the render begins with `delete table`, so the table and every set in it are
-// replaced wholesale, and only what the script re-adds survives.
+// loadScript models `nft -f`: the render begins with `delete table`, so only what the script re-adds survives.
 func (k *fakeKernel) loadScript(script string) {
 	if strings.Contains(script, "delete table inet stayconnect") {
 		k.sets = map[string][]string{}
@@ -123,8 +116,7 @@ func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]b
 	k.cmds = append(k.cmds, name+" "+strings.Join(args, " "))
 	joined := strings.Join(args, " ")
 
-	// Failure injection, one seam per read. Each models a DIFFERENT reason nft can fail that is not "the
-	// object is absent", and every one of them must abort the converge rather than be read as "empty".
+	// Failure injection: each nft failure that is not "the object is absent" must abort the converge, not read as "empty".
 	if k.failListTables {
 		if strings.HasPrefix(joined, "-j list tables") {
 			return nil, fmt.Errorf("nft: netlink: Operation not permitted")
@@ -134,8 +126,7 @@ func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]b
 		return []byte("{not json"), nil
 	}
 	if strings.HasPrefix(joined, "-j list tables") {
-		// `list tables` works whether or not OUR table is there; that is the whole point of using it as the
-		// authority on absence.
+		// `list tables` works whether or not our table exists, so it is the authority on absence.
 		var objs []any
 		if k.tableExists {
 			objs = append(objs, map[string]any{"table": map[string]any{"family": "inet", "name": "stayconnect"}})
@@ -165,15 +156,13 @@ func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]b
 				"name": netcfg.RenderMarkerSet, "comment": "netd-render-fp=" + k.fp}})
 		}
 		for name := range k.sets {
-			// real nft lists each set exactly once; emitting the marker again here (with no comment) would
-			// be a fake-only artefact that hides whether the reader handles the real listing correctly
+			// Real nft lists each set once; re-emitting the marker would hide whether the reader handles the real listing.
 			if name == netcfg.RenderMarkerSet {
 				continue
 			}
 			objs = append(objs, map[string]any{"set": map[string]any{"name": name, "comment": ""}})
 		}
 		if len(objs) == 0 {
-			// a table with no sets at all still exists
 			objs = append(objs, map[string]any{"table": map[string]any{"name": "stayconnect"}})
 		}
 		return json.Marshal(map[string]any{"nftables": objs})
@@ -191,8 +180,7 @@ func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]b
 			} else {
 				val = e
 			}
-			// timeouts[e] < 0 models a PERMANENT element: nft emits neither timeout nor expires for one,
-			// which is exactly the shape legacy scd authorizations have.
+			// timeouts[e] < 0 is a permanent element (no timeout or expires), like legacy scd authorizations.
 			if k.timeouts[e] < 0 {
 				out = append(out, map[string]any{"elem": map[string]any{"val": val}})
 				continue
@@ -227,8 +215,6 @@ func (k *fakeKernel) has(set, key string) bool {
 	return false
 }
 
-// ---- harness -----------------------------------------------------------------------------------------------
-
 func testIntent() []netcfg.GuestNetwork {
 	return []netcfg.GuestNetwork{{
 		Name: "guest90", Enabled: true, NetworkType: "vlan", ParentInterface: "ens192", VLANID: 90,
@@ -248,9 +234,7 @@ func newTestApplier(t *testing.T, k *fakeKernel) *applier {
 		generatedDir: t.TempDir(),
 		runFn:        k.run,
 		outFn:        k.output,
-		// Reading which guest bridges exist is FAIL-CLOSED in production: an unreadable /sys/class/net is an
-		// error, not "there are no guest bridges". These tests do not run on an appliance, so the seam answers
-		// for the kernel; cases that care about specific bridges override it.
+		// Stands in for /sys/class/net, whose read is fail-closed in production; cases that care override it.
 		liveBridgesFn: func() map[string]bool { return map[string]bool{} },
 	}
 }
@@ -264,10 +248,8 @@ func converge(t *testing.T, a *applier, trigger string) nftConvergeOutcome {
 	return res
 }
 
-// ---- 1. UPGRADE FROM A PRE-PHASE-3 STORED BUNDLE -------------------------------------------------------------
-
-// This is Live Increment 9 reproduced. The live table is the July structure: no phase3_auth_ipv4, no marker.
-// One reconciliation must converge it — and must not deauthorize the guests who are on the box.
+// Upgrade from the pre-Phase-3 structure (no phase3_auth_ipv4, no marker): one reconciliation converges it
+// without deauthorizing current guests.
 func TestReconcile_UpgradeFromPrePhase3Table(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.55", "br-g90|10.20.0.56")
@@ -284,7 +266,6 @@ func TestReconcile_UpgradeFromPrePhase3Table(t *testing.T) {
 	if k.fp != netcfg.RenderFingerprint(testIntent(), testTopo()) {
 		t.Fatalf("live fingerprint %q does not match the current render", k.fp)
 	}
-	// The two legacy guests must still be authorized.
 	for _, g := range []string{"br-g90|10.20.0.55", "br-g90|10.20.0.56"} {
 		if !k.has("auth_ipv4", g) {
 			t.Fatalf("converging deauthorized live guest %s", g)
@@ -294,8 +275,6 @@ func TestReconcile_UpgradeFromPrePhase3Table(t *testing.T) {
 		t.Fatalf("carried %d elements, want 2", res.Carried)
 	}
 }
-
-// ---- 2. PHASE 3 IS PRESENT BUT EMPTY WHILE DARK ---------------------------------------------------------------
 
 func TestReconcile_Phase3SetExistsAndIsEmptyWhileDark(t *testing.T) {
 	k := newFakeKernel(t)
@@ -311,11 +290,8 @@ func TestReconcile_Phase3SetExistsAndIsEmptyWhileDark(t *testing.T) {
 	}
 }
 
-// ---- 3. STEADY-STATE RESTART EXECUTES NOTHING -----------------------------------------------------------------
-
-// THE PRODUCTION INVARIANT. Once converged, a restart must not issue a single nft mutation. This is asserted on
-// the command log, not on the resulting ruleset: re-applying the same render would leave an identical structure
-// while destroying every live guest's authorization, and a ruleset-only assertion could not tell the difference.
+// Once converged, a restart must issue no nft mutation. Asserted on the command log, not the ruleset: re-applying
+// the same render yields an identical structure while destroying every live authorization.
 func TestReconcile_SteadyStateRestartIssuesNoMutation(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
@@ -337,8 +313,6 @@ func TestReconcile_SteadyStateRestartIssuesNoMutation(t *testing.T) {
 	}
 }
 
-// ---- 4. REPEATED RESTART / REBOOT IS IDEMPOTENT ---------------------------------------------------------------
-
 func TestReconcile_RepeatedRestartsAreIdempotent(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
@@ -355,15 +329,13 @@ func TestReconcile_RepeatedRestartsAreIdempotent(t *testing.T) {
 	}
 }
 
-// A reboot clears the kernel ruleset entirely (or leaves only the static /etc/nftables.conf). Reconstruction
-// must rebuild the current structure, and doing it repeatedly must settle.
+// A reboot clears the ruleset (or leaves only the static conf); reconstruction rebuilds it and then settles.
 func TestReconcile_RebootReconstructionThenSettles(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
 	converge(t, a, "install")
 
 	for cycle := 0; cycle < 3; cycle++ {
-		// reboot: kernel ruleset gone
 		k.tableExists, k.fp, k.sets, k.timeouts = false, "", map[string][]string{}, map[string]int{}
 		k.reset()
 		res := converge(t, a, "boot_reconcile")
@@ -379,8 +351,6 @@ func TestReconcile_RebootReconstructionThenSettles(t *testing.T) {
 		}
 	}
 }
-
-// ---- 5. FRESH INSTALLATION IS ALREADY CURRENT-FORMAT -----------------------------------------------------------
 
 func TestReconcile_FreshInstallProducesCurrentFormat(t *testing.T) {
 	k := newFakeKernel(t)
@@ -398,17 +368,13 @@ func TestReconcile_FreshInstallProducesCurrentFormat(t *testing.T) {
 			t.Fatalf("fresh installation is missing %s", s)
 		}
 	}
-	// and it needs no second pass
 	k.reset()
 	if r := converge(t, a, "verify"); r.Changed {
 		t.Fatal("a fresh installation required a second convergence")
 	}
 }
 
-// ---- 6. THE APPLIANCE NO LONGER DEPENDS ON THE STORED BUNDLE ---------------------------------------------------
-
-// An obsolete bundle on disk must not be able to influence the structure. Here the stored file is the July
-// render (no phase3 set); reconciliation must ignore it completely and still converge.
+// An obsolete stored bundle (no phase3 set) must not influence the structure.
 func TestReconcile_ObsoleteStoredBundleIsNotConsulted(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable()
@@ -432,16 +398,14 @@ func TestReconcile_ObsoleteStoredBundleIsNotConsulted(t *testing.T) {
 	}
 }
 
-// ---- 7. FINGERPRINT SEMANTICS ---------------------------------------------------------------------------------
-
 func TestReconcile_UnreadableMarkerNeverCountsAsAMatch(t *testing.T) {
 	k := newFakeKernel(t)
 	a := newTestApplier(t, k)
 	converge(t, a, "install")
 
-	// Corrupt the marker the way a truncated or hand-edited comment would.
+	// Corrupt the marker like a truncated or hand-edited comment.
 	for _, bad := range []string{"", "netd-render-fp=", "netd-render-fp=zzzz", "netd-render-fp=" + strings.Repeat("a", 31)} {
-		k.fp = netcfg.FingerprintFromSetComment(bad) // "" for all of these
+		k.fp = netcfg.FingerprintFromSetComment(bad)
 		k.reset()
 		res := converge(t, a, "after-corruption")
 		if !res.Changed {
@@ -450,7 +414,6 @@ func TestReconcile_UnreadableMarkerNeverCountsAsAMatch(t *testing.T) {
 	}
 }
 
-// A change in intent must change the fingerprint, or an upgrade would go undetected.
 func TestReconcile_FingerprintTracksIntentAndTopology(t *testing.T) {
 	base := netcfg.RenderFingerprint(testIntent(), testTopo())
 
@@ -469,8 +432,6 @@ func TestReconcile_FingerprintTracksIntentAndTopology(t *testing.T) {
 	}
 }
 
-// ---- 8. FAILURE IS NOT REPORTED AS SUCCESS ---------------------------------------------------------------------
-
 func TestReconcile_ApplyFailurePropagates(t *testing.T) {
 	k := newFakeKernel(t)
 	k.failNftF = true
@@ -480,16 +441,10 @@ func TestReconcile_ApplyFailurePropagates(t *testing.T) {
 	}
 }
 
-// ---- 8b. AN UNREADABLE LIVE STATE IS NOT AN EMPTY ONE ----------------------------------------------------
-//
-// THE FAILURE THIS PREVENTS. The obvious way to ask "does this set exist" is to read it and treat a non-zero
-// exit as no. But `nft list set` exits non-zero for a missing set, a missing binary, a denied permission, a
-// busy netlink socket and a malformed ruleset alike, and only the FIRST of those means empty. Every other one
-// would have been read as "there is no authorization to preserve" immediately before a `delete table` — which
-// is exactly how a converge could deauthorize an entire property and then report success.
-//
-// So absence is decided by ENUMERATION (the table listing), and anything the enumeration says exists must be
-// readable or the converge is abandoned before a single mutation is issued.
+// An unreadable live state is not an empty one: `nft list set` exits non-zero for a missing set, a missing
+// binary, denied permission or a busy socket alike, and reading all as "nothing to preserve" before a
+// `delete table` would deauthorize a whole property. Absence is decided by the table listing, and anything
+// listed must be readable or the converge is abandoned before any mutation.
 func TestReconcile_AnUnreadableLiveStateAbortsBeforeAnyMutation(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -505,7 +460,6 @@ func TestReconcile_AnUnreadableLiveStateAbortsBeforeAnyMutation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
 			k := newFakeKernel(t)
-			// a live, populated, pre-Phase-3 table — i.e. something a converge would otherwise rewrite
 			k.legacyJulyTable("br-g90|10.20.0.55", "br-g90|10.20.0.56")
 			k.sets["phase3_auth_ipv4"] = []string{}
 			before := len(k.sets["auth_ipv4"])
@@ -532,12 +486,11 @@ func TestReconcile_AnUnreadableLiveStateAbortsBeforeAnyMutation(t *testing.T) {
 	}
 }
 
-// AND THE LEGITIMATE CASE STILL WORKS: a set that the enumeration does not list is genuinely absent, has
-// nothing to carry, and must not block the converge. Otherwise every pre-Phase-3 appliance — which by
-// definition has no phase3_auth_ipv4 — would fail closed forever and never converge at all.
+// A set the enumeration does not list is genuinely absent and must not block the converge (pre-Phase-3
+// appliances have no phase3_auth_ipv4).
 func TestReconcile_AGenuinelyAbsentSetIsEmptyNotAnError(t *testing.T) {
 	k := newFakeKernel(t)
-	k.legacyJulyTable("br-g90|10.20.0.55") // no phase3_auth_ipv4 at all
+	k.legacyJulyTable("br-g90|10.20.0.55")
 	if _, ok := k.sets["phase3_auth_ipv4"]; ok {
 		t.Fatal("precondition: the phase-3 set should not be present")
 	}
@@ -553,7 +506,6 @@ func TestReconcile_AGenuinelyAbsentSetIsEmptyNotAnError(t *testing.T) {
 	if res.Carried != 1 {
 		t.Fatalf("carried %d; the one legacy element should have been carried", res.Carried)
 	}
-	// the absent set was never read — absence came from the enumeration, not from a failed read
 	for _, c := range k.cmds {
 		if strings.Contains(c, "list set inet stayconnect phase3_auth_ipv4") {
 			t.Fatal("the absent set was probed by reading it; absence must come from the table listing")
@@ -561,7 +513,6 @@ func TestReconcile_AGenuinelyAbsentSetIsEmptyNotAnError(t *testing.T) {
 	}
 }
 
-// A read failure must not be silently retried into success either: the refusal is reported, not swallowed.
 func TestReconcile_ReadFailureIsReportedNotSwallowed(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.55")
@@ -573,7 +524,6 @@ func TestReconcile_ReadFailureIsReportedNotSwallowed(t *testing.T) {
 		t.Fatalf("the refusal does not name the set that could not be read: %v", err)
 	}
 
-	// once the read works again, the same appliance converges normally
 	k.failReadSet = ""
 	res, err := a.ensureNftStructure(context.Background(), testIntent(), "boot-retry")
 	if err != nil || !res.Changed || res.Carried != 1 {
@@ -581,12 +531,10 @@ func TestReconcile_ReadFailureIsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
-// ---- 9. CARRY-OVER USES THE REMAINING LEASE ---------------------------------------------------------------------
-
 func TestReconcile_CarryOverUsesRemainingLeaseNotOriginal(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.60")
-	k.timeouts["br-g90|10.20.0.60"] = 7 // 7 seconds LEFT of a 3600s lease
+	k.timeouts["br-g90|10.20.0.60"] = 7 // seconds left of a 3600s lease
 	a := newTestApplier(t, k)
 
 	converge(t, a, "boot")
@@ -596,8 +544,7 @@ func TestReconcile_CarryOverUsesRemainingLeaseNotOriginal(t *testing.T) {
 	}
 }
 
-// LEGACY scd AUTHORIZATIONS ARE PERMANENT ELEMENTS — no timeout, no expiry. They must survive a converge, or
-// the upgrade that installs the Phase-3 structure would knock every legacy guest offline.
+// Legacy scd authorizations are permanent elements (no timeout) and must survive a converge.
 func TestReconcile_PermanentLegacyElementsSurviveConverge(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-lan|10.10.0.42")
@@ -633,12 +580,8 @@ func TestReconcile_ExpiredElementsAreNotResurrected(t *testing.T) {
 	}
 }
 
-// ---- 10. AN OLDER TABLE STILL HOLDING TEMPORARY VERIFICATION ACCESS ---------------------------------------------
-
-// The software before this one rendered verify_ipv4 (plus its quota/rate maps) and scd filled it with devices
-// waiting for an email code. The current render has none of it (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1). Upgrading
-// such an appliance must remove the set, carry nothing of it -- not even into another set -- and still keep every
-// signed-in guest online.
+// An older table holding the retired verify_ipv4 set is upgraded by removing it, carrying nothing of it into
+// another set, and keeping every signed-in guest online.
 func TestReconcile_UpgradeDropsAPopulatedVerificationSetAndCarriesNothingOfIt(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.70")

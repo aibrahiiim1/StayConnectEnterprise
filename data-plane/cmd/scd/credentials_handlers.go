@@ -1,18 +1,8 @@
 package main
 
-// Guest Username/Password authorization. IAM-v2 is the authority: this handler parses and throttles, and
-// hands the credential to the IAM-v2 adapter, which owns verification, lockout and the auth context.
-//
-// The superseded implementation that used to live here -- a direct public.guest_accounts lookup with its own
-// argon2 verification, its own failed_attempts/locked_until counters and its own public.sessions pipeline --
-// has been REMOVED, along with the local argon2 helpers that existed only to serve it. Password verification
-// belongs to exactly one authority; two of them meant two lockout counters disagreeing about the same
-// attempt.
-//
-// TWO KINDS OF ACCOUNT SIGN IN HERE. Staff-created Personal accounts are governed by the guest_account switch;
-// self-registered Email accounts (self_service.go) by the email_account switch and its licence. Both are the
-// same ACCOUNT subject to IAM-v2 and sign in through this one route, so a self-registered account's reply also
-// carries its verification state and the account token.
+// Guest username/password authorization: this handler parses and throttles, IAM-v2 owns verification, lockout and the auth context
+// (two lockout counters disagreed about the same attempt). Personal accounts are governed by the guest_account switch,
+// self-registered Email accounts by email_account and its licence; both sign in through this route.
 
 import (
 	"encoding/json"
@@ -29,9 +19,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/passwordhash"
 )
 
-// authorizeGuestAccount hands a username/password to the IAM-v2 authority. Every failure mode -- unknown
-// username, wrong password, disabled, expired, locked out, or an account of a kind whose switch is off -- is
-// answered identically and creates no auth context, device, entitlement or session.
+// authorizeGuestAccount: every failure mode (unknown, wrong password, disabled, expired, locked, switch off) is answered identically and creates no auth context, device, entitlement or session.
 func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -56,8 +44,7 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad mac")
 		return
 	}
-	// Both switches are read before any throttle charge or lookup. With both off the method is off, and the
-	// answer says nothing about any credential -- exactly the previous behaviour of the one switch.
+	// Both switches are read before any throttle charge or lookup; with both off the answer says nothing about any credential.
 	cfg, ok := s.guestMethodSwitches(r.Context())
 	personalOn := ok && methodSwitchOn(cfg, guestMethodAccount)
 	emailOn := ok && methodSwitchOn(cfg, guestMethodEmailAccount)
@@ -67,15 +54,8 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(req.Username)
 
-	// IAM-v2 IS THE GUEST AUTHORITY for account credentials. The superseded public.guest_accounts lookup,
-	// its argon2 verification, its own lockout counters and the public.sessions pipeline that followed have
-	// been REMOVED from the product. IAM-v2's adapter owns credential verification and account lockout
-	// (failed_attempts / locked_until on iam_v2.guest_access_accounts); running a second set of counters
-	// alongside it charged one attempt twice, which is why only one may exist.
-	//
-	// The durable endpoint throttle stays, and now applies to the single remaining path. It is charged before
-	// the credential check so a throttled attempt establishes no auth context, device or entitlement, and it
-	// never reveals whether a username exists.
+	// IAM-v2 owns credential verification and lockout; a second set of counters charged one attempt twice. The durable throttle is
+	// charged before the credential check so a throttled attempt creates nothing and never reveals whether a username exists.
 	if s.loginRL != nil && !s.loginRL.allow(username, ip.String(), mac.String()) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
@@ -86,10 +66,7 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// WHICH SWITCH GOVERNS THIS ACCOUNT. Learnt from the account itself, and a switched-off kind is answered as
-	// a wrong password, after the same argon2 work: "this address has an Email account but Email accounts are
-	// off" would be an enumeration oracle the portal never needs. An unknown username goes on to the
-	// authenticator, which does its own constant-work refusal.
+	// A switched-off account kind is answered as a wrong password after the same argon2 work: saying "Email accounts are off" would be an enumeration oracle.
 	credential := iamv2.CredentialAccount
 	if s.db != nil {
 		var selfRegistered bool

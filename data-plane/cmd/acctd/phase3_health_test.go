@@ -1,19 +1,11 @@
 package main
 
-// ACCOUNTING HEALTH. The failure this guards against is not an error going unlogged — it is an accounting
-// loop that keeps ticking while every observation it makes is refused, or one that quietly stops producing.
-// Both look identical from outside: the process is up, the heartbeat is fresh, and nothing says a thing until
-// a Folio comes up short.
-
 import (
 	"strings"
 	"testing"
 	"time"
 )
 
-// Every degraded condition must surface, and the reason must be a bounded phrase — not raw SQL, not a guest
-// or session identifier. Health output is read by people and by monitoring systems that were never
-// authorised to learn who is staying at the property.
 func TestAccountingHealthReportsEveryDegradedCondition(t *testing.T) {
 	now := time.Now()
 
@@ -38,8 +30,7 @@ func TestAccountingHealthReportsEveryDegradedCondition(t *testing.T) {
 	}
 }
 
-// SILENCE IS NOT SUCCESS. A loop that has not completed a clean pass within the freshness window is degraded
-// even though nothing errored — that is precisely the state nobody notices.
+// A loop with no clean pass inside the freshness window is degraded even if nothing errored.
 func TestAccountingHealthTreatsSilenceAsDegraded(t *testing.T) {
 	now := time.Now()
 
@@ -57,15 +48,13 @@ func TestAccountingHealthTreatsSilenceAsDegraded(t *testing.T) {
 		t.Fatalf("a silent loop reported reason %v", h["reason"])
 	}
 
-	// a loop that has NEVER completed a pass is also stale — "no evidence yet" is not evidence of health
 	never := &phase3{tenant: "t", site: "s"}
 	if h := never.accountingHealth(now); h["degraded"] != true || h["stale"] != true {
 		t.Fatalf("a loop that never ran was reported healthy: %v", h)
 	}
 }
 
-// The reason must never carry SQL, a session id, a guest identifier or an address. An error string pasted
-// straight through is the easiest way for those to reach a monitoring system or a support ticket.
+// Reasons must never carry SQL, a session id, a guest identifier or an address.
 func TestAccountingHealthReasonsAreBounded(t *testing.T) {
 	reasons := []string{
 		reasonSessionsUnreadable, reasonNoClassGenerations, reasonCountersUnreadable,
@@ -84,7 +73,6 @@ func TestAccountingHealthReasonsAreBounded(t *testing.T) {
 	}
 }
 
-// A dark arm is never degraded: it is doing exactly what it should, which is nothing.
 func TestDarkAccountingIsNotDegraded(t *testing.T) {
 	var dark *phase3
 	h := dark.accountingHealth(time.Now())
@@ -96,9 +84,7 @@ func TestDarkAccountingIsNotDegraded(t *testing.T) {
 	}
 }
 
-// The summary the health supervisor reads must carry BOTH problems when both exist. An operator told only
-// about the shaping refusal would declare the incident over once shaping recovered, while usage was still
-// being lost.
+// The summary must carry both problems, or recovering shaping would end the incident while usage is still lost.
 func TestDegradedSummaryCarriesBothProblems(t *testing.T) {
 	p := &phase3{tenant: "t", site: "s", lastPassOK: time.Now()}
 	p.acctDegraded = reasonCountersUnreadable

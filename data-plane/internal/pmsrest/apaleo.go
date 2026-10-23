@@ -1,21 +1,8 @@
 package pmsrest
 
-// Apaleo client.
-//
-// Documentation (verified 2026-09-24):
-//   - https://apaleo.dev/guides/oauth-connection/simple-client.html   client credentials: POST
-//     https://identity.apaleo.com/connect/token, Authorization: Basic base64(client_id:client_secret),
-//     grant_type=client_credentials
-//   - https://api.apaleo.com/swagger/booking-v1/swagger.json          GET /booking/v1/reservations
-//     (propertyIds, status [Confirmed|InHouse|CheckedOut|Canceled|NoShow], dateFilter [.. Modification ..],
-//     from/to, pageNumber, pageSize <= 500; 204 No Content for an empty page; ReservationListModel
-//     {reservations[], count}; ReservationItemModel id, status, arrival, departure, modified, unit{id,name},
-//     primaryGuest{firstName,lastName}, additionalGuests[])
-//   - https://api.apaleo.com/swagger/inventory-v1/swagger.json        GET /inventory/v1/units (propertyId,
-//     pageNumber, pageSize <= 500; UnitListModel {units[], count}; UnitItemModel name)
-//
-// Array query parameters use the Swagger 2 default collection format (comma separated). arrival/departure
-// are date-times WITH the property's UTC offset; they are converted to the configured property time zone.
+// Apaleo client: OAuth client credentials (Basic auth), GET /booking/v1/reservations and /inventory/v1/units with
+// pageSize <= 500 and 204 for an empty page. Array query parameters are comma separated; arrival/departure carry
+// the property's UTC offset and are converted to the configured property time zone.
 
 import (
 	"context"
@@ -26,7 +13,7 @@ import (
 	"time"
 )
 
-var apaleoPage = 500 // a var only so contract tests can page with small pages
+var apaleoPage = 500 // var so tests can use small pages
 
 type apaleoClient struct {
 	o            Options
@@ -61,7 +48,7 @@ func (c *apaleoClient) authenticate(ctx context.Context) error {
 		return req, nil
 	}, &tok)
 	if err != nil {
-		if KindOf(err) == KindRequest { // 400 invalid_client / unauthorized_client is a credential refusal
+		if KindOf(err) == KindRequest { // 400 invalid_client is a credential refusal
 			return perr(KindAuth, "connect/token", err.(*Error).Status, nil)
 		}
 		return err
@@ -74,11 +61,11 @@ func (c *apaleoClient) authenticate(ctx context.Context) error {
 		exp = 5 * time.Minute
 	}
 	c.token = tok.AccessToken
-	c.tokenExp = c.o.Now().Add(exp - exp/10) // renew before the provider's expiry
+	c.tokenExp = c.o.Now().Add(exp - exp/10)
 	return nil
 }
 
-// get performs an authenticated GET, re-authenticating ONCE when the API answers 401 (an expired token).
+// get re-authenticates once when the API answers 401 (expired token).
 func (c *apaleoClient) get(ctx context.Context, op, path string, q url.Values, out any) (int, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := c.authenticate(ctx); err != nil {
@@ -93,7 +80,7 @@ func (c *apaleoClient) get(ctx context.Context, op, path string, q url.Values, o
 			return req, nil
 		}, out)
 		if KindOf(err) == KindAuth && status == http.StatusUnauthorized && attempt == 0 {
-			c.token = "" // force a fresh token and try once more
+			c.token = ""
 			continue
 		}
 		return status, err
@@ -144,7 +131,7 @@ func (c *apaleoClient) reservations(ctx context.Context, q url.Values, max int) 
 			return nil, err
 		}
 		if status == http.StatusNoContent {
-			return out, nil // "If the page has no items, the API returns 204 No Content."
+			return out, nil
 		}
 		if resp.Reservations == nil || resp.Count == nil {
 			return nil, perr(KindInvalidResponse, "booking/reservations", status, nil)
@@ -212,8 +199,7 @@ func (c *apaleoClient) normalise(raw []apaleoReservation) []Reservation {
 		}
 		res.Arrival = localDate(parseInstant(r.Arrival), c.o.Location)
 		res.Departure = localDate(parseInstant(r.Departure), c.o.Location)
-		// Apaleo guests carry no id, so occupants are keyed by name downstream (the Stay Engine matches an
-		// id-less occupant on its normalised name). Listed only when there is more than the primary.
+		// Apaleo guests carry no id; the Stay Engine matches occupants on normalised name. Listed only beyond the primary.
 		if len(r.AdditionalGuests) > 0 && r.PrimaryGuest != nil {
 			res.Sharers = append(res.Sharers, Guest{FirstName: r.PrimaryGuest.FirstName, LastName: r.PrimaryGuest.LastName, Primary: true})
 			for _, g := range r.AdditionalGuests {

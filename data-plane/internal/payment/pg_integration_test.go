@@ -15,14 +15,11 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// The Phase-4 payment runtime matrix. It needs a disposable PostgreSQL 16 carrying 0011-0016
-// (scripts/phase4-pg-integration.sh builds one) reachable via PHASE4_TEST_DSN.
-//
-// No provider is ever contacted: every provider here is a deterministic in-process double, and the DARK
-// tests assert that even a double which WOULD capture is never reached.
+// Phase-4 payment runtime matrix; needs a disposable PostgreSQL 16 (scripts/phase4-pg-integration.sh) via
+// PHASE4_TEST_DSN. Every provider is an in-process double, and the DARK tests assert that even a double that would
+// capture is never reached.
 
-// outcomePool is the SEPARATE outcome-authority credential (0024). A test that needs to assert a provider
-// outcome must use it; the execution credential deliberately cannot.
+// outcomePool is the separate outcome-authority credential; assertions about provider outcomes must use it.
 func outcomePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("PHASE4_OUTCOME_DSN")
@@ -58,8 +55,6 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// ---------------------------------------------------------------- fixture
-
 type scope struct {
 	tenant, site string
 	purchase     string
@@ -79,9 +74,7 @@ func scan1[T any](t *testing.T, p *pgxpool.Pool, sql string, args ...any) T {
 	return v
 }
 
-// seedPaidChain builds a complete paid purchase: tenant, site, package, quote, auth context, purchase and
-// an ONLINE_PAYMENT settlement. The quote and auth context matter because the grant path reads its pins
-// from them, exactly as the free path does.
+// seedPaidChain: the quote and auth context matter because the grant path reads its pins from them.
 func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	ctx := context.Background()
@@ -94,8 +87,7 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	SELECT tenant_id::text, id::text FROM si`).Scan(&s.tenant, &s.site); err != nil {
 		t.Fatalf("seed tenant/site: %v", err)
 	}
-	// The site's authoritative payment identity. Nothing can create a payment intent without it, which is
-	// the corrected behaviour: no configuration means no charge, never an invented merchant account.
+	// No payment identity, no intent: no configuration means no charge, never an invented merchant account.
 	s.merchant = scan1[string](t, p, `INSERT INTO iam_v2.payment_provider_accounts
 		(tenant_id,site_id,provider,merchant_account_ref,status,is_default)
 		VALUES ($1,$2,'test-double','acct_'||substr(md5(random()::text),1,12),'ACTIVE',true)
@@ -122,7 +114,6 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 		t.Fatalf("current revision: %v", err)
 	}
 
-	// a voucher subject, so the grant has exactly one subject to pin
 	keyGen := scan1[string](t, p, `INSERT INTO iam_v2.voucher_code_key_generations
 		(tenant_id,site_id,generation_no,hmac_key_ciphertext,aead_params,encryption_key_id)
 		VALUES ($1,$2,1,'\x00','{}',gen_random_uuid()) RETURNING id::text`, s.tenant, s.site)
@@ -153,7 +144,6 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	return s
 }
 
-// fakeGranter records grant calls without writing anything, for tests about the payment machine itself.
 type fakeGranter struct {
 	mu    sync.Mutex
 	calls int
@@ -172,16 +162,14 @@ func (g *fakeGranter) GrantSettledSettlement(_ context.Context, _, _, _ string) 
 }
 
 var (
-	darkCfg = Config{MasterEnabled: true, PaymentEnabled: true}                        // domain on, provider OFF
-	liveCfg = Config{MasterEnabled: true, PaymentEnabled: true, ProviderEnabled: true} // doubles only
+	darkCfg = Config{MasterEnabled: true, PaymentEnabled: true}
+	liveCfg = Config{MasterEnabled: true, PaymentEnabled: true, ProviderEnabled: true}
 )
 
-// idem builds a per-run idempotency key. The run nonce matters: an idempotency key is globally unique by
-// design, so two runs against the same database must not collide over a name they legitimately share.
+// idem builds a per-run key: idempotency keys are globally unique, so two runs against one database must not collide.
 var runNonce = strconv.FormatInt(time.Now().UnixNano(), 36)
 
-// seedOperator creates a real active operator of the tenant. The financial actor assertion (0021) refuses
-// an arbitrary uuid, so a test that passed gen_random_uuid() would be measuring nothing but the refusal.
+// seedOperator: the financial actor assertion refuses an arbitrary uuid.
 func seedOperator(t *testing.T, p *pgxpool.Pool, tenant string) string {
 	t.Helper()
 	return scan1[string](t, p, `INSERT INTO public.operators(tenant_id,email,display_name,status)
@@ -189,8 +177,7 @@ func seedOperator(t *testing.T, p *pgxpool.Pool, tenant string) string {
 		RETURNING id::text`, tenant)
 }
 
-// guardedExec runs one statement (no result) inside a controlled-writer scope. Used only to STAGE a state
-// a test needs; on the full schema a raw write to a controlled table is refused outside such a scope.
+// guardedExec stages state inside a controlled-writer scope; raw writes to controlled tables are refused outside one.
 func guardedExec(t *testing.T, p *pgxpool.Pool, family, sql string, args ...any) {
 	t.Helper()
 	ctx := context.Background()
@@ -214,10 +201,6 @@ func idem(t *testing.T, suffix string) string {
 	return "idem-" + runNonce + "-" + t.Name() + "-" + suffix
 }
 
-// ---------------------------------------------------------------- DARK
-
-// The positive no-egress proof: the runtime genuinely runs, crosses the durable boundary, and is stopped at
-// the provider boundary with a double that WOULD have captured.
 func TestIntegrationPayment_DarkNeverReachesTheProvider(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -240,9 +223,8 @@ func TestIntegrationPayment_DarkNeverReachesTheProvider(t *testing.T) {
 	if e.ProviderRefusals() != 3 {
 		t.Fatalf("expected 3 recorded refusals, got %d", e.ProviderRefusals())
 	}
-	// A preflight refusal is provably NOT_SENT, so it must leave NOTHING behind. The intent stays CREATED
-	// and the settlement stays REQUIRED -- both still executable once the posture is fixed. The previous
-	// behaviour stranded them at PENDING / IN_PROGRESS, describing an execution that had never begun.
+	// A preflight refusal is provably NOT_SENT and leaves the intent CREATED and the settlement REQUIRED, both still
+	// executable.
 	if st := scan1[string](t, p, `SELECT status FROM iam_v2.payment_transactions WHERE id=$1`, in.ID); st != "CREATED" {
 		t.Fatalf("a NOT_SENT preflight refusal moved the intent to %s", st)
 	}
@@ -269,8 +251,6 @@ func TestIntegrationPayment_UncorrelatableAdapterIsRefused(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- server-pinned money
-
 func TestIntegrationPayment_AmountComesFromThePinnedPurchase(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -284,7 +264,6 @@ func TestIntegrationPayment_AmountComesFromThePinnedPurchase(t *testing.T) {
 		t.Fatalf("the intent must carry the pinned purchase money, got %d/%s/%d",
 			in.AmountMinor, in.Currency, in.Exponent)
 	}
-	// and the purchase price itself cannot be moved out from under the pinned quote at all
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET amount_minor=999999 WHERE id=$1`, s.purchase); err == nil {
 		t.Fatal("a purchase amount was edited away from its pinned quote")
 	}
@@ -292,8 +271,6 @@ func TestIntegrationPayment_AmountComesFromThePinnedPurchase(t *testing.T) {
 		t.Fatalf("the intent no longer carries the pinned amount: %d", got)
 	}
 }
-
-// ---------------------------------------------------------------- the capture path and the grant
 
 func TestIntegrationPayment_CapturedChargeSettlesAndGrantsExactlyOnce(t *testing.T) {
 	p := pool(t)
@@ -320,12 +297,10 @@ func TestIntegrationPayment_CapturedChargeSettlesAndGrantsExactlyOnce(t *testing
 	if out.EntitlementID == "" {
 		t.Fatal("a settled charge must grant")
 	}
-	// the correlation actually round-tripped
 	ref := scan1[string](t, p, `SELECT provider_txn_ref FROM iam_v2.payment_transactions WHERE id=$1`, in.ID)
 	if ref != "prv_"+in.ClientRef {
 		t.Fatalf("the provider reference did not round-trip: %q", ref)
 	}
-	// replaying the same execution must not grant again
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err == nil {
 		t.Fatal("a terminal intent must not be executable again")
 	}
@@ -334,7 +309,6 @@ func TestIntegrationPayment_CapturedChargeSettlesAndGrantsExactlyOnce(t *testing
 	}
 }
 
-// A duplicate callback, a concurrent callback and a replay all converge on ONE entitlement.
 func TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -351,7 +325,6 @@ func TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce(t *testing.
 	before := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.payment_transaction_events
 		WHERE payment_transaction_id=$1`, in.ID)
 
-	// the same provider event delivered many times, concurrently
 	var wg sync.WaitGroup
 	applied := make(chan string, 8)
 	for i := 0; i < 8; i++ {
@@ -384,8 +357,6 @@ func TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce(t *testing.
 	}
 }
 
-// ---------------------------------------------------------------- UNKNOWN
-
 func TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -407,7 +378,6 @@ func TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried(t *testin
 	if g.calls != 0 {
 		t.Fatal("UNKNOWN must never grant access")
 	}
-	// nothing retries it, and a second execution is structurally refused
 	for i := 0; i < 3; i++ {
 		if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); CodeOf(err) != ErrNotExecutable {
 			t.Fatalf("an UNKNOWN intent must not be re-executable, got %v", err)
@@ -416,7 +386,6 @@ func TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried(t *testin
 	if n := len(prov.Requests()); n != 1 {
 		t.Fatalf("UNKNOWN was retried: %d provider requests", n)
 	}
-	// and a new charge cannot be admitted against the same settlement while the UNKNOWN one is live
 	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "2")); err == nil {
 		t.Fatal("a settlement with a live UNKNOWN charge must not admit another")
 	}
@@ -438,13 +407,10 @@ func TestIntegrationPayment_DeclinedChargeFailsTheSettlementAndGrantsNothing(t *
 	if g.calls != 0 {
 		t.Fatal("a declined charge must not grant")
 	}
-	// (0016) a terminal settlement admits no further charge
 	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "2")); CodeOf(err) != ErrNotExecutable {
 		t.Fatalf("a FAILED settlement must not admit another charge, got %v", err)
 	}
 }
-
-// ---------------------------------------------------------------- refunds
 
 func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T) {
 	p := pool(t)
@@ -456,7 +422,6 @@ func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// a partial refund
 	r1, err := e.CreateRefundIntent(ctx, s.tenant, s.site, in.ID, 400, idem(t, "r1"))
 	if err != nil {
 		t.Fatalf("refund intent: %v", err)
@@ -467,7 +432,6 @@ func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T)
 	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "PARTIALLY_REVERSED" {
 		t.Fatalf("a partial capture must move the settlement to PARTIALLY_REVERSED, got %s", st)
 	}
-	// the remainder
 	r2, err := e.CreateRefundIntent(ctx, s.tenant, s.site, in.ID, 600, idem(t, "r2"))
 	if err != nil {
 		t.Fatal(err)
@@ -478,13 +442,10 @@ func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T)
 	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "REVERSED" {
 		t.Fatalf("a full return must move the settlement to REVERSED, got %s", st)
 	}
-	// and the bound holds
 	if _, err := e.CreateRefundIntent(ctx, s.tenant, s.site, in.ID, 1, idem(t, "r3")); CodeOf(err) != ErrNotExecutable {
 		t.Fatalf("the cumulative refund bound must refuse a further refund, got %v", err)
 	}
 }
-
-// ---------------------------------------------------------------- correlation
 
 func TestIntegrationPayment_CorrelationConflictAndForgery(t *testing.T) {
 	p := pool(t)
@@ -495,21 +456,18 @@ func TestIntegrationPayment_CorrelationConflictAndForgery(t *testing.T) {
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatal(err)
 	}
-	// an unknown client reference correlates to nothing and is refused, not guessed
 	if _, err := e.HandleProviderNotification(ctx,
 		BuildNotification("sc_not_a_real_ref", "evt-x", OutcomeCaptured, "prv_x")); CodeOf(err) != ErrUncorrelated {
 		t.Fatalf("an uncorrelated notification must be refused, got %v", err)
 	}
-	// a CONFLICTING provider reference for an already-pinned intent fails closed
 	if _, err := e.HandleProviderNotification(ctx,
 		BuildNotification(in.ClientRef, "evt-conflict", OutcomeCaptured, "prv_someone_else")); CodeOf(err) != ErrRefConflict {
 		t.Fatalf("a conflicting provider reference must fail closed, got %v", err)
 	}
 }
 
-// The forgery matrix. Each case is a way a caller might try to manufacture a CAPTURED, and each must fail
-// BEFORE anything is recorded. The baseline matters: the same delivery, correctly signed, is accepted --
-// otherwise these would pass against a boundary that simply rejects everything.
+// Forgery matrix: each case must fail before anything is recorded; the baseline (the same delivery correctly signed is
+// accepted) shows the boundary does not simply reject everything.
 func TestIntegrationPayment_ForgedNotificationsAreRefused(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -555,7 +513,6 @@ func TestIntegrationPayment_ForgedNotificationsAreRefused(t *testing.T) {
 	if g.calls != 0 {
 		t.Fatal("a forged notification reached the grant path")
 	}
-	// the baseline: the correctly signed delivery IS accepted, so the refusals above are about the forgery
 	if err := beginExecution(t, p, in.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -564,16 +521,13 @@ func TestIntegrationPayment_ForgedNotificationsAreRefused(t *testing.T) {
 	}
 }
 
-// beginExecution crosses the durable boundary directly, for tests that need an executing intent without
-// going through a provider double.
 func beginExecution(t *testing.T, p *pgxpool.Pool, txnID string) error {
 	t.Helper()
 	_, err := p.Exec(context.Background(), `SELECT iam_v2.begin_payment_execution($1)`, txnID)
 	return err
 }
 
-// An adapter that cannot authenticate notifications must not be able to deliver an outcome at all. This is
-// the difference between "we check a signature" and "there is no unauthenticated path".
+// An adapter that cannot authenticate notifications cannot deliver an outcome: there is no unauthenticated path.
 func TestIntegrationPayment_AdapterWithoutAuthenticationCannotDeliverAnOutcome(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -584,15 +538,12 @@ func TestIntegrationPayment_AdapterWithoutAuthenticationCannotDeliverAnOutcome(t
 	if _, err := e.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
 		t.Fatalf("an adapter that cannot authenticate must not deliver an outcome, got %v", err)
 	}
-	// and with no adapter at all
 	e2 := NewEngine(liveCfg, p, nil, &fakeGranter{})
 	if _, err := e2.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
 		t.Fatalf("no adapter must mean no notification path, got %v", err)
 	}
 }
 
-// Financial identity is configuration. A site without it cannot create an intent, and a DISABLED account
-// cannot take money.
 func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
@@ -609,14 +560,12 @@ func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
 	if in.Provider != "test-double" {
 		t.Fatalf("the intent resolved provider %q", in.Provider)
 	}
-	// no placeholder identity is representable in the financial record
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.payment_provider_accounts
 		(tenant_id,site_id,provider,merchant_account_ref,status) VALUES ($1,$2,'none','x','ACTIVE')`,
 		s.tenant, s.site); err == nil {
 		t.Fatal("a placeholder provider identity was accepted into configuration")
 	}
 
-	// a site with NO configured account fails closed rather than inventing one
 	b := seedPaidChain(t, p)
 	if _, err := p.Exec(ctx, `DELETE FROM iam_v2.payment_provider_accounts WHERE id=$1`, b.merchant); err != nil {
 		t.Fatal(err)
@@ -625,7 +574,6 @@ func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
 		t.Fatalf("a site with no configured account must fail closed, got %v", err)
 	}
 
-	// a DISABLED account is not a default and cannot be resolved
 	c := seedPaidChain(t, p)
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.payment_provider_accounts SET is_default=false, status='DISABLED'
 		WHERE id=$1`, c.merchant); err != nil {

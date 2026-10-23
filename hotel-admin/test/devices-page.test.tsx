@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// DEVICES (migration 0118): the search goes in a header, a device's detail shows its package and place, and every
-// action that changes something states what it does and keeps, and needs a reason before it can be confirmed.
-
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverStub;
 
@@ -19,7 +16,6 @@ const PKG = { entitlement_id: "e1", status: "ACTIVE", package_name: "Free Intern
   subject_label: "test@example.com", slot: "AUTHORIZED", consumed_data_bytes: 1000, places_in_use: 1, max_devices: 1 };
 const ROW = { id: "d1", mac: "aa:bb:cc:dd:ee:01", last_ip: "192.168.77.10", online: false, last_seen: new Date().toISOString(), current: PKG,
   on_network: true, lease_ip: "192.168.77.10", hostname: "iphone" };
-// On the Wi-Fi, never signed in: no record yet, so no id.
 const FRESH = { id: "", mac: "aa:bb:cc:dd:ee:02", online: false, on_network: true, lease_ip: "192.168.77.11", hostname: "ipad" };
 
 function wire() {
@@ -48,7 +44,6 @@ describe("Devices", () => {
     const row = screen.getByText("aa:bb:cc:dd:ee:01").closest("tr") as HTMLElement;
     expect(within(row).getByText("Holds a place")).toBeTruthy();
     expect(within(row).getAllByText(/test@example.com/).length).toBeGreaterThan(0);
-    // On the Wi-Fi but not signed in is its own state, not "Offline".
     expect(within(row).getByText("On the Wi-Fi, not signed in")).toBeTruthy();
     const fresh = screen.getByText("aa:bb:cc:dd:ee:02").closest("tr") as HTMLElement;
     expect(within(fresh).getByText("Has not signed in yet")).toBeTruthy();

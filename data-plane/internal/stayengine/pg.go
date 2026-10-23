@@ -16,8 +16,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// parseYYMMDD parses a Protel GA/GD date (YYMMDD) into a date, or nil when absent/malformed (dates are
-// evidence, never identity — an unparseable one is simply not stored, never fabricated).
+// parseYYMMDD parses a Protel GA/GD date (YYMMDD); nil when absent or malformed, never fabricated.
 func parseYYMMDD(s string) *time.Time {
 	if len(s) != 6 {
 		return nil
@@ -29,33 +28,26 @@ func parseYYMMDD(s string) *time.Time {
 	return &t
 }
 
-// Processor is the transactional Stay ingestion engine. It consumes durable inbox rows (iam_v2.stay_events)
-// that are consumable — LIVE, or RESYNC whose generation is published — and applies each in ONE PostgreSQL
-// transaction, moving the event PENDING→terminal exactly once. It issues NO financial command and writes NO
-// Posting; Folios are identity records only.
+// Processor applies durable inbox events (iam_v2.stay_events) to Stays, each in one transaction. It issues
+// no financial command and writes no Posting.
 type Processor struct {
 	pool *pgxpool.Pool
-	// conv, when set, makes Checkout ONE PHYSICAL TRANSACTION with the Event application: the engine skips its
-	// own Stay flip and delegates the whole boundary/eligibility/Grace/device/session/audit conversion to the
-	// Checkout Converter inside this same tx. Nil keeps the legacy Stay-domain-only flip.
+	// conv, when set, runs the whole checkout conversion inside the event's transaction.
 	conv CheckoutConverter
 }
 
-// ErrCheckoutConverterRequired — a Checkout (GO) event was claimed but no Checkout Converter is wired. There is
-// no legacy Stay-domain-only checkout path: rather than establish an unverified server-clock boundary, the
-// application fails closed and the whole transaction rolls back (the event stays PENDING for a correct retry).
+// ErrCheckoutConverterRequired: a GO event with no Converter wired fails closed (no unverified server-clock
+// boundary); the transaction rolls back and the event stays PENDING.
 var ErrCheckoutConverterRequired = errors.New("stayengine: checkout requires a wired Checkout Converter")
 
-// CheckoutConverter is the transaction-bound Checkout conversion the engine delegates to (implemented by
-// checkout.Converter). It must NOT open its own transaction.
+// CheckoutConverter must not open its own transaction.
 type CheckoutConverter interface {
 	ConvertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src checkout.BoundarySource) (checkout.Result, error)
 }
 
 func NewProcessor(pool *pgxpool.Pool) *Processor { return &Processor{pool: pool} }
 
-// NewProcessorWithCheckout wires the Checkout Converter so a GO event's application and its conversion commit
-// (or roll back) as ONE physical transaction.
+// NewProcessorWithCheckout makes a GO event's application and its conversion one transaction.
 func NewProcessorWithCheckout(pool *pgxpool.Pool, conv CheckoutConverter) *Processor {
 	return &Processor{pool: pool, conv: conv}
 }
@@ -69,17 +61,15 @@ type payload struct {
 	Folio       string `json:"folio"`
 	ArrivalRaw  string `json:"arrival_raw"`
 	Departure   string `json:"departure_raw"`
-	// Sharers is the OPTIONAL full occupancy list. Sharers are ordinary and legal (several occupants share one
-	// Stay); when the connector reports none, the event's own name fields describe the single primary guest.
+	// Sharers is the optional full occupancy list; without it the name fields describe the primary guest.
 	Sharers []Sharer `json:"sharers"`
-	// Guest attributes (FIAS property-mapped A0/A1). Absent = not stated = leave the stay's value alone.
+	// FIAS A0/A1 attributes; absent means not stated, so the stay's value is left alone.
 	TravelAgent *string `json:"travel_agent"`
 	VIP         *bool   `json:"vip"`
 }
 
-// ProcessNext claims and processes ONE pending consumable inbox event for the scope in a single transaction.
-// It returns processed=false when nothing is pending. Concurrency-safe: it FOR UPDATE SKIP LOCKED-claims the
-// event and locks the reservation's Stay, so two processors never apply the same event or race one Stay.
+// ProcessNext applies one pending consumable event for the scope; processed=false when none is pending.
+// It claims with FOR UPDATE SKIP LOCKED and locks the reservation's Stay.
 func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string) (bool, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -87,18 +77,13 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Applying an event writes both the Stay and the event row, and both belong to the capability-scoped
-	// Stay family. The scope is declared once, here, for the whole application.
 	if err := writerguard.Open(ctx, tx, writerguard.CapStay); err != nil {
 		return false, err
 	}
 
-	// ORDERED APPLICATION. Events for one PMS Interface form an ordered stream: a Stay's GI must be applied
-	// before its GO, and a room-move before a later correction. With only FOR UPDATE SKIP LOCKED, two processors
-	// could claim GI and GO concurrently and apply the GO against a Stay that does not exist yet (an orphan
-	// MANUAL_REVIEW) — i.e. silent reordering. This transaction-scoped advisory lock serializes application per
-	// (tenant, site, interface), so the ORDER BY received_at, id claim below is a true ordering guarantee.
-	// Different interfaces still process concurrently, and the lock is released at commit/rollback.
+	// Events for one interface are an ordered stream (GI before GO). SKIP LOCKED alone would let two
+	// processors apply GO before GI exists; this advisory lock serializes application per
+	// (tenant, site, interface) so the ORDER BY received_at, id claim is a true ordering guarantee.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3 || ':stay-events', 0))`,
 		tenant, site, iface); err != nil {
 		return false, err
@@ -106,13 +91,10 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 
 	var eventID, identity, eventType string
 	var raw []byte
-	// received_at, clock_suspect and the interface's PINNED revision (with its normalization version) come back
-	// with the event because the Stay's occupancy evidence is stamped from them — see stampOccupancyEvidence.
+	// Occupancy evidence is stamped from the received time, clock flag and pinned revision (stampOccupancyEvidence).
 	var evReceivedAt time.Time
 	var evClockSuspect bool
-	// NULLABLE, and scanned as such. pms_timestamp_utc is absent whenever the connector could not derive a
-	// trustworthy instant from the frame, which is ordinary — a non-pointer here fails every event that has
-	// no PMS time, including in fixtures that never set one.
+	// pms_timestamp_utc is nullable; a non-pointer would fail every event without a PMS time.
 	var evPMSAt *time.Time
 	var pinnedRevision string
 	var pinnedNormVersion int
@@ -138,7 +120,6 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 
 	var pl payload
 	if uerr := json.Unmarshal(raw, &pl); uerr != nil {
-		// an unparseable durable payload is not silently applied — mark it for review.
 		if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "PAYLOAD_UNPARSEABLE"); ferr != nil {
 			return false, ferr
 		}
@@ -152,8 +133,7 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		TravelAgent: pl.TravelAgent, VIP: pl.VIP,
 	}
 
-	// a payload that contradicts itself (the same occupant twice, or two occupants both claiming to be the
-	// primary) is never half-applied or silently decided — it goes to review before anything is written.
+	// A self-contradicting payload goes to review before anything is written.
 	if code := validateSharers(ev.Sharers); code != "" {
 		if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", code); ferr != nil {
 			return false, ferr
@@ -161,27 +141,17 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		return true, tx.Commit(ctx)
 	}
 
-	// load the CURRENT stay for this reservation within the interface (one authoritative row per reservation;
-	// lifecycle_version is the episode counter). Locked so a concurrent processor cannot race it.
+	// One authoritative Stay row per reservation per interface; locked against concurrent processors.
 	var cur *StayView
 	var sv StayView
 	var lerr error
 	if strings.TrimSpace(ev.Reservation) == "" {
-		// A CHECKOUT IDENTIFIED BY ROOM ALONE. This PMS reports every departure as a GO carrying RN and no G#,
-		// so there is no reservation to look the Stay up by and the room is the only thing the event says.
-		//
-		// Resolution is by room among IN_HOUSE Stays, and it is deliberately all-or-nothing: exactly one match
-		// is the answer, and anything else is not. Two IN_HOUSE Stays in one room are sharers, and choosing
-		// between them would check out a guest who is still resident — so that case goes to MANUAL_REVIEW with
-		// both Stays untouched rather than to a coin flip. Zero matches falls through to cur == nil, which the
-		// resolver already treats as GO_UNKNOWN_STAY.
-		//
-		// This is NOT a second checkout path: whatever it resolves goes through the same Decision, the same
-		// applyDecision and the same Checkout Converter as a reservation-keyed GO. All that differs is how the
-		// Stay is identified.
+		// This PMS sends every departure as a GO with a room and no reservation. Exactly one IN_HOUSE match
+		// in the room is the answer; several are sharers, and guessing would check out a resident guest, so
+		// they go to MANUAL_REVIEW. No match leaves cur nil (GO_UNKNOWN_STAY). Only the lookup differs from a
+		// reservation-keyed GO.
 		if ev.EventType != EvGuestOut {
-			// Only a checkout may be room-keyed. Anything else without a reservation is unusable, and the
-			// connector should not have admitted it; refuse rather than guess.
+			// Only a checkout may be room-keyed.
 			if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "EVENT_WITHOUT_RESERVATION"); ferr != nil {
 				return false, ferr
 			}
@@ -200,22 +170,10 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 			}
 			return true, tx.Commit(ctx)
 		}
-		// A ROOM NUMBER IS NOT AN IDENTITY, AND IT IS REUSED THE SAME AFTERNOON.
-		//
-		// The match above says only "somebody is in 412 now". It does not say the somebody is the person this
-		// departure is about. A GO raised on Tuesday and a guest who arrived on Thursday both answer to 412,
-		// and checking that guest out would disconnect a resident guest on the strength of a three-digit
-		// string — with the Checkout Converter revoking their access on the way past.
-		//
-		// This is not hypothetical. A departure that cannot be applied stays PENDING, and every reconnect
-		// restages the whole roster, so an unresolved GO is re-offered against a room whose occupant has since
-		// changed. The longer the feed was interrupted, the more certain the mismatch.
-		//
-		// So the candidate must have been in the room ALREADY when the PMS raised the event. stays.arrival is
-		// the PMS's own statement of when they came in; if it is later than the event, this is a subsequent
-		// occupant and the departure belongs to somebody who has already gone. See roomDepartureIsStale for
-		// why occupancy_evidence_at — the obvious-looking alternative — answers a different question and
-		// would refer almost the whole property to review after any reconnect.
+		// A room number is not an identity: an unresolved GO stays PENDING and is re-offered after every
+		// reconnect, possibly against a later occupant, whom the Converter would check out. The candidate
+		// must already have arrived when the event was raised (stays.arrival, not occupancy_evidence_at;
+		// see roomDepartureIsStale).
 		var arrival *time.Time
 		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,''),
 			       arrival::timestamptz
@@ -225,8 +183,6 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 			FOR UPDATE`, tenant, site, iface, normRoom(ev.Room)).
 			Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room, &arrival)
 		if lerr == nil && roomDepartureIsStale(eventAtFor(evPMSAt, evReceivedAt, evClockSuspect), arrival) {
-			// The refusal is the whole point of the guard, so it is not silent: the case appears on the
-			// reconciliation screen under this code, with the arrival that caused it.
 			if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "GO_STALE_ROOM_DEPARTURE"); ferr != nil {
 				return false, ferr
 			}
@@ -245,10 +201,6 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		return false, lerr
 	}
 
-	// NO FOLIO MODEL (Phase-0 Amendment A1, D46). A room charge targets the reservation (RN + G#), so a guest
-	// record's folio field -- which this Protel link does not send -- is not stored and cannot conflict. Posting
-	// permission is re-evaluated by the database whenever this stay changes (trigger stay_posting_permission).
-
 	d := Resolve(ev, cur)
 	occ := occupancyEvidence{At: evReceivedAt, RevisionID: pinnedRevision,
 		NormalizationVersion: pinnedNormVersion, ClockSuspect: evClockSuspect}
@@ -259,9 +211,8 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	if err := finishEvent(ctx, tx, eventID, terminal, stayID, reviewCode); err != nil {
 		return false, err
 	}
-	// ONE PHYSICAL TRANSACTION: the event is now APPLIED with the Stay application lineage pinned, so the
-	// Converter's audit can cite it as the verified boundary event. Any failure here rolls the Event, Stay,
-	// Entitlements, Purchase, Grace, devices, sessions and audit back together (no nested transaction).
+	// The event is APPLIED with its lineage pinned so the Converter's audit can cite it; any failure rolls
+	// everything back together.
 	if d.Op == OpCheckout && p.conv != nil && stayID != "" && terminal == "APPLIED" {
 		if _, cerr := p.conv.ConvertTx(ctx, tx, tenant, site, iface, stayID, checkout.BoundarySource{StayEventID: eventID}); cerr != nil {
 			return false, cerr
@@ -273,10 +224,7 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	return true, nil
 }
 
-// applyDecision performs the authoritative Stay mutation for the decision and returns the resolved stay id (or
-// ""), the terminal processing_status and the review code. All within the caller's transaction.
-// occupancyEvidence is what the PMS just told us about this Stay being occupied, taken from the event that
-// carried it: when it arrived, which Interface Revision produced it, and whether its clock was suspect.
+// occupancyEvidence is taken from the event that confirmed the Stay is occupied.
 type occupancyEvidence struct {
 	At                   time.Time
 	RevisionID           string
@@ -284,6 +232,8 @@ type occupancyEvidence struct {
 	ClockSuspect         bool
 }
 
+// applyDecision performs the Stay mutation inside the caller's transaction and returns the stay id (or ""),
+// the terminal processing_status and the review code.
 func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent, cur *StayView, d Decision, delegateCheckout bool, occ occupancyEvidence) (stayID, terminal, reviewCode string, err error) {
 	switch d.Op {
 	case OpCreateStay:
@@ -323,28 +273,23 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, namenorm.Room(ev.Room)); err != nil {
 			return "", "", "", err
 		}
-		// A room move is a GC like any other: a VIP or travel-agent change carried on it must not be lost.
 		if err = applyGuestAttributes(ctx, tx, cur.ID, ev); err != nil {
 			return "", "", "", err
 		}
-		// A room move is the PMS saying where this guest is NOW, so it refreshes occupancy like an arrival.
 		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
 			return "", "", "", serr
 		}
 		return cur.ID, "APPLIED", "", nil
 
 	case OpCheckout:
-		// The Checkout Converter OWNS the boundary: it derives the trusted/conservative effective_checkout_at
-		// from this durable event inside the SAME transaction. There is NO legacy server-clock flip — a Checkout
-		// with no Converter wired FAILS CLOSED rather than silently establishing an unverified boundary.
+		// The Converter owns the checkout boundary; without one this fails closed.
 		if !delegateCheckout {
 			return "", "", "", ErrCheckoutConverterRequired
 		}
 		return cur.ID, "APPLIED", "", nil
 
 	case OpReinstate:
-		// CHECKED_OUT → IN_HOUSE with EXACTLY one lifecycle_version bump (the migration trigger enforces this) and
-		// CLEARING the previous episode's boundary (the guard requires reinstatement to reset effective_checkout_at).
+		// The lifecycle trigger requires exactly one version bump and a cleared effective_checkout_at.
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1,
 			effective_checkout_at=NULL WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
@@ -369,10 +314,8 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 	}
 }
 
-// applyGuestAttributes writes the guest attributes the record STATED -- VIP and travel agent -- and leaves the
-// stay's values alone for anything it did not. A stated empty travel agent clears it (the PMS removed the
-// agent); VIP is always a stated yes or no when present. These are what package rules for VIP guests and for
-// a travel agent's guests are judged against.
+// applyGuestAttributes writes only the VIP and travel-agent values the record stated; a stated empty travel
+// agent clears it.
 func applyGuestAttributes(ctx context.Context, tx pgx.Tx, stayID string, ev InboxEvent) error {
 	if ev.TravelAgent == nil && ev.VIP == nil {
 		return nil
@@ -392,12 +335,9 @@ func applyGuestAttributes(ctx context.Context, tx pgx.Tx, stayID string, ev Inbo
 	return err
 }
 
-// createStay inserts the Stay (IN_HOUSE, lifecycle_version 1). Its occupancy facts (the primary guest or the
-// sharer list) are written by applyOccupancyFacts.
+// createStay inserts the IN_HOUSE Stay; external_stay_identity equals the reservation.
 func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent) (string, error) {
 	var stayID string
-	// external_stay_identity == reservation: one authoritative Stay per reservation per interface, episodes
-	// tracked by lifecycle_version.
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.stays
 		(tenant_id, site_id, pms_interface_id, external_reservation_id, external_stay_identity,
 		 normalized_room_number, status, lifecycle_version, arrival, departure)
@@ -407,14 +347,11 @@ func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev I
 		parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)).Scan(&stayID); err != nil {
 		return "", err
 	}
-	// occupancy facts are written by applyOccupancyFacts on BOTH the create and update paths, so the same rules
-	// apply either way and nothing is written twice.
 	return stayID, nil
 }
 
-// upsertPrimaryGuest inserts or refreshes the single primary guest for the Stay from the (validated) names.
-// applyOccupancyFacts writes the event's occupancy facts for the Stay. With no sharer list the event's own name
-// fields describe the single primary guest (the historical behaviour); with one, the whole list is reconciled.
+// applyOccupancyFacts writes the event's occupancy: the name fields as the primary guest when there is no
+// sharer list, otherwise the reconciled list.
 func applyOccupancyFacts(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, ev InboxEvent) (string, error) {
 	if len(ev.Sharers) == 0 {
 		if ev.FirstName != "" || ev.LastName != "" {
@@ -435,11 +372,8 @@ func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, sta
 	} else if ev.LastName == "" {
 		display = ev.FirstName
 	}
-	// THE `_norm` COLUMNS GET NORMALIZED VALUES. They did not: ev.FirstName and ev.LastName went in exactly
-	// as the PMS sent them, while the authentication query compared them against an upper-cased input. A feed
-	// that sends "Anderson" instead of "ANDERSON" therefore produced a row that could never match, and the
-	// guest was told to check their details or contact reception. `display` is built from the RAW values
-	// above and stays untouched -- the operator must still see the guest's name as the PMS spells it.
+	// The `_norm` columns must hold normalized values (authentication compares upper-cased input); `display`
+	// stays raw so operators see the PMS spelling.
 	_, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_guests
 		(tenant_id, site_id, pms_interface_id, stay_id, first_name_norm, last_name_norm, display_name, is_primary)
 		VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), true)
@@ -451,8 +385,7 @@ func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, sta
 	return err
 }
 
-// finishEvent moves the event PENDING→terminal exactly once (guarded by processing_status='PENDING') and, for
-// an APPLIED outcome, records the resolved stay lineage. The migration trigger enforces the result rules.
+// finishEvent moves the event PENDING to terminal exactly once and, when APPLIED, records the stay lineage.
 func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, reviewCode string) error {
 	tag, err := tx.Exec(ctx, `UPDATE iam_v2.stay_events
 		SET processing_status=$2, stay_id=NULLIF($3,'')::uuid, processed_at=now(), review_code=NULLIF($4,'')
@@ -464,8 +397,7 @@ func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, revi
 		return errors.New("stayengine: event no longer PENDING (raced)")
 	}
 	if terminal == "APPLIED" && stayID != "" {
-		// pin the EXACT durable event whose application last advanced the Stay (item 3 lineage), alongside the
-		// per-application counter, so the Checkout boundary verifier can prove exact event lineage.
+		// The checkout boundary verifier relies on this exact event lineage.
 		if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays
 			SET last_applied_event_version = last_applied_event_version + 1, last_applied_event_id = $2::uuid
 			WHERE id=$1`, stayID, eventID); err != nil {
@@ -479,43 +411,22 @@ func failEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, reviewCode str
 	return finishEvent(ctx, tx, eventID, terminal, "", reviewCode)
 }
 
-// stampOccupancyEvidence records that the PMS has just confirmed this Stay is occupied.
+// stampOccupancyEvidence records that the PMS just confirmed the Stay is occupied. Authentication
+// (internal/authctx, iam_v2.issue_or_return_pms_context) refuses Stays whose evidence is absent,
+// clock-suspect, from another Revision, or stale.
 //
-// WITHOUT THIS, PMS ROOM SIGN-IN CANNOT WORK AT ALL. iam_v2.stays carries occupancy_evidence_at,
-// occupancy_evidence_version, occupancy_revision_id and occupancy_clock_suspect, and authentication requires
-// every one of them: internal/authctx and iam_v2.issue_or_return_pms_context both refuse to mint a PMS Auth
-// Context for a Stay whose evidence is absent, clock-suspect, produced under a different Revision, or stale.
-// Those four columns were read in both places and written NOWHERE -- 503 mirrored Stays, none with evidence
-// -- so every verified guest was refused with CONTEXT_INVALID after their identity had already matched.
+// Values come from the event, not the server clock. Stamp for arrivals, updates, room moves and
+// reinstatements, never for a checkout, which must not refresh occupancy.
 //
-// The values come from the event that carried the confirmation rather than from the server clock: At is when
-// the record actually arrived, and clock_suspect is carried through so a feed with a doubtful timestamp
-// produces evidence authentication will decline rather than evidence that silently looks fine.
-//
-// The Revision is the one the connector was PINNED to when it received the record. Authentication compares it
-// against the interface published Revision, so evidence produced under a superseded configuration stops
-// authorising sign-ins the moment a new Revision is published -- intended behaviour, not an edge case.
-//
-// Stamped for arrivals, updates, room moves and reinstatements — every event saying the guest is in the room
-// now. NOT for a checkout: that Stay is leaving, and refreshing its occupancy is the one thing that must
-// never happen.
-//
-// Three database rules shape the statement below, and all three reject a naive write:
-//
+// Database rules shaping the statement:
 //   - stays_occupancy_all_or_none: evidence_at, ingested_at, revision_id, normalization_version and
-//     clock_suspect are one tuple. Writing three of the five is a CHECK violation, so a partial stamp would
-//     not degrade — it would abort the event.
+//     clock_suspect are one tuple; a partial write aborts the event.
 //   - stays_evidence_version_coherent: evidence present <=> version > 0.
-//   - p3_stay_lifecycle_guard: a MATERIAL change (evidence_at, revision_id, normalization_version or
-//     clock_suspect — ingested_at is deliberately excluded) must increment the version by exactly 1, and a
-//     non-material write must NOT touch it at all. Hence the CASE: re-applying an event whose evidence is
-//     identical refreshes ingested_at and leaves the version alone, which the guard requires and which also
-//     keeps Auth Contexts pinned to that version valid.
+//   - p3_stay_lifecycle_guard: a material change (all of the tuple except ingested_at) must bump the version
+//     by exactly 1 and a non-material write must not touch it, hence the CASE.
 func stampOccupancyEvidence(ctx context.Context, tx pgx.Tx, stayID string, occ occupancyEvidence) error {
 	if stayID == "" || occ.At.IsZero() || occ.RevisionID == "" || occ.NormalizationVersion <= 0 {
-		// Fail SAFE rather than closed: an interface with no pinned revision is not a reason to reject an
-		// otherwise good Stay record. Un-stamped evidence simply means authentication keeps declining until
-		// an event arrives with a complete one.
+		// No pinned revision is no reason to reject the Stay; authentication just keeps declining it.
 		return nil
 	}
 	_, err := tx.Exec(ctx, `UPDATE iam_v2.stays

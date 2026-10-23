@@ -1,24 +1,13 @@
 package main
 
-// AUTHORIZATION for the three voucher keys, through the ACTUAL router and session middleware.
+// Authorization for the three voucher keys through the real router and session middleware.
 //
-// The tempting shape is one "vouchers" key. It would be wrong for the same reason the guest sign-in keys
-// were split, and the reason is sharper here:
+//   * vouchers               print a batch, read the list, cancel a lost card.
+//   * voucher-codes          recover a code in the clear; password step-up, bounded reason, append-only row per use.
+//   * voucher-code-settings  the code format, owned with auth-methods.
 //
-//   * vouchers               print a batch, read the list, cancel a lost card. The daily job.
-//   * voucher-codes          recover a code IN THE CLEAR for a card already in a guest's hand. Additionally
-//                            gated by a password step-up and a mandatory bounded reason at the route, and
-//                            it writes an append-only row naming the operator every time.
-//   * voucher-code-settings  choose what a code looks like -- digits or mixed, and how long. A property
-//                            configuration decision, which is why it sits with auth-methods' owner.
-//
-// WHY THE SECOND KEY IS NOT REDUNDANT, given that issuing already returns plaintext: issuing creates codes
-// nobody holds yet, while revealing reads codes already printed -- possibly from a batch another operator
-// printed and handed out. A role with issue and no reveal genuinely cannot read somebody else's batch.
-//
-// hotel_it_manager is the case worth stating: it holds vouchers WRITE and voucher-code-settings WRITE and
-// is DENIED voucher-codes. That role owns configuration and the PMS integration; neither job requires
-// reading a guest's credential, and configuring the format is not reading a code.
+// Reveal is a separate key because issuing creates codes nobody holds, while revealing reads codes already printed.
+// hotel_it_manager holds vouchers WRITE and voucher-code-settings WRITE but is DENIED voucher-codes.
 
 import (
 	"net/http"
@@ -76,7 +65,6 @@ func TestVoucherSurface_PermissionModel(t *testing.T) {
 		// The desk: the guest with the unreadable card is standing there.
 		{"front_office_operator", reach, reach, reach, reach, reach, deny},
 		{"guest_relations_operator", reach, reach, reach, reach, reach, deny},
-		// The role NAMED for this, which until now held no voucher permission at all.
 		{"voucher_operator", reach, reach, reach, reach, reach, deny},
 		// A voucher is a commercial instrument, so this role reads the list -- and no code, and no format.
 		{"payments_operator", reach, deny, deny, deny, deny, deny},
@@ -107,10 +95,7 @@ func TestVoucherSurface_PermissionModel(t *testing.T) {
 	}
 }
 
-// PRINTING A CARD DOES NOT CARRY PERMISSION TO READ ONE ALREADY PRINTED.
-//
-// Stated separately because the two keys are held by an overlapping set of roles, which is exactly the
-// situation in which somebody later decides one implies the other and merges them.
+// Printing a card does not carry permission to read one already printed; the keys are held by overlapping roles, where one is easily assumed to imply the other.
 func TestPrintingDoesNotCarryRevealing(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := voucherRBACRouter(s)
@@ -127,9 +112,7 @@ func TestPrintingDoesNotCarryRevealing(t *testing.T) {
 	}
 }
 
-// AND SETTING THE FORMAT DOES NOT CARRY READING A CODE, which is the other direction of the same mistake:
-// the screen shows the format panel and the reveal button side by side, so the two are easy to conflate in
-// a later refactor of the route file.
+// Setting the format does not carry reading a code, though the screen shows both side by side.
 func TestChoosingTheFormatDoesNotCarryReadingACode(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := voucherRBACRouter(s)
@@ -143,9 +126,7 @@ func TestChoosingTheFormatDoesNotCarryReadingACode(t *testing.T) {
 	}
 }
 
-// A DESK ROLE MAY NOT RE-TUNE THE PROPERTY, which is the same line the sign-in protection policy draws: the
-// desk releases one restriction and does not change the threshold for everybody. Here the desk prints and
-// reveals and cannot make every future code six digits because a guest complained about typing.
+// A desk role may not re-tune the property: it prints and reveals but cannot change the code format for everybody.
 func TestTheDeskDoesNotChooseTheFormat(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := voucherRBACRouter(s)

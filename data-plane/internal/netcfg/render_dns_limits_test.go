@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// DNS ABUSE LIMITS: the resolver bounds every client and every zone, and the firewall holds a device that has
-// not signed in to 20 queries a second -- to the gateway and to the public resolvers alike -- with a counter.
+// DNS abuse limits: the resolver bounds every client and zone, and the firewall holds a device that has not signed
+// in to 20 queries a second (gateway and public resolvers alike) with a counter.
 func TestDNSIsRateLimitedAtTheResolverAndForDevicesThatHaveNotSignedIn(t *testing.T) {
 	u := string(RenderUnbound(twoNetworks()))
 	for _, want := range []string{"ip-ratelimit: 100", "ratelimit: 1000", "deny-any: yes"} {
@@ -25,8 +25,8 @@ func TestDNSIsRateLimitedAtTheResolverAndForDevicesThatHaveNotSignedIn(t *testin
 	if strings.Index(in, "dns_preauth_rl") > strings.Index(in, `udp dport 53 accept comment "DNS (own gateway)"`) {
 		t.Error("the limit must precede the DNS accept")
 	}
-	// ...AND THE ESTABLISHED ACCEPT: a UDP socket is "established" after the first reply, so a limiter behind
-	// that accept would meter only a client's first queries.
+	// ...and the established accept: a UDP socket is established after the first reply, so a limiter behind that accept
+	// would meter only the first queries.
 	if strings.Index(in, "dns_preauth_rl") > strings.Index(in, "ct state established,related accept") {
 		t.Error("the input limiter must precede the established accept")
 	}
@@ -39,10 +39,8 @@ func TestDNSIsRateLimitedAtTheResolverAndForDevicesThatHaveNotSignedIn(t *testin
 	}
 }
 
-// NOTHING GRANTS PRE-AUTHENTICATION INTERNET (contract ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1). The temporary
-// verification access is gone from the ruleset entirely -- its admission set, its quota and rate maps, the meters
-// and the marked-flow drops -- and the forward chain's WAN accepts are exactly the two authorization sets and the
-// walled garden. A rule that let an unsigned-in device out by any other route would have to appear in that list.
+// Nothing grants pre-authentication internet: the temporary verification access is gone from the ruleset, and the
+// forward chain's WAN accepts are exactly the two authorization sets and the walled garden.
 func TestNoTemporaryVerificationAccessRemainsInTheRuleset(t *testing.T) {
 	topo := topoT()
 	topo.MgmtCIDRs = []string{"172.21.60.0/24"}
@@ -81,8 +79,7 @@ func TestNoTemporaryVerificationAccessRemainsInTheRuleset(t *testing.T) {
 		if accepts != len(allowed) {
 			t.Errorf("vip=%q: %d forward accepts, want exactly %d", vip, accepts, len(allowed))
 		}
-		// Every gateway captive redirect exempts exactly the two authorization sets and the address-only garden;
-		// no third device exemption survives.
+		// Every gateway captive redirect exempts exactly the two authorization sets and the address-only garden.
 		nat := n[strings.Index(n, "chain prerouting_nat"):strings.Index(n, "chain postrouting_nat")]
 		redirects := 0
 		for _, line := range strings.Split(nat, "\n") {

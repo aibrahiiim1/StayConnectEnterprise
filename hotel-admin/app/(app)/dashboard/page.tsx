@@ -1,24 +1,7 @@
 "use client";
 
-// THE OVERVIEW — WHAT IS HAPPENING AT THIS PROPERTY, AND IS ANYTHING WRONG.
-//
-// Rebuilt on GET /reports/overview, which answers over a chosen range (24 hours, 7 days, 30 days) instead of
-// only "today". The order is the order a shift asks in:
-//
-//   1. DOES ANYTHING NEED ME?      the attention list, which appears only when something does; otherwise one
-//                                  calm line.
-//   2. HOW BUSY, HOW MUCH?          guests online, sign-ins, data used, room sign-in readiness — each with its
-//                                  trend over the range.
-//   3. THE SHAPE OF THE RANGE.      traffic (measured from the usage records) and devices connected at once.
-//   4. IS ANYONE FAILING TO GET IN? sign-in outcomes, and when guests sign in.
-//   5. WHAT ARE THEY ON, AND IS THE HOTEL CONNECTED?  packages and the PMS.
-//   6. THE NETWORKS.                per guest network: pool use from live DHCP leases, devices, traffic.
-//   7. THE APPLIANCE.               services, DHCP/DNS, configuration in force, licence and resources.
-//
-// THE ONE RULE EVERY BLOCK FOLLOWS: a figure that could not be measured is not drawn. Each block of the response
-// carries its own availability, and an unavailable block renders its reason in its own place. Nothing on this
-// page substitutes a zero for "unknown", and what is not recorded anywhere (failed voucher, account and one-time
-// code sign-ins; DNS query statistics) is named as not recorded.
+// A figure that could not be measured is never drawn; each block carries its own availability and renders its
+// reason in place.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -59,12 +42,11 @@ export default function DashboardPage() {
   const seq = useRef(0);
 
   const load = useCallback(async (r: OverviewRange, manual = false) => {
-    // A range switch while a poll is in flight must not let the older answer land last and overwrite the newer
-    // range, so every request is numbered and only the latest may write.
+    // Number each request and let only the latest write, so a slow older answer cannot overwrite a newer range.
     const mine = ++seq.current;
     if (manual) setBusy(true);
     try {
-      // Settled independently: a /health that hangs must not blank the overview, and vice versa.
+      // Settled independently: a hanging /health must not blank the overview, nor vice versa.
       const [o, h] = await Promise.allSettled([fetchOverview(r), api.get<EdgeHealth>("/health")]);
       if (mine !== seq.current) return;
       if (o.status === "fulfilled") {
@@ -90,7 +72,6 @@ export default function DashboardPage() {
     return () => clearInterval(id);
   }, [load]);
 
-  // Which property and which box this is, once. Purely a label: if it cannot be read the header just omits it.
   useEffect(() => {
     api.get<CentralStatus>("/central/status")
       .then((s) => {
@@ -101,20 +82,16 @@ export default function DashboardPage() {
   }, []);
 
   const caps = useCapabilities();
-  // A site without Hospitality is not a hotel on its Overview: no Room sign-in tile, no PMS card, no room
-  // checks, no PMS notes. Everything else is identical.
+  // Without Hospitality: no Room sign-in tile, PMS card, room checks or PMS notes.
   const hotel = moduleLicensed(caps, "hospitality");
   const stale = !!snap && snap.range !== range;
   const rangeLong = OVERVIEW_RANGES.find((r) => r.value === range)?.long ?? "";
 
-  // NEEDS ATTENTION. The server derives the operational items from the blocks this operator may read; the two
-  // runtime dependencies come from /health, exactly as before.
   const attention: AttentionRow[] = (snap?.attention ?? []).map((a) => ({
     text: a.title, detail: a.detail, href: a.href, action: a.action, tone: a.severity,
   }));
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
-  // Worth knowing, not worth doing: kept out of the attention list on purpose.
   const notes: { text: string; href: string }[] = [];
   const historical = hotel ? (snap?.pms.historical_exceptions ?? 0) : 0;
   if (historical > 0) {
@@ -190,7 +167,6 @@ export default function DashboardPage() {
 
       <ErrorBanner err={err} />
 
-      {/* ------------------------------------------------------------------ row 1: needs attention */}
       {attention.length > 0 ? (
         <Callout tone={attention.some((a) => a.tone === "err") ? "danger" : "warning"} title="Needs attention">
           <ul className="space-y-1.5" data-testid="attention">
@@ -228,7 +204,6 @@ export default function DashboardPage() {
       )}
 
       <div className={cn("space-y-5 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
-        {/* ---------------------------------------------------------------- row 2: the headline figures */}
         {!snap || !g || !t || !pms || !so ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
@@ -310,28 +285,23 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ---------------------------------------------------------------- row 3 */}
         <div className="grid gap-4 lg:grid-cols-2">
           <TrafficCard snap={snap} />
           <ConcurrencyCard snap={snap} />
         </div>
 
-        {/* ---------------------------------------------------------------- row 4 */}
         <div className="grid gap-4 lg:grid-cols-2">
           <SignInOutcomesCard snap={snap} rooms={hotel} />
           <SignInPatternCard snap={snap} />
         </div>
 
-        {/* ---------------------------------------------------------------- row 5 */}
         <div className={cn("grid gap-4", hotel && "lg:grid-cols-2")}>
           <PackagesCard snap={snap} />
           {hotel && <PmsCard snap={snap} canCharges={surfaceAvailable(caps, "financial-review")} />}
         </div>
 
-        {/* ---------------------------------------------------------------- row 6 */}
         <NetworksCard snap={snap} />
 
-        {/* ---------------------------------------------------------------- row 7 */}
         <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <Card className="min-w-0">
             <CardHeader>

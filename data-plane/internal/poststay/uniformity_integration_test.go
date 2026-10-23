@@ -2,17 +2,10 @@
 
 package poststay
 
-// UNIFORM NON-SUCCESS, PROVED RATHER THAN ASSERTED.
-//
-// The guest-facing post-stay surface has one failure answer, and the whole security argument for exposing it
-// to an unauthenticated network depends on that being literally true. So this drives the REAL handler logic
-// through every failure the Product Owner named -- wrong PIN, no PIN, expired, revoked, locked out, stale
-// episode, and a device with no post-stay identity at all -- and asserts that the results are
-// INDISTINGUISHABLE from each other: same error, and no field that differs.
-//
-// The comparison is on the store's own answer rather than an HTTP body, because that is where a difference
-// would originate: the scd handler collapses everything to one envelope, so a test that only looked at the
-// envelope would pass even if the layer beneath it leaked. What the handler adds is tested separately.
+// The guest-facing post-stay surface must have one failure answer. Every failure (wrong PIN, no PIN,
+// expired, revoked, locked out, stale episode, no post-stay identity) must be indistinguishable. The
+// comparison is on the store's own answer, not the HTTP envelope, since the handler collapses everything
+// and would hide a leak beneath it.
 
 import (
 	"context"
@@ -23,8 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// authorizeDevice records the durable "this device was authenticated on this stay" lineage that the
-// guest-facing path derives everything from. Without it there is no candidate and no issuance.
+// authorizeDevice records the "device was authenticated on this stay" lineage the guest path derives everything from.
 func authorizeDevice(t *testing.T, p *pgxpool.Pool, f fx) {
 	t.Helper()
 	ctx := context.Background()
@@ -56,9 +48,7 @@ func authorizeDevice(t *testing.T, p *pgxpool.Pool, f fx) {
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',now(),NULL)`, ent); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
-	// entitlement_devices is the binding; entitlement_device_authorizations is the INTERVAL over it, and the
-	// guard refuses an interval with no binding behind it. Seeding one without the other would be a state the
-	// appliance cannot reach.
+	// The authorization interval needs a binding behind it; the guard refuses one without.
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
 		(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
 		VALUES ($1,$2,$3,$4,'AUTHORIZED', now(), now())`, f.tenant, f.site, ent, f.device); err != nil {
@@ -77,8 +67,7 @@ func authorizeDevice(t *testing.T, p *pgxpool.Pool, f fx) {
 	}
 }
 
-// TestIntegration_GuestPathDerivesEverythingFromTheDevice proves the property the Product Owner asked for
-// directly: the guest never names a Stay or a profile, and the server finds both from the device alone.
+// The guest never names a Stay or a profile; the server finds both from the device alone.
 func TestIntegration_GuestPathDerivesEverythingFromTheDevice(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -108,7 +97,7 @@ func TestIntegration_GuestPathDerivesEverythingFromTheDevice(t *testing.T) {
 		t.Fatalf("verified profile %s, want %s", got, out.Profile)
 	}
 
-	// A DIFFERENT device with no lineage gets nothing, whatever PIN it presents.
+	// A device with no lineage gets nothing, whatever PIN it presents.
 	var otherDevice string
 	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 		VALUES (gen_random_uuid(),$1,$2,gen_random_uuid(),'02:00:00:00:00:99'::macaddr) RETURNING id::text`,
@@ -121,13 +110,11 @@ func TestIntegration_GuestPathDerivesEverythingFromTheDevice(t *testing.T) {
 	}
 }
 
-// THE UNIFORMITY MATRIX. Every named failure, one answer.
 func TestIntegration_EveryFailureIsTheSameAnswer(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	ctx := context.Background()
 
-	// Each case builds its own site so the states cannot interfere, and returns the attempt to make.
 	cases := []struct {
 		name    string
 		prepare func(t *testing.T) VerifyRequest
@@ -150,10 +137,7 @@ func TestIntegration_EveryFailureIsTheSameAnswer(t *testing.T) {
 			f := seed(t, p)
 			s := store(t, p)
 			authorizeDevice(t, p, f)
-			// A REAL expiry, by issuing a one-second window and letting it pass. The validity window cannot
-			// be back-dated -- psp_validity_window refuses valid_until <= created_at -- and that refusal is
-			// correct: a window that can be moved into the past is a window an operator could use to make a
-			// credential retroactively never-valid, which is not the same thing as revoking it.
+			// A real expiry: issue a one-second window and let it pass; psp_validity_window refuses back-dating.
 			out, err := s.Issue(context.Background(), IssueRequest{
 				Tenant: f.tenant, Site: f.site, Stay: f.stay, ValidFor: time.Second})
 			if err != nil {
@@ -190,8 +174,7 @@ func TestIntegration_EveryFailureIsTheSameAnswer(t *testing.T) {
 
 	for _, tc := range cases {
 		req := tc.prepare(t)
-		// A store with NO throttle, so the shared lockout of one case cannot change another's answer -- the
-		// locked-out case is asserted separately below, where it is the thing being measured.
+		// No throttle, so one case's lockout cannot change another's answer.
 		s := New(p, nil)
 		profile, err := s.VerifyForDevice(ctx, req)
 		if profile != "" {
@@ -207,15 +190,12 @@ func TestIntegration_EveryFailureIsTheSameAnswer(t *testing.T) {
 	}
 }
 
-// The locked-out case is the one failure that is deliberately DIFFERENT inside the store -- the caller needs
-// to know to back off -- and identical to the guest, because the handler collapses it. Both halves matter.
+// A lockout is deliberately distinct inside the store (the caller must back off) and identical to the guest.
 func TestIntegration_ThrottledIsDistinctInternallyAndIdenticalOutside(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	f := seed(t, p)
-	// A PINNED throttle clock, on this test's own window. 15 attempts against a device limit of 10 take
-	// about 1.4s, and the window is one minute: a real clock crossing a minute boundary mid-loop splits the
-	// count and the lockout correctly never engages. See storeAtFixedTime.
+	// Pinned throttle clock; see storeAtFixedTime.
 	s := storeAtFixedTime(t, p, time.Date(2030, 1, 1, 0, 11, 30, 0, time.UTC))
 	authorizeDevice(t, p, f)
 	got := issue(t, s, f)
@@ -233,7 +213,7 @@ func TestIntegration_ThrottledIsDistinctInternallyAndIdenticalOutside(t *testing
 	if !throttled {
 		t.Fatalf("the device lockout never engaged")
 	}
-	// The CORRECT PIN is refused while locked out, which is what makes the lockout worth anything.
+	// The correct PIN is refused while locked out.
 	if _, err := s.VerifyForDevice(ctx, VerifyRequest{
 		Tenant: f.tenant, Site: f.site, PIN: got.PIN, Device: f.device}); !errors.Is(err, ErrThrottled) {
 		t.Fatalf("the correct PIN got through the lockout: %v", err)

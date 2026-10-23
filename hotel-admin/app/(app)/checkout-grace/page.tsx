@@ -1,7 +1,5 @@
 "use client";
 
-// Route shell — the screen itself lives in components/checkout-grace so it can be tested without the router.
-
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { canWrite } from "@/lib/roles";

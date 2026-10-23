@@ -12,9 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Findings of the second adversarial review of migration 0147.
-
-// A stay the PMS never closed, with occupancy evidence, is anonymised by retention (it used to abort the whole run).
+// A stay the PMS never closed, with occupancy evidence, is anonymised by retention.
 func TestIntegration_SecondReview_AnOpenStayWithEvidenceIsAnonymised(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -112,7 +110,7 @@ func TestIntegration_SecondReview_AReplayedAssistedErasureCleansTheActivityLog(t
 	}
 }
 
-// A staff member's email is scrubbed from a table another role owns (the staff run used to fail on it).
+// A staff member's email is scrubbed from a table another role owns.
 func TestIntegration_SecondReview_AStaffLabelIsScrubbedWhoeverOwnsTheTable(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()

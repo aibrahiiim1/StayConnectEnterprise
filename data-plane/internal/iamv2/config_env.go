@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// Env variable names (deployment-controlled; no DB flag table, no admin UI).
 const (
 	EnvMaster     = "STAYCONNECT_IAMV2_MASTER"
 	EnvVoucher    = "STAYCONNECT_IAMV2_VOUCHER"
@@ -15,11 +14,9 @@ const (
 	EnvSocialStub = "STAYCONNECT_IAMV2_ALLOW_SOCIAL_STUB"
 )
 
-// Getenv is the environment accessor (injectable for tests).
 type Getenv func(string) string
 
-// parseBoolStrict returns false for an absent/empty value, and errors on a malformed value (fail
-// closed at startup rather than silently defaulting a typo to ON or OFF).
+// parseBoolStrict errors on a malformed value rather than silently defaulting a typo to ON or OFF.
 func parseBoolStrict(name, v string) (bool, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -32,9 +29,8 @@ func parseBoolStrict(name, v string) (bool, error) {
 	return b, nil
 }
 
-// LoadConfigFromEnv builds a Config from environment variables. Everything defaults OFF; a malformed
-// boolean or a method-enabled-while-master-off combination is a startup failure (Validate). The
-// production profile must never allow the social Stub.
+// LoadConfigFromEnv defaults everything OFF; a malformed boolean or a method enabled while master is off is a
+// startup failure. The production profile never allows the social Stub.
 func LoadConfigFromEnv(get Getenv, productionProfile bool) (Config, error) {
 	master, err := parseBoolStrict(EnvMaster, get(EnvMaster))
 	if err != nil {
@@ -56,18 +52,12 @@ func LoadConfigFromEnv(get Getenv, productionProfile bool) (Config, error) {
 		return Config{}, err
 	}
 	if productionProfile {
-		// Production permanently refuses the social Stub regardless of the flag.
 		stub = false
 	}
 	cfg := Config{MasterEnabled: master, Methods: methods, AllowSocialStub: stub}
-	// The guest IAM authority is LOCKED on a production BUILD: IAM-v2 is the only one, and a configuration
-	// that tries to select the superseded public-schema path is a startup failure rather than a silent
-	// downgrade. Applied BEFORE Validate so the locked methods are validated in their final state.
-	//
-	// Keyed on productionBuild, NOT on productionProfile. productionProfile is a caller argument that both
-	// live services already pass as true, including on the DEVELOPMENT appliance -- keying the lock on it
-	// would change the behaviour the development trial was accepted with. Which IAM authority is in force is
-	// decided by the binary, not by an argument or an env file.
+	// The guest IAM authority is locked on a production BUILD (selecting the superseded path is a startup
+	// failure), applied before Validate. Keyed on productionBuild, not productionProfile: both services pass
+	// productionProfile=true even on the development appliance, so the binary alone decides.
 	if err := enforceGuestAuthorityLock(&cfg, productionBuild, get); err != nil {
 		return Config{}, err
 	}
@@ -77,7 +67,6 @@ func LoadConfigFromEnv(get Getenv, productionProfile bool) (Config, error) {
 	return cfg, nil
 }
 
-// SafeFlagSummary returns a log-safe description of the flag states (no secrets).
 func (c Config) SafeFlagSummary() string {
 	var b strings.Builder
 	b.WriteString("iamv2 master=")
@@ -90,8 +79,7 @@ func (c Config) SafeFlagSummary() string {
 	}
 	b.WriteString(" social_stub=")
 	b.WriteString(strconv.FormatBool(c.AllowSocialStub))
-	// The build profile is reported at startup because it, not the flags above, decides whether the guest
-	// authority is locked. An operator reading a log must be able to tell which binary is running.
+	// The build profile, not the flags, decides whether the guest authority is locked.
 	b.WriteString(" build=")
 	b.WriteString(BuildProfile())
 	return b.String()

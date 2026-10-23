@@ -1,40 +1,14 @@
 package main
 
-// WHICH OF SCD'S ROUTES ARE ADMINISTRATIVE, AND WHY ONE SOCKET NEEDED TO LEARN THE DIFFERENCE.
+// scd's one unix socket (mode 0660, root:stayconnect) admits anything in the group, but its routes are of two kinds:
+// guest-facing (called by portald, which listens on every guest VLAN) and administrative (called by edged after operator
+// auth, permission and step-up: vouchers, backup restore, licence install, enrolment, certificate rotation).
+// Two things close the gap and neither suffices alone: portald runs as its own user (a shared uid can ptrace the
+// process, so no check here would mean anything), and an administrative route requires the peer to be edged by uid.
 //
-// scd listens on one unix socket, /run/stayconnect/scd.sock, mode 0660, owned root:stayconnect. Reaching it
-// is a single yes-or-no fact: group membership. Behind it sit 56 routes of two completely different kinds.
-//
-//	GUEST-FACING, called by portald -- the captive portal, which listens on *:8380, i.e. on every guest
-//	VLAN. Commerce, session activation, the Phase-3/5/6 authentication paths, tenant branding.
-//
-//	ADMINISTRATIVE, called by edged after it has authenticated an operator, checked the resource
-//	permission and, for the code routes, re-verified the password. Vouchers and their codes. Backups,
-//	INCLUDING /v1/backup/restore. Licence install and refresh. Appliance enrolment. Certificate rotation.
-//
-// Both sets were reachable by anything in the stayconnect group, and portald ran as User=stayconnect. So the
-// network-facing process could call /v1/backup/restore, /v1/license/install and /v1/central/offline-package directly --
-// no operator, no permission, no step-up, because all of those live in edged and nothing proved they had
-// happened. The voucher code routes were the ones that made this urgent, and they were never the worst of it.
-//
-// TWO CHANGES CLOSE IT, AND NEITHER IS SUFFICIENT ALONE:
-//
-//	1. portald gets its OWN user (deploy/systemd/stayconnect-portald.service). Under a shared uid no
-//	   check here means anything, because a process can ptrace the one it shares a uid with.
-//	2. This gate: an administrative route requires the peer to BE edged, by uid. Group membership gets you
-//	   the guest surface and nothing else.
-//
-// WHY A CLASSIFIER AND NOT A SECOND SOCKET. A second listener with disjoint routes is the more structural
-// answer and remains the better eventual shape. It is not what this does, for one honest reason: portald,
-// acctd, netd, keepalived and three deployment scripts all dial this path today, and moving the boundary
-// into the filesystem means changing every one of them at the same time as changing the trust model. This
-// keeps the socket and moves the boundary into the process identity, which is the part that was missing.
-//
-// DEFAULT DENY. classifyRoute returns adminRoute for anything it does not recognise, so a route added later
-// and forgotten here is refused to non-edged callers rather than silently exposed. That is the safe
-// direction and also the INCONVENIENT one -- a new GUEST route that nobody classifies breaks the portal --
-// which is why admin_surface_test.go walks the real router and fails when any registered route is not
-// named in one of the two lists below. The runtime fails closed; the test stops it reaching the appliance.
+// Default deny: classifyRoute returns adminRoute for anything unrecognised, so a forgotten route is refused rather than
+// exposed. A new guest route nobody classifies breaks the portal, which is why admin_surface_test.go walks the real
+// router and fails on any route not named in the lists below.
 
 import (
 	"net/http"
@@ -50,91 +24,59 @@ const (
 	guestRoute
 )
 
-// guestPrefixes is the surface a process other than edged is allowed to reach.
-//
-// EVERY ENTRY WAS DERIVED FROM A CALLER, not from the route's name. The callers were enumerated across
-// cmd/portald, cmd/acctd, cmd/netd, cmd/pmsd and deploy/ before this list existed:
-//
-//	portald          commerce, sessions/{activate,authorize*,status}, auth/otp/issue, auth/social/start, devices/*,
-//	                 tenant/{auth-methods,branding}, phase3/{access/status,auth/pms/*}, phase5/*, phase6/*
-//	acctd (root)     sessions/revoke -- quota enforcement revoking a live session
-//	netd (root)      health
-//	keepalived       health, as its VRRP liveness check
-//	deploy scripts   health, phase6/devices/{list,release}
-//
-// sessions/revoke is here BECAUSE acctd calls it, and that is a real weakening worth naming: portald can
-// revoke a guest session it did not create. It is bounded -- revoking access denies service to a guest and
-// discloses nothing, creates nothing and authorises nothing -- and the alternative today would be to refuse
-// acctd, which enforces quotas. A separate guest socket would let these two differ; one socket cannot.
+// guestPrefixes is the surface a process other than edged may reach; each entry was derived from a caller (portald,
+// acctd, netd, keepalived, deploy scripts), not from the route name.
+// sessions/revoke is here because acctd (root) calls it for quota enforcement: portald can therefore revoke a guest
+// session it did not create, which only denies service and discloses or authorises nothing.
 var guestPrefixes = []string{
 	"/v1/health",
 	"/metrics",
 	"/v1/commerce/",
 	"/v1/sessions/activate",
 	"/v1/sessions/authorize",
-	// The remembered device (client_resume.go): portald asks "is this device remembered" on the landing page
-	// and revokes on sign-out; Connect itself is /v1/sessions/authorize-resume, under the prefix above.
+	// The remembered device: portald asks whether a device is remembered and revokes on sign-out.
 	"/v1/sessions/resume-",
 	"/v1/sessions/status",
 	"/v1/sessions/revoke",
 	"/v1/auth/otp/",
 	"/v1/auth/social/",
-	// Email accounts (self_service_handlers.go): portald registers, signs in for grace, resends, verifies and
-	// resets. Each acts on one account the caller proves (a password, an account token bound to the device, or
-	// a single-use emailed token) or answers the same for everyone (forgot). The operator's resend is the
-	// separate /v1/admin/accounts/ route, under /v1/admin/.
+	// Email accounts: each acts on one account the caller proves (password, device-bound token or single-use emailed
+	// token) or answers the same for everyone (forgot). The operator's resend is under /v1/admin/.
 	"/v1/auth/account/",
 	"/v1/tenant/",
 	"/v1/phase3/access/",
 	"/v1/phase3/auth/",
 	"/v1/phase5/",
 	"/v1/phase6/",
-	// A client's devices on their package (client_devices.go, 0118): portald lists them and releases or replaces
-	// one. Each acts only on the package proven by the requesting device (a live session on it, or that device's
-	// own fresh sign-in), through iam_v2.client_device_action, which records every attempt.
+	// A client's devices: each acts only on the package proven by the requesting device, through iam_v2.client_device_action, which records every attempt.
 	"/v1/devices/",
-	// The portal's HTTPS state (portal_tls.go): portald polls it to decide whether to redirect to HTTPS and which
-	// certificate to serve. It answers hostnames and a reason -- nothing secret, nothing that changes anything.
-	// Its siblings under /v1/portal/tls/ (kick, renew) are administrative and listed below.
+	// The portal HTTPS state: hostnames and a reason, nothing secret and nothing that changes anything. Its siblings under /v1/portal/tls/ (kick, renew) are administrative.
 	"/v1/portal/tls-state",
 }
 
-// adminPrefixes exists for the TEST, not for the runtime: classification already defaults to admin, so this
-// list adds no enforcement. What it adds is the ability to distinguish "administrative, and we know it" from
-// "unclassified, and the default caught it" -- so the test can insist that every route on the router was
-// actually considered by somebody.
-//
-// /v1/phase3/signin-attempts/ is administrative although its siblings are not: it is the operator's view of
-// failed guest sign-ins, read by edged for the Guest sign-in attempts screen. The prefix sits between two
-// guest prefixes and is listed here deliberately.
+// adminPrefixes exists for the test, not enforcement (the default is already admin): it distinguishes "known
+// administrative" from "unclassified". /v1/phase3/signin-attempts/ is administrative although its siblings are not
+// (the operator's view of failed guest sign-ins); it sits between two guest prefixes deliberately.
 var adminPrefixes = []string{
 	"/v1/vouchers",
 	"/v1/voucher-batches",
 	"/v1/voucher-key-generations",
 	"/v1/admin/",
 	"/v1/backup/",
-	// The erasure ledger (ledger_service.go): edged commits every erasure through it; never a guest route.
+	// The erasure ledger: edged commits every erasure through it; never a guest route.
 	"/v1/ledger/",
 	"/v1/license/",
 	"/v1/hotel-admin-cert/",
 	"/v1/maintenance",
 	"/v1/central/",
 	"/v1/phase3/signin-attempts/",
-	// The module resolver's full state (licence, local switches, readiness) is operator information, read by
-	// edged for the capability list and the Modules screen. The portal never needs it: what a client may do is
-	// decided inside the guest routes themselves.
+	// The module resolver's full state is operator information; the portal never needs it.
 	"/v1/modules",
-	// Card payment administration: provider accounts (credentials are sealed here, where the key is), the
-	// connection test and the site's extra payment domains. Read and written by edged for the Payment methods
-	// screen; the portal never reaches it.
+	// Card payment administration: provider credentials are sealed here, where the key is; the portal never reaches it.
 	"/v1/payment/",
-	// The portal certificate agent's kick and renew: edged's, after the Portal HTTPS permission and step-up.
-	// "Renew now" orders new keys and certificates, which spends Central's issuance budget; the portal must
-	// never be able to trigger it.
+	// The portal certificate agent's kick and renew: "Renew now" spends Central's issuance budget, so the portal must never trigger it.
 	"/v1/portal/tls/",
-	// Social sign-in administration: the write-only provider secret (sealed here, where the key is), its
-	// yes/no state, reload and the offered/why-not status. edged only; the portal's social routes are the
-	// separate /v1/auth/social/ guest prefix.
+	// Social sign-in administration: the write-only provider secret is sealed here; the portal's social routes are the separate /v1/auth/social/ guest prefix.
 	"/v1/social/",
 }
 
@@ -147,12 +89,8 @@ func classifyRoute(path string) routeClass {
 	return adminRoute
 }
 
-// peerGate is scd's socket middleware: it decides, per request, whether the process on the other end is
-// allowed to ask for this.
-//
-// IT RUNS BEFORE ROUTING, on purpose. chi's Use middleware sees the raw URL path and not the matched
-// pattern, which for a gate is the stronger position: it cannot be fooled by a route that matches something
-// other than what it appears to, and an unrouted path (404) is classified and refused just the same.
+// peerGate runs before routing on purpose: chi's Use sees the raw URL path, so a route cannot fool it, and an unrouted
+// 404 path is classified and refused just the same.
 func (s *server) peerGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if classifyRoute(r.URL.Path) == adminRoute && !requireAdminPeer(w, r) {

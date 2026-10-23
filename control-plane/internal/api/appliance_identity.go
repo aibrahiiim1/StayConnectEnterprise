@@ -1,5 +1,3 @@
-// Appliance-facing identity endpoints: token-less registration lives in register.go; this file holds the
-// signed hello and offline-package reconciliation.
 package api
 
 import (
@@ -10,15 +8,12 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 )
 
-// IdentityBase serves the appliance-facing identity endpoints.
 type IdentityBase struct {
 	*Base
 	ReplayCache *applianceauth.ReplayCache
 }
 
-// OfflineReconcile (appliance-authed) marks an offline activation package as
-// consumed/reconciled centrally. Idempotent: repeating it never creates a
-// duplicate record and never re-activates. The package must belong to the
+// OfflineReconcile marks an offline activation package consumed. Idempotent; the package must belong to the
 // authenticated appliance.
 func (b *IdentityBase) OfflineReconcile(w http.ResponseWriter, r *http.Request) {
 	ident := auth.ApplianceFromContext(r.Context())
@@ -35,8 +30,7 @@ func (b *IdentityBase) OfflineReconcile(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-	// Idempotent: set consumed_at once, refresh reconciled_at; scope to the
-	// authenticated appliance so one appliance can't reconcile another's.
+	// Scoped to the authenticated appliance so one cannot reconcile another's package.
 	tag, err := b.DB.Exec(ctx, `
         UPDATE offline_activation_packages
            SET consumed_at = COALESCE(consumed_at, now()), reconciled_at = now()
@@ -46,15 +40,13 @@ func (b *IdentityBase) OfflineReconcile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		// Unknown/foreign package — do not create anything.
 		WriteJSON(w, http.StatusOK, map[string]any{"status": "no_match"})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "reconciled", "package_id": in.PackageID})
 }
 
-// HelloHandler is the signed liveness call. It is also licence ENFORCEMENT (CLAUDE.md §0E): a deleted
-// appliance gets 401 here and learns it is orphaned; a retired one gets 403.
+// HelloHandler is the signed liveness call and licence enforcement: a deleted appliance gets 401, a retired one 403.
 func (b *IdentityBase) HelloHandler(w http.ResponseWriter, r *http.Request) {
 	a := auth.ApplianceFromContext(r.Context())
 	if a == nil {

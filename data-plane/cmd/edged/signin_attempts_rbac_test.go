@@ -1,12 +1,6 @@
 package main
 
-// GUEST SIGN-IN ATTEMPTS — AUTHORIZATION, through the ACTUAL router and session middleware.
-//
-// The Product Owner asked for two distinct, server-enforced permissions, and "server-enforced" is the whole
-// of it: a UI that hides a button is a courtesy, and the only thing that stops an operator reading thirty
-// days of guest credentials is that edged refuses the route. So these tests drive the real stack — chi
-// router, requireAuth, resourcePermission, handler — and the denied cases assert that the handler is never
-// REACHED, not merely that it answered unhelpfully.
+// Guest sign-in attempts authorization through the real router and session middleware; denied cases assert the handler is never reached.
 
 import (
 	"net/http"
@@ -18,9 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// signInRBACRouter builds the same shape main.go mounts. The handler bodies are irrelevant here: a request
-// that reaches one has already crossed the boundary this test is about, and reaching it is exactly what must
-// not happen for a denied role.
+// signInRBACRouter builds the shape main.go mounts; handler bodies are irrelevant, since reaching one means the boundary was crossed.
 func signInRBACRouter(s *server) http.Handler {
 	reached := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) }
 	r := chi.NewRouter()
@@ -57,12 +49,8 @@ func signInDo(t *testing.T, h http.Handler, path, cookie string) int {
 	return rec.Code
 }
 
-// THE TWO PERMISSIONS ARE GENUINELY DIFFERENT, role by role.
-//
-// The row that matters most is site_viewer: it may read the list — the same class of operational evidence it
-// reads everywhere else — and it may NOT read what guests typed. If those two ever collapse into one key,
-// every read-only login on the property becomes a thirty-day window onto guest credentials, and this is the
-// test that fails when somebody does it.
+// The two permissions differ role by role: site_viewer may read the list but not what guests typed.
+// If they collapse into one key, every read-only login sees guest credentials.
 func TestSignInAttempts_TheTwoPermissionsAreEnforcedSeparately(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := signInRBACRouter(s)
@@ -93,9 +81,7 @@ func TestSignInAttempts_TheTwoPermissionsAreEnforcedSeparately(t *testing.T) {
 	}
 }
 
-// HIDING THE BUTTON IS NOT THE BOUNDARY. An operator who can see the list and calls the credential endpoint
-// directly — which is all "hiding a button" leaves them to do — is refused by middleware, before any handler
-// runs and before any row is read.
+// Hiding the button is not the boundary: calling the credential endpoint directly is refused by middleware before any handler or row read.
 func TestSignInAttempts_TheCredentialRouteCannotBeReachedByCallingItDirectly(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := signInRBACRouter(s)
@@ -109,8 +95,7 @@ func TestSignInAttempts_TheCredentialRouteCannotBeReachedByCallingItDirectly(t *
 	}
 }
 
-// No session, no surface. Stated separately because an authenticated-but-unauthorized answer and an
-// unauthenticated one are different failures, and only one of them means the middleware is wired at all.
+// No session, no surface: unauthenticated and unauthorized are different failures.
 func TestSignInAttempts_AnonymousIsRefusedOnBothSurfaces(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := signInRBACRouter(s)
@@ -121,10 +106,7 @@ func TestSignInAttempts_AnonymousIsRefusedOnBothSurfaces(t *testing.T) {
 	}
 }
 
-// WRITES ARE REFUSED ON THE LIST. It is read-only by construction — the router registers only GET — and the
-// permission model derives write intent from the METHOD, so a role holding permRead is refused a POST even if a
-// route were added later without thinking about it. (The credential reveal is a POST because it carries the
-// operator's password; its only action is the reveal.)
+// Writes are refused on the list: write intent derives from the METHOD, so permRead is refused a POST even if a route were added later.
 func TestSignInAttempts_NoRoleMayWriteEitherSurface(t *testing.T) {
 	s := &server{sessions: newSessionStore(time.Hour)}
 	h := signInRBACRouter(s)
@@ -140,9 +122,7 @@ func TestSignInAttempts_NoRoleMayWriteEitherSurface(t *testing.T) {
 	}
 }
 
-// The UI mirror must agree with this file. A drift between edged's rolePerms and hotel-admin's MATRIX has
-// already hidden working screens from the roles that owned them; here it would do something worse — show a
-// credential panel the server then refuses, or hide one the operator is entitled to.
+// The UI mirror (hotel-admin MATRIX) must agree with edged's rolePerms.
 func TestSignInAttempts_PermissionKeysExistInTheMatrix(t *testing.T) {
 	for _, key := range []string{"guest-signin-attempts", "guest-signin-credentials"} {
 		found := false

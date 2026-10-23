@@ -1,11 +1,6 @@
 "use client";
 
-// DISABLED ACCOUNTS — how long a disabled staff account is kept before it is anonymised (edged
-// /operators/account-retention, migration 0138, GDPR audit B4; docs/OPERATIONAL_SETTINGS_POLICY.md).
-//
-// Every role that can open Operators reads it; only a role that can change operators (site admin) edits it,
-// with a reason and the password, and every change is recorded. The bound comes from the appliance, so this
-// form cannot drift from what edged and the database accept.
+// Disabled-account retention bounds come from the appliance; changes require password and reason.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, UserMinus } from "lucide-react";
@@ -35,7 +30,7 @@ export function OperatorAccountRetention({ writable }: { writable: boolean }) {
       if (!r?.settings || !Array.isArray(r.bounds)) return;
       setData(r);
       setEdits(Object.fromEntries(r.bounds.map((b) => [b.key, String(r.settings[b.key])])));
-    } catch { /* the section stays absent rather than breaking the Operators page */ }
+    } catch { /* Keep the Operators page usable if this setting cannot load. */ }
   }, []);
   useEffect(() => { load(); }, [load]);
 

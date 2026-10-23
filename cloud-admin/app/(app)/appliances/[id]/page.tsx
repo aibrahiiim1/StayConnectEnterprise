@@ -41,7 +41,6 @@ type ReasonAction = {
   url: string;
   done: string;
   consequences?: string[];
-  /** Typed confirmation: the serial. */
   typed?: boolean;
 };
 
@@ -80,7 +79,6 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
-  // While it is activating, look every 5 seconds: the operator is usually watching for it to finish.
   const activating = a?.activation === "activating";
   usePoll(load, activating ? 5_000 : 30_000, !!a);
 
@@ -206,8 +204,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   })[verb];
 
   const activationText = activationInfo(a.activation);
-  // Two-phase retirement that the appliance never acknowledged: ctrlapi reports the delivery as failed (the same
-  // condition that raises the "retirement not confirmed" attention item). A deadline already past reads the same.
+  // Missing acknowledgement or a passed deadline both mean retirement remains unconfirmed.
   const unconfirmed =
     a.activation === "retiring" &&
     (a.retirement?.state === "terminal_delivery_failed" ||
@@ -242,7 +239,6 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
 
       <ErrorBanner err={err} />
 
-      {/* THE ONE THING TO DO NEXT, by state. */}
       {a.activation === "waiting" && (
         <Card className="border-info/40">
           <CardHeader>
@@ -297,9 +293,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               </CardDescription>
             </div>
           </CardHeader>
-          {/* OFFLINE ACTIVATION IS OFFERED ONLY WHEN IT CAN WORK. A package is generated from an imported
-              activation request; without one the download can only fail, so the button is not shown and the
-              card says what to do first instead. */}
+          {/* Offline activation requires an imported request; otherwise the package download will fail. */}
           {canManage && a.activating_on !== "certificate_reissue" && (
             <CardFooter>
               {a.offline_request_pending ? (
@@ -596,7 +590,6 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
         requireReason
         onConfirm={retire}
       >
-        {/* Already retiring: the only step left is not to wait. */}
         {a.activation !== "retiring" && (
           <label className="flex items-start gap-3 text-sm">
             <Switch checked={emergency} onCheckedChange={setEmergency} label="Emergency retire" />
@@ -645,7 +638,6 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   );
 }
 
-// "12 days left", "ends today", "ended 3 days ago" -- the date itself is already on the line above.
 function daysLeftWords(until: string): string {
   const days = Math.ceil((Date.parse(until) - Date.now()) / 86_400_000);
   if (Number.isNaN(days)) return "";
@@ -655,8 +647,7 @@ function daysLeftWords(until: string): string {
   return days === -1 ? "ended yesterday" : `ended ${(-days).toLocaleString()} days ago`;
 }
 
-// The same event repeated back to back (an appliance retrying with an expired token, say) is one line with a
-// count, not a screen of identical rows that pushes everything else out of view.
+// Collapse consecutive retries so they do not bury other events.
 type GroupedEvent = ActivityEvent & { count: number; first_at?: string };
 function groupRepeats(events: ActivityEvent[]): GroupedEvent[] {
   const out: GroupedEvent[] = [];
@@ -712,7 +703,6 @@ function ActivityList({ events }: { events: ActivityEvent[] }) {
   );
 }
 
-/** Rarely needed, so collapsed: repair actions and the protocol-level facts. */
 function Advanced({
   a, canManage, fileBusy, onPackage, onAction,
 }: {
@@ -769,7 +759,6 @@ function Advanced({
                   <ArrowRightLeft /> Mark for replacement
                 </Button>
               )}
-              {/* The package needs an imported, unconsumed offline activation request; without one ctrlapi refuses. */}
               {a.offline_request_pending && (
                 <Button variant="ghost" size="sm" disabled={fileBusy} onClick={onPackage}>
                   <Download /> Offline activation package

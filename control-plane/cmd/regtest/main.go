@@ -1,11 +1,8 @@
-// Command regtest is a minimal token-less appliance-registration client used by
-// the lifecycle/factory-reset regression suite. It generates a fresh Ed25519
-// identity, self-signs the registration request, and POSTs /v1/appliances/register
-// with a chosen serial — so a test can simulate a factory reset (same serial, new
-// identity). It is a TEST helper only; it is never part of the production runtime.
+// Command regtest is a test-only token-less appliance-registration client; re-registering a serial with a new
+// identity simulates a factory reset.
 //
 // With -signin it instead signs an operator in through both steps (password from $ADMIN_PASS, then the
-// authenticator code; internal/opsignin) and writes the session to a curl cookie jar:
+// authenticator code) and writes the session to a curl cookie jar:
 //
 //	ADMIN_PASS=... regtest -signin -base $API -email $ADMIN_EMAIL -jar $CJ
 package main

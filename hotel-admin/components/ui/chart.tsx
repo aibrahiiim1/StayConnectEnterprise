@@ -1,17 +1,6 @@
 "use client";
 
-// CHARTS, AS INLINE SVG AND NOTHING ELSE.
-//
-// No charting library: the appliance ships this bundle to a hotel back office, and three of these shapes do not
-// justify a runtime dependency. Everything below draws with the theme tokens, so a chart is correct in light and
-// dark without a second palette and without reading the current theme in JavaScript.
-//
-// The conventions are fixed, not per-call:
-//   * columns cap at 24px and keep a 2px surface-coloured gap, so touching bars separate by air, not outline;
-//   * data-ends are rounded 4px and square at the baseline;
-//   * gridlines are hairline, solid and one step off the surface — never dashed;
-//   * a legend is always drawn for two or more series, and every chart has a hover read-out, because a chart you
-//     cannot interrogate makes the reader guess at values the tooltip could simply state.
+// Inline SVG avoids a large charting dependency in the appliance bundle and follows theme tokens.
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
@@ -19,18 +8,12 @@ import { cn } from "@/lib/utils";
 export const SERIES = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5", "chart-6"] as const;
 export type SeriesToken = (typeof SERIES)[number];
 
-/** The fixed categorical order. Assigned by index, never cycled — a 7th series folds into "Other". */
+/** Extra series fold into Other instead of cycling colors. */
 export const seriesColor = (i: number) => `hsl(var(--${SERIES[Math.min(i, SERIES.length - 1)]}))`;
 
 type Point = { label: string; values: number[] };
 
-/**
- * ColumnChart — stacked or single-series columns over a categorical/time axis.
- *
- * Built for "traffic per hour" and "sign-ins per hour": a bounded number of bands, a total worth reading, and a
- * part-to-whole split (down/up) that a stacked column states directly. Deliberately NOT a dual-axis chart —
- * bytes and session counts are two measures and get two charts.
- */
+/** Use separate charts for different units such as bytes and session counts. */
 export function ColumnChart({
   data,
   series,
@@ -46,7 +29,6 @@ export function ColumnChart({
   height?: number;
   formatValue?: (n: number) => string;
   formatAxis?: (n: number) => string;
-  /** Label every Nth band, so 24 hourly columns do not produce 24 overlapping labels. */
   tickEvery?: number;
   className?: string;
   emptyLabel?: string;
@@ -57,7 +39,6 @@ export function ColumnChart({
   const peak = Math.max(0, ...totals);
   const allZero = peak <= 0;
 
-  // A "nice" ceiling so the top gridline is a round number rather than the exact peak.
   const ceiling = allZero ? 1 : niceCeiling(peak);
   const fmtAxis = formatAxis ?? formatValue;
 
@@ -66,8 +47,7 @@ export function ColumnChart({
       {series.length > 1 && <Legend items={series.map((s, i) => ({ name: s.name, index: i, token: s.token }))} />}
 
       <div className="relative">
-        {/* Gridlines sit behind the columns in their own absolutely-positioned layer so the bar geometry stays
-            simple arithmetic and the labels are real text rather than SVG <text> that cannot wrap. */}
+        {/* Keep labels as real text so they can wrap. */}
         <div className="pointer-events-none absolute inset-0 flex flex-col justify-between" style={{ height }}>
           {[1, 0.5, 0].map((f) => (
             <div key={f} className="flex items-center gap-2">
@@ -79,8 +59,7 @@ export function ColumnChart({
           ))}
         </div>
 
-        {/* A GROUP, not an image: role="img" makes every descendant presentational, which hid the very columns
-            that carry each band's values from the screen reader while leaving them in the tab order. */}
+        {/* role="img" hides the focusable columns' values from screen readers. */}
         <div className="flex items-end gap-[2px] pl-14" style={{ height }} role="group"
           aria-label={`${series.map((s) => s.name).join(" and ")} by ${data.length === 24 ? "hour" : "period"}`}>
           {data.map((d, i) => {
@@ -94,8 +73,7 @@ export function ColumnChart({
                 onMouseLeave={() => setHover((h) => (h === i ? null : h))}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover((h) => (h === i ? null : h))}
-                // The hit target is the FULL column height, not the drawn bar: an hour with 40 KB of traffic
-                // draws two pixels, and a two-pixel hover target is the same as none.
+                // Use full-height hit targets so tiny bars remain reachable.
                 className={cn(
                   "group relative flex h-full max-w-6 flex-1 cursor-default flex-col justify-end rounded-sm",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -105,7 +83,6 @@ export function ColumnChart({
                   .map((s, si) => `${s.name} ${formatValue(d.values[si] ?? 0)}`)
                   .join(", ")}`}
               >
-                {/* Stacked top-down so the first series sits at the bottom of the column. */}
                 {[...series].map((s, si) => series.length - 1 - si).map((si) => {
                   const v = d.values[si] ?? 0;
                   if (v <= 0) return null;
@@ -117,7 +94,6 @@ export function ColumnChart({
                       style={{
                         height: `${Math.max(pct, 0.9)}%`,
                         background: seriesColor(si),
-                        // The 2px surface gap between stacked segments — air, not a stroke.
                         marginBottom: si > 0 ? 2 : 0,
                       }}
                       className={cn(
@@ -164,16 +140,11 @@ export function ColumnChart({
   );
 }
 
-/** The index of the topmost non-zero segment, so only it gets the rounded cap. */
 function topIndex(values: number[]): number {
   for (let i = values.length - 1; i >= 0; i--) if ((values[i] ?? 0) > 0) return i;
   return 0;
 }
 
-/**
- * Sparkline — a 2px trend line for a stat tile. One series, so no legend: the tile's label says what it is.
- * No axis, no labels, no tooltip; the figure beside it carries the value.
- */
 export function Sparkline({
   values,
   width = 96,
@@ -202,7 +173,6 @@ export function Sparkline({
       className={cn("overflow-visible", className)}
       aria-hidden
     >
-      {/* The area is the hue at ~10% — a wash that gives the line a base without competing with it. */}
       <path d={area} fill={color} opacity={0.1} />
       <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={width} cy={y(values[values.length - 1])} r={2.5} fill={color} />
@@ -210,13 +180,7 @@ export function Sparkline({
   );
 }
 
-/**
- * SplitBar — one horizontal stacked bar for a part-to-whole with a handful of named parts.
- *
- * This is the form a donut is usually reached for and is wrong for: the parts are a proportion of one total,
- * the names are long, and the reader needs to compare two of them — all of which a straight bar does better.
- * Every part is labelled in the legend with its own count, so nothing depends on reading an area by eye.
- */
+/** Print each count beside its part so the bar's area is not the only way to read it. */
 export function SplitBar({
   parts,
   total,
@@ -262,7 +226,6 @@ export function SplitBar({
               style={{ background: colorOf(p, i) }}
               aria-hidden
             />
-            {/* The count is stated, never inferred from the bar — and the text stays in ink, not the mark's hue. */}
             <span className="text-muted-foreground">{p.name}</span>
             <span className="font-medium tabular text-foreground">{formatValue(p.value)}</span>
           </li>
@@ -319,7 +282,6 @@ function Row({
   );
 }
 
-/** A round ceiling at or above the peak, so the top gridline reads 2 GB rather than 1.87 GB. */
 function niceCeiling(peak: number): number {
   if (peak <= 0) return 1;
   const mag = Math.pow(10, Math.floor(Math.log10(peak)));
@@ -328,14 +290,7 @@ function niceCeiling(peak: number): number {
   return step * mag;
 }
 
-/**
- * AreaChart — one or more series over TIME, drawn as lines with a faint wash.
- *
- * The column chart is right for a bounded set of bands (24 hours). It is wrong for a week of samples or thirty
- * days: hundreds of 2px columns read as noise. A line states the shape, and the hover crosshair states the exact
- * value at any point. Series are NOT stacked: two traffic directions are compared, not summed, and a stacked area
- * makes the upper series unreadable against a moving baseline.
- */
+/** Keep compared series unstacked so each line has a stable baseline. */
 export function AreaChart({
   data,
   series,
@@ -351,7 +306,6 @@ export function AreaChart({
   height?: number;
   formatValue?: (n: number) => string;
   formatAxis?: (n: number) => string;
-  /** How many x-axis labels to show, spread evenly. */
   tickCount?: number;
   className?: string;
   emptyLabel?: string;
@@ -385,8 +339,7 @@ export function AreaChart({
     return Array.from({ length: k }, (_, j) => Math.round((j * (n - 1)) / (k - 1)));
   }, [n, tickCount]);
 
-  // POINTER events, so a finger scrubs the read-out as a mouse does. `touch-pan-y` on the svg hands vertical
-  // drags to the page scroll and keeps horizontal ones for the chart.
+  // Pointer events support touch scrubbing while touch-pan-y keeps vertical page scrolling.
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (n === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -394,8 +347,7 @@ export function AreaChart({
     const i = Math.round(((rel - pad) / (w - pad * 2)) * (n - 1));
     setHover(Math.max(0, Math.min(n - 1, i)));
   };
-  // A lifted finger always "leaves"; clearing then would hide the value the tap asked for. Touch keeps the last
-  // read-out until the next touch moves it.
+  // Keep the last touch read-out visible after the finger lifts.
   const onLeave = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType !== "touch") setHover(null);
   };
@@ -510,10 +462,7 @@ export function AreaChart({
   );
 }
 
-/**
- * The values behind a chart, for a screen reader. The line itself is a picture and its read-out follows a
- * pointer, so without this the numbers are reachable only by someone who can see and aim.
- */
+/** Provide chart values as a table so they do not require sight or pointer precision. */
 function ChartDataTable({
   caption, series, data, formatValue,
 }: { caption: string; series: string[]; data: Point[]; formatValue: (n: number) => string }) {
@@ -542,12 +491,6 @@ function ChartDataTable({
   );
 }
 
-/**
- * BarList — a ranked list of named quantities ("top packages", "sign-in outcomes").
- *
- * The bar sits BEHIND the label, so a long name never fights a separate axis for space, and the value is always
- * printed: the bar shows proportion, the number states it.
- */
 export function BarList({
   items,
   formatValue = (n) => n.toLocaleString(),
@@ -601,12 +544,7 @@ export function BarList({
   );
 }
 
-/**
- * Heatmap — counts on a day × hour grid ("when do guests sign in?").
- *
- * A cell's shade is its share of the busiest cell. Every cell carries its count as an accessible label and a
- * tooltip, so the grid is readable by value rather than only by colour.
- */
+/** Each cell states its count so color is never the only way to read the grid. */
 export function Heatmap({
   rows,
   columns,
@@ -616,7 +554,6 @@ export function Heatmap({
 }: {
   rows: string[];
   columns: string[];
-  /** values[rowIndex][columnIndex] */
   values: number[][];
   formatValue?: (n: number) => string;
   className?: string;

@@ -10,15 +10,10 @@ import (
 	"unicode/utf8"
 )
 
-// THE DESIGN DOCUMENT, FIELD BY FIELD.
-//
-// A design is a flat JSON object stored in tenants.branding. It has no schema in the database -- new keys are
-// stored, versioned and served without a migration -- so THIS is its schema: every key the portal will act on,
-// with the rule it must meet. A key that is not listed here is kept in the document (older designs may carry
-// keys a later release stopped using) but is never handed to a guest: ForGuests copies known keys only.
+// A design is a flat JSON object in tenants.branding with no database schema, so this file is its schema.
+// Unlisted keys are kept in the document but never handed to a guest: ForGuests copies known keys only.
 
-// Size limits. Each is generous for its purpose and small enough that the document, which every guest page
-// load reads, stays small.
+// Size limits keep the document, which every guest page load reads, small.
 const (
 	MaxAdvancedBytes    = 64 * 1024  // custom_css, custom_html
 	MaxHotelName        = 120        // characters
@@ -28,30 +23,26 @@ const (
 	MaxURLLength        = 2048       // https / appliance paths
 	MaxInlineImageBytes = 256 * 1024 // a data:image/… URI, from before uploads existed
 	MaxLanguages        = 16
-	MaxTranslationKeys  = 256 // every key the portal ships (211 with email accounts), with room to grow
+	MaxTranslationKeys  = 256 // every key the portal ships, with room to grow
 	MaxTranslationText  = 500
 	MaxLanguageLabel    = 40
 	MaxFontStack        = 200
 
-	// MaxBodyBytes caps a request that carries a design. It is the sum of the field limits above at their
-	// worst -- both advanced fields at 64 KB with JSON escaping doubling them, three inline images, sixteen
-	// fully translated languages -- rounded up, so no design that would validate is refused for size.
+	// MaxBodyBytes is the worst-case sum of the field limits (JSON escaping doubling the advanced fields,
+	// three inline images, sixteen full translations), so no valid design is refused for size.
 	MaxBodyBytes = 2 << 20
 )
 
-// Template is one of the portal's built-in page layouts.
 type Template struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
-// DefaultTemplate is what a design with no template_id renders as: the layout every appliance had before
-// templates existed, so an upgrade changes nothing a guest sees until an operator chooses otherwise.
+// DefaultTemplate is the original layout, so a design without template_id looks unchanged.
 const DefaultTemplate = "classic"
 
-// Templates are the layouts the portal ships, in the order the designer offers them. The CSS for each lives
-// in portald's own template (trusted code), never in a hotel's design.
+// Templates are in designer order; each one's CSS lives in portald's trusted template, never a hotel's design.
 var Templates = []Template{
 	{"classic", "Classic", "A centred card over your photograph. The original layout."},
 	{"split", "Split", "Your photograph and welcome on one side, sign-in on the other. Stacks on a phone."},
@@ -61,7 +52,6 @@ var Templates = []Template{
 	{"kiosk", "Kiosk", "No imagery and large controls, for a shared tablet or a client in a hurry."},
 }
 
-// TemplateID is the design's template, or the default when it names none or one this build does not have.
 func TemplateID(d map[string]any) string {
 	if v, ok := d["template_id"].(string); ok {
 		for _, t := range Templates {
@@ -73,8 +63,7 @@ func TemplateID(d map[string]any) string {
 	return DefaultTemplate
 }
 
-// Template options: small, closed vocabularies that templates translate into their own CSS. None of them can
-// carry markup or a stylesheet, which is why changing them does not ask for the Advanced step-up.
+// Template options are closed vocabularies that carry no markup or CSS, so changing them needs no Advanced step-up.
 var templateOptionEnums = map[string][]string{
 	"panel_position": {"start", "center", "end"},
 	"density":        {"compact", "comfortable", "spacious"},
@@ -90,26 +79,23 @@ var (
 	reStringKey  = regexp.MustCompile(`^[a-z][a-zA-Z0-9._-]{0,63}$`)
 	colourFields = []string{"brand_color", "brand_color_dark", "text_color"}
 	imageFields  = []string{"logo_url", "background_url", "hero_image_url"}
-	// linkFields are links a guest can follow from the sign-in page.
-	linkFields = []string{"terms_url", "privacy_url"}
-	// rePlaceholder is a part of the shipped privacy-notice template the hotel has not completed yet.
+	linkFields   = []string{"terms_url", "privacy_url"}
+	// rePlaceholder matches parts of the privacy-notice template the hotel has not completed.
 	rePlaceholder = regexp.MustCompile(`\[\[[^\]\n]*\]\]`)
-	// reCSSLoad and reHTMLLoad find what a guest's browser would FETCH from an outside host: url(...) in a
-	// stylesheet (backgrounds, @font-face sources) and src= in markup. A followed link is not a load.
+	// reCSSLoad and reHTMLLoad find what a guest's browser would fetch from an outside host (url() and src=);
+	// a followed link is not a load.
 	reCSSLoad  = regexp.MustCompile(`(?i)url\(\s*["']?https://([^/"'()\s\\]+)`)
 	reHTMLLoad = regexp.MustCompile(`(?i)\ssrc\s*=\s*["']?https://([^/"'\s>\\]+)`)
 )
 
-// ImageFields are the design keys that name an image, so the asset store can tell what is in use.
 func ImageFields() []string { return append([]string(nil), imageFields...) }
 
-// AdvancedFields are the keys that carry markup or a stylesheet. Changing any of them -- including clearing
-// it -- requires the operator's password (the Product Owner's rule for this page). A new field that can carry
-// markup or CSS MUST be added here, and to ADVANCED_KEYS in the Hotel Admin designer, or the step-up is
-// silently bypassed for it; TestAdvancedFieldsAreExactlyTheMarkupFields pins the list.
+// AdvancedFields carry markup or CSS; changing or clearing one requires the operator's password. A new such
+// field MUST be added here and to ADVANCED_KEYS in the Hotel Admin designer, or the step-up is silently
+// bypassed (TestAdvancedFieldsAreExactlyTheMarkupFields pins the list).
 var AdvancedFields = []string{"custom_css", "custom_html"}
 
-// Validate checks a whole design and returns every finding. Errors make the design unsaveable.
+// Validate returns every finding; errors make the design unsaveable.
 func Validate(d map[string]any) []Issue {
 	var out []Issue
 	add := func(field, format string, a ...any) {
@@ -149,8 +135,7 @@ func Validate(d map[string]any) []Issue {
 	text("welcome_text", MaxWelcomeText)
 	text("help_text", MaxHelpText)
 	text("privacy_text", MaxPrivacyText)
-	// No notice of the hotel's own (GDPR audit 2026-10-19, A5): guests then see the portal's short built-in
-	// notice, which cannot name the hotel or its periods, so the hotel is told every time it saves.
+	// Without its own notice guests see the short built-in one, which can't name the hotel or its periods.
 	if s, _ := d["privacy_text"].(string); strings.TrimSpace(s) == "" {
 		out = append(out, Issue{Field: "privacy_text", Severity: SeverityWarning, Message: "no privacy notice of your own: " +
 			"clients see only a short general notice. Start from the template under Content → Privacy notice and complete it"})
@@ -235,9 +220,8 @@ func Validate(d map[string]any) []Issue {
 	return out
 }
 
-// outsideHostWarnings names every host outside this appliance that the sign-in page would make a guest's
-// device contact (GDPR plan F7). It is allowed -- the hotel may choose it -- but the hotel should know: that
-// host learns each guest's address, and on a captive portal it is unreachable until the guest is online.
+// outsideHostWarnings names outside hosts a guest's device would contact: allowed, but that host learns each
+// guest's address and is unreachable on a captive portal until the guest is online.
 func outsideHostWarnings(d map[string]any) []Issue {
 	var out []Issue
 	warn := func(field string, hosts []string) {
@@ -247,7 +231,7 @@ func outsideHostWarnings(d map[string]any) []Issue {
 		out = append(out, Issue{Field: field, Severity: SeverityWarning, Message: fmt.Sprintf(
 			"loads from %s, outside this appliance: each client's device contacts that host, which sees its "+
 				"address, and nothing loads from it before the client is online; upload the file here instead, or "+
-				"name the host in the privacy notice", // the notice must say who sees guests' addresses (GDPR audit C1)
+				"name the host in the privacy notice", // the notice must say who sees guests' addresses
 			strings.Join(hosts, ", "))})
 	}
 	for _, k := range imageFields {
@@ -266,7 +250,6 @@ func outsideHostWarnings(d map[string]any) []Issue {
 	return out
 }
 
-// hostsIn returns the distinct hosts the patterns capture, lower-cased and sorted.
 func hostsIn(re *regexp.Regexp, s string, more ...*regexp.Regexp) []string {
 	seen := map[string]bool{}
 	for _, r := range append([]*regexp.Regexp{re}, more...) {
@@ -424,10 +407,8 @@ func validateTranslations(v any) []Issue {
 	return out
 }
 
-// ForGuests returns the design as a guest's browser may receive it: known keys only, each re-checked, invalid
-// values dropped, and the custom stylesheet and fragment sanitised. It never fails -- a design that is broken
-// in some field still serves every field that is not, because a guest must never be unable to sign in over a
-// logo.
+// ForGuests never fails: a field that is broken is dropped while the rest still serve, since a guest must
+// never be unable to sign in over a logo.
 func ForGuests(d map[string]any) map[string]any {
 	out := map[string]any{}
 	if d == nil {

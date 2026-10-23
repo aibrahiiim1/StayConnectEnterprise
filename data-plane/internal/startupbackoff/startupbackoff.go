@@ -1,22 +1,7 @@
-// Package startupbackoff gives every appliance service adaptive, crash-loop-safe
-// startup backoff without a central controller fighting systemd.
-//
-// systemd on the appliance (v249) has no native exponential restart backoff
-// (RestartSteps/RestartMaxDelaySec are v254+), and a flat Restart=always +
-// RestartSec=2 means a permanently broken service restarts every 2s forever —
-// a restart storm with no backoff. This package fixes that at the process level:
-// each service calls Guard() at startup; if it is crash-looping (too many starts
-// in a short sliding window) Guard sleeps for a bounded, jittered, exponentially
-// increasing delay BEFORE the service does any work. A transient failure (a few
-// recent starts) returns immediately, so recovery stays fast. The window slides,
-// so after a period of stability the backoff self-resets to zero.
-//
-// Because the delay is imposed by the service ON ITSELF (systemd still just
-// restarts at RestartSec), there is no second controller racing systemd. The
-// same logic backs the `svc-run` exec wrapper used for non-Go services
-// (caddy/kea/unbound/node), so every appliance service gets identical adaptive
-// backoff. The tracker file also exposes the live backoff state (count, level,
-// next-retry) that the edged health supervisor reads for diagnosis.
+// Package startupbackoff gives each service crash-loop backoff in-process: systemd v249 has no exponential
+// restart backoff (RestartSteps is v254+), so Guard() sleeps a bounded, jittered, exponential delay when the
+// service has started too often in a sliding window. The same logic backs the `svc-run` wrapper for non-Go
+// services, and the tracker file is read by the edged health supervisor.
 package startupbackoff
 
 import (
@@ -29,14 +14,10 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/healthdir"
 )
 
-// Dir holds the per-service backoff trackers. It lives on tmpfs (/run) on
-// purpose: a reboot is a clean slate — boot-time transients must not inherit
-// backoff accumulated before the reboot.
+// Dir is on tmpfs so a reboot starts clean: boot transients must not inherit earlier backoff.
 const Dir = "/run/stayconnect/health"
 
-// Tuning. Base restart cadence is systemd's RestartSec (~2s). The first
-// FastStarts restarts in Window get NO extra delay (transient recovery stays
-// fast); beyond that the delay doubles per extra restart up to MaxDelay.
+// The first FastStarts starts in Window get no extra delay; beyond that it doubles per start up to MaxDelay.
 const (
 	Window     = 120 * time.Second
 	FastStarts = 3
@@ -44,8 +25,6 @@ const (
 	MaxDelay   = 90 * time.Second
 )
 
-// Tracker is the persisted per-service backoff state (also read by the health
-// supervisor for diagnosis).
 type Tracker struct {
 	Service        string    `json:"service"`
 	Starts         []int64   `json:"starts"`           // unix-nano of recent starts in Window
@@ -58,12 +37,9 @@ type Tracker struct {
 	CrashLooping   bool      `json:"crash_looping"`    // Level past the crash-loop threshold
 }
 
-// CrashLoopLevel is the backoff level at/above which a service is classified as
-// a crash loop (used by the health supervisor). Level 3 ⇒ ~6th restart in the
-// window with delays already at 8s+.
+// CrashLoopLevel is the level at which the health supervisor classifies a crash loop.
 const CrashLoopLevel = 3
 
-// dirOverride redirects the tracker dir in tests; empty means use Dir.
 var dirOverride string
 
 func trackerDir() string {
@@ -75,17 +51,12 @@ func trackerDir() string {
 
 func path(service string) string { return filepath.Join(trackerDir(), service+".backoff.json") }
 
-// ensureDir creates the shared tracker dir writable by every service user
-// (services run as root/stayconnect/caddy/unbound and each writes its own
-// tracker; edged reads them all). It lives on tmpfs and holds only non-sensitive
-// restart counters, so a shared-writable mode is acceptable.
-//
-// The directory is sticky (1777): every account may create its own file and remove only its own (audit B-3).
+// ensureDir makes the tracker dir sticky (1777): every service account may create its own file and remove only
+// its own. It holds only non-sensitive restart counters.
 func ensureDir() {
 	healthdir.Ensure(trackerDir())
 }
 
-// Load returns the current tracker for a service (zero value if none/unreadable).
 func Load(service string) Tracker {
 	var t Tracker
 	b, err := os.ReadFile(path(service))
@@ -98,9 +69,7 @@ func Load(service string) Tracker {
 	return t
 }
 
-// Guard records this process start and, if the service is crash-looping, sleeps
-// for a bounded jittered exponential delay before returning. Safe to call once
-// at the very top of a service's main(). Never blocks longer than MaxDelay.
+// Guard records this start and sleeps if crash-looping; call once at the top of main(). Never blocks past MaxDelay.
 func Guard(service string) Tracker {
 	t := recordOnly(service, time.Now())
 	if d := time.Duration(t.LastDelayMS) * time.Millisecond; d > 0 {
@@ -109,13 +78,10 @@ func Guard(service string) Tracker {
 	return t
 }
 
-// recordOnly performs the full record + backoff computation + persistence for a
-// start at time `now`, WITHOUT sleeping. Guard wraps it with the sleep; tests
-// use it to drive many rapid starts deterministically.
+// recordOnly is Guard without the sleep, so tests can drive rapid starts deterministically.
 func recordOnly(service string, now time.Time) Tracker {
 	t := Load(service)
 
-	// Prune starts older than the sliding window, then record this start.
 	cutoff := now.Add(-Window).UnixNano()
 	kept := t.Starts[:0]
 	for _, s := range t.Starts {
@@ -129,7 +95,6 @@ func recordOnly(service string, now time.Time) Tracker {
 	t.LastStart = now
 	t.FirstInWindow = time.Unix(0, kept[0])
 
-	// Compute the backoff level and delay. The first FastStarts are free.
 	delay := time.Duration(0)
 	level := t.CountInWindow - FastStarts
 	if level < 0 {
@@ -137,11 +102,11 @@ func recordOnly(service string, now time.Time) Tracker {
 	}
 	t.Level = level
 	if level > 0 {
-		d := BaseDelay << uint(level-1) // 2s, 4s, 8s, 16s, ...
+		d := BaseDelay << uint(level-1)
 		if d > MaxDelay || d <= 0 {
 			d = MaxDelay
 		}
-		// ±20% jitter so a fleet of co-failing services doesn't resonate.
+		// ±20% jitter so co-failing services don't resonate.
 		jitter := time.Duration((rand.Float64()*0.4 - 0.2) * float64(d))
 		delay = d + jitter
 		if delay < 0 {
@@ -162,7 +127,6 @@ func save(t Tracker) {
 	if err != nil {
 		return
 	}
-	// A fresh, exclusively created temporary file renamed over the target: a symlink planted at either name is
-	// never written through, which matters because several of the writers are root (internal/healthdir).
+	// Exclusive temp file renamed over the target, so a planted symlink is never written through (several writers are root).
 	_ = healthdir.WriteFile(trackerDir(), t.Service+".backoff.json", b)
 }

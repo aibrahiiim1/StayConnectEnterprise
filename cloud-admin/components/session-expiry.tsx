@@ -1,23 +1,14 @@
 "use client";
 
-// THE WARNING BEFORE A SIGN-IN ENDS (WCAG 2.2.1 Timing Adjustable).
-//
-// Central ends a sign-in after a period without activity, and a fixed time after it began however active the person
-// is. Two minutes before the earlier of the two, this asks whether to stay signed in. Staying makes a request that
-// counts as activity, which moves the idle limit; nothing can move the absolute limit, so when that is the one
-// coming the dialog says so and offers only to acknowledge it or sign out now.
-//
-// Before warning and before ending, the deadlines are read again: work in another tab is activity too.
-//
-// The countdown is visible but not read out every second: the dialog's description gives the time it ends, and a
-// polite live region speaks once at one minute and once at thirty seconds.
+// Activity can extend the idle deadline, never the absolute deadline; recheck before warning and sign-out.
+// Announce milestones rather than every countdown second to screen readers.
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WARN_BEFORE_MS, nextEnding, type Deadlines, type Ending } from "@/lib/session-expiry";
 
-/** setTimeout's limit; a longer delay would fire at once. */
+/** Larger delays can fire immediately because setTimeout has a limit. */
 const MAX_DELAY = 2 ** 31 - 1;
 
 function clock(at: number): string {
@@ -37,14 +28,12 @@ export function SessionExpiryWarning({
   onSignOut,
 }: {
   deadlines: Deadlines;
-  /** Reads the deadlines again (whoami). Rejects when the sign-in has already ended. */
   refresh: () => Promise<Deadlines>;
-  /** A request that counts as activity. */
   keepAlive: () => Promise<unknown>;
   onExpired: () => void;
   onSignOut: () => void;
 }) {
-  // Keyed by value, not by object: a re-read that reports the same deadline must not restart the timers.
+  // Equivalent re-reads must not restart timers.
   const next = nextEnding(deadlines);
   const endAt = next?.at ?? null;
   const endKind = next?.kind ?? null;
@@ -63,12 +52,10 @@ export function SessionExpiryWarning({
   const expiredRef = React.useRef(onExpired);
   expiredRef.current = onExpired;
 
-  // A deadline that moved well past the warning window (activity here or in another tab) closes the warning.
   React.useEffect(() => {
     if (open && (!ending || ending.at - Date.now() > WARN_BEFORE_MS + 5000)) setOpen(null);
   }, [ending, open]);
 
-  // The warning, two minutes before the end, once the deadline is confirmed.
   React.useEffect(() => {
     if (!ending || open || dismissedAt === ending.at) return;
     const delay = Math.min(MAX_DELAY, Math.max(0, ending.at - WARN_BEFORE_MS - Date.now()));
@@ -78,10 +65,10 @@ export function SessionExpiryWarning({
       try {
         fresh = nextEnding(await refreshRef.current());
       } catch {
-        // An ended sign-in is handled where the request failed; a network failure keeps the known deadline.
+        // Network failures keep the last known deadline; 401 handling occurs at the request boundary.
       }
       if (!live || !fresh) return;
-      if (fresh.at - Date.now() > WARN_BEFORE_MS + 5000) return; // moved on; the new deadlines reschedule this
+      if (fresh.at - Date.now() > WARN_BEFORE_MS + 5000) return;
       setNow(Date.now());
       setSpoken("");
       setOpen(fresh);
@@ -89,7 +76,6 @@ export function SessionExpiryWarning({
     return () => { live = false; clearTimeout(t); };
   }, [ending, open, dismissedAt]);
 
-  // The end itself, whether or not the warning is showing: confirm, then sign out.
   React.useEffect(() => {
     if (!ending) return;
     const delay = Math.min(MAX_DELAY, Math.max(0, ending.at - Date.now()));
@@ -97,16 +83,14 @@ export function SessionExpiryWarning({
     const t = setTimeout(async () => {
       try {
         const fresh = nextEnding(await refreshRef.current());
-        if (live && fresh && fresh.at - Date.now() > 1000) return; // extended meanwhile
+        if (live && fresh && fresh.at - Date.now() > 1000) return;
       } catch {
-        // fall through: it has ended
       }
       if (live) expiredRef.current();
     }, delay);
     return () => { live = false; clearTimeout(t); };
   }, [ending]);
 
-  // The visible countdown, and the two spoken reminders.
   React.useEffect(() => {
     if (!open) return;
     const i = setInterval(() => {
@@ -128,7 +112,6 @@ export function SessionExpiryWarning({
       await keepAlive();
       await refreshRef.current();
     } catch {
-      // An ended sign-in is handled where the request failed.
     } finally {
       setBusy(false);
     }
@@ -147,7 +130,7 @@ export function SessionExpiryWarning({
       open={open !== null}
       onOpenChange={(v) => {
         if (v || busy) return;
-        // Escape is an answer too: for the idle limit the person is evidently here, so it counts as staying.
+        // Escape shows activity and may extend only the idle deadline.
         if (absolute) acknowledge();
         else void stay();
       }}

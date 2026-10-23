@@ -52,8 +52,6 @@ func enc(t *testing.T, e []Entry) []byte {
 	return b
 }
 
-// ---- the chain -------------------------------------------------------------------------------------------------------
-
 func TestParseChain_AGoodLedgerIsIntactAndKnowsItsHead(t *testing.T) {
 	p := ParseChain(enc(t, mk(5)))
 	if !p.Intact || p.Err != nil || p.Torn || len(p.Entries) != 5 {
@@ -133,8 +131,6 @@ func TestExtends_RefusesAnythingThatDoesNotContinue(t *testing.T) {
 	}
 }
 
-// ---- which copy may a restore rely on ----------------------------------------------------------------------------------
-
 func copyOf(name string, n int) Copy {
 	if n == 0 {
 		return Copy{Name: name}
@@ -210,8 +206,6 @@ func contains(l []string, s string) bool {
 	}
 	return false
 }
-
-// ---- the store -----------------------------------------------------------------------------------------------------
 
 // flaky wraps a Destination and fails or corrupts on demand.
 type flaky struct {
@@ -314,7 +308,6 @@ func TestCommit_WhenTheSecondaryFailsNothingIsLeftOnTheAppliance(t *testing.T) {
 		fl.failGet.Store(false)
 		fl.corruptGt.Store(false)
 	}
-	// storage back: the same entry now goes through
 	if err := s.Commit(context.Background(), all[2:3]); err != nil {
 		t.Fatalf("after recovery: %v", err)
 	}
@@ -428,7 +421,6 @@ func TestAbort_RemovesOnlyTheEntriesItWasGiven(t *testing.T) {
 	if err := s.Commit(ctx, all); err != nil {
 		t.Fatal(err)
 	}
-	// not the tail: nothing happens
 	if err := s.Abort(ctx, all[1:2]); err != nil {
 		t.Fatal(err)
 	}
@@ -445,8 +437,6 @@ func TestAbort_RemovesOnlyTheEntriesItWasGiven(t *testing.T) {
 		t.Fatalf("the secondary was not realigned: %d", n)
 	}
 }
-
-// ---- the encrypted external copy -------------------------------------------------------------------------------------
 
 func TestExternalCopyIsEncryptedAndOnlyAKeyHolderCanReadItBack(t *testing.T) {
 	s, _, _, ext := newStore(t)
@@ -473,7 +463,6 @@ func TestExternalCopyIsEncryptedAndOnlyAKeyHolderCanReadItBack(t *testing.T) {
 	if err != nil || !ok || !found || info.Seq != 3 || !info.Encrypted || info.CipherFP != "fp1" {
 		t.Fatalf("head = %+v ok=%v found=%v err=%v", info, ok, found, err)
 	}
-	// without a key it can be described but not verified
 	if c := s.ReadExternal(ctx, nil); c.Reach == nil {
 		t.Fatal("an encrypted copy was read without a key")
 	}
@@ -485,7 +474,6 @@ func TestExternalCopyIsEncryptedAndOnlyAKeyHolderCanReadItBack(t *testing.T) {
 	if c.Reach != nil || !c.Intact() || len(c.Parse.Entries) != 3 {
 		t.Fatalf("with the right key: %+v", c)
 	}
-	// a changed object is noticed by the note's hash even without the key
 	obj[len(obj)-3] ^= 0xff
 	if err := os.WriteFile(filepath.Join(ext, ExternalObject+backupcrypt.Suffix), obj, 0o600); err != nil {
 		t.Fatal(err)
@@ -496,7 +484,6 @@ func TestExternalCopyIsEncryptedAndOnlyAKeyHolderCanReadItBack(t *testing.T) {
 	if c := s.ReadExternal(ctx, id); c.Intact() {
 		t.Fatal("a tampered object was accepted")
 	}
-	// switching encryption off removes the stale encrypted object
 	s.Cipher = nil
 	if err := s.PushExternal(ctx); err != nil {
 		t.Fatal(err)
@@ -527,8 +514,6 @@ func TestRewriteLocalAndAppendLocalHealFromAVerifiedChain(t *testing.T) {
 		t.Fatalf("a gap was appended: %v", err)
 	}
 }
-
-// ---- destinations ----------------------------------------------------------------------------------------------------
 
 func TestDirDest_PutIsAtomicAndCheckRoundTrips(t *testing.T) {
 	d := &DirDest{Root: t.TempDir()}

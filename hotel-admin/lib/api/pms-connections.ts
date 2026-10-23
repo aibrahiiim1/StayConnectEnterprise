@@ -1,18 +1,9 @@
-// PMS CONNECTIONS — the provider catalogue, the request shapes and the operator wording for the PMS
-// connections screen.
-//
-// Everything that decides WHAT is sent to edged lives here rather than in the components, so the one thing the
-// tests must be able to pin — that a Protel connection is created with exactly the requests it always was — is
-// a pure function that can be read and asserted without rendering anything.
-//
-// THE CATALOGUE IS THE ONLY SOURCE OF OFFERED PROVIDERS. edged serves GET /pms-providers; a provider that is not
-// in it is never offered. Where the catalogue cannot be read at all (an appliance whose edged predates it
-// answers 404), exactly one provider is offered — Protel over FIAS, the connector every appliance has always
-// carried — and the screen says why the list is short.
+// PMS connections: provider catalogue, request shapes and operator wording. What is sent to edged lives here so it is
+// testable without rendering.
+// The catalogue (GET /pms-providers) is the only source of offered providers; when unreadable (404 on older edged) only
+// Protel over FIAS is offered.
 
 import { api, type PmsInterface, type PmsInterfaceHealth } from "@/lib/api";
-
-// ---------------------------------------------------------------- catalogue types (GET /pms-providers)
 
 export type PmsFieldType = "url" | "host_port" | "string" | "int" | "enum" | "bool";
 
@@ -79,9 +70,7 @@ export type TestConnectionResult = {
 
 export const PROTEL_KIND = "protel-fias";
 
-// THE PROTEL REVISION FORM, as a schema. These keys are the top-level fields of edged's authorRevisionReq and
-// are sent exactly as the form always sent them — Protel never uses provider_config. The defaults are the
-// starting points the form has always offered; the server validates every one of them.
+// Protel revision form schema: keys are edged's authorRevisionReq top-level fields; Protel never uses provider_config.
 export const PROTEL_FIELDS: PmsProviderField[] = [
   {
     key: "endpoint", label: "PMS address and port", type: "host_port", required: true,
@@ -98,8 +87,7 @@ export const PROTEL_FIELDS: PmsProviderField[] = [
   { key: "feed_freshness_ms", label: "Guest data stale after", type: "int", required: true, default: 120000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
   { key: "complete_sync_ms", label: "Full refresh at least every", type: "int", required: true, default: 600000, min: 1, max: 86_400_000, unit: "ms", advanced: true },
   {
-    // Carried through an edit like every other stored key (audit H-3): the form dropped it, so editing any
-    // timeout silently removed a site's offline sign-in window.
+    // Carried through an edit; dropping it silently removed a site's offline sign-in window.
     key: "max_auth_cache_age_seconds", label: "Offline sign-in window", type: "int", min: 0, max: 604800,
     unit: "seconds", advanced: true,
     help: "How long the last good guest list may still authorise room sign-in while the PMS cannot be reached. Leave empty for the default.",
@@ -135,9 +123,8 @@ export const PROTEL_FALLBACK: PmsProvider = {
 export type ProviderCatalogue = { providers: PmsProvider[]; available: boolean };
 
 /**
- * Loads the provider catalogue. Any failure — the route not existing on this appliance, or a malformed answer —
- * produces the Protel-only list with `available: false`, never an error screen: the page must still let an
- * operator manage the Protel connection they already have.
+ * Loads the catalogue. Any failure yields the Protel-only list with `available: false`, so the existing Protel
+ * connection stays manageable.
  */
 export async function loadProviderCatalogue(): Promise<ProviderCatalogue> {
   try {
@@ -158,15 +145,10 @@ export function providerFor(kind: string, catalogue: PmsProvider[]): PmsProvider
   return null;
 }
 
-/** The field schema the form renders: THE SERVER'S (GET /pms-providers), for Protel too (audit H-3).
- *
- *  Protel used a list kept in this file, and the list fell behind the server: it had no
- *  max_auth_cache_age_seconds, so an edit started from a revision that carried one saved a draft without it.
- *  The built-in list is now only the fallback for an appliance whose catalogue cannot be read. */
+/** Use the server's field schema, including Protel; the built-in list is a fallback. */
 export function fieldsFor(p: PmsProvider): PmsProviderField[] {
   const server = p.kind === PROTEL_KIND && p !== PROTEL_FALLBACK && (p.fields?.length ?? 0) > 0;
   const list = p.kind === PROTEL_KIND && !server ? PROTEL_FIELDS : (p.fields ?? []);
-  // The time zone is asked once, for every provider, as a revision column — never twice.
   return list.filter((f) => f.key !== "source_timezone");
 }
 
@@ -174,15 +156,13 @@ export const needsCredential = (p: PmsProvider | null | undefined) =>
   (p?.credential?.mode ?? "NONE") === "AUTH_KEY" && (p?.credential?.fields?.length ?? 0) > 0;
 
 /**
- * Whether "test connection" may be offered. Only when the catalogue says the provider supports it, and never
- * for a socket link: testing one would open a second session to the property's PMS beside the live one.
+ * "Test connection" only when the catalogue says the provider supports it, never for a socket link (it would open a
+ * second session to the PMS).
  */
 export const canTestConnection = (p: PmsProvider | null | undefined) =>
   !!p?.capabilities?.test_connection && p?.transport !== "SOCKET";
 
 export const canFullResync = (p: PmsProvider | null | undefined) => p?.capabilities?.full_resync !== false;
-
-// ---------------------------------------------------------------- form values and validation
 
 export type FormValues = Record<string, string | boolean>;
 
@@ -247,8 +227,6 @@ export function validateAll(fields: PmsProviderField[], values: FormValues): Rec
     const e = validateField(f, values[f.key]);
     if (e) errs[f.key] = e;
   }
-  // Protel's two cross-field rules, which the server also enforces. Stated here so the operator reads them
-  // beside the field rather than as a refusal after pressing Create.
   if (fields === PROTEL_FIELDS) {
     const hi = Number(values.heartbeat_interval_ms);
     const ht = Number(values.heartbeat_timeout_ms);
@@ -275,12 +253,7 @@ function typed(f: PmsProviderField, raw: string | boolean | undefined): unknown 
   return v;
 }
 
-// ---------------------------------------------------------------- request bodies
-
-/**
- * The Protel revision body — byte-for-byte what the configuration form has always posted: every timing field as
- * a number, the currency pair only when set, read_only fixed true, and nothing else.
- */
+/** The Protel revision body, exactly as the form has always posted it. */
 export function protelRevisionBody(
   values: FormValues, sourceTimezone: string, fields: PmsProviderField[] = PROTEL_FIELDS,
 ): Record<string, unknown> {
@@ -301,8 +274,7 @@ export function protelRevisionBody(
     financial_base_currency_exponent: exp === "" ? undefined : Number(exp),
     read_only: true,
   };
-  // EVERY OTHER FIELD THE SCHEMA NAMES, so nothing the revision carries is dropped by an edit (audit H-3):
-  // max_auth_cache_age_seconds today, and whatever the server adds to its Protel schema tomorrow.
+  // Every other schema field is carried so an edit drops nothing the revision holds.
   for (const f of fields) {
     if (f.key in body || f.key === "source_timezone") continue;
     const v = typed(f, values[f.key]);
@@ -335,9 +307,8 @@ export function credentialSecret(p: PmsProvider, values: Record<string, string>)
 }
 
 /**
- * The provider-specific values a saved revision carries. edged STORES them under `config.provider`
- * (pmsprovider.RESTConfig.StoredConfig); `provider_config` is only the name of the request field that sends
- * them. Reading the request name here started every Mews, Apaleo and OPERA Cloud edit from defaults and blanks.
+ * Provider-specific values of a saved revision. edged stores them under `config.provider`; `provider_config` is only
+ * the request field name.
  */
 export function storedProviderValues(cfg: Record<string, unknown>): Record<string, unknown> {
   const pick = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
@@ -350,23 +321,18 @@ export function valuesFromRevision(
 ): { values: FormValues; timezone: string } {
   const fields = fieldsFor(p);
   const cfg = (rev?.config ?? {}) as Record<string, unknown>;
-  // The currency pair is a revision COLUMN, not a config key, so it is read from the revision itself.
   const cols: Record<string, unknown> = {};
   const r = (rev ?? {}) as Record<string, unknown>;
   if (r.financial_base_currency != null) cols.financial_base_currency = r.financial_base_currency;
   if (r.financial_base_currency_exponent != null) cols.financial_base_currency_exponent = r.financial_base_currency_exponent;
-  // TLS on the FIAS link is stored as config.tls {enabled, cert_sha256} (GDPR plan C8); the form fields are flat.
   const tls = (cfg.tls && typeof cfg.tls === "object" ? cfg.tls : {}) as Record<string, unknown>;
   const tlsValues: Record<string, unknown> = {};
   if (tls.enabled === true) tlsValues.tls_enabled = true;
   if (typeof tls.cert_sha256 === "string") tlsValues.tls_cert_sha256 = tls.cert_sha256;
   const src: Record<string, unknown> = { ...cols, ...cfg, ...tlsValues, ...storedProviderValues(cfg) };
-  // A redacted value is not a value: starting an edit from "[redacted]" would save the placeholder.
   for (const k of Object.keys(src)) if (src[k] === "[redacted]") delete src[k];
   return { values: initialValues(fields, src), timezone: rev?.source_timezone || "Africa/Cairo" };
 }
-
-// ---------------------------------------------------------------- operator wording
 
 export const LIFECYCLE_WORDS: Record<string, string> = {
   ACTIVE: "Active",
@@ -456,8 +422,6 @@ export const REASON_WORDS: Record<string, string> = {
   CONFIG_ROLLBACK: "Returned to an earlier configuration",
 };
 
-// ---------------------------------------------------------------- health helpers (display only)
-
 /** The most recent moment the PMS was heard from, whichever signal carried it. */
 export function lastCommunication(h?: PmsInterfaceHealth | null): string | null {
   if (!h) return null;
@@ -474,10 +438,7 @@ export function isSyncing(h?: PmsInterfaceHealth | null): boolean {
   return ACTIVE_STAGES.has(stage);
 }
 
-/**
- * Where a connection points, with nothing that could be a credential: the host (and port) only. A URL's user
- * info, path and query are dropped — an API key pasted into a query string must never reach a card.
- */
+/** Host (and port) only: user info, path and query are dropped so a pasted credential never reaches a card. */
 export function safeHost(endpoint?: string | null): string | null {
   const v = (endpoint ?? "").trim();
   if (!v) return null;
@@ -492,13 +453,11 @@ export function safeHost(endpoint?: string | null): string | null {
 /** "Never configured": switched off and never given a live configuration. Kept apart from real connections. */
 export const isNeverConfigured = (i: PmsInterface) => i.lifecycle_state === "AUTH_DISABLED" && !i.published;
 
-// ---------------------------------------------------------------- errors
-
 type ErrLike = { status?: number; code?: string; message?: string; traceId?: string; body?: any };
 
 /**
- * An edged refusal in words an operator can act on. The server's error code decides the sentence; where the
- * server's own message is already written for people (a resync refusal) it is kept.
+ * An edged refusal in operator words; the error code decides the sentence, except messages already written for people
+ * (resync).
  */
 export function pmsErrorText(e: unknown): string | null {
   if (e == null || e === "") return null;

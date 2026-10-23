@@ -2,8 +2,7 @@ package signinattempt
 
 import "testing"
 
-// THE COUNTING SET IS CLOSED, and this walks every Result so that adding one and forgetting to decide
-// whether it counts fails here rather than in a hotel lobby.
+// Walks every Result so that adding one without deciding whether it counts fails here.
 func TestOnlyWrongCredentialsCount(t *testing.T) {
 	want := map[Result]bool{
 		CredentialMismatch: true,
@@ -25,8 +24,7 @@ func TestOnlyWrongCredentialsCount(t *testing.T) {
 	}
 }
 
-// A TECHNICAL FAILURE MUST NEVER RESTRICT A GUEST. Stated as its own test because it is the rule most likely
-// to be broken by someone "simplifying" the set to "everything that is not VERIFIED".
+// A technical failure must never restrict a guest; a "simplification" to "everything not VERIFIED" would break this.
 func TestNoTechnicalFailureCounts(t *testing.T) {
 	for _, r := range AllResults {
 		if r.GuestClass() == GuestTechnical && r.CountsAsCredentialFailure() {
@@ -36,8 +34,7 @@ func TestNoTechnicalFailureCounts(t *testing.T) {
 	}
 }
 
-// An attempt refused BY the policy must not feed it, or a sixty-second restriction becomes permanent for
-// anyone who keeps tapping.
+// An attempt refused by the policy must not feed it, or a short restriction becomes permanent.
 func TestARateLimitedAttemptDoesNotFeedThePolicy(t *testing.T) {
 	if RateLimited.CountsAsCredentialFailure() {
 		t.Fatal("a blocked attempt extends the restriction that blocked it")
@@ -57,10 +54,7 @@ func TestDefaultsAreTheApprovedValuesAndAreValid(t *testing.T) {
 	}
 }
 
-// THE LOWER BOUNDS ARE THE ONES THAT PROTECT GUESTS. A threshold of one would restrict somebody for a single
-// typo; a five-second window would make the control invisible. These assert the refusals, and they assert
-// that the message names the unit and the range, because an operator typing into a form needs to know what
-// to type instead.
+// The lower bounds protect guests (a threshold of one restricts a typo); messages must name unit and range.
 func TestValidateRefusesValuesThatWouldHurtGuests(t *testing.T) {
 	cases := []struct {
 		name string

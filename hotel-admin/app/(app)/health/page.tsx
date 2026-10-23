@@ -1,14 +1,7 @@
 "use client";
 
-// DIAGNOSTICS — is each service on this appliance running, and what can be done about one that is not.
-//
-// The page polls every 10 seconds. It dims rather than blanks while it refreshes, and a failed refresh keeps the
-// last answer on screen (LiveStatus says so) instead of emptying the table under the operator.
-//
-// Actions follow the server's permissions exactly. Reading service logs needs diagnostics WRITE (site admin and
-// IT manager): journal lines record what services did, which can include a client's details, so edged serves them
-// only to the people who fix things, redacted (audit N-22). Recheck and Restart are writes too.
-// Restart additionally requires a reason and password confirmation, which the server enforces.
+// Reading service logs needs diagnostics WRITE since journal lines can include client details; Restart also needs
+// a reason and password confirmation, enforced by edged.
 
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
@@ -60,7 +53,6 @@ type ServiceHealth = {
   updated_at: string;
 };
 type Boot = { converged: boolean; alert_open: boolean; pending: string[]; boot_at?: string; converged_at?: string; deadline_at?: string };
-/** Checks that are not supervised services (today: portal_https, the HTTP-fallback alert). */
 type Check = { name: string; level: "ok" | "warn" | "critical" | string; reason?: string; message: string };
 type Summary = { overall: string; counts: Record<string, number>; services: ServiceHealth[]; boot: Boot | null; checks?: Check[]; generated_at: string };
 type RecoveryEvent = { id: number; service: string; event: string; cause: string; action: string; backoff_level: number; result: string; duration_ms: number; actor: string; created_at: string };
@@ -70,8 +62,7 @@ type Tone = "ok" | "warn" | "err" | "default" | "info";
 function stateTone(s: string): Tone {
   switch (s) {
     case "healthy": return "ok";
-    // "waiting" is a correct state, not a fault: the service is intentionally idle because its
-    // configuration prerequisite does not exist yet (Kea before guest networking is configured).
+    // "waiting" is not a fault: the service is idle until its prerequisite exists.
     case "waiting": return "default";
     case "recovering": case "starting": return "info";
     case "degraded": return "warn";
@@ -87,8 +78,6 @@ const STATE_WORDS: Record<string, string> = {
 };
 const stateWord = (s: string) => STATE_WORDS[s] ?? (s ? s.replace(/_/g, " ") : "Unknown");
 
-// The count tiles, in the order the handoff names them. Tone is only raised when the count is non-zero, so a
-// row of zeros reads as quiet rather than as seven alarms.
 const TILES: { key: string; label: string; tone: "ok" | "warn" | "err" | "info" | "default" }[] = [
   { key: "healthy", label: "Healthy", tone: "ok" },
   { key: "waiting", label: "Waiting", tone: "default" },
@@ -146,7 +135,6 @@ export default function HealthPage() {
   useEffect(() => { api.get<Whoami>("/auth/whoami").then(setMe).catch(() => {}); }, []);
   useEffect(() => { load(); const t = setInterval(() => void inBackground(load), POLL_SECONDS * 1000); return () => clearInterval(t); }, [load]);
 
-  // The service awaiting a restart confirmation.
   const [restarting, setRestarting] = useState<string | null>(null);
   const [restartErr, setRestartErr] = useState<string | null>(null);
 
@@ -175,11 +163,6 @@ export default function HealthPage() {
     catch (e) { setActionErr(e instanceof ApiError ? e.message : "logs failed"); }
     finally { setBusy(null); }
   }
-  // RESTARTING A SERVICE TOOK A PASSWORD THROUGH window.prompt().
-  //
-  // `prompt()` rendered a plain text input, so every character of an operator's own admin password was displayed
-  // on a front-desk screen — and the first prompt asked for a reason with no indication of what restarting that
-  // particular service would interrupt. The confirmation now names the impact, and the password is masked.
   async function restart({ reason, password }: { reason: string; password: string }) {
     if (!restarting) return;
     const name = restarting;
@@ -273,7 +256,6 @@ export default function HealthPage() {
         </Callout>
       )}
 
-      {/* Non-service checks. Only a check that is not ok is raised; an ok one says nothing worth reading. */}
       {(sum?.checks ?? []).filter((c) => c.level !== "ok").map((c) => (
         <Callout
           key={c.name}
@@ -285,7 +267,6 @@ export default function HealthPage() {
         </Callout>
       ))}
 
-      {/* Count tiles */}
       <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7", refreshing && sum && refreshingClass)}>
         {loading
           ? TILES.map((t) => <Skeleton key={t.key} className="h-[5.5rem] rounded-lg" />)
@@ -302,7 +283,6 @@ export default function HealthPage() {
             })}
       </div>
 
-      {/* Service table */}
       <Card>
         <CardHeader>
           <div className="space-y-0.5">
@@ -425,7 +405,6 @@ export default function HealthPage() {
         </div>
       </Card>
 
-      {/* Detail sheet: the record, its recent logs and its recovery history. */}
       <Sheet open={sel !== null} onOpenChange={(v) => !v && closeDetail()}>
         <SheetContent width="lg">
           <SheetHeader
@@ -515,10 +494,6 @@ export default function HealthPage() {
         </SheetContent>
       </Sheet>
 
-      {/*
-        The restart confirmation. It names the service and says what restarting it INTERRUPTS, because that is the
-        only thing the operator is actually deciding — and the password is typed into a masked field.
-      */}
       <ConfirmDialog
         open={restarting !== null}
         onOpenChange={(v) => { if (!v) { setRestarting(null); setRestartErr(null); } }}
@@ -544,9 +519,7 @@ export default function HealthPage() {
   );
 }
 
-// WHAT A RESTART COSTS, per service. The operator is not choosing whether to restart "a process" — they are
-// choosing whether to drop every guest, or to stop new devices getting an address for a few seconds. An
-// unrecognised service falls back to the generic warning rather than claiming something specific.
+// An unrecognised service falls back to the generic warning rather than claiming something specific.
 const RESTART_IMPACT: Record<string, string> = {
   scd: "Every client currently online is disconnected and has to reconnect. Enforcement of speed and data limits stops until it comes back.",
   edged: "This admin interface goes away for a few seconds and you may have to sign in again. Clients are not affected.",
@@ -560,8 +533,7 @@ const RESTART_IMPACT: Record<string, string> = {
   postgres: "Everything stops: client sign-in and this admin both depend on the database.",
 };
 
-/** The PMS connection is named as a casualty only where hospitality is licensed: a site without one must not
- *  be warned about a PMS it does not have. */
+/** Name the PMS as a casualty only where hospitality is licensed. */
 const RESTART_IMPACT_HOSPITALITY: Record<string, string> = {
   postgres: "Everything stops: client sign-in, this admin and the PMS connection all depend on the database.",
 };

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// exhausted is a counter every bucket of which is already over any limit; it records the keys it was asked for.
+// exhausted reports every bucket as over the limit and records the keys asked for.
 type exhausted struct {
 	mu   sync.Mutex
 	keys []string
@@ -23,15 +23,13 @@ func (e *exhausted) Incr(_ context.Context, key string, _ time.Duration) (int64,
 	return 1 << 30, nil
 }
 
-// Login and step-up re-authentication are rate-limited on the server-derived client address. Re-auth is
-// limited before the session check, so the limit holds without a session too.
 func TestLoginAndReauthAreRateLimitedOnTrustedClientAddress(t *testing.T) {
 	c := &exhausted{}
 	h := NewRouter(Deps{rateCounter: c})
 	for _, path := range []string{"/v1/auth/login", "/v1/auth/reauth"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"email":"x","password":"y"}`))
 		req.RemoteAddr = "203.0.113.9:40000"
-		req.Header.Set("X-Real-IP", "10.9.9.9") // a direct client's claim: ignored
+		req.Header.Set("X-Real-IP", "10.9.9.9") // a client-supplied header must be ignored
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusTooManyRequests {

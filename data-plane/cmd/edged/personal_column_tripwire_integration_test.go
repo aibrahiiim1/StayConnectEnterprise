@@ -11,15 +11,10 @@ import (
 	"testing"
 )
 
-// A COLUMN THAT LOOKS LIKE PERSONAL DATA MUST BE CONSIDERED BEFORE IT SHIPS (GDPR final mission).
-//
-// testdata/personal_column_candidates.txt is every column of the appliance schema whose name suggests a person (an email,
-// a phone, a name, an address, a device address, a room, a reservation, free text, a label, an actor). The list is the
-// schema as the closure audit (audit section H) left it: each is anonymised by the erasure or retention, is a financial
-// record kept by law, is staff configuration, or is not about a person. A column that is NOT in the list is new, and nobody has yet decided what an
-// erasure does with it. This test fails until someone does -- the erasure (migration 0127/0147 primitives), the scrub
-// registry, the export and docs/DATA_OWNERSHIP.md section 9 are where the decision is made -- and then adds the column
-// here. It is a tripwire, not a classification: it cannot tell that a column is handled, only that it was looked at.
+// Tripwire: testdata/personal_column_candidates.txt lists every column whose name suggests a person, each already
+// handled by erasure or retention, kept by law, staff configuration, or not about a person. A column not in the list
+// is new and fails this test until someone decides what erasure does with it (erasure, scrub registry, export,
+// docs/DATA_OWNERSHIP.md section 9) and adds it. It cannot tell a column is handled, only that it was looked at.
 const personalColumnQuery = `
 select table_schema||'.'||table_name||'.'||column_name from information_schema.columns c
  where table_schema in ('public','iam_v2')

@@ -8,10 +8,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// maybeSeedPMSStubs is the env-gated seed entry point called from both
-// main() startup and reloadPMS(). The 10-minute pmsReloadSafetyLoop builds
-// a fresh *pms.Stub on every tick, so a startup-only seed is lost by the
-// first reload. Gated by SCD_PMS_STUB_SEED=true — production leaves it off.
+// maybeSeedPMSStubs is called at startup and from reloadPMS (which builds a fresh *pms.Stub each tick, so a
+// startup-only seed would be lost). Gated by SCD_PMS_STUB_SEED=true; production leaves it off.
 func maybeSeedPMSStubs(providers []pms.Provider) {
 	if os.Getenv("SCD_PMS_STUB_SEED") != "true" {
 		return
@@ -24,10 +22,7 @@ func maybeSeedPMSStubs(providers []pms.Provider) {
 	}
 }
 
-// seedPMSStubReservations populates the in-memory Stub with a few sample
-// reservations so the dev tenant has data to validate against without an
-// external PMS. Reservations are anchored relative to "now" so the test
-// suite always finds an active stay window.
+// seedPMSStubReservations seeds sample reservations anchored relative to now so an active stay window always exists.
 func seedPMSStubReservations(s *pms.Stub) {
 	now := time.Now().UTC()
 	yesterday := now.AddDate(0, 0, -1)
@@ -58,7 +53,7 @@ func seedPMSStubReservations(s *pms.Stub) {
 		CheckIn:           yesterday,
 		CheckOut:          tomorrow,
 	})
-	// A reservation that hasn't started yet — for the stay-window test.
+	// not started yet
 	s.Upsert(pms.Reservation{
 		RoomNumber:        "201",
 		FirstName:         "Future",
@@ -67,7 +62,7 @@ func seedPMSStubReservations(s *pms.Stub) {
 		CheckIn:           now.AddDate(0, 0, 7),
 		CheckOut:          now.AddDate(0, 0, 10),
 	})
-	// A reservation that has already ended.
+	// already ended
 	s.Upsert(pms.Reservation{
 		RoomNumber:        "202",
 		FirstName:         "Past",

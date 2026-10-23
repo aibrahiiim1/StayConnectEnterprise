@@ -8,25 +8,16 @@ import (
 	"net/url"
 )
 
-// Stub is a fake OAuth provider. It points the browser at a local
-// "consent" page hosted by portald which round-trips back to the real
-// callback with a code that base64-encodes the chosen UserInfo.
-//
-// Wire it as Stub{Name: "google", AuthorizeBase: "http://portal.stayconnect.local:8380/api/oauth/stub/authorize"}
-// to simulate Google without a real OAuth client.
-//
-// THE STUB MINTS WHATEVER IDENTITY ITS CODE NAMES, so it is a development tool
-// only: scd registers it in a development build (buildprofile) and never in a
-// production one, where a stub left standing in for an unconfigured provider
-// would let anyone sign in as anyone.
+// Stub is a fake provider whose code base64-encodes the chosen UserInfo. It mints whatever identity its code
+// names, so scd registers it in development builds only; in production a stub standing in for an
+// unconfigured provider would let anyone sign in as anyone.
 type Stub struct {
 	ProviderName  string
-	AuthorizeBase string // typically http://portal.stayconnect.local:8380/api/oauth/stub/authorize
+	AuthorizeBase string
 }
 
 func (s *Stub) Name() string { return s.ProviderName }
 
-// Binding: none. The stub has no token endpoint to bind a verifier or a nonce to.
 func (s *Stub) Binding() Binding { return Binding{} }
 
 func (s *Stub) AuthorizeURL(a AuthRequest) string {
@@ -42,8 +33,6 @@ func (s *Stub) AuthorizeURL(a AuthRequest) string {
 	return u.String()
 }
 
-// Exchange decodes the stub code (base64url JSON of UserInfo). Real providers
-// would POST to the token endpoint here.
 func (s *Stub) Exchange(_ context.Context, x ExchangeRequest) (*UserInfo, error) {
 	code := x.Code
 	if code == "" {
@@ -58,14 +47,12 @@ func (s *Stub) Exchange(_ context.Context, x ExchangeRequest) (*UserInfo, error)
 		return nil, fmt.Errorf("%w: %v", ErrBadCode, err)
 	}
 	if u.Sub == "" {
-		// Synthesize a stable id from email so re-logins look like the same user.
 		u.Sub = "stub:" + u.Email
 	}
 	return &u, nil
 }
 
-// EncodeStubCode builds the code value the stub authorize page sends back.
-// Exposed so the stub authorize handler in portald can build it.
+// EncodeStubCode is exported for portald's stub authorize handler.
 func EncodeStubCode(info UserInfo) string {
 	b, _ := json.Marshal(info)
 	return base64.RawURLEncoding.EncodeToString(b)

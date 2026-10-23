@@ -1,21 +1,7 @@
 package main
 
-// THE FAILURE THIS FILE REPRODUCES ACTUALLY HAPPENED.
-//
-// PRE-LIVE appliance, 2026-08-31. /var/lib/kea/kea-leases4.csv.pid was zero bytes. memfile refuses to open its
-// lease database while it cannot read a PID from that file, so kea-dhcp4 came up with NO LEASE MANAGER - and
-// then ran for three days answering status-get normally, holding its control socket open, and refusing every
-// single lease command with:
-//
-//     { "result": 1, "text": "no current lease manager is available" }
-//
-// It had issued no lease for two days. The health surface asked only whether Kea answered status-get, so it
-// reported healthy the whole time. Address ownership - the rule that stops the appliance authorizing an
-// address after the device holding it has gone - depends entirely on those leases, and it was silently
-// deciding UNKNOWN for every session on the box.
-//
-// These tests hold the three conditions apart, because they need three different operator responses:
-// the lease manager being gone, a query failing for any other reason, and the on-disk state that causes it.
+// A zero-byte kea-leases4.csv.pid leaves Kea answering status-get with no lease manager. The three
+// conditions (lease manager gone, other query failure, on-disk cause) need different operator responses.
 
 import (
 	"context"
@@ -26,7 +12,6 @@ import (
 	"time"
 )
 
-// failingLeases is an evidence source that only ever fails, which is the whole of what these cases need.
 type failingLeases struct{ err error }
 
 func (f failingLeases) Leases() ([]KeaLease, error) { return nil, f.err }
@@ -40,7 +25,6 @@ type staticFiles struct {
 
 func (s staticFiles) LeaseFile() (string, error) { return s.path, s.err }
 
-// THE .25 CONDITION, in Kea's own words.
 func TestEvidence_LeaseManagerUnavailableIsItsOwnFault(t *testing.T) {
 	src := failingLeases{err: errors.New("lease4-get-all: no current lease manager is available")}
 
@@ -57,9 +41,7 @@ func TestEvidence_LeaseManagerUnavailableIsItsOwnFault(t *testing.T) {
 	}
 }
 
-// Any other query failure is a DIFFERENT fault. A socket that has gone away is an ordinary outage; a server
-// running without a lease manager is a silent one, and telling an operator they are the same thing sends them
-// looking in the wrong place.
+// A vanished socket is an ordinary outage, distinct from a running Kea with no lease manager.
 func TestEvidence_AnyOtherQueryFailureIsNotMistakenForIt(t *testing.T) {
 	h := probeEvidence(context.Background(),
 		failingLeases{err: errors.New("dial unix /run/kea/kea4-ctrl-socket: connect: no such file or directory")}, nil)
@@ -69,9 +51,7 @@ func TestEvidence_AnyOtherQueryFailureIsNotMistakenForIt(t *testing.T) {
 	}
 }
 
-// THE ARTIFACT. When the query fails AND the memfile PID companion is empty, the on-disk cause outranks the
-// symptom: that file is what an operator has to look at, and naming it turns three days of diagnosis into one
-// line of output.
+// When the query fails and the PID companion is empty, the on-disk cause outranks the symptom.
 func TestEvidence_TheEmptyPIDFileIsNamedAsTheCause(t *testing.T) {
 	dir := t.TempDir()
 	leaseFile := filepath.Join(dir, "kea-leases4.csv")
@@ -95,8 +75,7 @@ func TestEvidence_TheEmptyPIDFileIsNamedAsTheCause(t *testing.T) {
 	if !contains(h.Detail, leaseFile+".pid") || !contains(h.Detail, "EMPTY") {
 		t.Fatalf("the detail does not name the artifact: %q", h.Detail)
 	}
-	// NOTHING WAS REPAIRED. A health check that quietly deletes the evidence hides a recurring fault and
-	// destroys what the next operator needs.
+	// The probe must not repair (delete) the evidence.
 	if _, err := os.Stat(leaseFile + ".pid"); err != nil {
 		t.Fatalf("the probe removed the PID file: %v", err)
 	}
@@ -105,8 +84,6 @@ func TestEvidence_TheEmptyPIDFileIsNamedAsTheCause(t *testing.T) {
 	}
 }
 
-// An ABSENT PID file is the normal, healthy case - nothing is holding the lease file - and must not be
-// reported as a fault of its own.
 func TestEvidence_AnAbsentPIDFileIsNotAFault(t *testing.T) {
 	dir := t.TempDir()
 	leaseFile := filepath.Join(dir, "kea-leases4.csv")
@@ -123,7 +100,6 @@ func TestEvidence_AnAbsentPIDFileIsNotAFault(t *testing.T) {
 	}
 }
 
-// A netd with no lease source at all is a wiring fault, not a DHCP fault, and is named as such.
 func TestEvidence_NoSourceIsReportedAsAConfigurationFault(t *testing.T) {
 	h := probeEvidence(context.Background(), nil, nil)
 	if h.Available || h.Fault != evidenceNotConfigured {
@@ -131,11 +107,7 @@ func TestEvidence_NoSourceIsReportedAsAConfigurationFault(t *testing.T) {
 	}
 }
 
-// THE PLANE MUST NOT REPORT ITSELF HEALTHY WHILE ITS OWNERSHIP AUTHORITY IS DOWN.
-//
-// This is the whole point. The applier goes on holding kernel state, and by every other measure it is
-// converged - but it can no longer tell whether that state belongs to the guest it says it does, and it is
-// withholding every renewal. CONVERGED there is a lie an operator acts on.
+// The plane must not report converged while its ownership authority is down.
 func TestEvidence_AnEvidenceOutageDegradesTheReportedPlane(t *testing.T) {
 	p := liveWriter(newFakeTC())
 	p.hasConverged = true
@@ -160,8 +132,6 @@ func TestEvidence_AnEvidenceOutageDegradesTheReportedPlane(t *testing.T) {
 	}
 }
 
-// A DARK appliance has no plane to degrade, and an idle Kea on a box that has never been configured must not
-// be reported as an enforcement fault.
 func TestEvidence_ADarkApplianceIsNotDegradedByIt(t *testing.T) {
 	p := &phase3Shaping{mode: phase3Mode{Active: false}}
 	out := p.statusWithEvidence(evidenceHealth{Fault: evidenceLeaseManagerUnavailable}, true)

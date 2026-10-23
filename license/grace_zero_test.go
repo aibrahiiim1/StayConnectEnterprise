@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// X-4: a v3+ licence signed with grace_period_days = 0 has NO grace. It used to fall back to the 30-day
-// offline allowance, so "no grace" silently meant a month.
+// Zero renewal grace must not fall back to the offline allowance.
 func TestGraceZeroIsHonouredOnASignedLicence(t *testing.T) {
 	s := newSigner(t)
 	issued := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -40,14 +39,12 @@ func TestGraceZeroIsHonouredOnASignedLicence(t *testing.T) {
 	if st := Evaluate(got, d.ValidUntil.Add(time.Second), time.Time{}, false).State; st != StateExpired {
 		t.Fatalf("one second after valid_until with no grace: want Expired, got %s", st)
 	}
-	// The offline allowance keeps its own meaning: cloud staleness, never the renewal grace.
 	if ev := Evaluate(got, d.ValidUntil.Add(-time.Hour), d.ValidUntil.Add(-40*24*time.Hour), false); !ev.CloudStale || ev.State != StateActive {
 		t.Fatalf("offline_grace_days still bounds staleness only: %+v", ev)
 	}
 }
 
-// Licences already in the field keep evaluating exactly as before: an explicit grace is unchanged, and a
-// v1/v2 document (which never carried a grace period) still uses the offline allowance.
+// Older documents with no renewal grace still use the offline allowance.
 func TestGraceCompatibilityForExistingLicences(t *testing.T) {
 	d := testDoc(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	d.GracePeriodDays, d.OfflineGraceDays = 30, 30

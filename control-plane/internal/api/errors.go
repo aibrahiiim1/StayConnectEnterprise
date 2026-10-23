@@ -6,8 +6,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// Standard machine-readable error codes. Keep this list stable — the UI and
-// external API consumers branch on these.
+// Error codes are stable: the UI and external API consumers branch on them.
 const (
 	CodeUnauthenticated = "unauthenticated"
 	CodeForbidden       = "forbidden"
@@ -17,17 +16,7 @@ const (
 	CodeInternal        = "internal"
 )
 
-// Fail writes an error response in the standard envelope:
-//
-//	{
-//	  "error":    "<machine_code>",      // stable, branch on this
-//	  "message":  "<human-readable>",    // show to users
-//	  "trace_id": "<request id>",        // matches X-Trace-Id header
-//	  <extras>                           // flat extras (e.g. expected, activation)
-//	}
-//
-// Extras are merged into the top-level object; pass one or more maps to include
-// structured context.
+// Fail writes {error, message, trace_id} plus any extras merged into the top-level object.
 func Fail(w http.ResponseWriter, r *http.Request, status int, code, message string, extras ...map[string]any) {
 	body := map[string]any{
 		"error":    code,
@@ -42,7 +31,6 @@ func Fail(w http.ResponseWriter, r *http.Request, status int, code, message stri
 	WriteJSON(w, status, body)
 }
 
-// TraceID returns the chi-assigned request id (also mirrored in X-Trace-Id).
 func TraceID(r *http.Request) string {
 	if r == nil {
 		return ""

@@ -29,8 +29,7 @@ type Session struct {
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	ExpiresAt       time.Time `json:"expires_at"`
 
-	// Set per request by Validate from the current settings and never stored: when the session ends if no
-	// further activity arrives (idle limit), and when it ends however active it is (absolute lifetime).
+	// Set per request by Validate from the current settings, never stored: the idle and absolute end times.
 	IdleExpiresAt     time.Time `json:"-"`
 	AbsoluteExpiresAt time.Time `json:"-"`
 }
@@ -49,7 +48,6 @@ func newToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// Create issues a new session and returns the token + Session.
 func (s *SessionStore) Create(ctx context.Context, base Session) (*Session, error) {
 	tok, err := newToken()
 	if err != nil {
@@ -71,9 +69,8 @@ func (s *SessionStore) Create(ctx context.Context, base Session) (*Session, erro
 	return &sess, nil
 }
 
-// Get fetches a session by token. Returns (nil, nil) when not found. It changes nothing: activity is recorded by
-// Touch, after the request has passed the session policy (0052), so the idle limit is judged on the last real
-// activity rather than on this request.
+// Get returns (nil, nil) when not found. It changes nothing: Touch records activity after the policy passes, so
+// the idle limit is judged on the last real activity rather than this request.
 func (s *SessionStore) Get(ctx context.Context, token string) (*Session, error) {
 	raw, err := s.R.Get(ctx, key(token)).Bytes()
 	if err != nil {
@@ -90,12 +87,10 @@ func (s *SessionStore) Get(ctx context.Context, token string) (*Session, error) 
 	return &sess, nil
 }
 
-// Touch records activity on a session: LastSeenAt moves to now (at most once a minute, to keep Redis writes
-// bounded) and the Redis TTL slides. The idle and absolute limits are enforced by Validate.
+// Touch moves LastSeenAt to now (at most once a minute) and slides the TTL; Validate enforces the limits.
 //
-// ONLY A SESSION THAT STILL EXISTS IS WRITTEN (SET ... XX). A request that read the session just before a
-// sign-out deleted it would otherwise write it back, and the signed-out session would work again for its
-// whole lifetime.
+// Only a session that still exists is written (SET ... XX): a request that read it just before a sign-out would
+// otherwise write it back and revive the signed-out session.
 func (s *SessionStore) Touch(ctx context.Context, sess *Session) error {
 	if time.Since(sess.LastSeenAt) <= time.Minute {
 		return nil
@@ -108,13 +103,12 @@ func (s *SessionStore) Touch(ctx context.Context, sess *Session) error {
 		return err
 	}
 	err = s.R.SetXX(ctx, key(sess.Token), buf, SessionTTL).Err()
-	if err == redis.Nil { // gone meanwhile: nothing to touch
+	if err == redis.Nil {
 		return nil
 	}
 	return err
 }
 
-// Destroy removes a session.
 func (s *SessionStore) Destroy(ctx context.Context, token string) error {
 	return s.R.Del(ctx, key(token)).Err()
 }

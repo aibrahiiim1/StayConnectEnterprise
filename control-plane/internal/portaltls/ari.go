@@ -15,15 +15,8 @@ import (
 	"time"
 )
 
-// RENEWAL TIMING. Central decides when each certificate should be renewed and tells the appliance
-// (renew_after); the appliance renews once now > renew_after. The CA's own advice wins when it gives any:
-// ACME Renewal Information (ARI, RFC 9773) is how Let's Encrypt asks for early renewal -- after an incident
-// that requires mass revocation, for instance -- so a revocation the CA plans shows up here as a window in
-// the past, and the appliance renews before the certificate dies. Without ARI: two thirds of the lifetime.
-
-// ARICertID is the RFC 9773 §4.1 certificate identifier: base64url(AKI keyIdentifier) "." base64url(serial),
-// where the serial is the DER INTEGER's content octets -- including the leading zero a positive serial with
-// its top bit set carries, which big.Int.Bytes() drops.
+// ARICertID is the RFC 9773 §4.1 certificate identifier: base64url(AKI) "." base64url(serial). The serial
+// keeps the leading zero a positive serial with its top bit set carries, which big.Int.Bytes() drops.
 func ARICertID(cert *x509.Certificate) (string, error) {
 	if len(cert.AuthorityKeyId) == 0 {
 		return "", errors.New("certificate has no authority key identifier")
@@ -43,13 +36,12 @@ func ariCertID(aki []byte, serial *big.Int) string {
 	return enc.EncodeToString(aki) + "." + enc.EncodeToString(sb)
 }
 
-// DefaultRenewAfter is two thirds of the way through the validity period.
+// DefaultRenewAfter is two thirds of the validity period; used when the CA offers no ARI.
 func DefaultRenewAfter(notBefore, notAfter time.Time) time.Time {
 	return notBefore.Add(notAfter.Sub(notBefore) * 2 / 3)
 }
 
-// pickInWindow chooses a uniformly random moment in [start, end): spreading renewals across the window is
-// what the CA asks for, so a fleet does not renew in the same second.
+// pickInWindow picks a random moment in [start, end) so a fleet does not renew in the same second.
 func pickInWindow(start, end time.Time) time.Time {
 	if !end.After(start) {
 		return start
@@ -57,8 +49,7 @@ func pickInWindow(start, end time.Time) time.Time {
 	return start.Add(time.Duration(rand.Int64N(int64(end.Sub(start)))))
 }
 
-// directoryRenewalInfo returns the CA's renewalInfo URL, "" when it offers none. golang.org/x/crypto/acme does
-// not expose this directory field, so it is read here.
+// directoryRenewalInfo returns the CA's renewalInfo URL, "" when none; x/crypto/acme does not expose it.
 func directoryRenewalInfo(ctx context.Context, hc *http.Client, directoryURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, directoryURL, nil)
 	if err != nil {
@@ -81,9 +72,7 @@ func directoryRenewalInfo(ctx context.Context, hc *http.Client, directoryURL str
 	return d.RenewalInfo, nil
 }
 
-// RenewAfter computes renew_after for a freshly issued certificate: a random point inside the ARI suggested
-// window when the CA offers ARI and answers, otherwise DefaultRenewAfter. The second value reports whether
-// ARI decided it.
+// RenewAfter returns a random point in the CA's ARI window, else DefaultRenewAfter; the bool reports whether ARI decided.
 func RenewAfter(ctx context.Context, hc *http.Client, directoryURL string, cert *x509.Certificate) (time.Time, bool) {
 	if start, end, ok := ARIWindow(ctx, hc, directoryURL, cert); ok {
 		return pickInWindow(start, end), true
@@ -91,8 +80,7 @@ func RenewAfter(ctx context.Context, hc *http.Client, directoryURL string, cert 
 	return DefaultRenewAfter(cert.NotBefore, cert.NotAfter), false
 }
 
-// ARIWindow asks the issuing CA for the certificate's suggested renewal window. ok=false when the CA offers no
-// ARI or does not answer usefully.
+// ARIWindow asks the CA for the suggested renewal window; ok=false when it offers none.
 func ARIWindow(ctx context.Context, hc *http.Client, directoryURL string, cert *x509.Certificate) (start, end time.Time, ok bool) {
 	ri, err := directoryRenewalInfo(ctx, hc, directoryURL)
 	if err != nil || ri == "" {

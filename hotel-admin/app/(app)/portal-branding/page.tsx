@@ -1,26 +1,9 @@
 "use client";
 
-// GUEST PORTAL SETTINGS — A DESIGNER FOR THE WI-FI SIGN-IN PAGE.
-//
-// WHAT AN OPERATOR DOES HERE
-// --------------------------
-// Pick a layout from six real templates, put the hotel's name, colours and photographs on it, write the words
-// guests read, choose the languages they are offered, and -- for the property with a designer -- add their own
-// CSS and HTML. A large live preview renders the REAL portal page with the unsaved changes, at desktop, tablet
-// and phone sizes. Then one button: Save changes. Guests see it immediately.
-//
-// WHAT STAYS THE PRODUCT OWNER'S DECISION
-// ---------------------------------------
-//   - One current configuration and one verb, "Save". The immutable history every save appends is shown as
-//     History, with Restore -- never as drafts, publishing or versions an operator has to operate.
-//   - Ordinary settings save with no password. Custom CSS and HTML are confirmed with the operator's password,
-//     in BOTH directions -- adding, changing or clearing them (ADVANCED_KEYS / advancedChanged, mirrored on the
-//     server). Choosing a template is not markup and asks for nothing.
-//   - The welcome and help lines are the hotel's own words, one field each, not per-language translations.
-//
-// SAFETY IS THE SERVER'S. Every change is sent to /portal-branding/validate as it is made; the answer names
-// anything the portal would refuse or change, beside the field it belongs to, and the preview renders the
-// sanitised Advanced fields so what an operator sees is what a guest would get.
+// One current configuration and one verb, "Save"; history is shown with Restore, never as drafts or versions.
+// Ordinary settings need no password, but adding, changing or clearing custom CSS/HTML does (ADVANCED_KEYS /
+// advancedChanged, mirrored on the server). Welcome and help lines are single fields, not per-language.
+// Safety is the server's: every change goes to /portal-branding/validate and the preview renders the sanitised fields.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, ApiError, ListResp, PortalAsset, Whoami } from "@/lib/api";
@@ -57,9 +40,7 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { LanguagesSection } from "./languages";
 import { PRIVACY_TEMPLATE } from "./privacy-template";
 
-// The page's tips, shared by the loading header and the loaded one so the lightbulb is there from the start.
-// Room numbers are mentioned only where hospitality is licensed: the help must not describe a hotel to a site
-// that is not one.
+// Room numbers are mentioned only where hospitality is licensed.
 const pageHelp = (hospitality: boolean) => (
   <>
     <HelpSection title="How this page works">
@@ -111,14 +92,12 @@ const pageHelp = (hospitality: boolean) => (
   </>
 );
 
-/** What an unbranded appliance shows. The portal carries the same values; these mirror them so a colour well
- *  that has never been set shows what a guest is actually looking at rather than black. */
+/** Mirrors the portal's unbranded values so an unset colour well shows what a guest sees, not black. */
 const DEFAULTS = {
   brand_color: "#0f6b63",
   brand_color_dark: "#0b544e",
   text_color: "#14302e",
   corner_radius: "20px",
-  /** The sign-in card and the text on buttons. */
   card: "#ffffff",
 } as const;
 
@@ -140,8 +119,7 @@ const IMAGE_LABEL: Record<ImageKey, string> = {
 
 export default function PortalSettingsPage() {
   const toast = useToast();
-  // Whether this site is a hotel as far as the portal is concerned. Decides only which words this screen uses
-  // for what the sign-in page collects; unknown module state fails closed to the neutral wording.
+  // Picks the wording for what the sign-in page collects; unknown module state fails closed to the neutral wording.
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
   const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
@@ -170,7 +148,6 @@ export default function PortalSettingsPage() {
       const live = s.design ?? {};
       setSaved(live);
       setRevisions(s.revisions ?? []);
-      // An operator who was interrupted mid-edit finds their work, without ever being told the word "draft".
       setD(Object.keys(s.draft ?? {}).length ? s.draft : live);
       setLoadErr(null);
       try {
@@ -188,14 +165,8 @@ export default function PortalSettingsPage() {
   const dirty = useMemo(() => saved !== null && JSON.stringify(d) !== JSON.stringify(saved), [d, saved]);
   const needsPassword = useMemo(() => saved !== null && advancedChanged(d, saved), [d, saved]);
 
-  // UNSAVED WORK SURVIVES A CLOSED TAB. Written quietly and never named: an operator should not have to learn
-  // a second save verb to get the protection every document editor gives them for free.
-  //
-  // ONLY A DRAFT THE SERVER WILL ACCEPT IS SENT. The server validates drafts with the same rules as a save, so
-  // a draft carrying refused markup (a <base> tag, an inline handler) comes back 400. Found on PRE-LIVE: the
-  // autosave kept firing on its own timer and failing silently while the screen already showed the problem.
-  // It now waits for the verdict on THIS exact design and sends it only when that verdict is clean -- or when no
-  // verdict could be obtained, in which case the server decides as it always did.
+  // Unsaved work is autosaved quietly as a draft. The server validates drafts like a save and returns 400 for
+  // refused markup, so send only once the verdict on this exact design is clean (or unobtainable).
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const designKey = useMemo(() => JSON.stringify(d), [d]);
   const [verdictFor, setVerdictFor] = useState<{ key: string; clean: boolean | null } | null>(null);
@@ -210,8 +181,7 @@ export default function PortalSettingsPage() {
     return () => { if (settle.current) clearTimeout(settle.current); };
   }, [d, designKey, dirty, writable, verdictFor]);
 
-  // THE SERVER'S VERDICT, AS THE OPERATOR TYPES. Debounced, and only for someone who can save: it is the same
-  // rule set that will accept or refuse the save, so there is no second copy of it in this screen.
+  // The server's verdict as the operator types (debounced): the same rules that accept or refuse the save.
   useEffect(() => {
     if (saved === null || !writable) return;
     let live = true;
@@ -231,7 +201,6 @@ export default function PortalSettingsPage() {
     return () => { live = false; clearTimeout(t); };
   }, [d, saved, writable]);
 
-  // Leaving with work in progress is caught by the browser rather than by a modal of our own.
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
@@ -243,12 +212,11 @@ export default function PortalSettingsPage() {
   const errorsFor = (field: string) => issues.filter((i) => i.field === field && i.severity === "error");
   const fieldError = (field: string) => errorsFor(field).map((i) => i.message).join("; ") || undefined;
   const blocking = issues.filter((i) => i.severity === "error");
-  // Warnings outside the Advanced section (which lists its own): an outside image host, an unfinished notice.
+  // Warnings outside the Advanced section, which lists its own.
   const notes = issues.filter((i) => i.severity === "warning" && i.field !== "custom_css" && i.field !== "custom_html");
   const fieldNote = (field: string) => notes.filter((i) => i.field === field).map((i) => i.message).join("; ") || undefined;
 
   async function save(password?: string) {
-    // The step-up is asked for ONLY when the change needs it, at the moment of saving, in a masked field.
     if (needsPassword && password === undefined) {
       setStepUpErr(null);
       setStepUp(true);
@@ -262,7 +230,6 @@ export default function PortalSettingsPage() {
       await load();
     } catch (e) {
       if (e instanceof ApiError && e.code === "reauth_required") {
-        // The one refusal with something specific to do: confirm the password.
         setStepUpErr(password === undefined ? null : "That password was not accepted.");
         setStepUp(true);
       } else {
@@ -282,8 +249,7 @@ export default function PortalSettingsPage() {
   async function upload(field: ImageKey, file: File) {
     setUploading(field); setSaveErr(null);
     try {
-      // Through the API CLIENT, which knows where edged is. A hand-written URL here is what once made both
-      // uploads fail -- see api.upload.
+      // Use the API client, which knows where edged is; a hand-written URL once broke uploads (see api.upload).
       const a = await api.upload<PortalAsset>("/portal-assets", file);
       set(field, a.url);
       const list = await api.get<ListResp<PortalAsset>>("/portal-assets");
@@ -405,9 +371,7 @@ export default function PortalSettingsPage() {
       {saveErr ? <ErrorBanner err={saveErr} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.05fr)]">
-        {/* ---- the rail --------------------------------------------------------------------------------- */}
-        {/* The tablist is entered at its selected tab (roving tabIndex, arrows below), never the list itself, which is
-            the ARIA pattern; jsx-a11y reads the container role as a control. */}
+        {/* The tablist is entered at its selected tab (roving tabIndex); jsx-a11y reads the container role as a control. */}
         {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
         <div role="tablist" aria-label="Portal settings sections" aria-orientation="vertical"
           onKeyDown={(e) => {
@@ -450,7 +414,6 @@ export default function PortalSettingsPage() {
           ))}
         </div>
 
-        {/* ---- the section being edited ----------------------------------------------------------------- */}
         <div id="portal-section" role="tabpanel" className="min-w-0 space-y-5">
           {section === "template" && (
             <>
@@ -687,7 +650,6 @@ export default function PortalSettingsPage() {
           )}
         </div>
 
-        {/* ---- the live preview --------------------------------------------------------------------------- */}
         <div className="min-w-0 lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6 xl:self-start">
           <PortalPreview design={d} sanitized={validation?.sanitized ?? null} />
         </div>
@@ -732,7 +694,7 @@ function OptionRow({ label, hint, children }: { label: string; hint?: string; ch
   );
 }
 
-/** WCAG AA asks 4.5:1 for body text. The designer warns rather than refuses: the colours are the hotel's. */
+/** WCAG AA asks 4.5:1 for body text; warns rather than refuses since the colours are the hotel's. */
 function ContrastNote({ label, ratio }: { label: string; ratio: number | null }) {
   if (ratio === null) return null;
   const ok = ratio >= 4.5;
@@ -751,8 +713,7 @@ function ColorField({ label, help, value, fallback, disabled, error, onChange }:
   label: string; help: string; value?: string; fallback: string; disabled?: boolean; error?: string;
   onChange: (v: string) => void;
 }) {
-  // Two controls for one value (a colour well and its hex text), so the label is bound to the well and the text
-  // field names itself; Field binds exactly one control and would give the wrapper the id.
+  // Two controls for one value, so the label binds to the well and the text field names itself (Field binds one control).
   const id = useId();
   return (
     <div className="min-w-0">
@@ -771,8 +732,7 @@ function ColorField({ label, help, value, fallback, disabled, error, onChange }:
   );
 }
 
-/** Upload, replace, remove — and see what is actually set, read back through the operator API (an /assets/
- *  path is a guest-network path that resolves to nothing from the admin origin). */
+/** Reads the image back through the operator API: an /assets/ path resolves to nothing from the admin origin. */
 function ImageField({ label, help, src, busy, writable, wide, error, onPick, onClear }: {
   label: string; help: string; src?: string; busy: boolean; writable: boolean; wide?: boolean; error?: string;
   onPick: (f: File) => void; onClear: () => void;
@@ -790,8 +750,7 @@ function ImageField({ label, help, src, busy, writable, wide, error, onPick, onC
         </div>
         {writable && (
           <div className="flex flex-col gap-2">
-            {/* The file input stays in the tab order (visually hidden, not display:none), so the upload is
-                reachable by keyboard; the label is what looks like the button. */}
+            {/* The file input is visually hidden, not display:none, so the upload stays keyboard-reachable. */}
             <label className={cn(
               buttonVariants({ variant: "secondary", size: "sm" }),
               "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",

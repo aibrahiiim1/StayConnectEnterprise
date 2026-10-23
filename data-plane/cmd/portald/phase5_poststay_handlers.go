@@ -1,23 +1,12 @@
 package main
 
-// THE GUEST-FACING POST-STAY FLOW.
+// A post-stay guest submits only a PIN; identity is derived by scd from the connection's device, so no room,
+// name or stay appears in any body.
 //
-// Three routes, and what is NOT in any of their request bodies is the design: no room, no last name, no
-// reservation number, no stay, no interface and no profile. A post-stay guest submits a PIN and nothing else;
-// everything about WHO they are is derived by scd from the device this connection came from.
-//
-// That is a stronger position than the Phase-3 flow, which still has to take a room number because it is
-// proving an identity for the first time. Post-stay is proving a SECOND time, and the first proof left a
-// durable record — so the second one needs no identifier at all.
-//
-// UNIFORM NON-SUCCESS, through the SAME builder and the SAME response-time budget the Phase-3 flow uses. A
-// second implementation of "the uniform failure" is two things that can drift, and drift here is only ever
-// discovered by an attacker noticing it. The budget matters as much as the body: a wrong PIN that answers
-// faster than a locked-out device tells the attacker which one they hit.
-//
-// The routes are mounted UNCONDITIONALLY, exactly like /auth/pms/phase3. While Phase 5 is dark scd does not
-// mount its endpoints, the hop fails, and the guest gets the same uniform answer a wrong PIN gets — so the
-// portal never reveals whether post-stay exists on this appliance.
+// Non-success uses the same uniform builder and response-time budget as the Phase-3 flow (a faster wrong-PIN
+// answer would tell an attacker which case they hit). Routes are mounted unconditionally like
+// /auth/pms/phase3: while Phase 5 is dark the scd hop fails with the same uniform answer, so the portal
+// never reveals whether post-stay exists.
 
 import (
 	"encoding/json"
@@ -25,29 +14,22 @@ import (
 	"strings"
 )
 
-// postStayIn is the guest's submission. The PIN is the only field, and the only one there is any argument
-// for: everything else is derived.
 type postStayIn struct {
 	PIN string `json:"pin,omitempty"`
-	// AuthContextID + PackageRevisionID appear only on the SECOND call, after a successful PIN, when the
-	// guest has picked among server-offered packages.
+	// AuthContextID and PackageRevisionID appear only on the second call, after a successful PIN.
 	AuthContextID     string `json:"auth_context_id,omitempty"`
 	PackageRevisionID string `json:"package_revision_id,omitempty"`
 }
 
-// postStayOut is the guest-facing body. On issuance it carries the one-time PIN; everywhere else it carries
-// as little as the flow allows.
 type postStayOut struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message,omitempty"`
 
-	// PIN is present on a successful ISSUE and nowhere else. It is shown once: the appliance does not store
-	// it and cannot produce it again, so a guest who loses this response needs a new one from the front desk.
+	// PIN is present on a successful issue only and shown once; the appliance cannot produce it again.
 	PIN       string `json:"pin,omitempty"`
 	ExpiresAt string `json:"pin_expires_at,omitempty"`
 
-	// NeedsChoice + Choices are a verified PIN awaiting the guest's package choice (more than one post-stay
-	// package is offered). The page sends the chosen package_revision_id back with AuthContextID.
+	// NeedsChoice and Choices: a verified PIN awaiting the package choice (more than one offered).
 	NeedsChoice   bool             `json:"needs_choice,omitempty"`
 	AuthContextID string           `json:"auth_context_id,omitempty"`
 	Choices       []postStayChoice `json:"choices,omitempty"`
@@ -55,8 +37,7 @@ type postStayOut struct {
 	RedirectTo    string           `json:"redirect_to,omitempty"`
 }
 
-// postStayChoice is one package the verified guest may take. Post-stay grants zero-price packages only, so
-// there is no method and no price: the page shows the name and the speed.
+// Post-stay grants zero-price packages only, so there is no method or price.
 type postStayChoice struct {
 	PackageRevisionID string `json:"package_revision_id"`
 	Code              string `json:"code"`
@@ -75,10 +56,8 @@ type scdPostStayResp struct {
 	EntitlementID string           `json:"entitlement_id"`
 }
 
-// postStayIssue serves POST /poststay/issue — an authenticated guest asking for a PIN to use after checkout.
-//
-// The guest is authenticated by virtue of the DEVICE already holding access; scd checks that lineage and
-// refuses if it is absent. The portal adds no identity of its own and takes none from the body.
+// postStayIssue serves POST /poststay/issue. The device already holding access authenticates the guest; scd
+// checks that lineage, and the portal takes no identity from the body.
 func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
@@ -104,10 +83,8 @@ func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// postStayAuth serves POST /auth/post-stay-pin — the departing guest coming back with their PIN.
-//
-// On success it does exactly what every other credential method does: it obtains a one-time Auth Context,
-// never a session. The session is created only after the conversion below reaches GRANTED.
+// postStayAuth serves POST /auth/post-stay-pin. Success yields a one-time Auth Context, never a session;
+// the session exists only after the conversion reaches GRANTED.
 func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
@@ -119,7 +96,7 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A second call carrying a context is the guest choosing a package after a successful PIN.
+	// A context on the call means the guest is choosing a package after a successful PIN.
 	if strings.TrimSpace(in.AuthContextID) != "" {
 		h.postStayConvert(w, r, b, in.AuthContextID, in.PackageRevisionID, device)
 		return
@@ -127,14 +104,11 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	body, _ := json.Marshal(map[string]any{"device": device, "pin": in.PIN})
 	var out scdPostStayResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase5/auth/post-stay-pin", body, &out) || out.Outcome != "VERIFIED" {
-		// Wrong PIN, no PIN, expired, revoked, locked out, a stale episode, a device with no post-stay
-		// identity, and Phase 5 being dark are ALL this answer.
+		// Every non-success, including Phase 5 being dark, gets this one answer.
 		h.phase3Fail(w, r, b, "poststay_not_verified", classPostStay)
 		return
 	}
-	// THE OFFER SET scd returned with the context. One offer is not a choice: it is converted at once, in this
-	// request, exactly as the room path grants a single included offer. More than one is the guest's choice,
-	// and the page sends the chosen package_revision_id back with the context.
+	// One offer is converted at once, as the room path does; more than one is the guest's choice.
 	switch len(out.Offers) {
 	case 0:
 		// scd issues no context without an offer, so this is a contract break, not a guest condition.
@@ -149,10 +123,8 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 		OK: true, NeedsChoice: true, AuthContextID: out.AuthContextID, Choices: out.Offers})
 }
 
-// postStayConvert asks scd to convert the verified context into the chosen package. scd commits the
-// entitlement and this device's session together and answers GRANTED only once the session is enforced (the
-// room grant's rule), so a session id here is a device that is online -- which is exactly what the success page
-// is told. A GRANTED answer without a session id is not access and is refused like any other failure.
+// scd answers GRANTED only once the session is enforced, so a session id means the device is online. GRANTED
+// without a session id (or with the entitlement id as the session id) is not access and is refused.
 func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *phase3Budget,
 	contextID, packageRevision string, device map[string]string) {
 	body, _ := json.Marshal(map[string]any{
@@ -167,52 +139,36 @@ func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *pha
 	writeJSONPortal(w, http.StatusOK, postStayOut{OK: true, SessionID: out.SessionID, RedirectTo: "/success"})
 }
 
-// postStayDevice derives the guest's device from the connection and the appliance's own neighbour table. It
-// is the only place this flow acquires an identity, and it consults nothing the guest typed.
+// postStayDevice is the only place this flow acquires an identity, from the connection and the neighbour
+// table, never from anything the guest typed.
 func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget) (map[string]string, bool) {
-	// THE DEVICE ANSWER, NOT THE AUTHENTICATION ONE. Every refusal originDevice can produce is about the source
-	// device, so this is where post-stay stops borrowing its own "check your details" sentence for a condition
-	// the guest cannot act on. The other three callers of originDevice already pass something appropriate --
-	// the access-status poll answers with nothing at all, and the device list has its own sentence -- which is
-	// exactly why this is a parameter and not a hardcoded call.
+	// Device refusals use the device answer, not "check your details", which the guest cannot act on.
 	return h.originDevice(w, r, b, h.poststayDeviceFail)
 }
 
-// poststayFail keeps this flow's existing audit vocabulary exactly as it was: the shared helpers now name the
-// condition and the flow supplies its own prefix, so no recorded reason code changes.
+// poststayFail supplies the flow's audit reason-code prefix.
 func (h *handler) poststayFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
 	h.phase3Fail(w, r, b, "poststay_"+reason, classPostStay)
 }
 
-// poststayDeviceFail is the post-stay refusal for the one condition that is NOT about the guest: the appliance
-// could not establish the device the request came from.
-//
-// The post-stay wording is deliberately uniform for everything else -- a departed guest returning with a PIN has
-// no room number, family name or reservation number to re-check, so the room sign-in sentence would be actively
-// misleading advice. But its sentence still says "check your details", and for a device that could not be placed
-// on a guest network that is advice about the one thing the guest cannot do anything about. TECHNICAL is the
-// honest class here, as it already is on the room path.
+// poststayDeviceFail covers the one condition not about the guest (the device could not be established);
+// the post-stay sentence says "check your details", which would be misleading advice, so it is TECHNICAL.
 func (h *handler) poststayDeviceFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
 	h.phase3Fail(w, r, b, "poststay_"+reason, classTechnical)
 }
 
-// uniformFail is how a flow says "this did not succeed" WITHOUT saying why. Every one of them writes 200,
-// waits the same budget first and returns one fixed message; they differ only in which flow's message and
-// audit vocabulary they use, which is why this is a parameter rather than a hardcoded call. The device flow
-// spent its whole life calling the AUTHENTICATION one, telling guests their stay could not be verified when
-// nothing had been authenticated at all.
+// uniformFail says "this did not succeed" without saying why: 200, the same budget wait, one fixed message.
+// Flows differ only in message and audit vocabulary, hence the parameter.
 type uniformFail func(http.ResponseWriter, *http.Request, *phase3Budget, string)
 
-// originDevice is postStayDevice with the caller's own uniform failure.
 func (h *handler) originDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget, fail uniformFail) (map[string]string, bool) {
 	ip := clientIP(r)
 	if ip == nil {
 		fail(w, r, b, "no_source_address")
 		return nil, false
 	}
-	// The hardware address comes from the kernel's neighbour table, never from the client, and the kernel is
-	// ASKED to resolve it rather than only consulted (arp_resolve.go): a cold cache is not evidence that a
-	// device is off the guest network. Same mechanism, same guarantee, on every sign-in path.
+	// The MAC comes from the kernel neighbour table, which is asked to resolve (arp_resolve.go): a cold cache
+	// is not evidence that the device is off the guest network.
 	mac, ok := h.deviceMAC(b.ctx, ip)
 	if !ok {
 		fail(w, r, b, "device_not_on_guest_network")
@@ -221,30 +177,17 @@ func (h *handler) originDevice(w http.ResponseWriter, r *http.Request, b *phase3
 	return map[string]string{"ip": ipString(ip), "mac": mac.String()}, true
 }
 
-// decodePostStayStrict is the PUBLIC guest surface's decoder, and it is strict for a reason that only shows
-// up from outside.
-//
-// scd's internal handlers already refuse unknown fields, so a stray `stay` or `room` never reached the
-// server's own logic. But portald is the process a guest's browser actually talks to, and a permissive
-// decoder there SILENTLY DROPS such a field: the request succeeds, the guest is served from their real
-// device-derived identity, and nothing anywhere says the parameter was ignored. That is the worst version of
-// the behaviour -- not exploitable, but indistinguishable from a surface that honours it, which is exactly
-// what invites someone to build against it and eventually to argue it should work.
-//
-// Refusing outright makes the absence of those parameters an OBSERVABLE fact rather than an internal one.
-// The refusal is the ordinary uniform non-success: a guest cannot learn from it either.
+// decodePostStayStrict refuses unknown fields on the public surface: a permissive decoder would silently drop
+// a stray `stay` or `room`, indistinguishable from a surface that honours it. The refusal is the uniform
+// non-success.
 func decodePostStayStrict(w http.ResponseWriter, r *http.Request, b *phase3Budget, h *handler, dst any) bool {
 	return decodeStrict(w, r, b, dst, h.poststayFail)
 }
 
-// decodeStrict is decodePostStayStrict with the caller's own uniform failure, for the same reason
-// originDevice takes one.
 func decodeStrict(w http.ResponseWriter, r *http.Request, b *phase3Budget, dst any, fail uniformFail) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		// One reason code for every decode failure, including an identity-looking field. Logging WHICH field
-		// was sent would be useful to an operator and is deliberately not returned to the guest.
 		fail(w, r, b, "malformed_request: "+strings.TrimSpace(err.Error()))
 		return false
 	}

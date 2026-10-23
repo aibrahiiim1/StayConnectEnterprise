@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// ---- item 1: voucher state/validity rule (pure unit) ----------------------
-
 func TestVoucherRedeemableRule(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
@@ -35,32 +33,25 @@ func TestVoucherRedeemableRule(t *testing.T) {
 	}
 }
 
-// ---- item 2: account is scoped to the site (DB) ---------------------------
-
 func TestAccountCrossSiteRejected(t *testing.T) {
 	db := scratchDB(t)
 	seedGuestNetwork(t, db)
 	ctx := context.Background()
-	// account belongs to testSite
 	db.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts (tenant_id, site_id, username, password_hash, enabled) VALUES ($1,$2,'dave',$3,true)`, testTenant, testSite, argon2idHash("pw"))
 	a, _ := New(Config{MasterEnabled: true, Methods: map[Method]bool{MethodAccount: true}}, NewPgRepository(db), NopObserver{})
 
 	otherSite := "99999999-9999-9999-9999-999999999999"
-	// correct tenant+site -> allow
 	if res, err := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "dave", Secret: "pw", Device: gnDevice("de:ad:be:ef:20:01")}); err != nil || res.Decision != DecisionAllow {
 		t.Fatalf("same-site must allow: %+v %v", res, err)
 	}
-	// same tenant, different site -> generic deny (same as nonexistent)
+	// A different site denies generically, the same as a nonexistent account.
 	if res, _ := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: otherSite, Username: "dave", Secret: "pw", Device: gnDevice("de:ad:be:ef:20:02")}); res.Decision != DecisionDeny {
 		t.Fatalf("cross-site must deny generically: %+v", res)
 	}
-	// different tenant -> deny
 	if res, _ := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: otherSite, SiteID: testSite, Username: "dave", Secret: "pw", Device: gnDevice("de:ad:be:ef:20:03")}); res.Decision != DecisionDeny {
 		t.Fatalf("cross-tenant must deny: %+v", res)
 	}
 }
-
-// ---- item 4: social identity scratch (DB) ---------------------------------
 
 func TestSocialScratchIntegration(t *testing.T) {
 	db := scratchDB(t)
@@ -73,12 +64,10 @@ func TestSocialScratchIntegration(t *testing.T) {
 	if err != nil || res.Decision != DecisionAllow || res.Subject.PrincipalID == "" {
 		t.Fatalf("social allow: %+v %v", res, err)
 	}
-	// same issuer+subject -> same principal (idempotent)
 	res2, _ := a.Authenticate(ctx, base)
 	if res2.Subject.PrincipalID != res.Subject.PrincipalID {
 		t.Fatal("same issuer+subject must resolve the same principal")
 	}
-	// different issuer, same subject -> independent identity/principal
 	diff := base
 	diff.FactorIssuer = "apple"
 	diff.Device = gnDevice("de:ad:be:ef:30:02")
@@ -91,15 +80,12 @@ func TestSocialScratchIntegration(t *testing.T) {
 	if principals != 2 {
 		t.Fatalf("expected 2 principals (google + apple), got %d", principals)
 	}
-	// a SOCIAL auth_context was created
 	var n int
 	db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.auth_contexts WHERE method='SOCIAL'`).Scan(&n)
 	if n < 1 {
 		t.Fatal("expected a SOCIAL auth_context")
 	}
 }
-
-// ---- item 3: pinned consume rejects wrong device/tenant/site (DB) ---------
 
 func TestConsumePinnedRejectsWrongPins(t *testing.T) {
 	db := scratchDB(t)
@@ -125,13 +111,11 @@ func TestConsumePinnedRejectsWrongPins(t *testing.T) {
 			return err
 		})
 	}
-	// wrong device / guest-network (same tenant+site) -> mismatch
 	check("wrong device", func(r *ConsumeAuthContextRequest) { r.ExpectedDeviceID = "88888888-8888-8888-8888-888888888888" }, ErrACMismatch)
 	check("wrong network", func(r *ConsumeAuthContextRequest) { r.ExpectedGuestNetworkID = "88888888-8888-8888-8888-888888888889" }, ErrACMismatch)
-	// wrong tenant / site -> not found (must not reveal existence)
+	// A wrong tenant or site is not-found and must not reveal existence.
 	check("wrong tenant", func(r *ConsumeAuthContextRequest) { r.TenantID = "88888888-8888-8888-8888-888888888890" }, ErrACNotFound)
 	check("wrong site", func(r *ConsumeAuthContextRequest) { r.SiteID = "88888888-8888-8888-8888-888888888891" }, ErrACNotFound)
-	// correct pins still consume successfully afterwards
 	_ = repo.WithTx(ctx, func(tx Tx) error {
 		cc, err := tx.ConsumeAuthContext(ctx, base)
 		if err != nil || cc.Subject.GuestAccountID == "" {
@@ -141,7 +125,6 @@ func TestConsumePinnedRejectsWrongPins(t *testing.T) {
 	})
 }
 
-// A redeemed card may sign a device in again only while its own entitlement is ACTIVE; nothing else rejoins.
 func TestVoucherRejoinable(t *testing.T) {
 	for _, c := range []struct {
 		state string

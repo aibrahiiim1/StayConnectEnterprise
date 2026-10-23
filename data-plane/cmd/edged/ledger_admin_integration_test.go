@@ -19,9 +19,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The Backups screen's relays to scd for the erasure ledger and the one backup system: who may do what, what is forwarded (and what is
-// not), and that credentials never reach the activity log.
-
 type ledgerScdCall struct {
 	Method, Path string
 	Body         map[string]any
@@ -88,14 +85,12 @@ func TestIntegration_LedgerAdmin_SavingTheSecondaryStorageNeedsThePasswordAndKee
 	secret := "S3-SECRET-KEY-VALUE-" + fmt.Sprint(time.Now().UnixNano())
 	body := map[string]any{"kind": "s3", "bucket": "b", "region": "eu-west-1", "access_key": "AK", "secret_key": secret}
 
-	// without the password nothing is forwarded
 	if st, _ := f.do(t, "PUT", "/backups/ledger/destination", body); st == 200 {
 		t.Fatalf("the secondary storage was saved without the password")
 	}
 	if rec.last("/v1/ledger/destination") != nil {
 		t.Fatalf("an unauthorised save reached scd")
 	}
-	// with it: forwarded, the password removed, the operator named, never a test
 	body["password"] = f.password
 	body["test_only"] = true // a caller cannot turn a save into a test or the other way
 	if st, out := f.do(t, "PUT", "/backups/ledger/destination", body); st != 200 {
@@ -114,7 +109,6 @@ func TestIntegration_LedgerAdmin_SavingTheSecondaryStorageNeedsThePasswordAndKee
 	if c.Body["secret_key"] != secret || c.Body["kind"] != "s3" || c.Body["by"] == "" {
 		t.Errorf("forwarded body = %v", c.Body)
 	}
-	// the activity log says WHAT was chosen, never the credentials
 	var n int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.ledger_storage_changed' AND payload::text NOT LIKE '%'||$1||'%'`, secret).Scan(&n); err != nil || n < 1 {
 		t.Errorf("no clean audit entry: %d %v", n, err)
@@ -167,15 +161,12 @@ func TestIntegration_LedgerAdmin_RecoveryAndBackupOnRequestNeedThePassword(t *te
 			t.Errorf("%s = %d %v", tc.path, st, out)
 		}
 	}
-	// recovery forwards the key and nothing else
 	if c := rec.last("/v1/ledger/recover"); c == nil || c.Body["identity"] != "AGE-SECRET-KEY-1X" || len(c.Body) != 1 {
 		t.Errorf("recover body = %+v", c)
 	}
-	// a backup on request is the one engine's manual backup, attributed to the person who asked
 	if c := rec.last("/v1/backup/run"); c == nil || c.Body["kind"] != "manual" || c.Body["by"] == nil || c.Body["by"] == "" {
 		t.Errorf("run body = %+v", c)
 	}
-	// the key is never logged
 	var n int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE payload::text LIKE '%AGE-SECRET-KEY%'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("a backup key reached the activity log: %d %v", n, err)
@@ -203,11 +194,9 @@ func TestIntegration_EarlierBackupsGoOnlyWithPasswordAndTypedConfirmation(t *tes
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM public.audit_log WHERE action='backup.earlier_removed'`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	// no password
 	if st, _ := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": earlierBackupsConfirmation}); st == 200 {
 		t.Error("allowed without the password")
 	}
-	// wrong confirmation
 	if st, _ := f.do(t, "POST", "/backups/earlier/remove", map[string]any{"confirm": "yes", "password": f.password}); st != 400 {
 		t.Errorf("a wrong confirmation = %d", st)
 	}
@@ -242,8 +231,6 @@ func TestIntegration_LedgerAdmin_StatusIsRelayedAsItIs(t *testing.T) {
 	}
 }
 
-// ---- the ledger itself, in the database ---------------------------------------------------------------------------------
-
 func TestIntegration_Ledger_TheTablesCannotBeChangedAfterTheFact(t *testing.T) {
 	f := newAPI(t)
 	ctx := context.Background()
@@ -261,7 +248,6 @@ func TestIntegration_Ledger_TheTablesCannotBeChangedAfterTheFact(t *testing.T) {
 			t.Errorf("%s: unexpected error %v", q, err)
 		}
 	}
-	// the chain is intact
 	if got := gdStr(t, f, `SELECT (iam_v2.ledger_verify() ->> 'ok')`); got != "true" {
 		t.Errorf("the database ledger fails its own chain check: %s", got)
 	}
@@ -304,8 +290,6 @@ func TestIntegration_Ledger_ConcurrentErasuresSerialise(t *testing.T) {
 		t.Errorf("chain check: %s", got)
 	}
 }
-
-// ---- privileges: the runtime roles reach the ledger only through its functions ----------------------------------------------
 
 func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 	edsn, sdsn := os.Getenv("EDGED_ROLE_TEST_DSN"), os.Getenv("SCD_ROLE_TEST_DSN")
@@ -386,14 +370,12 @@ func TestIntegration_Ledger_TheRuntimeRolesReachOnlyTheFunctions(t *testing.T) {
 	}
 }
 
-// An SFTP server's password and the operator's step-up password both used to be called "password": the first was taken for the second
-// and never reached scd. The server's travels as sftp_password and arrives at scd as password; the operator's never does.
+// The server's password travels as sftp_password and arrives at scd as password; the operator's step-up password never does.
 func TestIntegration_LedgerAdmin_AnSFTPPasswordReachesScdAndTheOperatorsDoesNot(t *testing.T) {
 	f := newAPI(t, "site_admin")
 	scd, rec := fakeLedgerSCD(t)
 	f.app.scd = scd
 	body := map[string]any{"kind": "sftp", "host": "nas", "port": 22, "user": "ledger", "dir": "/ledger", "sftp_password": "SERVER-PW", "fingerprint": "SHA256:x"}
-	// a test needs no step-up and still carries the server's password
 	if st, out := f.do(t, "POST", "/backups/ledger/destination/test", body); st != 200 {
 		t.Fatalf("test = %d %v", st, out)
 	}

@@ -1,12 +1,7 @@
 "use client";
 
-// BACKUP ENCRYPTION -- the hotel's own keys (migration 0129; GDPR plan C5; Product-Owner decision D-C5).
-//
-// Every backup is encrypted to every key holder's public key, so any one holder can restore alone and nobody
-// else can read it -- not the appliance, not its supplier. Adding a holder generates the key on the appliance
-// and hands the private key over ONCE, as a file and a printable recovery sheet; encryption counts on it only
-// after the check code printed in them is typed back. The restore test asks, every few months (a setting), for
-// a holder to prove their key still opens the newest backup.
+// Backups are encrypted to every holder's public key. The private key is handed over once, and encryption
+// relies on it only after the printed check code is typed back.
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -35,7 +30,7 @@ type NewKey = {
   key_file: string; key_file_name: string;
 };
 
-/** A backup key, pasted or read from the key file. Lives in component state only, for one action. */
+/** Held in component state for one action only. */
 export function BackupKeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Field label="Backup key" hint="Paste the key file’s contents, or choose the key file. It is used for this action only and never stored.">
@@ -61,7 +56,6 @@ function esc(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 }
 
-/** The printable recovery sheet: the same key and check code as the file, for the hotel safe. */
 function printSheet(k: NewKey) {
   const w = window.open("", "_blank", "width=800,height=900");
   if (!w) return;

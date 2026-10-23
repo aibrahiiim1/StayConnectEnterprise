@@ -2,13 +2,9 @@ package api
 
 import "time"
 
-// THE ONE PLACE APPLIANCE STATE IS DECIDED (docs/CENTRAL_CONTROL_PLANE.md §3).
-//
-// Every list, every detail page and the overview call DeriveState on the same facts. The console never
-// derives a state itself, and nothing stores one: the appliance lifecycle column holds identity only
-// (pending_approval, assigned, revoked, decommissioned).
+// DeriveState is the one place appliance state is decided: the console never derives one and nothing stores one;
+// the lifecycle column holds identity only.
 
-// Activation states.
 const (
 	ActivationWaiting    = "waiting"
 	ActivationActivating = "activating"
@@ -17,7 +13,6 @@ const (
 	ActivationRetired    = "retired"
 )
 
-// Connection states.
 const (
 	ConnectionConnected    = "connected"
 	ConnectionRecentlySeen = "recently_seen"
@@ -25,7 +20,6 @@ const (
 	ConnectionNever        = "never"
 )
 
-// Licence states.
 const (
 	LicenseNone      = "none"
 	LicenseActive    = "active"
@@ -36,15 +30,14 @@ const (
 	LicenseRevoked   = "revoked"
 )
 
-// Thresholds. A healthy appliance calls Central every 30 s.
+// A healthy appliance calls Central every 30 s.
 const (
 	ConnectedWithin    = 5 * time.Minute
 	RecentlySeenWithin = 24 * time.Hour
 	ExpiringWithin     = 30 * 24 * time.Hour
 )
 
-// LicenseFacts is the appliance's licence as stored: the CURRENT row (status active or suspended) when one
-// exists, otherwise the newest revoked row. Superseded rows are never facts.
+// LicenseFacts is the current (active or suspended) row, else the newest revoked row; superseded rows are never facts.
 type LicenseFacts struct {
 	Status           string // active | suspended | revoked
 	ValidUntil       time.Time
@@ -52,11 +45,8 @@ type LicenseFacts struct {
 	OfflineGraceDays int
 }
 
-// EffectiveGraceDays mirrors the appliance's own rule (license.Document.EffectiveGraceDays). Every licence
-// Central issues is a v3+ document, whose grace period is explicit: 0 means NO grace. Rows from before the
-// simple model had grace_period_days back-filled from the offline allowance by migration 0040, which is
-// exactly what the appliance applies to those older documents, so the stored value is the answer for every
-// row. OfflineGraceDays is the cloud-staleness allowance and never a renewal grace.
+// EffectiveGraceDays mirrors the appliance's own rule (license.Document.EffectiveGraceDays): the stored grace is
+// explicit and 0 means no grace. OfflineGraceDays is the cloud-staleness allowance, never a renewal grace.
 func (l LicenseFacts) EffectiveGraceDays() int {
 	if l.GracePeriodDays < 0 {
 		return 0
@@ -64,12 +54,10 @@ func (l LicenseFacts) EffectiveGraceDays() int {
 	return l.GracePeriodDays
 }
 
-// GraceEndsAt is valid_until plus the effective grace period.
 func (l LicenseFacts) GraceEndsAt() time.Time {
 	return l.ValidUntil.Add(time.Duration(l.EffectiveGraceDays()) * 24 * time.Hour)
 }
 
-// ApplianceFacts is everything DeriveState needs, read in one query.
 type ApplianceFacts struct {
 	Lifecycle string // pending_approval | assigned | revoked | decommissioned
 	// TerminalDelivery is appliance_terminal_delivery.delivery_state, "" when retirement never started.
@@ -79,28 +67,25 @@ type ApplianceFacts struct {
 	License          *LicenseFacts // nil = no licence was ever issued (or only superseded ones)
 }
 
-// DerivedState is what the API returns for every appliance.
 type DerivedState struct {
 	Activation string
 	Connection string
 	License    string
 }
 
-// DeriveState computes the three §3 fields.
+// DeriveState computes activation, connection and licence state.
 //
 //	activation
 //	  waiting     lifecycle pending_approval
 //	  retired     lifecycle revoked or decommissioned
-//	  retiring    lifecycle assigned and a retirement (terminal delivery) was started and not yet confirmed
-//	  activated   lifecycle assigned, an ACTIVE client certificate exists, and a licence exists (licence
-//	              state is not "none") — i.e. the appliance holds everything activation hands it
-//	  activating  lifecycle assigned otherwise (certificate or licence not yet in place)
+//	  retiring    lifecycle assigned and a retirement was started and not yet confirmed
+//	  activated   lifecycle assigned, an active client certificate and a licence exist
+//	  activating  lifecycle assigned otherwise
 //
 //	connection   from last_seen_at: <= 5 min connected, <= 24 h recently_seen, older offline, never
 //
-//	license      from LicenseFacts: suspended; revoked (no current licence, newest is revoked); otherwise by
-//	             time — active, expiring (<= 30 days left), grace (past valid_until, inside the effective grace
-//	             period), expired. none when there is no licence.
+//	license      suspended; revoked (newest is revoked, none current); otherwise by time: active, expiring
+//	             (<= 30 days left), grace (past valid_until, inside the grace period), expired; none without a licence.
 func DeriveState(f ApplianceFacts, now time.Time) DerivedState {
 	d := DerivedState{
 		Connection: deriveConnection(f.LastSeenAt, now),
@@ -139,7 +124,6 @@ func deriveConnection(lastSeen *time.Time, now time.Time) string {
 	}
 }
 
-// DeriveLicense is the licence half of DeriveState, also used for a single licence row in the licence list.
 func DeriveLicense(l *LicenseFacts, now time.Time) string {
 	if l == nil {
 		return LicenseNone

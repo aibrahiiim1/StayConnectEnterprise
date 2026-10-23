@@ -12,16 +12,8 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
-// AUDIT H-2: A ROSTER DEPARTURE IS A CHECKOUT.
-//
-// pms_roster_reconcile used to set a stay CHECKED_OUT directly, so the stay's entitlement stayed ACTIVE, its
-// sessions and device authorizations survived, and no grace or audit was produced -- the checkout conversion
-// Phase-0 invariant 10 requires never ran. Since 0123 an APPLY queues one checkout (GO) event per absent stay
-// and the Stay Engine applies it through the Checkout Converter, exactly as a PMS checkout.
-
-// rosterGeneration publishes resync generation gen whose roster lists exactly the given reservations, with
-// sweep coverage for their rooms and a healthy link, and lowers the roster-size floor so a small fixture is
-// trusted.
+// rosterGeneration publishes resync generation gen listing exactly the given reservations, with sweep
+// coverage for their rooms and a healthy link, and lowers the roster-size floor for a small fixture.
 func rosterGeneration(t *testing.T, p *pgxpool.Pool, s scope, gen int64, rooms []string, reservations ...string) {
 	t.Helper()
 	ctx := context.Background()
@@ -81,7 +73,6 @@ func TestIntegration_RosterDepartureRunsTheCheckoutConversion(t *testing.T) {
 	pkgRev := commerce(t, p, s, true)
 	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 
-	// Two guests arrive live; the one in 202 holds internet.
 	insertLive(t, p, s, "L-GI-1", "GI", pay("RSTAY", "101", "Stay", "Sam", "", "260101", "261231"))
 	insertLive(t, p, s, "L-GI-2", "GI", pay("RGONE", "202", "Gone", "Gil", "", "260101", "261231"))
 	drain(t, pr, s)
@@ -91,10 +82,8 @@ func TestIntegration_RosterDepartureRunsTheCheckoutConversion(t *testing.T) {
 	}
 	ent := grantEntitlement(t, p, s, gone, pkgRev, time.Now().Add(-3*time.Hour))
 
-	// A complete roster that lists only RSTAY.
 	rosterGeneration(t, p, s, 1, []string{"101", "202"}, "RSTAY")
 
-	// A DRY RUN reports the departure and queues nothing (and establishes no inventory -- H-13).
 	if out, n := reconcile(t, p, s, 1, false); out != "COMPLETED" || n != 0 {
 		t.Fatalf("dry run = %s/%d, want COMPLETED/0", out, n)
 	}
@@ -105,7 +94,7 @@ func TestIntegration_RosterDepartureRunsTheCheckoutConversion(t *testing.T) {
 		t.Fatalf("a dry run queued %d checkouts", n)
 	}
 
-	// The APPLY queues exactly one checkout and does NOT itself flip the stay.
+	// Apply queues one checkout (GO) event; the checkout path, not the reconcile function, flips the stay.
 	if out, n := reconcile(t, p, s, 1, true); out != "COMPLETED" || n != 1 {
 		t.Fatalf("apply = %s/%d, want COMPLETED/1", out, n)
 	}
@@ -114,12 +103,10 @@ func TestIntegration_RosterDepartureRunsTheCheckoutConversion(t *testing.T) {
 	if st != "IN_HOUSE" {
 		t.Fatalf("the reconcile function closed the stay itself (%s); the checkout path must do it", st)
 	}
-	// A repeated apply on the same generation queues nothing more.
 	if _, n := reconcile(t, p, s, 1, true); n != 0 {
 		t.Fatalf("a repeated apply queued %d more checkouts", n)
 	}
 
-	// The engine applies it through the converter.
 	drain(t, pr, s)
 	var effco *time.Time
 	var posting bool
@@ -144,7 +131,6 @@ func TestIntegration_RosterDepartureRunsTheCheckoutConversion(t *testing.T) {
 		WHERE a.stay_id=$1 AND e.external_event_identity LIKE 'ROSTER_RECONCILIATION:%'`, gone); n != 1 {
 		t.Fatalf("checkout audit citing the roster checkout = %d, want 1", n)
 	}
-	// The guest still listed is untouched.
 	_ = p.QueryRow(ctx, `SELECT status FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='RSTAY'`, s.iface).Scan(&st)
 	if st != "IN_HOUSE" {
 		t.Fatalf("the listed guest is %s", st)

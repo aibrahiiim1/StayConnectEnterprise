@@ -1,14 +1,5 @@
-// Room sign-in readiness is a per-guest-network question, and getting it wrong is a defect in both
-// directions.
-//
-// A missing warning means an operator watches a correctly configured, enabled method refuse guests with a
-// message that reads like a wrong surname. A false warning means they hunt a PMS problem that does not exist.
-// A warning that is right for the property but wrong for a network is both at once.
-//
-// TWO THINGS ARE NO LONGER DECIDED HERE, and the tests below pin that. Whether an interface's feed is healthy
-// is the server's answer (`room_auth_ready`), derived from the same runtime and active Revision that Phase 3
-// reads — including that Revision's own heartbeat_timeout_ms, which this client cannot know. And an interface
-// whose health could not be READ is unknown, never an outage.
+// Use the server's per-network readiness verdict because heartbeat timeouts depend on each active revision.
+// Unreadable interface health is unknown, not evidence of an outage.
 
 import { describe, it, expect } from "vitest";
 import { roomSignInReadiness } from "@/lib/pms-availability";
@@ -19,7 +10,6 @@ const iface = (id: string, label: string, state = "ACTIVE"): PmsInterface => ({
   revision_count: 1, published: true,
 });
 
-/** A health row carrying the SERVER's verdict. `reason` is a bounded code, as the server sends. */
 const health = (id: string, ready: boolean, reason?: string): PmsInterfaceHealth => ({
   pms_interface_id: id,
   transport_status: ready ? "CONNECTED" : "DISCONNECTED",
@@ -30,7 +20,6 @@ const health = (id: string, ready: boolean, reason?: string): PmsInterfaceHealth
   in_house_stays: 0, pending_events: 0, review_events: 0,
 });
 
-/** A health row from a server that does not answer the question — indistinguishable from unknown. */
 const healthWithoutVerdict = (id: string): PmsInterfaceHealth => ({
   pms_interface_id: id,
   transport_status: "CONNECTED", sync_status: "IN_SYNC", continuity_status: "CONTINUOUS",
@@ -51,14 +40,11 @@ describe("the server decides feed health, not this client", () => {
     expect(r.state).toBe("ready");
   });
 
-  // THE NON-DEFAULT TIMEOUT CASE. An interface whose Revision sets heartbeat_timeout_ms well above the
-  // 300-second default is silent-but-healthy by its own configuration, and the server says so. The client
-  // used to hardcode 300s and would have called this an outage; it must now simply believe the server.
+  // A revision can set a longer heartbeat timeout than the default; trust the server's verdict.
   it("believes a server that reports ready despite a long silence under a non-default heartbeat timeout", () => {
     const longTimeout: PmsInterfaceHealth = {
       pms_interface_id: "a",
       transport_status: "CONNECTED", sync_status: "IN_SYNC", continuity_status: "CONTINUOUS",
-      // Twenty minutes since anything was heard — past the 300s default, inside this Revision's own bound.
       last_heartbeat_at: new Date(Date.now() - 20 * 60_000).toISOString(),
       room_auth_ready: true,
       in_house_stays: 0, pending_events: 0, review_events: 0,
@@ -67,8 +53,7 @@ describe("the server decides feed health, not this client", () => {
     expect(r.state).toBe("ready");
   });
 
-  // And the converse: a Revision with a SHORTER timeout than the default. The server calls it silent while a
-  // 300-second client rule would still have called it healthy.
+  // Shorter revision timeouts must also override a client-side default.
   it("believes a server that reports FEED_SILENT under a shorter-than-default heartbeat timeout", () => {
     const shortTimeout: PmsInterfaceHealth = {
       pms_interface_id: "a",
@@ -97,7 +82,7 @@ describe("the server decides feed health, not this client", () => {
     if (r.state === "down") expect(r.reason).toBe(wording);
   });
 
-  // A code this build does not know must never be printed raw at a hotel.
+  // Unknown internal codes must not be displayed raw to hotel staff.
   it("falls back to a general phrase for an unrecognised reason code", () => {
     const r = roomSignInReadiness([iface("a", "Protel")], [health("a", false, "SOME_FUTURE_CODE")], [route("W", "a", "Protel")]);
     if (r.state !== "down") throw new Error(`expected down, got ${r.state}`);
@@ -107,8 +92,7 @@ describe("the server decides feed health, not this client", () => {
 });
 
 describe("an unreadable health result is unknown, never an outage", () => {
-  // THE SECOND CORRECTION. The fetch for this interface failed, so it is absent from the health list. That is
-  // absence of evidence: reporting "guests cannot sign in" would turn an admin-API hiccup into a false outage.
+  // A failed health fetch must not become a false outage warning.
   it("does not claim an outage when a routed interface's health could not be read", () => {
     const r = roomSignInReadiness([iface("a", "Protel")], [], [route("Guest Wi-Fi", "a", "Protel")]);
     expect(r.state).toBe("unknown");
@@ -120,8 +104,6 @@ describe("an unreadable health result is unknown, never an outage", () => {
     expect(r.state).toBe("unknown");
   });
 
-  // Mixed: one network definitely broken, one unreadable. The broken one is reported; the unreadable one is
-  // listed as unchecked and is NOT counted among the affected.
   it("separates unchecked networks from affected ones", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe"), iface("c", "Protel Spa")],
@@ -134,7 +116,6 @@ describe("an unreadable health result is unknown, never an outage", () => {
     expect(r.unchecked).toEqual(["Spa"]);
   });
 
-  // A network whose own interface is unread is unknown, not an outage.
   it("is unchecked when the routed interface was not read", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
@@ -178,8 +159,7 @@ describe("routing semantics are unchanged", () => {
     expect(r.state).toBe("ready");
   });
 
-  // ALL_ACTIVE_INTERFACES never fanned out: no resolver has ever read routing_mode, so a row carrying it
-  // resolves against its MAPPED interface like any other. A healthy neighbour does not rescue it.
+  // routing_mode does not fan out; readiness follows the mapped interface only.
   it("reads a stored ALL_ACTIVE_INTERFACES route as the one interface it is mapped to", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],

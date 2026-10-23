@@ -1,8 +1,6 @@
 /**
- * What a request covers depends on whose record it is (migration 0145, decision D-R5). A reservation's own data
- * belongs to the guest the PMS names; an account or identity belongs to the person who registered it. The
- * internet access used through a room's credentials, a voucher or a staff-issued account, and any device used with
- * someone else, is shared by several people: no request about one person exports or changes it.
+ * A reservation's data belongs to the guest the PMS names; an account to who registered it. Shared access (room
+ * credentials, vouchers, staff accounts, shared devices) is never exported or changed for one person.
  */
 export function exportDescription(kind: string | undefined): string {
   if (kind === "stay" || kind === "stay_guest") {
@@ -32,7 +30,6 @@ export function eraseConsequences(kind: string | undefined): string[] {
   ];
 }
 
-/** Why a request was refused, in plain words (the database's reason codes). */
 export const LIVE_REASONS: Record<string, string> = {
   co_guests: "other guests are named on this stay; search again and choose the guest who asked, so the others are left alone",
   pms_open: "the PMS still shows this stay as reserved or in-house and its departure date has not passed; the PMS would copy the guest straight back",

@@ -30,8 +30,6 @@ func (k *readSink) entries() []readEntry {
 	return append([]readEntry(nil), k.got...)
 }
 
-// The recorder, without a database: a typed search is one entry, two different searches are two, a repeated
-// read is one, and stopping writes what was still waiting.
 func TestReadRecorderCollapsesTypingAndRepeats(t *testing.T) {
 	sink := &readSink{}
 	rr := newReadRecorder(sink.write)
@@ -130,7 +128,6 @@ func TestGuestDataReadRoutesExist(t *testing.T) {
 	have := map[string]bool{}
 	_ = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if method == http.MethodGet {
-			// The pattern the middleware sees at run time, through chi's own normalisation.
 			have[(&chi.Context{RoutePatterns: []string{route}}).RoutePattern()] = true
 		}
 		return nil

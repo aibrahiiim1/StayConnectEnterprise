@@ -1,12 +1,4 @@
-// THE STANDING "APPLY CURRENT SETTINGS TO PACKAGES" ACTION.
-//
-// The state this exists for is real and was on the PRE-LIVE appliance: service plan "Free Internet" is on
-// revision 4 (10/5 Mbps) while the "Freee" package still pins revision 3 (2/2 Mbps). Package Edit keeps the
-// pin when the plan selection is unchanged — deliberately, so a rename never carries a technical change — so
-// the only way to move a package forward was to publish ANOTHER plan revision just to be offered the prompt.
-//
-// What is guarded here is mostly what the action must NOT do: it must not publish a service plan revision, it
-// must not touch a package that is already current, and it must not drop any part of the package it rewrites.
+// Repinning a package must preserve its commercial terms and avoid publishing another plan revision.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -31,15 +23,12 @@ const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const p = api.post as unknown as ReturnType<typeof vi.fn>;
 function list<T>(data: T[]) { return { data, meta: { has_more: false } }; }
 
-// The live shape, names and all: one plan on revision 4, one package left on revision 3, one already current.
 const PLANS = [{
   plan_id: "plan-free", code: "FREE", name: "Free Internet", enabled: true,
   current_revision_id: "rev4", revision_count: 4,
   down_kbps: 10000, up_kbps: 5000, max_concurrent_devices: 1, used_by_active_packages: 2,
 }];
 
-// The live OneDay plan, values and all: 10 Gbps each way (exactly the server's ceiling), 5 devices, and a
-// one-day time allowance that editing the plan used to throw away.
 const ONEDAY = {
   plan_id: "plan-oneday", code: "OneDay", name: "OneDay", enabled: true,
   current_revision_id: "rev-od-1", revision_count: 1,
@@ -59,7 +48,6 @@ const PACKAGES = [
   },
 ];
 
-// The commercial terms are the live reader's shape: a priced card + voucher package with no room charge.
 const FREEE_CURRENT = {
   code: "FREEE",
   price_minor: 2500, currency: "USD", currency_exponent: 2,
@@ -75,7 +63,6 @@ const FREEE_CURRENT = {
 
 function mockLoad(packages = PACKAGES, plans: unknown[] = PLANS) {
   g.mockImplementation((path: string) => {
-    // A role that may change plans: the write controls are offered only to one.
     if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
     if (path === "/commercial-packages/plans") return Promise.resolve(list(plans));
     if (path === "/commercial-packages") return Promise.resolve(list(packages));
@@ -114,7 +101,6 @@ describe("ServicePlansPage — stale package pin", () => {
   });
 
   it("changes NOTHING until the operator picks a package and applies", async () => {
-    // Opening the prompt is not an action. The real Freee package must stay exactly as it is until chosen.
     mockLoad();
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByTestId("apply-current-FREE"));
@@ -136,11 +122,8 @@ describe("ServicePlansPage — stale package pin", () => {
 
     await waitFor(() => expect(p).toHaveBeenCalledTimes(1));
     const [path, body] = p.mock.calls[0];
-    // ONE post, to the package endpoint. Nothing was posted to /commercial-packages/plans, so no service
-    // plan revision was created — which is the whole point of the action existing separately.
     expect(path).toBe("/commercial-packages");
     expect(p.mock.calls.some((c: unknown[]) => String(c[0]).includes("/plans"))).toBe(false);
-    // ...and it pins the revision the plan ALREADY had.
     expect(body.service_plan_revision_id).toBe("rev4");
   });
 
@@ -161,9 +144,9 @@ describe("ServicePlansPage — stale package pin", () => {
     expect(body.eligibility_rules).toEqual([{ type: "AUTH_METHOD", value: { methods: ["pms"] } }]);
     expect(body.grant_tiers).toEqual([{ order: 10, grant: { down_kbps: 2000 } }]);
     expect(body.visible_from).toBe("2026-01-01T00:00:00Z");
-    // The configuration came from the package's own current revision, not from the list row.
+    // Use the package's current revision, not an abbreviated list row.
     expect(g).toHaveBeenCalledWith("/commercial-packages/pkg-freee/current");
-    // AUDIT O-1: the price and how clients get it travel too, or the repin republishes the package as Free.
+    // Carry price and purchase methods so repinning cannot turn a priced package free.
     expect(body.price_minor).toBe(2500);
     expect(body.currency).toBe("USD");
     expect(body.currency_exponent).toBe(2);
@@ -171,7 +154,6 @@ describe("ServicePlansPage — stale package pin", () => {
     expect(body.room_charge_mappings).toEqual([]);
     expect(body.package_type).toBe("GENERAL");
     expect(body.renewable).toBe(false);
-    // A plan change is a step-up: the password asked once goes with the post.
     expect(body.password).toBe("pw-op");
   });
 
@@ -181,7 +163,7 @@ describe("ServicePlansPage — stale package pin", () => {
       if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       if (path === "/commercial-packages/plans") return Promise.resolve(list(PLANS));
       if (path === "/commercial-packages") return Promise.resolve(list(PACKAGES));
-      // A priced package whose reader returned no currency and no methods: nothing may be guessed.
+      // Do not guess missing commercial fields for a priced package.
       if (path === "/commercial-packages/pkg-freee/current") {
         return Promise.resolve({ ...FREEE_CURRENT, currency: "", settlement_methods: null, currency_exponent: undefined });
       }
@@ -210,7 +192,6 @@ describe("ServicePlansPage — stale package pin", () => {
     fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: /apply to selected packages/i }));
     expect(await screen.findByText("That password is not correct. Nothing was changed.")).toBeInTheDocument();
-    // The prompt stays open so the operator can try again.
     expect(screen.getByTestId("repin-title")).toBeInTheDocument();
   });
 
@@ -230,7 +211,6 @@ describe("ServicePlansPage — stale package pin", () => {
   });
 
   it("republishes a stale package even when other packages of the same plan are current", async () => {
-    // Only the one that is behind is touched; the current one is not republished as a side effect.
     mockLoad();
     p.mockResolvedValue({});
     render(<ServicePlansPage />);
@@ -254,17 +234,10 @@ describe("ServicePlansPage — stale package pin", () => {
   });
 });
 
-// EDITING A PLAN MUST NOT DROP WHAT IT ALREADY HAS.
-//
-// This form publishes a complete new revision from whatever its fields hold — it does not patch. Four fields
-// were never pre-filled, so editing the OneDay plan to change one number published a revision with no time
-// allowance at all. Re-typing the value by hand is where the second failure came from: the unit dropdown had
-// reset to "hours", and 86400 entered against the wrong unit is what produced the refused save.
+// Plan edits publish full revisions, so prefill every field and preserve the original unit.
 
 describe("ServicePlansPage — editing an existing plan", () => {
-  // SCOPED TO THE DOCUMENT, NOT THE CONTAINER. The form moved into a dialog, and Radix portals dialog content to
-  // document.body — so a container-scoped query looks in the one place the fields are guaranteed not to be. The
-  // assertions themselves are unchanged: same field names, same expected values.
+  // Radix portals the dialog to document.body, outside the render container.
   function fieldsOf(_container: HTMLElement) {
     const v = (name: string) =>
       (document.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLSelectElement | null)?.value;
@@ -281,7 +254,6 @@ describe("ServicePlansPage — editing an existing plan", () => {
     expect(v("down_mbps")).toBe("10000");
     expect(v("up_mbps")).toBe("10000");
     expect(v("max_concurrent_devices")).toBe("5");
-    // The one that was silently dropped: 86400 seconds reads as 1 DAY, not 24 hours and not blank.
     expect(v("time_quota")).toBe("1");
     expect(v("time_quota_unit")).toBe("days");
   });
@@ -296,7 +268,6 @@ describe("ServicePlansPage — editing an existing plan", () => {
   });
 
   it("republishes the plan unchanged when the operator edits one field and saves", async () => {
-    // The regression in one assertion: changing the device count must not also remove the time allowance.
     mockLoad([], [ONEDAY]);
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     const { container } = render(<ServicePlansPage />);
@@ -318,7 +289,6 @@ describe("ServicePlansPage — editing an existing plan", () => {
     p.mockResolvedValue({ current_revision_id: "rev-od-2" });
     render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
-    // Shown as it is, not offered as a choice that could convert it.
     const mode = document.getElementById("plan-time-mode") as HTMLSelectElement;
     expect(mode.disabled).toBe(true);
     expect(mode.value).toBe("AGGREGATE_ONLINE_TIME");
@@ -340,8 +310,6 @@ describe("ServicePlansPage — editing an existing plan", () => {
   });
 
   it("stops an over-limit speed at the field, with the ceiling stated on screen", async () => {
-    // 10 Gbps is the server's ceiling and OneDay already sits on it, so the next keystroke up is refused.
-    // Refusing it here names a control the operator can see instead of a wire field they cannot.
     mockLoad([], [ONEDAY]);
     const { container } = render(<ServicePlansPage />);
     fireEvent.click(await screen.findByRole("button", { name: /^edit\b/i }));
@@ -353,9 +321,6 @@ describe("ServicePlansPage — editing an existing plan", () => {
     expect(screen.getAllByText(/up to 10000 mbps/i).length).toBeGreaterThan(0);
   });
 });
-
-// ---------------------------------------------------------------------------------------------------------
-// THE REDESIGN: Add refuses taken codes, the plan record opens in a sheet, and Delete… never pretends.
 
 if (!("ResizeObserver" in globalThis)) {
   (globalThis as Record<string, unknown>).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
@@ -379,12 +344,11 @@ describe("ServicePlansPage — add, record and delete", () => {
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() => expect(p).toHaveBeenCalledTimes(2));
     expect(p.mock.calls[1][1]).not.toHaveProperty("create_only");
-    // Revising an existing plan is a step-up; adding one is not.
     expect(p.mock.calls[1][1].password).toBe("pw-op");
     expect(p.mock.calls[0][1]).not.toHaveProperty("password");
   });
 
-  // D-C / O-8: both offered policies are enforced; ADMIN_APPROVAL has no approval workflow and is not offered.
+  // ADMIN_APPROVAL has no approval workflow and must not be offered.
   it("offers only the device-limit policies the appliance enforces", async () => {
     mockLoad([], [ONEDAY]);
     render(<ServicePlansPage />);
@@ -408,8 +372,6 @@ describe("ServicePlansPage — add, record and delete", () => {
     expect(await within(dialog).findByText(/code_exists/)).toBeInTheDocument();
   });
 
-  // A plan's `enabled` flag changes nothing a guest receives, so the list no longer shows it as a status the
-  // operator could flip, and there is no switch for it.
   it("presents no enable/disable state for a plan", async () => {
     mockLoad([], [{ ...ONEDAY, enabled: false }]);
     render(<ServicePlansPage />);

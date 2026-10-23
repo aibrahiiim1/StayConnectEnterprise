@@ -1,17 +1,5 @@
 "use client";
 
-// PORTAL HTTPS — the Client Portal's own address, its hostnames and its publicly trusted certificates
-// (docs/architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md §2.1, §3.1, §4, §8).
-//
-// Most of what this page shows is what the appliance learnt from OneGate Central and installed: the OneGate
-// hostname, the hotel domain's verification, which hostname is canonical, the certificates, and whether HTTPS
-// is active or the approved HTTP fallback is in force. The operator sets two things here -- the portal address
-// and the hotel portal domain -- and can ask for a re-check or a renewal. Changing either setting and Renew
-// now ask for the operator's password; the server enforces that, this page only collects it.
-//
-// A new portal address is a network change: it is saved here and made live by the Client networks screen's
-// validate / apply / confirm, exactly like any other network change. The page says so and links there.
-
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, Whoami } from "@/lib/api";
@@ -50,7 +38,7 @@ export default function PortalHTTPSPage() {
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState<null | "check" | "renew" | "address" | "domain" | "remove">(null);
 
-  // Dialog state. Each change collects the password in its own dialog; the server checks it.
+  // The page only collects the password; the server enforces it.
   const [editingAddress, setEditingAddress] = useState(false);
   const [addressInput, setAddressInput] = useState("");
   const [addressErr, setAddressErr] = useState<unknown>(null);
@@ -227,7 +215,6 @@ export default function PortalHTTPSPage() {
         )
       ) : (
         <>
-          {/* STATUS ---------------------------------------------------------------------------------- */}
           <Callout tone={headline!.tone} title={headline!.title}>
             {!st!.https_active && (
               <>
@@ -276,7 +263,6 @@ export default function PortalHTTPSPage() {
             </CardBody>
           </Card>
 
-          {/* CERTIFICATES ------------------------------------------------------------------------------ */}
           <Card>
             <CardHeader>
               <div className="space-y-1">
@@ -310,7 +296,6 @@ export default function PortalHTTPSPage() {
             </CardBody>
           </Card>
 
-          {/* PORTAL ADDRESS ---------------------------------------------------------------------------- */}
           <Card>
             <CardHeader>
               <div className="space-y-1">
@@ -343,7 +328,6 @@ export default function PortalHTTPSPage() {
             </CardBody>
           </Card>
 
-          {/* HOTEL PORTAL DOMAIN ----------------------------------------------------------------------- */}
           <Card>
             <CardHeader>
               <div className="space-y-1">
@@ -421,7 +405,6 @@ export default function PortalHTTPSPage() {
             </CardBody>
           </Card>
 
-          {/* HISTORY ----------------------------------------------------------------------------------- */}
           <Card>
             <CardHeader><CardTitle>History</CardTitle></CardHeader>
             <CardBody className="p-0">
@@ -448,7 +431,6 @@ export default function PortalHTTPSPage() {
         </>
       )}
 
-      {/* DIALOGS ------------------------------------------------------------------------------------- */}
       <ConfirmDialog
         open={editingAddress}
         onOpenChange={(v) => { if (!v) setEditingAddress(false); }}

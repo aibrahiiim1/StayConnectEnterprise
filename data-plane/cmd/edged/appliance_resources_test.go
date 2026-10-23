@@ -29,7 +29,6 @@ Cached:          5000000 kB
 	if m.TotalBytes != 8000000*1024 || m.AvailableBytes != 6000000*1024 {
 		t.Fatalf("figures = %+v", m)
 	}
-	// Total minus FREE would say 97.5% used on a machine whose page cache is simply doing its job.
 	if m.UsedPct != 25 {
 		t.Errorf("used = %v%%, want 25%% (total minus available)", m.UsedPct)
 	}
@@ -48,7 +47,7 @@ func TestParseUptime(t *testing.T) {
 }
 
 func TestDiskFiguresMatchDf(t *testing.T) {
-	// 100 blocks of 4 KiB: 30 free, of which 25 available to unprivileged writers (5 reserved for root).
+	// 30 free blocks, 25 available to unprivileged writers (5 reserved for root).
 	d, err := diskFromStatfs("/", 100, 30, 25, 4096)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +55,6 @@ func TestDiskFiguresMatchDf(t *testing.T) {
 	if d.TotalBytes != 409600 || d.UsedBytes != 70*4096 || d.AvailableBytes != 25*4096 {
 		t.Fatalf("figures = %+v", d)
 	}
-	// df: used / (used + avail) = 70 / 95
 	if d.UsedPct != 73.7 {
 		t.Errorf("used = %v%%, want 73.7%% (the reserved blocks are not free space anyone can write to)", d.UsedPct)
 	}

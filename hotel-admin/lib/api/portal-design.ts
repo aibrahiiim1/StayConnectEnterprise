@@ -1,10 +1,5 @@
-// THE GUEST PORTAL DESIGNER'S API.
-//
-// The design itself is read and saved through the routes the settings screen always used
-// (/portal-branding, /portal-branding/settings, /portal-branding/draft, /portal-branding/rollback/{n}). What is
-// new is /portal-branding/validate: the server's own answer to "what would the portal do with this design?",
-// so the Advanced editors can name a problem while it is being typed and the preview can render the SAFE
-// version of a fragment rather than the text in the box.
+// Guest portal designer API. /portal-branding/validate returns the server's verdict so the preview renders the SAFE
+// version of a fragment.
 
 import { api } from "@/lib/api";
 
@@ -40,7 +35,6 @@ export type BrandingState<D> = {
   published?: boolean;
 };
 
-/** Restoring an earlier save re-publishes it as a NEW entry in the history; it rewrites nothing. */
 export function restoreRevision(version: number, password: string) {
   return api.post<{ version: number; restored_from: number }>(
     `/portal-branding/rollback/${encodeURIComponent(String(version))}`, { password });
@@ -57,8 +51,10 @@ export type PortalTemplate = {
 export type TemplateId = "classic" | "split" | "immersive" | "headerbar" | "editorial" | "kiosk";
 export type TemplateOption = "overlay" | "panel_position" | "hero_height" | "surface" | "heading_font" | "density" | "hero";
 
-/** The portal's layouts, in the order the designer offers them. The ids are the closed list the server accepts
- *  (internal/portaldesign.Templates); a Go test reads this file and fails if the two lists drift. */
+/**
+ * The portal's layouts in designer order; ids are the server's closed list (internal/portaldesign.Templates), checked
+ * by a Go test.
+ */
 export const PORTAL_TEMPLATES: PortalTemplate[] = [
   { id: "classic", name: "Classic", description: "A centred card over your photograph. The original layout.",
     options: ["density", "heading_font"] },

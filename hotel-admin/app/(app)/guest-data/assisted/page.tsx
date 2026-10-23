@@ -1,20 +1,9 @@
 "use client";
 
-// ASSISTED GUEST DATA REQUESTS (migration 0146).
-//
-// The ordinary guest data request finds a guest and handles what is certainly theirs. It leaves alone the internet
-// access several people share — a room's credentials, a voucher, a staff-issued account, a device used with
-// someone else — because a device address, a room number or a reservation credential does not show who a person is.
-// A guest who used only the room’s credentials still has a right to the usage of their own phone. This page is how
-// staff exercise it with care:
-//
-//   1. verify the requester, say how, and state what you saw (three statements);
-//   2. name the reservation, guest or account the records are about, the device address(es) and the range;
-//   3. review every record in that range, sorted by the database into what can be selected and what is left alone;
-//   4. select, and confirm with your password, a reason and the request reference.
-//
-// Only site_admin and the IT manager reach this page (the guest-data-rights key). Everything that decides what a
-// record is — and whether anything changed since you looked — is decided by the database, not by this page.
+// Assisted requests cover shared access (room credentials, vouchers, staff accounts) where a device address or room
+// number does not identify a person.
+// Only site_admin and the IT manager reach this page; the database decides what is selectable and whether anything
+// changed.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -73,7 +62,7 @@ function saveJSON(doc: unknown, prefix: string) {
   URL.revokeObjectURL(url);
 }
 
-// A datetime-local value is the hotel's wall clock in the browser's zone; the server wants an instant.
+// A datetime-local value is the browser's wall clock; the server wants an instant.
 const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 export default function AssistedGuestDataPage() {
@@ -158,9 +147,6 @@ export default function AssistedGuestDataPage() {
   );
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Opening a request.
-// ---------------------------------------------------------------------------------------------------------
 function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (id: string) => void }) {
   const now = useMemo(() => new Date(), []);
   const [purpose, setPurpose] = useState<"ACCESS" | "ERASURE">("ACCESS");
@@ -340,9 +326,6 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
   );
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// One request: review, select, confirm.
-// ---------------------------------------------------------------------------------------------------------
 function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => Promise<void> }) {
   const toast = useToast();
   const [c, setC] = useState<Detail | null>(null);

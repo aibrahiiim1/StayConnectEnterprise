@@ -11,11 +11,8 @@ import (
 	"time"
 )
 
-// keaClient speaks the Kea control-socket protocol (a length-unframed JSON
-// request/response over a unix stream socket). We use config-test to validate
-// a candidate config without applying it, config-set to apply it live, and
-// config-write to persist it to the on-disk kea-dhcp4.conf so it survives a
-// cold restart. No Kea restart and no CSV parsing anywhere.
+// keaClient speaks the Kea control-socket protocol (unframed JSON over a unix stream socket): config-test to
+// validate, config-set to apply live, config-write to persist. No Kea restart and no CSV parsing.
 type keaClient struct {
 	socket string
 }
@@ -25,12 +22,8 @@ func newKeaClient(socket string) *keaClient { return &keaClient{socket: socket} 
 func (k *keaClient) cmd(command string, args any) (map[string]any, error) {
 	c, err := net.DialTimeout("unix", k.socket, 5*time.Second)
 	if err != nil {
-		// AN ABSENT SOCKET IS "DHCP IS NOT RUNNING YET", NOT A FAULT.
-		//
-		// Kea binds the LAN bridge, so on a factory-clean appliance it cannot start until guest networking
-		// has been configured. The raw dial error reached the operator verbatim -- "connect: no such file or
-		// directory" -- which reads as a broken appliance rather than an unconfigured one, and names a path
-		// they can do nothing with.
+		// An absent socket means DHCP is not running yet, not a fault: Kea binds the LAN bridge and cannot start
+		// on a factory-clean appliance until guest networking is configured.
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("DHCP is not running yet: Kea has no control socket at %s. "+
 				"Kea serves the LAN bridge, so it starts once guest networking is configured on this "+
@@ -78,7 +71,6 @@ func resultOK(resp map[string]any) (int, string) {
 	return code, text
 }
 
-// ConfigTest validates a candidate Dhcp4 config without applying it.
 func (k *keaClient) ConfigTest(dhcp4 map[string]any) error {
 	resp, err := k.cmd("config-test", map[string]any{"Dhcp4": dhcp4})
 	if err != nil {
@@ -90,7 +82,6 @@ func (k *keaClient) ConfigTest(dhcp4 map[string]any) error {
 	return nil
 }
 
-// ConfigSet applies a candidate Dhcp4 config live, then persists it to disk.
 func (k *keaClient) ConfigSet(dhcp4 map[string]any) error {
 	resp, err := k.cmd("config-set", map[string]any{"Dhcp4": dhcp4})
 	if err != nil {
@@ -106,8 +97,7 @@ func (k *keaClient) ConfigSet(dhcp4 map[string]any) error {
 	return nil
 }
 
-// RunningDhcp4 returns the Dhcp4 configuration Kea is RUNNING (config-get), which is the only honest answer to
-// "what is Kea telling devices right now" -- the file on disk and the last thing netd pushed can both differ from it.
+// RunningDhcp4 returns the configuration Kea is running (config-get); the file on disk and netd's last push can differ.
 func (k *keaClient) RunningDhcp4() (map[string]any, error) {
 	resp, err := k.cmd("config-get", nil)
 	if err != nil {
@@ -124,7 +114,6 @@ func (k *keaClient) RunningDhcp4() (map[string]any, error) {
 	return dhcp4, nil
 }
 
-// Status returns true when the dhcp4 service answers status-get.
 func (k *keaClient) Healthy() bool {
 	resp, err := k.cmd("status-get", nil)
 	if err != nil {
@@ -134,7 +123,6 @@ func (k *keaClient) Healthy() bool {
 	return code == 0
 }
 
-// KeaLease is a lease row as returned by lease4-get-all.
 type KeaLease struct {
 	IPAddress string `json:"ip-address"`
 	HWAddr    string `json:"hw-address"`
@@ -145,13 +133,8 @@ type KeaLease struct {
 	ValidLft  int    `json:"valid-lft"`
 }
 
-// LeaseFile reports the memfile path Kea is configured to keep its leases in.
-//
-// It exists so that a FAILED lease query can be explained rather than merely reported. When memfile cannot
-// open its database, Kea keeps answering status-get and refuses every lease command, and the reason is on
-// disk next to the lease file - so health has to be able to find that file without being told where it is.
-// Reading it from the server's own running configuration is the only way to be sure we inspect the file this
-// Kea is actually using, rather than a distribution default that may not apply.
+// LeaseFile reports the memfile path from Kea's running configuration. When memfile cannot open its database
+// Kea still answers status-get but refuses lease commands, with the reason on disk next to the lease file.
 func (k *keaClient) LeaseFile() (string, error) {
 	resp, err := k.cmd("config-get", nil)
 	if err != nil {
@@ -171,8 +154,7 @@ func (k *keaClient) LeaseFile() (string, error) {
 	return name, nil
 }
 
-// Leases returns all current DHCPv4 leases from the memfile backend via the
-// control socket (structured — never parses the CSV).
+// Leases returns all current DHCPv4 leases via the control socket (never parses the CSV).
 func (k *keaClient) Leases() ([]KeaLease, error) {
 	resp, err := k.cmd("lease4-get-all", nil)
 	if err != nil {

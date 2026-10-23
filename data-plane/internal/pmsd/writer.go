@@ -9,32 +9,27 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// writeReq is one request to the single serialized protocol writer. body=="" is an ACTIVITY-ONLY signal
-// (reset the idle-keepalive timer, write nothing). ack, when non-nil, receives the write result so the caller
-// can observe success/failure synchronously.
+// writeReq: body=="" is an activity-only signal (reset the idle timer, write nothing). A non-nil ack receives
+// the write result.
 type writeReq struct {
 	body string
 	ack  chan error
-	// financial marks a PS submitted by the financial relay. Only SubmitFinancial sets it, and the writer
-	// routes it to guardedConn.writeFinancialFrame, which accepts a PS and nothing else.
+	// financial marks a PS from the financial relay; only SubmitFinancial sets it, and the writer routes it to
+	// guardedConn.writeFinancialFrame, which accepts a PS and nothing else.
 	financial bool
-	// guard, for a financial request only, is evaluated by the writer goroutine IMMEDIATELY BEFORE the first
-	// byte is written. A non-empty code means "do not write": the request is answered with a GuardRefusedError
-	// and nothing reaches the socket. It must be fast and must not block (it reads in-memory state only).
+	// guard (financial only) runs on the writer goroutine immediately before the first byte; a non-empty code
+	// means do not write (GuardRefusedError). It must be fast and non-blocking.
 	guard func() string
 }
 
-// serialWriter is the SOLE owner of the outbound socket. EXACTLY ONE goroutine (run) ever calls
-// g.writeFrame, so no two frames overlap and every LS/LD/LR/LA/DR/LE frame is serialized through one owner.
-// It also owns the idle-LA keepalive ticker and, on cancellation, emits a controlled LE within a BOUNDED
-// write deadline and then closes the transport so a parked reader is released promptly (independent of the
-// heartbeat read timeout). The read loop, cancellation and startup interact ONLY by submitting writeReqs —
-// no other goroutine writes. The request channel is BOUNDED (never an unbounded writer queue).
+// serialWriter is the sole owner of the outbound socket: exactly one goroutine (run) calls g.writeFrame, so
+// frames never overlap. It owns the idle-LA keepalive and, on cancellation, emits LE under a bounded write
+// deadline then closes the transport to release a parked reader. The request channel is bounded.
 type serialWriter struct {
 	g        *guardedConn
 	interval time.Duration // idle keepalive period (0 disables the idle LA)
 	reqCh    chan writeReq
-	done     chan struct{} // closed exactly once, when run returns
+	done     chan struct{}
 
 	errOnce sync.Once
 	err     error // the write failure that ended ownership (nil on clean cancellation)
@@ -44,11 +39,8 @@ func newSerialWriter(g *guardedConn, interval time.Duration) *serialWriter {
 	return &serialWriter{g: g, interval: interval, reqCh: make(chan writeReq, 8), done: make(chan struct{})}
 }
 
-// run is the single writer goroutine. It writes startup/ack/DR frames on request and a bare LA whenever the
-// connection has been idle for `interval`. ANY request (including an activity-only ping) resets the idle
-// timer. On ctx cancellation it writes a best-effort LE (controlled shutdown) THEN closes the transport to
-// unblock a parked reader; on any write failure it records the error, closes the transport, and returns
-// (ending ownership).
+// run: any request, including an activity-only ping, resets the idle timer. On cancellation it writes a
+// best-effort LE then closes the transport; a write failure records the error and ends ownership.
 func (w *serialWriter) run(ctx context.Context) {
 	defer close(w.done)
 	var idle *time.Ticker
@@ -66,14 +58,13 @@ func (w *serialWriter) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = w.g.writeFrame(pms.BuildLE()) // controlled shutdown, bounded by the write deadline
-			w.closeConn()                     // release a reader parked in ReadFramedRecord promptly
+			_ = w.g.writeFrame(pms.BuildLE())
+			w.closeConn()
 			return
 		case req := <-w.reqCh:
-			resetIdle() // any activity resets the keepalive timer
+			resetIdle()
 			if req.financial && req.guard != nil {
-				// THE FIRST-BYTE BOUNDARY (Phase-0 Amendment A1, rule 7). This is the last point at which the
-				// command is provably unwritten; after the next line, it may be with the PMS.
+				// First-byte boundary: the last point at which the command is provably unwritten.
 				if code := req.guard(); code != "" {
 					if req.ack != nil {
 						req.ack <- &GuardRefusedError{Code: code}
@@ -98,7 +89,7 @@ func (w *serialWriter) run(ctx context.Context) {
 			}
 			if err != nil {
 				w.fail(err)
-				return // write failure ends the ownership cycle
+				return
 			}
 		case <-idleC:
 			if err := w.g.writeFrame(pms.BuildLA()); err != nil {
@@ -116,13 +107,11 @@ func (w *serialWriter) fail(err error) {
 
 func (w *serialWriter) closeConn() {
 	if w.g != nil && w.g.c != nil {
-		_ = w.g.c.Close() // idempotent enough for net.Conn; unblocks a parked reader
+		_ = w.g.c.Close() // unblocks a parked reader
 	}
 }
 
-// Submit enqueues a fire-and-forget frame with bounded waiting. It returns when the frame is queued, when the
-// caller's context is cancelled, or when the writer has stopped (returning the writer's failure). A caller
-// never blocks indefinitely behind a stalled socket; the bounded channel provides back-pressure.
+// Submit is fire-and-forget; a caller never blocks indefinitely behind a stalled socket.
 func (w *serialWriter) Submit(ctx context.Context, body string) error {
 	select {
 	case w.reqCh <- writeReq{body: body}:
@@ -134,9 +123,7 @@ func (w *serialWriter) Submit(ctx context.Context, body string) error {
 	}
 }
 
-// SubmitSync writes a frame and waits for its result. Used for CRITICAL frames (startup LS/LD/LR, LA
-// acknowledgements, DR) so a write failure is observed by the caller immediately. Bounded by the caller's
-// context and by writer termination.
+// SubmitSync is for critical frames (startup, LA acks, DR) so a write failure is seen immediately.
 func (w *serialWriter) SubmitSync(ctx context.Context, body string) error {
 	ack := make(chan error, 1)
 	select {
@@ -156,20 +143,14 @@ func (w *serialWriter) SubmitSync(ctx context.Context, body string) error {
 	}
 }
 
-// GuardRefusedError is the writer's answer when a financial request's pre-write guard refused it. It PROVES
-// that no byte of the request was written: the guard runs before writeFinancialFrame, in the only goroutine
-// that writes.
+// GuardRefusedError proves no byte was written: the guard runs before writeFinancialFrame in the only writing goroutine.
 type GuardRefusedError struct{ Code string }
 
 func (e *GuardRefusedError) Error() string { return "pre-write guard refused: " + e.Code }
 
-// SubmitFinancial writes one PS through the single writer and reports whether the writer ever TOOK it.
-//
-// enqueued=false means provably nothing was written: the request never reached the writer. Once it is taken,
-// the write may be partial or complete whatever error follows, so the caller must treat any err as UNKNOWN.
-//
-// guard (may be nil) is evaluated by the writer immediately before the write; a refusal is returned as
-// (true, *GuardRefusedError), which the caller must treat as provably NOT written.
+// SubmitFinancial: enqueued=false means provably nothing was written. Once taken, the write may be partial
+// or complete whatever error follows, so treat any err as UNKNOWN. A guard refusal returns
+// (true, *GuardRefusedError), which is provably NOT written.
 func (w *serialWriter) SubmitFinancial(ctx context.Context, body string, guard func() string) (enqueued bool, err error) {
 	ack := make(chan error, 1)
 	select {
@@ -189,9 +170,7 @@ func (w *serialWriter) SubmitFinancial(ctx context.Context, body string, guard f
 	}
 }
 
-// activity resets the idle keepalive timer without writing. It is best-effort and NON-BLOCKING: if the
-// request channel is momentarily full the writer is already draining requests (each of which resets the
-// timer), so a dropped ping changes nothing.
+// activity is best-effort and non-blocking: a full channel means the writer is already resetting the timer.
 func (w *serialWriter) activity() {
 	select {
 	case w.reqCh <- writeReq{}:
@@ -199,8 +178,7 @@ func (w *serialWriter) activity() {
 	}
 }
 
-// stoppedErr returns the recorded write failure if any, else a generic link-ended code. Reading w.err after
-// observing w.done is safe: run sets w.err (in fail) before returning, and close(w.done) happens-after.
+// Reading w.err after observing w.done is safe: run sets it (in fail) before close(w.done).
 func (w *serialWriter) stoppedErr() error {
 	if w.err != nil {
 		return w.err

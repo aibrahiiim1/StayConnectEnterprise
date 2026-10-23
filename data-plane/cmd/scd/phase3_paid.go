@@ -1,22 +1,14 @@
 package main
 
-// PAID ACQUISITION FOR A VERIFIED STAY: PMS Room Charge and Card payment.
+// Paid acquisition for a verified stay. Room charge needs: room_charge effective, a posting code mapped on a
+// financially onboarded interface, package currency equal to interface currency (no FX), an IN_HOUSE stay with
+// posting_allowed and no unresolved room charge, and green freshness; the charge targets the reservation
+// (RN + G#), never a folio. Card payment needs card_payment effective and a currency the default account
+// accepts (iamv2.SiteMethods.CardApplicable).
 //
-// A client who proved their stay by Room sign-in is offered priced packages alongside the included ones, each
-// with only the methods that can succeed for THIS stay right now:
-//
-//	Room charge   room_charge effective; the package maps a posting code on the stay's interface; that interface
-//	              is financially onboarded; package currency == interface currency (no FX); the stay is
-//	              IN_HOUSE and posting_allowed (it has a reservation number and no posting block); it has no
-//	              unresolved room charge; every freshness axis is green. The charge targets the reservation
-//	              (RN + G#), never a folio (Phase-0 Amendment A1).
-//	Card payment  card_payment effective (provider ready) and the package currency acceptable to the default
-//	              account (iamv2.SiteMethods.CardApplicable: settled in it, or converted by its provider).
-//
-// Choosing one consumes the verified auth context and writes quote, purchase (AWAITING_SETTLEMENT) and a
-// REQUIRED settlement in ONE transaction; for a room charge the posting is created in that same transaction by
-// iam_v2.p4_create_room_charge_posting (evidence re-derived from the purchase; the insert gates decide).
-// NOTHING IS GRANTED HERE: access follows a PA=OK or a provider-verified capture.
+// Choosing one consumes the auth context and writes quote, purchase (AWAITING_SETTLEMENT) and a REQUIRED
+// settlement in one transaction (a room charge posting via iam_v2.p4_create_room_charge_posting). Nothing is
+// granted here: access follows a PA=OK or a provider-verified capture.
 
 import (
 	"context"
@@ -37,12 +29,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
-// stayMethodGate is the site's effective acquisition methods as the Room sign-in path reads them: the same
-// module resolver and default-account currency the commerce engine's gate uses (siteAcquisitionMethods). It is
-// a variable only so an integration test can stand in for the module resolver, which needs a licence.
+// stayMethodGate is a variable only so an integration test can replace the licence-dependent module resolver.
 var stayMethodGate = func(ctx context.Context, s *server) iamv2.SiteMethods { return s.siteAcquisitionMethods(ctx) }
 
-// stayMethods returns the acquisition methods this verified stay may use for one offered package now.
 func (p *phase3Auth) stayMethods(ctx context.Context, stayID, ifaceID string, d offerDecision) []string {
 	if d.PriceMinor == 0 {
 		if containsString(d.SettlementMethods, iamv2.AcquireFree) {
@@ -59,10 +48,8 @@ func (p *phase3Auth) stayMethods(ctx context.Context, stayID, ifaceID string, d 
 		p.roomChargeApplicable(ctx, stayID, ifaceID, d) {
 		out = append(out, iamv2.AcquireRoomCharge)
 	}
-	// The card currency, through the same rule every other path uses (iamv2.SiteMethods.CardApplicable). It was
-	// missing here: a room guest was offered card for a USD package on a GBP account that does not convert,
-	// choosing it consumed the verified context and committed the purchase AWAITING_SETTLEMENT, and then the
-	// payment gate refused the intent -- the guest saw a failure and the package stayed hidden for the stay.
+	// Card currency uses the shared iamv2.SiteMethods.CardApplicable rule; without it a guest could consume the
+	// context and commit a purchase the payment gate then refuses.
 	if site.Card && containsString(d.SettlementMethods, iamv2.AcquireCard) && site.CardApplicable(d.Currency) {
 		out = append(out, iamv2.AcquireCard)
 	}
@@ -78,9 +65,8 @@ func containsString(ss []string, v string) bool {
 	return false
 }
 
-// roomChargeApplicableSQL is every room-charge precondition in one statement, run as svc_scd. Everything it
-// reads is either a table svc_scd may read or a narrow definer (financial readiness, the open-charge check and
-// the interface freshness reader): svc_scd must not read pms_interface_runtime itself.
+// roomChargeApplicableSQL is every room-charge precondition in one statement, run as svc_scd, which must not
+// read pms_interface_runtime itself (only narrow definers).
 const roomChargeApplicableSQL = `
 		SELECT COALESCE((SELECT r.ready AND r.currency = $5 AND r.currency_exponent = $6
 		                   FROM iam_v2.pms_interface_financially_ready($1,$2,$3) r), false)
@@ -92,7 +78,7 @@ const roomChargeApplicableSQL = `
 		   AND NOT iam_v2.p4_stay_room_charge_open($4::uuid)
 		   AND iam_v2.p4_room_charge_interface_fresh($1,$2,$3)`
 
-// roomChargeApplicable asks the database every room-charge precondition in one statement. Any error is "no".
+// roomChargeApplicable treats any error as "no".
 func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID string, d offerDecision) bool {
 	var ok bool
 	err := p.srv.db.QueryRow(ctx, roomChargeApplicableSQL,
@@ -104,15 +90,13 @@ func (p *phase3Auth) roomChargeApplicable(ctx context.Context, stayID, ifaceID s
 	return ok
 }
 
-// paidPurchase handles a grant request whose chosen method is a paid one. The offer has already been locked
-// and its evidence re-checked by grantHandler.
+// paidPurchase handles a paid grant; grantHandler has already locked the offer and re-checked its evidence.
 func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx.Tx, req phase3GrantReq, dev deviceIdentity,
 	offeredTier *int) (signinattempt.Result, bool) {
 	ctx := r.Context()
 	acID := strings.TrimSpace(req.AuthContextID)
 	pkgRev := strings.TrimSpace(req.PackageRevID)
 
-	// The package, as the offer saw it -- re-read under the transaction.
 	var d offerDecision
 	var svcRev, pkgType string
 	var duration, alloc []byte
@@ -130,7 +114,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 	}
 	d.Currency = strings.TrimSpace(d.Currency)
 
-	// THE METHOD, re-validated now: the page's earlier state is never trusted.
+	// The method is re-validated now; the page's earlier state is never trusted.
 	var stayID, ifaceID string
 	if err := tx.QueryRow(ctx, `SELECT stay_id::text, pms_interface_id::text FROM iam_v2.auth_contexts
 		WHERE tenant_id=$1 AND site_id=$2 AND id=$3::uuid`, p.srv.tenID, p.srv.siteID, acID).Scan(&stayID, &ifaceID); err != nil {
@@ -146,7 +130,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: writer scope")
 		return signinattempt.ServiceUnavailable, false
 	}
-	// CONSUME the verified context exactly once, against its full pin set.
+	// Consume the verified context exactly once, against its full pin set.
 	consumed, err := authctx.NewStore(p.srv.db).ConsumeTx(ctx, tx, acID, authctx.Presenter{
 		Tenant: p.srv.tenID, Site: p.srv.siteID, Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork})
 	if err != nil {
@@ -154,8 +138,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		return signinattempt.ServiceUnavailable, false
 	}
 
-	// THE SNAPSHOT: the same typed snapshot the commerce engine builds, with the stay grant's own end shape
-	// and frozen per-night allowance.
+	// The commerce engine's typed snapshot, with the stay grant's end shape and frozen per-night allowance.
 	plan, err := p.planRevision(ctx, tx, svcRev)
 	if err != nil {
 		notVerified(w, signinattempt.ServiceUnavailable, "paid: plan")
@@ -234,7 +217,7 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 		var posting string
 		if err := tx.QueryRow(ctx, `SELECT iam_v2.p4_create_room_charge_posting($1,$2,$3)::text`,
 			p.srv.tenID, p.srv.siteID, settlementID).Scan(&posting); err != nil {
-			// The insert gates refused (folio, currency, stay, freshness): nothing is committed.
+			// The insert gates refused: nothing is committed.
 			notVerified(w, signinattempt.VerifiedNoEligiblePackage, "paid: posting refused: "+err.Error())
 			return signinattempt.VerifiedNoEligiblePackage, false
 		}
@@ -265,14 +248,13 @@ func (p *phase3Auth) paidPurchase(w http.ResponseWriter, r *http.Request, tx pgx
 }
 
 type phase3PaidResp struct {
-	Outcome     string `json:"outcome"` // PENDING
+	Outcome     string `json:"outcome"`
 	PurchaseID  string `json:"purchase_id"`
 	Method      string `json:"method"`
 	RedirectURL string `json:"redirect_url,omitempty"`
 	State       string `json:"state,omitempty"`
 }
 
-// planRevision reads the plan revision the snapshot is built from.
 func (p *phase3Auth) planRevision(ctx context.Context, tx pgx.Tx, id string) (iamv2.PlanRevisionRow, error) {
 	var r iamv2.PlanRevisionRow
 	var tq, dq *int64

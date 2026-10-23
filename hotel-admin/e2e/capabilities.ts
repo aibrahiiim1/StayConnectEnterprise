@@ -1,17 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 
-// WHAT A REAL APPLIANCE SAYS IT CAN DO.
-//
-// Since the site-modules delivery (D44), the Admin Console asks edged's /capabilities which surfaces are served
-// and which optional modules are licensed, and a module-owned page (stays, PMS connections, financial review,
-// sign-in protection, post-stay, transfers...) FAILS CLOSED when the answer does not confirm it: it shows "Not
-// enabled on this appliance". The browser suites mock edged, and their catch-all answered /capabilities with
-// `{}` -- an appliance that serves nothing -- so every module page rendered the not-enabled screen and 58 tests
-// timed out looking for content the product correctly refused to show.
-//
-// This is the answer of a fully licensed hotel appliance with every Phase flag on, in the exact shape edged
-// returns (read from PRE-LIVE: { surfaces: string[], modules: { <id>: ModuleFlags } }). It is installed AFTER a
-// spec's own catch-all, so it takes precedence for /capabilities only and changes nothing else a spec mocks.
+// Module pages fail closed without capabilities; install this full-hotel response after each spec's catch-all.
 
 const SURFACES = [
   "account-password-settings", "audit", "auth-methods", "backups", "checkout-grace", "commercial-packages", "diagnostics", "financial-ops",
@@ -49,7 +38,7 @@ export function fullHotelCapabilities() {
   return { surfaces: [...SURFACES], modules };
 }
 
-/** Answer /capabilities as a fully licensed hotel appliance. Call AFTER the spec's own catch-all route. */
+/** Register after catch-all routes so this response takes precedence for capabilities. */
 export async function installCapabilities(page: Page, caps = fullHotelCapabilities()) {
   await page.route("**/api/edge/v1/capabilities", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(caps) }));

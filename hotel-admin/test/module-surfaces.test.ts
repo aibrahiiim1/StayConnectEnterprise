@@ -3,11 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODULE_SURFACES, surfaceAvailable } from "@/lib/capabilities";
 
-// THE MENU'S LIST OF LICENCE-CONTROLLED SURFACES IS edged's LIST, NOT A SECOND OPINION.
-//
-// edged gates every module-owned surface per request (data-plane/cmd/edged/modules.go, surfaceModules). The
-// menu keeps its own copy only so it can fail closed before edged has answered; a copy that drifts would
-// either flash a licence-controlled destination or hide a core one. This reads the Go map and compares.
+// The menu's copy of licence-controlled surfaces must equal edged's surfaceModules (it exists only to fail closed
+// before edged answers).
 const EDGED = readFileSync(join(process.cwd(), "..", "data-plane", "cmd", "edged", "modules.go"), "utf8");
 
 function edgedSurfaces(): string[] {

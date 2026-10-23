@@ -1,14 +1,6 @@
 package main
 
-// TWENTY MEGABITS FOR THE ROOM, OR TWENTY PER PHONE.
-//
-// Both are real products and the plan revision now says which. PER_DEVICE is what every revision written
-// before the column existed promised, so it stays the default and the behaviour is unchanged. SHARED puts one
-// aggregate ceiling on the Entitlement and lets the devices under it borrow from it.
-//
-// The distinction that matters, and the one these tests pin, is that SHARED is NOT a division. A guest with
-// three devices, two of them asleep, gets the whole ceiling on the third. Reserving a third of the rate per
-// device would throttle an active guest while their own idle laptop held capacity it was not using.
+// SHARED puts one aggregate ceiling on an Entitlement and its devices borrow from it; it is not a division, so one active device gets the whole ceiling. PER_DEVICE is the default.
 
 import (
 	"context"
@@ -25,14 +17,9 @@ func allocSession(id, ip, ent, mode string) shapeplan.Session {
 		DownKbps: 20000, UpKbps: 5000, Entitled: true}
 }
 
-// allocMAC gives each address its own device, so the ownership check has something coherent to verify.
 func allocMAC(ip string) string { return "aa:bb:cc:00:00:" + ip[len(ip)-2:] }
 
-// allocWriter is a live writer whose DHCP evidence CONFIRMS every address these tests use.
-//
-// Shaping is what is under test here, and ownership verification sits in front of it: a writer with no
-// evidence source answers UNKNOWN, withholds the renewal and never reaches the class construction. Supplying
-// the leases keeps these tests about the thing they are named after.
+// allocWriter's DHCP evidence confirms every address, since unconfirmed ownership never reaches class construction.
 func allocWriter(t *testing.T, tc *fakeTC, g *fakeGate, ips ...string) *phase3Shaping {
 	t.Helper()
 	rows := make([]KeaLease, 0, len(ips))
@@ -45,8 +32,7 @@ func allocWriter(t *testing.T, tc *fakeTC, g *fakeGate, ips ...string) *phase3Sh
 	return p
 }
 
-// PER_DEVICE: no group is created and every session hangs off the root at its own rate — byte for byte what
-// the applier did before speed allocation existed.
+// PER_DEVICE: no group is created and each session hangs off the root at its own rate.
 func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
@@ -70,8 +56,7 @@ func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 	}
 }
 
-// An EMPTY mode is PER_DEVICE. Every plan revision that predates the column produces one, and none of them may
-// quietly become SHARED — that would halve a property's sold bandwidth without anything failing.
+// An empty mode is PER_DEVICE; older revisions produce one and must not become SHARED.
 func TestSpeedAllocation_UnsetModeIsPerDevice(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11")
@@ -88,8 +73,7 @@ func TestSpeedAllocation_UnsetModeIsPerDevice(t *testing.T) {
 	}
 }
 
-// SHARED: one group class per Entitlement, at the plan's rate, with both sessions under it — on the download
-// bridge AND the upload IFB, because a shared plan is shared in both directions.
+// SHARED: one group class per Entitlement, on both the download bridge and the upload IFB.
 func TestSpeedAllocation_SharedBuildsOneCeilingForTheEntitlement(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
@@ -119,8 +103,7 @@ func TestSpeedAllocation_SharedBuildsOneCeilingForTheEntitlement(t *testing.T) {
 	}
 }
 
-// TWO ACCOUNTS DO NOT POOL. Separate entitlements get separate ceilings, or one room's guests would be
-// spending another room's bandwidth.
+// Separate entitlements get separate ceilings.
 func TestSpeedAllocation_SeparateEntitlementsGetSeparateCeilings(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
@@ -139,8 +122,7 @@ func TestSpeedAllocation_SeparateEntitlementsGetSeparateCeilings(t *testing.T) {
 	}
 }
 
-// The group is created ONCE and re-rated, never replaced. Replacing it every pass would reset the aggregate
-// class's counters and, worse, momentarily drop the ceiling every device is borrowing from.
+// The group is created once and re-rated, never replaced: replacing resets counters and drops the ceiling.
 func TestSpeedAllocation_SharedGroupIsIdempotentAcrossPasses(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11")
@@ -156,8 +138,7 @@ func TestSpeedAllocation_SharedGroupIsIdempotentAcrossPasses(t *testing.T) {
 	}
 }
 
-// A SHARED session with no entitlement to group by is refused rather than silently given its own full rate.
-// Defaulting there would hand one device the whole ceiling and call it shared.
+// A SHARED session with no entitlement to group by is refused rather than given its own full rate.
 func TestSpeedAllocation_SharedWithoutAnEntitlementIsRefused(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
 	p := allocWriter(t, tc, g, "10.0.0.11")
@@ -175,8 +156,7 @@ func TestSpeedAllocation_SharedWithoutAnEntitlementIsRefused(t *testing.T) {
 	}
 }
 
-// The floor is a floor, not a slice. Whatever the group rate, one device's guaranteed rate must stay well
-// below the ceiling so HTB lends it everything the others are not using.
+// The floor is a floor, not a slice: it stays well below the ceiling so HTB lends the rest.
 func TestSpeedAllocation_TheSharedFloorIsNotADivision(t *testing.T) {
 	for _, tc := range []struct{ group, wantMax int }{
 		{group: 20000, wantMax: 20000},

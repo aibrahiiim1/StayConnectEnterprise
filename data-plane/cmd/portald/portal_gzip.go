@@ -1,13 +1,8 @@
 package main
 
-// THE PAGES, COMPRESSED ON THE WIRE.
-//
-// The sign-in page carries its whole stylesheet, its script and the six shipped dictionaries inline, and it is
-// read over a lobby's Wi-Fi by a phone that has no internet yet. Text compresses to a fraction of its size, so
-// every text response -- the pages, /api/branding, /api/languages, the JSON the sign-in script reads -- is
-// gzipped for a client that says it accepts gzip. Images are left alone: the formats the hotel can upload are
-// already compressed. Nothing about what a response says, or how it may be cached, changes; Cache-Control is
-// the handler's, and Vary tells any cache that the body depends on Accept-Encoding.
+// Text responses are gzipped for clients that accept it (the sign-in page is large and read over lobby
+// Wi-Fi). Images are left alone as already compressed. Cache-Control stays the handler's; Vary tells caches
+// the body depends on Accept-Encoding.
 
 import (
 	"bufio"
@@ -23,7 +18,6 @@ var gzipWriters = sync.Pool{New: func() any {
 	return w
 }}
 
-// compressible is the text a response may be compressed as.
 func compressible(contentType string) bool {
 	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
 	switch {
@@ -51,7 +45,6 @@ func acceptsGzip(r *http.Request) bool {
 	return false
 }
 
-// gzipResponses compresses text responses for clients that accept gzip.
 func gzipResponses(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Accept-Encoding")
@@ -65,8 +58,7 @@ func gzipResponses(next http.Handler) http.Handler {
 	})
 }
 
-// gzipResponseWriter decides at the first WriteHeader or Write, when the handler has set its headers, whether
-// this response is compressed.
+// gzipResponseWriter decides at the first WriteHeader or Write, once the handler's headers are set.
 type gzipResponseWriter struct {
 	http.ResponseWriter
 	decided bool
@@ -97,7 +89,7 @@ func (g *gzipResponseWriter) WriteHeader(status int) {
 
 func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 	if !g.decided {
-		// A handler that writes without naming a type gets one sniffed, exactly as net/http would.
+		// Sniff a type as net/http would.
 		if g.ResponseWriter.Header().Get("Content-Type") == "" {
 			g.ResponseWriter.Header().Set("Content-Type", http.DetectContentType(b))
 		}

@@ -13,7 +13,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-// X-11: failed sign-ins are audited -- within a budget, so an unauthenticated flood cannot fill the log.
 func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
@@ -25,7 +24,7 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO operators (email, password_hash, status) VALUES ('ops@central.test',$1,'active') RETURNING id::text`, hash).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	// The account lockout (0053) is raised out of the way: this test is about the audit budget, not the lock.
+	// Raise the lockout out of the way: this test is about the audit budget.
 	if _, err := pool.Exec(ctx, `UPDATE central_security_settings SET signin_lock_failures = 20 WHERE id`); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +55,7 @@ func TestFailedLoginsAreAuditedWithinABudget(t *testing.T) {
 	if unknown != 1 {
 		t.Fatalf("an unknown-email failure must be audited too, got %d", unknown)
 	}
-	// What was typed is not kept: an unknown name may be anyone's address, and a known one is the actor id.
+	// A typed email may be anyone's address, so it is never stored.
 	var typed int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action LIKE 'auth.%' AND payload::text LIKE '%@central.test%'`).Scan(&typed)
 	if typed != 0 {

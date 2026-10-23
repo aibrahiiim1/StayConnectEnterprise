@@ -18,12 +18,9 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
 )
 
-// authWindow is the durable-throttle fixed window length.
 const authWindow = time.Minute
 
-// The durable throttle's limits (per authWindow). Named constants rather than settings: they sit behind the
-// operator-visible sign-in protection settings (migration 0068) as an abuse damper, and making them settings
-// needs a schema change (recorded in the audit-remediation report).
+// Abuse dampers behind the operator-visible sign-in protection settings; deliberately not settings themselves.
 const (
 	throttleEndpointPerWindow = 600              // appliance-wide, all methods, all clients (global)
 	throttleClientPerWindow   = 30               // one source IP, or one device, for one method
@@ -31,8 +28,7 @@ const (
 	throttleBlock             = 15 * time.Minute // a client-scoped cap, once exceeded, blocks this long
 )
 
-// identityPerClient is the identity throttle's scope value: the identity together with the client making the
-// attempt (its device when known, otherwise its address). The store HMACs it before storage.
+// identityPerClient scopes the identity throttle to the identity plus the client making the attempt; the store HMACs it.
 func identityPerClient(identity string, ip net.IP, mac net.HardwareAddr) string {
 	client := ""
 	switch {
@@ -44,39 +40,15 @@ func identityPerClient(identity string, ip net.IP, mac net.HardwareAddr) string 
 	return identity + "\x00" + client
 }
 
-// initAuthSecurity constructs the Phase 1B dark-auth machinery and attaches it to the server. It is
-// FAIL-CLOSED for anything explicitly enabled: an enabled feature whose key material is missing or
-// disagrees with the database aborts startup rather than running with weakened enforcement. When a
-// feature flag is off the corresponding field stays nil and the legacy path runs unchanged.
-//
-// IAM-v2 is ALWAYS constructed here, but from LoadConfigFromEnv(production=true) with every method
-// flag defaulting OFF, so the authenticator short-circuits to DecisionDisabled without ever touching a
-// repository — and we pass a nil repository precisely because the master flag is off. Nothing in this
-// function issues a single IAM-v2 SQL statement.
+// initAuthSecurity fails closed for anything enabled: missing or inconsistent key material aborts startup.
+// IAM-v2 is always constructed with a nil repository while its master flag is off, so it issues no SQL.
 func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg, log *slog.Logger) error {
-	// --- dark IAM-v2 (always constructed, always inert unless env flags are set) ---
 	iamCfg, err := iamv2.LoadConfigFromEnv(os.Getenv, true)
 	if err != nil {
 		return fmt.Errorf("iamv2 config: %w", err)
 	}
-	// THE REPOSITORY IS WIRED WHEN, AND ONLY WHEN, THE MASTER FLAG IS ON.
-	//
-	// This used to return an error here, because wiring a real repository was deferred to the cutover. It is
-	// wired now so that the AUTHORIZED DEVELOPMENT trial (D31/T0068) can run IAM-v2 for real on a development
-	// appliance; the repository the accepted phases already built (iamv2.PgRepository, over the same pool this
-	// daemon already holds) is constructed here.
-	//
-	// WHAT THIS DOES NOT MEAN. An earlier version of this comment said the Product Owner had decided on a
-	// "CLEAN IAM-v2 REPLACEMENT", that IAM-v2 is the only IAM authority and that the legacy IAM is disposable.
-	// That was D30's wording, and D31 explicitly withdrew it as policy the Product Owner had never approved.
-	// The PRODUCTION IAM transition strategy is OPEN: no replacement, migration, dual-run or legacy-retirement
-	// approach is authorized, and nothing in this file may be read as adopting one. Wiring a repository for a
-	// development trial is not a transition decision.
-	//
-	// The nil-while-dark behaviour is deliberately unchanged: with the master flag OFF the authenticator is
-	// still constructed with NO repository, so it short-circuits to DecisionDisabled without ever issuing an
-	// IAM-v2 statement. Enabling is therefore a real enablement, not a fallback, and there is no path where a
-	// flagged-on IAM-v2 quietly serves from the legacy tables instead.
+	// The repository is wired only when the master flag is on; while off the authenticator has none and
+	// short-circuits to DecisionDisabled, never serving from legacy tables.
 	var iamRepo iamv2.Repository // nil: prefer NO repository while the master flag is OFF
 	if iamCfg.MasterEnabled {
 		if pool == nil {
@@ -84,21 +56,8 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		}
 		iamRepo = iamv2.NewPgRepository(pool)
 	}
-	// THE VOUCHER BLIND-INDEX HMAC, RESOLVED FROM THE KEY GENERATION.
-	//
-	// iam_v2.vouchers stores no plaintext code: it holds code_hmac, a blind index the authenticator
-	// recomputes from the submitted code to find the row. Without this option every VOUCHER attempt fails
-	// with "no voucher HMAC configured" -- enabled by flag and structurally incapable of succeeding.
-	//
-	// The key is NOT read straight out of a file. The accepted design (FINAL contract key hierarchy) is
-	// appliance secret store -> DEK -> per-generation voucher code key, and the schema enforces it: each
-	// voucher pins code_key_generation_id, and the generation row carries hmac_key_ciphertext sealed under
-	// encryption_key_id. So the index key is resolved PER GENERATION and opened with the DEK, which is what
-	// makes rotation and supersession possible at all -- a raw file key could never be superseded, and no
-	// voucher could name the key that indexed it.
-	//
-	// An earlier iteration did read the file directly as the HMAC key. That collapsed the DEK and the
-	// blind-index key onto one physical secret and bypassed the generation lifecycle; it is replaced here.
+	// Vouchers store only a blind-index HMAC. Its key is resolved per generation and opened with the DEK
+	// (not read from a raw file) so rotation and supersession work.
 	var authOpts []iamv2.Option
 	if iamCfg.Enabled(iamv2.MethodVoucher) {
 		dekPath := filepath.Join(c.SecretsDir, voucherDEKFile)
@@ -108,8 +67,7 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 				"(run keybootstrap at deploy): %w", dekPath, err)
 		}
 		kr := iamv2.MapVoucherKeyring{voucherDEKID: dek}
-		// Candidates, not a single index: after a rotation a voucher issued under the previous generation can
-		// only be found by also trying that generation's key. See newGenerationVoucherHMAC.
+		// Candidates: after a rotation, a voucher issued under the previous generation is found only by trying that key too.
 		authOpts = append(authOpts, iamv2.WithVoucherHMACCandidates(
 			newGenerationVoucherHMAC(pool, kr)))
 	}
@@ -118,18 +76,14 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		return fmt.Errorf("iamv2 new: %w", err)
 	}
 	s.iamv2Auth = auth
-	// KEEP THE CONFIG. The guest entry points must decide authority from the same value this Authenticator
-	// was gated on; reading the environment a second time, or keeping a separate copy, is how the two drift.
+	// Keep the config: guest entry points must decide authority from the value the Authenticator was gated on.
 	s.iamv2Cfg = iamCfg
 	log.Info("iamv2 authenticator constructed", "flags", iamCfg.SafeFlagSummary())
 
-	// --- dark Phase-2 commerce (always constructed, inert unless env flags are set) ---
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
 	if err != nil {
 		return fmt.Errorf("phase2 commerce config: %w", err)
 	}
-	// Same shape as the authenticator above, and for the same reason: the accepted Phase-2 commerce repository
-	// is constructed when the master flag is on, and left nil while it is off.
 	var commRepo iamv2.CommerceRepository // nil: NO repository while the master flag is OFF
 	if commCfg.MasterEnabled {
 		if pool == nil {
@@ -137,14 +91,10 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		}
 		commRepo = iamv2.NewPgCommerceRepository(pool)
 	}
-	// PHASE 6 (DARK by default): the commerce engine's aggregate acquisition capability is derived from the
-	// SAME flag that turns on acctd's accrual tick, and from the same fail-closed reader the grant path uses.
-	// A runtime that could create an aggregate entitlement it cannot account for is the state the gate
-	// exists to prevent, so the two must never be configured independently.
+	// Same flag as acctd's accrual tick: the aggregate acquisition capability and the accrual tick must never be configured independently.
 	comm, err := iamv2.NewCommerceEngine(commCfg, commRepo, iamv2.NopObserver{},
 		iamv2.WithAggregateOnlineTime(phase6AggregateOn()),
-		// Which optional acquisition methods are effective at this site is the module resolver's answer (all
-		// four gates, readiness included), read on every list, quote and confirm -- never cached here.
+		// Effective acquisition methods come from the module resolver, read on every call and never cached.
 		iamv2.WithMethodGate(s.siteAcquisitionMethods))
 	if err != nil {
 		return fmt.Errorf("phase2 commerce new: %w", err)
@@ -153,7 +103,6 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	s.commerceCfg = commCfg
 	log.Info("phase2 dark commerce engine constructed", "flags", commCfg.SafeFlagSummary())
 
-	// --- durable throttle (D4) ---
 	if c.DurableThrottle {
 		keyPath := filepath.Join(c.SecretsDir, "throttle.key")
 		key, err := localkeys.LoadExistingKey(keyPath) // runtime is load-only; absent => fail closed
@@ -168,7 +117,6 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		log.Info("durable auth throttle enabled")
 	}
 
-	// --- keyed-HMAC OTP ring (D7) ---
 	if c.OTPHMAC {
 		ring, err := loadOTPRing(ctx, pool, c.SecretsDir)
 		if err != nil {
@@ -180,9 +128,7 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	return nil
 }
 
-// loadOTPRing loads the OTP generation key files (runtime load-only) and validates them against the
-// database lifecycle metadata: exactly one active generation, and key material present for the active
-// generation and every generation still referenced by an unexpired OTP. Any disagreement fails closed.
+// loadOTPRing validates the key files against the database lifecycle metadata; any disagreement fails closed.
 func loadOTPRing(ctx context.Context, pool *pgxpool.Pool, secretsDir string) (*otpkey.Ring, error) {
 	keys, err := localkeys.LoadGenerationKeys(secretsDir, keybootstrap.OTPPrefix)
 	if err != nil {
@@ -225,22 +171,14 @@ func referencedOTPGenerations(ctx context.Context, pool *pgxpool.Pool) ([]int, e
 	return out, rows.Err()
 }
 
-// throttleGuard charges the durable throttle for one auth attempt with an EXPLICIT method and returns
-// whether the attempt may proceed. It fails closed (deny) on any store error. Scope values are HMAC'd
-// inside the store, so no raw IP/MAC/identity is persisted or logged here. When the durable throttle
-// is disabled this is a no-op that always allows (legacy in-memory limiter still applies where wired).
-//
-// method must be one of the throttle package's known methods (account|otp|voucher|social|pms). The
-// identity value is an already-non-sensitive selector (e.g. lowercased username or destination); pass
-// "" to skip that dimension.
+// throttleGuard charges the durable throttle for one auth attempt and fails closed (deny) on store error; a no-op allow when disabled.
+// method must be a known throttle method; identity is an already-non-sensitive selector ("" skips it).
 func (s *server) throttleGuard(ctx context.Context, method string, ip net.IP, mac net.HardwareAddr, identity string) (bool, time.Duration) {
 	if s.authThrottle == nil {
 		return true, 0
 	}
 	rules := []throttle.Rule{
-		// Endpoint-wide damper shared across methods (deliberate MethodAny). GLOBAL: charged only when this
-		// client's own rules allowed the attempt, so one client -- refused or blocked by its own caps -- cannot
-		// use up the budget every guest shares (audit B-10).
+		// Endpoint-wide damper, charged only when the client's own rules allowed the attempt, so one blocked client cannot use up the shared budget.
 		{Kind: throttle.ScopeEndpoint, Value: "auth", Method: throttle.MethodAny, Limit: throttleEndpointPerWindow, Global: true},
 	}
 	if ip != nil {
@@ -250,11 +188,7 @@ func (s *server) throttleGuard(ctx context.Context, method string, ip net.IP, ma
 		rules = append(rules, throttle.Rule{Kind: throttle.ScopeDevice, Value: mac.String(), Method: method, Limit: throttleClientPerWindow, Block: throttleBlock})
 	}
 	if identity != "" {
-		// THE IDENTITY IS COUNTED PER CLIENT (audit B-10). Keyed on the identity alone, eleven wrong attempts at
-		// somebody else's address from any device blocked THAT PERSON's sign-ins on every device for fifteen
-		// minutes -- a lock-out anyone could aim. Keyed on (identity, this device) -- or this IP when no device
-		// is known -- the block lands on the client making the attempts. Spreading guesses over many devices is
-		// bounded by the per-device and per-IP caps above and by the account's own failed-attempt lockout.
+		// Count the identity per client: keyed on identity alone, anyone could lock a person out by guessing wrong at their address.
 		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: identityPerClient(identity, ip, mac),
 			Method: method, Limit: throttleIdentityPerWindow, Block: throttleBlock})
 	}

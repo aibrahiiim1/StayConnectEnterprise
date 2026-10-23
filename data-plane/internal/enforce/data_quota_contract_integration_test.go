@@ -2,17 +2,10 @@
 
 package enforce
 
-// THE QUOTA CONTRACT, PROVEN THROUGH THE OPERATION THE APPLIANCE ACTUALLY RUNS.
-//
-// Every other quota test in this package inserts into iam_v2.accounting_records directly. That proves the
-// DERIVED crossing and nothing else — and it is exactly why a real defect survived a green suite for the whole
-// life of the product: iam_v2.ingest_absolute_counters, the operation acctd calls on every tick, advanced the
-// accounting record, the session totals and the checkpoint, but never the ENTITLEMENT's own consumed_data_bytes.
-// On the appliance all four entitlements read 0 bytes and usage_version 0 while a real guest moved 35 MB.
-//
-// The tested path and the live path were different paths. So these cases go through the live one: every byte
-// below enters as an ABSOLUTE counter reading submitted to the real ingestion operation, with the real
-// checkpoint, replay, epoch and attribution rules in the way — because those rules are the contract.
+// The quota contract, proven through the operation acctd runs. Other quota tests insert into
+// iam_v2.accounting_records directly and prove only the derived crossing; here every byte enters as an absolute
+// counter reading submitted to iam_v2.ingest_absolute_counters, with the real checkpoint, replay, epoch and
+// attribution rules, which also advance the entitlement's own consumed_data_bytes.
 
 import (
 	"context"
@@ -22,13 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ---------------------------------------------------------------------------------------------------------
-// fixtures
-// ---------------------------------------------------------------------------------------------------------
-
-// quotaSeed builds a site whose plan revision carries an explicit quota, speed allocation and time mode. It is
-// separate from seed() because two of those three are the axes this file varies, and the contract says none of
-// them may change data-quota semantics.
+// quotaSeed builds a site whose plan revision carries an explicit quota, speed allocation and time mode; none
+// of them may change data-quota semantics.
 func quotaSeed(t *testing.T, p *pgxpool.Pool, quota any, alloc, timeMode string) fixture {
 	t.Helper()
 	var f fixture
@@ -63,11 +51,9 @@ func quotaSeed(t *testing.T, p *pgxpool.Pool, quota any, alloc, timeMode string)
 	return f
 }
 
-// measured is a session the ingestion operation will accept: it carries the ingress interface and address the
-// operation re-derives its counter source from. A session without them cannot be metered at all, by design.
+// measured is a session the ingestion operation accepts: it needs the ingress interface and address, or it cannot be metered.
 type measured struct{ id, device, ip, iface string }
 
-// meteredSession attaches a device to an entitlement and opens a live session on a named bridge and address.
 func meteredSession(t *testing.T, p *pgxpool.Pool, f fixture, ent, ip, mac, iface string, at time.Time) measured {
 	t.Helper()
 	ctx := context.Background()
@@ -90,15 +76,13 @@ func meteredSession(t *testing.T, p *pgxpool.Pool, f fixture, ent, ip, mac, ifac
 	return measured{id: sess, device: dev, ip: ip, iface: iface}
 }
 
-// firstMeteredSession is the same for the session grant() already created: it needs an interface before the
-// ingestion operation will measure it.
+// firstMeteredSession is the same for the session grant() created, which needs an interface before it is measured.
 func onBridge(t *testing.T, p *pgxpool.Pool, sess, iface string) measured {
 	t.Helper()
 	var m measured
 	m.id, m.iface = sess, iface
-	// A session's ingress interface is accounting identity, which only the ingestion owner may change on the
-	// production schema. This is a SEED (the session grant() opened is placed on a bridge before any reading
-	// exists), so it runs as iam_v2_owner — what the test login was on the historical scratch chain.
+	// A session's ingress interface is accounting identity, which only the ingestion owner may change; this
+	// seed runs as iam_v2_owner.
 	ctx := context.Background()
 	tx := ownerTx(t, p)
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -112,8 +96,7 @@ func onBridge(t *testing.T, p *pgxpool.Pool, sess, iface string) measured {
 	return m
 }
 
-// submit hands the operation an ABSOLUTE counter reading, exactly as acctd does. The class minor is derived by
-// the database from the session's own address, so the test does not get to choose it.
+// submit hands the operation an absolute counter reading, as acctd does; the database derives the class minor.
 func submit(t *testing.T, p *pgxpool.Pool, f fixture, m measured, epoch, absUp, absDown int64, at time.Time) string {
 	t.Helper()
 	var got string
@@ -127,7 +110,6 @@ func submit(t *testing.T, p *pgxpool.Pool, f fixture, m measured, epoch, absUp, 
 	return got
 }
 
-// submitErr is submit for the cases that MUST be refused.
 func submitErr(t *testing.T, p *pgxpool.Pool, f fixture, m measured, epoch, absUp, absDown int64, at time.Time) error {
 	t.Helper()
 	var got string
@@ -137,8 +119,7 @@ func submitErr(t *testing.T, p *pgxpool.Pool, f fixture, m measured, epoch, absU
 		f.tenant, f.site, m.id, m.device, m.iface, m.ip, epoch, absUp, absDown, at).Scan(&got)
 }
 
-// recorded is what the ENTITLEMENT says it has spent; attributed is what the accounting series says. The whole
-// defect was that the first never moved, so every case below asserts on both.
+// recorded is what the entitlement says it spent; attributed is what the accounting series says. Cases assert on both.
 func recorded(t *testing.T, p *pgxpool.Pool, ent string) int64 {
 	t.Helper()
 	var n int64
@@ -159,8 +140,7 @@ func attributed(t *testing.T, p *pgxpool.Pool, ent string) int64 {
 	return n
 }
 
-// agree is the invariant the migration asserts and every case re-checks: the maintained counter and the
-// derived series are two views of one fact and may never diverge.
+// agree asserts the maintained counter and the derived series never diverge.
 func agree(t *testing.T, p *pgxpool.Pool, ent string, want int64) {
 	t.Helper()
 	r, a := recorded(t, p, ent), attributed(t, p, ent)
@@ -183,12 +163,7 @@ func status(t *testing.T, p *pgxpool.Pool, ent string) string {
 	return s
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 1. THE DEFECT ITSELF
-// ---------------------------------------------------------------------------------------------------------
-
-// THE REGRESSION. One session, real ingestion, and the Entitlement must record what it spent. Before the fix
-// this failed on the first assertion with 0 — which is precisely what the appliance showed.
+// One session, real ingestion: the entitlement must record what it spent.
 func TestIntegration_Quota_TheEntitlementRecordsWhatItSpent(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -197,19 +172,17 @@ func TestIntegration_Quota_TheEntitlementRecordsWhatItSpent(t *testing.T) {
 	ent, sess := grant(t, p, f, nil, at)
 	m := onBridge(t, p, sess, "br-g-test")
 
-	// The first reading is the BASELINE: nothing is billed, because there is nothing to subtract from.
+	// The first reading is the baseline: nothing is billed.
 	if got := submit(t, p, f, m, 1, 0, 0, at.Add(time.Minute)); got != "BASELINED" {
 		t.Fatalf("first observation = %q, want BASELINED", got)
 	}
 	agree(t, p, ent, 0)
 
-	// 12 MB of real movement.
 	if got := submit(t, p, f, m, 1, 2_000_000, 10_000_000, at.Add(2*time.Minute)); got != "ACCEPTED" {
 		t.Fatalf("observation = %q, want ACCEPTED", got)
 	}
 	agree(t, p, ent, 12_000_000)
 
-	// ...and it accumulates rather than being replaced.
 	submit(t, p, f, m, 1, 3_000_000, 15_000_000, at.Add(3*time.Minute))
 	agree(t, p, ent, 18_000_000)
 
@@ -223,7 +196,7 @@ func TestIntegration_Quota_TheEntitlementRecordsWhatItSpent(t *testing.T) {
 	}
 }
 
-// MONOTONIC. The contract's before-crossing requirement: usage only ever increases, sample after sample.
+// Usage only ever increases, sample after sample.
 func TestIntegration_Quota_UsageIncreasesMonotonically(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -248,11 +221,7 @@ func TestIntegration_Quota_UsageIncreasesMonotonically(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 2. AGGREGATION — the property the whole contract rests on
-// ---------------------------------------------------------------------------------------------------------
-
-// TWO DEVICES, ONE ALLOWANCE, THROUGH THE REAL OPERATION. Neither device crosses it alone.
+// Two devices, one allowance: neither device crosses it alone.
 func TestIntegration_Quota_TwoDevicesSpendOneAllowance(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -282,14 +251,13 @@ func TestIntegration_Quota_TwoDevicesSpendOneAllowance(t *testing.T) {
 		t.Fatalf("the aggregate crossing did not end access: %+v — a second device must not buy a second "+
 			"allowance", due)
 	}
-	// EVERY session under it is torn down, not just the one that happened to cross.
+	// Every session under it is torn down, not just the one that crossed.
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id=$1 AND ended IS NULL`, ent); n != 0 {
 		t.Fatalf("%d session(s) still live under an exhausted entitlement", n)
 	}
 }
 
-// A NEW ADDRESS IS NOT A NEW ALLOWANCE. The guest's phone moves to a different address on a different bridge,
-// which opens a NEW session — the exact shape that would reset a per-session counter.
+// A new address (a new session on another bridge) is not a new allowance; a per-session counter would reset.
 func TestIntegration_Quota_MovingToANewAddressDoesNotResetUsage(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -302,21 +270,18 @@ func TestIntegration_Quota_MovingToANewAddressDoesNotResetUsage(t *testing.T) {
 	submit(t, p, f, first, 1, 20_000_000, 50_000_000, at.Add(time.Minute)) // 70 MB
 	agree(t, p, ent, 70_000_000)
 
-	// The old session ends (lease lost, roaming, reconnect — the reason does not matter) and a new one opens
-	// on a new address under the SAME entitlement.
+	// The old session ends and a new one opens on a new address under the same entitlement.
 	if _, err := p.Exec(ctx, `SELECT iam_v2.close_session($1,'ADDRESS_NO_LONGER_OWNED')`, first.id); err != nil {
 		t.Fatal(err)
 	}
 	moved := meteredSession(t, p, f, ent, "10.20.31.77", "02:00:00:00:40:11", "br-g-two", at.Add(2*time.Minute))
 	submit(t, p, f, moved, 1, 0, 0, at.Add(2*time.Minute))
 
-	// The allowance did not start again: 70 MB is still spent.
 	agree(t, p, ent, 70_000_000)
 	if due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site); err != nil || len(due) != 0 {
 		t.Fatalf("unexpected expiry before the quota: %+v (err %v)", due, err)
 	}
 
-	// 40 MB on the new address crosses the SHARED total, not a fresh one.
 	submit(t, p, f, moved, 1, 10_000_000, 30_000_000, at.Add(3*time.Minute))
 	agree(t, p, ent, 110_000_000)
 	due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
@@ -328,12 +293,7 @@ func TestIntegration_Quota_MovingToANewAddressDoesNotResetUsage(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 3. IDEMPOTENCE — a retry is not traffic
-// ---------------------------------------------------------------------------------------------------------
-
-// THE SAME READING TWICE IS NOT TWICE THE BYTES. An uncertain commit and a retry is ordinary; counting it
-// would let a flaky link exhaust a guest's package without them using anything.
+// The same reading twice is not twice the bytes, or a flaky link could exhaust a guest's package.
 func TestIntegration_Quota_DuplicateReadingsDoNotDoubleCount(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -345,7 +305,6 @@ func TestIntegration_Quota_DuplicateReadingsDoNotDoubleCount(t *testing.T) {
 	submit(t, p, f, m, 1, 5_000_000, 20_000_000, at.Add(time.Minute))
 	agree(t, p, ent, 25_000_000)
 
-	// Replay the identical reading four times.
 	for i := 0; i < 4; i++ {
 		got := submit(t, p, f, m, 1, 5_000_000, 20_000_000, at.Add(time.Minute))
 		if got != "REPLAY:ACCEPTED" && got != "DUPLICATE" {
@@ -354,15 +313,14 @@ func TestIntegration_Quota_DuplicateReadingsDoNotDoubleCount(t *testing.T) {
 	}
 	agree(t, p, ent, 25_000_000)
 
-	// An OUT-OF-ORDER delivery is refused outright and must not move the counter either.
+	// An out-of-order delivery is refused and must not move the counter.
 	if err := submitErr(t, p, f, m, 1, 6_000_000, 21_000_000, at.Add(30*time.Second)); err == nil {
 		t.Fatal("a sample dated before the last accepted one was accepted")
 	}
 	agree(t, p, ent, 25_000_000)
 }
 
-// A COUNTER RESET IS A NEW BASELINE, NOT A REFUND AND NOT A WINDFALL. netd replacing a class bumps the epoch;
-// the bytes already spent stay spent.
+// A counter reset (netd replacing a class bumps the epoch) is a new baseline: spent bytes stay spent.
 func TestIntegration_Quota_AClassReplacementKeepsTheSpentBytes(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -374,7 +332,6 @@ func TestIntegration_Quota_AClassReplacementKeepsTheSpentBytes(t *testing.T) {
 	submit(t, p, f, m, 1, 8_000_000, 22_000_000, at.Add(time.Minute))
 	agree(t, p, ent, 30_000_000)
 
-	// New epoch: the kernel counters legitimately restart from zero.
 	if got := submit(t, p, f, m, 2, 0, 0, at.Add(2*time.Minute)); got != "RESET_BASELINED" {
 		t.Fatalf("epoch bump = %q, want RESET_BASELINED", got)
 	}
@@ -383,19 +340,14 @@ func TestIntegration_Quota_AClassReplacementKeepsTheSpentBytes(t *testing.T) {
 	submit(t, p, f, m, 2, 1_000_000, 4_000_000, at.Add(3*time.Minute))
 	agree(t, p, ent, 35_000_000) // and counting continues on top
 
-	// An OLDER epoch is a stale reading and is refused.
+	// An older epoch is stale and refused.
 	if err := submitErr(t, p, f, m, 1, 9_000_000, 30_000_000, at.Add(4*time.Minute)); err == nil {
 		t.Fatal("a reading from a superseded epoch was accepted")
 	}
 	agree(t, p, ent, 35_000_000)
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 4. THE CROSSING
-// ---------------------------------------------------------------------------------------------------------
-
-// EXACTLY ONCE, AT THE SAMPLE THAT CROSSED IT. The instant is the sample's, not the sweep's, and a second
-// sweep changes nothing.
+// The crossing happens once, at the crossing sample's instant (not the sweep's); a second sweep changes nothing.
 func TestIntegration_Quota_CrossingTerminatesExactlyOnceAtTheCrossingSample(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -424,7 +376,6 @@ func TestIntegration_Quota_CrossingTerminatesExactlyOnceAtTheCrossingSample(t *t
 		t.Fatalf("entitlement is %s after crossing its quota", s)
 	}
 
-	// ONE transition. A second sweep must not re-terminate, re-date, or report anything.
 	n1 := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id=$1`, ent)
 	again, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
 	if err != nil {
@@ -438,7 +389,7 @@ func TestIntegration_Quota_CrossingTerminatesExactlyOnceAtTheCrossingSample(t *t
 	}
 }
 
-// LATE ACCOUNTING MAY DEEPEN THE AUDIT TRAIL. IT MAY NOT REOPEN ACCESS.
+// Late accounting may deepen the audit trail but may not reopen access.
 func TestIntegration_Quota_LateAccountingCannotReopenAccess(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -457,8 +408,7 @@ func TestIntegration_Quota_LateAccountingCannotReopenAccess(t *testing.T) {
 	}
 	spent := recorded(t, p, ent)
 
-	// The session is over, so the operation refuses further readings for it outright — an ended session owns
-	// no further traffic. Access cannot be revived by submitting more.
+	// An ended session owns no further traffic, so more readings are refused.
 	if err := submitErr(t, p, f, m, 1, 45_000_000, 75_000_000, at.Add(2*time.Minute)); err == nil {
 		t.Fatal("the operation accepted a reading for a session whose entitlement had ended")
 	}
@@ -471,7 +421,7 @@ func TestIntegration_Quota_LateAccountingCannotReopenAccess(t *testing.T) {
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id=$1 AND ended IS NULL`, ent); n != 0 {
 		t.Fatalf("%d session(s) live again after termination", n)
 	}
-	// AND NO REPLACEMENT WAS CONJURED. Exhaustion ends access; it does not silently sell another package.
+	// Exhaustion ends access; it does not silently sell another package.
 	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay); n != 1 {
 		t.Fatalf("%d entitlements exist for the stay; exhaustion must not create another", n)
 	}
@@ -480,8 +430,7 @@ func TestIntegration_Quota_LateAccountingCannotReopenAccess(t *testing.T) {
 	}
 }
 
-// A SWEEP THAT RESTARTS MID-STAY FINDS THE SAME NUMBER. Usage is durable state, not something a process
-// remembers: the enforcer is thrown away and rebuilt between every sample here.
+// Usage is durable state: the enforcer is rebuilt between every sample here.
 func TestIntegration_Quota_UsageSurvivesRestartAndReconcile(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -494,7 +443,6 @@ func TestIntegration_Quota_UsageSurvivesRestartAndReconcile(t *testing.T) {
 
 	for i := 1; i <= 5; i++ {
 		submit(t, p, f, m, 1, int64(i)*4_000_000, int64(i)*10_000_000, at.Add(time.Duration(i)*time.Minute))
-		// a brand-new Enforcer every pass: nothing is carried in memory
 		if _, err := New(p).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
 			t.Fatal(err)
 		}
@@ -505,11 +453,7 @@ func TestIntegration_Quota_UsageSurvivesRestartAndReconcile(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 5. THE AXES THAT MUST NOT CHANGE QUOTA SEMANTICS
-// ---------------------------------------------------------------------------------------------------------
-
-// SHARED SPEED ALLOCATION IS A SHAPING DECISION, NOT A QUOTA ONE. The same aggregate rule applies.
+// Shared speed allocation is a shaping decision, not a quota one; the same aggregate rule applies.
 func TestIntegration_Quota_SharedAllocationObeysTheSameAggregateQuota(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -534,8 +478,7 @@ func TestIntegration_Quota_SharedAllocationObeysTheSameAggregateQuota(t *testing
 	}
 }
 
-// A PLAN WITH NO QUOTA IS UNLIMITED, and stays unlimited however much is spent. The counter still records it —
-// unlimited means no ceiling, not no measurement.
+// A plan with no quota is unlimited however much is spent, but the counter still records it.
 func TestIntegration_Quota_NoQuotaMeansUnlimited(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -560,8 +503,7 @@ func TestIntegration_Quota_NoQuotaMeansUnlimited(t *testing.T) {
 	}
 }
 
-// THE OUTER WINDOW AND THE QUOTA ARE INDEPENDENT. A VALIDITY_WINDOW entitlement whose window has NOT elapsed
-// still runs out of data, and the reason recorded is DATA rather than TIME.
+// The window and the quota are independent: a VALIDITY_WINDOW entitlement within its window still runs out of data (reason DATA).
 func TestIntegration_Quota_DataQuotaAppliesUnderValidityWindow(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -583,10 +525,8 @@ func TestIntegration_Quota_DataQuotaAppliesUnderValidityWindow(t *testing.T) {
 	}
 }
 
-// DATA QUOTA IS NOT A PHASE-6 FEATURE. This is the coupling the Product Owner asked about explicitly: the
-// aggregate ONLINE-TIME mode is dark, and data enforcement must be completely independent of it. The enforcer
-// here is the plain one — no WithAggregateOnlineTime, charge bound zero — which is the configuration a
-// rollback or a disabled flag produces.
+// Data enforcement must be independent of the aggregate online-time mode; the plain Enforcer here (no
+// WithAggregateOnlineTime) is what a rollback or disabled flag produces.
 func TestIntegration_Quota_EnforcedWithTheAggregateTimeFeatureOff(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -599,7 +539,7 @@ func TestIntegration_Quota_EnforcedWithTheAggregateTimeFeatureOff(t *testing.T) 
 	submit(t, p, f, m, 1, 30_000_000, 80_000_000, at.Add(time.Minute))
 	agree(t, p, ent, 110_000_000)
 
-	e := New(p) // aggregateTimeMaxCharge == 0: the Phase-6 tick never runs
+	e := New(p)
 	if e.aggregateTimeMaxCharge != 0 {
 		t.Fatal("this case is meaningless unless the aggregate-time feature is off")
 	}
@@ -611,19 +551,10 @@ func TestIntegration_Quota_EnforcedWithTheAggregateTimeFeatureOff(t *testing.T) 
 		t.Fatalf("data quota was not enforced with the aggregate-time feature off: %+v — the two semantics "+
 			"are independent and must not be coupled", due)
 	}
-	// The flag-ON direction is NOT asserted here: turning the tick on requires p6_tick_online_time, which
-	// exists only on a Phase-6 schema, and this suite runs on the Phase-3/5 chain. It is already covered by
-	// the Phase-6 suite, which runs DATA terminations with the tick enabled. What this case owns is the
-	// direction that had never been proven anywhere: with the Phase-6 feature completely absent, the data
-	// quota is still enforced.
+	// The flag-on direction needs p6_tick_online_time and is covered by the Phase-6 suite.
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 6. NOTHING FINANCIAL IS INVOLVED
-// ---------------------------------------------------------------------------------------------------------
-
-// RUNNING OUT OF DATA IS NOT A FINANCIAL EVENT. No posting, no attempt, no outbox row, no payment — a guest
-// hitting their allowance must never touch the PMS or a payment provider.
+// Running out of data is not a financial event: no posting, outbox row or payment may result.
 func TestIntegration_Quota_ExhaustionTouchesNothingFinancial(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -649,19 +580,10 @@ func TestIntegration_Quota_ExhaustionTouchesNothingFinancial(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// 7. THE CROSSING SAMPLE STILL BELONGS TO THE ENTITLEMENT THAT SPENT IT
-// ---------------------------------------------------------------------------------------------------------
-//
-// On the live acceptance the maintained counter and the derived usage disagreed by exactly one sample: the
-// crossing itself. The Entitlement terminated at that sample's instant, so the Session's binding closed at
-// the same instant, and a strictly half-open interval drops a sample landing exactly on its close. The sample
-// that ended the access stopped being attributed to the access it ended.
-//
-// The half-open bound stays: it is what makes a Phase-5 rebinding unambiguous. Only the terminal case - where
-// no successor binding covers the instant - lets the closing binding keep its own last sample.
-
-// AFTER A DATA TERMINATION, the counter and the derived usage agree, and both include the crossing sample.
+// The crossing sample still belongs to the entitlement that spent it: the binding closes at the termination
+// instant, and a strictly half-open interval would drop a sample landing on its close. The half-open bound stays
+// (it makes a rebinding unambiguous); only the terminal case, with no successor binding, keeps its last sample.
+// After a data termination the counter and derived usage agree and both include the crossing sample.
 func TestIntegration_Quota_CrossingSampleStaysAttributedAfterTermination(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -687,17 +609,13 @@ func TestIntegration_Quota_CrossingSampleStaysAttributedAfterTermination(t *test
 		t.Fatalf("expiry = %+v, want one DATA termination", due)
 	}
 
-	// THE REGRESSION. Before the fix the derived value dropped to 90,000,000 here - the crossing sample fell
-	// outside the interval the instant the interval closed - while the counter stayed at 105,000,000.
 	agree(t, p, ent, 105_000_000)
 	if s := status(t, p, ent); s != "TERMINATED" {
 		t.Fatalf("entitlement is %s", s)
 	}
 }
 
-// A PHASE-5 REBINDING AT AN EXACT BOUNDARY IS STILL COUNTED ONCE, AND BY THE SUCCESSOR. This is what the
-// half-open bound protects, and the terminal fallback must not reach it: at a rebinding the successor covers
-// the instant, so the closing binding cannot also claim it.
+// A rebinding at an exact boundary is counted once, by the successor, which covers the instant.
 func TestIntegration_Quota_RebindingBoundarySampleIsCountedOnce(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -710,38 +628,31 @@ func TestIntegration_Quota_RebindingBoundarySampleIsCountedOnce(t *testing.T) {
 	submit(t, p, f, m, 1, 1_000_000, 4_000_000, at.Add(time.Minute)) // 5 MB under the first entitlement
 	agree(t, p, first, 5_000_000)
 
-	// A SECOND entitlement for the session to move to, on ANOTHER Stay in the same site — one Stay may hold
-	// only one live Entitlement (ent_live_stay), and moving a session between commercial agreements is what a
-	// Phase-5 transfer IS, so this is the real shape rather than a convenient one.
+	// A second entitlement on another Stay (ent_live_stay allows one live per Stay), as a transfer does.
 	second := secondEntitlement(t, p, f, at)
 	boundary := at.Add(2 * time.Minute)
-	// The production schema refuses a live session on an entitlement its device is not authorized on
-	// (p6_session_requires_authorized_binding). The product's own transfer (checkout.go) authorizes the device
-	// on the successor before rebinding, so the seed does the same.
+	// p6_session_requires_authorized_binding: authorize the device on the successor before rebinding.
 	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, second, m.device, boundary); err != nil {
 		t.Fatalf("authorize device on the successor: %v", err)
 	}
 	if _, err := p.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, m.id, second, boundary); err != nil {
 		t.Fatalf("rebind: %v", err)
 	}
-	// ...and a sample lands EXACTLY on the boundary.
+	// A sample lands exactly on the boundary.
 	submit(t, p, f, m, 1, 1_500_000, 5_500_000, boundary) // +2 MB
 
-	// It belongs to the SUCCESSOR, once. The predecessor keeps only what it actually carried.
 	if got := attributed(t, p, first); got != 5_000_000 {
 		t.Fatalf("the closed binding claimed the boundary sample too: %d bytes attributed, want 5000000", got)
 	}
 	if got := attributed(t, p, second); got != 2_000_000 {
 		t.Fatalf("the successor was attributed %d bytes at the boundary, want 2000000", got)
 	}
-	// and the total across both is the traffic, not more: nothing was counted twice.
 	if total := attributed(t, p, first) + attributed(t, p, second); total != 7_000_000 {
 		t.Fatalf("total attributed = %d, want 7000000 - a boundary sample was double counted", total)
 	}
 }
 
-// AND NOTHING ELSE MOVED. The corrected attribution must not change what enforcement decides, what accounting
-// records exist, or anything financial.
+// The attribution correction must not change enforcement decisions, accounting records or anything financial.
 func TestIntegration_Quota_TheCorrectionChangesNoOtherSemantics(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -753,7 +664,6 @@ func TestIntegration_Quota_TheCorrectionChangesNoOtherSemantics(t *testing.T) {
 	submit(t, p, f, m, 1, 0, 0, at)
 	submit(t, p, f, m, 1, 10_000_000, 30_000_000, at.Add(time.Minute)) // 40 MB, well under
 
-	// Still healthy: an entitlement under its quota is not ended by the new arm.
 	if due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site); err != nil || len(due) != 0 {
 		t.Fatalf("an entitlement at 40MB of 100MB was ended: %+v (err %v)", due, err)
 	}
@@ -775,9 +685,7 @@ func TestIntegration_Quota_TheCorrectionChangesNoOtherSemantics(t *testing.T) {
 	}
 }
 
-// secondEntitlement creates another Stay in the same site and an ACTIVE Entitlement on it, reusing the
-// fixture's interface and pinned plan. It exists because a Phase-5 rebinding moves a Session BETWEEN
-// commercial agreements, and one Stay may hold only one live Entitlement.
+// secondEntitlement creates another Stay in the site with an ACTIVE Entitlement on the fixture's interface and plan.
 func secondEntitlement(t *testing.T, p *pgxpool.Pool, f fixture, at time.Time) string {
 	t.Helper()
 	ctx := context.Background()

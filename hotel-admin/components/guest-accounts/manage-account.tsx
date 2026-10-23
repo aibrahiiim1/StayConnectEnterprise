@@ -1,9 +1,6 @@
 "use client";
 
-// MANAGE ONE CLIENT ACCOUNT: what it holds (verification state, packages, the devices on each package) and what
-// staff may do to it. edged GET /guest-accounts/{id}/manage; the actions are edged's verify-email,
-// restart-verification, resend-verification, disconnect and DELETE (which removes an account with history and
-// deletes one without).
+// Accounts with history are removed from use; accounts without history can be deleted.
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type GuestAccount, type GuestAccountManage } from "@/lib/api";
@@ -45,18 +42,14 @@ export function ManageAccountDialog({
 }: {
   account: GuestAccount | null;
   mayWrite: boolean;
-  /** The device view reads /client-devices (sessions READ); without it the Device button is not offered. */
+  /** Hide the Device action without sessions-read permission. */
   mayReadDevices?: boolean;
-  /** Device actions are sessions WRITE, not guest-accounts WRITE: the voucher station holds the second only.
-   *  Defaults to mayWrite for callers that have not said. */
+  /** Device actions require sessions-write, separate from guest-accounts-write. */
   mayActOnDevices?: boolean;
-  /** Mark email verified vouches for an address on the client's behalf: code-reveal WRITE, the password and a
-   *  reason (edged guest_accounts_manage.go). */
+  /** Staff verification requires code-reveal-write, password, and reason. */
   mayVouch?: boolean;
   onClose: () => void;
-  // Something about the account changed: the list behind should reload.
   onChanged: () => void;
-  // Remove is confirmed by the page's own dialog, which says what will happen.
   onRemove: (a: GuestAccount, removal: GuestAccountManage["removal"]) => void;
 }) {
   const toast = useToast();
@@ -112,7 +105,6 @@ export function ManageAccountDialog({
         <DialogBody className="space-y-5">
           <ErrorBanner err={err} />
 
-          {/* ---------------------------------------------------------------- the account */}
           <section className="space-y-2">
             <div className="flex flex-wrap items-center gap-1.5">
               {selfService && <Badge tone="info">Self-service</Badge>}
@@ -178,7 +170,6 @@ export function ManageAccountDialog({
             )}
           </section>
 
-          {/* ---------------------------------------------------------------- packages and devices */}
           <section className="space-y-2">
             <h3 className="text-sm font-medium">Packages</h3>
             {!data && !err ? (

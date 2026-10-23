@@ -1,23 +1,7 @@
 "use client";
 
-// CLIENT GROUPS — who a client IS, as opposed to how they signed in.
-//
-// A group is a site-level policy object: a name, a priority, and one or more membership rules. A client is a
-// member when ANY rule matches, membership is decided from the client's VERIFIED identity (a mailbox proven by
-// a code or a trusted identity provider; an organisation asserted by Microsoft or Google), and a client who
-// matches several groups gets the one with the lowest priority number. Packages then name a group as their
-// AUDIENCE: "Employees free, partners discounted, public normal" is three packages and two groups, with no
-// discount engine and no rule about Google or email anywhere (docs/architecture/
-// ONEGATE_CLIENT_IDENTITY_AND_ACCESS_POLICY.md §3, §4).
-//
-// TWO LEVELS OF ASSURANCE, SAID PLAINLY. A verified email address at company.com is right for a commercial
-// benefit (anyone who can receive mail there qualifies, including an ex-employee whose mailbox is still
-// forwarded); an organisation account answers "is this person in the directory NOW", which is what an employee
-// benefit actually asks. The rule editor names both so a site admin can choose without being an IAM engineer.
-//
-// Same treatment as the other list screens: the editor is a dialog, delete is a real confirmation, and a group
-// that a package still names as its audience is refused by the server (409) -- the refusal says which packages,
-// and this screen shows it where the operator is looking.
+// A client is in a group when ANY rule matches, on VERIFIED identity only; the lowest priority number wins.
+// The server refuses (409) to delete a group a package names as its audience.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -41,13 +25,10 @@ import { useToast } from "@/components/ui/toast";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { ruleSummary } from "./rule-summary";
 
-// Priority: an operational number with a default, bounds and an explanation (lower wins).
 const PRIORITY_DEFAULT = 100;
 const PRIORITY_MIN = 1;
 const PRIORITY_MAX = 1000;
 
-// THE RULE KINDS, in the operator's words, each with its assurance level stated. The order is deliberate:
-// the commonest first, then the two strong ones.
 const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string; hint: string }[] = [
   {
     type: "EMAIL_DOMAIN",
@@ -70,12 +51,9 @@ const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string;
 ];
 const RULE_LABEL: Record<ClientGroupRuleType, string> = Object.fromEntries(RULE_KINDS.map((k) => [k.type, k.label])) as Record<ClientGroupRuleType, string>;
 
-// One rule as the editor holds it: the list fields are typed as text (one per line, or comma-separated) and
-// split on save, so an operator can paste a list from anywhere.
 type RuleForm = { type: ClientGroupRuleType; list: string; include_subdomains: boolean };
 
-// One per line, or comma-separated; a domain repeated in another case is kept once, because the engine matches
-// case-insensitively and a second spelling would add nothing. Tenant IDs are GUIDs and are kept as typed.
+// Domains are lowercased because the engine matches case-insensitively; tenant IDs are kept as typed.
 const splitList = (s: string, lower = false): string[] =>
   Array.from(new Set(s.split(/[\n,;\s]+/).map((x) => (lower ? x.trim().toLowerCase() : x.trim())).filter(Boolean)));
 
@@ -141,7 +119,6 @@ export default function ClientGroupsPage() {
     api.get<Whoami>("/auth/whoami").then((m) => setRoles(m.roles ?? [])).catch(() => setRoles([]));
   }, [load]);
 
-  // The history is read when its tab is opened, and again after every write, so what it shows is what happened.
   const loadChanges = useCallback(async () => {
     setChangesErr(null);
     try { setChanges((await api.get<ListResp<ClientGroupChange>>("/client-groups/changes")).data ?? []); }
@@ -149,7 +126,7 @@ export default function ClientGroupsPage() {
   }, []);
   useEffect(() => { if (tab === "history") loadChanges(); }, [tab, loadChanges]);
 
-  // Sorted as the engine decides: by priority, then name. The table order IS the conflict order.
+  // Sorted as the engine decides (priority, then name): table order is conflict order.
   const sorted = useMemo(
     () => (rows ?? []).slice().sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)),
     [rows]);
@@ -209,7 +186,6 @@ export default function ClientGroupsPage() {
       await load();
       if (tab === "history") await loadChanges();
     } catch (e) {
-      // 409 in_use: the server names the packages whose audience this group is. Shown verbatim, in the dialog.
       setFormErr(e instanceof ApiError && e.code === "in_use" ? e.message : e);
     }
     finally { setBusy(false); }

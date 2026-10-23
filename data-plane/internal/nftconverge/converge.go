@@ -1,33 +1,16 @@
-// Package nftconverge makes the live nftables ruleset match what the CURRENT binary renders, and does nothing
-// at all when it already does.
+// Package nftconverge makes the live nftables ruleset match what the current binary renders, and does nothing when it
+// already does.
 //
-// THE STORED BUNDLE IS NOT THE SOURCE OF TRUTH FOR RULESET STRUCTURE.
+// The stored bundle is not the source of truth for structure: it is a snapshot of what an older binary rendered, and
+// replaying it (its `delete table` removed phase3_auth_ipv4, which current software requires) breaks the ruleset.
+// Structure is a function of (intent, topology, renderer version), so reconciliation renders from the current binary
+// and compares against the kernel.
 //
-// netd used to re-assert the ruleset on boot by replaying `<bundle>/stayconnect.nft` — the file rendered at the
-// time of the last network apply. That file is a snapshot of what an OLDER BINARY thought the ruleset should
-// be, and nothing about it changes when the software changes. On the pilot appliance the active revision was
-// rendered in July; every netd start replayed it, and because the render begins with `delete table inet
-// stayconnect`, every start deleted `phase3_auth_ipv4` — a set the current software requires. The database was
-// correct, the bundle was intact, and the structure was still wrong.
-//
-// Structure is a pure function of (intent, topology, RENDERER VERSION). Two of those live in the database; the
-// third exists only in the running binary. So reconciliation renders from the current binary and compares
-// against the kernel, and the stored bundle becomes what it always should have been: a record of what was
-// applied, not the instruction for what to apply next.
-//
-// THE STEADY-STATE / UPGRADE DISTINCTION IS THE WHOLE SAFETY ARGUMENT.
-//
-//	steady state — the live fingerprint equals what this binary renders. Nothing is executed. Not a narrower
-//	               nft command, not an idempotent re-apply: ZERO mutations. A routine restart or reboot of a
-//	               correct appliance therefore cannot disturb guest authorization, because it does not touch
-//	               the ruleset at all.
-//	upgrade      — the live fingerprint differs (new software, a hand-edited table, or a fresh boot where only
-//	               the static /etc/nftables.conf has loaded). The current render is applied as ONE atomic nft
-//	               transaction, and the authorization that was live is carried across inside that same
-//	               transaction, so converging does not deauthorize anyone either.
-//
-// Both halves matter. Skip-when-equal alone would still have made the one upgrade destructive; carry-over alone
-// would have made every restart a rewrite of the live ruleset.
+// Steady state (live fingerprint equals the render): nothing is executed, so a routine restart cannot disturb guest
+// authorization. Upgrade (fingerprint differs: new software, a hand-edited table, or a boot with only
+// /etc/nftables.conf): the current render is applied as one atomic nft transaction with the live authorization
+// carried across inside it. Both halves matter: skip-when-equal alone leaves the upgrade destructive, and carry-over
+// alone makes every restart a rewrite.
 package nftconverge
 
 import (
@@ -45,17 +28,14 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
-// Runner is the process boundary. It is an interface so that a test can observe exactly which commands a
-// reconciliation issued — including, for the steady-state case, that it issued none. A test that could only
-// inspect the resulting ruleset could not tell "already correct, did nothing" apart from "rewrote it to the
-// same thing", and those differ by whether a live guest keeps their authorization.
+// Runner is the process boundary, an interface so tests can observe exactly which commands a reconciliation issued,
+// including that the steady state issues none.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) error
 	Output(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// Outcome is the result of one reconciliation. It is deliberately explicit about "changed nothing", because
-// "changed nothing" is the property the production invariant depends on and the tests assert.
+// Outcome is the result of one reconciliation, explicit about "changed nothing".
 type Outcome struct {
 	Changed   bool   `json:"changed"`
 	Trigger   string `json:"trigger"`
@@ -65,28 +45,19 @@ type Outcome struct {
 	TableWas  bool   `json:"table_existed"`
 }
 
-// AuthSets are the sets whose contents must survive a converge: the two packet-authorization sets, and the
-// walled garden. All three hold runtime state rather than rendered structure. The garden was missing here, so
-// every structural re-render reset it to the three baseline addresses until scd's next minute -- a sign-in
-// through an identity provider or a card payment page in progress at that moment lost its way out.
-//
-// ONLY SETS THE CURRENT RENDER DECLARES MAY BE LISTED HERE. A carried `add element` into a set the new table
-// does not have fails the whole `nft -f`, and the converge with it. That is also why the temporary
-// verification-access set (verify_ipv4, with its verify_quota/up/down maps and per-device quota and limit
-// objects) left this list when it left the render: an older table that still holds it, populated, converges by
-// the ordinary `delete table` + recreate, which removes the set, its maps and their objects, and nothing of
-// theirs is read or carried -- a device that held a verification window comes out of the converge with no
-// Internet, exactly as the contract (ONEGATE_EMAIL_ACCOUNTS_SELF_SERVICE §1) now requires.
+// AuthSets are the sets whose contents must survive a converge: the two packet-authorization sets and the walled
+// garden (runtime state, not rendered structure). Only sets the current render declares may be listed: a carried
+// `add element` into a set the new table lacks fails the whole `nft -f`. An older table still holding the retired
+// verification-access set converges by the ordinary `delete table` + recreate, which removes it and its maps and
+// objects without reading or carrying them.
 var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4, nft.GardenV4, nft.GardenTCP, nft.GardenUDP}
 
-// tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
-// table the render actually replaces.
+// tableName is the single StayConnect nft table, named once so no read path drifts from the table the render replaces.
 const tableName = "stayconnect"
 
-// Engine reconciles one appliance's ruleset.
 type Engine struct {
 	Topo    netcfg.Topology
-	Dir     string // where the applied render is written, for inspection
+	Dir     string
 	NftPath string // "nft" unless a test points it at a namespace-scoped wrapper
 	R       Runner
 }
@@ -98,37 +69,34 @@ func (e *Engine) nftBin() string {
 	return "nft"
 }
 
-// Ensure makes the live ruleset match what this binary renders for the given intent.
 func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (Outcome, error) {
 	out := Outcome{Trigger: trigger, DesiredFP: netcfg.RenderFingerprint(intent, e.Topo)}
 
 	live, err := e.ReadLive(ctx)
 	if err != nil {
-		// THE LIVE STATE COULD NOT BE ESTABLISHED. Converging from here would mean deciding what to delete
-		// and what to re-authorize on the strength of a reading we know is unreliable, and the render begins
-		// with `delete table`. Nothing is executed and the live ruleset is left exactly as it is.
+		// The live state could not be established: converging would mean deciding what to delete on an unreliable reading,
+		// and the render begins with `delete table`. Nothing is executed.
 		return out, fmt.Errorf("%w: %v", ErrLiveStateUntrusted, err)
 	}
 	out.LiveFP, out.TableWas = live.Fingerprint, live.TableExists
 
 	if live.TableExists && live.Fingerprint == out.DesiredFP {
-		// STEADY STATE. Return without executing anything.
+		// Steady state: execute nothing.
 		return out, nil
 	}
 
-	// UPGRADE / RECONSTRUCTION. Carry the live authorization across the atomic replace.
+	// Upgrade or reconstruction: carry the live authorization across the atomic replace.
 	var carried []string
 	if live.TableExists {
 		for _, set := range AuthSets {
 			if !live.Sets[set] {
-				// GENUINELY ABSENT, on the authority of the table listing itself — there is nothing to
-				// carry. This is the normal case for phase3_auth_ipv4 on a pre-Phase-3 appliance.
+				// Genuinely absent per the table listing: nothing to carry (normal for phase3_auth_ipv4 on a pre-Phase-3 appliance).
 				continue
 			}
 			els, err := e.readSet(ctx, set)
 			if err != nil {
-				// The set EXISTS and we could not read it. That is not the same as empty: converging
-				// would silently deauthorize whoever is in it. Refuse before touching anything.
+				// The set exists but could not be read, which is not the same as empty: converging would silently deauthorize
+				// whoever is in it. Refuse before touching anything.
 				return out, fmt.Errorf("%w: read live set %s: %v", ErrLiveStateUntrusted, set, err)
 			}
 			carried = append(carried, CarryOverCommands(set, withoutRendered(set, els))...)
@@ -158,38 +126,31 @@ func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigg
 	}
 	out.Changed = true
 
-	// Verify against the kernel rather than trusting the exit code: a ruleset that loaded but did not produce
-	// the expected structure is exactly the failure this whole mechanism exists to detect.
+	// Verify against the kernel rather than the exit code: a ruleset that loaded but lacks the expected structure is
+	// the failure this mechanism exists to detect.
 	if got, ok := e.LiveFingerprint(ctx); !ok || got != out.DesiredFP {
 		return out, fmt.Errorf("nft applied but live fingerprint is %q, want %q", got, out.DesiredFP)
 	}
 	return out, nil
 }
 
-// ErrLiveStateUntrusted is returned when the live ruleset could not be established well enough to converge
-// from. It is deliberately distinct from "the structure differs": one means act, the other means stop.
+// ErrLiveStateUntrusted is returned when the live ruleset could not be established well enough to converge from;
+// distinct from "the structure differs" (one means act, the other stop).
 var ErrLiveStateUntrusted = errors.New("live nft state could not be read reliably")
 
-// LiveState is what the kernel says it is holding right now.
 type LiveState struct {
 	TableExists bool
 	Fingerprint string
 	Sets        map[string]bool // names of the sets the table declares
 }
 
-// ReadLive establishes the live state, and returns an error rather than a guess whenever it cannot.
-//
-// ABSENCE IS DECIDED BY ENUMERATION, NEVER BY A FAILED READ. The obvious implementation asks nft for the set
-// and treats a non-zero exit as "not there" — but `nft list set` exits non-zero for a missing set, a missing
-// binary, a denied permission, a busy netlink socket and a malformed ruleset alike, and only the first of those
-// means empty. Every other one would have been read as "no authorization to preserve" immediately before a
-// `delete table`, which is precisely how a converge could deauthorize a whole property and report success.
-//
-// So the table listing — one command, which either works or fails as a whole — is the authority on which sets
-// exist, and a set that IS listed must then be readable or the converge is abandoned.
+// ReadLive establishes the live state, returning an error rather than a guess. Absence is decided by enumeration,
+// never by a failed read: `nft list set` exits non-zero for a missing set, missing binary, denied permission, busy
+// netlink and malformed ruleset alike, and only the first means empty. The table listing (one command that works or
+// fails as a whole) is the authority on which sets exist, and a listed set must then be readable or the converge is
+// abandoned.
 func (e *Engine) ReadLive(ctx context.Context) (LiveState, error) {
-	// 1. Is nft usable at all, and does our table exist? `list tables` answers both: if it fails we know
-	//    nothing, and if it succeeds its enumeration is trustworthy.
+	// 1. Is nft usable and does our table exist? `list tables` answers both; if it fails we know nothing.
 	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "tables", "inet")
 	if err != nil {
 		return LiveState{}, fmt.Errorf("list tables: %w", err)
@@ -213,7 +174,7 @@ func (e *Engine) ReadLive(ctx context.Context) (LiveState, error) {
 		}
 	}
 	if !present {
-		// GENUINELY ABSENT — a fresh boot, or an appliance that has never been configured. Not an error.
+		// Genuinely absent: a fresh boot or an unconfigured appliance. Not an error.
 		return LiveState{TableExists: false, Sets: map[string]bool{}}, nil
 	}
 
@@ -240,17 +201,16 @@ func (e *Engine) ReadLive(ctx context.Context) (LiveState, error) {
 		}
 		st.Sets[o.Set.Name] = true
 		if o.Set.Name == netcfg.RenderMarkerSet {
-			// An unreadable marker comment yields "", which compares unequal to every fingerprint — a
-			// marker we cannot parse must never be read as "already current".
+			// An unreadable marker yields "", which compares unequal to every fingerprint, so it is never read as already current.
 			st.Fingerprint = netcfg.FingerprintFromSetComment(o.Set.Comment)
 		}
 	}
 	return st, nil
 }
 
-// LiveFingerprint is the convenience form used by callers that only need the comparison. It reports no
-// fingerprint and no table when the live state cannot be trusted, which is safe for those callers because they
-// use it to decide whether to LOOK further, never to decide what to delete.
+// LiveFingerprint is the convenience form for callers that only compare. It reports no fingerprint and no table when
+// the live state cannot be trusted, which is safe because they use it to decide whether to look further, never what
+// to delete.
 func (e *Engine) LiveFingerprint(ctx context.Context) (string, bool) {
 	st, err := e.ReadLive(ctx)
 	if err != nil {
@@ -259,8 +219,7 @@ func (e *Engine) LiveFingerprint(ctx context.Context) (string, bool) {
 	return st.Fingerprint, st.TableExists
 }
 
-// readSet reads one authorization set that the table listing says EXISTS. Every failure is an error; there is
-// no longer any path by which an unreadable set becomes an empty one.
+// readSet reads one authorization set the table listing says exists; every failure is an error, never an empty set.
 func (e *Engine) readSet(ctx context.Context, set string) ([]nft.Element, error) {
 	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "set", "inet", tableName, set)
 	if err != nil {
@@ -273,20 +232,13 @@ func (e *Engine) readSet(ctx context.Context, set string) ([]nft.Element, error)
 	return els, nil
 }
 
-// CarryOverCommands turns live elements into the `add element` lines that re-authorize them inside the same
-// transaction as the structural replace.
-//
-// THE THREE CASES ARE NOT INTERCHANGEABLE, and collapsing any two of them is a security bug:
-//
-//	Expires > 0                  a live timed authorization. Carried with its REMAINING lease, never its
-//	                             original: an element created with a 90s lease 89 seconds ago has one second
-//	                             left, and re-adding it with 90s extends an authorization past the boundary
-//	                             that granted it.
-//	Timeout > 0, Expires <= 0    an EXPIRED authorization. The kernel was about to drop it; carrying it over
-//	                             would resurrect it. Dropped.
-//	Timeout == 0, Expires == 0   a PERMANENT element — which is what legacy scd writes into auth_ipv4. It has
-//	                             no lease to preserve, so it is re-added with no timeout clause. Treating it
-//	                             as expired would deauthorize every legacy guest on the appliance.
+// CarryOverCommands turns live elements into `add element` lines that re-authorize them inside the same transaction
+// as the structural replace. The three cases are not interchangeable:
+//   - Expires > 0: a live timed authorization, carried with its remaining lease, never the original (re-adding with
+//     90s would extend it past the boundary that granted it).
+//   - Timeout > 0, Expires <= 0: expired; carrying it over would resurrect it, so it is dropped.
+//   - Timeout == 0, Expires == 0: permanent (what legacy scd writes into auth_ipv4), re-added with no timeout clause;
+//     treating it as expired would deauthorize every legacy guest.
 func CarryOverCommands(set string, els []nft.Element) []string {
 	var out []string
 	for _, e := range els {
@@ -313,7 +265,7 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 			}
 			out = append(out, fmt.Sprintf("add element inet stayconnect %s { %s timeout %ds }", set, key, secs))
 		case e.Timeout > 0:
-			continue // expired
+			continue
 		default:
 			out = append(out, fmt.Sprintf("add element inet stayconnect %s { %s }", set, key))
 		}
@@ -321,9 +273,8 @@ func CarryOverCommands(set string, els []nft.Element) []string {
 	return out
 }
 
-// withoutRendered drops the elements the new render declares itself -- the baseline resolver pairs of the
-// port-restricted garden sets -- so the converge carries only RUNTIME state (authorizations, scd's garden
-// entries) and reports exactly that many.
+// withoutRendered drops the elements the new render declares itself (the baseline resolver pairs of the
+// port-restricted garden sets) so the converge carries and reports only runtime state.
 func withoutRendered(set string, els []nft.Element) []nft.Element {
 	if set != nft.GardenTCP && set != nft.GardenUDP {
 		return els

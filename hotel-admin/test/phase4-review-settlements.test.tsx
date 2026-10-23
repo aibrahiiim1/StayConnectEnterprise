@@ -1,8 +1,3 @@
-// Phase 4 (DARK) — Manual Review and the settlement browser.
-//
-// The assertions concentrate on the two ways these screens could mislead an operator: offering an action the
-// backend will refuse, and implying a capability that does not exist. Both are worse than a broken screen,
-// because both look like they worked.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -21,7 +16,6 @@ vi.mock("@/lib/api", async (orig) => {
 
 function route(map: Record<string, any>) {
   get.mockImplementation(async (path: string) => {
-    // A paged list carries ?page=&page_size= (and filters); the route is the path without them.
     const key = path.split("?")[0];
     if (!(key in map)) throw new Error(`unexpected GET ${path}`);
     return typeof map[key] === "function" ? map[key](path) : map[key];
@@ -86,10 +80,8 @@ describe("manual review", () => {
     const offered = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
     expect(offered).toContain("CONFIRM_POSTED");
     expect(offered).toContain("ESCALATE");
-    // available_actions did not include these, so the screen must not offer them
     expect(offered).not.toContain("CREATE_REVERSAL");
     expect(offered).not.toContain("CONFIRM_NOT_POSTED_RETRY");
-    // and there is no generic approve anywhere
     expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
   });
 
@@ -104,8 +96,7 @@ describe("manual review", () => {
   });
 
   it("shows the pinned reservation (G#) and posting target, and a NOT_SENT attempt as not sent", async () => {
-    // Phase-0 Amendment A1: attempt 1 was refused by pmsd before any byte was written (the guest had moved to
-    // 205), attempt 2 carried the new room with the same reservation. Each keeps the room it actually carried.
+    // NOT_SENT means no bytes reached PMS; later attempts may carry a different room.
     const detail = {
       ...DETAIL,
       attempts: [
@@ -160,7 +151,6 @@ describe("manual review", () => {
       "/financial-review/postings/p1": DETAIL });
     render(<ManualReviewView canAct={false} />);
     await userEvent.click(await screen.findByRole("button", { name: /^review$/i }));
-    // The evidence is visible; the decision form, its password field and its button are not offered at all.
     expect(await screen.findByText("protel-fias (ACTIVE)")).toBeInTheDocument();
     expect(screen.queryByLabelText(/what did you establish/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/your password/i)).not.toBeInTheDocument();
@@ -215,7 +205,6 @@ describe("package payments", () => {
     expect(screen.getByText("Free — nothing to pay")).toBeInTheDocument();
     expect(screen.getByText("Paid by voucher")).toBeInTheDocument();
     expect(screen.getByText("Client account")).toBeInTheDocument();
-    // no raw backend code is the answer on screen
     for (const code of ["NOT_REQUIRED", "PMS_POSTING", "MANUAL_REVIEW", "ONLINE_PAYMENT", "PREPAID"]) {
       expect(document.body.textContent).not.toContain(code);
     }

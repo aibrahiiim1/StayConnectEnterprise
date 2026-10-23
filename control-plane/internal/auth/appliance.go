@@ -18,12 +18,10 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/ratebudget"
 )
 
-// maxSignedBody bounds how much request body we buffer to hash for signature
-// binding. Appliance requests are tiny; 1 MiB is a generous ceiling.
+// maxSignedBody bounds the request body buffered to hash for signature binding.
 const maxSignedBody = 1 << 20
 
 // ApplianceIdent is what RequireAppliance attaches to the request context.
-// Handlers that need the appliance's tenant scope read it from here.
 type ApplianceIdent struct {
 	ApplianceID string
 	TenantID    string
@@ -39,16 +37,13 @@ func ApplianceFromContext(ctx context.Context) *ApplianceIdent {
 	return a
 }
 
-// ContextWithAppliance attaches an appliance identity the way RequireAppliance does, for callers that drive
-// a handler without the middleware (tests).
+// ContextWithAppliance attaches an identity for callers that drive a handler without the middleware (tests).
 func ContextWithAppliance(ctx context.Context, a *ApplianceIdent) context.Context {
 	return context.WithValue(ctx, applianceCtxKey, a)
 }
 
-// RequireAppliance verifies an Ed25519-signed request JWT that BINDS the
-// method, path, body hash, audience and signing-key id (see applianceauth).
-// It blocks replay via the shared ReplayCache, rejects suspended/revoked/
-// decommissioned identities, and audits every failed attempt.
+// RequireAppliance verifies the Ed25519-signed request JWT (see applianceauth), blocks replay via the shared
+// ReplayCache, rejects retired identities, and audits failed attempts.
 func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,12 +77,9 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				jsonErr(w, http.StatusInternalServerError, "internal", "appliance lookup failed", r)
 				return
 			}
-			// Identity-level revocation. ONLY a retired identity (revoked / decommissioned) is refused.
-			//
-			// Licence state is deliberately NOT consulted: a suspended or revoked LICENCE must never cut the
-			// appliance off from Central, or it could not fetch the signed suspension or the revocation list
-			// that tells it so. Retired appliances learn of their retirement through the certificate-only
-			// assignment channel, which does not run this middleware.
+			// Only a retired identity is refused. Licence state is deliberately not consulted: a suspended or revoked
+			// licence must not cut the appliance off, or it could not fetch the suspension or revocation list.
+			// Retired appliances learn of it through the certificate-only assignment channel.
 			if lifecycle == "revoked" || lifecycle == "decommissioned" {
 				applianceAuthFail(r.Context(), db, r, iss, "identity "+lifecycle)
 				jsonErr(w, http.StatusForbidden, "forbidden", "appliance identity "+lifecycle, r)
@@ -98,7 +90,6 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 				jsonErr(w, http.StatusInternalServerError, "internal", "appliance key corrupt", r)
 				return
 			}
-			// Buffer + restore the body so we can hash it for binding.
 			body, err := io.ReadAll(io.LimitReader(r.Body, maxSignedBody))
 			if err != nil {
 				jsonErr(w, http.StatusBadRequest, "bad_request", "body read failed", r)
@@ -137,14 +128,12 @@ func RequireAppliance(db *pgxpool.Pool, cache *applianceauth.ReplayCache) func(h
 	}
 }
 
-// applianceAuthFailures bounds how many failed appliance authentications are written: these routes are
-// reachable by anyone, and every failure used to insert an audit row. Per client address 5 a minute, 300 a
-// minute overall; what is suppressed is recorded as one appliance.auth_failures_suppressed row.
+// applianceAuthFailures bounds failed-authentication audit rows, since these routes are reachable by anyone: 5 a
+// minute per client address, 300 overall; suppressed ones are recorded as one appliance.auth_failures_suppressed row.
 var applianceAuthFailures = ratebudget.New(5, 300, time.Minute)
 
-// applianceAuthFail records a failed appliance authentication to audit_log, within applianceAuthFailures.
-// Written directly (not via internal/audit) to avoid an auth→audit import
-// cycle. Never fails the request path.
+// applianceAuthFail records a failed authentication within applianceAuthFailures. It writes directly, not via
+// internal/audit, to avoid an import cycle, and never fails the request path.
 func applianceAuthFail(ctx context.Context, db *pgxpool.Pool, r *http.Request, applianceID, reason string) {
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -191,8 +180,7 @@ func bearerFrom(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 }
 
-// peekIss pulls the `iss` claim out without verifying the signature. Used
-// only to select which public key to verify against.
+// peekIss reads the `iss` claim without verifying it, only to select the public key to verify against.
 func peekIss(token string) (string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {

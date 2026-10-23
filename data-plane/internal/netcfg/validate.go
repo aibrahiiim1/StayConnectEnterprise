@@ -14,14 +14,12 @@ const (
 	MaxLeaseSeconds = 7 * 24 * 3600
 )
 
-// Issue is a single structured validation problem (surfaced to the API).
 type Issue struct {
 	Field   string `json:"field"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// ValidationResult aggregates issues across all networks being applied.
 type ValidationResult struct {
 	OK     bool    `json:"ok"`
 	Issues []Issue `json:"issues"`
@@ -32,8 +30,7 @@ func (r *ValidationResult) add(field, code, msg string) {
 	r.OK = false
 }
 
-// ValidateOne checks a single network in isolation (shape, CIDR, pools,
-// reservations, timers, VLAN, portal). prefix is the field path prefix.
+// ValidateOne checks a single network in isolation; prefix is the field path prefix.
 func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[string]bool, prefix string) []Issue {
 	var r ValidationResult
 	r.OK = true
@@ -45,13 +42,9 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 	if n.ParentInterface == "" {
 		r.add(f("parent_interface"), "required", "a parent interface is required")
 	} else if availIfaces != nil && !availIfaces[n.ParentInterface] {
-		// availIfaces is the set of interfaces the appliance HAS RIGHT NOW, not the set it has ever recorded.
-		// A guest network attached to an interface that no longer exists cannot come up, so it is refused
-		// here rather than at netplan/Kea time where the message would name something else entirely.
-		//
-		// KnownIfaces, when supplied, lets the message distinguish an interface this appliance has never had
-		// from one it had and lost — a typo and a pulled card are the same error code otherwise, and they are
-		// resolved very differently.
+		// availIfaces is the set of interfaces the appliance has right now: a network on a vanished interface cannot come
+		// up, so it is refused here rather than at netplan/Kea time. KnownIfaces lets the message tell a never-had typo from
+		// a lost interface.
 		if knownIfaces != nil && knownIfaces[n.ParentInterface] {
 			r.add(f("parent_interface"), "interface_not_present",
 				fmt.Sprintf("interface %q is recorded on this appliance but is NOT PRESENT now — it was not "+
@@ -69,7 +62,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 			fmt.Sprintf("interface %q is the management/WAN interface and is protected; choose a guest interface", n.ParentInterface))
 	}
 
-	// VLAN
 	switch n.NetworkType {
 	case "vlan":
 		if n.VLANID < 1 || n.VLANID > 4094 {
@@ -83,7 +75,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		r.add(f("network_type"), "bad_network_type", "network_type must be 'untagged' or 'vlan'")
 	}
 
-	// Gateway + subnet
 	gw := net.ParseIP(n.GatewayIP)
 	if gw == nil || gw.To4() == nil {
 		r.add(f("gateway_ip"), "bad_gateway", "gateway_ip must be a valid IPv4 address")
@@ -109,9 +100,8 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 			r.add(f("subnet_cidr"), "subnet_too_small",
 				"subnet is too small to host a gateway and a DHCP pool (use /30 or larger)")
 		}
-		// THE WIDEST SUBNET THE SHAPER CAN TELL APART (audit B-8). A client's tc class is chosen from the low
-		// 12 host bits of its address (internal/shape MinorForIP), so in anything wider than a /20 two clients
-		// share one class: one is metered and limited for the other's traffic. 4094 addresses per network.
+		// The widest subnet the shaper can tell apart: a client's tc class comes from the low 12 host bits of its address
+		// (internal/shape MinorForIP), so in anything wider than a /20 two clients share one class.
 		if bits == 32 && ones < MinSubnetPrefix {
 			r.add(f("subnet_cidr"), "subnet_too_large",
 				fmt.Sprintf("subnet is larger than /%d (4094 clients); per-client speed limits and usage cannot tell "+
@@ -119,8 +109,7 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		}
 	}
 
-	// Lease timers: each one that is set must lie within Kea-sane bounds (audit N-20). Negative values used to
-	// pass, and a lease of a second or of a year reached Kea unchecked.
+	// Each set lease timer must lie within Kea-sane bounds; negative or absurdly short or long leases must not reach Kea.
 	for _, lt := range []struct {
 		field string
 		v     int
@@ -131,7 +120,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		}
 	}
 
-	// Lease timers
 	if n.LeaseMin > 0 && n.LeaseDefault > 0 && n.LeaseMin > n.LeaseDefault {
 		r.add(f("lease_min_seconds"), "bad_lease_timers", "min lease must be <= default lease")
 	}
@@ -139,7 +127,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		r.add(f("lease_max_seconds"), "bad_lease_timers", "max lease must be >= default lease")
 	}
 
-	// DNS
 	if n.DNSMode == "custom" {
 		if len(n.DNSServers) == 0 {
 			r.add(f("dns_servers"), "dns_required", "custom DNS mode requires at least one DNS server")
@@ -151,13 +138,9 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		}
 	}
 
-	// Portal URL (option 114) — only relevant for local+captive networks.
-	//
-	// HTTPS IS ALLOWED IN EXACTLY ONE FORM. The approved HTTP fallback is http://<gateway>:<port>/ and stays
-	// the default; while the portal's HTTPS is active the option names the RFC 8908 captive API on the
-	// canonical hostname -- https://<canonical>/captive-portal/api -- and nothing else. Any other https URL
-	// (a gateway address, a different path, a hostname that is not the canonical one) would hand a device a
-	// TLS endpoint the appliance holds no certificate for, so it is refused rather than rendered.
+	// Portal URL (option 114), only for local+captive networks. HTTPS is allowed in one form: while the portal's HTTPS
+	// is active, https://CANONICAL/captive-portal/api; the default is http://GATEWAY:PORT/. Any other https URL would
+	// hand a device a TLS endpoint the appliance has no certificate for.
 	if n.DHCPMode == DHCPLocal && n.CaptiveEnabled && gw != nil {
 		url := CaptivePortalURL(n.GatewayIP, topo)
 		if strings.HasPrefix(url, "https://") {
@@ -170,7 +153,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		}
 	}
 
-	// Relay
 	if n.DHCPMode == DHCPRelay {
 		if len(n.RelayTargets) == 0 {
 			r.add(f("relay_targets"), "relay_required", "relay mode requires at least one relay target")
@@ -182,7 +164,6 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 		}
 	}
 
-	// Pools (only meaningful for local DHCP)
 	if n.DHCPMode == DHCPLocal {
 		validatePools(&r, n, ipnet, gw, network, broadcast, prefix)
 		validateReservations(&r, n, ipnet, prefix)
@@ -235,7 +216,6 @@ func validatePools(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet, gw, ne
 				r.add(fp, "pool_contains_gateway", "the pool must not include the gateway address")
 			}
 		}
-		// overlap with earlier pools
 		for _, o := range ranges {
 			if su <= o.hi && o.lo <= eu {
 				r.add(fp, "pool_overlap", "this pool overlaps another pool in the same subnet")
@@ -249,7 +229,6 @@ func validatePools(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet, gw, ne
 func validateReservations(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet, prefix string) {
 	seenMAC := map[string]bool{}
 	seenIP := map[string]bool{}
-	// pool ranges for conflict detection
 	type rng struct{ lo, hi uint32 }
 	var pools []rng
 	for _, p := range n.Pools {
@@ -296,10 +275,8 @@ func validateReservations(r *ValidationResult, n GuestNetwork, ipnet *net.IPNet,
 	}
 }
 
-// ValidateSet checks a whole set of networks for cross-network conflicts on
-// one appliance: duplicate VLAN on the same parent, duplicate bridge names,
-// and overlapping enabled subnets (no VRF yet). Issues is always non-nil so
-// it serializes as [] rather than null.
+// ValidateSet checks networks for cross-network conflicts: duplicate VLAN on a parent, duplicate bridge names and
+// overlapping enabled subnets. Issues is non-nil so it serializes as [] rather than null.
 func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces map[string]bool) ValidationResult {
 	res := ValidationResult{OK: true, Issues: []Issue{}}
 	for i := range nets {
@@ -310,7 +287,6 @@ func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces ma
 	}
 
 	enabled := sortEnabled(nets)
-	// duplicate VLAN per parent
 	seenVLAN := map[string]int{}
 	seenBridge := map[string]int{}
 	for i, n := range enabled {
@@ -330,7 +306,6 @@ func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces ma
 			seenBridge[n.BridgeName] = i
 		}
 	}
-	// overlapping enabled subnets
 	type ent struct {
 		name   string
 		lo, hi uint32
@@ -358,9 +333,8 @@ func ValidateSet(nets []GuestNetwork, topo Topology, availIfaces, knownIfaces ma
 	return res
 }
 
-// PortalURLFor builds the plain-HTTP captive-portal URL for a network's gateway: the approved HTTP fallback
-// (and what option 114 carries whenever the portal's HTTPS is not active). Straight to portald, never Caddy.
-// See CaptivePortalURL for the state-aware choice option 114 actually makes.
+// PortalURLFor builds the plain-HTTP captive-portal URL for a gateway, straight to portald and never Caddy;
+// CaptivePortalURL makes the state-aware choice.
 func PortalURLFor(gatewayIP string, httpPort int) string {
 	return fmt.Sprintf("http://%s:%d/", gatewayIP, httpPort)
 }

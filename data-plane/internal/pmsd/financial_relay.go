@@ -1,34 +1,13 @@
 package pmsd
 
-// THE FINANCIAL RELAY: pmsd CARRIES A ROOM CHARGE, AND DECIDES NOTHING ABOUT IT (decision D45).
+// The financial relay carries an immutable room-charge command (exact PS bytes, SHA-256, interface, P#) from the
+// financial path to the single FIAS link and decides nothing about it: it never builds or edits a PS, retries,
+// or interprets the answer. It refuses unless all three PHASE4 flags are set on this process, checks the
+// command's shape, has the database authorise exactly this command, carries it only on a steady link and never
+// the same P# twice, and revalidates the room immediately before the first byte inside the link's single writer.
 //
-// The property's PMS accepts one FIAS client connection and pmsd owns it. So a room charge the financial path
-// has validated and durably recorded is handed here, over a root-only unix socket, as an immutable command:
-// the exact PS bytes, their SHA-256, the interface and the P# they own. The relay
-//
-//  1. refuses unless room-charge transmission is deployed on THIS process too (STAYCONNECT_PHASE4_MASTER,
-//     _OUTBOX_WORKER and _PMS_TRANSMIT) -- scd alone cannot turn pmsd into a financial sender;
-//  2. checks the command's shape (a bounded, wire-safe PS carrying exactly its own P#, matching its hash);
-//  3. asks the database whether exactly this command is authorised (p4_posting_command_authorised: a SENDING,
-//     recent attempt for this interface and P# recording this hash, on an in-flight CHARGE, on an interface
-//     still financially ready). pmsd holds EXECUTE on that check and no privilege on any posting table;
-//  4. carries it only on a connected link that is between resyncs, one command at a time per link, and never
-//     the same P# twice;
-//  4a. revalidates, INSIDE the link's single writer and immediately before the first byte, that the command's
-//     room is still its reservation's current room as the link has seen it (Phase-0 Amendment A1, rule 7): a
-//     guest record already read on this link that moved the reservation, or announced its departure, means the
-//     stale command is never written and is answered NOT_TRANSMITTED (ROOM_CHANGED_ON_LINK /
-//     RESERVATION_DEPARTED_ON_LINK), so a fresh attempt can be built with the new room and the same G#;
-//  5. writes the bytes verbatim through the link's single serialized writer, and returns the PA whose P#
-//     matches -- verbatim -- or UNKNOWN when none arrives in time or the link ends.
-//
-// What it will NOT do, by construction: build or edit a PS, choose an amount, room, G#, currency or posting
-// code, create a posting, retry anything, interpret AS, settle, reverse or grant access. Those belong to the
-// posting engine and the database, on the other side of the socket.
-//
-// "NOT_TRANSMITTED" is answered only when no byte of the command was handed to the writer. Every doubt after
-// that is UNKNOWN -- including a command for a P# this process already carried, which could otherwise be
-// mistaken for "never sent" and retried into a second charge.
+// NOT_TRANSMITTED is answered only when no byte was handed to the writer. Every later doubt, including a
+// repeated P#, is UNKNOWN, so a possibly-posted charge is never retried into a second charge.
 
 import (
 	"bufio"
@@ -49,16 +28,14 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/postinghandoff"
 )
 
-// Environment flags pmsd reads for itself. They are the same names the posting engine uses; pmsd does not
-// import the posting package (that package imports this one), so it reads them directly and fails closed.
+// These match the posting engine's flag names; pmsd cannot import that package (it imports this one), so it reads them directly and fails closed.
 const (
 	envPhase4Master   = "STAYCONNECT_PHASE4_MASTER"
 	envPhase4Outbox   = "STAYCONNECT_PHASE4_OUTBOX_WORKER"
 	envPhase4Transmit = "STAYCONNECT_PHASE4_PMS_TRANSMIT"
 )
 
-// RelayTransmitDeployed reports whether room-charge transmission is deployed on this process: all three flags
-// must parse as true. Anything else -- unset, false, malformed -- is "not deployed".
+// RelayTransmitDeployed requires all three flags to parse as true; unset, false or malformed is "not deployed".
 func RelayTransmitDeployed(getenv func(string) string) bool {
 	for _, k := range []string{envPhase4Master, envPhase4Outbox, envPhase4Transmit} {
 		v, err := strconv.ParseBool(strings.TrimSpace(getenv(k)))
@@ -69,11 +46,9 @@ func RelayTransmitDeployed(getenv func(string) string) bool {
 	return true
 }
 
-// Authoriser asks the database whether exactly this command may be carried. It returns "AUTHORISED" or a
-// bounded refusal code.
+// Authoriser returns "AUTHORISED" or a bounded refusal code.
 type Authoriser func(ctx context.Context, interfaceID string, pNumber int64, bodySHA256 string) (string, error)
 
-// FinancialRelay routes authorised posting commands to the FIAS link that owns their interface.
 type FinancialRelay struct {
 	enabled   bool
 	authorise Authoriser
@@ -82,31 +57,26 @@ type FinancialRelay struct {
 	mu      sync.Mutex
 	ports   map[string]*relayPort
 	carried map[string]map[int64]struct{} // interface -> P#s this process has handed to a writer
-	// seen is what each live link has told us about reservations since it connected: interface -> G# -> the
-	// latest normalized room, or departed. It is fed by the link's read loop as it parses guest records -- BEFORE
-	// the database has applied them -- so the pre-write guard sees a room move the moment it is on the link.
+	// seen is interface -> G# -> latest room or departed, fed by the read loop before the database applies the
+	// record, so the pre-write guard sees a room move the moment it is on the link.
 	seen map[string]map[string]linkReservation
 }
 
-// linkReservation is the latest state of one reservation as read on the live link.
 type linkReservation struct {
 	room     string
 	departed bool
 }
 
-// maxSeenPerLink bounds the per-link reservation view. A property's in-house roster is far smaller; on
-// overflow the view is reset, which only removes the extra, earlier guard (the database check still applies).
+// maxSeenPerLink bounds the per-link view; on overflow it resets, dropping only the early guard (the database check still applies).
 const maxSeenPerLink = 50000
 
-// NewFinancialRelay builds the relay. enabled=false answers every command NOT_TRANSMITTED; a nil authoriser
-// likewise refuses everything.
+// NewFinancialRelay: enabled=false or a nil authoriser answers every command NOT_TRANSMITTED.
 func NewFinancialRelay(enabled bool, authorise Authoriser, log *slog.Logger) *FinancialRelay {
 	return &FinancialRelay{enabled: enabled, authorise: authorise, log: log,
 		ports: map[string]*relayPort{}, carried: map[string]map[int64]struct{}{},
 		seen: map[string]map[string]linkReservation{}}
 }
 
-// relayPort is one live FIAS link offered to the relay.
 type relayPort struct {
 	iface  string
 	submit func(ctx context.Context, body string, guard func() string) (bool, error)
@@ -124,7 +94,6 @@ type pendingCommand struct {
 
 func (p *relayPort) setSteady(v bool) { p.steady.Store(v) }
 
-// onPA hands a PA to the command waiting for its P#. It reports whether one was waiting.
 func (p *relayPort) onPA(body string) bool {
 	pn := postinghandoff.PNumberOf(body)
 	p.mu.Lock()
@@ -146,10 +115,8 @@ func (r *FinancialRelay) attach(iface string, submit func(ctx context.Context, b
 	return p
 }
 
-// ObserveGuestRecord records what one guest record read on the live link says about its reservation: GI and GC
-// carry the reservation's current room; GO announces its departure. Called by the link's read loop, before the
-// record is admitted to the database. Nothing about the guest is retained beyond the reservation number and the
-// normalized room, and nothing is logged.
+// ObserveGuestRecord is called by the read loop before the record reaches the database: GI/GC carry the current
+// room, GO a departure. Only the reservation number and normalized room are retained, and nothing is logged.
 func (r *FinancialRelay) ObserveGuestRecord(iface string, recordType RecordType, reservation, room string) {
 	if r == nil || reservation == "" {
 		return
@@ -173,9 +140,8 @@ func (r *FinancialRelay) ObserveGuestRecord(iface string, recordType RecordType,
 	}
 }
 
-// linkGuard returns the pre-write check for one command: refuse when the link has already seen the command's
-// reservation move to another room or depart. A reservation the link has not mentioned is left to the database
-// check, which already passed.
+// linkGuard refuses when the link has already seen the reservation move or depart; an unmentioned one is left to
+// the database check, which already passed.
 func (r *FinancialRelay) linkGuard(iface, body string, port *relayPort) func() string {
 	rn, g := psField(body, "RN"), psField(body, "G#")
 	return func() string {
@@ -201,7 +167,6 @@ func (r *FinancialRelay) linkGuard(iface, body string, port *relayPort) func() s
 	}
 }
 
-// psField returns the value of one field of a PS body (fields are "|XXvalue"), or "".
 func psField(body, code string) string {
 	for _, f := range strings.Split(body, "|") {
 		if len(f) > len(code) && strings.HasPrefix(f, code) {
@@ -228,8 +193,7 @@ func (r *FinancialRelay) portFor(iface string) *relayPort {
 	return r.ports[iface]
 }
 
-// markCarried records that a P# was handed to a writer on this interface, and reports whether it already had
-// been. Bounded: an interface keeps at most 4096 recent P#s (a P# is never reused by the allocator).
+// markCarried records a P# handed to a writer and reports whether it already was; bounded to 4096 per interface.
 func (r *FinancialRelay) markCarried(iface string, pn int64) (already bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -266,7 +230,6 @@ func unknown(code string) postinghandoff.Response {
 	return postinghandoff.Response{Result: postinghandoff.Unknown, Code: code}
 }
 
-// Handle carries one command and returns its single answer.
 func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request) postinghandoff.Response {
 	if !r.enabled {
 		return notSent("PMS_TRANSMIT_NOT_DEPLOYED_ON_PMSD")
@@ -278,7 +241,6 @@ func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request)
 	if r.wasCarried(req.InterfaceID, req.PNumber) {
 		return unknown("DUPLICATE_COMMAND")
 	}
-	// Authorisation first: bytes the financial path did not record are refused whatever the link is doing.
 	if r.authorise == nil {
 		return notSent("AUTHORISATION_UNAVAILABLE")
 	}
@@ -309,7 +271,7 @@ func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request)
 		port.mu.Unlock()
 		return notSent("LINK_BUSY")
 	}
-	// Registered BEFORE the write, so a PA that arrives immediately is matched rather than dropped.
+	// Registered before the write so an immediate PA is matched, not dropped.
 	port.pending = pc
 	port.mu.Unlock()
 	release := func() {
@@ -324,11 +286,10 @@ func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request)
 		release()
 		return unknown("DUPLICATE_COMMAND")
 	}
-	enqueued, werr := port.submit(ctx, req.Body, r.linkGuard(req.InterfaceID, req.Body, port)) // the exact bytes, unmodified
+	enqueued, werr := port.submit(ctx, req.Body, r.linkGuard(req.InterfaceID, req.Body, port))
 	var refused *GuardRefusedError
 	if errors.As(werr, &refused) {
-		// The writer refused BEFORE the first byte: provably nothing was written. Forget the P# so the record
-		// is exact, and say why, so the financial path records NOT_SENT and builds a fresh attempt.
+		// Refused before the first byte: nothing was written, so forget the P# and let the financial path build a fresh attempt.
 		release()
 		r.mu.Lock()
 		delete(r.carried[req.InterfaceID], req.PNumber)
@@ -336,7 +297,7 @@ func (r *FinancialRelay) Handle(ctx context.Context, req postinghandoff.Request)
 		return notSent(boundedRelayCode(refused.Code))
 	}
 	if !enqueued {
-		// The writer never took it: provably nothing was written. Forget the P# so the record is exact.
+		// The writer never took it: nothing was written, so forget the P#.
 		release()
 		r.mu.Lock()
 		delete(r.carried[req.InterfaceID], req.PNumber)
@@ -377,8 +338,8 @@ func boundedRelayCode(c string) string {
 	return c
 }
 
-// ServeSocket accepts commands on a root-only unix socket until ctx ends. One request and one answer per
-// connection. Nothing from a command's body is ever logged: it carries a room number and a reservation.
+// ServeSocket serves a root-only unix socket, one request and answer per connection. A command body (room,
+// reservation) is never logged.
 func (r *FinancialRelay) ServeSocket(ctx context.Context, path string) error {
 	if path == "" {
 		path = postinghandoff.DefaultSocket

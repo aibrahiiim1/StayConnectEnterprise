@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// QuoteRequest is the guest's package-selection input. The browser submits only identifiers; the
-// server resolves every priced/pinned dimension.
 type QuoteRequest struct {
 	TenantID       string
 	SiteID         string
@@ -15,13 +13,11 @@ type QuoteRequest struct {
 	PackageID      string
 	DeviceID       string
 	GuestNetworkID string
-	// Method is how the client chose to acquire the package. "" means the single applicable method (Free for
-	// a free package, Voucher for a voucher subject); a priced package must name its method.
+	// Empty means the single applicable method (Free for a free package, Voucher for a voucher subject); a
+	// priced package must name its method.
 	Method string
 }
 
-// ConfirmRequest confirms a previously-created quote. The client submits only the opaque quote id and
-// the device/network it is operating from.
 type ConfirmRequest struct {
 	TenantID       string
 	SiteID         string
@@ -30,14 +26,9 @@ type ConfirmRequest struct {
 	GuestNetworkID string
 }
 
-// CreateQuote resolves -- server-side, in one transaction, WITHOUT consuming the auth context -- the
-// package/plan revisions, the acquisition method, eligibility, the first-match grant tier and the price, then
-// writes a one-time offer_quote (5-min TTL). Returns only guest-safe display + the opaque quote id. When the
-// portal surface is OFF it returns Disabled without touching the repository (zero SQL).
-//
-// A voucher subject is quoted the revision its card was printed against, by Voucher, whatever the package
-// current revision or active flag: an issued voucher is honoured until its own state, window or an explicit
-// revocation ends it.
+// CreateQuote resolves everything server-side in one transaction without consuming the auth context, then
+// writes a one-time offer_quote (5-min TTL). A voucher subject is quoted the revision its card was printed
+// against, whatever the package's current revision or active flag.
 func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (QuoteResult, error) {
 	if !e.cfg.PortalOn() {
 		e.obs.Event("phase2.disabled", map[string]string{"op": "quote"})
@@ -54,14 +45,14 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 		if err != nil {
 			return err
 		}
-		// Pin validation (no consume): the auth-context must belong to this tenant/site, be for THIS
-		// device+network, be non-PMS, unconsumed and unexpired.
+		// The auth-context must belong to this tenant/site, be for this device and network, be non-PMS,
+		// unconsumed and unexpired.
 		if ac.TenantID != req.TenantID || ac.SiteID != req.SiteID || ac.DeviceID != req.DeviceID || ac.GuestNetworkID != req.GuestNetworkID {
 			res = quoteDeny("auth_context_mismatch")
 			return nil
 		}
 		if ac.StayID != "" {
-			res = quoteDeny("pms_uses_room_sign_in") // a verified stay acquires through the Room sign-in path
+			res = quoteDeny("pms_uses_room_sign_in")
 			return nil
 		}
 		if ac.Consumed || !ac.ExpiresAt.After(now) {
@@ -105,12 +96,11 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 				return nil
 			}
 			if pkg.VisibleUntil != nil && !now.Before(*pkg.VisibleUntil) {
-				res = quoteDeny("sale_window_closed") // upper bound exclusive
+				res = quoteDeny("sale_window_closed")
 				return nil
 			}
 		}
 
-		// THE METHOD: effective at this site, listed by the package, applicable to this client -- now.
 		applicable := applicableMethods(pkg, ac, site)
 		method := req.Method
 		if method == "" && len(applicable) == 1 {
@@ -131,9 +121,8 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			return err
 		}
 
-		// ...AND THE CLIENT NETWORKS THIS ONE CONTINUES. A rule naming a network that was safely replaced for
-		// VLAN/port/addressing reasons is satisfied by a device on its successor; without this an UNUSED PRINTED
-		// VOUCHER, which redeems its pinned immutable revision directly, died the moment a cable moved.
+		// Also accept the client networks this one continues, so an unused printed voucher (which redeems its
+		// pinned revision) survives a network replacement.
 		ancestors, aerr := tx.GuestNetworkAncestors(ctx, req.TenantID, req.SiteID, ac.GuestNetworkID)
 		if aerr != nil {
 			return aerr
@@ -145,8 +134,8 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 		if err != nil {
 			return err
 		}
-		// The prior-purchase history is keyed on the PACKAGE under the revision's own policy (contract §5),
-		// exactly as the list did -- a quote must never pass what the list withheld.
+		// History is keyed on the package under the revision's own policy; a quote must never pass what the
+		// list withheld.
 		if pol := PriorPurchasePolicyOf(rules, pkg.PriceMinor).ForSubject(ac.Subject.Kind); pol.Present {
 			prior, err := tx.HasPriorPurchase(ctx, req.TenantID, req.SiteID, PriorPurchaseQuery{PackageID: pkg.PackageID, Subject: ac.Subject, Policy: pol})
 			if err != nil {
@@ -169,18 +158,17 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			return nil
 		}
 
-		// typed, validated grant snapshot (no arbitrary jsonb copied into a security-enforced snapshot)
+		// Typed, validated snapshot: no arbitrary jsonb is copied into a security-enforced snapshot.
 		snapshot, err := BuildGrantSnapshot(tier, plan, pkg)
 		if err != nil {
 			res = quoteDeny("invalid_grant_config")
 			return nil
 		}
-		// PHASE 6: a mode this runtime cannot account for is refused HERE, before a quote exists.
+		// A time mode this runtime cannot account for is refused here, before a quote exists.
 		if why := TimeModeAcquirable(snapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
 			res = quoteDeny(why)
 			return nil
 		}
-		// resolve the immutable duration/end policy once, freezing it into the snapshot
 		endMode, window, derr := ResolveEndPolicy(pkg.DurationPolicy, now)
 		if derr != nil {
 			res = quoteDeny("invalid_duration_policy")
@@ -211,23 +199,17 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 	return res, nil
 }
 
-// ConfirmFreePurchase is kept as the historical name of the confirm step; it confirms whichever method the
-// quote pinned. See ConfirmPurchase.
 func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmRequest) (PurchaseResult, error) {
 	return e.ConfirmPurchase(ctx, req)
 }
 
-// ConfirmPurchase consumes the quote + its pinned auth-context and writes the Purchase + Settlement in ONE
-// transaction with a deterministic lock order (quote -> auth-context -> subject). What happens next depends
-// on the method the quote pinned, and the site gates are re-checked here rather than trusted from the quote:
+// ConfirmPurchase consumes the quote and its pinned auth-context and writes Purchase and Settlement in one
+// transaction (lock order quote -> auth-context -> subject); site gates are re-checked, not trusted from the
+// quote.
 //
-//	Free          settlement NOT_REQUIRED; granted in this transaction (p4_grant_quoted_entitlement)
-//	Voucher       purchase VOUCHER_REDEMPTION, settlement PREPAID/SETTLED; granted in this transaction by
-//	              p4_grant_voucher_entitlement, which burns the voucher in the same statement chain
-//	Card payment  purchase AWAITING_SETTLEMENT, settlement ONLINE_PAYMENT/REQUIRED; NOTHING is granted. The
-//	              caller starts the provider checkout; access follows only a verified capture.
-//
-// Any failure rolls the whole thing back (single tx): zero partial rows.
+//	Free          settlement NOT_REQUIRED; granted in this transaction
+//	Voucher       purchase VOUCHER_REDEMPTION, settlement PREPAID/SETTLED; granted in this transaction, burning the voucher
+//	Card payment  purchase AWAITING_SETTLEMENT, settlement ONLINE_PAYMENT/REQUIRED; nothing is granted until a verified capture
 func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest) (PurchaseResult, error) {
 	if !e.cfg.PortalOn() {
 		e.obs.Event("phase2.disabled", map[string]string{"op": "purchase"})
@@ -240,7 +222,6 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 	site := e.siteMethods(ctx)
 	var res PurchaseResult
 	err := e.repo.WithTx(ctx, func(tx CommerceTx) error {
-		// 1. lock the quote (tenant/site scoped); reject consumed/expired.
 		q, err := tx.LockOfferQuoteForUpdate(ctx, req.TenantID, req.SiteID, req.QuoteID)
 		if err != nil {
 			return err
@@ -251,27 +232,25 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 		}
 		method := q.GrantSnapshot.AcquisitionMethod
 		if method == "" {
-			method = AcquireFree // a quote that predates acquisition methods was a free quote
+			method = AcquireFree
 		}
-		// 1a. Re-validate the quote for its method BEFORE consuming anything.
+		// Re-validate for its method before consuming anything.
 		if why := revalidateQuote(q, method, site); why != "" {
 			res = purchaseDeny(why)
 			return nil
 		}
-		// 1b. PHASE 6, RE-CHECKED AT CONFIRM AND BEFORE ANYTHING IS CONSUMED.
+		// Time mode re-checked at confirm, before anything is consumed.
 		if why := TimeModeAcquirable(q.GrantSnapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
 			res = purchaseDeny(why)
 			return nil
 		}
-		// 1c. A PER-NIGHT ALLOWANCE NEEDS A STAY, re-checked here as the listing and the quote check it
-		// (applicableMethods): no subject on this path carries one.
+		// A per-night allowance needs a stay, re-checked as the listing and quote do (applicableMethods).
 		if pkg, perr := tx.LoadPackageRevisionByID(ctx, req.TenantID, req.SiteID, q.PackageRevisionID); perr != nil {
 			return perr
 		} else if pkg.DataAllocationMode == AllocPerStayNight {
 			res = purchaseDeny("per_night_allowance_needs_stay")
 			return nil
 		}
-		// 2. lock the EXACT pinned auth-context; verify all pins.
 		ac, err := tx.LockAuthContextForUpdate(ctx, req.TenantID, req.SiteID, q.AuthContextID)
 		if err != nil {
 			return err
@@ -289,17 +268,16 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 			res = purchaseDeny("subject_invalid")
 			return nil
 		}
-		// The method must still fit the subject: only a voucher subject acquires by Voucher, and a voucher
-		// subject acquires by nothing else.
+		// The method must still fit the subject: only a voucher subject acquires by Voucher, and by nothing
+		// else.
 		if (method == AcquireVoucher) != (ac.Subject.Kind == SubjectVoucher) {
 			res = purchaseDeny("method_subject_mismatch")
 			return nil
 		}
-		// 3. deterministic subject/entitlement lock (advisory) - same order for every confirm.
+		// Same lock order for every confirm.
 		if err := tx.AcquireSubjectLock(ctx, req.TenantID, req.SiteID, ac.Subject); err != nil {
 			return err
 		}
-		// 4. atomic compare-and-set consume of quote then auth-context.
 		okQ, err := tx.ConsumeOfferQuote(ctx, q.ID, now)
 		if err != nil {
 			return err
@@ -319,7 +297,7 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 		spec := PurchaseSpec{
 			TenantID: req.TenantID, SiteID: req.SiteID, PackageRevisionID: q.PackageRevisionID,
 			OfferQuoteID: q.ID, AuthContextID: ac.ID, Subject: ac.Subject,
-			AmountMinor: q.PriceMinor, Currency: q.Currency, CurrencyExponent: q.CurrencyExponent, // pinned from the quote, never defaulted
+			AmountMinor: q.PriceMinor, Currency: q.Currency, CurrencyExponent: q.CurrencyExponent,
 		}
 		switch method {
 		case AcquireFree:
@@ -330,7 +308,6 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 			if err := tx.InsertSettlement(ctx, req.TenantID, req.SiteID, pid); err != nil {
 				return err
 			}
-			// THE SHARED GRANT KERNEL (migrations 0024, 0095): the FREE authorization.
 			eid, superseded, err := tx.GrantQuotedEntitlement(ctx, req.TenantID, req.SiteID, pid)
 			if err != nil {
 				return err
@@ -372,18 +349,17 @@ func (e *CommerceEngine) ConfirmPurchase(ctx context.Context, req ConfirmRequest
 		return res, nil
 	}
 	if err != nil {
-		// FAIL CLOSED: the whole tx rolled back; no partial rows. Report a generic repo error.
+		// Fail closed: the whole tx rolled back; report a generic repo error.
 		return PurchaseResult{}, &Error{Code: ErrRepo, Msg: "confirm"}
 	}
 	return res, nil
 }
 
-// errDenyRollback aborts a confirm transaction after consumption when the method turns out to be unknown,
-// so nothing consumed survives a refusal.
+// Aborts a confirm after consumption when the method is unknown, so nothing consumed survives a refusal.
 var errDenyRollback = &Error{Code: ErrInvalidInput, Msg: "confirm refused"}
 
-// revalidateQuote re-asserts, at confirm time, that a locked quote is coherent for its method AND that the
-// method is still effective at this site. A tampered quote row is rejected before any consume.
+// Re-asserts at confirm time that a locked quote is coherent for its method and that the method is still
+// effective at this site; a tampered quote row is rejected before any consume.
 func revalidateQuote(q OfferQuoteRow, method string, site SiteMethods) string {
 	switch method {
 	case AcquireFree:
@@ -402,9 +378,8 @@ func revalidateQuote(q OfferQuoteRow, method string, site SiteMethods) string {
 		if q.PMSInterfaceID != nil || q.SettlementMappingID != nil {
 			return "quote_has_pms_settlement"
 		}
-		// THE CURRENCY, re-checked now: the default account (or its conversion) may have changed since the
-		// quote. Confirming anyway would write a purchase AWAITING_SETTLEMENT that the payment identity gate
-		// then refuses (PAYMENT_ACCOUNT_CURRENCY), stranding it.
+		// Currency is re-checked now: the default account may have changed since the quote, and confirming
+		// would strand an AWAITING_SETTLEMENT purchase (PAYMENT_ACCOUNT_CURRENCY).
 		if !site.CardApplicable(q.Currency) {
 			return "card_currency_not_accepted"
 		}
@@ -420,12 +395,9 @@ func revalidateQuote(q OfferQuoteRow, method string, site SiteMethods) string {
 	return ""
 }
 
-// ---- helpers ----
-
 func quoteDeny(reason string) QuoteResult       { return QuoteResult{Reason: reason} }
 func purchaseDeny(reason string) PurchaseResult { return PurchaseResult{Reason: reason} }
 
-// subjectID returns the single non-PMS subject id and whether exactly one is set.
 func (s CommerceSubject) subjectID() (string, bool) {
 	switch s.Kind {
 	case SubjectVoucher:
@@ -440,9 +412,8 @@ func (s CommerceSubject) subjectID() (string, bool) {
 	return "", false
 }
 
-// revalidateFreeQuote re-asserts, at confirm time, that a locked quote is a valid Phase-2 FREE quote:
-// zero price, valid currency+exponent, and NO PMS interface / settlement mapping / tax. A tampered
-// quote row is rejected before any consume. Returns "" when valid, else a deterministic reason.
+// Zero price, valid currency and exponent, and no PMS interface, settlement mapping or tax; returns "" when
+// valid, else a reason.
 func revalidateFreeQuote(q OfferQuoteRow) string {
 	if q.PriceMinor != 0 {
 		return "quote_not_free"
@@ -462,7 +433,6 @@ func revalidateFreeQuote(q OfferQuoteRow) string {
 	return ""
 }
 
-// marshalPolicy returns a compact JSON of the duration policy for the snapshot's audit copy.
 func marshalPolicy(dp map[string]any) (json.RawMessage, error) {
 	if len(dp) == 0 {
 		return nil, nil
@@ -471,7 +441,6 @@ func marshalPolicy(dp map[string]any) (json.RawMessage, error) {
 	return json.RawMessage(b), err
 }
 
-// guestDisplay returns only guest-appropriate display fields from the typed snapshot.
 func guestDisplay(snap GrantSnapshot, pkg PackageRevisionRow) map[string]any {
 	d := map[string]any{
 		"down_kbps":              snap.DownKbps,

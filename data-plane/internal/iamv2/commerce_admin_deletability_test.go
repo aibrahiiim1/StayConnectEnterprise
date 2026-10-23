@@ -9,8 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// fakeAdminRepo / fakeAdminTx implement only what these tests exercise. Embedding the interfaces keeps them
-// compiling as the interfaces grow; calling anything not overridden panics, which is the point.
+// The fakes implement only what these tests exercise; calling anything not overridden panics, on purpose.
 type fakeAdminRepo struct {
 	CommerceAdminRepository
 	tx        *fakeAdminTx
@@ -121,8 +120,6 @@ func pkgSpec(code string, createOnly bool) PackagePublishSpec {
 	}
 }
 
-// ADD MUST NOT BECOME A SILENT REVISION. Typing an existing code into "Add package" used to publish a new
-// revision of that package -- replacing its offer for every future guest -- and report success.
 func TestAddPackageWithAnExistingCodeIsRefusedNotRevised(t *testing.T) {
 	a, repo := newFakeAdmin(t, "GOLD")
 	_, err := a.PublishRevision(context.Background(), pkgSpec("GOLD", true))
@@ -150,7 +147,6 @@ func TestAddPackageWithANewCodeCreatesIt(t *testing.T) {
 	}
 }
 
-// EDIT KEEPS ITS BEHAVIOUR: a revision of the existing package, via the upsert path.
 func TestEditStillPublishesANewRevisionOfTheExistingPackage(t *testing.T) {
 	a, repo := newFakeAdmin(t, "GOLD")
 	res, err := a.PublishRevision(context.Background(), pkgSpec("GOLD", false))
@@ -180,7 +176,6 @@ func TestAddPlanWithAnExistingCodeIsRefused(t *testing.T) {
 	}
 }
 
-// AN UNUSED ITEM IS DELETABLE: the database returned no blocker with a count.
 func TestDeletabilityIsYesWhenNothingDependsOnIt(t *testing.T) {
 	a, repo := newFakeAdmin(t)
 	repo.blockers = []CatalogueBlocker{}
@@ -193,7 +188,6 @@ func TestDeletabilityIsYesWhenNothingDependsOnIt(t *testing.T) {
 	}
 }
 
-// A USED ITEM IS NOT, and every reason carries the database's count in words.
 func TestDeletabilityIsNoWithTheDatabasesReasons(t *testing.T) {
 	a, repo := newFakeAdmin(t)
 	repo.blockers = []CatalogueBlocker{{"ENTITLEMENTS", 12}, {"VOUCHERS", 1}, {"GUEST_ACCOUNTS", 0}, {"SOMETHING_NEW", 2}}
@@ -225,7 +219,6 @@ func TestDeletabilityOfAnUnknownOrSystemItemIsNotFound(t *testing.T) {
 	}
 }
 
-// A DATABASE WITHOUT 0091 answers "no", never an approximation.
 func TestDeletabilityOnAnOlderDatabaseIsNo(t *testing.T) {
 	a, repo := newFakeAdmin(t)
 	repo.blockErr = ErrCatalogueDeleteUnavailable
@@ -255,7 +248,6 @@ func TestDeletePassesOperatorAndReason(t *testing.T) {
 	}
 }
 
-// NO MAPPED REFUSAL MAY BECOME A SUCCESS OR A 500.
 func TestCatalogueErrorMapping(t *testing.T) {
 	cases := map[string]error{
 		"42883": ErrCatalogueDeleteUnavailable, "23001": ErrCatalogueInUse, "23503": ErrCatalogueInUse,

@@ -1,32 +1,10 @@
 package main
 
-// PMS RECONCILIATION — the departures nobody could place, as CASES rather than as rows.
-//
-// The property was told it had 12 026 messages needing attention. It had 397 unresolved departures, each
-// restaged once per reconnect for weeks. Counting the rows was not a rounding error: it made the number
-// useless, and a number nobody can act on is a warning nobody reads.
-//
-// WHAT THIS SCREEN WILL NOT DO. It will not close a stay because a planned departure date has passed — a
-// planned date is a plan. It will not treat two stays in one room as a duplicate — sharing a room is
-// ordinary. It will not apply an old room-keyed departure to whoever is in that room today. And it will not
-// make a case disappear to lower the count: a case with no answer stays in the list, labelled with the
-// evidence it is missing.
-//
-// THERE IS NO ACTION HERE, AND THAT IS THE CORRECT ANSWER RATHER THAN A MISSING FEATURE.
-//
-// This screen briefly offered "re-evaluate", which handed a recorded departure back to the ingestion engine.
-// It could never have worked, and it should not: iam_v2.stay_events is strictly one-way (the
-// p3_stay_event_appendonly trigger refuses any change to a terminal row's status), and separately a checkout
-// boundary must be an APPLIED GO event pinned as the stay's application lineage. A MANUAL_REVIEW departure
-// is neither and cannot become either.
-//
-// What those two invariants say together is worth stating plainly instead of working around: a departure the
-// engine could not place is resolved by the PMS sending one it CAN place. The PMS is the source of truth for
-// whether a guest has left, and a hotel system that checked a guest out on its own re-reading of an old
-// message would be asserting something it does not know.
-//
-// The LIST was always the valuable half: 397 distinct departures instead of 12,271 rows, each labelled with
-// the evidence it is waiting for. Counting honestly never needed a button.
+// Departures the engine could not place, shown as cases rather than rows. There is no action here by design:
+// iam_v2.stay_events is one-way (p3_stay_event_appendonly refuses changes to a terminal row) and a checkout
+// boundary must be an applied GO event, so a MANUAL_REVIEW departure is resolved only by the PMS sending one
+// the engine can place. It never closes a stay on a planned date, treats shared rooms as duplicates, applies an
+// old room-keyed departure to the current occupant, or hides a case to lower the count.
 
 import (
 	"crypto/sha256"
@@ -54,16 +32,13 @@ type reconciliationCaseOut struct {
 	CandidateStayID *string    `json:"candidate_stay_id,omitempty"`
 	RosterPresent   bool       `json:"roster_present"`
 	ResolutionState string     `json:"resolution_state"`
-	// NeedsPMSEvidence is true for every case, and says so rather than implying some are actionable here.
-	// It exists so the screen can state what WOULD resolve the case without re-deriving that in the browser.
+	// True for every case: the screen states what would resolve it without re-deriving that in the browser.
 	NeedsPMSEvidence bool `json:"needs_pms_evidence"`
-	// IdentityHidden: the reservation number was withheld from a role without pms-stay-identity (audit H-7;
-	// GDPR final check D2). The case key, which is built from it, is then an opaque digest.
+	// The reservation number is withheld from roles without pms-stay-identity; the case key is then an opaque digest.
 	IdentityHidden bool `json:"identity_hidden,omitempty"`
 }
 
-// opaqueCaseKey replaces a case key that names a reservation with a stable digest, so a list can still be keyed
-// and compared between reads without showing the reservation number.
+// Replaces a reservation-naming case key with a stable digest, so lists stay comparable without showing it.
 func opaqueCaseKey(k string) string {
 	sum := sha256.Sum256([]byte(k))
 	return "case:" + hex.EncodeToString(sum[:8])
@@ -111,7 +86,6 @@ func (s *server) scanReconciliationCases(w http.ResponseWriter, r *http.Request,
 			jsonErr(w, http.StatusInternalServerError, "cases_unreadable", "the reconciliation data could not be read")
 			return nil, false
 		}
-		// Every case is answered by the PMS, whatever its classification. The state says which evidence.
 		c.NeedsPMSEvidence = true
 		if !identity {
 			c.Reservation, c.CaseKey, c.IdentityHidden = "", opaqueCaseKey(c.CaseKey), true
@@ -135,14 +109,8 @@ func (s *server) listReconciliationCases(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"cases": out})
 }
 
-// reconciliationSummary is the honest headline: how many DISTINCT departures are outstanding, how many
-// recorded copies sit behind them, and how the cases divide by what can actually be done about them.
-//
-// recorded_rows is reported rather than hidden. The gap between 397 and 12 271 is the single most useful
-// fact about this feed, and rounding it away would be the same mistake in the other direction.
-//
-// There is no "actionable" total, because none of them is actionable HERE. Every case is waiting on the PMS,
-// and a count implying otherwise would be the screen lying about what the property can do today.
+// The headline counts distinct departures and reports recorded_rows too. There is deliberately no "actionable"
+// total: every case is waiting on the PMS.
 func (s *server) reconciliationSummary(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -188,9 +156,9 @@ func (s *server) reconciliationSummary(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cases": totalCases, "recorded_rows": totalRows,
-		"by_state":                                buckets,
-		"rooms_multi_occupancy":                   multiRooms,
-		"stays_past_departure":                    pastDeparture,
+		"by_state":              buckets,
+		"rooms_multi_occupancy": multiRooms,
+		"stays_past_departure":  pastDeparture,
 		"stays_past_departure_absent_from_roster": pastDepartureAbsent,
 	})
 }
@@ -251,10 +219,9 @@ func (s *server) listStaysPastDeparture(w http.ResponseWriter, r *http.Request) 
 		Departure     *time.Time `json:"departure,omitempty"`
 		DaysPast      int        `json:"days_past_departure"`
 		RosterPresent bool       `json:"roster_present"`
-		// "Not listed" and "somebody else is in that room now" are different facts. The second is the one
-		// that says the room has been re-let, which is what an operator actually needs to know.
+		// "Not listed" and "someone else is in that room now" differ: the second means the room was re-let.
 		RoomReLet bool `json:"room_now_holds_another_stay"`
-		// IdentityHidden: the reservation number was withheld (audit H-7; GDPR final check D2).
+		// The reservation number was withheld.
 		IdentityHidden bool `json:"identity_hidden,omitempty"`
 	}
 	identity := canSeeStayIdentity(r)

@@ -33,7 +33,6 @@ func connected(in centralInputs) centralInputs {
 	return in
 }
 
-// The section 8 computation, over activation x licence x connection.
 func TestComputeCentralStatus(t *testing.T) {
 	base := func() centralInputs {
 		return centralInputs{Now: now0, ApplianceID: "appl-1", Serial: "SC-1", CertRequired: true, CertReady: true,
@@ -143,7 +142,6 @@ func TestComputeCentralStatus(t *testing.T) {
 			if got.Central.State == centralUnreachable && got.Central.LastContactAt != nil && got.Central.LastError == nil {
 				t.Fatal("an unreachable Central with a past contact must say why")
 			}
-			// Customer and site are named only once the verified assignment grants them.
 			named := got.CustomerName != nil
 			if named != (c.activation == activationActivated || c.activation == activationActivating) {
 				t.Fatalf("customer_name shown=%v for activation %s", named, got.Activation)
@@ -154,7 +152,6 @@ func TestComputeCentralStatus(t *testing.T) {
 
 func intp(i int) *int { return &i }
 
-// The JSON is the section 8 contract: every documented key present, nulls where unknown.
 func TestCentralStatusJSONShape(t *testing.T) {
 	b, _ := json.Marshal(computeCentralStatus(centralInputs{Now: now0}))
 	var m map[string]any
@@ -211,11 +208,6 @@ func TestCentralContactRecordsAnswersAndFailures(t *testing.T) {
 	}
 }
 
-// CENTRAL ANSWERING BUT REFUSING THE CERTIFICATE IS NOT "UNREACHABLE".
-//
-// Found on PRE-LIVE after "Reissue certificate" in Central: the signed hello kept succeeding (Central showed the
-// appliance Connected) while every mTLS call was refused with 403, and the Admin Console said "Temporarily
-// unreachable", which sent the operator looking for a network fault that did not exist.
 func TestCentralLinkCredentialRefusedIsNotUnreachable(t *testing.T) {
 	now := time.Date(2026, 9, 28, 22, 0, 0, 0, time.UTC)
 	in := centralInputs{Now: now, CentralConfigured: true,
@@ -225,7 +217,6 @@ func TestCentralLinkCredentialRefusedIsNotUnreachable(t *testing.T) {
 	if got.State != centralCredentialRefused || got.LastError == nil {
 		t.Fatalf("want credential_refused with a reason, got %+v", got)
 	}
-	// Silent for too long, or failing without an HTTP refusal, is still unreachable.
 	in.LastOK = now.Add(-time.Hour)
 	if got := centralLinkState(in); got.State != centralUnreachable {
 		t.Fatalf("no recent answer is unreachable, got %s", got.State)

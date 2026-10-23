@@ -1,12 +1,9 @@
-// Words for the request register (migration 0147). Kept apart from the page so a test can hold them.
-
 export const REGISTER_KIND_WORDS: Record<string, string> = {
   ACCESS: "A copy of their data",
   ERASURE: "Erasure of their data",
   OTHER: "Another data-protection request",
 };
 
-// The results a request can be closed with.
 export const REGISTER_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "ANSWERED", label: "Answered" },
   { value: "PARTLY_REFUSED", label: "Partly refused" },
@@ -27,7 +24,6 @@ export const REGISTER_STATUS_TONE: Record<string, "neutral" | "ok" | "warn" | "e
   WITHDRAWN: "neutral",
 };
 
-// The ground for what was kept or refused, in words the person can be given.
 export const OUTCOME_OPTIONS: { value: string; label: string }[] = [
   { value: "NONE", label: "Nothing kept or refused" },
   { value: "LEGAL_RETENTION", label: "Kept because the law requires it (invoices, payments)" },

@@ -1,11 +1,6 @@
 package pmsrest
 
-// OPERA CLOUD (OHIP) CONTRACT TESTS.
-//
-// Shaped after Oracle's published OpenAPI documents (github.com/oracle/hospitality-api-docs):
-// rest-api-specs/security/v1/publishedoauth.json (POST /oauth/v1/tokens) and
-// rest-api-specs/property/v1/rsv.json (GET /rsv/v1/hotels/{hotelId}/reservations, getHotelReservations).
-// No request here reaches Oracle.
+// Contract tests shaped after Oracle's published OpenAPI documents (github.com/oracle/hospitality-api-docs); nothing reaches Oracle.
 
 import (
 	"encoding/json"

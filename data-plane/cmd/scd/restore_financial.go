@@ -1,24 +1,7 @@
 package main
 
-// THE FINANCIAL-RECOVERY GUARANTEES OF A RESTORE.
-//
-// There used to be two ways to put a database back: the Backups screen (this program) and stayconnect-financial-restore.sh, a
-// command-line tool that was never wired in. The script carried the guarantees that make a restore safe for money; the screen did
-// not. With one backup system, the restore carries all of them:
-//
-//   - a PROVEN quiesce: every service that can write financial state is stopped and then checked, and a service that is still
-//     running (or whose state cannot be read) aborts the restore before anything is replaced;
-//   - the management marker (/etc/stayconnect/financial-restore-generation.json) is advanced BEFORE the swap, so neither a database
-//     restore nor an /etc restore can roll it back, and a restore that fails half way still leaves money movement held;
-//   - TimescaleDB's hypertables must be registered after the swap (a database can restore "successfully" and refuse every write to
-//     audit_log and accounting_records);
-//   - the restore is recorded in the database (iam_v2.p4_record_supported_restore), which puts the site into FINANCIAL_RECOVERY_MODE:
-//     nothing is transmitted or paid until an operator has reconciled what was in flight when the backup was taken.
-//
-// The database-level GRANT CREATE ON DATABASE that Gate-P gives iam_v2_owner is carried across the swap by the privilege capture
-// (privileges.go), not here.
-//
-// Whether a scheduled backup is switched on has no bearing on any of this: it is part of restoring, not of the schedule.
+// Financial-recovery guarantees of a restore: proven quiesce, marker advanced before the swap, hypertables registered after it,
+// and the restore recorded in the database (FINANCIAL_RECOVERY_MODE).
 
 import (
 	"context"
@@ -35,11 +18,9 @@ import (
 	"time"
 )
 
-// markerPath is where the marker lives: outside the database and outside the /etc archive.
 func markerPath() string { return filepath.Join(etcStayconnectDir, financialMarker) }
 
-// readMarkerGeneration is the generation the marker records; a missing marker is generation 0 (never restored). A marker that is
-// there but cannot be read is an error: the restore refuses rather than guess.
+// A missing marker is generation 0; an unreadable one is an error so the restore refuses rather than guess.
 func readMarkerGeneration() (int64, error) {
 	b, err := os.ReadFile(markerPath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -62,9 +43,7 @@ func readMarkerGeneration() (int64, error) {
 
 var reHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// writeMarker advances the marker to gen. It never moves it backwards or sideways, and it writes world-readable (0644, root-owned):
-// edged, which reads it to detect a restore, is not root, and the marker holds a count, a time and a digest, nothing secret. Its
-// protection is that only root can write it and that it lives outside everything a restore replaces.
+// The marker is world-readable (0644): edged reads it to detect a restore and is not root; it holds nothing secret.
 func writeMarker(gen int64, manifestSHA string) error {
 	if !reHex64.MatchString(manifestSHA) {
 		return errors.New("the marker needs the SHA-256 of the backup being restored")
@@ -101,8 +80,7 @@ func writeMarker(gen int64, manifestSHA string) error {
 	return nil
 }
 
-// markerAdvanceMain is `scd marker-advance --generation N --manifest-sha HEX`. scd's own unit cannot write /etc/stayconnect, so the
-// restore runs this as a transient systemd unit, outside scd's sandbox.
+// Runs as a transient systemd unit because scd's own unit cannot write /etc/stayconnect.
 func markerAdvanceMain(args []string) int {
 	fs := flag.NewFlagSet("marker-advance", flag.ContinueOnError)
 	gen := fs.Int64("generation", 0, "the generation to advance the marker to")
@@ -118,7 +96,6 @@ func markerAdvanceMain(args []string) int {
 	return 0
 }
 
-// advanceMarker is a var so tests (and the restore drill, which has no systemd) can supply their own.
 var advanceMarker = func(ctx context.Context, gen int64, manifestSHA string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -132,7 +109,6 @@ var advanceMarker = func(ctx context.Context, gen int64, manifestSHA string) err
 	return nil
 }
 
-// stopService and serviceState are vars so tests can stand in for systemd.
 var stopService = func(ctx context.Context, svc string) error {
 	return exec.CommandContext(ctx, "systemctl", "stop", svc).Run()
 }
@@ -142,8 +118,7 @@ var serviceState = func(ctx context.Context, svc string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// proveQuiesced stops every dependent service and then checks that each is no longer running. Stopping is not the same as being
-// stopped: a service still active, or in a state that cannot be read, aborts the restore.
+// Stopping is not the same as being stopped: a service still active, or whose state cannot be read, aborts the restore.
 func proveQuiesced(ctx context.Context) error {
 	var bad []string
 	for _, svc := range dependentServices {
@@ -163,7 +138,7 @@ func proveQuiesced(ctx context.Context) error {
 	return nil
 }
 
-// assertHypertables: when TimescaleDB is installed, at least two hypertables (audit_log, accounting_records) must be registered.
+// With TimescaleDB installed, audit_log and accounting_records must be hypertables or writes to them are refused.
 func assertHypertables(ctx context.Context, db string) (string, error) {
 	out, err := exec.CommandContext(ctx, "docker", "exec", pgContainer, "psql", "-U", pgUser, "-d", db, "-tA", "-v", "ON_ERROR_STOP=1", "-c",
 		"SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname='timescaledb') "+
@@ -184,7 +159,7 @@ func assertHypertables(ctx context.Context, db string) (string, error) {
 
 var reUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// recordSupportedRestore tells the database a supported restore happened, which holds money movement (FINANCIAL_RECOVERY_MODE).
+// Puts the site into FINANCIAL_RECOVERY_MODE, which holds money movement until reconciled.
 func recordSupportedRestore(ctx context.Context, db, tenant, site string, gen int64, manifestSHA string, takenAt time.Time, by string) error {
 	if !reUUID.MatchString(tenant) || !reUUID.MatchString(site) || !reHex64.MatchString(manifestSHA) {
 		return errors.New("the restore could not be recorded: the site identity or the backup digest is not valid")

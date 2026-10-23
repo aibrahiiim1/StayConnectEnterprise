@@ -1,8 +1,5 @@
-// Shaping the API's CURRENT configuration of a package into the authoring form's shape.
-//
-// Moved out of the page unchanged. Edit loads the current configuration — including the eligibility rules and
-// grant tiers the form does not display prominently — because saving republishes all of it, and anything not
-// loaded would be silently dropped.
+// Shapes the API's current package configuration into the form's shape. Everything is loaded, including
+// rules and tiers the form barely shows, because saving republishes it all and anything missing would be dropped.
 
 import type {
   EligibilityRuleForm, GrantTierForm, DurationForm, AcquisitionForm, AcquisitionMethod, PreservedRule,
@@ -21,25 +18,22 @@ export type PackageCurrent = {
   eligibility_rules?: { Type?: string; type?: string; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   grant_tiers?: { Order?: number; order?: number; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
   visible_from?: string | null; visible_until?: string | null;
-  // PRICE AND HOW CLIENTS GET IT. Loaded for the same reason as the allowance policy: saving republishes all
-  // of it, so a rename must hand the price, the methods and the room-charge posting codes back unchanged.
+  // Price, methods and room-charge codes are handed back unchanged on save, so a rename cannot alter them.
   price_minor?: number | null;
   currency?: string | null;
   currency_exponent?: number | null;
-  /** The stored acquisition methods (NOT_REQUIRED, PREPAID, ONLINE_PAYMENT, PMS_POSTING). */
+  /** NOT_REQUIRED, PREPAID, ONLINE_PAYMENT or PMS_POSTING. */
   settlement_methods?: string[] | null;
   room_charge_mappings?: {
     pms_interface_id: string; posting_code: string; tax_code?: string | null; tax_rate_bp?: number | null;
   }[] | null;
-  // CARRIED ON EVERY REVISION. The form does not edit these; a save hands them back exactly as loaded, so a
-  // rename never resets what kind of package it is, its plan overrides, renewability or purchase limit.
+  // Not edited by the form; handed back exactly as loaded so a rename never resets them.
   package_type?: string | null;
   plan_overrides?: Record<string, unknown> | null;
   renewable?: boolean | null;
   max_purchases_per_stay?: number | null;
 };
 
-/** The revision fields the form does not edit, as the publish body carries them back. */
 export type RevisionCarry = {
   package_type?: string;
   plan_overrides?: Record<string, unknown> | null;
@@ -47,8 +41,8 @@ export type RevisionCarry = {
   max_purchases_per_stay?: number | null;
 };
 
-// revisionTermsOf is what the package charges and grants today, normalised the way the form will send it, so
-// the editor can tell whether a save changes any of it (and so needs the operator's password).
+// revisionTermsOf is what the package charges and grants today, normalised as the form sends it, so a save
+// that changes terms can be detected (and require the password).
 export function revisionTermsOf(cur: Pick<PackageCurrent,
   "price_minor" | "currency" | "currency_exponent" | "settlement_methods" | "service_plan_revision_id">): RevisionTerms {
   const currency = (cur.currency ?? "").trim().toUpperCase() || DEFAULT_CURRENCY;
@@ -63,8 +57,7 @@ export function revisionTermsOf(cur: Pick<PackageCurrent,
   };
 }
 
-// revisionCarryOf returns the loaded value of each carried field that the reader returned. A field the reader
-// did not return is left out, which the server reads as "carry what the current revision has".
+// revisionCarryOf omits fields the reader did not return; the server then carries the current revision's value.
 export function revisionCarryOf(cur: Pick<PackageCurrent,
   "package_type" | "plan_overrides" | "renewable" | "max_purchases_per_stay">): RevisionCarry {
   const out: RevisionCarry = {};
@@ -75,10 +68,8 @@ export function revisionCarryOf(cur: Pick<PackageCurrent,
   return out;
 }
 
-// acquisitionToForm reads the stored price section back into the form. A revision published before prices
-// existed carries price 0 and {NOT_REQUIRED}, or nothing at all; both read as Free, which is what it is.
-// The stored exponent is kept alongside the currency so a currency this build does not list is still
-// handed back with the exponent it was published with, never a guessed one.
+// acquisitionToForm reads the stored price back; price 0 or no methods reads as Free. The stored exponent is
+// kept so an unlisted currency is handed back with its published exponent, never a guessed one.
 export function acquisitionToForm(cur: Pick<PackageCurrent,
   "price_minor" | "currency" | "currency_exponent" | "settlement_methods" | "room_charge_mappings">): AcquisitionForm {
   const currency = (cur.currency ?? "").trim().toUpperCase() || DEFAULT_CURRENCY;
@@ -100,8 +91,8 @@ export function acquisitionToForm(cur: Pick<PackageCurrent,
   };
 }
 
-// Go marshals these structs with capitalised keys (the fields carry no json tags), so both spellings are
-// accepted rather than assuming one. Getting this wrong would drop rules on save.
+// Go marshals these structs with capitalised keys (no json tags), so both spellings are accepted; getting
+// this wrong would drop rules on save.
 const pick = <T,>(a: T | undefined, b: T | undefined): T | undefined => (a !== undefined ? a : b);
 
 export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): EligibilityRuleForm[] {
@@ -119,9 +110,7 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
         from: toLocalInput(value.from as string | undefined) ?? "",
         until: toLocalInput(value.until as string | undefined) ?? "",
       }); break;
-      // THE FREE ALLOWANCE. The window and the device switch are read back only when the stored rule names
-      // them: a rule that never did keeps the server's defaults, and republishing it must not pin a value the
-      // operator never set.
+      // Window and device switch are read back only when stored, so republishing never pins an unset default.
       case "PRIOR_PURCHASE": out.push({
         type: "PRIOR_PURCHASE", mode: value.requires_prior ? "requires_prior" : "forbids_prior",
         ...(typeof value.within_hours === "number" && Number.isFinite(value.within_hours) ? { within_hours: String(value.within_hours) } : {}),
@@ -135,8 +124,7 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
           : [],
         public: value.public === true,
       }); break;
-      // THE STAY DIMENSIONS. A bound that is absent stays absent: reading a missing max_nights back as "0"
-      // would republish "up to zero nights", i.e. a package for nobody.
+      // An absent bound stays absent: a missing max_nights read as "0" would republish a package for nobody.
       case "STAY_LENGTH": out.push({
         type: "STAY_LENGTH",
         min_nights: num(value.min_nights),
@@ -145,7 +133,7 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
       case "ROOM_TYPE": out.push({ type: "ROOM_TYPE", room_types: list("room_types") }); break;
       case "RATE_PLAN": out.push({ type: "RATE_PLAN", rate_plans: list("rate_plans") }); break;
       case "VIP": out.push({ type: "VIP", is_vip: value.is_vip === false ? "false" : "true" }); break;
-      // Kept as the stored list: joining it into text would split a name that contains a comma on the next save.
+      // Kept as a list: joining into text would split a name containing a comma on the next save.
       case "TRAVEL_AGENT": out.push({
         type: "TRAVEL_AGENT",
         travel_agents: Array.isArray(value.travel_agents)
@@ -155,16 +143,14 @@ export function rulesToForm(rules: PackageCurrent["eligibility_rules"]): Eligibi
       case "PMS_INTERFACE": out.push({
         type: "PMS_INTERFACE", pms_interface_ids: list("pms_interface_ids"),
       }); break;
-      // A type the form does not edit is NOT handled here: preservedRulesOf keeps it verbatim instead, so
-      // saving never drops a condition the operator could not even see (audit O-15).
+      // Types the form does not edit are kept verbatim by preservedRulesOf, so saving never drops them.
       default: break;
     }
   }
   return out;
 }
 
-// preservedRulesOf returns the stored rules of a type this form does not edit (STAY_STATUS, or anything a
-// newer appliance knows), exactly as loaded. They are republished unchanged and shown read-only.
+// preservedRulesOf returns stored rules of types this form does not edit, republished unchanged.
 export function preservedRulesOf(rules: PackageCurrent["eligibility_rules"]): PreservedRule[] {
   const out: PreservedRule[] = [];
   for (const r of rules ?? []) {
@@ -179,7 +165,7 @@ export function tiersToForm(tiers: PackageCurrent["grant_tiers"]): GrantTierForm
   const out: GrantTierForm[] = [];
   for (const t of tiers ?? []) {
     const value = (pick(t.value, t.Value) ?? {}) as Record<string, unknown>;
-    // Everything but the two speeds the form edits -- the tier's `match` condition above all -- is kept.
+    // Everything but the two edited speeds (notably the tier's `match`) is kept.
     const { down_kbps: down, up_kbps: up, ...extra } = value;
     out.push({
       order: pick(t.order, t.Order) ?? 10,
@@ -198,7 +184,7 @@ export function durationToForm(d: PackageCurrent["duration_policy"]): DurationFo
   return { end_mode: "MANUAL_END" };
 }
 
-// datetime-local wants "YYYY-MM-DDTHH:mm" in local time; the API speaks RFC3339.
+// datetime-local wants local "YYYY-MM-DDTHH:mm"; the API speaks RFC3339.
 export function toLocalInput(iso?: string | null): string | undefined {
   if (!iso) return undefined;
   const t = new Date(iso);

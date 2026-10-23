@@ -11,7 +11,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/sysnet"
 )
 
-// a system-network manager over a temporary directory, with no real netplan, no database and a staged state.
 func testSysnet(t *testing.T) (*sysNetMgr, sysnetPaths, *[]string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,7 +29,7 @@ func testSysnet(t *testing.T) (*sysNetMgr, sysnetPaths, *[]string) {
 		files: &ps,
 		currentFn: func(context.Context) (sysnet.WANConfig, sysnet.LANConfig) {
 			return sysnet.WANConfig{Interface: "ens160", Mode: "static", IP: "192.0.2.10", PrefixLen: 24, Gateway: "192.0.2.1"},
-				sysnet.LANConfig{PhysicalInterface: "ens192", Bridge: "br-lan"} // base LAN carries no address
+				sysnet.LANConfig{PhysicalInterface: "ens192", Bridge: "br-lan"}
 		},
 		verifyFn: func(sysnet.WANConfig, sysnet.LANConfig) map[string]bool {
 			return map[string]bool{"wan_ip": true, "gateway": true, "management_reachable": true}
@@ -48,8 +47,7 @@ func wanTo(ip string) sysnet.Proposal {
 	return sysnet.Proposal{WAN: &sysnet.WANConfig{Interface: "ens160", Mode: "static", IP: ip, PrefixLen: 24, Gateway: "192.0.2.1"}}
 }
 
-// ROLLBACK WITH NOTHING PENDING REFUSES. It used to restore the newest backup directory -- a change confirmed
-// long ago -- silently reverting everything applied since.
+// Rollback with nothing pending refuses rather than restoring the newest backup, which may be a long-confirmed change.
 func TestSysnetRollbackWithNothingPendingRefuses(t *testing.T) {
 	m, ps, calls := testSysnet(t)
 	_ = os.WriteFile(ps.wan, []byte("current"), 0o600)
@@ -69,8 +67,7 @@ func TestSysnetRollbackWithNothingPendingRefuses(t *testing.T) {
 	}
 }
 
-// THE PENDING MARKER EXISTS BEFORE THE CHANGE TAKES EFFECT, so a crash between `netplan apply` and the end of
-// the apply still leaves the watchdog and the boot reconcile something to roll back.
+// The pending marker exists before the change takes effect, so a crash mid-apply leaves something to roll back.
 func TestSysnetPendingMarkerIsWrittenBeforeNetplanApply(t *testing.T) {
 	m, ps, calls := testSysnet(t)
 	res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", "")
@@ -90,8 +87,7 @@ func TestSysnetPendingMarkerIsWrittenBeforeNetplanApply(t *testing.T) {
 	}
 }
 
-// A ROLLBACK REMOVES WHAT THE CHANGE CREATED. The backup records that the WAN file did not exist; restoring
-// must delete it rather than leave the new configuration to take effect at the next netplan apply or reboot.
+// Rollback removes what the change created: the backup records that the WAN file did not exist.
 func TestSysnetRollbackRemovesFilesTheChangeCreated(t *testing.T) {
 	m, ps, _ := testSysnet(t)
 	if _, err := os.Stat(ps.wan); !os.IsNotExist(err) {
@@ -111,7 +107,6 @@ func TestSysnetRollbackRemovesFilesTheChangeCreated(t *testing.T) {
 	}
 }
 
-// A failed verification rolls back immediately, restoring the previous content.
 func TestSysnetFailedVerificationRestoresThePreviousFile(t *testing.T) {
 	m, ps, _ := testSysnet(t)
 	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
@@ -127,7 +122,7 @@ func TestSysnetFailedVerificationRestoresThePreviousFile(t *testing.T) {
 	}
 }
 
-// THE LOCKOUT CHECK: a literal management pin refuses a WAN move away from it; "auto" follows.
+// The lockout check: a literal management pin refuses a WAN move away from it; "auto" follows.
 func TestSysnetLiteralManagementPinRefusesAWANMove(t *testing.T) {
 	m, _, calls := testSysnet(t)
 	m.mgmtAddr = "192.0.2.10"
@@ -150,7 +145,6 @@ func TestSysnetLiteralManagementPinRefusesAWANMove(t *testing.T) {
 	}
 }
 
-// netplan apply also re-asserts the firewall (the management pin follows the WAN), on apply and on restore.
 func TestSysnetReassertsTheFirewallAfterEveryNetplanApply(t *testing.T) {
 	m, _, _ := testSysnet(t)
 	n := 0
@@ -167,8 +161,7 @@ func TestSysnetReassertsTheFirewallAfterEveryNetplanApply(t *testing.T) {
 	}
 }
 
-// NETD_MGMT_ADDR=auto renders the management interface's current address; an interface with none renders no
-// pin at all (interface-wide accept), never a pin to nothing.
+// NETD_MGMT_ADDR=auto renders the interface's current address; an interface with none renders no pin, never a pin to nothing.
 func TestManagementPinAutoFollowsTheInterface(t *testing.T) {
 	a := &applier{}
 	a.topo.MgmtInterface = "ens160"
