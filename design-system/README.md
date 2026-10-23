@@ -72,9 +72,9 @@ download before a client is online).
 | `text-emphasis` | 0.9375rem / 650 / 1.5 | card titles, row titles |
 | `text-body` / `text-sm` | 0.875rem / 400 / 1.45 | default text |
 | `text-label` | 0.8125rem / 600 | form labels, button text |
-| `text-caption` | 0.75rem / 400 | metadata, hints |
-| `text-micro` | 0.6875rem / 700 | badges, table headers, eyebrows (uppercase) |
-| `text-nano` | 0.625rem / 700 | counters, nav group headings |
+| `text-caption` / `text-xs` | 0.8125rem / 400 | metadata, hints |
+| `text-micro` | 0.75rem / 700 | badges, table headers, eyebrows (uppercase) |
+| `text-nano` | 0.6875rem / 700 | counters, nav group headings |
 
 Numbers that are compared use `tabular` (tabular figures).
 

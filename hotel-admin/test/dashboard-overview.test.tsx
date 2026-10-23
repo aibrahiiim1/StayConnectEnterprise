@@ -125,13 +125,14 @@ function allUnavailable(): any {
 
 const HEALTH = { service: "edged", version: "0.1.0-edge", site_id: "s", status: "ok", db: true, scd: true, license_state: "active", license_installed: true };
 
-function route(overview: (range: string) => any, health: any = HEALTH) {
+function route(overview: (range: string) => any, health: any = HEALTH, alerts?: any) {
   get.mockImplementation((path: string) => {
     if (path.startsWith("/reports/overview")) {
       const range = new URL(`http://x${path}`).searchParams.get("range") ?? "24h";
       return Promise.resolve(overview(range));
     }
     if (path === "/health") return Promise.resolve(health);
+    if (path === "/operational-alerts" && alerts) return Promise.resolve(alerts);
     if (path === "/capabilities") return Promise.resolve({ surfaces: [] });
     if (path === "/central/status") return Promise.resolve({ site_name: "Semantics Demo", serial: "SC-01" });
     return Promise.reject(new Error(`unexpected ${path}`));
@@ -179,6 +180,15 @@ describe("the overview", () => {
     expect(dhcp).toHaveAttribute("href", "/network/dhcp");
     expect(within(list).getByText("Opera is not ready for room sign-in")).toBeInTheDocument();
     expect(screen.queryByTestId("all-normal")).toBeNull();
+  });
+
+  it("lists unacknowledged operational alerts with a link to them", async () => {
+    const alert = (state: string) => ({ audit_id: state, state, alert_code: "checkout_grace_config_invalid", trigger: "EMERGENCY_GRACE" });
+    route(() => healthy(), HEALTH, { data: [alert("OPEN"), alert("OPEN"), alert("ACKNOWLEDGED")], meta: { has_more: false } });
+    render(<DashboardPage />);
+    const list = await screen.findByTestId("attention");
+    expect(within(list).getByText("2 open alerts")).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "Review alerts" })).toHaveAttribute("href", "/operational-alerts");
   });
 
   it("asks the server for the chosen range when the range changes", async () => {

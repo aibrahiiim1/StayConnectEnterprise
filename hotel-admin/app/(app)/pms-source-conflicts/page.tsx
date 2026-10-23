@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Layers } from "lucide-react";
+import { Layers, AlertTriangle, Hourglass } from "lucide-react";
 import { api, PmsSourceConflict } from "@/lib/api";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
@@ -75,7 +75,7 @@ export default function PMSSourceConflictsPage() {
         eyebrow="Hotel"
         title="Duplicate sources"
         icon={<Layers />}
-        description="PMS connections claiming the same rooms; guests in contested rooms cannot be verified until one is given authority."
+        description="Rooms claimed by two PMS connections. Their guests cannot be verified until one is given authority."
         help={
           <>
             <HelpSection title="What a duplicate source is">
@@ -99,8 +99,8 @@ export default function PMSSourceConflictsPage() {
       {rows !== null && rows.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label="Conflicts" value={counts.all.toLocaleString()} icon={<Layers />} tone="primary" />
-          <StatCard label="High severity" value={counts.high.toLocaleString()} tone={counts.high > 0 ? "err" : "default"} />
-          <StatCard label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
+          <StatCard icon={<AlertTriangle />} label="High severity" value={counts.high.toLocaleString()} tone={counts.high > 0 ? "err" : "default"} />
+          <StatCard icon={<Hourglass />} label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
         </div>
       )}
 

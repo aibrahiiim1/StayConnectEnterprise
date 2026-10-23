@@ -4,7 +4,7 @@
 // Plaintext PINs are never stored, so a reset response can reveal its new PIN only once.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, KeyRound, ShieldOff } from "lucide-react";
+import { CalendarClock, KeyRound, ShieldOff, PauseCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
@@ -177,7 +177,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Can reconnect now" value={rows ? counts.usable.toLocaleString() : "—"} tone="ok" icon={<KeyRound />} />
-        <StatCard
+        <StatCard icon={<PauseCircle />}
           label="Active, not usable"
           value={rows ? counts.notUsable.toLocaleString() : "—"}
           hint="Expired, or the stay moved on"

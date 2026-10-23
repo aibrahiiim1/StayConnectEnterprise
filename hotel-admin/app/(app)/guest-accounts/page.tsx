@@ -27,7 +27,7 @@ import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, Settings2 } from "lucide-react";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, Settings2, LogIn, Monitor } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
 import { ACCOUNT_NAME_MAX, ACCOUNT_NOTES_MAX, accountEditBody, validityWindow } from "@/lib/account-form";
@@ -381,8 +381,8 @@ export default function GuestAccountsPage() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} tone="primary" />
-        <StatCard label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
-        <StatCard
+        <StatCard icon={<LogIn />} label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
+        <StatCard icon={<Monitor />}
           label="Devices online"
           value={rows ? totals.online.toLocaleString() : "—"}
           href="/sessions"

@@ -244,7 +244,7 @@ export default function NotificationsPage() {
         icon={<MessageSquare />}
         eyebrow="Client access"
         title="Delivery"
-        description="How the appliance reaches clients: SMS and WhatsApp sign-in codes, and the verification and password-reset emails of Email accounts."
+        description="How the appliance sends sign-in codes by SMS or WhatsApp, and account emails."
         help={
           <>
             <HelpSection title="What a sender does">

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, inBackground, CentralStatus, EdgeHealth } from "@/lib/api";
+import { api, inBackground, CentralStatus, EdgeHealth, type ListResp, type OperationalAlert } from "@/lib/api";
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
@@ -34,6 +34,7 @@ export default function DashboardPage() {
   const [range, setRange] = useState<OverviewRange>("24h");
   const [snap, setSnap] = useState<OverviewSnapshot | null>(null);
   const [health, setHealth] = useState<EdgeHealth | null>(null);
+  const [openAlerts, setOpenAlerts] = useState<{ count: number; more: boolean } | null>(null);
   const [context, setContext] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -47,8 +48,15 @@ export default function DashboardPage() {
     if (manual) setBusy(true);
     try {
       // Settled independently: a hanging /health must not blank the overview, nor vice versa.
-      const [o, h] = await Promise.allSettled([fetchOverview(r), api.get<EdgeHealth>("/health")]);
+      const [o, h, a] = await Promise.allSettled([
+        fetchOverview(r),
+        api.get<EdgeHealth>("/health"),
+        api.get<ListResp<OperationalAlert>>("/operational-alerts"),
+      ]);
       if (mine !== seq.current) return;
+      if (a.status === "fulfilled") {
+        setOpenAlerts({ count: (a.value.data ?? []).filter((x) => x.state === "OPEN").length, more: !!a.value.meta?.has_more });
+      }
       if (o.status === "fulfilled") {
         setSnap(normalizeOverview(o.value));
         setErr(null);
@@ -92,6 +100,16 @@ export default function DashboardPage() {
   }));
   if (health && !health.db) attention.push({ text: describeDatabase(false).summary, href: "/health", tone: "err" });
   if (health && !health.scd) attention.push({ text: describeSessionController(false).summary, href: "/health", tone: "err" });
+  if (openAlerts && openAlerts.count > 0 && !attention.some((x) => x.href === "/operational-alerts")) {
+    const n = `${fmtInt(openAlerts.count)}${openAlerts.more ? "+" : ""}`;
+    attention.push({
+      text: `${n} open alert${openAlerts.count === 1 && !openAlerts.more ? "" : "s"}`,
+      detail: "Not yet acknowledged.",
+      href: "/operational-alerts",
+      action: "Review alerts",
+      tone: "warn",
+    });
+  }
   const notes: { text: string; href: string }[] = [];
   const historical = hotel ? (snap?.pms.historical_exceptions ?? 0) : 0;
   if (historical > 0) {

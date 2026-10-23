@@ -152,7 +152,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       icon={<LifeBuoy />}
       eyebrow="Hotel"
       title="Recovery"
-      description="After a database restore, reconcile the money that was in flight before charging resumes. Nothing here re-sends anything."
+      description="After a restore, settle in-flight payments before charging resumes. Nothing is re-sent."
       help={
         <>
           <HelpSection title="What recovery is">

@@ -145,7 +145,7 @@ export function SettlementsView() {
         icon={<Receipt />}
         eyebrow="Hotel"
         title="Package payments"
-        description="Every Internet package a client received, how it was paid for, and whether anything needs your attention."
+        description="Every Internet package given out, how it was paid for, and what needs your attention."
         help={
           <>
             <HelpSection title="What this page shows">

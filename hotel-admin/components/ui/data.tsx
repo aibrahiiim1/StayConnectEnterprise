@@ -125,7 +125,7 @@ export function FilterChips<T extends string>({
             tabIndex={active || (!options.some((x) => x.value === value) && o === options[0]) ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
+              "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors pointer-coarse:min-h-11",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               active
                 ? "border-primary/40 bg-primary-subtle text-primary-subtle-foreground"

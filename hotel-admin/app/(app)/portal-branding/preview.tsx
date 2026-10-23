@@ -237,10 +237,20 @@ export function PortalFrame({
   srcDoc: string; width: number; height: number; scale: number; title: string; interactive?: boolean;
 }) {
   const [loaded, setLoaded] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [near, setNear] = useState(interactive);
+  useEffect(() => {
+    if (near) return;
+    const el = boxRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") { setNear(true); return; }
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setNear(true); }, { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
   return (
-    <div className="relative" style={{ height: height * scale, width: width * scale, overflow: "hidden" }}>
+    <div ref={boxRef} className="relative" style={{ height: height * scale, width: width * scale, overflow: "hidden" }}>
       {!loaded && <Skeleton className="absolute inset-0 h-full w-full rounded-none" />}
-      <iframe
+      {near && <iframe
         title={title}
         srcDoc={srcDoc}
         sandbox="allow-scripts"
@@ -252,7 +262,7 @@ export function PortalFrame({
           width, height, border: 0, transform: `scale(${scale})`, transformOrigin: "top left",
           pointerEvents: interactive ? undefined : "none",
         }}
-      />
+      />}
     </div>
   );
 }

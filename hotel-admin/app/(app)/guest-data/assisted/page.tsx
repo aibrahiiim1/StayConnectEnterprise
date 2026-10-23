@@ -86,7 +86,7 @@ export default function AssistedGuestDataPage() {
         icon={<ClipboardCheck />}
         eyebrow="System"
         title="Assisted guest data request"
-        description="Hand over or anonymise the internet-usage records of one person’s device when no automatic rule can say they are theirs."
+        description="Hand over or anonymise one person’s device usage when no rule can tie it to them."
         actions={<Link className="text-sm underline" href="/guest-data">Back to guest data requests</Link>}
       />
 

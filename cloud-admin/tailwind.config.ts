@@ -134,7 +134,8 @@ const config: Config = {
         ],
       },
       fontSize: {
-        "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.02em" }],
+        "2xs": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.01em" }],
+        xs: ["0.8125rem", { lineHeight: "1.25rem" }],
         title: ["1.625rem", { lineHeight: "1.3", letterSpacing: "-0.025em", fontWeight: "700" }],
         metric: ["1.5rem", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }],
         subtitle: ["1.25rem", { lineHeight: "1.4", letterSpacing: "-0.02em", fontWeight: "700" }],
@@ -142,9 +143,9 @@ const config: Config = {
         emphasis: ["0.9375rem", { lineHeight: "1.5", fontWeight: "650" }],
         body: ["0.875rem", { lineHeight: "1.45" }],
         label: ["0.8125rem", { lineHeight: "1.45", fontWeight: "600" }],
-        caption: ["0.75rem", { lineHeight: "1.45" }],
-        micro: ["0.6875rem", { lineHeight: "1.45", fontWeight: "700" }],
-        nano: ["0.625rem", { lineHeight: "1.45", fontWeight: "700" }],
+        caption: ["0.8125rem", { lineHeight: "1.45" }],
+        micro: ["0.75rem", { lineHeight: "1.45", fontWeight: "700" }],
+        nano: ["0.6875rem", { lineHeight: "1.45", fontWeight: "700" }],
       },
       boxShadow: {
         xs: "var(--shadow-card)",
