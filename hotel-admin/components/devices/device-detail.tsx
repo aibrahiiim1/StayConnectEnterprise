@@ -146,14 +146,14 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
               {mayWrite && (
                 <section className="flex flex-wrap gap-1.5">
                   {data.device.online && (
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPending({ kind: "disconnect" }); setReason(""); }}>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "disconnect" }); setReason(""); }}>
                       <Power /> Disconnect
                     </Button>
                   )}
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPending({ kind: "require-signin" }); setReason(""); }}>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "require-signin" }); setReason(""); }}>
                     <KeyRound /> Require fresh sign-in
                   </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPending({ kind: "prepare-test" }); setReason(""); }}>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setPending({ kind: "prepare-test" }); setReason(""); }}>
                     <FlaskConical /> Prepare for a sign-in test
                   </Button>
                 </section>
@@ -204,7 +204,7 @@ export function DeviceDetailDialog({ deviceId, mayWrite, onClose, onChanged }: {
                       <span className="tabular">Data {formatBytes(p.consumed_data_bytes)}{p.data_quota_bytes ? ` of ${formatBytes(p.data_quota_bytes)}` : ""}</span>
                     </div>
                     {mayWrite && p.slot === "AUTHORIZED" && LIVE.has(p.status) && (
-                      <Button className="mt-2" size="sm" variant="outline" disabled={busy}
+                      <Button className="mt-2" size="sm" variant="secondary" disabled={busy}
                         onClick={() => { setPending({ kind: "release", ent: p }); setReason(""); }}>
                         <Unlink /> Release this place
                       </Button>

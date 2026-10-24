@@ -18,7 +18,7 @@ import { Plus, Shield } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatRelative, errMsg } from "@/lib/utils";
+import { formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 function kindTone(kind: string): "info" | "default" | "warn" {

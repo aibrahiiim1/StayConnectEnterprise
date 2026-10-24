@@ -53,7 +53,6 @@ const RULE_KINDS: { type: ClientGroupRuleType; label: string; assurance: string;
     hint: "Strong: the client signed in with a Google Workspace account of this domain. Requires the Google identity provider.",
   },
 ];
-const RULE_LABEL: Record<ClientGroupRuleType, string> = Object.fromEntries(RULE_KINDS.map((k) => [k.type, k.label])) as Record<ClientGroupRuleType, string>;
 
 type RuleForm = { type: ClientGroupRuleType; list: string; include_subdomains: boolean };
 

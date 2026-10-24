@@ -470,7 +470,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             max={REMEMBER_DAYS_MAX}
             defaultValue={REMEMBER_DAYS_DEFAULT}
             readOnly={!writable || busy}
-            explanation="After a client verifies a code or an identity provider on a device, that device can reconnect without another code for this long. Only over the portal's HTTPS address: without HTTPS, devices are not remembered. 0 = always ask."
+            explanation="How long a device that verified a code or identity provider reconnects without another code. Only over the portal's HTTPS address. 0 = always ask."
           />
           {storedOff && (
             <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">

@@ -149,8 +149,8 @@ export function ActivityTab({ guard, setErr }: TabProps) {
       <ErrorBanner err={loadErr} />
 
       <StatGrid cols={4}>
-        <StatCard label="Packages still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />}
-          hint="Given out, not yet ended" />
+        <StatCard label="Still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />}
+          hint="Not yet ended" />
         <StatCard label="Access started" value={s ? s.started_in_range.toLocaleString() : "—"} icon={<PackageCheck />}
           hint={s ? `${s.in_range.toLocaleString()} in use in the period` : undefined} />
         <StatCard label="Data used" value={s ? formatBytes(s.data_bytes) : "—"} icon={<Database />}

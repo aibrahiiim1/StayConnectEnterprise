@@ -15,7 +15,7 @@ import { KeyValueGrid, MetricStrip, Pagination } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { Segmented } from "@/components/ui/tabs";
-import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   batchLabel,

@@ -294,13 +294,13 @@ export default function ServicePlansPage() {
       {!unavailable && (
         <StatGrid cols={4}>
           <StatCard label="Service plans" value={rows ? stats.all : "—"} icon={<Layers />} />
-          <StatCard label="Used by active packages" value={rows ? stats.used : "—"} icon={<Gauge />}
-            hint="Clients can receive these" />
-          <StatCard label="Packages on older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
+          <StatCard label="In use" value={rows ? stats.used : "—"} icon={<Gauge />}
+            hint="By an active package" />
+          <StatCard label="On older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
             tone={stats.stale > 0 ? "warn" : "default"}
-            hint={stats.stale > 0 ? "Apply current settings from the plan" : "Every package is up to date"} />
-          <StatCard label="Not used by any package" value={rows ? stats.unused : "—"} icon={<CircleSlash />}
-            hint="Reach no client yet" />
+            hint={stats.stale > 0 ? "Packages to update" : "All up to date"} />
+          <StatCard label="Not used" value={rows ? stats.unused : "—"} icon={<CircleSlash />}
+            hint="By any package" />
         </StatGrid>
       )}
 

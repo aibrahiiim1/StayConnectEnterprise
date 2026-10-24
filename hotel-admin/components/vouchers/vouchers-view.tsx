@@ -260,26 +260,26 @@ export function VouchersView(props: {
           label="Available now"
           value={summary ? (summary.available ?? summary.unused).toLocaleString() : "—"}
           icon={<CheckCircle2 />}
-          hint="Unused and within validity"
+          hint="Unused, still valid"
         />
         <StatCard
           label="Used"
           value={summary ? summary.redeemed.toLocaleString() : "—"}
           icon={<TicketCheck />}
-          hint="A client signed in with them"
+          hint="Redeemed by clients"
         />
         <StatCard
           label="Expired unused"
           value={summary ? (summary.expired_unused ?? summary.redemption_expired).toLocaleString() : "—"}
           icon={<CalendarClock />}
           tone={summary && (summary.expired_unused ?? 0) > 0 ? "warn" : "default"}
-          hint="Past valid-until; refused at sign-in"
+          hint="Refused at sign-in"
         />
         <StatCard
           label="Cancelled"
           value={summary ? summary.revoked.toLocaleString() : "—"}
           icon={<Ban />}
-          hint="Cancelled before use"
+          hint="Before use"
         />
         <StatCard
           label="Issued this week"

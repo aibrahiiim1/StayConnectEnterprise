@@ -349,8 +349,8 @@ export function PackagesTab({
         <StatCard label="Offered to clients" value={rows ? counts.active : "—"} icon={<CheckCircle2 />}
           hint={rows ? `of ${counts.all} package${counts.all === 1 ? "" : "s"}` : undefined} />
         <StatCard label="Disabled" value={rows ? counts.disabled : "—"} icon={<Ban />} hint="Kept with their history" />
-        <StatCard label="Packages still valid" value={activeNow ?? "—"} icon={<Users />}
-          hint={!rows ? undefined : activeNow === null ? "Could not be counted right now" : "Given out, not yet ended"} />
+        <StatCard label="Still valid" value={activeNow ?? "—"} icon={<Users />}
+          hint={!rows ? undefined : activeNow === null ? "Could not be counted right now" : "Not yet ended"} />
         <StatCard label="Service plans" value={rows ? plans.length : "—"} icon={<Gauge />} href="/service-plans"
           hint="Speed and allowances" />
       </StatGrid>

@@ -13,7 +13,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge, StatusBadge, StatusDot } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -27,7 +27,7 @@ import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
+import { formatBytes, formatRelative, formatDate } from "@/lib/utils";
 import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair, acquisitionOrdinal,
 } from "@/lib/session-words";

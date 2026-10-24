@@ -465,8 +465,8 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
               <TR>
                 <TH>Network</TH>
                 <TH className="min-w-44">Address pool</TH>
-                <TH className="text-right">Devices online</TH>
-                <TH className="text-right">Traffic</TH>
+                <TH numeric>Devices online</TH>
+                <TH numeric>Traffic</TH>
                 <TH>Services</TH>
               </TR>
             </THead>
@@ -500,8 +500,8 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                       <span className="text-xs text-muted-foreground">{fmtInt(n.pool_size)} addresses · use not known</span>
                     )}
                   </TD>
-                  <TD className="text-right tabular">{fmtInt(n.devices_online)}</TD>
-                  <TD className="text-right tabular">
+                  <TD numeric>{fmtInt(n.devices_online)}</TD>
+                  <TD numeric>
                     {n.traffic_known ? (
                       <span title={`${formatBytes(n.bytes_down)} down · ${formatBytes(n.bytes_up)} up`}>{formatBytes(n.bytes_down + n.bytes_up)}</span>
                     ) : (
