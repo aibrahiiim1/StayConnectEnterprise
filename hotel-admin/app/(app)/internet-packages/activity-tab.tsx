@@ -12,13 +12,14 @@ import {
   type ActivityQuery, type ActivityRange, type ActivityResponse, type ActivityRow, type ActivityStatus,
   type PackageSummary,
 } from "@/lib/api/commerce";
-import { StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardFooter, SectionCard } from "@/components/ui/card";
+import { FilterBar } from "@/components/ui/toolbar";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetSection } from "@/components/ui/sheet";
 import { FilterChips, KeyValueGrid, MetricStrip, Pagination, SearchInput, Timeline } from "@/components/ui/data";
@@ -103,71 +104,60 @@ export function ActivityTab({ guard, setErr }: TabProps) {
   const rows = resp?.data ?? [];
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardBody className="space-y-3">
-          <Toolbar>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Period</div>
-                <Segmented<ActivityRange>
-                  label="Period"
-                  value={range}
-                  onChange={reset(setRange)}
-                  options={[
-                    { value: "24h", label: "24 hours" }, { value: "7d", label: "7 days" },
-                    { value: "30d", label: "30 days" }, { value: "custom", label: "Custom" },
-                  ]}
-                />
-              </div>
-              {range === "custom" && (
-                <>
-                  <Field label="From" className="w-full sm:w-52">
-                    <Input type="datetime-local" value={customFrom} onChange={(e) => { setOffset(0); setCustomFrom(e.target.value); }} />
-                  </Field>
-                  <Field label="To" className="w-full sm:w-52">
-                    <Input type="datetime-local" value={customTo} onChange={(e) => { setOffset(0); setCustomTo(e.target.value); }} />
-                  </Field>
-                </>
-              )}
-              <Field label="Package" className="w-full sm:w-52">
-                <Select value={packageID} onChange={(e) => { setOffset(0); setPackageID(e.target.value); }}>
-                  <option value="">All packages</option>
-                  {packages.map((p) => <option key={p.package_id} value={p.package_id}>{p.name || p.code}</option>)}
-                </Select>
-              </Field>
-              <Field label="How it was given" className="w-full sm:w-56">
-                <Select value={source} onChange={(e) => { setOffset(0); setSource(e.target.value); }}>
-                  <option value="">Every way</option>
-                  {Object.entries(SOURCE_LABELS).filter(([v]) => offerSource(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </Select>
-              </Field>
-            </div>
-            {/* The server searches only rooms and reservations, so the box exists only where stays do. */}
-            {stays && (
-              <SearchInput value={q} onChange={reset(setQ)} delay={300}
-                placeholder="Room or reservation" label="Search by room or reservation" />
-            )}
-          </Toolbar>
-          {range === "custom" && !customReady && (
-            <p className="text-xs text-muted-foreground">Choose both a start and an end to see a custom period.</p>
-          )}
-        </CardBody>
-      </Card>
+    <div className="space-y-5">
+      <FilterBar
+        filters={
+          <Segmented<ActivityRange>
+            label="Period"
+            value={range}
+            onChange={reset(setRange)}
+            options={[
+              { value: "24h", label: "24 hours" }, { value: "7d", label: "7 days" },
+              { value: "30d", label: "30 days" }, { value: "custom", label: "Custom" },
+            ]}
+          />
+        }
+        search={stays ? (
+          // The server searches only rooms and reservations, so the box exists only where stays do.
+          <SearchInput value={q} onChange={reset(setQ)} delay={300}
+            placeholder="Room or reservation" label="Search by room or reservation" />
+        ) : undefined}
+      >
+        {range === "custom" && (
+          <>
+            <Input type="datetime-local" aria-label="From" className="w-full sm:w-52" value={customFrom}
+              onChange={(e) => { setOffset(0); setCustomFrom(e.target.value); }} />
+            <Input type="datetime-local" aria-label="To" className="w-full sm:w-52" value={customTo}
+              onChange={(e) => { setOffset(0); setCustomTo(e.target.value); }} />
+          </>
+        )}
+        <Select aria-label="Package" className="w-full sm:w-48" value={packageID}
+          onChange={(e) => { setOffset(0); setPackageID(e.target.value); }}>
+          <option value="">All packages</option>
+          {packages.map((p) => <option key={p.package_id} value={p.package_id}>{p.name || p.code}</option>)}
+        </Select>
+        <Select aria-label="How it was given" className="w-full sm:w-52" value={source}
+          onChange={(e) => { setOffset(0); setSource(e.target.value); }}>
+          <option value="">Every way</option>
+          {Object.entries(SOURCE_LABELS).filter(([v]) => offerSource(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </Select>
+      </FilterBar>
+      {range === "custom" && !customReady && (
+        <p className="-mt-3 text-xs text-muted-foreground">Choose both a start and an end to see a custom period.</p>
+      )}
 
       <ErrorBanner err={loadErr} />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Packages still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />} tone="ok"
-          hint="Given out and not yet ended, online or not" />
-        <StatCard label="Access started in this period" value={s ? s.started_in_range.toLocaleString() : "—"}
-          icon={<PackageCheck />} tone="primary"
-          hint={s ? `${s.in_range.toLocaleString()} in use at some point in the period` : undefined} />
-        <StatCard label="Data used" value={s ? formatBytes(s.data_bytes) : "—"} icon={<Database />} tone="info"
-          hint="Measured on the connections of these grants" />
+      <StatGrid cols={4}>
+        <StatCard label="Packages still valid" value={s ? s.active_now.toLocaleString() : "—"} icon={<Users />}
+          hint="Given out, not yet ended" />
+        <StatCard label="Access started" value={s ? s.started_in_range.toLocaleString() : "—"} icon={<PackageCheck />}
+          hint={s ? `${s.in_range.toLocaleString()} in use in the period` : undefined} />
+        <StatCard label="Data used" value={s ? formatBytes(s.data_bytes) : "—"} icon={<Database />}
+          hint="On these grants' connections" />
         <StatCard label="Most given package" value={top ? top.name : "—"} icon={<BarChart3 />}
-          hint={top ? `${top.grants.toLocaleString()} grant${top.grants === 1 ? "" : "s"} in this period` : "Nothing in this period"} />
-      </div>
+          hint={top ? `${top.grants.toLocaleString()} grant${top.grants === 1 ? "" : "s"}` : "Nothing in this period"} />
+      </StatGrid>
 
       {s && s.undated > 0 && (
         <Callout tone="neutral" title="Some records have no time">
@@ -177,94 +167,76 @@ export function ActivityTab({ guard, setErr }: TabProps) {
         </Callout>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Grants by package</CardTitle>
-              <CardDescription>How often each package was in use during the period.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody>
-            {s ? <BarList items={s.by_package.slice(0, 8).map((p) => ({ key: p.package_id, name: p.name, value: p.grants }))}
-              emptyLabel="No package was in use in this period" /> : <SkeletonRows rows={3} cols={1} />}
-          </CardBody>
-        </Card>
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>How access was given</CardTitle>
-              <CardDescription>Portal choices, vouchers, client accounts, the Grace Period and staff grants.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody>
-            {s ? <BarList items={s.by_source.map((x) => ({ key: x.source, name: x.label, value: x.grants, tone: "info" as const }))}
-              emptyLabel="Nothing was given in this period" /> : <SkeletonRows rows={3} cols={1} />}
-          </CardBody>
-        </Card>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <SectionCard title="Grants by package">
+          {s ? <BarList items={s.by_package.slice(0, 8).map((p) => ({ key: p.package_id, name: p.name, value: p.grants }))}
+            emptyLabel="No package was in use in this period" /> : <SkeletonRows rows={3} cols={1} />}
+        </SectionCard>
+        <SectionCard title="How access was given">
+          {s ? <BarList items={s.by_source.map((x) => ({ key: x.source, name: x.label, value: x.grants, tone: "info" as const }))}
+            emptyLabel="Nothing was given in this period" /> : <SkeletonRows rows={3} cols={1} />}
+        </SectionCard>
       </div>
 
-      <Card>
-        <div className="border-b border-border px-4 py-3">
-          <FilterChips<ActivityStatus>
-            label="Status"
-            value={status}
-            onChange={reset(setStatus)}
-            options={[
-              { value: "all", label: "All", count: s ? s.status_counts.active + s.status_counts.ended + s.status_counts.other : undefined },
-              { value: "active", label: "In use", count: s?.status_counts.active, tone: "ok" },
-              { value: "ended", label: "Ended", count: s?.status_counts.ended },
-              { value: "other", label: "Not started or no access", count: s?.status_counts.other, tone: "warn" },
-            ]}
-          />
-        </div>
-        <CardBody className="p-0">
-          {loading && !resp ? (
-            <SkeletonRows rows={6} cols={6} />
-          ) : rows.length === 0 ? (
-            <EmptyState icon={<Activity />} title="Nothing in this period"
-              hint="Widen the period or clear a filter. Grants appear here as clients are given internet access — by the portal, a voucher, a client account, the Grace Period or staff." />
-          ) : (
-            <Table>
-              <THead><TR>
-                <TH>When</TH><TH>Package</TH><TH>Client</TH><TH>How it was given</TH><TH>Status</TH>
-                <TH className="text-right">Data used</TH><TH className="text-right">Devices</TH>
-              </TR></THead>
-              <TBody>
-                {rows.map((r) => {
-                  const st = statusWords(r.status);
-                  return (
-                    <TR key={r.purchase_id} className="cursor-pointer" onClick={() => setOpen(r)}>
-                      <TD className="whitespace-nowrap"><When at={r.occurred_at} /></TD>
-                      <TD>
-                        <button type="button" className="text-left font-medium hover:underline"
-                          onClick={(e) => { e.stopPropagation(); setOpen(r); }}>
-                          {r.package_name}
-                        </button>
-                        <div className="text-xs text-muted-foreground">{priceText(r.price_minor, r.currency, r.currency_exponent)}</div>
-                      </TD>
-                      <TD>
-                        <div>{whoWords(r)}</div>
-                        {r.room && r.pms_interface && <div className="text-xs text-muted-foreground">{r.pms_interface}</div>}
-                      </TD>
-                      <TD>{r.source_label}</TD>
-                      <TD>
-                        <Badge tone={st.tone} dot>{st.label}</Badge>
-                        {r.online_now && <div className="mt-0.5 text-xs text-success">Online now</div>}
-                      </TD>
-                      <TD className="text-right tabular">{r.sessions > 0 ? formatBytes(r.bytes_down + r.bytes_up) : "—"}</TD>
-                      <TD className="text-right tabular">{r.devices || "—"}</TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
-          )}
-        </CardBody>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
+            <FilterChips<ActivityStatus>
+              label="Status"
+              value={status}
+              onChange={reset(setStatus)}
+              options={[
+                { value: "all", label: "All", count: s ? s.status_counts.active + s.status_counts.ended + s.status_counts.other : undefined },
+                { value: "active", label: "In use", count: s?.status_counts.active, tone: "ok" },
+                { value: "ended", label: "Ended", count: s?.status_counts.ended },
+                { value: "other", label: "Not started or no access", count: s?.status_counts.other, tone: "warn" },
+              ]}
+            />
+          }
+        />
+        {loading && !resp ? (
+          <SkeletonRows rows={6} cols={6} />
+        ) : rows.length === 0 ? (
+          <EmptyState size="sm" icon={<Activity />} title="Nothing in this period"
+            hint="Widen the period or clear a filter." />
+        ) : (
+          <Table label="Client activity">
+            <THead><TR>
+              <TH>When</TH><TH>Package</TH><TH>Client</TH><TH className="hidden md:table-cell">How it was given</TH>
+              <TH>Status</TH><TH numeric>Data used</TH><TH numeric className="hidden sm:table-cell">Devices</TH>
+            </TR></THead>
+            <TBody>
+              {rows.map((r) => {
+                const st = statusWords(r.status);
+                return (
+                  <TR key={r.purchase_id} onClick={() => setOpen(r)}>
+                    <TD nowrap><When at={r.occurred_at} /></TD>
+                    <TD truncate title={r.package_name} className="max-w-[14rem]">
+                      <span className="font-medium">{r.package_name}</span>
+                      <div className="text-xs text-muted-foreground">{priceText(r.price_minor, r.currency, r.currency_exponent)}</div>
+                    </TD>
+                    <TD nowrap>
+                      <div>{whoWords(r)}</div>
+                      {r.room && r.pms_interface && <div className="text-xs text-muted-foreground">{r.pms_interface}</div>}
+                    </TD>
+                    <TD nowrap muted className="hidden md:table-cell">{r.source_label}</TD>
+                    <TD nowrap>
+                      <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+                      {r.online_now && <div className="mt-0.5 text-xs text-success">Online now</div>}
+                    </TD>
+                    <TD numeric>{r.sessions > 0 ? formatBytes(r.bytes_down + r.bytes_up) : "—"}</TD>
+                    <TD numeric className="hidden sm:table-cell">{r.devices || "—"}</TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
         {resp && rows.length > 0 && (
-          <div className="border-t border-border px-4 py-3">
+          <CardFooter>
             <Pagination offset={offset} limit={PAGE} shown={rows.length} total={resp.meta.total} onChange={setOffset} />
-          </div>
+          </CardFooter>
         )}
       </Card>
 

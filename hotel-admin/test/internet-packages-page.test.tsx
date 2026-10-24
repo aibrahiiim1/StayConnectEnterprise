@@ -24,6 +24,7 @@ vi.mock("@/lib/api", () => {
 
 import { api, ApiError } from "@/lib/api";
 import InternetPackagesPage from "@/app/(app)/internet-packages/page";
+import { chooseRowAction } from "./row-actions-helper";
 
 const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const p = api.post as unknown as ReturnType<typeof vi.fn>;
@@ -82,7 +83,7 @@ describe("InternetPackagesPage — packages", () => {
     routes({ "/commercial-packages": list([PKG]), "/commercial-packages/plans": list([PLAN]) });
     render(<InternetPackagesPage />);
     expect(await screen.findByText("Free WiFi")).toBeInTheDocument();
-    expect(screen.getByText(/10 Mbps down/i)).toBeInTheDocument();
+    expect(screen.getByText("10 / 5 Mbps")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     const sel = (await screen.findByTestId("service-plan")) as HTMLSelectElement;
@@ -118,7 +119,7 @@ describe("InternetPackagesPage — packages", () => {
       ]),
     });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "FREEWIFI" }));
+    fireEvent.click(await screen.findByText("FREEWIFI"));
     const sheet = await screen.findByRole("dialog");
     expect(await within(sheet).findByText(/in force/i)).toBeInTheDocument();
     expect(within(sheet).getByText(/Version 1/)).toBeInTheDocument();
@@ -132,7 +133,7 @@ describe("InternetPackagesPage — packages", () => {
   it("directs a stale plan pin to Service plans, not to Edit and save", async () => {
     routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: true }]) });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByText("Free WiFi"));
     const sheet = await screen.findByRole("dialog");
     const callout = (await within(sheet).findByText(/will not move it/i)).closest("div")!;
 
@@ -146,7 +147,7 @@ describe("InternetPackagesPage — packages", () => {
   it("says nothing about plan settings when the pin is current", async () => {
     routes({ "/commercial-packages": list([{ ...PKG, plan_has_newer_revision: false }]) });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByText("Free WiFi"));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).queryByText(/service plan has newer settings/i)).toBeNull();
   });
@@ -169,7 +170,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
+    await chooseRowAction("FREEWIFI", /^disable/i);
 
     expect(p).not.toHaveBeenCalled();
     fireEvent.change(await screen.findByLabelText(/why are you disabling it/i), { target: { value: "bad package" } });
@@ -185,7 +186,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
+    await chooseRowAction("FREEWIFI", /^disable/i);
     fireEvent.click(await screen.findByRole("button", { name: /^cancel$/i }));
     await new Promise((r) => setTimeout(r, 10));
     expect(p).not.toHaveBeenCalled();
@@ -195,7 +196,7 @@ describe("InternetPackagesPage — packages", () => {
     routes({ "/commercial-packages": list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 1 }]) });
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /^disable\b/i }));
+    await chooseRowAction("FREEWIFI", /^disable/i);
 
     const confirm = await screen.findByRole("button", { name: /stop offering it/i });
     expect(confirm).toBeDisabled();
@@ -383,7 +384,7 @@ describe("InternetPackagesPage — packages", () => {
     p.mockResolvedValue({});
     render(<InternetPackagesPage />);
     await screen.findByText("Free WiFi");
-    fireEvent.click(screen.getByRole("button", { name: /^enable\b/i }));
+    await chooseRowAction("Free WiFi", /^enable/i);
     const dlg = await screen.findByRole("dialog", { name: /offer free wifi again/i });
     expect(p).not.toHaveBeenCalled();
     fireEvent.change(within(dlg).getByLabelText(/confirm your password/i), { target: { value: "pw-op" } });
@@ -423,7 +424,7 @@ describe("InternetPackagesPage — packages", () => {
       },
     });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByText("Free WiFi"));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
 
     expect(await screen.findByText("2 internet grants given to guests record this package.")).toBeInTheDocument();
@@ -446,7 +447,7 @@ describe("InternetPackagesPage — packages", () => {
       "/commercial-packages/pk1/deletability": { deletable: true, reasons: [] },
     });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByText("Free WiFi"));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
     expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
     const go = screen.getByRole("button", { name: /^delete package$/i });
@@ -466,7 +467,7 @@ describe("InternetPackagesPage — packages", () => {
       "/commercial-packages/pk1/deletability": { deletable: true, reasons: [] },
     });
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Free WiFi" }));
+    fireEvent.click(await screen.findByText("Free WiFi"));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
     fireEvent.change(await screen.findByLabelText(/why are you deleting it/i), { target: { value: "Not needed" } });
     fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });
@@ -508,6 +509,10 @@ const SUMMARY = {
   active_by_package: [],
 };
 
+async function rowText(text: string) {
+  return (await screen.findAllByText(text)).find((el) => el.closest("tbody"))!;
+}
+
 async function openActivity() {
   render(<InternetPackagesPage />);
   await userEvent.click(await screen.findByRole("tab", { name: /client activity/i }));
@@ -537,7 +542,7 @@ describe("InternetPackagesPage — guest activity", () => {
   it("opens the full record with a timeline of recorded moments and a link to THIS stay's usage", async () => {
     routes({ "/commercial-packages/activity*": activity([ROW_STAY, ROW_VOUCHER], SUMMARY) });
     await openActivity();
-    await userEvent.click(await screen.findByRole("button", { name: "Free Internet Package" }));
+    await userEvent.click(await rowText("Free Internet Package"));
     const sheet = await screen.findByRole("dialog");
 
     expect(within(sheet).getByText("Offer taken on the portal")).toBeInTheDocument();
@@ -552,7 +557,7 @@ describe("InternetPackagesPage — guest activity", () => {
   it("never shows an offer for a grant that had none, and never invents an offer time", async () => {
     routes({ "/commercial-packages/activity*": activity([ROW_VOUCHER], SUMMARY) });
     await openActivity();
-    await userEvent.click(await screen.findByRole("button", { name: "Premium" }));
+    await userEvent.click(await rowText("Premium"));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText("Given without a portal offer")).toBeInTheDocument();
     expect(within(sheet).queryByText(/offer taken/i)).toBeNull();

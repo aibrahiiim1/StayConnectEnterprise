@@ -121,12 +121,6 @@ function emptyRule(type: RuleType): EligibilityRuleForm {
   }
 }
 
-const num = (v: unknown): number | null => {
-  if (v === "" || v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-
 export function PackageForm({
   mode, initial, plans, busy, onSave, onCancel, modules = null, roomChargeInterfaces = null, clientGroups = null,
   cardAccount = null,
@@ -267,10 +261,10 @@ export function PackageForm({
 
 
   return (
-    <form onSubmit={submit} className="space-y-5" data-testid="package-form">
+    <form onSubmit={submit} className="space-y-6 [&>div+div]:border-t [&>div+div]:border-border [&>div+div]:pt-5" data-testid="package-form">
       {error && <div role="alert" className="text-sm text-destructive">{error}</div>}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         {/* Accessible names are the visible labels; test hooks live in data-testid, not aria-label. */}
         <Field label="Name" hint="What the client sees on the portal.">
           <Input data-testid="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Free WiFi" />
@@ -285,7 +279,7 @@ export function PackageForm({
       </div>
 
       <div>
-        <h3 id={planHeadingID} className="text-sm font-medium mb-2">Service plan</h3>
+        <h3 id={planHeadingID} className="mb-1.5 text-label">Service plan</h3>
         {plans.length === 0 ? (
           // Says what to do rather than showing an empty dropdown that looks like loading.
           <div className="text-sm rounded-md border border-border bg-surface px-3 py-2" role="status">
@@ -302,12 +296,12 @@ export function PackageForm({
                 <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
               ))}
             </Select>
-            <p className="text-xs text-muted mt-2" data-testid="plan-summary">
+            <p className="mt-1.5 text-xs text-muted-foreground" data-testid="plan-summary">
               {selected
                 ? planSummary(selected)
                 : "Choose a plan to see the speed and allowances it gives."}
             </p>
-            <p className="text-xs text-muted mt-1">
+            <p className="mt-1 text-xs text-muted-foreground">
               <a href="/service-plans" className="underline">Change speed and limits on Service plans</a>.
             </p>
           </>
@@ -315,8 +309,8 @@ export function PackageForm({
       </div>
 
       <div>
-        <h3 id={endHeadingID} className="text-sm font-medium mb-2">How long access lasts</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <h3 id={endHeadingID} className="mb-1.5 text-label">How long access lasts</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Select data-testid="end-mode" aria-labelledby={endHeadingID}
               value={duration.end_mode} onChange={(e) => setDuration({ end_mode: e.target.value as DurationForm["end_mode"] })}>
@@ -344,7 +338,7 @@ export function PackageForm({
 
       {/* The preview exists because the clamp order is not obvious and the published revision is immutable. */}
       <div>
-        <h3 id={allocHeadingID} className="mb-1.5 text-sm font-semibold">Data allowance</h3>
+        <h3 id={allocHeadingID} className="mb-1.5 text-label">Data allowance</h3>
         <Select data-testid="allocation-mode" aria-labelledby={allocHeadingID}
           value={alloc.mode}
           onChange={(e) => setAlloc((a) => ({ ...a, mode: e.target.value as AllocationForm["mode"] }))}>
@@ -399,7 +393,7 @@ export function PackageForm({
             className={
               notice.emphasis
                 ? "mt-2 text-sm rounded-md border border-border bg-surface px-3 py-2 space-y-1"
-                : "mt-2 text-xs text-muted"
+                : "mt-2 text-xs text-muted-foreground"
             }
           >
             {notice.kind === "FIXED_USES_PLAN" && (
@@ -452,7 +446,7 @@ export function PackageForm({
 
       {/* The audience is about the client (employees, partners, public), never the sign-in method. */}
       <div>
-        <h3 id={`${ids}-audience`} className="mb-1.5 text-sm font-semibold">Audience</h3>
+        <h3 id={`${ids}-audience`} className="mb-1.5 text-label">Audience</h3>
         <Select data-testid="audience" aria-labelledby={`${ids}-audience`} value={audience}
           onChange={(e) => setAudience(e.target.value as Audience)}>
           <option value="everyone">Everyone</option>
@@ -506,8 +500,8 @@ export function PackageForm({
       {/* The free allowance is keyed on the package, not the revision, so a wording change does not reset it.
           It also applies to priced packages, but the device switch defaults ON only for Free ones. */}
       <div>
-        <h3 id={`${ids}-free`} className="mb-1.5 text-sm font-semibold">Free access</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <h3 id={`${ids}-free`} className="mb-1.5 text-label">Free access</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
           <Select data-testid="free-access" aria-labelledby={`${ids}-free`} value={freeAccess}
             onChange={(e) => setFreeAccess(e.target.value as FreeAccess)}>
             <option value="unlimited">No limit — a client may get this package again</option>
@@ -552,7 +546,7 @@ export function PackageForm({
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-medium">More conditions</h3>
+          <h3 className="text-label">More conditions</h3>
           <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}>
             <Plus size={14} /> Add condition
           </Button>
@@ -560,7 +554,7 @@ export function PackageForm({
         {rules.filter((r) => !isDedicatedRule(r)).length === 0 && <p className="text-xs text-muted-foreground">No further conditions. Add one to narrow the audience by sign-in method, date, network or stay.</p>}
         {/* A voucher guest has no Stay to test, so a PMS condition excludes them entirely rather than narrowing. */}
         {rules.some((r) => isPMSRuleType(r.type)) && (
-          <p className="text-xs text-muted mb-2" data-testid="pms-rule-note">
+          <p className="mb-2 text-xs text-muted-foreground" data-testid="pms-rule-note">
             Conditions about the stay only apply to clients who signed in with their room. Clients using a
             voucher or an account are not offered this package while any of them is set.
           </p>
@@ -642,20 +636,20 @@ export function PackageForm({
         <div data-testid="speed-steps-notice">
           <Callout tone="warning" title="Speed steps are not applied">
             <p>{SPEED_STEPS_REFUSAL}</p>
-            <Button type="button" variant="outline" size="sm" className="mt-2" data-testid="remove-speed-steps"
+            <Button type="button" variant="secondary" size="sm" className="mt-2" data-testid="remove-speed-steps"
               onClick={() => setTiers((ts) => plainTiers(ts))}>Remove speed steps</Button>
           </Callout>
         </div>
       )}
 
       <div>
-        <button type="button" className="text-sm text-muted flex items-center gap-1"
+        <button type="button" className="flex items-center gap-1 rounded-md text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
           {advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Advanced
         </button>
         {advanced && (
-          <div className="mt-3 space-y-4 border-l-2 border-border pl-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Offer from"><Input data-testid="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></Field>
               <Field label="Offer until"><Input data-testid="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></Field>
             </div>
@@ -663,9 +657,9 @@ export function PackageForm({
         )}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
+        {onCancel && <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>}
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : mode === "edit" ? "Save changes" : "Add package"}</Button>
-        {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
       </div>
     </form>
   );

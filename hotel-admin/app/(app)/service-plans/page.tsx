@@ -3,7 +3,7 @@
 // No enable/disable switch on purpose: nothing that decides what a guest receives reads a plan's `enabled`
 // flag (packages hand out the plan version they pinned), so a switch would be a control that lies.
 
-import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CircleSlash, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, ApiError, ListResp, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
@@ -12,15 +12,19 @@ import { deletePlan, getPlanDeletability, type RevisionInfo } from "@/lib/api/co
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Hint, Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, InputGroup, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
+import { HistoryList } from "@/components/ui/history";
+import { formatSpeedPair } from "@/components/commerce/speed";
 import { HelpList, HelpSection } from "@/components/help";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetSection } from "@/components/ui/sheet";
-import { FilterChips, KeyValueGrid, MetricStrip, SearchInput, Timeline } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, MetricStrip, SearchInput } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/commerce/delete-dialog";
@@ -253,8 +257,6 @@ export default function ServicePlansPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Gauge />}
-        eyebrow="Internet offering"
         title="Service plans"
         description="The speed, devices, data and time a package hands out."
         help={
@@ -290,25 +292,25 @@ export default function ServicePlansPage() {
       {notice && <Callout tone="success">{notice}</Callout>}
 
       {!unavailable && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatGrid cols={4}>
           <StatCard label="Service plans" value={rows ? stats.all : "—"} icon={<Layers />} />
-          <StatCard label="Used by active packages" value={rows ? stats.used : "—"} icon={<Gauge />} tone="ok"
-            hint="Plans that clients can currently receive" />
+          <StatCard label="Used by active packages" value={rows ? stats.used : "—"} icon={<Gauge />}
+            hint="Clients can receive these" />
           <StatCard label="Packages on older settings" value={rows ? stats.stale : "—"} icon={<AlertTriangle />}
             tone={stats.stale > 0 ? "warn" : "default"}
             hint={stats.stale > 0 ? "Apply current settings from the plan" : "Every package is up to date"} />
           <StatCard label="Not used by any package" value={rows ? stats.unused : "—"} icon={<CircleSlash />}
-            hint="These reach no client until a package uses them" />
-        </div>
+            hint="Reach no client yet" />
+        </StatGrid>
       )}
 
       {repin && (
-        <Card>
+        <Card className="border-primary/40">
           <CardHeader><CardTitle data-testid="repin-title">
             {repin.standing ? "Apply current settings to packages" : "Apply these settings to packages?"}
           </CardTitle></CardHeader>
           <CardBody>
-            <p className="mb-3 text-sm text-muted" data-testid="repin-intro">
+            <p className="mb-3 max-w-3xl text-sm text-muted-foreground" data-testid="repin-intro">
               {repin.standing ? (
                 <>
                   These packages still give clients older settings than <strong>{repin.planLabel}</strong> has
@@ -326,7 +328,7 @@ export default function ServicePlansPage() {
             <div className="mb-4 space-y-2">
               {repin.packages.map((k) => (
                 <label key={k.package_id} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" aria-label={`repin-${k.code}`}
+                  <input type="checkbox" className="size-4 accent-primary" aria-label={`repin-${k.code}`}
                     checked={!!repin.chosen[k.package_id]}
                     onChange={(e) => setRepin((s2) => s2 && ({ ...s2, chosen: { ...s2.chosen, [k.package_id]: e.target.checked } }))} />
                   <span>{k.name || k.code}</span>
@@ -334,12 +336,11 @@ export default function ServicePlansPage() {
                 </label>
               ))}
             </div>
-            <div className="mb-4 max-w-sm">
-              <Label htmlFor="repin-password">Confirm your password</Label>
+            <Field label="Confirm your password" className="mb-4 max-w-sm"
+              hint="Asked once for all the packages you move.">
               <Input id="repin-password" type="password" autoComplete="current-password" value={repinPassword}
                 onChange={(e) => setRepinPassword(e.target.value)} />
-              <Hint>Moving a package to other plan settings changes what it gives future clients, so your password is asked once for all of them.</Hint>
-            </div>
+            </Field>
             <div className="flex gap-2">
               <Button onClick={applyRepin}
                 disabled={busy || (repin.packages.some((k) => repin.chosen[k.package_id]) && repinPassword === "")}>
@@ -358,16 +359,17 @@ export default function ServicePlansPage() {
       )}
 
       {unavailable ? (
-        <Card><CardBody>
+        <Card>
           <EmptyState
             icon={<Gauge />}
             title="The internet offering is not switched on for this appliance"
             hint="Service plans and internet packages become available once this capability is enabled for the site. Contact your Semantics administrator." />
-        </CardBody></Card>
+        </Card>
       ) : (
-        <Card>
-          <div className="border-b border-border px-4 py-3">
-            <Toolbar>
+        <Card className="overflow-hidden">
+          <FilterBar
+            inset
+            filters={
               <FilterChips<Chip>
                 label="Show plans"
                 value={chip}
@@ -378,78 +380,80 @@ export default function ServicePlansPage() {
                   { value: "unused", label: "Not used", count: rows ? stats.unused : undefined },
                 ]}
               />
-              <SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name or code" />
-            </Toolbar>
-          </div>
-          <CardBody className="p-0">
-            {rows === null ? (
-              <SkeletonRows rows={4} cols={7} />
-            ) : rows.length === 0 ? (
-              <EmptyState
-                icon={<Gauge />}
-                title="No service plans yet"
-                hint="A service plan defines the speed, device count and allowances a client receives. Create one, then attach it to an internet package."
-                action={writable ? <Button onClick={() => startNew()}><Plus /> Add the first plan</Button> : undefined} />
-            ) : shown.length === 0 ? (
-              <EmptyState icon={<Gauge />} title="No plan matches" hint="Clear the search or choose another filter." />
-            ) : (
-              <Table>
-                <THead><TR>
-                  <TH>Plan</TH><TH>Speed</TH><TH>Devices</TH><TH>Time</TH><TH>Data</TH><TH>Used by</TH>
-                  <TH><span className="sr-only">Actions</span></TH>
-                </TR></THead>
-                <TBody>
-                  {shown.map((p) => {
-                    const stale = stalePackagesFor(p, packages);
-                    return (
-                      <Fragment key={p.plan_id}>
-                        <TR className="cursor-pointer" onClick={() => setSelected(p)}>
-                          <TD>
-                            <button type="button" className="text-left font-medium hover:underline"
-                              onClick={(e) => { e.stopPropagation(); setSelected(p); }}>
-                              {p.name || p.code}
-                            </button>
-                            <div className="text-xs text-muted-foreground">{p.code}</div>
-                          </TD>
-                          <TD>
-                            <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
-                            <div className="text-xs text-muted-foreground">{formatSpeed(p.up_kbps)} up</div>
-                          </TD>
-                          <TD>
-                            <div>{formatDevices(p.max_concurrent_devices)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] ?? "—"}
-                            </div>
-                          </TD>
-                          <TD>{formatDuration(p.time_quota_seconds)}</TD>
-                          <TD>{formatData(p.data_quota_bytes)}</TD>
-                          <TD className="text-xs text-muted-foreground">
-                            {(p.used_by_active_packages ?? 0) === 0
-                              ? "No active packages"
-                              : `${p.used_by_active_packages} active package${p.used_by_active_packages === 1 ? "" : "s"}`}
+            }
+            search={<SearchInput value={q} onChange={setQ} placeholder="Search plans" label="Search plans by name or code" />}
+          />
+          {rows === null ? (
+            <SkeletonRows rows={4} cols={7} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              size="sm"
+              icon={<Gauge />}
+              title="No service plans yet"
+              hint="A service plan defines the speed, devices and allowances a client receives. Create one, then attach it to an internet package."
+              action={writable ? <Button onClick={() => startNew()}><Plus /> Add the first plan</Button> : undefined} />
+          ) : shown.length === 0 ? (
+            <EmptyState size="sm" icon={<Gauge />} title="No plan matches" hint="Clear the search or choose another filter." />
+          ) : (
+            <Table label="Service plans">
+              <THead><TR>
+                <TH>Plan</TH><TH>Speed (down / up)</TH><TH>Devices</TH><TH className="hidden md:table-cell">Time</TH>
+                <TH className="hidden md:table-cell">Data</TH><TH>Used by</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR></THead>
+              <TBody>
+                {shown.map((p) => {
+                  const stale = stalePackagesFor(p, packages);
+                  const name = p.name || p.code;
+                  const used = p.used_by_active_packages ?? 0;
+                  return (
+                    <TR key={p.plan_id} onClick={() => setSelected(p)}>
+                      <TD truncate title={name} className="max-w-[16rem]">
+                        <span className="font-medium">{name}</span>
+                        <div className="truncate text-xs text-muted-foreground">{p.code}</div>
+                      </TD>
+                      <TD nowrap>
+                        {formatSpeedPair(p.down_kbps, p.up_kbps)}
+                        {p.speed_allocation === "SHARED" && <span className="text-muted-foreground"> · shared</span>}
+                      </TD>
+                      <TD nowrap title={DEVICE_LIMIT_POLICIES[p.device_limit_policy ?? ""] ?? undefined}>
+                        {formatDevices(p.max_concurrent_devices)}
+                      </TD>
+                      <TD nowrap className="hidden md:table-cell">{formatDuration(p.time_quota_seconds)}</TD>
+                      <TD nowrap className="hidden md:table-cell">{formatData(p.data_quota_bytes)}</TD>
+                      <TD nowrap>
+                        <span className={used === 0 ? "text-muted-foreground" : undefined}>
+                          {used === 0 ? "No active packages" : `${used} active package${used === 1 ? "" : "s"}`}
+                        </span>
+                        {stale.length > 0 && (
+                          <div className="text-xs text-warning-subtle-foreground" data-testid={`stale-count-${p.code}`}>
+                            {stale.length} still on older settings
+                          </div>
+                        )}
+                      </TD>
+                      <TD className="w-0">
+                        {writable && (
+                          <div className="flex items-center justify-end gap-1">
                             {stale.length > 0 && (
-                              <div className="mt-0.5 text-warning-subtle-foreground" data-testid={`stale-count-${p.code}`}>
-                                {stale.length} still on older settings
-                              </div>
-                            )}
-                          </TD>
-                          <TD className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
-                            {writable && stale.length > 0 && (
-                              <Button size="sm" variant="ghost" data-testid={`apply-current-${p.code}`}
-                                onClick={() => startRepin(p)}>
-                                Apply current settings to packages
+                              <Button size="xs" variant="ghost" className="text-foreground" data-testid={`apply-current-${p.code}`}
+                                onClick={(e) => { e.stopPropagation(); startRepin(p); }}>
+                                <RefreshCw /> Apply current settings
                               </Button>
                             )}
-                            {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${p.name || p.code}`} onClick={() => startNew(p)}>Edit</Button>}
-                          </TD>
-                        </TR>
-                      </Fragment>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            )}
-          </CardBody>
+                            <RowActions
+                              subject={name}
+                              primary={{ label: "Edit", onSelect: () => startNew(p) }}
+                              items={[{ label: "Delete…", danger: true, icon: <Trash2 />, onSelect: () => setDeleting(p) }]}
+                            />
+                          </div>
+                        )}
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          )}
         </Card>
       )}
 
@@ -487,7 +491,7 @@ export default function ServicePlansPage() {
                   )}
                   <SheetSection title="What it grants">
                     <KeyValueGrid items={[
-                      { label: "Speed", value: `${formatSpeed(p.down_kbps)} down · ${formatSpeed(p.up_kbps)} up` },
+                      { label: "Speed (down / up)", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
                       { label: "Speed sharing", value: p.speed_allocation === "SHARED"
                         ? "Shared by the client's devices" : "Full speed on every device" },
                       { label: "Devices at once", value: formatDevices(p.max_concurrent_devices),
@@ -519,13 +523,13 @@ export default function ServicePlansPage() {
                   <SheetSection title="Saved versions">
                     <ErrorBanner err={revsErr} />
                     {revs === null && !revsErr ? <SkeletonRows rows={2} cols={1} /> : (
-                      <Timeline emptyLabel="No saved versions yet"
+                      <HistoryList label="Saved versions" emptyLabel="No saved versions yet"
+                        className="rounded-md border border-border"
                         items={(revs ?? []).map((r) => ({
-                          key: r.revision_id,
-                          title: <span>Version {r.revision_no}{" "}
-                            {r.is_current ? <Badge tone="info">in force</Badge> : <span className="text-muted-foreground">superseded</span>}
-                          </span>,
-                          body: r.label || undefined,
+                          id: r.revision_id,
+                          title: `Version ${r.revision_no}`,
+                          badge: r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>,
+                          summary: r.label || undefined,
                           tone: r.is_current ? "ok" : "neutral",
                         }))} />
                     )}
@@ -577,40 +581,35 @@ export default function ServicePlansPage() {
           <DialogBody className="space-y-4">
             <ErrorBanner err={formErr} />
             {/* Keyed on the plan: uncontrolled inputs would otherwise keep the previous plan's numbers and publish them. */}
-            <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="plan-code">Plan code</Label>
+            <form id="service-plan-form" key={prefill?.plan_id ?? "new"} onSubmit={onPublish} className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
+              <Field label="Plan code" required
+                hint={prefill ? "Identifies this plan; cannot be changed." : "A short identifier no other plan uses. It cannot be changed later."}>
                 <Input id="plan-code" name="code" required defaultValue={prefill?.code ?? ""} readOnly={!!prefill}
                   placeholder="GOLD" />
-                <Hint>
-                  {prefill ? "The code identifies this plan and cannot be changed." : "A short identifier that no other plan uses. It cannot be changed later."}
-                </Hint>
-              </div>
-              <div>
-                <Label htmlFor="plan-name">Display name</Label>
+              </Field>
+              <Field label="Display name" optional>
                 <Input id="plan-name" name="name" defaultValue={prefill?.name ?? ""} placeholder="Premium Wi-Fi" />
-              </div>
+              </Field>
 
-              <div>
-                <Label htmlFor="plan-down">Download speed (Mbps)</Label>
-                <Input id="plan-down" name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
-                  defaultValue={prefill?.down_kbps ? prefill.down_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
-                <Hint>Up to {LIMITS.mbps} Mbps.</Hint>
-              </div>
-              <div>
-                <Label htmlFor="plan-up">Upload speed (Mbps)</Label>
-                <Input id="plan-up" name="up_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
-                  defaultValue={prefill?.up_kbps ? prefill.up_kbps / 1000 : ""} placeholder="Leave empty for unlimited" />
-                <Hint>Up to {LIMITS.mbps} Mbps.</Hint>
-              </div>
+              <Field label="Download speed" htmlFor="plan-down" hint={`Empty for unlimited. Up to ${LIMITS.mbps} Mbps.`}>
+                <InputGroup suffix="Mbps">
+                  <Input id="plan-down" name="down_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
+                    defaultValue={prefill?.down_kbps ? prefill.down_kbps / 1000 : ""} placeholder="Unlimited" />
+                </InputGroup>
+              </Field>
+              <Field label="Upload speed" htmlFor="plan-up" hint={`Empty for unlimited. Up to ${LIMITS.mbps} Mbps.`}>
+                <InputGroup suffix="Mbps">
+                  <Input id="plan-up" name="up_mbps" type="number" min={0} max={LIMITS.mbps} step="0.1"
+                    defaultValue={prefill?.up_kbps ? prefill.up_kbps / 1000 : ""} placeholder="Unlimited" />
+                </InputGroup>
+              </Field>
 
-              <div>
-                <Label htmlFor="plan-devices">Devices at once</Label>
+              <Field label="Devices at once" required>
                 <Input id="plan-devices" name="max_concurrent_devices" type="number" min={1}
                   defaultValue={prefill?.max_concurrent_devices ?? 1} required />
-              </div>
-              <div>
-                <Label htmlFor="plan-device-policy">When the device limit is reached</Label>
+              </Field>
+              <Field label="When the device limit is reached"
+                hint="Disconnecting the oldest device frees its place for the new one.">
                 <Select id="plan-device-policy" name="device_limit_policy"
                   defaultValue={(SELECTABLE_DEVICE_LIMIT_POLICIES as readonly string[]).includes(prefill?.device_limit_policy ?? "")
                     ? (prefill?.device_limit_policy ?? "REJECT_NEW_DEVICE") : "REJECT_NEW_DEVICE"}>
@@ -618,12 +617,12 @@ export default function ServicePlansPage() {
                     <option key={v} value={v}>{DEVICE_LIMIT_POLICIES[v]}</option>
                   ))}
                 </Select>
-                <Hint>Disconnecting the oldest device ends its connection and frees its place for the new one.</Hint>
-              </div>
+              </Field>
 
               {/* Fields must be pre-filled: the form publishes a complete version from whatever they hold. */}
-              <div>
-                <Label htmlFor="plan-time">Total time allowance</Label>
+              <Field label="Total time allowance" htmlFor="plan-time"
+                hint={<>Time online, added up across the client&rsquo;s devices (two devices online for an hour use two
+                  hours). Up to {LIMITS.timeQuotaDays} days.</>}>
                 <div className="flex gap-2">
                   <Input id="plan-time" name="time_quota" type="number" min={0} step="0.01" placeholder="Unlimited"
                     className="flex-1" defaultValue={timeQuota.value} />
@@ -633,69 +632,63 @@ export default function ServicePlansPage() {
                     <option value="days">days</option>
                   </Select>
                 </div>
-                <Hint>Time online, added up across the client&rsquo;s devices (two devices online for an hour use two
-                  hours). Access ends when it runs out, or when the package&rsquo;s duration ends if that comes first.
-                  Up to {LIMITS.timeQuotaDays} days.</Hint>
-              </div>
-              <div>
-                <Label htmlFor="plan-data">Data allowance (GB)</Label>
-                <Input id="plan-data" name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited"
-                  defaultValue={bytesToGb(prefill?.data_quota_bytes)} />
-              </div>
+              </Field>
+              <Field label="Data allowance" htmlFor="plan-data" hint="Empty for unlimited.">
+                <InputGroup suffix="GB">
+                  <Input id="plan-data" name="data_quota_gb" type="number" min={0} step="0.1" placeholder="Unlimited"
+                    defaultValue={bytesToGb(prefill?.data_quota_bytes)} />
+                </InputGroup>
+              </Field>
 
-              <div>
-                <Label htmlFor="plan-idle">Disconnect after inactivity (minutes)</Label>
-                <Input id="plan-idle" name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
-                  defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
-                <Hint>A device with no traffic for this long is disconnected; it can sign in again, and the package is
-                  not used up.</Hint>
-              </div>
-              <div>
-                <Label htmlFor="plan-session">Maximum single session (hours)</Label>
-                <Input id="plan-session" name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
-                  defaultValue={secondsToDurationField(prefill?.max_continuous_session_seconds, ["hours"]).value} />
-                <Hint>A connection is ended after this long; the device can sign in again straight away.</Hint>
-              </div>
+              <Field label="Disconnect after inactivity" htmlFor="plan-idle"
+                hint="The device can sign in again; the package is not used up.">
+                <InputGroup suffix="minutes">
+                  <Input id="plan-idle" name="idle_timeout" type="number" min={0} max={LIMITS.idleMinutes} placeholder="Never"
+                    defaultValue={secondsToDurationField(prefill?.idle_timeout_seconds, ["minutes"]).value} />
+                </InputGroup>
+              </Field>
+              <Field label="Maximum single session" htmlFor="plan-session"
+                hint="The device can sign in again straight away.">
+                <InputGroup suffix="hours">
+                  <Input id="plan-session" name="max_session" type="number" min={0} max={LIMITS.sessionHours} placeholder="No limit"
+                    defaultValue={secondsToDurationField(prefill?.max_continuous_session_seconds, ["hours"]).value} />
+                </InputGroup>
+              </Field>
 
-              <div className="sm:col-span-2">
-                <Label htmlFor="plan-sharing">How the speed is shared</Label>
+              <Field label="How the speed is shared" className="sm:col-span-2" hint="Shared needs a download and upload speed to share.">
                 <Select id="plan-sharing" name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}>
                   <option value="PER_DEVICE">Per device — every device gets the full speed</option>
                   <option value="SHARED">Shared — all the client&rsquo;s devices share the speed</option>
                 </Select>
-                <Hint>Shared needs a download and upload speed to share.</Hint>
-              </div>
+              </Field>
 
-              <div className="sm:col-span-2">
-                <Label htmlFor="plan-time-mode">How time is counted</Label>
-                {prefill ? (
-                  <>
-                    <Select id="plan-time-mode" disabled value={prefill.time_accounting_mode || "VALIDITY_WINDOW"} onChange={() => {}}>
-                      <option value={prefill.time_accounting_mode || "VALIDITY_WINDOW"}>
-                        {TIME_ACCOUNTING_MODES[prefill.time_accounting_mode || "VALIDITY_WINDOW"] ?? prefill.time_accounting_mode}
-                      </option>
-                    </Select>
-                    <Hint>Kept as this plan has it. Saving does not change how time is counted.</Hint>
-                  </>
-                ) : (
+              {prefill ? (
+                <Field label="How time is counted" className="sm:col-span-2" hint="Kept as this plan has it. Saving does not change how time is counted.">
+                  <Select id="plan-time-mode" disabled value={prefill.time_accounting_mode || "VALIDITY_WINDOW"} onChange={() => {}}>
+                    <option value={prefill.time_accounting_mode || "VALIDITY_WINDOW"}>
+                      {TIME_ACCOUNTING_MODES[prefill.time_accounting_mode || "VALIDITY_WINDOW"] ?? prefill.time_accounting_mode}
+                    </option>
+                  </Select>
+                </Field>
+              ) : (
+                <Field label="How time is counted" className="sm:col-span-2">
                   <Select id="plan-time-mode" name="time_accounting_mode" defaultValue="VALIDITY_WINDOW">
                     <option value="VALIDITY_WINDOW">{TIME_ACCOUNTING_MODES.VALIDITY_WINDOW}</option>
                   </Select>
-                )}
-              </div>
+                </Field>
+              )}
 
               {prefill && (
-                <div className="sm:col-span-2">
-                  <Label htmlFor="plan-password">Confirm your password</Label>
+                <Field label="Confirm your password" required className="sm:col-span-2"
+                  hint="Saving changes what every package using this plan can give future clients.">
                   <Input id="plan-password" name="password" type="password" autoComplete="current-password" required />
-                  <Hint>Saving changes what every package using this plan can give future clients, so your password is required.</Hint>
-                </div>
+                </Field>
               )}
 
             </form>
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => { setShowNew(false); setPrefill(null); }}>Cancel</Button>
             <Button type="submit" form="service-plan-form" disabled={busy}>{busy ? "Saving…" : prefill ? "Save changes" : "Add plan"}</Button>
           </DialogFooter>
         </DialogContent>
