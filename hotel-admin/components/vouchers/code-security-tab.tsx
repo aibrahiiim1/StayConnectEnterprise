@@ -3,18 +3,21 @@
 // Code-format changes require a preview, reason, and confirmation before saving.
 
 import * as React from "react";
-import { History, KeyRound, Pencil, RefreshCw } from "lucide-react";
+import { KeyRound, Pencil, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
+import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input, Select } from "@/components/ui/input";
-import { KeyValueGrid, OptionCard, Timeline } from "@/components/ui/data";
+import { DescriptionList, KeyValueGrid, OptionCard } from "@/components/ui/data";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
-import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   formatWords,
@@ -39,6 +42,7 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
   const [retiring, setRetiring] = React.useState<KeyGeneration | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<unknown>(null);
+  const [openChange, setOpenChange] = React.useState<{ c: FormatChange; i: number } | null>(null);
 
   const loadFormat = React.useCallback(() => {
     setFormatErr(null);
@@ -79,10 +83,10 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-5 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <div className="space-y-0.5">
+          <div className="min-w-0">
             <CardTitle>Code format</CardTitle>
             <CardDescription>Applies to the next batch you issue. Cards already printed keep working.</CardDescription>
           </div>
@@ -126,49 +130,86 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
         </CardBody>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
-          <div className="space-y-0.5">
-            <CardTitle>
-              <span className="inline-flex items-center gap-2">
-                <History className="size-4" aria-hidden /> Format history
-              </span>
-            </CardTitle>
+          <div className="min-w-0">
+            <CardTitle>Format history</CardTitle>
             <CardDescription>Every change, who made it and why.</CardDescription>
           </div>
         </CardHeader>
-        <CardBody>
-          {changesErr ? (
+        {changesErr ? (
+          <CardBody>
             <ErrorBanner err={changesErr} />
-          ) : changes === null ? (
+          </CardBody>
+        ) : changes === null ? (
+          <CardBody>
             <Skeleton className="h-16" />
-          ) : (
-            <Timeline
-              emptyLabel="The format has never been changed; the defaults are in use."
-              items={changes.map((c, i) => ({
-                key: `${c.changed_at}-${i}`,
-                title:
-                  c.old_code_mode && c.old_code_length
-                    ? `${formatWords(c.old_code_mode, c.old_code_length)} → ${formatWords(c.new_code_mode, c.new_code_length)}`
-                    : `Set to ${formatWords(c.new_code_mode, c.new_code_length)}`,
-                when: <When iso={c.changed_at} />,
-                body: [c.changed_by, c.change_reason && `“${c.change_reason}”`].filter(Boolean).join(" · "),
-                tone: "info" as const,
-              }))}
-            />
-          )}
-        </CardBody>
+          </CardBody>
+        ) : (
+          <HistoryList
+            label="Format history"
+            emptyLabel="The format has never been changed; the defaults are in use."
+            onSelect={(it) => {
+              const i = Number(it.id);
+              setOpenChange({ c: changes[i], i });
+            }}
+            selectedId={openChange ? String(openChange.i) : null}
+            items={changes.map((c, i) => ({
+              id: String(i),
+              title: c.old_code_mode && c.old_code_length
+                ? `${formatWords(c.old_code_mode, c.old_code_length)} → ${formatWords(c.new_code_mode, c.new_code_length)}`
+                : `Set to ${formatWords(c.new_code_mode, c.new_code_length)}`,
+              actor: c.changed_by,
+              at: c.changed_at,
+              summary: c.change_reason ? `“${c.change_reason}”` : undefined,
+              tone: "info" as const,
+            }))}
+          />
+        )}
       </Card>
 
+      <DetailsDrawer
+        open={openChange !== null}
+        onOpenChange={(v) => !v && setOpenChange(null)}
+        eyebrow="Code format change"
+        title={openChange ? `Set to ${formatWords(openChange.c.new_code_mode, openChange.c.new_code_length)}` : ""}
+      >
+        {openChange && (
+          <>
+            <DetailsSection title="Change">
+              <ChangeDiff
+                changes={[
+                  {
+                    field: "Characters",
+                    before: openChange.c.old_code_mode ? (openChange.c.old_code_mode === "numbers" ? "Digits only" : "Letters and digits") : undefined,
+                    after: openChange.c.new_code_mode === "numbers" ? "Digits only" : "Letters and digits",
+                  },
+                  {
+                    field: "Length",
+                    before: openChange.c.old_code_length ? `${openChange.c.old_code_length} characters` : undefined,
+                    after: `${openChange.c.new_code_length} characters`,
+                  },
+                ]}
+              />
+            </DetailsSection>
+            <DetailsSection title="Record">
+              <DescriptionList
+                items={[
+                  { label: "Changed by", value: openChange.c.changed_by || "—" },
+                  { label: "When", value: <When iso={openChange.c.changed_at} /> },
+                  { label: "Reason", value: openChange.c.change_reason || "—" },
+                ]}
+              />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
+
       {canEditFormat && (
-        <Card className="lg:col-span-2">
+        <Card className="overflow-hidden lg:col-span-2">
           <CardHeader>
-            <div className="space-y-0.5">
-              <CardTitle>
-                <span className="inline-flex items-center gap-2">
-                  <KeyRound className="size-4" aria-hidden /> Code keys
-                </span>
-              </CardTitle>
+            <div className="min-w-0">
+              <CardTitle>Code keys</CardTitle>
               <CardDescription>Retiring a key means new batches use a fresh one; cards already printed keep working.</CardDescription>
             </div>
           </CardHeader>
@@ -179,28 +220,25 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
           ) : gens === null ? (
             <SkeletonRows rows={2} cols={4} />
           ) : gens.length === 0 ? (
-            <EmptyState icon={<KeyRound />} title="No key yet" hint="The first batch you issue creates one." />
+            <EmptyState size="sm" icon={<KeyRound />} title="No key yet" hint="The first batch you issue creates one." />
           ) : (
-            <TableWrap>
-              <Table>
+              <Table label="Code keys">
                 <THead>
                   <TR>
                     <TH>Key</TH>
                     <TH>State</TH>
-                    <TH className="text-right">Cards</TH>
-                    <TH className="text-right">Still unused</TH>
+                    <TH numeric>Cards</TH>
+                    <TH numeric>Still unused</TH>
                     <TH><span className="sr-only">Actions</span></TH>
                   </TR>
                 </THead>
                 <TBody>
                   {gens.map((g) => (
                     <TR key={g.id}>
-                      <TD>Generation {g.generation_no}</TD>
+                      <TD nowrap>Generation {g.generation_no}</TD>
                       <TD>
                         {g.active ? (
-                          <Badge tone="ok" dot>
-                            In use
-                          </Badge>
+                          <StatusBadge tone="ok">In use</StatusBadge>
                         ) : (
                           <span className="space-y-0.5">
                             <Badge tone="neutral">Retired</Badge>{" "}
@@ -211,27 +249,27 @@ export function CodeSecurityTab({ canEditFormat }: { canEditFormat: boolean }) {
                           </span>
                         )}
                       </TD>
-                      <TD className="text-right tabular">{g.vouchers.toLocaleString()}</TD>
-                      <TD className="text-right tabular">{g.unused_vouchers.toLocaleString()}</TD>
-                      <TD className="text-right">
+                      <TD numeric>{g.vouchers.toLocaleString()}</TD>
+                      <TD numeric>{g.unused_vouchers.toLocaleString()}</TD>
+                      <TD className="w-0">
                         {g.active && (
-                          <Button
-                            size="xs"
-                            variant="danger"
-                            onClick={() => {
-                              setErr(null);
-                              setRetiring(g);
-                            }}
-                          >
-                            Retire
-                          </Button>
+                          <RowActions
+                            subject={`generation ${g.generation_no}`}
+                            items={[{
+                              label: "Retire key…",
+                              danger: true,
+                              onSelect: () => {
+                                setErr(null);
+                                setRetiring(g);
+                              },
+                            }]}
+                          />
                         )}
                       </TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
-            </TableWrap>
           )}
         </Card>
       )}

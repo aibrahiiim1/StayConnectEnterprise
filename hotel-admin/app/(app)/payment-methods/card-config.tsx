@@ -10,20 +10,25 @@ import {
   saveErrorMessage,
 } from "@/lib/payment-admin";
 import { formatDate } from "@/lib/utils";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { EmptyState } from "@/components/ui/empty-state";
+import { HistoryList } from "@/components/ui/history";
+import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { Field, Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
 import { SettingField } from "@/components/ui/patterns";
-import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { AccountDialog } from "./account-dialog";
 import { cardAccepts, defaultCardAccount } from "@/lib/card-currency";
 import { CodeList, CodeText } from "./codes";
-import { Globe, Pencil, Plus, PlugZap, Trash2 } from "lucide-react";
+import { CreditCard, Plus, PlugZap, Trash2 } from "lucide-react";
 
 const MAX_EXTRA_DOMAINS = 20;
 
@@ -221,11 +226,11 @@ function AccountsCard({
   }
 
   return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle>Provider accounts</CardTitle>
-          <CardDescription>The merchant accounts card payments are taken through. The default account is used for new payments.</CardDescription>
+          <CardDescription>The default account takes every new card payment.</CardDescription>
         </div>
         {writable && (
           <Button
@@ -244,27 +249,23 @@ function AccountsCard({
           </Callout>
         </CardBody>
       )}
-      <TableWrap>
-        {accounts === null ? (
+      {accounts === null ? (
           <SkeletonRows rows={2} cols={5} />
         ) : accounts.accounts.length === 0 ? (
-          <CardBody>
-            <p className="text-sm text-muted-foreground">
-              No provider account yet. Card payment cannot be offered to clients until one is added and active.
-            </p>
-          </CardBody>
+          <EmptyState size="sm" icon={<CreditCard />} title="No provider account yet"
+            hint="Card payment cannot be offered to clients until one is added and active." />
         ) : (
-          <Table>
+          <Table label="Provider accounts">
             <THead>
               <TR>
                 <TH>Account</TH>
-                <TH>Provider</TH>
+                <TH className="hidden md:table-cell">Provider</TH>
                 <TH>Currency</TH>
                 <TH>Other currencies</TH>
                 <TH>Mode</TH>
                 <TH>Status</TH>
                 <TH>Credentials</TH>
-                <TH className="text-right">Actions</TH>
+                <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
             <TBody>
@@ -272,20 +273,22 @@ function AccountsCard({
                 const r = results[a.id];
                 return (
                   <TR key={a.id}>
-                    <TD>
-                      <div className="font-medium">{a.display_name || "—"}</div>
+                    <TD nowrap>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">{a.display_name || "—"}</span>
+                        {a.is_default && <Badge tone="accent">Default</Badge>}
+                      </div>
                       <div className="font-mono text-xs text-muted-foreground">{a.merchant_account_ref}</div>
-                      {a.is_default && <Badge tone="accent" className="mt-1">Default</Badge>}
                     </TD>
-                    <TD>{providerLabel(a.provider)}</TD>
-                    <TD className="font-mono">{a.currency}</TD>
-                    <TD>
+                    <TD nowrap className="hidden md:table-cell">{providerLabel(a.provider)}</TD>
+                    <TD nowrap className="font-mono">{a.currency}</TD>
+                    <TD className="min-w-[12rem]">
                       {a.conversion_supported ? (
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={a.provider_converts ? "ok" : "default"}>{a.provider_converts ? "Provider converts" : "Not converted"}</Badge>
                           {/* Only the default account takes card checkouts; the server refuses conversion elsewhere. */}
                           {writable && (
-                            <Button size="sm" variant="ghost" disabled={!a.is_default} onClick={() => setConverting(a)}
+                            <Button size="xs" variant="ghost" className="text-foreground" disabled={!a.is_default} onClick={() => setConverting(a)}
                               aria-describedby={!a.is_default ? `convert-default-only-${a.id}` : undefined}>
                               {a.provider_converts ? "Stop converting" : "Let the provider convert"}
                             </Button>
@@ -300,11 +303,11 @@ function AccountsCard({
                         <span className="text-xs text-muted-foreground">Settles {a.currency} only</span>
                       )}
                     </TD>
-                    <TD><Badge tone={a.mode === "LIVE" ? "warn" : "info"}>{a.mode}</Badge></TD>
-                    <TD>
-                      <Badge tone={a.status === "ACTIVE" ? "ok" : "default"} dot={a.status === "ACTIVE"}>
+                    <TD nowrap><Badge tone={a.mode === "LIVE" ? "warn" : "info"}>{a.mode}</Badge></TD>
+                    <TD nowrap>
+                      <StatusBadge tone={a.status === "ACTIVE" ? "ok" : "default"}>
                         {a.status === "ACTIVE" ? "Active" : a.status === "DISABLED" ? "Disabled" : a.status}
-                      </Badge>
+                      </StatusBadge>
                     </TD>
                     <TD>
                       <Badge tone={a.has_credentials ? "ok" : "warn"}>{a.has_credentials ? "Stored" : "Not set"}</Badge>
@@ -320,28 +323,17 @@ function AccountsCard({
                         </div>
                       )}
                     </TD>
-                    <TD>
-                      <div className="flex flex-wrap justify-end gap-1.5">
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={testing !== null || !a.has_credentials}
-                          onClick={() => test(a)}
-                          aria-label={`Test connection for ${a.display_name || a.merchant_account_ref}`}
-                        >
-                          <PlugZap /> {testing === a.id ? "Testing…" : "Test connection"}
-                        </Button>
-                        {writable && (
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            onClick={() => { setEditing(a); setDialogOpen(true); }}
-                            aria-label={`Edit ${a.display_name || a.merchant_account_ref}`}
-                          >
-                            <Pencil /> Edit
-                          </Button>
-                        )}
-                      </div>
+                    <TD className="w-0">
+                      <RowActions
+                        subject={a.display_name || a.merchant_account_ref}
+                        primary={writable ? { label: "Edit", onSelect: () => { setEditing(a); setDialogOpen(true); } } : undefined}
+                        items={[{
+                          label: testing === a.id ? "Testing…" : "Test connection",
+                          icon: <PlugZap />,
+                          disabled: testing !== null || !a.has_credentials,
+                          onSelect: () => void test(a),
+                        }]}
+                      />
                     </TD>
                   </TR>
                 );
@@ -349,8 +341,7 @@ function AccountsCard({
             </TBody>
           </Table>
         )}
-      </TableWrap>
-      <CurrencyMismatchNotice accounts={accounts} />
+      <div className="empty:hidden [&>p]:m-4"><CurrencyMismatchNotice accounts={accounts} /></div>
       <ConversionDialog account={converting} providerName={converting ? providerLabel(converting.provider) : ""}
         onClose={() => setConverting(null)} onSaved={async () => {
           setConverting(null);
@@ -418,13 +409,10 @@ function DomainsCard({
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Globe aria-hidden /> Hosted payment domains</CardTitle>
-          <CardDescription>
-            The provider&rsquo;s payment pages a client must reach before signing in. They are reachable before sign-in
-            only while Card payment is in use.
-          </CardDescription>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Hosted payment domains</CardTitle>
+          <CardDescription>Reachable before sign-in only while Card payment is in use.</CardDescription>
         </div>
       </CardHeader>
       <CardBody className="space-y-5">
@@ -583,8 +571,8 @@ function SettingsCard({
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle>Card payment timings</CardTitle>
           <CardDescription>
             {settings.settings.is_default
@@ -620,12 +608,14 @@ function SettingsCard({
             readOnly={!writable}
           />
         </div>
-        {writable && (
+      </CardBody>
+      {writable && (
+        <CardFooter className="justify-end">
           <Button disabled={!dirty || !valid} onClick={() => { setSaveErr(null); setConfirming(true); }}>
             Save timings
           </Button>
-        )}
-      </CardBody>
+        </CardFooter>
+      )}
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
@@ -642,45 +632,63 @@ function SettingsCard({
   );
 }
 
+const HISTORY_SHOWN = 8;
+
 function HistoryCard({ changes }: { changes: PaymentChange[] | null }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const [all, setAll] = useState(false);
+  const shown = changes ? (all ? changes : changes.slice(0, HISTORY_SHOWN)) : [];
+  const sel = open !== null && changes ? changes[open] : null;
   return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle>Change history</CardTitle>
-          <CardDescription>Every change to provider accounts, payment domains and timings, with who made it and why.</CardDescription>
+          <CardDescription>Accounts, payment domains and timings: who changed what, and why.</CardDescription>
         </div>
-      </CardHeader>
-      <TableWrap>
-        {changes === null ? (
-          <SkeletonRows rows={3} cols={4} />
-        ) : changes.length === 0 ? (
-          <CardBody><p className="text-sm text-muted-foreground">No changes recorded yet.</p></CardBody>
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>When</TH>
-                <TH>What</TH>
-                <TH>By</TH>
-                <TH>Reason</TH>
-                <TH>Detail</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {changes.map((c, i) => (
-                <TR key={`${c.changed_at}-${i}`}>
-                  <TD className="whitespace-nowrap">{formatDate(c.changed_at)}</TD>
-                  <TD className="whitespace-nowrap">{KIND_LABEL[c.kind] ?? c.kind}</TD>
-                  <TD className="break-all">{c.changed_by || "—"}</TD>
-                  <TD className="min-w-40">{c.reason || "—"}</TD>
-                  <TD className="min-w-48 break-words text-xs text-muted-foreground">{summariseDetail(c.detail)}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+        {changes && changes.length > HISTORY_SHOWN && (
+          <Button size="sm" variant="ghost" onClick={() => setAll((v) => !v)}>
+            {all ? "Show latest" : `View all ${changes.length}`}
+          </Button>
         )}
-      </TableWrap>
+      </CardHeader>
+      {changes === null ? (
+        <SkeletonRows rows={3} cols={4} />
+      ) : (
+        <HistoryList
+          label="Change history"
+          emptyLabel="No changes recorded yet."
+          onSelect={(it) => setOpen(Number(it.id))}
+          selectedId={open !== null ? String(open) : null}
+          items={shown.map((c, i) => ({
+            id: String(i),
+            title: KIND_LABEL[c.kind] ?? c.kind,
+            actor: c.changed_by || undefined,
+            at: c.changed_at,
+            summary: c.reason || undefined,
+            tone: "info" as const,
+          }))}
+        />
+      )}
+      <DetailsDrawer
+        open={sel !== null}
+        onOpenChange={(v) => !v && setOpen(null)}
+        eyebrow="Payment configuration change"
+        title={sel ? KIND_LABEL[sel.kind] ?? sel.kind : ""}
+      >
+        {sel && (
+          <DetailsSection title="Record">
+            <DescriptionList
+              items={[
+                { label: "When", value: formatDate(sel.changed_at) },
+                { label: "Changed by", value: sel.changed_by || "—" },
+                { label: "Reason", value: sel.reason || "—" },
+                { label: "Detail", value: <span className="text-xs">{summariseDetail(sel.detail)}</span> },
+              ]}
+            />
+          </DetailsSection>
+        )}
+      </DetailsDrawer>
     </Card>
   );
 }

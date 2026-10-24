@@ -24,6 +24,7 @@ vi.mock("@/lib/roles", async (orig) => {
 });
 
 import { api } from "@/lib/api";
+import { chooseRowAction } from "./row-actions-helper";
 import PaymentMethodsPage from "@/app/(app)/payment-methods/page";
 import { domainProblem } from "@/app/(app)/payment-methods/card-config";
 
@@ -142,7 +143,7 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     post.mockResolvedValue({ ...ACCOUNT });
     render(<PaymentMethodsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Main Stripe" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit: Main Stripe" }));
 
     const secret = await screen.findByLabelText(/^Secret key/);
     const publishable = screen.getByLabelText(/^Publishable key/);
@@ -211,7 +212,7 @@ describe("Payment methods — Card payment configuration", () => {
     const { ApiError } = await import("@/lib/api");
     post.mockRejectedValue(new ApiError(409, { error: "live_not_authorised", message: "LIVE is not authorised here." }));
     render(<PaymentMethodsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Main Stripe" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit: Main Stripe" }));
     fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: "Try it" } });
     fireEvent.change(screen.getByLabelText(/^Confirm your password/), { target: { value: "pw" } });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
@@ -222,7 +223,8 @@ describe("Payment methods — Card payment configuration", () => {
     routes(["site_admin"], { card_payment: mod("card_payment"), room_charge: mod("room_charge") });
     post.mockResolvedValue({ ok: false, error: "auth_failed", message: "Invalid API key" });
     render(<PaymentMethodsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /test connection for main stripe/i }));
+    await screen.findByText("Main Stripe");
+    await chooseRowAction("Main Stripe", /test connection/i);
     expect(await screen.findByText(/connection failed: invalid api key/i)).toBeInTheDocument();
     expect(post).toHaveBeenCalledWith("/payment-providers/accounts/acc-1/test", {});
   });
