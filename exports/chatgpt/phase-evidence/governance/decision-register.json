@@ -1034,6 +1034,20 @@
       "does_not_authorize": "Go-Live; any change to guest (client) authentication, Entitlement, PMS behaviour, financial safeguards, networking or local-first operation; weakening throttling, lockout, replay protection, recovery or auditing for accounts that turned two-step sign-in on.",
       "implementation": "Branch delivery/admin-consoles-redesign, PR #228, recorded by T0244. edged operator_signin.go, operator_mfa.go, main.go; scd operator_mfa.go; ctrlapi internal/http/auth_mfa_handlers.go, router.go, internal/auth/mfa.go, internal/opsignin; hotel-admin and cloud-admin components/ui (parity-tested), every page; docs/ui/DESIGN_SYSTEM.md. No schema change.",
       "supersedes_in_part": "D64 (D-C10: an authenticator as the second step for EVERY Admin Console account, set up at the next sign-in)"
+    },
+    {
+      "id": "D69",
+      "decided_on": "2026-10-24",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-24",
+      "status": "ACTIVE",
+      "title": "ROOM SIGN-IN KEEPS THE LAST GOOD ROSTER WHILE A PMS RESYNC RUNS, CONNECTED OR NOT; A RE-SENT PMS RECORD NO LONGER ENDS THE SESSION; NEW AUTHENTICATORS ARE BRANDED ONEGATE (2026-10-24). iam_v2.p3_feed_authorizes (migration 0150) lets the last fully published roster answer whenever the transport is down or the guest list is not IN_SYNC, so a reconnect (which always starts a full resync) no longer closes Room sign-in; continuity, the pinned revision, the claimable-pending (materialization) term, the evidence age and the refusal of a silent IN_SYNC link are unchanged, and edged readiness mirrors the rule and reports room_auth_source. Root cause of the recurring Protel 'disconnects': pmsd itself ended the session when Protel re-sent a byte-identical live record (unique violation on se_live_identity, an untyped error), then reconnected and resynced, and Protel re-sent again; an exact retransmission is now admitted idempotently and every session end is classified with privacy-safe link diagnostics. New two-step authenticators are labelled OneGate Hotel Admin / OneGate Central; existing authenticators, secrets and recovery codes are untouched.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-24 'OneGate - PMS Resilience & Authenticator Branding', which explicitly approved continuing Room sign-in from the last fully published, trusted and sufficiently fresh roster while a new PMS synchronization runs regardless of transport state, authorised passive narrowly scoped observation of connection-close traffic, the authenticator branding, and implementation, PRE-LIVE deployment and protected merge under D67.",
+      "does_not_authorize": "Go-Live; any change to the 72-hour max_auth_cache_age_seconds PRE-LIVE test policy (not a production default); PMS configuration changes, active protocol probes, financial posting or any relaxation of the room-charge freshness gate (p4_interface_freshness_block is unchanged); weakening continuity, materialization, checkout or freshness safeguards.",
+      "implementation": "Branch delivery/pms-resilience-and-branding, PR #229, recorded by T0245. data-plane/migrations/0150; edged resources_phase3_interfaces.go and resources_dashboard.go; pmsd pg.go, worker.go, adapter_fias.go, transport_diag.go, errcodes.go; edged and scd operator_mfa.go; hotel-admin readiness wording and PMS connection screens; docs/EDGE_ARCHITECTURE.md section 5A.",
+      "supersedes_in_part": "The 0060 rule that a CONNECTED resync refuses Room sign-in (docs/design/Room-Auth-Materialization-Readiness.md 'During full sync')."
     }
   ]
 }
