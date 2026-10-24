@@ -13,10 +13,9 @@ export function OperatorSigninProtection({ writable }: { writable: boolean }) {
       summary={(s) => `${s.account_max_failures} wrong passwords lock an account for ${Math.round(s.lockout_seconds / 60)} min`}
       description={
         <>
-          Protects this console&rsquo;s sign-in and every password confirmation. Wrong passwords are counted per account
-          and per address; reaching a limit locks it for the lockout period, and every failure is recorded in Activity.
-          Changes apply to the next attempt; an account already locked stays locked until that operator&rsquo;s password
-          is reset.
+          Wrong passwords are counted per account and per address; reaching a limit locks it for the lockout period.
+          Changes apply to the next attempt. A locked account stays locked until the lockout ends or its password is
+          reset.
         </>
       }
       saveLabel="Save sign-in protection"

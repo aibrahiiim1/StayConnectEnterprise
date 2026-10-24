@@ -261,7 +261,8 @@ describe("Operators", () => {
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
     expect(await screen.findByText("You")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Disable desk@hotel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for desk@hotel" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /Disable/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByText(/can be re-enabled/)).toBeNull();
     expect(within(dialog).getByText(/no way to re-enable/i)).toBeTruthy();
@@ -272,10 +273,14 @@ describe("Operators", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
-    const select = await screen.findByLabelText("Give desk@hotel another role");
+    // Roles are managed in the operator's details, opened by clicking the row.
+    await userEvent.click(await screen.findByText("desk@hotel"));
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("Client services operator")).toBeTruthy();
+    const select = within(drawer).getByLabelText("Give desk@hotel another role");
     await userEvent.selectOptions(select, "site_viewer");
     expect(post).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: /Give this role\?/ });
     expect(within(dialog).getByText(/Give this role\?/)).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "Add role" })).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText(/Your password/), "admin-pass-1");

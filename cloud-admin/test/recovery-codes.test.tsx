@@ -39,17 +39,19 @@ describe("new recovery codes", () => {
     const sent = recordFetch((s) =>
       s.url === "/api/v1/auth/mfa/recovery-codes" ? { body: { recovery_codes: codes } } : { body: mfa });
     renderAs(PLATFORM_ME, <TwoStepSigninPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Make new recovery codes" }));
     const field = await screen.findByLabelText("Code from your authenticator app");
     expect(field).toHaveAttribute("autocomplete", "one-time-code");
 
-    fireEvent.click(screen.getByRole("button", { name: "Make new recovery codes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make codes" }));
     expect(await screen.findByText(/Enter the 6-digit code your authenticator app shows now/)).toBeInTheDocument();
     expect(field).toHaveAttribute("aria-invalid", "true");
     expect(sent.some((s) => s.method === "POST")).toBe(false);
 
     fireEvent.change(field, { target: { value: "123 456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Make new recovery codes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make codes" }));
     expect(await screen.findByRole("list", { name: "New recovery codes" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const post = sent.find((s) => s.method === "POST");
     expect(post?.body).toEqual({ code: "123456" });
   });
@@ -60,9 +62,10 @@ describe("new recovery codes", () => {
         ? { status: 400, body: { error: "wrong_code", message: "That code is not right. Enter the 6-digit code your authenticator app shows now." } }
         : { body: mfa });
     renderAs(PLATFORM_ME, <TwoStepSigninPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Make new recovery codes" }));
     const field = await screen.findByLabelText("Code from your authenticator app");
     fireEvent.change(field, { target: { value: "000000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Make new recovery codes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make codes" }));
     await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByText(/That code is not right/)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "New recovery codes" })).not.toBeInTheDocument();

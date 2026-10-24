@@ -117,15 +117,21 @@ test("turning two-step sign-in on from the account page, then off again", async 
   // The suggestion goes as soon as it is on.
   await expect(page.getByRole("link", { name: /turn on two-step sign-in/ })).toHaveCount(0);
 
-  await main.getByRole("button", { name: "Turn off" }).click();
-  await main.getByLabel("Your password").fill("correct-password");
-  await main.getByLabel("Code").fill("000000");
-  await main.getByRole("button", { name: "Turn off two-step sign-in" }).click();
-  await expect(main.getByText("That code is not right.")).toBeVisible();
+  await expect(main.getByRole("status").filter({ hasText: "signed out" })).toBeVisible();
+
+  await main.getByRole("button", { name: "Turn off", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Your password").fill("correct-password");
+  await dialog.getByLabel("Code").fill("000000");
+  await dialog.getByRole("button", { name: "Turn off two-step sign-in" }).click();
+  await expect(dialog.getByText("That code is not right.")).toBeVisible();
   await expect(main.getByText("On", { exact: true })).toBeVisible();
-  await main.getByLabel("Code").fill("123456");
-  await main.getByRole("button", { name: "Turn off two-step sign-in" }).click();
+  await dialog.getByLabel("Code").fill("123456");
+  await dialog.getByRole("button", { name: "Turn off two-step sign-in" }).click();
+  await expect(dialog).toHaveCount(0);
   await expect(main.getByText("Off", { exact: true })).toBeVisible();
   await expect(main.getByRole("status").filter({ hasText: "Two-step sign-in is off" })).toBeVisible();
   expect(acct.calls.filter((c) => c === "POST /auth/mfa/disable")).toHaveLength(2);
+  // The page keeps working afterwards: it can be turned on again straight away.
+  await expect(main.getByRole("button", { name: "Turn on two-step sign-in" })).toBeVisible();
 });

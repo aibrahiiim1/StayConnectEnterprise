@@ -1,22 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, KeyRound, Mail, Plus, Smartphone, UserCheck, UserMinus, UserPen, Users } from "lucide-react";
+import { Download, KeyRound, Mail, Plus, Smartphone, UserCheck, UserMinus, Users } from "lucide-react";
 import { api, ApiError, itemsOf, withStepUp, type CentralUser, type Items } from "@/lib/api";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Field, Input, Select, useFieldErrors } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
+import { RowActions, type RowAction } from "@/components/ui/row-actions";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { DescriptionList } from "@/components/ui/data";
 import { StateBadge } from "@/components/status-badge";
 import { roleLabel } from "@/lib/permissions";
-import { ago, userStatusInfo } from "@/lib/status";
+import { ago, formatDateTime, userStatusInfo } from "@/lib/status";
 
 const MIN_PASSWORD = 10;
+// On a phone the inline row action moves to the details drawer, so the menu stays on screen.
+const INLINE_FROM_SM = "max-sm:[&>a]:hidden max-sm:[&>button:not([aria-haspopup])]:hidden";
 
 type UserField = "email" | "password" | "reason";
 
@@ -92,6 +97,7 @@ export function UsersManager({
     | null
   >(null);
   const [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dErr, setDErr] = useState<unknown>(null);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: roles[roles.length - 1] as string });
   const [mfaReason, setMfaReason] = useState("");
@@ -131,12 +137,26 @@ export function UsersManager({
   }
 
   const sorted = useMemo(() => [...(rows ?? [])].sort((a, b) => a.email.localeCompare(b.email)), [rows]);
+  const selected = rows?.find((u) => u.id === selectedId) ?? null;
+  const enable = (u: CentralUser) => run(() => api.patch(`${base}/${u.id}`, { status: "active" }), "Sign-in enabled", u.email);
+
+  function actionsFor(u: CentralUser): RowAction[] {
+    return [
+      { label: "Set a new password", icon: <KeyRound />, hidden: !canResetPassword, onSelect: () => open({ kind: "password", u }) },
+      { label: "Correct the email", icon: <Mail />, onSelect: () => open({ kind: "email", u }) },
+      { label: "Reset two-step sign-in", icon: <Smartphone />, hidden: !u.two_step_enrolled, onSelect: () => open({ kind: "mfa", u }) },
+      { label: "Download their data", icon: <Download />, hidden: !canExportData, onSelect: () => open({ kind: "export", u }) },
+      u.status === "disabled"
+        ? { label: "Enable sign-in", icon: <UserCheck />, disabled: busy, onSelect: () => void enable(u) }
+        : { label: "Disable sign-in", icon: <UserMinus />, danger: true, onSelect: () => open({ kind: "disable", u }) },
+    ];
+  }
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <span className="text-sm text-muted-foreground">
-          {rows ? `${rows.length} ${rows.length === 1 ? noun : `${noun}s`}` : " "}
+          {rows ? `${rows.length} ${rows.length === 1 ? noun : `${noun}s`}` : " "}
         </span>
         {canManage && (
           <Button size="sm" onClick={() => open({ kind: "new" })}>
@@ -148,93 +168,122 @@ export function UsersManager({
       {rows === null ? (
         <SkeletonRows rows={3} cols={4} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={<Users />} title={`No ${noun}s yet`} />
+        <EmptyState size="sm" icon={<Users />} title={`No ${noun}s yet`} />
       ) : (
         <Table aria-label={`${noun}s`}>
           <THead>
             <TR>
-              <TH>Email</TH><TH>Role</TH><TH>Status</TH><TH className="hidden md:table-cell">Last sign-in</TH>
-              <TH><span className="sr-only">Actions</span></TH>
+              <TH>Email</TH>
+              <TH className="hidden sm:table-cell">Role</TH>
+              <TH className="hidden md:table-cell">Two-step</TH>
+              <TH className="hidden sm:table-cell">Status</TH>
+              <TH className="hidden lg:table-cell">Last sign-in</TH>
+              {canManage && <TH className="w-0"><span className="sr-only">Actions</span></TH>}
             </TR>
           </THead>
-          <tbody>
+          <TBody>
             {sorted.map((u) => {
               const self = u.id === meId;
               const names = roleNames(u);
               return (
-                <TR key={u.id}>
-                  <TD>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-sm font-medium">{u.email}</span>
-                      {self && <Badge tone="accent">You</Badge>}
+                <TR key={u.id} onClick={() => setSelectedId(u.id)}>
+                  <TD className="max-w-[16rem]">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-medium" title={u.email}>{u.email}</span>
+                      {self && <Badge tone="accent" size="sm">You</Badge>}
                     </div>
-                    {u.display_name && <div className="text-caption text-muted-foreground">{u.display_name}</div>}
-                    {u.status === "active" && typeof u.two_step_enrolled === "boolean" && (
-                      <Badge tone={u.two_step_enrolled ? "ok" : "neutral"} className="mt-1">
-                        {u.two_step_enrolled ? "Two-step on" : "Two-step off"}
-                      </Badge>
-                    )}
+                    {u.display_name && <div className="truncate text-xs text-muted-foreground">{u.display_name}</div>}
+                    {u.status !== "active" && <StateBadge info={userStatusInfo(u.status)} className="mt-1 sm:hidden" />}
                   </TD>
-                  <TD>
+                  <TD className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1">
-                      {names.length ? names.map((r) => <Badge key={r} tone="neutral">{roleLabel(r)}</Badge>) : "—"}
+                      {names.length ? names.map((r) => <Badge key={r} tone="neutral" size="sm">{roleLabel(r)}</Badge>) : "—"}
                     </div>
                   </TD>
-                  <TD><StateBadge info={userStatusInfo(u.status)} /></TD>
-                  <TD className="hidden text-muted-foreground md:table-cell">{u.last_login_at ? ago(u.last_login_at) : "Never"}</TD>
-                  <TD>
-                    {canManage && !self && (
-                      <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => open({ kind: "role", u })}>
-                          <UserPen /> <span className="hidden sm:inline">Role</span>
-                          <span className="sr-only"> of {u.email}</span>
-                        </Button>
-                        {canResetPassword && (
-                          <Button size="sm" variant="ghost" onClick={() => open({ kind: "password", u })}>
-                            <KeyRound /> <span className="hidden sm:inline">Password</span>
-                            <span className="sr-only"> of {u.email}</span>
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => open({ kind: "email", u })}>
-                          <Mail /> <span className="hidden sm:inline">Email</span>
-                          <span className="sr-only"> of {u.email}</span>
-                        </Button>
-                        {u.two_step_enrolled && (
-                          <Button size="sm" variant="ghost" onClick={() => open({ kind: "mfa", u })}>
-                            <Smartphone /> <span className="hidden sm:inline">Reset two-step</span>
-                            <span className="sr-only"> for {u.email}</span>
-                          </Button>
-                        )}
-                        {canExportData && (
-                          <Button size="sm" variant="ghost" onClick={() => open({ kind: "export", u })}>
-                            <Download /> <span className="hidden sm:inline">Data</span>
-                            <span className="sr-only"> of {u.email}</span>
-                          </Button>
-                        )}
-                        {u.status === "disabled" ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => run(() => api.patch(`${base}/${u.id}`, { status: "active" }), "Sign-in enabled", u.email)}
-                          >
-                            <UserCheck /> <span className="hidden sm:inline">Enable</span>
-                            <span className="sr-only"> {u.email}</span>
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => open({ kind: "disable", u })}>
-                            <UserMinus /> <span className="hidden sm:inline">Disable</span>
-                            <span className="sr-only"> {u.email}</span>
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                  <TD nowrap className="hidden md:table-cell">
+                    {u.status === "active" && typeof u.two_step_enrolled === "boolean"
+                      ? <TwoStepBadge on={u.two_step_enrolled} />
+                      : <span className="text-muted-foreground">—</span>}
                   </TD>
+                  <TD nowrap className="hidden sm:table-cell"><StateBadge info={userStatusInfo(u.status)} /></TD>
+                  <TD nowrap muted className="hidden lg:table-cell">{u.last_login_at ? ago(u.last_login_at) : "Never"}</TD>
+                  {canManage && (
+                    <TD nowrap className="w-0">
+                      {!self && (
+                        <RowActions
+                          subject={u.email}
+                          className={INLINE_FROM_SM}
+                          primary={{ label: "Change role", onSelect: () => open({ kind: "role", u }) }}
+                          items={actionsFor(u)}
+                        />
+                      )}
+                    </TD>
+                  )}
                 </TR>
               );
             })}
-          </tbody>
+          </TBody>
         </Table>
       )}
+
+      <DetailsDrawer
+        open={selected !== null}
+        onOpenChange={(v) => { if (!v) setSelectedId(null); }}
+        eyebrow={`${noun[0].toUpperCase()}${noun.slice(1)}`}
+        title={selected?.email ?? ""}
+        description={selected?.display_name || undefined}
+        badges={selected && (
+          <>
+            <StateBadge info={userStatusInfo(selected.status)} />
+            {selected.id === meId && <Badge tone="accent">You</Badge>}
+          </>
+        )}
+        actions={selected && canManage && selected.id !== meId && (
+          <>
+            {selected.status === "disabled" ? (
+              <Button variant="secondary" className="me-auto" loading={busy} onClick={() => void enable(selected)}>
+                Enable sign-in
+              </Button>
+            ) : (
+              <Button variant="danger-outline" className="me-auto" onClick={() => open({ kind: "disable", u: selected })}>
+                Disable sign-in
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => open({ kind: "role", u: selected })}>Change role</Button>
+          </>
+        )}
+      >
+        {selected && (
+          <div className="space-y-6">
+            <DetailsSection title="Account">
+              <DescriptionList
+                items={[
+                  { label: "Email", value: selected.email },
+                  { label: "Name", value: selected.display_name || undefined },
+                  { label: "Role", value: roleNames(selected).map(roleLabel).join(", ") || undefined },
+                  {
+                    label: "Two-step sign-in",
+                    value: typeof selected.two_step_enrolled === "boolean" ? <TwoStepBadge on={selected.two_step_enrolled} /> : undefined,
+                  },
+                  { label: "Last sign-in", value: selected.last_login_at ? ago(selected.last_login_at) : "Never" },
+                  { label: "Added", value: selected.created_at ? formatDateTime(selected.created_at) : undefined, hidden: !selected.created_at },
+                ]}
+              />
+            </DetailsSection>
+            {canManage && selected.id !== meId && (
+              <DetailsSection title="More actions">
+                <div className="flex flex-wrap gap-2">
+                  {actionsFor(selected).filter((a) => !a.hidden && !a.danger && a.label !== "Enable sign-in").map((a) => (
+                    <Button key={a.label} size="sm" variant="secondary" disabled={a.disabled} onClick={a.onSelect}>
+                      {a.icon}{a.label}
+                    </Button>
+                  ))}
+                </div>
+              </DetailsSection>
+            )}
+          </div>
+        )}
+      </DetailsDrawer>
 
       <DialogForm
         open={dialog?.kind === "new"}
@@ -452,4 +501,8 @@ export function UsersManager({
       />
     </>
   );
+}
+
+function TwoStepBadge({ on }: { on: boolean }) {
+  return <StatusBadge tone={on ? "ok" : "default"}>{on ? "On" : "Off"}</StatusBadge>;
 }

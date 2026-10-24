@@ -45,19 +45,19 @@ export function MfaRecommendation({ email, collapsed, onNavigate }: {
 
   if (!show || collapsed || !email) return null;
   return (
-    <div className="mt-1 flex items-start gap-2 rounded-md px-2.5 py-1.5 text-2xs text-sidebar-muted">
-      <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+    <div className="mt-1 flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 py-1 pe-1 ps-2.5 text-xs text-sidebar-muted">
+      <ShieldCheck className="size-3.5 shrink-0 text-sidebar-active" aria-hidden />
       <Link
         href="/account/security"
         onClick={onNavigate}
-        className="flex-1 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active"
+        className="min-w-0 flex-1 rounded-sm py-0.5 leading-snug transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        Protect your account: turn on two-step sign-in.
+        Recommended: turn on two-step sign-in
       </Link>
       <button
         type="button"
         aria-label="Dismiss the two-step sign-in suggestion"
-        className="shrink-0 rounded hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active"
+        className="flex size-6 shrink-0 items-center justify-center rounded-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:size-11"
         onClick={() => { writeDismissed(email); setShow(false); }}
       >
         <X className="size-3.5" aria-hidden />

@@ -147,7 +147,7 @@ describe("Operators (N-8)", () => {
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
     expect(await screen.findByText("Must set a new password")).toBeTruthy();
-    await userEvent.click(await screen.findByRole("button", { name: "Reset the password for desk@hotel" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reset password: desk@hotel" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/signed out everywhere/)).toBeTruthy();
     const box = within(dialog).getByRole("checkbox", { name: /Must choose their own password/ }) as HTMLInputElement;
@@ -166,8 +166,8 @@ describe("Operators (N-8)", () => {
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
     await screen.findByText("You");
-    expect(screen.queryByRole("button", { name: "Reset the password for me@hotel" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Change my password" }).getAttribute("href")).toBe("/account/password");
+    expect(screen.queryByRole("button", { name: "Reset password: me@hotel" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Change my password: me@hotel" }).getAttribute("href")).toBe("/account/password");
   });
 
   it("sign-in protection is saved with a reason and the password", async () => {
