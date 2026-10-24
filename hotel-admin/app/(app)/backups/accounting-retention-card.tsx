@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -74,33 +74,31 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
 
   const lastRun = data?.purge_runs?.[0];
   return (
-    <Card>
-      <CardBody className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="text-emphasis">Usage detail kept for</div>
-            <p className="text-caption text-muted-foreground">
-              How long the appliance keeps the detailed traffic samples behind each client session. Totals per
-              package and per session are always kept. Default 365 days. With a number of days ({RETENTION_MIN_DAYS} to{" "}
-              {RETENTION_MAX_DAYS}), detail older than that is removed once an hour, only for sessions that have ended
-              and packages that have finished; Unlimited removes nothing. Removed detail cannot be brought back.
-            </p>
-            {lastRun && (
-              <p className="text-caption text-muted-foreground">
-                Last removal {formatDate(lastRun.ran_at)}: {lastRun.records_deleted} samples older than{" "}
-                {lastRun.retention_days} days.
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge tone="neutral">{data ? retentionLabel(current) : "—"}</Badge>
-            {writable && !editing && data && (
-              <Button ref={triggerRef} size="sm" variant="outline" onClick={() => {
-                setUnlimited(current == null); setDraft(String(current ?? 365)); setEditing(true);
-              }}>Change</Button>
-            )}
-          </div>
-        </div>
+    <SectionCard
+      title="Usage detail kept for"
+      description="The detailed traffic samples behind each client session. Totals are always kept."
+      actions={
+        <>
+          <Badge tone="neutral">{data ? retentionLabel(current) : "—"}</Badge>
+          {writable && !editing && data && (
+            <Button ref={triggerRef} size="sm" variant="secondary" onClick={() => {
+              setUnlimited(current == null); setDraft(String(current ?? 365)); setEditing(true);
+            }}>Change</Button>
+          )}
+        </>
+      }
+      bodyClassName="space-y-3"
+    >
+        <p className="text-caption text-muted-foreground">
+          Default 365 days; {RETENTION_MIN_DAYS} to {RETENTION_MAX_DAYS} days, or Unlimited. Detail older than that is
+          removed hourly, only for ended sessions and finished packages. Removed detail cannot be brought back.
+        </p>
+        {lastRun && (
+          <p className="text-caption text-muted-foreground">
+            Last removal {formatDate(lastRun.ran_at)}: {lastRun.records_deleted} samples older than{" "}
+            {lastRun.retention_days} days.
+          </p>
+        )}
         <ErrorBanner err={err} />
         {editing && (
           <div ref={panelRef} className="grid gap-3 sm:grid-cols-3">
@@ -132,7 +130,6 @@ export function AccountingRetentionCard({ writable }: { writable: boolean }) {
             </div>
           </div>
         )}
-      </CardBody>
-    </Card>
+    </SectionCard>
   );
 }

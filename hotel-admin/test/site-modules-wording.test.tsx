@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import { render, screen, cleanup, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { fakeAudit } from "./fake-paged";
 
@@ -207,7 +207,8 @@ describe("Diagnostics", () => {
     routes({ "/diagnostics/services": { overall: "healthy", counts: { healthy: 1 }, services: [PG], generated_at: new Date().toISOString() } });
     const { default: Page } = await import("@/app/(app)/health/page");
     render(<Page />);
-    await userEvent.click(await screen.findByRole("button", { name: "Restart postgres" }));
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Actions for postgres" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
     return screen.findByRole("dialog");
   }
 

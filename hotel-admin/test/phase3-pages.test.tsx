@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const get = vi.fn();
@@ -220,7 +220,7 @@ describe("Operational alerts page", () => {
     post.mockResolvedValue({ id: "x", action: "ACK" });
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: /Acknowledge alert/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [path, body] = post.mock.calls[0];
     expect(path).toBe("/operational-alerts/a1/acknowledge");
@@ -241,7 +241,8 @@ describe("Operational alerts page", () => {
     post.mockRejectedValue(new Error("illegal transition"));
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: /Resolve alert/ }));
+    fireEvent.keyDown(await screen.findByRole("button", { name: /^Actions for alert/ }), { key: "Enter" });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Resolve" }));
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
 
@@ -257,7 +258,7 @@ describe("Operational alerts page", () => {
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage canAct={false} />);
     await screen.findByText(/emergency grace used/i);
-    expect(screen.queryByRole("button", { name: /Acknowledge alert/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Acknowledge|^Actions for/ })).toBeNull();
   });
 });
 
@@ -274,7 +275,7 @@ describe("Concurrency contracts in the UI", () => {
     post.mockRejectedValue(Object.assign(new Error("state conflict"), { status: 409 }));
     const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: /Acknowledge alert/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Acknowledge: alert/ }));
     // Reload after conflict instead of retrying a stale decision.
     expect(await screen.findByRole("status")).toBeTruthy();
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));

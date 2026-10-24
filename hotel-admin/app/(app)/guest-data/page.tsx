@@ -7,18 +7,22 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ApiError, BACKGROUND_HEADER } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Button, LinkButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { RowActions } from "@/components/ui/row-actions";
+import { HistoryList } from "@/components/ui/history";
+import { DetailsDrawer } from "@/components/ui/details-drawer";
+import { HelpSection } from "@/components/help";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ResultsCount } from "@/components/ui/data";
+import { DescriptionList, ResultsCount, SEARCH_FIELD_PROPS } from "@/components/ui/data";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
-import { UserSearch, Download, Eraser, Search } from "lucide-react";
+import { Download, Eraser, Search } from "lucide-react";
 import { LIVE_REASONS, eraseConsequences, exportDescription } from "@/lib/guest-data-words";
 import { ledgerHeadline, type LedgerStatus } from "@/lib/ledger-words";
 
@@ -66,6 +70,7 @@ export default function GuestDataPage() {
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ ref: string; counts: Record<string, number> } | null>(null);
+  const [record, setRecord] = useState<Erasure | null>(null);
 
   const loadErasures = useCallback(async () => {
     try {
@@ -82,8 +87,7 @@ export default function GuestDataPage() {
     })();
   }, []);
 
-  async function search(e?: React.FormEvent) {
-    e?.preventDefault();
+  async function search() {
     const term = q.trim();
     if (term.length < 2) return;
     setSearching(true); setErr(null);
@@ -124,27 +128,43 @@ export default function GuestDataPage() {
     } finally { setBusy(false); }
   }
 
+  const countWords = (counts: Record<string, number>) =>
+    Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`).join(", ");
+
   return (
     <PageShell>
       <PageHeader
-        icon={<UserSearch />}
-        eyebrow="System"
         title="Guest data requests"
         description="Give a guest a copy of their data, or erase it, when they ask."
+        help={
+          <>
+            <HelpSection title="Records no rule can attribute to one person">
+              <p>
+                The internet access used through a room, a voucher or a staff-issued account, and a device used with
+                someone else, is shared: it is never exported or erased here. If a guest asks for the usage of their own
+                phone, open an <strong>assisted request</strong>: you verify the requester, review the exact records,
+                and only records established as theirs can be handed over or anonymised.
+              </p>
+            </HelpSection>
+            <HelpSection title="Request register">
+              <p>Keep track of each request and its deadline in the request register.</p>
+            </HelpSection>
+            <HelpSection title="Erasures">
+              <p>Erasure anonymises the records and is refused while the guest is staying or online. Each erasure has a reference to give the guest as proof.</p>
+            </HelpSection>
+          </>
+        }
+        actions={
+          <>
+            <LinkButton href="/guest-data/register" variant="secondary">Request register</LinkButton>
+            <LinkButton href="/guest-data/assisted" variant="secondary">Assisted request</LinkButton>
+          </>
+        }
       />
 
-      <Callout tone="info">
-        Check the guest&rsquo;s identity before you hand over an export or erase anything. Do not write the
-        guest&rsquo;s name, address, phone, room or reservation in the reason: the reason is kept after the guest is
-        erased, so a reason that names them is refused.
-      </Callout>
-
-      <Callout tone="neutral" title="Records no rule can attribute to one person">
-        The internet access used through a room, a voucher or a staff-issued account, and a device used with someone else,
-        is shared: it is never exported or erased here. If a guest asks for the usage of their own phone, open an{" "}
-        <Link className="underline" href="/guest-data/assisted">assisted request</Link>: you verify the requester,
-        review the exact records, and only records established as theirs can be handed over or anonymised. Keep track of
-        each request and its deadline in the <Link className="underline" href="/guest-data/register">request register</Link>.
+      <Callout tone="warning" title="Check the guest’s identity first">
+        Before you hand over an export or erase anything. Do not write the guest&rsquo;s name, address, phone, room or
+        reservation in the reason: it is kept after the guest is erased, so a reason that names them is refused.
       </Callout>
 
       {ledger?.state && ledger.erasure_available === false && (
@@ -157,96 +177,127 @@ export default function GuestDataPage() {
       {done && (
         <Callout tone="success">
           Erased. Reference <strong className="font-mono">{done.ref}</strong>: give it to the guest as proof. {""}
-          {Object.entries(done.counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`).join(", ")}.
+          {countWords(done.counts)}.
         </Callout>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Find the guest</CardTitle>
-          <CardDescription>Email, phone, name, client account, room, reservation number or device MAC address.</CardDescription>
-        </CardHeader>
-        <CardBody className="space-y-4">
-          <form className="flex flex-wrap gap-2" onSubmit={search}>
-            <Input aria-label="Search" className="min-w-0 flex-1" value={q} maxLength={200}
-              onChange={(e) => setQ(e.target.value)} placeholder="guest@example.com, 412, Smith, aa:bb:cc:dd:ee:ff" />
-            <Button type="submit" variant="primary" disabled={searching || q.trim().length < 2}>
-              <Search /> {searching ? "Searching…" : "Search"}
-            </Button>
-          </form>
-          <ErrorBanner err={err} />
-          <ResultsCount count={matches?.length} noun="record" />
-          {matchesCut && (
-            <Callout tone="warning">
-              Only the first 50 records are shown. Search for something more specific (the full email, the phone number or the
-              reservation number) so the guest&rsquo;s own records are listed.
-            </Callout>
-          )}
-          {matches !== null && matches.length === 0 && (
-            <EmptyState title="No guest found" hint="Records already erased or anonymised by retention are not shown." />
-          )}
-          {matches !== null && matches.length > 0 && (
-            <div className="overflow-x-auto">
-              <Table>
-                <THead>
-                  <TR><TH>Record</TH><TH>Found by</TH><TH>Status</TH><TH>Last activity</TH><TH><span className="sr-only">Actions</span></TH></TR>
-                </THead>
-                <TBody>
-                  {matches.map((m) => (
-                    <TR key={`${m.kind}-${m.id}`}>
-                      <TD>
-                        <div className="text-sm">{KIND_LABELS[m.kind]}</div>
-                        {m.detail && <div className="text-caption text-muted-foreground">{m.detail}</div>}
-                      </TD>
-                      <TD className="break-all">{m.label}</TD>
-                      <TD>{m.status ? <Badge tone="neutral">{m.status}</Badge> : null}</TD>
-                      <TD>{m.last_activity ? formatDate(m.last_activity) : "—"}</TD>
-                      <TD className="whitespace-nowrap text-right">
-                        <Button size="sm" variant="outline" aria-label={`Export ${KIND_LABELS[m.kind]} ${m.label}`}
-                          onClick={() => { setActionErr(null); setExporting(m); }}>
-                          <Download /> Export
-                        </Button>{" "}
-                        <Button size="sm" variant="danger" aria-label={`Erase ${KIND_LABELS[m.kind]} ${m.label}`}
-                          onClick={() => { setActionErr(null); setDone(null); setErasing(m); }}>
-                          <Eraser /> Erase
-                        </Button>
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      <SectionCard
+        flush
+        title="Find the guest"
+        description="Email, phone, name, client account, room, reservation number or device MAC address."
+      >
+        <div className="flex flex-wrap gap-2 border-b border-border px-4 py-3" role="search">
+          <Input
+            {...SEARCH_FIELD_PROPS}
+            name="guest-data-lookup"
+            aria-label="Search"
+            className="min-w-0 flex-1"
+            value={q}
+            maxLength={200}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void search(); } }}
+            placeholder="guest@example.com, 412, Smith, aa:bb:cc:dd:ee:ff"
+          />
+          <Button variant="primary" disabled={searching || q.trim().length < 2} onClick={() => void search()}>
+            <Search /> {searching ? "Searching…" : "Search"}
+          </Button>
+        </div>
+        <ResultsCount count={matches?.length} noun="record" />
+        {(err || matchesCut) && (
+          <div className="space-y-3 px-4 pt-3">
+            <ErrorBanner err={err} className="mb-0" />
+            {matchesCut && (
+              <Callout tone="warning">
+                Only the first 50 records are shown. Search for something more specific (the full email, the phone
+                number or the reservation number).
+              </Callout>
+            )}
+          </div>
+        )}
+        {matches === null ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">Search to list the guest&rsquo;s records.</p>
+        ) : matches.length === 0 ? (
+          <EmptyState size="sm" title="No guest found" hint="Records already erased or anonymised by retention are not shown." />
+        ) : (
+          <Table label="Matching records">
+            <THead>
+              <TR>
+                <TH>Record</TH>
+                <TH>Found by</TH>
+                <TH className="hidden sm:table-cell">Status</TH>
+                <TH className="hidden md:table-cell">Last activity</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <TBody>
+              {matches.map((m) => (
+                <TR key={`${m.kind}-${m.id}`}>
+                  <TD>
+                    <div className="text-sm">{KIND_LABELS[m.kind]}</div>
+                    {m.detail && <div className="text-caption text-muted-foreground">{m.detail}</div>}
+                  </TD>
+                  <TD className="break-all">{m.label}</TD>
+                  <TD nowrap className="hidden sm:table-cell">{m.status ? <Badge tone="neutral">{m.status}</Badge> : null}</TD>
+                  <TD nowrap muted className="hidden md:table-cell">{m.last_activity ? formatDate(m.last_activity) : "—"}</TD>
+                  <TD className="w-0">
+                    <RowActions
+                      subject={`${KIND_LABELS[m.kind]} ${m.label}`}
+                      primary={{ label: "Export", icon: <Download />, onSelect: () => { setActionErr(null); setExporting(m); } }}
+                      items={[{
+                        label: "Erase…",
+                        icon: <Eraser />,
+                        danger: true,
+                        onSelect: () => { setActionErr(null); setDone(null); setErasing(m); },
+                      }]}
+                    />
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Erasures</CardTitle>
-          <CardDescription>Every erasure on this site. They hold no guest data.</CardDescription>
-        </CardHeader>
-        <CardBody>
-          {erasuresCut && <Callout tone="neutral">Only the 200 most recent erasures are shown. Older ones are kept.</Callout>}
-          {erasures !== null && erasures.length === 0 && <EmptyState title="No guest has been erased" />}
-          {erasures !== null && erasures.length > 0 && (
-            <div className="overflow-x-auto">
-              <Table>
-                <THead><TR><TH>Reference</TH><TH>When</TH><TH>By</TH><TH>Reason</TH></TR></THead>
-                <TBody>
-                  {erasures.map((x) => (
-                    <TR key={x.erasure_ref}>
-                      <TD className="font-mono">{x.erasure_ref}</TD>
-                      <TD>{formatDate(x.erased_at)}</TD>
-                      <TD>{x.erased_by}</TD>
-                      <TD>{x.reason}</TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      <SectionCard flush title="Erasures" description="Every erasure on this site. They hold no guest data.">
+        {erasuresCut && (
+          <div className="px-4 pt-3"><Callout tone="neutral">Only the 200 most recent erasures are shown. Older ones are kept.</Callout></div>
+        )}
+        {erasures !== null && (
+          <HistoryList
+            label="Erasures"
+            emptyLabel="No guest has been erased."
+            items={erasures.map((x) => ({
+              id: x.erasure_ref,
+              title: <span className="font-mono">{x.erasure_ref}</span>,
+              actor: x.erased_by,
+              at: x.erased_at,
+              summary: x.reason,
+            }))}
+            selectedId={record?.erasure_ref ?? null}
+            onSelect={(it) => setRecord(erasures.find((x) => x.erasure_ref === it.id) ?? null)}
+          />
+        )}
+      </SectionCard>
+
+      <DetailsDrawer
+        open={record !== null}
+        onOpenChange={(v) => !v && setRecord(null)}
+        eyebrow="Erasure"
+        title={record ? <span className="font-mono">{record.erasure_ref}</span> : ""}
+        description={record ? formatDate(record.erased_at) : undefined}
+      >
+        {record && (
+          <DescriptionList
+            items={[
+              { label: "Record type", value: KIND_LABELS[record.subject_kind] ?? record.subject_kind },
+              { label: "Erased by", value: record.erased_by },
+              { label: "When", value: formatDate(record.erased_at) },
+              { label: "Reason", value: record.reason },
+              { label: "What was anonymised", value: countWords(record.counts || {}) || "—" },
+            ]}
+          />
+        )}
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={exporting !== null}

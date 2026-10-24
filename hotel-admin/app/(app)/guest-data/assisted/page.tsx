@@ -6,20 +6,21 @@
 // changed.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Button, LinkButton } from "@/components/ui/button";
 import { Input, Textarea, Select, Field } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { DescriptionList } from "@/components/ui/data";
+import { HistoryList } from "@/components/ui/history";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
-import { ClipboardCheck, Download, Eraser, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, Download, Eraser, Plus, Search, X } from "lucide-react";
 import {
   ASSISTED_ERASE_CONSEQUENCES, ASSISTED_EXPORT_NOTE, BLOCK_WORDS, CLASS_WORDS, KIND_WORDS, METHOD_OPTIONS,
   PURPOSE_WORDS, REASON_WORDS, REFUSAL_WORDS, STATUS_TONE, describeDetail, isGroupAddress, isPrivateAddress,
@@ -49,6 +50,11 @@ const ANCHOR_LABELS: Record<AnchorKind, string> = {
   account: "Client account", principal: "Portal sign-in identity", stay: "Hotel stay", stay_guest: "Guest on a shared stay",
 };
 const METHOD_LABEL = Object.fromEntries(METHOD_OPTIONS.map((m) => [m.value, m.label]));
+const statusWord = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+const toneOf = (s: string) => {
+  const t = STATUS_TONE[s] ?? "neutral";
+  return t === "neutral" ? "default" : t;
+};
 
 function saveJSON(doc: unknown, prefix: string) {
   const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
@@ -82,65 +88,69 @@ export default function AssistedGuestDataPage() {
 
   return (
     <PageShell>
+      <LinkButton href="/guest-data" variant="ghost" size="sm" className="-ms-2.5 self-start">
+        <ArrowLeft className="rtl:rotate-180" /> Guest data requests
+      </LinkButton>
       <PageHeader
-        icon={<ClipboardCheck />}
-        eyebrow="System"
         title="Assisted guest data request"
         description="Hand over or anonymise one person’s device usage when no rule can tie it to them."
-        actions={<Link className="text-sm underline" href="/guest-data">Back to guest data requests</Link>}
+        actions={!caseId && !creating && (
+          <Button variant="primary" onClick={() => setCreating(true)}><Plus /> New request</Button>
+        )}
       />
 
-      <Callout tone="info" title="A device address does not identify a person">
-        A MAC address, a room number, a reservation credential or a shared device does not prove who someone is or what is
-        theirs. Verify the requester yourself, say how, and review the exact records before you hand anything over or
-        anonymise it. Records that may belong to someone else are shown but can never be selected, even when several
-        guests used the same room, device, voucher or account.
+      <Callout tone="warning" title="A device address does not identify a person">
+        Verify the requester yourself and review the exact records before you hand anything over or anonymise it.
+        Records that may belong to someone else are shown but can never be selected.
       </Callout>
 
       {caseId ? (
         <CasePanel id={caseId} onClose={() => { setCaseId(null); void loadList(); }} onChanged={loadList} />
       ) : (
         <>
-          {creating ? (
+          {creating && (
             <NewRequest
               onCancel={() => setCreating(false)}
               onOpened={(id) => { setCreating(false); setCaseId(id); void loadList(); toast.success("Request opened", "Review its records next."); }}
             />
-          ) : (
-            <div><Button variant="primary" onClick={() => setCreating(true)}><Plus /> New request</Button></div>
           )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Requests</CardTitle>
-              <CardDescription>Open requests wait for you; closed ones keep who, when, how it was verified and how many records — no device address and no notes.</CardDescription>
-            </CardHeader>
-            <CardBody>
-              <ErrorBanner err={listErr} />
-              {list !== null && list.length === 0 && !listErr && <EmptyState title="No assisted request yet" />}
-              {list !== null && list.length > 0 && (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <THead><TR><TH>Reference</TH><TH>Purpose</TH><TH>Status</TH><TH>Range</TH><TH>Opened</TH><TH><span className="sr-only">Actions</span></TH></TR></THead>
-                    <TBody>
-                      {list.map((x) => (
-                        <TR key={x.id}>
-                          <TD className="font-mono">{x.ref}</TD>
-                          <TD>{PURPOSE_WORDS[x.purpose] ?? x.purpose}</TD>
-                          <TD><Badge tone={STATUS_TONE[x.status] ?? "neutral"}>{x.status.toLowerCase()}</Badge></TD>
-                          <TD>{formatDate(x.range_from)} – {formatDate(x.range_to)}</TD>
-                          <TD>{formatDate(x.created_at)} · {x.created_by}</TD>
-                          <TD className="text-right">
-                            <Button size="sm" variant="outline" aria-label={`Open request ${x.ref}`} onClick={() => setCaseId(x.id)}>Open</Button>
-                          </TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </Table>
-                </div>
-              )}
-            </CardBody>
-          </Card>
+          <SectionCard
+            flush
+            title="Requests"
+            description="Closed requests keep who, when, how it was verified and how many records — no device address and no notes."
+          >
+            {listErr && <div className="px-4 pt-3"><ErrorBanner err={listErr} className="mb-0" /></div>}
+            {list !== null && list.length === 0 && !listErr && <EmptyState size="sm" title="No assisted request yet" />}
+            {list !== null && list.length > 0 && (
+              <Table label="Assisted requests">
+                <THead>
+                  <TR>
+                    <TH>Reference</TH>
+                    <TH>Purpose</TH>
+                    <TH>Status</TH>
+                    <TH className="hidden lg:table-cell">Range</TH>
+                    <TH className="hidden md:table-cell">Opened</TH>
+                    <TH><span className="sr-only">Actions</span></TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {list.map((x) => (
+                    <TR key={x.id} onClick={() => setCaseId(x.id)}>
+                      <TD nowrap className="font-mono text-xs">{x.ref}</TD>
+                      <TD>{PURPOSE_WORDS[x.purpose] ?? x.purpose}</TD>
+                      <TD nowrap><StatusBadge tone={toneOf(x.status)}>{statusWord(x.status)}</StatusBadge></TD>
+                      <TD nowrap muted className="hidden lg:table-cell">{formatDate(x.range_from)} – {formatDate(x.range_to)}</TD>
+                      <TD muted className="hidden md:table-cell">{formatDate(x.created_at)} · {x.created_by}</TD>
+                      <TD className="w-0" onClick={(e) => e.stopPropagation()}>
+                        <Button size="xs" variant="ghost" className="text-foreground" aria-label={`Open request ${x.ref}`} onClick={() => setCaseId(x.id)}>Open</Button>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </SectionCard>
         </>
       )}
     </PageShell>
@@ -215,15 +225,13 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>New assisted request</CardTitle>
-        <CardDescription>Nothing is handed over or changed by opening a request. You review the records first.</CardDescription>
-      </CardHeader>
-      <CardBody>
+    <SectionCard
+      title="New assisted request"
+      description="Nothing is handed over or changed by opening a request. You review the records first."
+    >
         <form className="space-y-6" onSubmit={submit}>
           <fieldset className="space-y-2">
-            <legend className="text-sm font-semibold">What the requester asks for</legend>
+            <legend className="text-label">What the requester asks for</legend>
             {(["ACCESS", "ERASURE"] as const).map((p) => (
               <label key={p} className="flex items-start gap-2 text-sm">
                 <input type="radio" name="purpose" className="mt-1" checked={purpose === p} onChange={() => setPurpose(p)} />
@@ -233,10 +241,9 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
           </fieldset>
 
           <fieldset className="space-y-3">
-            <legend className="text-sm font-semibold">Whose records these are said to be</legend>
+            <legend className="text-label">Whose records these are said to be</legend>
             <p className="text-xs text-muted-foreground">
-              The reservation, guest, account or sign-in identity the requester names. This is what they say, not proof: a
-              device address alone identifies nobody. A returning guest names every reservation the device was used under.
+              What the requester names — not proof. A returning guest names every reservation the device was used under.
             </p>
             <div className="flex flex-wrap gap-2">
               {anchors.map((a) => (
@@ -250,7 +257,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
             <div className="flex flex-wrap gap-2">
               <Input aria-label="Search for the guest" className="min-w-0 flex-1" value={q} maxLength={200} onChange={(e2) => setQ(e2.target.value)}
                 placeholder="name, room, reservation number, account or email" />
-              <Button type="button" variant="outline" disabled={searching || q.trim().length < 2} onClick={() => void search()}>
+              <Button type="button" variant="secondary" disabled={searching || q.trim().length < 2} onClick={() => void search()}>
                 <Search /> {searching ? "Searching…" : "Search"}
               </Button>
             </div>
@@ -260,7 +267,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
                 {matches.map((m) => (
                   <li key={`${m.kind}-${m.id}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                     <span>{ANCHOR_LABELS[m.kind]} · <span className="break-all">{m.label}</span>{m.detail ? <span className="text-muted-foreground"> · {m.detail}</span> : null}</span>
-                    <Button type="button" size="sm" variant="outline" disabled={anchors.length >= 5 || anchors.some((a) => a.id === m.id)}
+                    <Button type="button" size="sm" variant="secondary" disabled={anchors.length >= 5 || anchors.some((a) => a.id === m.id)}
                       aria-label={`Use ${ANCHOR_LABELS[m.kind]} ${m.label}`}
                       onClick={() => setAnchors((x) => [...x, { kind: m.kind, id: m.id, label: m.label }])}>Use</Button>
                   </li>
@@ -283,7 +290,7 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
           </fieldset>
 
           <fieldset className="space-y-3">
-            <legend className="text-sm font-semibold">How you verified the requester</legend>
+            <legend className="text-label">How you verified the requester</legend>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Who is asking" hint="A name or a reference, kept only while the request is open."><Input value={requester} maxLength={120} onChange={(e2) => setRequester(e2.target.value)} /></Field>
               <Field label="How they were verified">
@@ -315,14 +322,13 @@ function NewRequest({ onCancel, onOpened }: { onCancel: () => void; onOpened: (i
           </Field>
 
           <ErrorBanner err={err} />
-          {problems.length > 0 && <ul className="list-disc pl-5 text-xs text-muted-foreground">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+          {problems.length > 0 && <ul className="list-disc ps-5 text-xs text-muted-foreground">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
           <div className="flex gap-2">
             <Button type="submit" variant="primary" disabled={busy || problems.length > 0}>{busy ? "Opening…" : "Open request"}</Button>
             <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
           </div>
         </form>
-      </CardBody>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -402,61 +408,70 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
     } catch (e) { setActionErr(refusal(e)); } finally { setBusy(false); }
   }
 
-  if (err && !c) return <><ErrorBanner err={err} /><Button variant="outline" onClick={onClose}>Back</Button></>;
+  if (err && !c) return <><ErrorBanner err={err} /><Button variant="secondary" onClick={onClose}>Back</Button></>;
   if (!c) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const tick = (v: boolean) => <StatusBadge tone={v ? "ok" : "default"}>{v ? "Yes" : "No"}</StatusBadge>;
 
   return (
     <div className="space-y-4">
-      <div><Button variant="ghost" onClick={onClose}>← All requests</Button></div>
+      <div><Button variant="ghost" size="sm" className="-ms-2.5" onClick={onClose}><ArrowLeft className="rtl:rotate-180" /> All requests</Button></div>
       {notice && <Callout tone="success">{notice}</Callout>}
       {receipt && (
         <Callout tone="info" title={receipt.title}>
           This is the hotel’s file of the request. The database no longer keeps the device addresses or notes: save it with your records.{" "}
-          <Button size="sm" variant="outline" onClick={() => saveJSON(receipt.body, `assisted-request-${c.ref}`)}><Download /> Save the request file</Button>
+          <Button size="sm" variant="secondary" onClick={() => saveJSON(receipt.body, `assisted-request-${c.ref}`)}><Download /> Save the request file</Button>
         </Callout>
       )}
       <ErrorBanner err={err} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Request <span className="font-mono">{c.ref}</span> <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{c.status.toLowerCase()}</Badge></CardTitle>
-          <CardDescription>{PURPOSE_WORDS[c.purpose]}. Opened {formatDate(c.created_at)} by {c.created_by}.</CardDescription>
-        </CardHeader>
-        <CardBody className="space-y-2 text-sm">
-          <div>Range: {formatDate(c.range_from)} – {formatDate(c.range_to)}</div>
-          <div>Verified: {METHOD_LABEL[c.verification_method] ?? c.verification_method}{c.requester && c.requester !== "[removed]" ? ` · ${c.requester}` : ""}</div>
-          {open && c.addresses && <div>Device addresses: <span className="font-mono">{c.addresses.join(", ")}</span></div>}
-          {open && c.anchors.length > 0 && <div>About: {c.anchors.map((a) => `${ANCHOR_LABELS[a.kind]} ${a.label ?? ""}`.trim()).join("; ")}</div>}
-          <div>
-            Statements: identity verified {c.statements.identity_verified ? "✓" : "✗"} · device shown {c.statements.device_shown ? "✓" : "✗"} ·
-            sole use stated {c.statements.sole_use ? "✓" : "✗"} · private address confirmed {c.statements.private_address_confirmed ? "✓" : "✗"}
-          </div>
-          {!open && c.result && <div>Result: {Object.entries(c.result).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ") || "nothing changed"}.</div>}
-          {!open && <p className="text-muted-foreground">Closed {c.closed_at ? formatDate(c.closed_at) : ""} by {c.closed_by}. The addresses and notes were removed when it closed.</p>}
-        </CardBody>
-      </Card>
+      <SectionCard
+        title={<span className="flex flex-wrap items-center gap-2">Request <span className="font-mono">{c.ref}</span> <StatusBadge tone={toneOf(c.status)}>{statusWord(c.status)}</StatusBadge></span>}
+        description={`${PURPOSE_WORDS[c.purpose]}. Opened ${formatDate(c.created_at)} by ${c.created_by}.`}
+        bodyClassName="space-y-3 text-sm"
+      >
+        <DescriptionList
+          columns={2}
+          items={[
+            { label: "Range", value: `${formatDate(c.range_from)} – ${formatDate(c.range_to)}` },
+            { label: "Verified", value: `${METHOD_LABEL[c.verification_method] ?? c.verification_method}${c.requester && c.requester !== "[removed]" ? ` · ${c.requester}` : ""}` },
+            { label: "Device addresses", value: <span className="font-mono">{(c.addresses ?? []).join(", ")}</span>, hidden: !(open && c.addresses) },
+            { label: "About", value: c.anchors.map((a) => `${ANCHOR_LABELS[a.kind]} ${a.label ?? ""}`.trim()).join("; "), hidden: !(open && c.anchors.length > 0) },
+            { label: "Identity verified", value: tick(c.statements.identity_verified) },
+            { label: "Device shown", value: tick(c.statements.device_shown) },
+            { label: "Sole use stated", value: tick(c.statements.sole_use) },
+            { label: "Private address confirmed", value: tick(c.statements.private_address_confirmed) },
+            {
+              label: "Result",
+              hidden: !(!open && c.result),
+              value: `${Object.entries(c.result ?? {}).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ") || "nothing changed"}.`,
+            },
+          ]}
+        />
+        {!open && <p className="text-muted-foreground">Closed {c.closed_at ? formatDate(c.closed_at) : ""} by {c.closed_by}. The addresses and notes were removed when it closed.</p>}
+      </SectionCard>
 
       {open && review && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Records in this range</CardTitle>
-            <CardDescription>
+        <SectionCard
+          title="Records in this range"
+          description={
+            <>
               {records.length} record{records.length === 1 ? "" : "s"} for the stated addresses.{" "}
               {(Object.keys(CLASS_WORDS) as RecordClass[]).filter((k) => review.by_class[k]).map((k) => `${review.by_class[k]} ${CLASS_WORDS[k].label.toLowerCase()}`).join(" · ")}
-            </CardDescription>
-          </CardHeader>
-          <CardBody className="space-y-3">
-            {records.length === 0 && <EmptyState title="No record of these addresses in this range" hint="Check the addresses and the range, or cancel the request." />}
+            </>
+          }
+          bodyClassName="space-y-3"
+        >
+            {records.length === 0 && <EmptyState size="sm" title="No record of these addresses in this range" hint="Check the addresses and the range, or cancel the request." />}
             {selectable.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Button size="sm" variant="outline" onClick={() => setPicked(new Set(selectable.map(key)))}>Select all that can be selected</Button>
+                <Button size="sm" variant="secondary" onClick={() => setPicked(new Set(selectable.map(key)))}>Select all that can be selected</Button>
                 <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
                 <span className="text-muted-foreground">{chosen.length} selected</span>
               </div>
             )}
             {records.length > 0 && (
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="overflow-hidden rounded-md border border-border">
+                <Table label="Records in this range" density="compact">
                   <THead><TR><TH><span className="sr-only">Select</span></TH><TH>Record</TH><TH>When</TH><TH>What it would disclose</TH><TH>Why</TH></TR></THead>
                   <TBody>
                     {records.map((r) => (
@@ -483,8 +498,7 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
             <ul className="space-y-1 text-xs text-muted-foreground">
               {(Object.keys(CLASS_WORDS) as RecordClass[]).filter((k) => review.by_class[k]).map((k) => <li key={k}><strong>{CLASS_WORDS[k].label}.</strong> {CLASS_WORDS[k].help}</li>)}
             </ul>
-          </CardBody>
-        </Card>
+        </SectionCard>
       )}
 
       {open && (
@@ -499,21 +513,19 @@ function CasePanel({ id, onClose, onChanged }: { id: string; onClose: () => void
             </Button>
           )}
           {c.purpose === "ACCESS" && exported > 0 && (
-            <Button variant="outline" onClick={() => { setActionErr(null); setActing("complete"); }}>Mark completed</Button>
+            <Button variant="secondary" onClick={() => { setActionErr(null); setActing("complete"); }}>Mark completed</Button>
           )}
           <Button variant="ghost" onClick={() => { setActionErr(null); setActing("cancel"); }}>Cancel request</Button>
         </div>
       )}
 
       {c.events.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>History</CardTitle></CardHeader>
-          <CardBody>
-            <ul className="space-y-1 text-sm">
-              {c.events.map((e, i) => <li key={i}>{formatDate(e.at)} · {e.action.toLowerCase()} · {e.by}</li>)}
-            </ul>
-          </CardBody>
-        </Card>
+        <SectionCard flush title="History">
+          <HistoryList
+            label="Request history"
+            items={c.events.map((e, i) => ({ id: String(i), title: statusWord(e.action.replace(/_/g, " ")), actor: e.by, at: formatDate(e.at) }))}
+          />
+        </SectionCard>
       )}
 
       <ConfirmDialog

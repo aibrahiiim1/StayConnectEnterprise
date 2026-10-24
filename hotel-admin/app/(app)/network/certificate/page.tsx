@@ -3,13 +3,13 @@
 import { certCheckDetail } from "@/lib/cert-check";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -17,7 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
 import { useNetworkAccess } from "@/components/network/shared";
 import { HelpList, HelpSection } from "@/components/help";
-import { Lock, RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
+import { RefreshCw, RotateCw, CheckCircle2, ShieldCheck } from "lucide-react";
 
 type CertStatus = {
   available?: boolean;
@@ -112,8 +112,6 @@ export default function CertificatePage() {
   return (
     <PageShell>
       <PageHeader
-        icon={<Lock />}
-        eyebrow="Networking"
         title="TLS certificate"
         description="The HTTPS certificate Admin Console itself is served with."
         help={
@@ -165,80 +163,73 @@ export default function CertificatePage() {
       <ErrorBanner err={err} className="mb-0" />
       {result && <Callout tone={result.tone}>{result.text}</Callout>}
 
-      <Card>
-        <CardHeader>
-          <div className="space-y-1">
-            <CardTitle>Status</CardTitle>
-            {st && st.available !== false && st.expires_at && (
-              <CardDescription>Expires {when(st.expires_at)}</CardDescription>
+      <SectionCard
+        title="Status"
+        description={st && st.available !== false && st.expires_at ? `Expires ${when(st.expires_at)}` : undefined}
+        actions={st && st.available !== false && (
+          <StatusBadge tone={thr.tone}>
+            {thr.label}{days !== null ? ` · ${days} ${days === 1 ? "day" : "days"} left` : ""}
+          </StatusBadge>
+        )}
+        bodyClassName="space-y-4"
+      >
+        {!st ? (
+          err ? null : (
+            <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
+              <span className="sr-only">Loading</span>
+              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          )
+        ) : st.available === false ? (
+          <EmptyState
+            size="sm"
+            icon={<ShieldCheck />}
+            title="No certificate status yet"
+            hint={writable ? "Run “Check certificate” to read the certificate now." : "The appliance has not reported the certificate yet."}
+            action={writable ? <Button size="sm" variant="secondary" disabled={busy !== null} onClick={check}>Check certificate</Button> : undefined}
+          />
+        ) : (
+          <>
+            {st.last_error && <Callout tone="danger" title="Last renewal error">{st.last_error}</Callout>}
+            {st.san_config_match === false && (
+              <Callout tone="warning" title="The certificate does not match the current configuration">
+                Its names or addresses differ from what the appliance is using now. It is renewed automatically; you can
+                also rotate it.
+              </Callout>
             )}
-          </div>
-          {st && st.available !== false && (
-            <Badge tone={thr.tone} dot>
-              {thr.label}{days !== null ? ` · ${days} ${days === 1 ? "day" : "days"} left` : ""}
-            </Badge>
-          )}
-        </CardHeader>
-        <CardBody className="space-y-5">
-          {!st ? (
-            err ? null : (
-              <div className="grid gap-4 sm:grid-cols-2" aria-busy="true">
-                <span className="sr-only">Loading</span>
-                {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
-              </div>
-            )
-          ) : st.available === false ? (
-            <EmptyState
-              icon={<ShieldCheck />}
-              title="No certificate status yet"
-              hint={writable ? "Run “Check certificate” to read the certificate now." : "The appliance has not reported the certificate yet."}
-              action={writable ? <Button size="sm" disabled={busy !== null} onClick={check}>Check certificate</Button> : undefined}
-            />
-          ) : (
-            <>
-              {st.last_error && <Callout tone="danger" title="Last renewal error">{st.last_error}</Callout>}
-              {st.san_config_match === false && (
-                <Callout tone="warning" title="The certificate does not match the current configuration">
-                  Its names or addresses differ from what the appliance is using now. It is renewed automatically; you can
-                  also rotate it.
-                </Callout>
-              )}
-              <KeyValueGrid
-                items={[
-                  { label: "Subject", value: mono(st.subject) },
-                  { label: "Serial", value: mono(st.serial) },
-                  { label: "Host names covered", value: (st.dns_sans ?? []).length ? mono((st.dns_sans ?? []).join(", ")) : "—" },
-                  { label: "IP addresses covered", value: (st.ip_sans ?? []).length ? mono((st.ip_sans ?? []).join(", ")) : "—" },
-                  { label: "Current management IP", value: mono(st.current_management_ip) },
-                  {
-                    label: "Matches configuration",
-                    value: st.san_config_match ? <Badge tone="ok">Yes</Badge> : <Badge tone="err">No</Badge>,
-                  },
-                  { label: "Issued", value: when(st.issued_at) },
-                  { label: "Expires", value: when(st.expires_at) },
-                  { label: "Days remaining", value: days !== null ? <span className="tabular">{days}</span> : "—" },
-                  { label: "SHA-256 fingerprint", value: mono(st.fingerprint_sha256), wide: true },
-                ]}
-              />
-            </>
-          )}
-        </CardBody>
-      </Card>
-
-      {st && st.available !== false && (
-        <Card>
-          <CardHeader><CardTitle>Renewal</CardTitle></CardHeader>
-          <CardBody>
-            <KeyValueGrid
-              columns={3}
+            <DescriptionList
+              columns={2}
               items={[
-                { label: "Last successful renewal", value: when(st.last_successful_renewal) },
-                { label: "Last attempt", value: when(st.last_renewal_attempt) },
-                { label: "Last result", value: st.last_renewal_result || "—" },
+                { label: "Subject", value: mono(st.subject) },
+                { label: "Serial", value: mono(st.serial) },
+                { label: "Host names covered", value: (st.dns_sans ?? []).length ? mono((st.dns_sans ?? []).join(", ")) : "—" },
+                { label: "IP addresses covered", value: (st.ip_sans ?? []).length ? mono((st.ip_sans ?? []).join(", ")) : "—" },
+                { label: "Current management IP", value: mono(st.current_management_ip) },
+                {
+                  label: "Matches configuration",
+                  value: st.san_config_match ? <StatusBadge tone="ok">Yes</StatusBadge> : <StatusBadge tone="err">No</StatusBadge>,
+                },
+                { label: "Issued", value: when(st.issued_at) },
+                { label: "Expires", value: when(st.expires_at) },
+                { label: "SHA-256 fingerprint", value: mono(st.fingerprint_sha256), wide: true },
               ]}
             />
-          </CardBody>
-        </Card>
+          </>
+        )}
+      </SectionCard>
+
+      {st && st.available !== false && (
+        <SectionCard title="Renewal" description="Checked daily and renewed automatically.">
+          <DescriptionList
+            layout="stacked"
+            columns={3}
+            items={[
+              { label: "Last successful renewal", value: when(st.last_successful_renewal) },
+              { label: "Last attempt", value: when(st.last_renewal_attempt) },
+              { label: "Last result", value: st.last_renewal_result || "—" },
+            ]}
+          />
+        </SectionCard>
       )}
 
       <ConfirmDialog

@@ -6,23 +6,24 @@ import {
   api, ListResp,
   DhcpLease, Reservation, GuestNetwork,
 } from "@/lib/api";
-import { Card } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader } from "@/components/ui/page";
 import { Pagination, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
+import { FilterBar } from "@/components/ui/toolbar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Pencil, Pin, Plus, Trash2, Wifi } from "lucide-react";
+import { Pin, Plus, Wifi } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import {
-  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, useNetworkAccess,
+  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, ReservationTable, useNetworkAccess,
 } from "@/components/network/shared";
 
 function leaseState(s?: number | string): string {
@@ -79,17 +80,20 @@ export default function DhcpPage() {
 
   const noMatch = (what: string) => (
     <EmptyState
+      size="sm"
       title={`No ${what} match “${q}”`}
       hint="Search looks at the IP address, MAC address and hostname."
       action={<Button variant="secondary" size="sm" onClick={() => setQ("")}>Clear search</Button>}
     />
   );
 
+  const searchBar = (
+    <FilterBar inset search={<SearchInput value={q} onChange={setQ} placeholder="Search IP, MAC or hostname" delay={300} />} />
+  );
+
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Wifi />}
-        eyebrow="Networking"
         title="DHCP & leases"
         description="Client devices holding an address now, and fixed reservations."
         help={
@@ -105,6 +109,7 @@ export default function DhcpPage() {
                 items={[
                   "A reservation pins a device, by MAC address, to a fixed address on one client network.",
                   "Use it for devices that must stay reachable at one address — a printer, a TV or a door lock.",
+                  "A reservation is staged: it reaches the DHCP server when you next apply the client-network changes.",
                   "You can also manage reservations from each client network's own page.",
                 ]}
               />
@@ -126,34 +131,32 @@ export default function DhcpPage() {
       <ErrorBanner err={err} className="mb-0" />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "leases" | "reservations")}>
-        <Toolbar className="items-center">
-          <TabsList className="border-b-0">
-            <TabsTrigger value="leases">
-              Leases {leaseList.total !== null && <Badge tone="neutral">{leaseList.total}</Badge>}
-            </TabsTrigger>
-            <TabsTrigger value="reservations">
-              Reservations {resList.total !== null && <Badge tone="neutral">{resList.total}</Badge>}
-            </TabsTrigger>
-          </TabsList>
-          <SearchInput value={q} onChange={setQ} placeholder="Search IP, MAC or hostname" delay={300} />
-        </Toolbar>
+        <TabsList>
+          <TabsTrigger value="leases">
+            Leases {leaseList.total !== null && <Badge tone="neutral">{leaseList.total}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="reservations">
+            Reservations {resList.total !== null && <Badge tone="neutral">{resList.total}</Badge>}
+          </TabsTrigger>
+        </TabsList>
 
         <TabsContent value="leases" className="mt-4">
-          <Card>
+          <Card className="overflow-hidden">
+            {searchBar}
             {leases === null ? (
               <SkeletonRows rows={5} cols={5} />
             ) : leases.length === 0 && !needle ? (
-              <EmptyState icon={<Wifi />} title="No active leases" hint="Leases appear here once clients connect and are given an address." />
+              <EmptyState size="sm" icon={<Wifi />} title="No active leases" hint="Leases appear here once clients connect." />
             ) : leases.length === 0 ? (
               noMatch("leases")
             ) : (
-              <Table>
+              <Table label="DHCP leases" stickyHeader maxHeight="36rem">
                 <THead>
                   <TR>
                     <TH>IP address</TH>
                     <TH className="hidden sm:table-cell">MAC address</TH>
                     <TH className="hidden md:table-cell">Hostname</TH>
-                    <TH className="hidden lg:table-cell">Subnet ID</TH>
+                    <TH numeric className="hidden lg:table-cell">Subnet ID</TH>
                     <TH>State</TH>
                     <TH className="hidden sm:table-cell">Expires</TH>
                   </TR>
@@ -164,15 +167,15 @@ export default function DhcpPage() {
                     const s = LEASE_STATE[st] ?? { label: st, tone: "default" as const };
                     return (
                       <TR key={i}>
-                        <TD className="font-mono text-xs">
+                        <TD nowrap className="font-mono text-xs">
                           {l["ip-address"]}
                           <div className="font-mono text-caption text-muted-foreground sm:hidden">{l["hw-address"]}</div>
                         </TD>
-                        <TD className="hidden font-mono text-xs sm:table-cell">{l["hw-address"]}</TD>
-                        <TD className="hidden text-muted-foreground md:table-cell">{l.hostname || "—"}</TD>
-                        <TD className="hidden tabular text-muted-foreground lg:table-cell">{l["subnet-id"] ?? "—"}</TD>
-                        <TD><Badge tone={s.tone}>{s.label}</Badge></TD>
-                        <TD className="hidden text-muted-foreground sm:table-cell">{leaseExpiry(l)}</TD>
+                        <TD nowrap className="hidden font-mono text-xs sm:table-cell">{l["hw-address"]}</TD>
+                        <TD truncate muted className="hidden md:table-cell" title={l.hostname || undefined}>{l.hostname || "—"}</TD>
+                        <TD numeric muted className="hidden lg:table-cell">{l["subnet-id"] ?? "—"}</TD>
+                        <TD nowrap><StatusBadge tone={s.tone}>{s.label}</StatusBadge></TD>
+                        <TD nowrap muted className="hidden sm:table-cell">{leaseExpiry(l)}</TD>
                       </TR>
                     );
                   })}
@@ -180,7 +183,7 @@ export default function DhcpPage() {
               </Table>
             )}
             {leases && leases.length > 0 && (leaseList.offset > 0 || leaseList.hasMore) && (
-              <div className="border-t border-border px-4 py-3">
+              <CardFooter>
                 <Pagination
                   offset={leaseList.offset}
                   limit={leaseList.pageSize}
@@ -189,57 +192,37 @@ export default function DhcpPage() {
                   hasMore={leaseList.hasMore}
                   onChange={leaseList.setOffset}
                 />
-              </div>
+              </CardFooter>
             )}
           </Card>
         </TabsContent>
 
         <TabsContent value="reservations" className="mt-4">
-          <Card>
+          <Card className="overflow-hidden">
+            {searchBar}
             {reservations === null ? (
               <SkeletonRows rows={4} cols={5} />
             ) : reservations.length === 0 && !needle ? (
               <EmptyState
+                size="sm"
                 icon={<Pin />}
                 title="No reservations"
-                hint="Pin a device to a fixed address on one of your client networks — a printer, a TV or a door lock."
-                action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> New reservation</Button> : undefined}
+                hint="Pin a device — a printer, a TV or a door lock — to a fixed address."
+                action={writable ? <Button size="sm" variant="secondary" onClick={() => setAdding(true)}><Plus /> New reservation</Button> : undefined}
               />
             ) : reservations.length === 0 ? (
               noMatch("reservations")
             ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>Client network</TH>
-                    <TH className="hidden sm:table-cell">MAC address</TH>
-                    <TH>Reserved IP</TH>
-                    <TH className="hidden md:table-cell">Hostname</TH>
-                    <TH className="hidden sm:table-cell">Status</TH>
-                    {writable && <TH><span className="sr-only">Actions</span></TH>}
-                  </TR>
-                </THead>
-                <TBody>
-                  {reservations.map((r) => (
-                    <TR key={r.id}>
-                      <TD>{netName(r.guest_network_id)}</TD>
-                      <TD className="hidden font-mono text-xs sm:table-cell">{r.mac}</TD>
-                      <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                      <TD className="hidden text-muted-foreground md:table-cell">{r.hostname || "—"}</TD>
-                      <TD className="hidden sm:table-cell">{r.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
-                      {writable && (
-                        <TD className="whitespace-nowrap text-end">
-                          <Button size="icon-sm" variant="ghost" aria-label={`Edit reservation ${r.reserved_ip}`} onClick={() => setEditRes(r)}><Pencil /></Button>
-                          <Button size="icon-sm" variant="ghost" aria-label={`Remove reservation ${r.reserved_ip}`} onClick={() => setRemoving(r)}><Trash2 /></Button>
-                        </TD>
-                      )}
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
+              <ReservationTable
+                reservations={reservations}
+                writable={writable}
+                networkName={netName}
+                onEdit={setEditRes}
+                onRemove={setRemoving}
+              />
             )}
             {reservations && reservations.length > 0 && (resList.offset > 0 || resList.hasMore) && (
-              <div className="border-t border-border px-4 py-3">
+              <CardFooter>
                 <Pagination
                   offset={resList.offset}
                   limit={resList.pageSize}
@@ -248,7 +231,7 @@ export default function DhcpPage() {
                   hasMore={resList.hasMore}
                   onChange={resList.setOffset}
                 />
-              </div>
+              </CardFooter>
             )}
           </Card>
         </TabsContent>

@@ -6,13 +6,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Blocks, ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { api, Whoami } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Button, LinkButton } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
@@ -96,12 +96,24 @@ export default function ModulesPage() {
     } finally { setBusy(false); }
   };
 
+  const siteType = report?.site_type ? SITE_TYPE_LABELS[report.site_type] ?? `Other (${report.site_type})` : "Not set";
   const header = (
     <PageHeader
-      icon={<Blocks />}
-      eyebrow="System"
       title="Modules"
       description="What the licence allows here, what is switched on, and why anything is not in use."
+      meta={report && (
+        <>
+          <Badge tone="default">Site type: {siteType}</Badge>
+          <StatusBadge tone={report.license_state === "Active" ? "ok" : "warn"}>
+            Licence: {LICENCE_STATE_WORDS[report.license_state] ?? report.license_state ?? "Unknown"}
+          </StatusBadge>
+        </>
+      )}
+      actions={
+        <LinkButton href="/appliance" variant="secondary">
+          Appliance &amp; licence <ArrowUpRight aria-hidden />
+        </LinkButton>
+      }
       help={
         <>
           <HelpSection title="Four separate questions">
@@ -150,8 +162,6 @@ export default function ModulesPage() {
   // Unknown modules follow the known ones rather than being dropped.
   const ids = [...ORDER, ...Object.keys(report.modules).filter((id) => !ORDER.includes(id))];
   const mods = ids.map((id) => report.modules[id]).filter(Boolean) as ModuleState[];
-  const siteType = report.site_type ? SITE_TYPE_LABELS[report.site_type] ?? `Other (${report.site_type})` : "Not set";
-
   return (
     <PageShell>
       {header}
@@ -160,20 +170,7 @@ export default function ModulesPage() {
       )}
       <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardBody className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <span><span className="text-muted-foreground">Site type</span> <strong>{siteType}</strong></span>
-          <span>
-            <span className="text-muted-foreground">Licence</span>{" "}
-            <Badge tone={report.license_state === "Active" ? "ok" : "warn"}>{LICENCE_STATE_WORDS[report.license_state] ?? report.license_state ?? "Unknown"}</Badge>
-          </span>
-          <Link href="/appliance" className="inline-flex items-center gap-0.5 text-primary underline-offset-4 hover:underline">
-            Appliance &amp; licence <ArrowUpRight className="size-3.5" aria-hidden />
-          </Link>
-        </CardBody>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {mods.map((m) => (
           <ModuleCard
             key={m.id}
@@ -222,15 +219,15 @@ function ModuleCard({
         <div className="min-w-0 space-y-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
             {mod.label}
-            <Badge tone={mod.effective ? "ok" : mod.licensed ? "warn" : "default"} dot>
+            <StatusBadge tone={mod.effective ? "ok" : mod.licensed ? "warn" : "default"}>
               {mod.effective ? "In use" : mod.licensed ? "Not in use" : "Not licensed"}
-            </Badge>
+            </StatusBadge>
           </CardTitle>
           {requires.length > 0 && <CardDescription>Needs {requires.join(" and ")}.</CardDescription>}
         </div>
       </CardHeader>
       <CardBody className="flex flex-1 flex-col gap-3">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md bg-surface px-3 py-2.5 text-sm sm:grid-cols-4">
           <Gate label="Available" on={mod.deployed} />
           <Gate label="Licensed" on={mod.licensed} />
           {/* Without the licence these show a dash. "Switched on" is the report's `enabled` for every module (scd
@@ -251,7 +248,7 @@ function ModuleCard({
         )}
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
           {mod.switchable && mayToggle && mod.licensed && (
-            <Button size="sm" variant={mod.enabled ? "outline" : "primary"} onClick={() => onToggle(!mod.enabled)}>
+            <Button size="sm" variant="secondary" onClick={() => onToggle(!mod.enabled)}>
               {mod.enabled ? "Switch off" : "Switch on"}
             </Button>
           )}
@@ -286,7 +283,7 @@ function Gate({ label, on, note }: { label: string; on: boolean | null; note?: s
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={on ? "font-medium" : "text-muted-foreground"}>{on === null ? "—" : on ? "Yes" : "No"}{note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}</dd>
+      <dd className={on ? "font-medium text-foreground" : "text-muted-foreground"}>{on === null ? "—" : on ? "Yes" : "No"}{note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}</dd>
     </div>
   );
 }

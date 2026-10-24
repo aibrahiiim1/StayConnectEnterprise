@@ -8,22 +8,25 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { canRead } from "@/lib/roles";
 import { useOperatorRoles } from "@/lib/whoami-context";
-import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
-import { FilterChips, KeyValueGrid, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { DescriptionList, FilterChips, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { FilterBar } from "@/components/ui/toolbar";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate } from "@/lib/utils";
 import {
   auditWords, auditActor, AUDIT_CATEGORIES, MODULE_CATEGORIES, auditCategoriesFor, type AuditCategory,
 } from "@/lib/audit-words";
-import { ScrollText, ChevronRight, ShieldAlert, RefreshCw } from "lucide-react";
+import { ScrollText, ShieldAlert, RefreshCw } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleHasHistory, useCapabilities } from "@/lib/capabilities";
 
@@ -58,7 +61,7 @@ export default function ActivityPage() {
   const [anchor, setAnchor] = useState(() => Date.now());
   const [chip, setChip] = useState<Chip>("all");
   const [text, setText] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<Row | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
 
   const period = `${range.label}|${anchor}`;
@@ -166,8 +169,6 @@ export default function ActivityPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<ScrollText />}
-        eyebrow="System"
         title="Activity"
         description="Every change made to this appliance, by staff and by the system itself."
         help={
@@ -205,129 +206,98 @@ export default function ActivityPage() {
 
       <ErrorBanner err={err} className="mb-0" />
 
-      <div className="space-y-3">
-        <Toolbar className="items-center">
-          <SearchInput
-            value={text}
-            onChange={setText}
-            label="Search the activity trail"
-            placeholder="What happened, who, an address or an ID"
-            className="sm:w-96"
-            delay={300}
-          />
-          <Select
-            aria-label="Period"
-            className="h-9 w-full sm:w-44"
-            value={range.label}
-            onChange={(e) => {
-              setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2]);
-              setAnchor(Date.now());
-            }}
-          >
-            {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
-          </Select>
-        </Toolbar>
-        <ResultsCount count={rows?.length} noun="entry" plural="entries" />
-        <FilterChips<Chip> label="Show" value={chip} onChange={setChip} options={chipOptions} />
-      </div>
-
       <Card className="overflow-hidden">
-        <CardHeader>
-          <div className="space-y-0.5">
-            <CardTitle>
-              {rows === null || total === null ? "Activity" : `${total.toLocaleString()} ${total === 1 ? "entry" : "entries"}`}
-            </CardTitle>
-            <CardDescription>{range.label} · newest first</CardDescription>
-          </div>
-        </CardHeader>
+        <FilterBar
+          inset
+          search={
+            <SearchInput
+              value={text}
+              onChange={setText}
+              label="Search the activity trail"
+              placeholder="What happened, who, an address or an ID"
+              delay={300}
+            />
+          }
+          filters={
+            <Select
+              aria-label="Period"
+              className="h-9 w-full sm:w-44"
+              value={range.label}
+              onChange={(e) => {
+                setRange(RANGES.find((x) => x.label === e.target.value) ?? RANGES[2]);
+                setAnchor(Date.now());
+              }}
+            >
+              {RANGES.map((r) => <option key={r.label}>{r.label}</option>)}
+            </Select>
+          }
+          actions={
+            rows !== null && total !== null
+              ? <span className="text-xs text-muted-foreground tabular">{`${total.toLocaleString()} ${total === 1 ? "entry" : "entries"}`}</span>
+              : undefined
+          }
+        />
+        <div className="border-b border-border px-4 py-2.5">
+          <FilterChips<Chip> label="Show" value={chip} onChange={setChip} options={chipOptions} />
+        </div>
+        <ResultsCount count={rows?.length} noun="entry" plural="entries" />
 
         <div className={cn(loading && rows && refreshingClass)}>
           {rows === null ? (
             err ? (
-              <EmptyState icon={<ScrollText />} title="The activity trail could not be read"
+              <EmptyState size="sm" icon={<ScrollText />} title="The activity trail could not be read"
                 hint="It appears here once the appliance answers." />
             ) : <SkeletonRows rows={6} cols={3} />
           ) : rows.length === 0 ? (
             filtered ? (
-              <EmptyState icon={<ScrollText />} title="Nothing matches"
-                hint="No recorded activity fits these filters. Widen the period or clear the search."
+              <EmptyState size="sm" icon={<ScrollText />} title="Nothing matches"
+                hint="Widen the period or clear the search."
                 action={<Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>} />
             ) : (
-              <EmptyState icon={<ScrollText />} title="No activity in this period"
-                hint="Nothing was recorded. Choose a longer period to look further back." />
+              <EmptyState size="sm" icon={<ScrollText />} title="No activity in this period"
+                hint="Choose a longer period to look further back." />
             )
           ) : (
-            <ul className="divide-y divide-border">
-              {rows.map((r, i) => {
-                const w = auditWords(r.action);
-                const id = `${r.ts}-${i}`;
-                const isOpen = open === id;
-                const panel = `activity-${i}`;
-                return (
-                  <li key={id}>
-                    <button
-                      type="button"
-                      className="flex w-full items-start gap-3 px-4 py-3 text-start transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5"
-                      aria-expanded={isOpen}
-                      aria-controls={panel}
-                      onClick={() => setOpen(isOpen ? null : id)}
-                    >
-                      <ChevronRight
-                        className={cn(
-                          "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform rtl:-scale-x-100",
-                          isOpen && "rotate-90 rtl:rotate-90",
-                        )}
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-emphasis">{w.title}</span>
+            <Table label="Activity">
+              <THead>
+                <TR>
+                  <TH>What happened</TH>
+                  <TH className="hidden md:table-cell">Who</TH>
+                  <TH>When</TH>
+                  <TH className="hidden lg:table-cell">Source</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {rows.map((r, i) => {
+                  const w = auditWords(r.action);
+                  const who = auditActor(r.actor_type, r.actor_id, names);
+                  return (
+                    <TR key={`${r.ts}-${i}`} onClick={() => setOpen(r)} selected={open === r}>
+                      <TD className="min-w-56">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-medium text-foreground">{w.title}</span>
                           {w.severity === "security" && (
                             <Badge tone="warn"><ShieldAlert className="size-3" aria-hidden /> Security</Badge>
                           )}
-                          <Badge tone="default">{w.category}</Badge>
                         </div>
-                        <div className="mt-0.5 text-caption text-muted-foreground">
-                          {auditActor(r.actor_type, r.actor_id, names)} · {formatDate(r.ts)}
-                          {r.ip ? ` · from ${r.ip.replace(/\/\d+$/, "")}` : ""}
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {w.category}
+                          <span className="md:hidden"> · {who}</span>
                           {r.target_type ? <span className="hidden sm:inline"> · {r.target_type}</span> : null}
                         </div>
-                      </div>
-                    </button>
-
-                    {isOpen && (
-                      <div id={panel} className="mb-4 me-4 ms-11 space-y-3 rounded-md border border-border bg-surface p-3 sm:me-5">
-                        {w.note && <p className="text-sm text-muted-foreground">{w.note}</p>}
-                        <KeyValueGrid
-                          columns={2}
-                          items={[
-                            { label: "Recorded", value: <span className="font-mono text-xs break-all">{new Date(r.ts).toISOString()}</span> },
-                            { label: "Action code", value: <span className="font-mono text-xs break-all">{r.action}</span> },
-                            { label: "Actor", value: <span className="font-mono text-xs break-all">{r.actor_id || `(${r.actor_type ?? "system"})`}</span> },
-                            { label: "Target", value: <span className="font-mono text-xs break-all">{r.target_id ? `${r.target_type ?? ""} ${r.target_id}`.trim() : "—"}</span> },
-                            { label: "Source address", value: <span className="font-mono text-xs break-all">{r.ip || "—"}</span> },
-                          ]}
-                        />
-                        {r.payload !== null && r.payload !== undefined && (
-                          <details className="group">
-                            <summary className="cursor-pointer select-none rounded-sm text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                              Raw payload
-                            </summary>
-                            <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-border bg-card p-2 font-mono text-2xs">
-                              {JSON.stringify(r.payload, null, 2)}
-                            </pre>
-                          </details>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      </TD>
+                      <TD truncate className="hidden md:table-cell" title={typeof who === "string" ? who : undefined}>{who}</TD>
+                      <TD nowrap muted className="tabular">{formatDate(r.ts)}</TD>
+                      <TD nowrap muted className="hidden font-mono text-xs lg:table-cell">{r.ip ? r.ip.replace(/\/\d+$/, "") : "—"}</TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
           )}
         </div>
         {rows && rows.length > 0 && (
-          <div className="border-t border-border px-4 py-3 sm:px-5">
+          <CardFooter>
             <Pagination
               offset={list.offset}
               limit={list.pageSize}
@@ -336,9 +306,50 @@ export default function ActivityPage() {
               hasMore={list.hasMore}
               onChange={(o) => { setOpen(null); list.setOffset(o); }}
             />
-          </div>
+          </CardFooter>
         )}
       </Card>
+
+      <DetailsDrawer
+        open={open !== null}
+        onOpenChange={(v) => !v && setOpen(null)}
+        eyebrow="Activity entry"
+        title={open ? auditWords(open.action).title : ""}
+        description={open ? `${auditActor(open.actor_type, open.actor_id, names)} · ${formatDate(open.ts)}` : undefined}
+        badges={open && (
+          <>
+            {auditWords(open.action).severity === "security" && <Badge tone="warn"><ShieldAlert className="size-3" aria-hidden /> Security</Badge>}
+            <Badge tone="default">{auditWords(open.action).category}</Badge>
+          </>
+        )}
+      >
+        {open && (
+          <div className="space-y-5">
+            {auditWords(open.action).note && <p className="text-sm text-muted-foreground">{auditWords(open.action).note}</p>}
+            <DescriptionList
+              items={[
+                { label: "Recorded", value: <span className="break-all font-mono text-xs">{new Date(open.ts).toISOString()}</span> },
+                { label: "Action code", value: <span className="break-all font-mono text-xs">{open.action}</span> },
+                { label: "Actor", value: <span className="break-all font-mono text-xs">{open.actor_id || `(${open.actor_type ?? "system"})`}</span> },
+                { label: "Target", value: <span className="break-all font-mono text-xs">{open.target_id ? `${open.target_type ?? ""} ${open.target_id}`.trim() : "—"}</span> },
+                { label: "Source address", value: <span className="break-all font-mono text-xs">{open.ip || "—"}</span> },
+              ]}
+            />
+            {open.payload !== null && open.payload !== undefined && (
+              <DetailsSection title="Payload">
+                <details className="group">
+                  <summary className="cursor-pointer select-none rounded-sm text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Raw payload
+                  </summary>
+                  <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-2xs">
+                    {JSON.stringify(open.payload, null, 2)}
+                  </pre>
+                </details>
+              </DetailsSection>
+            )}
+          </div>
+        )}
+      </DetailsDrawer>
     </PageShell>
   );
 }

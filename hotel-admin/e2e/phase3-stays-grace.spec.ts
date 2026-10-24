@@ -216,7 +216,7 @@ test("an operator acknowledges an operational alert", async ({ page }) => {
     mutations,
   });
   await page.goto("/operational-alerts");
-  await page.getByRole("button", { name: /Acknowledge alert/ }).click();
+  await page.getByRole("button", { name: /^Acknowledge: alert/ }).click();
   await expect
     .poll(() => mutations.find((m) => m.path === "/operational-alerts/a1/acknowledge"))
     .toBeTruthy();
@@ -383,6 +383,6 @@ test("an alert changed by someone else refreshes the queue instead of overwritin
     mutations,
   });
   await page.goto("/operational-alerts");
-  await page.getByRole("button", { name: /Acknowledge alert/ }).click();
+  await page.getByRole("button", { name: /^Acknowledge: alert/ }).click();
   await expect(page.getByText(/changed while you were looking at it/i)).toBeVisible();
 });
