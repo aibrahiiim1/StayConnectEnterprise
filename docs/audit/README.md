@@ -18,7 +18,7 @@ The audit changes no code. Fixes are made later, one batch at a time, on their o
 | 4 | Guest sign-in (scd) | [PHASE4_GUEST_SIGN_IN.md](PHASE4_GUEST_SIGN_IN.md) | done |
 | 5 | Client Portal (portald) | [PHASE5_CLIENT_PORTAL.md](PHASE5_CLIENT_PORTAL.md) | done |
 | 6 | Payments, ledger, posting, accounting (acctd) | [PHASE6_PAYMENTS_AND_POSTING.md](PHASE6_PAYMENTS_AND_POSTING.md) | done |
-| 7 | PMS (pmsd) | | not started |
+| 7 | PMS (pmsd) | [PHASE7_PMS.md](PHASE7_PMS.md) | done |
 | 8 | Networking (netd) | | not started |
 | 9 | Admin Console API (edged), in four parts | | not started |
 | 10 | Cross-cutting and final report | | not started |
