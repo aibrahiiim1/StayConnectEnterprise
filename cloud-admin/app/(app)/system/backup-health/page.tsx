@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, HardDrive, History, ShieldCheck, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Archive, HardDrive, History, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { SectionCard } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { FilterChips } from "@/components/ui/data";
 import { HelpList, HelpSection } from "@/components/help";
 import { Meter, Skeleton } from "@/components/ui/misc";
-import { ago as formatRelative } from "@/lib/status";
+import { ago, formatDateTime } from "@/lib/status";
 
 type Status = {
   host_role: string; last_run: string; mode: string;
@@ -29,45 +31,26 @@ type DatabaseBackup = {
 };
 type Resp = { available: boolean; message?: string; status?: Status; pins?: string[]; database_backup?: DatabaseBackup };
 
+type Group = "protected" | "pinned" | "retained" | "delete";
+
+const GROUPS: { value: Group; label: string; tone: "ok" | "warn" | "default" | "err"; hint: string }[] = [
+  { value: "protected", label: "Protected", tone: "ok", hint: "Never deleted." },
+  { value: "pinned", label: "Pinned", tone: "warn", hint: "Kept because an operator pinned them." },
+  { value: "retained", label: "Retained", tone: "default", hint: "Kept by the retention policy." },
+  { value: "delete", label: "Delete candidates", tone: "err", hint: "Removed on the next cleanup run." },
+];
+
 const diskTone = (a: string) => (a === "critical" ? "err" : a === "warning" ? "warn" : "ok");
 
-function ItemTable({
-  title, description, items, tone,
-}: { title: string; description?: string; items?: string[]; tone: "ok" | "warn" | "err" | "default" }) {
-  const rows = (items ?? []).map((s) => s.split("|"));
-  return (
-    <Card>
-      <CardHeader>
-        <div className="space-y-0.5">
-          <CardTitle>
-            {title} <span className="text-sm font-normal text-muted-foreground tabular">({rows.length})</span>
-          </CardTitle>
-          {description && <CardDescription>{description}</CardDescription>}
-        </div>
-      </CardHeader>
-      {rows.length === 0 ? (
-        <EmptyState title="None" className="py-8" />
-      ) : (
-        <Table>
-          <THead><TR><TH>Type</TH><TH>Artifact</TH><TH className="hidden md:table-cell">Reason</TH></TR></THead>
-          <tbody>
-            {rows.map((r, i) => (
-              <TR key={i}>
-                <TD><Badge tone={tone}>{r[0]}</Badge></TD>
-                <TD className="break-all font-mono text-2xs">{r[1]}</TD>
-                <TD className="hidden text-xs text-muted-foreground md:table-cell">{r[2]}</TD>
-              </TR>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </Card>
-  );
+function itemsOf(s: Status, g: Group): string[][] {
+  const raw = { protected: s.protected_items, pinned: s.pinned_items, retained: s.retained_items, delete: s.delete_items }[g];
+  return (raw ?? []).map((x) => x.split("|"));
 }
 
 export default function BackupHealthPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [group, setGroup] = useState<Group>("protected");
 
   useEffect(() => {
     api.get<Resp>("/cloud/v1/backup-health").then(setData).catch((e) => setErr(e?.message ?? "Failed to load"));
@@ -75,12 +58,15 @@ export default function BackupHealthPage() {
 
   const s = data?.available ? data.status : undefined;
   const db = data?.database_backup;
+  const lastFailed = !!db?.last_failure_at && (!db.last_success_at || db.last_failure_at > db.last_success_at);
+  const rows = useMemo(() => (s ? itemsOf(s, group) : []), [s, group]);
+  const current = GROUPS.find((g) => g.value === group)!;
 
   return (
     <PageShell>
       <PageHeader
         title="Backup health"
-        description="Whether Central's own backup and rollback storage is healthy."
+        description="Whether Central's own backups and rollback storage are healthy."
         help={
           <>
             <HelpSection title="What the cleanup never deletes">
@@ -98,8 +84,6 @@ export default function BackupHealthPage() {
                 <p>
                   Keep the newest {s.keep_binaries} binaries, {s.keep_releases} releases (plus current and previous),{" "}
                   {s.keep_db} database dumps (the newest is never deleted) and {s.keep_config} config backups.
-                  Currently retained <strong>{s.retained}</strong>, pinned <strong>{s.pinned}</strong>, protected{" "}
-                  <strong>{s.protected}</strong>; the next run would delete <strong>{s.delete_candidates}</strong>.
                 </p>
               ) : (
                 <p>The retention figures appear here once the backup status has loaded.</p>
@@ -121,77 +105,114 @@ export default function BackupHealthPage() {
       {db && !db.healthy && (
         <Callout tone="danger" title="Database backup problem">{db.problem}</Callout>
       )}
-      {db && (
-        <section aria-label="Database backup" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatCard
-            label="Newest database backup"
-            icon={db.healthy ? <ShieldCheck /> : <AlertTriangle />}
-            tone={db.healthy ? "ok" : "err"}
-            value={<span className="text-headline">{db.newest_at ? formatRelative(db.newest_at) : "None"}</span>}
-            hint={db.newest_file ? db.newest_file.split("/").pop() : "No dump on this host"}
-          />
-          <StatCard
-            label="Last backup run"
-            icon={<History />}
-            tone={db.last_failure_at && (!db.last_success_at || db.last_failure_at > db.last_success_at) ? "err" : "ok"}
-            value={<span className="text-headline">{db.last_attempt_at ? formatRelative(db.last_attempt_at) : "Not recorded"}</span>}
-            hint={db.last_failure_at && (!db.last_success_at || db.last_failure_at > db.last_success_at)
-              ? `Failed: ${db.last_error || "see the host log"}`
-              : db.last_success_at ? "Succeeded" : "No run recorded yet"}
-          />
-        </section>
-      )}
       {data && !data.available && (
         <Callout tone="warning" title="Backup status unavailable">{data.message}</Callout>
       )}
 
       {!data && !err && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-busy="true">
+        <div aria-busy="true">
           <span className="sr-only">Loading</span>
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
+          <StatGrid cols={4}>
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[5.25rem]" />)}
+          </StatGrid>
         </div>
+      )}
+
+      {db && (
+        <section aria-label="Database backup">
+          <StatGrid cols={2}>
+            <StatCard
+              label="Newest database backup"
+              icon={db.healthy ? <ShieldCheck /> : <AlertTriangle />}
+              tone={db.healthy ? "ok" : "err"}
+              value={db.newest_at ? <span title={formatDateTime(db.newest_at)}>{ago(db.newest_at)}</span> : "None"}
+              hint={db.newest_file ? db.newest_file.split("/").pop() : "No dump on this host"}
+            />
+            <StatCard
+              label="Last backup run"
+              icon={<History />}
+              tone={lastFailed ? "err" : "ok"}
+              value={db.last_attempt_at ? <span title={formatDateTime(db.last_attempt_at)}>{ago(db.last_attempt_at)}</span> : "Not recorded"}
+              hint={lastFailed ? `Failed: ${db.last_error || "see the host log"}` : db.last_success_at ? "Succeeded" : "No run recorded yet"}
+            />
+          </StatGrid>
+        </section>
       )}
 
       {s && (
         <>
-          <section aria-label="Backup health figures" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard
-              label="Disk used"
-              icon={<HardDrive />}
-              tone={diskTone(s.disk_alert)}
-              value={`${s.disk_pct}%`}
-              footer={<Meter value={s.disk_pct} max={100} tone={diskTone(s.disk_alert)} caption={`Warn ${s.disk_warn}% · critical ${s.disk_crit}%`} />}
-            />
-            <StatCard
-              label="Rollback path"
-              icon={s.rollback_path_valid ? <ShieldCheck /> : <AlertTriangle />}
-              tone={s.rollback_path_valid ? "ok" : "err"}
-              value={<Badge tone={s.rollback_path_valid ? "ok" : "err"} dot className="text-sm">{s.rollback_path_valid ? "Valid" : "Invalid"}</Badge>}
-              hint="Current and previous release present"
-            />
-            <StatCard
-              label="Last cleanup"
-              icon={<History />}
-              value={<span className="text-headline">{formatRelative(s.last_run)}</span>}
-              hint={`Mode ${s.mode} · deleted ${s.deleted_last_run} · ${Math.round((s.reclaimed_kb || 0) / 1024)} MB freed`}
-            />
-            <StatCard
-              label="Failures"
-              icon={<AlertTriangle />}
-              tone={s.failures ? "err" : "ok"}
-              value={s.failures}
-              hint={s.failure_detail || "None"}
-            />
+          <section aria-label="Backup health figures">
+            <StatGrid cols={4}>
+              <StatCard
+                label="Disk used"
+                icon={<HardDrive />}
+                tone={diskTone(s.disk_alert)}
+                value={`${s.disk_pct}%`}
+                footer={<Meter value={s.disk_pct} max={100} tone={diskTone(s.disk_alert)} caption={`Warn ${s.disk_warn}% · critical ${s.disk_crit}%`} />}
+              />
+              <StatCard
+                label="Rollback path"
+                icon={s.rollback_path_valid ? <ShieldCheck /> : <AlertTriangle />}
+                tone={s.rollback_path_valid ? "ok" : "err"}
+                value={s.rollback_path_valid ? "Valid" : "Invalid"}
+                hint="Current and previous release"
+              />
+              <StatCard
+                label="Last cleanup"
+                icon={<History />}
+                value={<span title={formatDateTime(s.last_run)}>{ago(s.last_run)}</span>}
+                hint={`${s.mode} · ${s.deleted_last_run} deleted · ${Math.round((s.reclaimed_kb || 0) / 1024)} MB freed`}
+              />
+              <StatCard
+                label="Failures"
+                icon={<AlertTriangle />}
+                tone={s.failures ? "err" : "ok"}
+                value={s.failures}
+                hint={s.failure_detail || "None"}
+              />
+            </StatGrid>
           </section>
 
-          <ItemTable title="Protected" description="Never deleted." items={s.protected_items} tone="ok" />
-          {(s.pinned ?? 0) > 0 && <ItemTable title="Operator-pinned" items={s.pinned_items} tone="warn" />}
-          <ItemTable title="Retained" items={s.retained_items} tone="default" />
-          <ItemTable title="Delete candidates" description="Removed on the next cleanup run." items={s.delete_items} tone="err" />
+          <SectionCard title="Artifacts" description={current.hint} flush>
+            <FilterBar
+              inset
+              filters={
+                <FilterChips<Group>
+                  label="Artifacts"
+                  value={group}
+                  onChange={setGroup}
+                  options={GROUPS.map((g) => ({
+                    value: g.value,
+                    label: g.label,
+                    count: itemsOf(s, g.value).length,
+                    tone: g.tone === "default" ? undefined : g.tone,
+                  }))}
+                />
+              }
+            />
+            {rows.length === 0 ? (
+              <EmptyState size="sm" icon={<Archive />} title={`No ${current.label.toLowerCase()} artifacts`} />
+            ) : (
+              <Table aria-label={`${current.label} artifacts`} stickyHeader maxHeight="32rem" density="compact">
+                <THead>
+                  <TR><TH>Type</TH><TH>Artifact</TH><TH className="hidden md:table-cell">Reason</TH></TR>
+                </THead>
+                <TBody>
+                  {rows.map((r, i) => (
+                    <TR key={i}>
+                      <TD nowrap><Badge tone={current.tone}>{r[0]}</Badge></TD>
+                      <TD className="break-all font-mono text-xs">{r[1]}</TD>
+                      <TD muted className="hidden text-xs md:table-cell">{r[2]}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </SectionCard>
         </>
       )}
       {s === undefined && data?.available && (
-        <EmptyState icon={<Trash2 />} title="No status reported" />
+        <EmptyState icon={<Archive />} title="No status reported" />
       )}
     </PageShell>
   );

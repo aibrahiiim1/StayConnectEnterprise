@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ScrollText } from "lucide-react";
 import { api, itemsOf, qs, type AuditEntry, type AuditPage } from "@/lib/api";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { SkeletonRows } from "@/components/ui/misc";
-import { actionTone, actionWords, ago, formatDateTime } from "@/lib/status";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { ListState, PayloadView, hasPayload } from "@/components/record-view";
+import { actionTone, actionWords, ago, formatDateTime, sentenceCase } from "@/lib/status";
 
 export type AuditFilters = {
   customer_id?: string;
@@ -20,26 +22,19 @@ export type AuditFilters = {
 };
 
 const PAGE = 50;
+const LINK = "rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function Details({ payload }: { payload: Record<string, unknown> }) {
-  const n = Object.keys(payload).length;
-  return (
-    <details className="text-xs">
-      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-        {n} {n === 1 ? "detail" : "details"}
-      </summary>
-      <pre className="mt-1 max-h-48 max-w-md overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-2 font-mono text-muted-foreground">
-        {JSON.stringify(payload, null, 2)}
-      </pre>
-    </details>
-  );
+function actorOf(e: AuditEntry): string {
+  return e.actor_email ?? (e.actor_type === "appliance" ? "The appliance" : e.actor_type === "system" ? "Central" : e.actor_type ?? "—");
 }
 
+/** Entries are append-only: the list shows who did what and when; everything recorded opens in a drawer. */
 export function AuditLog({ filters, showCustomer = true }: { filters: AuditFilters; showCustomer?: boolean }) {
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [more, setMore] = useState(false);
+  const [selected, setSelected] = useState<AuditEntry | null>(null);
   const key = JSON.stringify(filters);
 
   const fetchPage = useCallback(
@@ -83,65 +78,109 @@ export function AuditLog({ filters, showCustomer = true }: { filters: AuditFilte
   return (
     <>
       <ErrorBanner err={err} className="m-4" />
-      {rows === null ? (
-        <SkeletonRows rows={6} cols={4} />
-      ) : rows.length === 0 ? (
-        <EmptyState icon={<ScrollText />} title="No activity" hint="Nothing has been recorded for these filters." />
-      ) : (
-        <>
-          <Table aria-label="Audit log">
-            <THead>
-              <TR>
-                <TH>When</TH>
-                <TH>What</TH>
-                {showCustomer && <TH className="hidden md:table-cell">Customer</TH>}
-                <TH className="hidden sm:table-cell">Appliance</TH>
-                <TH className="hidden lg:table-cell">By</TH>
-                <TH className="hidden xl:table-cell">Details</TH>
-              </TR>
-            </THead>
-            <tbody>
-              {rows.map((e, i) => (
-                <TR key={e.id ?? `${e.ts}-${i}`}>
-                  <TD className="whitespace-nowrap text-muted-foreground">
-                    <time dateTime={e.ts} title={formatDateTime(e.ts)}>{ago(e.ts)}</time>
-                  </TD>
-                  <TD><Badge tone={actionTone(e.action)}>{actionWords(e.action)}</Badge></TD>
-                  {showCustomer && (
-                    <TD className="hidden md:table-cell">
-                      {e.customer_id ? (
-                        <Link href={`/customers/${e.customer_id}`} className="underline-offset-2 hover:underline">
-                          {e.customer_name ?? "Customer"}
-                        </Link>
-                      ) : <span className="text-muted-foreground">Platform</span>}
-                    </TD>
-                  )}
-                  <TD className="hidden sm:table-cell">
-                    {e.appliance_id ? (
-                      <Link href={`/appliances/${e.appliance_id}`} className="font-mono text-xs underline-offset-2 hover:underline">
-                        {e.serial ?? "Appliance"}
+      <ListState
+        rows={rows}
+        cols={4}
+        empty={<EmptyState size="sm" icon={<ScrollText />} title="No activity" hint="Nothing has been recorded for these filters." />}
+      >
+        <Table aria-label="Audit log">
+          <THead>
+            <TR>
+              <TH>When</TH>
+              <TH>What</TH>
+              {showCustomer && <TH className="hidden md:table-cell">Customer</TH>}
+              <TH className="hidden sm:table-cell">Appliance</TH>
+              <TH className="hidden lg:table-cell">By</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {(rows ?? []).map((e, i) => (
+              <TR key={e.id ?? `${e.ts}-${i}`} onClick={() => setSelected(e)} selected={selected === e}>
+                <TD nowrap muted>
+                  <time dateTime={e.ts} title={formatDateTime(e.ts)}>{ago(e.ts)}</time>
+                </TD>
+                <TD nowrap>
+                  <Badge tone={actionTone(e.action)}>{actionWords(e.action)}</Badge>
+                </TD>
+                {showCustomer && (
+                  <TD className="hidden md:table-cell">
+                    {e.customer_id ? (
+                      <Link href={`/customers/${e.customer_id}`} onClick={(ev) => ev.stopPropagation()} className={LINK}>
+                        {e.customer_name ?? "Customer"}
                       </Link>
-                    ) : <span className="text-muted-foreground">—</span>}
+                    ) : <span className="text-muted-foreground">Platform</span>}
                   </TD>
-                  <TD className="hidden text-muted-foreground lg:table-cell">
-                    {e.actor_email ?? (e.actor_type === "appliance" ? "The appliance" : e.actor_type === "system" ? "Central" : e.actor_type ?? "—")}
-                  </TD>
-                  <TD className="hidden xl:table-cell">
-                    {e.payload && Object.keys(e.payload).length > 0 ? <Details payload={e.payload} /> : "—"}
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
-          {cursor && (
-            <div className="flex justify-center border-t border-border p-3">
-              <Button variant="secondary" size="sm" disabled={more} onClick={older}>
-                {more ? "Loading…" : "Show older"}
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+                )}
+                <TD nowrap className="hidden sm:table-cell">
+                  {e.appliance_id ? (
+                    <Link href={`/appliances/${e.appliance_id}`} onClick={(ev) => ev.stopPropagation()} className={`${LINK} font-mono text-xs`}>
+                      {e.serial ?? "Appliance"}
+                    </Link>
+                  ) : <span className="text-muted-foreground">—</span>}
+                </TD>
+                <TD truncate muted className="hidden lg:table-cell" title={actorOf(e)}>{actorOf(e)}</TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+        {cursor && (
+          <div className="flex justify-center border-t border-border p-3">
+            <Button variant="secondary" size="sm" loading={more} onClick={older}>
+              Show older
+            </Button>
+          </div>
+        )}
+      </ListState>
+
+      <DetailsDrawer
+        open={!!selected}
+        onOpenChange={(v) => { if (!v) setSelected(null); }}
+        eyebrow="Audit entry"
+        title={selected ? actionWords(selected.action) : ""}
+        description={selected ? formatDateTime(selected.ts) : undefined}
+      >
+        {selected && (
+          <>
+            <DetailsSection title="Entry">
+              <DescriptionList
+                items={[
+                  { label: "When", value: formatDateTime(selected.ts) },
+                  { label: "By", value: actorOf(selected) },
+                  { label: "From address", value: selected.ip ? <span className="font-mono text-xs">{selected.ip}</span> : null, hidden: !selected.ip },
+                  {
+                    label: "Customer",
+                    value: selected.customer_id ? (
+                      <Link href={`/customers/${selected.customer_id}`} className="text-primary underline-offset-2 hover:underline">
+                        {selected.customer_name ?? "Customer"}
+                      </Link>
+                    ) : "Platform",
+                  },
+                  {
+                    label: "Appliance",
+                    value: selected.appliance_id ? (
+                      <Link href={`/appliances/${selected.appliance_id}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
+                        {selected.serial ?? "Appliance"}
+                      </Link>
+                    ) : null,
+                    hidden: !selected.appliance_id,
+                  },
+                  {
+                    label: "Target",
+                    value: selected.target_type ? `${sentenceCase(selected.target_type)}${selected.target_id ? ` ${selected.target_id}` : ""}` : null,
+                    hidden: !selected.target_type,
+                  },
+                  { label: "Action", value: <span className="font-mono text-xs">{selected.action}</span> },
+                ]}
+              />
+            </DetailsSection>
+            {hasPayload(selected.payload) && (
+              <DetailsSection title="Recorded details">
+                <PayloadView payload={selected.payload} />
+              </DetailsSection>
+            )}
+          </>
+        )}
+      </DetailsDrawer>
     </>
   );
 }

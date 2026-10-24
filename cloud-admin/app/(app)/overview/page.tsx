@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, BadgeCheck, Building2, CheckCircle2, MapPin, Server } from "lucide-react";
 import { api, ApiError, type AttentionItem, type Overview, type RequestOptions } from "@/lib/api";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { LinkButton } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusDot } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageHeader, PageShell } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
+import { HelpList, HelpSection } from "@/components/help";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
 import {
@@ -22,29 +23,21 @@ import { cn } from "@/lib/utils";
 
 const POLL_MS = 30_000;
 
-const DOT: Record<string, string> = {
-  ok: "bg-success",
-  warn: "bg-warning",
-  err: "bg-destructive",
-  info: "bg-info",
-  default: "bg-muted-foreground/50",
-};
-
 function CountRow({ info, count, href }: { info: StateInfo; count: number; href: string }) {
   return (
     <li>
       <Link
         href={href}
         className={cn(
-          "group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/70",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "group flex items-center gap-3 px-5 py-2 transition-colors hover:bg-accent/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           count === 0 && "text-muted-foreground",
         )}
       >
-        <span className={cn("size-2 shrink-0 rounded-full", count === 0 ? "bg-border-strong" : DOT[info.tone])} aria-hidden />
+        <StatusDot tone={count === 0 ? "default" : info.tone} />
         <span className="min-w-0 flex-1 truncate text-sm">{info.label}</span>
-        <span className={cn("text-emphasis tabular", count === 0 && "font-normal")}>{count.toLocaleString()}</span>
-        <ArrowRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 rtl:-scale-x-100" aria-hidden />
+        <span className={cn("tabular text-sm", count > 0 && "font-semibold text-foreground")}>{count.toLocaleString()}</span>
+        <ArrowRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 rtl:-scale-x-100" aria-hidden />
       </Link>
     </li>
   );
@@ -52,12 +45,9 @@ function CountRow({ info, count, href }: { info: StateInfo; count: number; href:
 
 function Breakdown({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Card>
-      <CardHeader className="py-3">
-        <CardTitle className="text-sm">{title}</CardTitle>
-      </CardHeader>
-      <ul className="p-2">{children}</ul>
-    </Card>
+    <SectionCard title={title} flush>
+      <ul className="py-1.5">{children}</ul>
+    </SectionCard>
   );
 }
 
@@ -93,11 +83,24 @@ export default function OverviewPage() {
   const canAct = (a: AttentionItem) =>
     a.kind === "waiting_activation" ? can["appliances.activate"] : a.kind.startsWith("license_") ? can["licenses.manage"] : can["appliances.manage"];
 
+  const activeLicenses = data ? (data.licenses.active ?? 0) + (data.licenses.expiring ?? 0) : 0;
+
   return (
     <PageShell>
       <PageHeader
         title="Overview"
-        description="Every customer, appliance and license at a glance. Select a number to see the list behind it."
+        description="Every customer, appliance and license at a glance."
+        help={
+          <HelpSection title="Reading this page">
+            <HelpList
+              items={[
+                <><strong>Needs attention</strong> lists appliances waiting for activation, out of contact, or short of a valid license, with the action that resolves each.</>,
+                <>Every count opens the list behind it, already filtered.</>,
+                <>Central shows licensing only; client activity stays on each appliance.</>,
+              ]}
+            />
+          </HelpSection>
+        }
         actions={
           <LiveStatus
             updatedAt={updatedAt}
@@ -112,75 +115,81 @@ export default function OverviewPage() {
       {!data && <ErrorBanner err={err} />}
 
       {!data ? (
-        <div className="space-y-4" aria-busy="true">
+        <div className="space-y-5" aria-busy="true">
           <span className="sr-only">Loading</span>
+          <StatGrid cols={4}>
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[5.25rem]" />)}
+          </StatGrid>
           <Skeleton className="h-40" />
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Skeleton className="h-64" /><Skeleton className="h-64" /><Skeleton className="h-64" />
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Skeleton className="h-56" /><Skeleton className="h-56" /><Skeleton className="h-56" />
           </div>
         </div>
       ) : (
         <div className={cn("space-y-5", refreshing && refreshingClass)}>
-          <section aria-labelledby="attention-title">
-            <Card>
-              <CardHeader>
-                <CardTitle id="attention-title">Needs attention</CardTitle>
-                {data.attention.length > 0 && (
-                  <Badge tone="warn">{data.attention.length}</Badge>
-                )}
-              </CardHeader>
-              {data.attention.length === 0 ? (
-                <EmptyState
-                  icon={<CheckCircle2 className="text-success" />}
-                  title="Nothing needs attention"
-                  hint="No appliance is waiting, offline or short of a valid license."
-                  className="py-10"
-                />
-              ) : (
-                <ul className="divide-y divide-border" aria-label="Items that need attention">
-                  {data.attention.map((a, i) => {
-                    const info = attentionInfo(a.kind);
-                    const where = [a.customer_name, a.site_name].filter(Boolean).join(" · ");
-                    return (
-                      <li key={`${a.kind}-${a.appliance_id ?? i}`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-                        <span className={cn("size-2 shrink-0 rounded-full", DOT[info.tone])} aria-hidden />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-baseline gap-x-2">
-                            <span className="text-sm font-semibold">{info.title}</span>
-                            {a.serial && <span className="font-mono text-xs text-muted-foreground">{a.serial}</span>}
-                          </div>
-                          <div className="truncate text-caption text-muted-foreground">
-                            {[a.detail, where, a.since ? `since ${ago(a.since)}` : null].filter(Boolean).join(" · ")}
-                          </div>
+          <section aria-label="Totals">
+            <StatGrid cols={4}>
+              <StatCard label="Customers" icon={<Building2 />} value={data.customers.toLocaleString()} href="/customers" />
+              <StatCard label="Sites" icon={<MapPin />} value={data.sites.toLocaleString()} />
+              <StatCard
+                label="Appliances"
+                icon={<Server />}
+                value={data.appliances.total.toLocaleString()}
+                hint={`${(data.appliances.activated ?? 0).toLocaleString()} activated`}
+                href="/appliances"
+              />
+              <StatCard
+                label="Valid licenses"
+                icon={<BadgeCheck />}
+                value={activeLicenses.toLocaleString()}
+                hint={data.licenses.expiring ? `${data.licenses.expiring.toLocaleString()} expiring soon` : undefined}
+                tone={data.licenses.expiring ? "warn" : "default"}
+                href="/licenses"
+              />
+            </StatGrid>
+          </section>
+
+          <SectionCard
+            title={<span id="attention-title">Needs attention</span>}
+            actions={data.attention.length > 0 ? <Badge tone="warn">{data.attention.length}</Badge> : undefined}
+            flush
+          >
+            {data.attention.length === 0 ? (
+              <EmptyState
+                size="sm"
+                icon={<CheckCircle2 className="text-success" />}
+                title="Nothing needs attention"
+                hint="No appliance is waiting, offline or short of a valid license."
+              />
+            ) : (
+              <ul className="divide-y divide-border" aria-label="Items that need attention">
+                {data.attention.map((a, i) => {
+                  const info = attentionInfo(a.kind);
+                  const where = [a.customer_name, a.site_name].filter(Boolean).join(" · ");
+                  return (
+                    <li key={`${a.kind}-${a.appliance_id ?? i}`} className="flex items-center gap-3 px-5 py-2.5">
+                      <StatusDot tone={info.tone} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-sm font-medium">{info.title}</span>
+                          {a.serial && <span className="font-mono text-xs text-muted-foreground">{a.serial}</span>}
                         </div>
-                        <LinkButton href={attentionHref(a, can["system.read"])} size="sm" variant={canAct(a) ? "secondary" : "ghost"}>
-                          {canAct(a) ? info.action : info.viewAction}
-                          <span className="sr-only"> {a.serial ?? ""}</span>
-                        </LinkButton>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Card>
-          </section>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {[a.detail, where, a.since ? `since ${ago(a.since)}` : null].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                      <LinkButton href={attentionHref(a, can["system.read"])} size="sm" variant={canAct(a) ? "secondary" : "ghost"}>
+                        {canAct(a) ? info.action : info.viewAction}
+                        <span className="sr-only"> {a.serial ?? ""}</span>
+                      </LinkButton>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </SectionCard>
 
-          <section aria-label="Totals" className="flex flex-wrap gap-x-8 gap-y-2 px-1 text-sm text-muted-foreground">
-            <Link href="/customers" className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="text-headline tabular text-foreground">{data.customers.toLocaleString()}</span>{" "}
-              {data.customers === 1 ? "customer" : "customers"}
-            </Link>
-            <span>
-              <span className="text-headline tabular text-foreground">{data.sites.toLocaleString()}</span>{" "}
-              {data.sites === 1 ? "site" : "sites"}
-            </span>
-            <Link href="/appliances" className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="text-headline tabular text-foreground">{data.appliances.total.toLocaleString()}</span>{" "}
-              {data.appliances.total === 1 ? "appliance" : "appliances"}
-            </Link>
-          </section>
-
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-5 lg:grid-cols-3">
             <Breakdown title="Activation">
               {ACTIVATION_ORDER.map((k) => (
                 <CountRow key={k} info={ACTIVATION[k]} count={data.appliances[k] ?? 0} href={`/appliances?activation=${k}`} />

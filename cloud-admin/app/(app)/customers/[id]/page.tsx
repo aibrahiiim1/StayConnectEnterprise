@@ -3,24 +3,27 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, ArchiveRestore, MapPin, Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BadgeCheck, MapPin, Pencil, Plus, Server, Trash2 } from "lucide-react";
 import {
   api, ApiError, itemsOf, qs, type ApplianceRow, type Customer, type Items, type LicenseRow, type Site,
 } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, SectionCard } from "@/components/ui/card";
 import { Button, LinkButton } from "@/components/ui/button";
-import { Field, Input, useFieldErrors } from "@/components/ui/input";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Field, FieldGrid, Input, useFieldErrors } from "@/components/ui/input";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { RowActions } from "@/components/ui/row-actions";
+import { DescriptionList } from "@/components/ui/data";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
-import { PageHeader, PageShell } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { TabList, TabPanel } from "@/components/ui/tabs";
 import { NotAvailable } from "@/components/ui/patterns";
-import { Skeleton, SkeletonRows } from "@/components/ui/misc";
+import { Skeleton } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/delete-dialog";
-import { Fact, StateBadge } from "@/components/status-badge";
+import { StateBadge } from "@/components/status-badge";
+import { ListState } from "@/components/record-view";
 import { ApplianceTable, sortAppliances } from "@/components/appliance-table";
 import { LicenseTable } from "@/components/license-table";
 import { UsersManager } from "@/components/users-manager";
@@ -118,33 +121,22 @@ function CustomerView({ id }: { id: string }) {
     <PageShell width="wide">
       <PageHeader
         title={c.name}
-        description={`${c.sites} ${c.sites === 1 ? "site" : "sites"} · ${c.appliances} ${c.appliances === 1 ? "appliance" : "appliances"}`}
+        meta={archived ? <StateBadge info={recordStatusInfo(c.status)} /> : undefined}
         actions={
           can["customers.edit"] ? (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => { setName(c.name); setDErr(null); setDialog("rename"); }}>
-                <Pencil /> Rename
-              </Button>
-              {archived ? (
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => act(() => api.post(`/cloud/v1/customers/${c.id}/restore`), "Customer restored")}>
-                  <ArchiveRestore /> Restore
-                </Button>
-              ) : (
-                <Button variant="ghost" size="sm" onClick={() => { setDErr(null); setDialog("archive"); }}>
-                  <Archive /> Archive
-                </Button>
-              )}
-              {can["customers.delete"] && (
-                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDialog("delete")}>
-                  <Trash2 /> Delete
-                </Button>
-              )}
-            </>
+            <RowActions
+              subject={c.name}
+              primary={{ label: "Rename", icon: <Pencil />, onSelect: () => { setName(c.name); setDErr(null); setDialog("rename"); } }}
+              items={[
+                archived
+                  ? { label: "Restore customer", icon: <ArchiveRestore />, disabled: busy, onSelect: () => act(() => api.post(`/cloud/v1/customers/${c.id}/restore`), "Customer restored") }
+                  : { label: "Archive customer", icon: <Archive />, onSelect: () => { setDErr(null); setDialog("archive"); } },
+                { label: "Delete customer", icon: <Trash2 />, danger: true, hidden: !can["customers.delete"], onSelect: () => setDialog("delete") },
+              ]}
+            />
           ) : undefined
         }
-      >
-        {archived && <StateBadge info={recordStatusInfo(c.status)} />}
-      </PageHeader>
+      />
 
       <div>
         <TabList
@@ -164,7 +156,7 @@ function CustomerView({ id }: { id: string }) {
           {tab === "appliances" && <CustomerAppliances customerId={c.id} canActivate={can["appliances.activate"]} />}
           {tab === "licenses" && <CustomerLicenses customerId={c.id} />}
           {tab === "users" && (
-            <Card>
+            <Card className="overflow-hidden">
               <UsersManager
                 base={`/cloud/v1/customers/${c.id}/users`}
                 roles={CUSTOMER_USER_ROLES}
@@ -176,7 +168,7 @@ function CustomerView({ id }: { id: string }) {
             </Card>
           )}
           {tab === "activity" && (
-            <Card>
+            <Card className="overflow-hidden">
               <AuditLog filters={{ customer_id: c.id }} showCustomer={false} />
             </Card>
           )}
@@ -232,49 +224,65 @@ function CustomerView({ id }: { id: string }) {
   );
 }
 
-const SUMMARY_BUTTON =
-  "rounded text-headline tabular hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
 /** Include the count's subject in the button name so its purpose is clear to screen readers. */
 function countLabel(n: number, one: string, many: string, tab: string): string {
   return `${n} ${n === 1 ? one : many}, open the ${tab} tab`;
 }
 
+/** A stat card that switches tab instead of navigating. */
+function CountCard({
+  label, value, hint, aria, onClick,
+}: { label: string; value: number; hint?: string; aria: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={aria}
+      className="block min-w-0 rounded-lg border border-border bg-card px-4 py-3.5 text-start shadow-card transition-[box-shadow,border-color] duration-base ease-onegate hover:border-border-strong hover:shadow-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1.5 text-metric tabular">{value.toLocaleString()}</div>
+      {hint && <div className="mt-1 truncate text-xs text-muted-foreground">{hint}</div>}
+    </button>
+  );
+}
+
 function Summary({ c, onTab }: { c: Customer; onTab: (t: Tab) => void }) {
   return (
-    <div className="grid gap-5 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
-        <CardBody>
-          <dl className="grid gap-5 sm:grid-cols-3">
-            <Fact label="Sites">
-              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("sites")}
-                aria-label={countLabel(c.sites, "site", "sites", "Sites")}>{c.sites}</button>
-            </Fact>
-            <Fact label="Appliances">
-              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("appliances")}
-                aria-label={countLabel(c.appliances, "appliance", "appliances", "Appliances")}>{c.appliances}</button>
-              <div className="text-caption text-muted-foreground">{c.activated} activated</div>
-            </Fact>
-            <Fact label="Active licenses">
-              <button type="button" className={SUMMARY_BUTTON} onClick={() => onTab("licenses")}
-                aria-label={countLabel(c.licenses_active, "active license", "active licenses", "Licenses")}>{c.licenses_active}</button>
-            </Fact>
-          </dl>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardBody className="space-y-3">
-          <Fact label="Needs attention">
-            {c.attention > 0 ? (
-              <Link href={`/appliances?customer_id=${c.id}`} className="font-medium text-primary underline-offset-2 hover:underline">
-                {c.attention} {c.attention === 1 ? "item" : "items"} — see appliances
-              </Link>
-            ) : "Nothing"}
-          </Fact>
-          <Fact label="Customer since">{formatDay(c.created_at)}</Fact>
-          <Fact label="Status"><StateBadge info={recordStatusInfo(c.status)} /></Fact>
-        </CardBody>
-      </Card>
+    <div className="space-y-5">
+      <StatGrid cols={4}>
+        <CountCard label="Sites" value={c.sites} aria={countLabel(c.sites, "site", "sites", "Sites")} onClick={() => onTab("sites")} />
+        <CountCard
+          label="Appliances"
+          value={c.appliances}
+          hint={`${c.activated} activated`}
+          aria={countLabel(c.appliances, "appliance", "appliances", "Appliances")}
+          onClick={() => onTab("appliances")}
+        />
+        <CountCard
+          label="Active licenses"
+          value={c.licenses_active}
+          aria={countLabel(c.licenses_active, "active license", "active licenses", "Licenses")}
+          onClick={() => onTab("licenses")}
+        />
+        <StatCard
+          label="Needs attention"
+          value={c.attention}
+          tone={c.attention > 0 ? "warn" : "default"}
+          hint={c.attention > 0 ? "See its appliances" : "Nothing"}
+          href={c.attention > 0 ? `/appliances?customer_id=${c.id}` : undefined}
+        />
+      </StatGrid>
+      <SectionCard title="Details">
+        <DescriptionList
+          columns={2}
+          items={[
+            { label: "Status", value: <StateBadge info={recordStatusInfo(c.status)} /> },
+            { label: "Customer since", value: formatDay(c.created_at) },
+            { label: "Short name", value: <span className="font-mono text-xs">{c.slug}</span>, hidden: !c.slug },
+          ]}
+        />
+      </SectionCard>
     </div>
   );
 }
@@ -367,69 +375,68 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
   const setD = (patch: Partial<SiteDraft>) => setEdit((e) => (e ? { ...e, draft: { ...e.draft, ...patch } } : e));
 
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <span className="text-sm text-muted-foreground">A site is one physical location, such as a hotel, office or campus.</span>
-        {canManage && (
-          <Button size="sm" onClick={() => open(null)}><Plus /> New site</Button>
-        )}
-      </div>
+    <SectionCard
+      flush
+      title="Sites"
+      description="A site is one physical location, such as a hotel, office or campus."
+      actions={canManage ? <Button size="sm" onClick={() => open(null)}><Plus /> New site</Button> : undefined}
+    >
       <ErrorBanner err={err} className="m-4" />
-      {rows === null ? (
-        <SkeletonRows rows={3} cols={5} />
-      ) : rows.length === 0 ? (
-        <EmptyState icon={<MapPin />} title="No sites yet" hint="Add one here, or when you activate an appliance for this customer." />
-      ) : (
+      <ListState
+        rows={rows}
+        cols={5}
+        empty={<EmptyState size="sm" icon={<MapPin />} title="No sites yet" hint="Add one here, or when you activate an appliance for this customer." />}
+      >
         <Table aria-label="Sites">
           <THead>
             <TR>
-              <TH>Site</TH><TH className="hidden sm:table-cell">Type</TH><TH className="hidden md:table-cell">Time zone</TH>
-              <TH className="text-end">Appliances</TH><TH>Status</TH><TH><span className="sr-only">Actions</span></TH>
+              <TH>Site</TH>
+              <TH className="hidden sm:table-cell">Type</TH>
+              <TH className="hidden md:table-cell">Time zone</TH>
+              <TH numeric>Appliances</TH>
+              <TH>Status</TH>
+              {canManage && <TH className="w-0"><span className="sr-only">Actions</span></TH>}
             </TR>
           </THead>
-          <tbody>
-            {rows.map((s) => (
+          <TBody>
+            {(rows ?? []).map((s) => (
               <TR key={s.id}>
                 <TD>
                   <div className="font-medium">{s.name}</div>
-                  <div className="text-caption text-muted-foreground">{[s.code, s.country].filter(Boolean).join(" · ") || "—"}</div>
+                  <div className="text-xs text-muted-foreground">{[s.code, s.country].filter(Boolean).join(" · ") || "—"}</div>
                 </TD>
-                <TD className="hidden sm:table-cell">{siteTypeLabel(s.site_type)}</TD>
-                <TD className="hidden text-muted-foreground md:table-cell">{s.timezone}</TD>
-                <TD className="text-end tabular">
+                <TD nowrap className="hidden sm:table-cell">{siteTypeLabel(s.site_type)}</TD>
+                <TD nowrap muted className="hidden md:table-cell">{s.timezone}</TD>
+                <TD numeric>
                   {s.appliances > 0 ? (
-                    <Link href={`/appliances?customer_id=${customerId}&site_id=${s.id}`} className="underline-offset-2 hover:underline">
+                    <Link
+                      href={`/appliances?customer_id=${customerId}&site_id=${s.id}`}
+                      className="rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
                       {s.appliances}
                     </Link>
                   ) : 0}
                 </TD>
-                <TD><StateBadge info={recordStatusInfo(s.status)} /></TD>
-                <TD>
-                  {canManage && (
-                    <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => open(s)}>
-                        <Pencil /> <span className="hidden sm:inline">Edit</span><span className="sr-only"> {s.name}</span>
-                      </Button>
-                      {s.status === "archived" ? (
-                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => api.post(`/cloud/v1/sites/${s.id}/restore`), "Site restored", s.name)}>
-                          <ArchiveRestore /> <span className="hidden sm:inline">Restore</span><span className="sr-only"> {s.name}</span>
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="ghost" onClick={() => { setDErr(null); setArchiveSite(s); }}>
-                          <Archive /> <span className="hidden sm:inline">Archive</span><span className="sr-only"> {s.name}</span>
-                        </Button>
-                      )}
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteSite(s)}>
-                        <Trash2 /><span className="sr-only">Delete {s.name}</span>
-                      </Button>
-                    </div>
-                  )}
-                </TD>
+                <TD nowrap><StateBadge info={recordStatusInfo(s.status)} /></TD>
+                {canManage && (
+                  <TD className="w-0">
+                    <RowActions
+                      subject={s.name}
+                      primary={{ label: "Edit", onSelect: () => open(s) }}
+                      items={[
+                        s.status === "archived"
+                          ? { label: "Restore", icon: <ArchiveRestore />, disabled: busy, onSelect: () => run(() => api.post(`/cloud/v1/sites/${s.id}/restore`), "Site restored", s.name) }
+                          : { label: "Archive", icon: <Archive />, onSelect: () => { setDErr(null); setArchiveSite(s); } },
+                        { label: "Delete", icon: <Trash2 />, danger: true, onSelect: () => setDeleteSite(s) },
+                      ]}
+                    />
+                  </TD>
+                )}
               </TR>
             ))}
-          </tbody>
+          </TBody>
         </Table>
-      )}
+      </ListState>
 
       <DialogForm
         open={!!edit}
@@ -444,25 +451,25 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
         onSubmit={save}
       >
         {d && (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <FieldGrid cols={2}>
             <Field label="Name" required className="sm:col-span-2" error={siteErr.error("name")}>
               <Input id={siteErr.id("name")} value={d.name} onChange={(e) => setD({ name: e.target.value })} autoComplete="off" />
             </Field>
             <Field label="Time zone" required error={siteErr.error("timezone")}>
               <TimezoneSelect id={siteErr.id("timezone")} value={d.timezone} onChange={(v) => setD({ timezone: v })} />
             </Field>
-            <Field label="Country" hint="Two letters, such as EG. Optional." error={siteErr.error("country")}>
+            <Field label="Country" optional hint="Two letters, such as EG." error={siteErr.error("country")}>
               <Input id={siteErr.id("country")} value={d.country} maxLength={2} className="uppercase" onChange={(e) => setD({ country: e.target.value })} />
             </Field>
             <Field label="Site type" hint="Describes the place. It does not turn anything on; the license's modules do." className="sm:col-span-2" error={siteErr.error("siteType")}>
               <SiteTypeSelect id={siteErr.id("siteType")} value={d.siteType} onChange={(v) => setD({ siteType: v })} />
             </Field>
             {!edit?.site && (
-              <Field label="Short code" hint="Optional. Generated from the name when left empty." className="sm:col-span-2" error={siteErr.error("code")}>
+              <Field label="Short code" optional hint="Generated from the name when left empty." className="sm:col-span-2" error={siteErr.error("code")}>
                 <Input id={siteErr.id("code")} value={d.code} onChange={(e) => setD({ code: e.target.value })} autoComplete="off" />
               </Field>
             )}
-          </div>
+          </FieldGrid>
         )}
       </DialogForm>
 
@@ -492,7 +499,7 @@ function Sites({ customerId, canManage, onChanged }: { customerId: string; canMa
         consequences={["Refused while an appliance is still assigned to it.", "It cannot be undone."]}
         blockerHref={() => `/appliances?customer_id=${customerId}&site_id=${deleteSite?.id ?? ""}`}
       />
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -505,20 +512,23 @@ function CustomerAppliances({ customerId, canActivate }: { customerId: string; c
       .catch((e) => { setErr(e); setRows([]); });
   }, [customerId]);
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <ErrorBanner err={err} className="m-4" />
-      {rows === null ? (
-        <SkeletonRows rows={3} cols={4} />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<Server />}
-          title="No appliances yet"
-          hint="An appliance joins this customer when it is activated."
-          action={canActivate ? <LinkButton href="/appliances?activation=waiting" variant="secondary">Appliances waiting for activation</LinkButton> : undefined}
-        />
-      ) : (
-        <ApplianceTable rows={rows} showCustomer={false} />
-      )}
+      <ListState
+        rows={rows}
+        cols={4}
+        empty={
+          <EmptyState
+            size="sm"
+            icon={<Server />}
+            title="No appliances yet"
+            hint="An appliance joins this customer when it is activated."
+            action={canActivate ? <LinkButton href="/appliances?activation=waiting" variant="secondary" size="sm">Appliances waiting for activation</LinkButton> : undefined}
+          />
+        }
+      >
+        <ApplianceTable rows={rows ?? []} showCustomer={false} />
+      </ListState>
     </Card>
   );
 }
@@ -532,15 +542,15 @@ function CustomerLicenses({ customerId }: { customerId: string }) {
       .catch((e) => { setErr(e); setRows([]); });
   }, [customerId]);
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <ErrorBanner err={err} className="m-4" />
-      {rows === null ? (
-        <SkeletonRows rows={3} cols={4} />
-      ) : rows.length === 0 ? (
-        <EmptyState title="No licenses yet" hint="A license is issued when one of its appliances is activated." />
-      ) : (
-        <LicenseTable rows={rows} showCustomer={false} />
-      )}
+      <ListState
+        rows={rows}
+        cols={4}
+        empty={<EmptyState size="sm" icon={<BadgeCheck />} title="No licenses yet" hint="A license is issued when one of its appliances is activated." />}
+      >
+        <LicenseTable rows={rows ?? []} showCustomer={false} />
+      </ListState>
     </Card>
   );
 }

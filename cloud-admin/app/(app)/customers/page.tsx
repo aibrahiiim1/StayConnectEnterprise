@@ -7,18 +7,19 @@ import { Building2, Plus } from "lucide-react";
 import { api, ApiError, itemsOf, qs, type Customer, type Items } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Field, Input, useFieldErrors } from "@/components/ui/input";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm } from "@/components/ui/dialog";
-import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
 import { SearchInput } from "@/components/ui/data";
 import { Segmented } from "@/components/ui/tabs";
-import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { StateBadge } from "@/components/status-badge";
+import { ListState } from "@/components/record-view";
 import { usePermissions } from "@/lib/permissions";
 import { useQueryState } from "@/lib/use-query-state";
 import { recordStatusInfo } from "@/lib/status";
@@ -87,93 +88,102 @@ function Customers() {
 
   if (own) return null;
 
+  const openCreate = () => { setName(""); setCreateErr(null); nameErr.clear(); setCreating(true); };
+
   return (
     <PageShell>
       <PageHeader
         title="Customers"
-        description="The organisations that own sites. Open one to manage its sites, appliances, licenses and users."
+        description="The organisations that own sites, appliances and licenses."
         actions={
           can["customers.create"] ? (
-            <Button onClick={() => { setName(""); setCreateErr(null); nameErr.clear(); setCreating(true); }}>
+            <Button onClick={openCreate}>
               <Plus /> New customer
             </Button>
           ) : undefined
         }
       />
 
-      <Card>
-        <Toolbar className="border-b border-border px-4 py-3">
-          <Segmented
-            label="Show"
-            value={status}
-            onChange={(v) => setF({ status: v === "active" ? "" : v })}
-            options={[
-              { value: "active", label: "Active" },
-              { value: "archived", label: "Archived" },
-              { value: "all", label: "All" },
-            ]}
-          />
-          <SearchInput value={f.q} onChange={(v) => setF({ q: v })} delay={300} placeholder="Search customers" label="Search customers" />
-        </Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
+            <Segmented
+              label="Show"
+              value={status}
+              onChange={(v) => setF({ status: v === "active" ? "" : v })}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "archived", label: "Archived" },
+                { value: "all", label: "All" },
+              ]}
+            />
+          }
+          search={<SearchInput value={f.q} onChange={(v) => setF({ q: v })} delay={300} placeholder="Search customers" label="Search customers" />}
+        />
         <ErrorBanner err={err} className="m-4" />
-        {rows === null ? (
-          <SkeletonRows rows={5} cols={5} />
-        ) : rows.length === 0 ? (
-          f.q || status !== "active" ? (
-            <EmptyState title="No customers match" hint="Nothing matches this search." />
-          ) : (
+        <ListState
+          rows={rows}
+          cols={5}
+          filtered={!!f.q || status !== "active"}
+          noMatch={<EmptyState title="No customers match" hint="Nothing matches this search." />}
+          empty={
             <EmptyState
               icon={<Building2 />}
               title="No customers yet"
               hint="Create one here, or when you activate an appliance."
-              action={can["customers.create"] ? <Button onClick={() => setCreating(true)}><Plus /> New customer</Button> : undefined}
+              action={can["customers.create"] ? <Button size="sm" onClick={openCreate}><Plus /> New customer</Button> : undefined}
             />
-          )
-        ) : (
+          }
+        >
           <Table aria-label="Customers">
             <THead>
               <TR>
                 <TH>Customer</TH>
-                <TH className="hidden sm:table-cell text-end">Sites</TH>
-                <TH className="text-end">Appliances</TH>
-                <TH className="hidden md:table-cell text-end">Active licenses</TH>
+                <TH numeric className="hidden sm:table-cell">Sites</TH>
+                <TH numeric>Appliances</TH>
+                <TH numeric className="hidden md:table-cell">Active licenses</TH>
                 <TH>Needs attention</TH>
               </TR>
             </THead>
-            <tbody>
-              {rows.map((c) => (
-                <TR key={c.id} className="cursor-pointer" onClick={() => router.push(`/customers/${c.id}`)}>
+            <TBody>
+              {(rows ?? []).map((c) => (
+                <TR key={c.id} onClick={() => router.push(`/customers/${c.id}`)}>
                   <TD>
-                    <Link
-                      href={`/customers/${c.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="rounded font-semibold hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {c.name}
-                    </Link>
-                    {c.status !== "active" && <StateBadge info={recordStatusInfo(c.status)} className="ms-2" />}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/customers/${c.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="rounded font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {c.name}
+                      </Link>
+                      {c.status !== "active" && <StateBadge info={recordStatusInfo(c.status)} />}
+                    </div>
                   </TD>
-                  <TD className="hidden text-end tabular sm:table-cell">{c.sites}</TD>
-                  <TD className="text-end tabular">
+                  <TD numeric className="hidden sm:table-cell">{c.sites}</TD>
+                  <TD numeric>
                     {c.appliances}
                     {c.appliances > c.activated && (
-                      <span className="block text-caption text-muted-foreground">{c.activated} activated</span>
+                      <div className="text-xs font-normal text-muted-foreground">{c.activated} activated</div>
                     )}
                   </TD>
-                  <TD className="hidden text-end tabular md:table-cell">{c.licenses_active}</TD>
-                  <TD>{c.attention > 0 ? <Badge tone="warn" dot>{c.attention}</Badge> : <span className="text-muted-foreground">—</span>}</TD>
+                  <TD numeric className="hidden md:table-cell">{c.licenses_active}</TD>
+                  <TD nowrap>
+                    {c.attention > 0 ? <StatusBadge tone="warn">{c.attention} {c.attention === 1 ? "item" : "items"}</StatusBadge> : <span className="text-muted-foreground">—</span>}
+                  </TD>
                 </TR>
               ))}
-            </tbody>
+            </TBody>
           </Table>
-        )}
+        </ListState>
       </Card>
 
       <DialogForm
         open={creating}
         onOpenChange={setCreating}
         title="New customer"
-        description="An organisation that runs one or more sites. Add its sites next."
+        description="An organisation that runs one or more sites. You add its sites next."
         submitLabel="Create customer"
         busyLabel="Creating…"
         busy={busy}

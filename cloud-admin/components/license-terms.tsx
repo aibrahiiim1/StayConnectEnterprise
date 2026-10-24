@@ -1,6 +1,6 @@
 "use client";
 
-import { Field, Input } from "@/components/ui/input";
+import { Checkbox, Field, FieldGrid, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/tabs";
 import type { LicenseTerms } from "@/lib/api";
@@ -86,7 +86,7 @@ export function LicenseTermsFields({
 }) {
   const set = (patch: Partial<TermsDraft>) => onChange({ ...value, ...patch });
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <FieldGrid cols={2}>
       <Field label="Clients online at once" required hint="The most client devices that may be online at the same time." error={errorFor?.("maxGuests")}>
         <Input
           id={idFor?.("maxGuests")}
@@ -98,7 +98,7 @@ export function LicenseTermsFields({
       <Field
         label="Grace period (days)"
         required
-        hint="How long it keeps admitting clients after the end date. 0 = no grace: it stops at the end date."
+        hint="Days it keeps admitting clients after the end date. 0 stops at the end date."
         error={errorFor?.("graceDays")}
       >
         <Input id={idFor?.("graceDays")} inputMode="numeric" value={value.graceDays} onChange={(e) => set({ graceDays: e.target.value })} />
@@ -132,7 +132,7 @@ export function LicenseTermsFields({
         siteType={siteType}
         onChange={(modules) => set({ modules, modulesTouched: true })}
       />
-    </div>
+    </FieldGrid>
   );
 }
 
@@ -173,21 +173,14 @@ export function ModuleFields({
             const needs = requiresLabel(catalog, m.id);
             const checked = value.includes(m.id);
             return (
-              <label
+              <Checkbox
                 key={m.id}
-                className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-                  checked={checked}
-                  onChange={(e) => onChange(toggleModule(catalog, value, m.id, e.target.checked))}
-                />
-                <span>
-                  <span className="font-medium">{m.label}</span>
-                  {needs && <span className="block text-caption text-muted-foreground">Needs {needs}</span>}
-                </span>
-              </label>
+                className="rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent/50"
+                label={<span className="font-medium">{m.label}</span>}
+                description={needs ? `Needs ${needs}` : undefined}
+                checked={checked}
+                onChange={(e) => onChange(toggleModule(catalog, value, m.id, e.target.checked))}
+              />
             );
           })}
         </div>

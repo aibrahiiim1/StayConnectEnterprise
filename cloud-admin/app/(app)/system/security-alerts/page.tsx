@@ -5,16 +5,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { api, itemsOf, type Items } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
-import { FilterChips, SearchInput } from "@/components/ui/data";
-import { SkeletonRows } from "@/components/ui/misc";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { DescriptionList, FilterChips, SearchInput } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { RowActions, type RowAction } from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
 import { StateBadge } from "@/components/status-badge";
+import { ListState, PayloadView, hasPayload } from "@/components/record-view";
 import { HelpList, HelpSection } from "@/components/help";
 import { usePermissions } from "@/lib/permissions";
 import { ago, alertStatusInfo, formatDateTime, sentenceCase } from "@/lib/status";
@@ -40,6 +43,7 @@ const kindWord = (k: string) => KIND_WORDS[k] ?? sentenceCase(k);
 const closed = (a: Alert) => a.resolved ?? (a.status === "resolved" || a.status === "false_positive");
 
 type View = "open" | "closed" | "all";
+type CloseStatus = "resolved" | "false_positive";
 
 export default function SecurityAlertsPage() {
   const toast = useToast();
@@ -50,8 +54,9 @@ export default function SecurityAlertsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [view, setView] = useState<View>("open");
   const [query, setQuery] = useState("");
-  const [closeReq, setCloseReq] = useState<{ a: Alert; status: "resolved" | "false_positive" } | null>(null);
+  const [closeReq, setCloseReq] = useState<{ a: Alert; status: CloseStatus } | null>(null);
   const [dlgErr, setDlgErr] = useState<unknown>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -97,6 +102,21 @@ export default function SecurityAlertsPage() {
     }
   }
 
+  const askClose = (a: Alert, status: CloseStatus) => {
+    setSelectedId(null);
+    setDlgErr(null);
+    setCloseReq({ a, status });
+  };
+
+  /** Every triage step for one alert, in the order an operator takes them. */
+  const triage = (a: Alert): RowAction[] => [
+    { label: "Investigate", hidden: a.status !== "open", disabled: busy === a.id, onSelect: () => void setStatus(a, "investigating") },
+    { label: "Acknowledge", hidden: closed(a) || a.status === "acknowledged", disabled: busy === a.id, onSelect: () => void setStatus(a, "acknowledged") },
+    { label: "Resolve", hidden: closed(a), disabled: busy === a.id, onSelect: () => askClose(a, "resolved") },
+    { label: "False positive", hidden: closed(a), disabled: busy === a.id, onSelect: () => askClose(a, "false_positive") },
+    { label: "Reopen", hidden: !closed(a), disabled: busy === a.id, onSelect: () => void setStatus(a, "open") },
+  ];
+
   const counts = useMemo(() => {
     const all = rows ?? [];
     return { open: all.filter((a) => !closed(a)).length, closed: all.filter(closed).length, all: all.length };
@@ -109,11 +129,13 @@ export default function SecurityAlertsPage() {
       .filter((a) => !q || [a.serial, a.kind, kindWord(a.kind), a.source_ip, a.status].join(" ").toLowerCase().includes(q));
   }, [rows, view, query]);
 
+  const selected = rows?.find((a) => a.id === selectedId) ?? null;
+
   return (
     <PageShell width="wide">
       <PageHeader
         title="Security alerts"
-        description="Suspicious appliance registrations, such as known hardware returning with a new identity. Central refuses those registrations; triage records what was done about each."
+        description="Suspicious appliance registrations, which Central refuses. Triage records what was done about each."
         help={
           <>
             <HelpSection title="When an alert is raised">
@@ -131,6 +153,7 @@ export default function SecurityAlertsPage() {
                   <><strong>Investigate</strong> and <strong>Acknowledge</strong> record that someone is looking at it.</>,
                   <><strong>Resolve</strong> or <strong>False positive</strong> close it, with a reason for the audit log.</>,
                   <><strong>Reopen</strong> returns a closed alert to Open.</>,
+                  <>Select an alert to see everything recorded about it.</>,
                 ]}
               />
             </HelpSection>
@@ -140,83 +163,123 @@ export default function SecurityAlertsPage() {
 
       <ErrorBanner err={err} />
 
-      <Card>
-        <Toolbar className="border-b border-border px-4 py-3">
-          <FilterChips<View>
-            label="Show"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "open", label: "Open", count: rows ? counts.open : undefined, tone: counts.open ? "err" : undefined },
-              { value: "closed", label: "Closed", count: rows ? counts.closed : undefined },
-              { value: "all", label: "All", count: rows ? counts.all : undefined },
-            ]}
-          />
-          <SearchInput value={query} onChange={setQuery} placeholder="Search serial, kind, address" label="Search alerts" />
-        </Toolbar>
-        {rows === null ? (
-          <SkeletonRows rows={4} cols={6} />
-        ) : visible.length === 0 ? (
-          query ? (
-            <EmptyState title="No alerts match" action={<Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button>} />
-          ) : (
-            <EmptyState icon={<ShieldCheck />} title={view === "open" ? "No open alerts" : "No alerts"} hint="Nothing suspicious has been detected." />
-          )
-        ) : (
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
+            <FilterChips<View>
+              label="Show"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "open", label: "Open", count: rows ? counts.open : undefined, tone: counts.open ? "err" : undefined },
+                { value: "closed", label: "Closed", count: rows ? counts.closed : undefined },
+                { value: "all", label: "All", count: rows ? counts.all : undefined },
+              ]}
+            />
+          }
+          search={<SearchInput value={query} onChange={setQuery} placeholder="Search serial, kind, address" label="Search alerts" />}
+        />
+        <ListState
+          rows={rows === null ? null : visible}
+          cols={6}
+          filtered={!!query}
+          noMatch={<EmptyState size="sm" title="No alerts match" action={<Button variant="secondary" size="sm" onClick={() => setQuery("")}>Clear search</Button>} />}
+          empty={<EmptyState size="sm" icon={<ShieldCheck />} title={view === "open" ? "No open alerts" : "No alerts"} hint="Nothing suspicious has been detected." />}
+        >
           <Table aria-label="Security alerts">
             <THead>
               <TR>
-                <TH>When</TH><TH>What</TH><TH>Appliance</TH><TH className="hidden md:table-cell">From address</TH>
-                <TH className="hidden lg:table-cell">Details</TH><TH>Status</TH><TH><span className="sr-only">Triage</span></TH>
+                <TH>When</TH>
+                <TH>What</TH>
+                <TH>Appliance</TH>
+                <TH className="hidden md:table-cell">From address</TH>
+                <TH>Status</TH>
+                <TH className="w-0"><span className="sr-only">Triage</span></TH>
               </TR>
             </THead>
-            <tbody>
-              {visible.map((a) => (
-                <TR key={a.id}>
-                  <TD className="whitespace-nowrap text-muted-foreground"><time dateTime={a.at} title={formatDateTime(a.at)}>{ago(a.at)}</time></TD>
-                  <TD className="font-medium">{kindWord(a.kind)}</TD>
-                  <TD>
-                    {a.appliance_id ? (
-                      <Link href={`/appliances/${a.appliance_id}`} className="font-mono text-xs underline-offset-2 hover:underline">{a.serial ?? "Appliance"}</Link>
-                    ) : <span className="font-mono text-xs">{a.serial || "—"}</span>}
-                  </TD>
-                  <TD className="hidden font-mono text-xs md:table-cell">{a.source_ip || "—"}</TD>
-                  <TD className="hidden max-w-xs lg:table-cell">
-                    {a.detail && Object.keys(a.detail).length > 0 ? (
-                      <details className="text-xs">
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Show</summary>
-                        <code className="mt-1 block break-all rounded bg-surface p-2 text-muted-foreground">{JSON.stringify(a.detail)}</code>
-                      </details>
-                    ) : "—"}
-                  </TD>
-                  <TD><StateBadge info={alertStatusInfo(a.status)} /></TD>
-                  <TD>
-                    {canTriage && (
-                      <div className="flex flex-wrap justify-end gap-1">
-                        {a.status === "open" && (
-                          <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setStatus(a, "investigating")}>Investigate</Button>
-                        )}
-                        {!closed(a) && a.status !== "acknowledged" && (
-                          <Button size="sm" variant="ghost" disabled={busy === a.id} onClick={() => setStatus(a, "acknowledged")}>Acknowledge</Button>
-                        )}
-                        {!closed(a) && (
-                          <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => { setDlgErr(null); setCloseReq({ a, status: "resolved" }); }}>Resolve</Button>
-                        )}
-                        {!closed(a) && (
-                          <Button size="sm" variant="ghost" disabled={busy === a.id} onClick={() => { setDlgErr(null); setCloseReq({ a, status: "false_positive" }); }}>False positive</Button>
-                        )}
-                        {closed(a) && (
-                          <Button size="sm" variant="ghost" disabled={busy === a.id} onClick={() => setStatus(a, "open")}>Reopen</Button>
-                        )}
-                      </div>
-                    )}
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
+            <TBody>
+              {visible.map((a) => {
+                const steps = triage(a);
+                const first = steps.find((s) => !s.hidden);
+                return (
+                  <TR key={a.id} onClick={() => setSelectedId(a.id)} selected={a.id === selectedId}>
+                    <TD nowrap muted><time dateTime={a.at} title={formatDateTime(a.at)}>{ago(a.at)}</time></TD>
+                    <TD className="font-medium">{kindWord(a.kind)}</TD>
+                    <TD nowrap>
+                      {a.appliance_id ? (
+                        <Link
+                          href={`/appliances/${a.appliance_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded font-mono text-xs underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {a.serial ?? "Appliance"}
+                        </Link>
+                      ) : <span className="font-mono text-xs">{a.serial || "—"}</span>}
+                    </TD>
+                    <TD nowrap className="hidden font-mono text-xs md:table-cell">{a.source_ip || "—"}</TD>
+                    <TD nowrap><StateBadge info={alertStatusInfo(a.status)} /></TD>
+                    <TD className="w-0">
+                      {canTriage && (
+                        <RowActions
+                          subject={`${kindWord(a.kind)}${a.serial ? ` on ${a.serial}` : ""}`}
+                          primary={first}
+                          items={steps.filter((s) => s !== first)}
+                        />
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
           </Table>
-        )}
+        </ListState>
       </Card>
+
+      <DetailsDrawer
+        open={!!selected}
+        onOpenChange={(v) => { if (!v) setSelectedId(null); }}
+        eyebrow="Security alert"
+        title={selected ? kindWord(selected.kind) : ""}
+        description={selected ? formatDateTime(selected.at) : undefined}
+        badges={selected ? <StateBadge info={alertStatusInfo(selected.status)} /> : undefined}
+        actions={
+          selected && canTriage ? (
+            triage(selected).filter((s) => !s.hidden).map((s) => (
+              <Button key={s.label} size="sm" variant="secondary" disabled={s.disabled} onClick={s.onSelect}>
+                {s.label}
+              </Button>
+            ))
+          ) : undefined
+        }
+      >
+        {selected && (
+          <>
+            <DetailsSection title="Alert">
+              <DescriptionList
+                items={[
+                  {
+                    label: "Appliance",
+                    value: selected.appliance_id ? (
+                      <Link href={`/appliances/${selected.appliance_id}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
+                        {selected.serial ?? "Appliance"}
+                      </Link>
+                    ) : selected.serial ? <span className="font-mono text-xs">{selected.serial}</span> : null,
+                  },
+                  { label: "From address", value: selected.source_ip ? <span className="font-mono text-xs">{selected.source_ip}</span> : null },
+                  { label: "Raised", value: formatDateTime(selected.at) },
+                  { label: "Kind", value: <span className="font-mono text-xs">{selected.kind}</span> },
+                ]}
+              />
+            </DetailsSection>
+            {hasPayload(selected.detail) && (
+              <DetailsSection title="What Central recorded">
+                <PayloadView payload={selected.detail} />
+              </DetailsSection>
+            )}
+          </>
+        )}
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={!!closeReq}

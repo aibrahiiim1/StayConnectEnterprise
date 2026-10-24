@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, itemsOf, qs, type Customer, type Items, type Site } from "@/lib/api";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, FieldGrid, Input, Select } from "@/components/ui/input";
 import { DEFAULT_SITE_TYPE, SITE_TYPES } from "@/lib/site-types";
 
 const NEW = "__new";
@@ -159,7 +159,7 @@ export function PlacementFields({
   const newSite = isNewSite(value);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <FieldGrid cols={2}>
       <Field label="Customer" required error={errorFor?.("customer")}>
         {lockedCustomer ? (
           <Select id={idFor?.("customer")} value={lockedCustomer.id} disabled onChange={() => undefined}>
@@ -216,7 +216,7 @@ export function PlacementFields({
           <Field label="Site type" hint="Describes the place. It does not turn anything on.">
             <SiteTypeSelect value={value.newSiteType} onChange={(v) => set({ newSiteType: v })} />
           </Field>
-          <Field label="Country" hint="Two letters, such as EG. Optional." error={errorFor?.("newSiteCountry")}>
+          <Field label="Country" optional hint="Two letters, such as EG." error={errorFor?.("newSiteCountry")}>
             <Input
               id={idFor?.("newSiteCountry")}
               value={value.newSiteCountry}
@@ -228,6 +228,6 @@ export function PlacementFields({
           </Field>
         </>
       )}
-    </div>
+    </FieldGrid>
   );
 }

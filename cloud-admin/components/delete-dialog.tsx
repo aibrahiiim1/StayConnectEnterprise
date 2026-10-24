@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { api, withStepUp, ApiError } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { Callout } from "@/components/ui/error-banner";
 
 export type Blocker = {
   type: string;
@@ -84,16 +85,15 @@ export function DeleteDialog({
       onConfirm={submit}
     >
       {blockers && blockers.length > 0 && (
-        <div className="rounded-md border border-destructive/30 bg-destructive-subtle p-3.5 text-sm text-destructive-subtle-foreground">
-          <div className="mb-2 font-semibold">{what} cannot be deleted because it still has:</div>
-          <ul className="space-y-1.5">
+        <Callout tone="neutral" title={`${what} cannot be deleted because it still has:`}>
+          <ul className="mt-1 space-y-1">
             {blockers.map((b) => {
               const href = blockerHref?.(b);
               return (
                 <li key={b.type} className="flex items-center justify-between gap-3">
-                  <span>{b.count} {b.label}</span>
+                  <span className="tabular">{b.count} {b.label}</span>
                   {href && (
-                    <Link href={href} className="inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline">
+                    <Link href={href} className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline">
                       View {b.label} <ArrowRight className="size-3.5 rtl:-scale-x-100" aria-hidden />
                     </Link>
                   )}
@@ -101,10 +101,8 @@ export function DeleteDialog({
               );
             })}
           </ul>
-          <div className="mt-2 text-xs opacity-80">
-            Remove these first, in order: appliances, then sites, then the customer.
-          </div>
-        </div>
+          <p className="mt-2 text-xs text-muted-foreground">Remove these first, in order: appliances, then sites, then the customer.</p>
+        </Callout>
       )}
     </ConfirmDialog>
   );
