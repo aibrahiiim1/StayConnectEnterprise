@@ -18,7 +18,7 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/testdb"
 )
 
-func TestTestToolsSignInThroughBothSteps(t *testing.T) {
+func TestTestToolsSignInWithOrWithoutTheCode(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
 	hash, _ := auth.HashPassword("correct-horse-battery")
@@ -45,8 +45,21 @@ func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 		}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/login", d.login)
-	mux.HandleFunc("POST /v1/auth/login/enrol", d.loginEnrol)
 	mux.HandleFunc("POST /v1/auth/login/code", d.loginCode)
+	// The step-up and session checks are the router's (auth_mfa_integration_test.go); here the session is the cookie's.
+	withSession := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			c, err := r.Cookie(auth.SessionCookieName)
+			if err != nil || c.Value == "" {
+				http.Error(w, "no session", http.StatusUnauthorized)
+				return
+			}
+			h(w, r.WithContext(auth.ContextWithSession(r.Context(), &auth.Session{OperatorID: id, Email: "tool@central.test"})))
+		}
+	}
+	mux.HandleFunc("POST /v1/auth/reauth", withSession(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]any{"ok": true}) }))
+	mux.HandleFunc("POST /v1/auth/mfa/setup", withSession(d.mfaSetup))
+	mux.HandleFunc("POST /v1/auth/mfa/confirm", withSession(d.mfaConfirm))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -63,13 +76,10 @@ func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 	}
 	cl, err := signIn(kr)
 	if err != nil {
-		t.Fatalf("first sign-in (set-up): %v", err)
+		t.Fatalf("first sign-in (password only): %v", err)
 	}
-	if st, _ := mfa.Status(ctx, id); !st.Enrolled {
-		t.Fatal("the first sign-in did not finish setting the authenticator up")
-	}
-	if fi, err := os.Stat(ringPath); err != nil || fi.Size() == 0 {
-		t.Fatalf("the keyring was not written: %v", err)
+	if sessions != 1 {
+		t.Fatalf("the password-only sign-in opened %d sessions", sessions)
 	}
 	jarPath := filepath.Join(t.TempDir(), "cj.txt")
 	if err := opsignin.WriteCurlJar(cl, srv.URL, jarPath); err != nil {
@@ -77,6 +87,15 @@ func TestTestToolsSignInThroughBothSteps(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(jarPath); !strings.Contains(string(b), "\t"+auth.SessionCookieName+"\ttok-x\n") {
 		t.Fatalf("the curl jar does not carry the session:\n%s", b)
+	}
+	if err := kr.Enable(cl, srv.URL, "tool@central.test", "correct-horse-battery"); err != nil {
+		t.Fatalf("turning two-step sign-in on: %v", err)
+	}
+	if st, _ := mfa.Status(ctx, id); !st.Enrolled {
+		t.Fatal("Enable did not confirm the authenticator")
+	}
+	if fi, err := os.Stat(ringPath); err != nil || fi.Size() == 0 {
+		t.Fatalf("the keyring was not written: %v", err)
 	}
 
 	kr2, err := opsignin.Open(ringPath)

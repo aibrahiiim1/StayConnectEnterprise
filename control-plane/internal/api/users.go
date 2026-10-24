@@ -28,7 +28,7 @@ type UserRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 	// LastLoginAt is the last successful console sign-in; null when the user never signed in.
 	LastLoginAt *time.Time `json:"last_login_at"`
-	// TwoStepEnrolled: an authenticator app is set up; without one, the next sign-in sets one up.
+	// TwoStepEnrolled: the account has turned two-step sign-in on (a confirmed authenticator); without it, the password alone signs in.
 	TwoStepEnrolled bool `json:"two_step_enrolled"`
 }
 

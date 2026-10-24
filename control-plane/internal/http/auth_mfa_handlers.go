@@ -28,7 +28,9 @@ func (d authDeps) clearPendingCookie(w http.ResponseWriter) {
 		Secure: d.Secure, SameSite: http.SameSiteStrictMode})
 }
 
-func (d authDeps) beginSecondStep(w http.ResponseWriter, r *http.Request, op *auth.Operator) {
+// finishPasswordStep opens the session at once for an account without a confirmed authenticator, and otherwise only
+// the pending sign-in that the code step completes. An unreadable state refuses: it cannot tell which applies.
+func (d authDeps) finishPasswordStep(w http.ResponseWriter, r *http.Request, op *auth.Operator) {
 	if d.MFA == nil || d.DB == nil {
 		slog.Error("sign-in refused: two-step sign-in is not configured (CTRLAPI_OPERATOR_MFA_KEY)")
 		api.Fail(w, r, http.StatusServiceUnavailable, "signin_unavailable",
@@ -40,17 +42,25 @@ func (d authDeps) beginSecondStep(w http.ResponseWriter, r *http.Request, op *au
 		api.Fail(w, r, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
 		return
 	}
-	tok, err := auth.CreatePending(r.Context(), d.DB, op.ID, !st.Enrolled)
+	if !st.Enrolled {
+		d.clearPendingCookie(w)
+		sess, ok := d.openSession(w, r, op, "none")
+		if !ok {
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			SecondStep string `json:"second_step"`
+			whoamiResp
+		}{"none", d.describe(r.Context(), sess)})
+		return
+	}
+	tok, err := auth.CreatePending(r.Context(), d.DB, op.ID)
 	if err != nil {
 		api.Fail(w, r, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
 		return
 	}
 	d.setPendingCookie(w, tok)
-	step := "code"
-	if !st.Enrolled {
-		step = "enrol"
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"second_step": step})
+	writeJSON(w, http.StatusOK, map[string]string{"second_step": "code"})
 }
 
 func (d authDeps) pending(w http.ResponseWriter, r *http.Request) (string, *auth.PendingSignin, bool) {
@@ -67,34 +77,6 @@ func (d authDeps) pending(w http.ResponseWriter, r *http.Request) (string, *auth
 	return c.Value, p, true
 }
 
-func (d authDeps) loginEnrol(w http.ResponseWriter, r *http.Request) {
-	tok, p, ok := d.pending(w, r)
-	if !ok {
-		return
-	}
-	if !p.Enrol {
-		api.Fail(w, r, http.StatusConflict, "already_enrolled", "An authenticator is already set up. Enter its code.")
-		return
-	}
-	op, err := d.Repo.FindByID(r.Context(), p.OperatorID)
-	if err != nil {
-		api.Fail(w, r, http.StatusUnauthorized, api.CodeUnauthenticated, "invalid credentials")
-		return
-	}
-	secret, uri, err := d.MFA.Enrol(r.Context(), op.ID, op.Email)
-	if errors.Is(err, auth.ErrMFAAlreadyEnrolled) {
-		auth.SetPendingEnrol(r.Context(), d.DB, tok, false)
-		api.Fail(w, r, http.StatusConflict, "already_enrolled", "An authenticator is already set up. Enter its code.")
-		return
-	}
-	if err != nil {
-		slog.Error("two-step set-up failed", "err", err)
-		api.Fail(w, r, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": auth.MFAIssuer, "account": op.Email})
-}
-
 func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Code string `json:"code"`
@@ -108,28 +90,14 @@ func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var (
-		recovery []string
-		method   = "totp"
-		left     = -1
-		valid    bool
-		locked   *time.Time
-		err      error
-	)
-	if p.Enrol {
-		recovery, valid, locked, err = d.MFA.Confirm(r.Context(), p.OperatorID, in.Code)
-		method = "enrolled"
-	} else {
-		method, left, valid, locked, err = d.MFA.Verify(r.Context(), p.OperatorID, in.Code)
-	}
+	method, left, valid, locked, err := d.MFA.Verify(r.Context(), p.OperatorID, in.Code)
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):
-		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(time.Until(lockedErr.Until).Seconds())+1)))
-		api.Fail(w, r, http.StatusTooManyRequests, "too_many_attempts",
-			"Too many wrong codes. Wait until "+lockedErr.Until.UTC().Format("15:04")+" UTC and try again.")
+		d.codeLocked(w, r, lockedErr.Until)
 		return
-	case errors.Is(err, auth.ErrMFANotEnrolled), errors.Is(err, auth.ErrMFAAlreadyEnrolled):
+	case errors.Is(err, auth.ErrMFANotEnrolled):
+		// Reset meanwhile: the password step must be taken again, never skipped.
 		auth.DropPending(r.Context(), d.DB, tok)
 		d.clearPendingCookie(w)
 		api.Fail(w, r, http.StatusConflict, "signin_restart", "Your sign-in changed while you were entering the code. Sign in again.")
@@ -159,19 +127,15 @@ func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if p.Enrol {
-		audit.Op(auth.ContextWithSession(r.Context(), sess), d.DB, r, "auth.mfa_enrolled", "operator", op.ID, nil)
-	}
 	if method == "recovery_code" {
 		audit.Op(auth.ContextWithSession(r.Context(), sess), d.DB, r, "auth.mfa_recovery_code_used", "operator", op.ID,
 			map[string]any{"recovery_codes_left": left})
 	}
 	type codeResp struct {
 		whoamiResp
-		RecoveryCodes     []string `json:"recovery_codes,omitempty"`
-		RecoveryCodesLeft *int     `json:"recovery_codes_left,omitempty"`
+		RecoveryCodesLeft *int `json:"recovery_codes_left,omitempty"`
 	}
-	out := codeResp{whoamiResp: d.describe(r.Context(), sess), RecoveryCodes: recovery}
+	out := codeResp{whoamiResp: d.describe(r.Context(), sess)}
 	if method == "recovery_code" {
 		out.RecoveryCodesLeft = &left
 	}
@@ -240,9 +204,7 @@ func (d authDeps) mfaRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	var lockedErr auth.ErrMFALocked
 	switch {
 	case errors.As(err, &lockedErr):
-		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(time.Until(lockedErr.Until).Seconds())+1)))
-		api.Fail(w, r, http.StatusTooManyRequests, "too_many_attempts",
-			"Too many wrong codes. Wait until "+lockedErr.Until.UTC().Format("15:04")+" UTC and try again.")
+		d.codeLocked(w, r, lockedErr.Until)
 		return
 	case errors.Is(err, auth.ErrMFANotEnrolled):
 		api.Fail(w, r, http.StatusConflict, "not_enrolled", "No authenticator is set up for this account.")
@@ -251,15 +213,112 @@ func (d authDeps) mfaRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		api.Fail(w, r, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
 		return
 	case !ok:
-		d.auditFailure(r, "auth.mfa_failed", s.OperatorID, map[string]any{"reason": "wrong code", "for": "new recovery codes"})
-		if locked != nil {
-			audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "system", Action: "auth.mfa_locked", TargetType: "operator",
-				TargetID: s.OperatorID, IP: clientip.From(r), Payload: map[string]any{"locked_until": locked.UTC()}})
-		}
-		api.Fail(w, r, http.StatusBadRequest, "wrong_code",
-			"That code is not right. Enter the 6-digit code your authenticator app shows now.")
+		d.wrongOwnCode(w, r, s.OperatorID, "new recovery codes",
+			"That code is not right. Enter the 6-digit code your authenticator app shows now.", locked)
 		return
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.mfa_recovery_codes_replaced", "operator", s.OperatorID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
+}
+
+func (d authDeps) codeLocked(w http.ResponseWriter, r *http.Request, until time.Time) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, int(time.Until(until).Seconds())+1)))
+	api.Fail(w, r, http.StatusTooManyRequests, "too_many_attempts",
+		"Too many wrong codes. Wait until "+until.UTC().Format("15:04")+" UTC and try again.")
+}
+
+func (d authDeps) wrongOwnCode(w http.ResponseWriter, r *http.Request, operatorID, what, msg string, locked *time.Time) {
+	d.auditFailure(r, "auth.mfa_failed", operatorID, map[string]any{"reason": "wrong code", "for": what})
+	if locked != nil {
+		audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "system", Action: "auth.mfa_locked", TargetType: "operator",
+			TargetID: operatorID, IP: clientip.From(r), Payload: map[string]any{"locked_until": locked.UTC()}})
+	}
+	api.Fail(w, r, http.StatusBadRequest, "wrong_code", msg)
+}
+
+// mfaSetup starts turning two-step sign-in on (behind the password step-up): a new secret for the QR code. A set-up
+// never confirmed is replaced; a confirmed authenticator never is, so this cannot swap one out.
+func (d authDeps) mfaSetup(w http.ResponseWriter, r *http.Request) {
+	s := auth.FromContext(r.Context())
+	secret, uri, err := d.MFA.Enrol(r.Context(), s.OperatorID, s.Email)
+	switch {
+	case errors.Is(err, auth.ErrMFAAlreadyEnrolled):
+		api.Fail(w, r, http.StatusConflict, "already_enrolled", "Two-step sign-in is already on for this account.")
+		return
+	case err != nil:
+		slog.Error("two-step set-up failed", "err", err)
+		api.Fail(w, r, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be set up. Try again shortly.")
+		return
+	}
+	audit.Op(r.Context(), d.DB, r, "auth.mfa_setup_started", "operator", s.OperatorID, nil)
+	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": auth.MFAIssuer, "account": s.Email})
+}
+
+// mfaConfirm turns two-step sign-in on with the first code from the app, and answers the recovery codes once.
+func (d authDeps) mfaConfirm(w http.ResponseWriter, r *http.Request) {
+	s := auth.FromContext(r.Context())
+	var in struct {
+		Code string `json:"code"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in)
+	c := totp.Normalize(in.Code)
+	if len(c) != totp.Digits || strings.Trim(c, "0123456789") != "" {
+		api.Fail(w, r, http.StatusBadRequest, "code_required", "Enter the 6-digit code your authenticator app shows now.")
+		return
+	}
+	codes, ok, locked, err := d.MFA.Confirm(r.Context(), s.OperatorID, c)
+	var lockedErr auth.ErrMFALocked
+	switch {
+	case errors.As(err, &lockedErr):
+		d.codeLocked(w, r, lockedErr.Until)
+		return
+	case errors.Is(err, auth.ErrMFAAlreadyEnrolled):
+		api.Fail(w, r, http.StatusConflict, "nothing_to_confirm", "There is no set-up waiting to be confirmed. Start again.")
+		return
+	case err != nil:
+		slog.Error("two-step confirm failed", "err", err)
+		api.Fail(w, r, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned on. Try again shortly.")
+		return
+	case !ok:
+		d.wrongOwnCode(w, r, s.OperatorID, "turning two-step sign-in on",
+			"That code is not right. Enter the 6-digit code your authenticator app shows now.", locked)
+		return
+	}
+	audit.Op(r.Context(), d.DB, r, "auth.mfa_enrolled", "operator", s.OperatorID, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"enrolled": true, "recovery_codes": codes})
+}
+
+// mfaDisable turns two-step sign-in off. Behind the password step-up it also needs a code from the second factor
+// (the app's or a recovery code): a stolen session plus the password is not enough.
+func (d authDeps) mfaDisable(w http.ResponseWriter, r *http.Request) {
+	s := auth.FromContext(r.Context())
+	var in struct {
+		Code string `json:"code"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in)
+	if strings.TrimSpace(in.Code) == "" || len(in.Code) > maxMFACodeLen {
+		api.Fail(w, r, http.StatusBadRequest, "code_required",
+			"Enter the 6-digit code your authenticator app shows now, or one of your recovery codes.")
+		return
+	}
+	method, ok, locked, err := d.MFA.Disable(r.Context(), s.OperatorID, in.Code)
+	var lockedErr auth.ErrMFALocked
+	switch {
+	case errors.As(err, &lockedErr):
+		d.codeLocked(w, r, lockedErr.Until)
+		return
+	case errors.Is(err, auth.ErrMFANotEnrolled):
+		api.Fail(w, r, http.StatusConflict, "not_enrolled", "Two-step sign-in is not on for this account.")
+		return
+	case err != nil:
+		slog.Error("two-step disable failed", "err", err)
+		api.Fail(w, r, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned off. Try again shortly.")
+		return
+	case !ok:
+		d.wrongOwnCode(w, r, s.OperatorID, "turning two-step sign-in off",
+			"That code is not right. Enter the 6-digit code your authenticator app shows now, or a recovery code.", locked)
+		return
+	}
+	audit.Op(r.Context(), d.DB, r, "auth.mfa_disabled", "operator", s.OperatorID, map[string]any{"second_step": method})
+	writeJSON(w, http.StatusOK, map[string]any{"enrolled": false})
 }

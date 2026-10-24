@@ -33,7 +33,9 @@ func TestSignInLocksAfterRepeatedWrongPasswords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(50, 300, time.Minute), MFA: mfa}
+	var sessions int
+	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(50, 300, time.Minute), MFA: mfa,
+		NewSession: testSessions(&sessions)}
 	login := func(email, pw string) (int, string, string) {
 		raw, _ := json.Marshal(map[string]string{"email": email, "password": pw})
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw))

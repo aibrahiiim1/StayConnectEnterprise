@@ -101,10 +101,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/v1", func(r chi.Router) {
 		// Password re-entry is limited before the session check, so guesses without a session are limited too.
 		r.With(limit("login", loginPerMinute)).Post("/auth/login", adeps.login)
-		r.With(limit("login", loginPerMinute)).Post("/auth/login/enrol", adeps.loginEnrol)
 		r.With(limit("login", loginPerMinute)).Post("/auth/login/code", adeps.loginCode)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/mfa", adeps.mfaStatus)
 		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/recovery-codes", adeps.mfaRecoveryCodes)
+		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/setup", adeps.mfaSetup)
+		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/confirm", adeps.mfaConfirm)
+		r.With(auth.RequireAuth(store, checker), api.RequireReauth(d.Redis)).Post("/auth/mfa/disable", adeps.mfaDisable)
 		r.Post("/auth/logout", adeps.logout)
 		r.With(limit("reauth", reauthPerMinute), auth.RequireAuth(store, checker)).Post("/auth/reauth", adeps.reauth)
 		r.With(auth.RequireAuth(store, checker)).Get("/auth/whoami", adeps.whoami)

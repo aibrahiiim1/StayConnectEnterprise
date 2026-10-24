@@ -33,7 +33,9 @@ func TestSignInLockHoldsOnlyTheAddressItCameFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(50, 300, time.Minute), MFA: mfa}
+	var sessions int
+	d := authDeps{Repo: &auth.Repo{DB: pool}, DB: pool, Failures: ratebudget.New(50, 300, time.Minute), MFA: mfa,
+		NewSession: testSessions(&sessions)}
 	type from struct{ remote, realIP string }
 	direct := func(ip string) from { return from{remote: ip + ":40000"} }
 	viaCaddy := func(ip string) from { return from{remote: "127.0.0.1:50000", realIP: ip} }
