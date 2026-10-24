@@ -447,6 +447,18 @@ Retention anonymises guest data in these tables in place (`cmd/scd/data_retentio
 | D1-H2 | How soon must a used-up allowance or time limit cut a guest off? This sets acctd's tick. | Within 5 s by default, as a setting. |
 | D1-H3 | What usage detail is kept, at what grain, for how long? | Per-minute detail for 30 days, hourly totals for the 12-month retention. |
 
+## Compliance
+
+Checked against the rules in the [README](README.md#compliance). Added after the phase was first written, on the Product Owner's instruction; no finding's severity changes.
+
+| Finding | Rules that apply | What the fix must respect |
+|---|---|---|
+| D1-H3 accounting detail | GDPR Art. 5(1)(c), (e); ePrivacy Art. 6; Art. 15, 17, 20; national connection-log laws | **Per-second usage per device is traffic data.** ePrivacy allows keeping it only while needed to deliver the service or for billing, so the coarser grain recommended here also serves storage limitation. Three conditions apply: (1) the hotel's retention settings stay the single control: the accounting-detail retention (12 months by default, D-C2) and the log period (1–730 days) are not shortened by the fix, and a hotel that must keep connection logs longer still can; (2) the roll-ups are still personal data, so the guest export and erasure (GDPR plan C3, C4, `docs/privacy/ERASURE_LEDGER.md`) must cover the new tables, and erasure must reach them, as it reaches the detail today; (3) the totals used for a paid package or a room charge are kept with the financial record for the statutory period. **The D1-H3 decision is therefore a joint product and privacy decision**, and the hotel's record of processing (`HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md`) and the DPA's Annex II need the new grain and periods once decided. |
+| D1-L5 untrimmed tables | GDPR Art. 5(1)(e); financial record retention | Anonymised rows are outside GDPR, so keeping them is a performance question, not a privacy one, provided anonymisation is complete. Rows still linked to financial records (purchases, postings, settlements, entitlements with a payment) are kept for the statutory period and are not trimmed. Any trimming is recorded in the erasure ledger like other retention runs. |
+| D1-L2 slow-query log | GDPR Art. 25, 32; ISO 27001 A.8.15 | Bound parameters are never logged (`log_parameter_max_length = 0`, `log_parameter_max_length_on_error = 0`). The Postgres log follows the hotel's log period. `pg_stat_statements` stores normalised query text without values, which is acceptable. |
+| D1-H1, D1-H2, D1-M1 | GDPR Art. 32 | The controlled-operation guard is a security control (only the controlled writer may change usage). The fixes keep it; they change how its bookkeeping is cleaned up and how many observations one call carries, not who may write. |
+| D1-M2, D1-M3, D1-L1 | None beyond Art. 32 availability | Sizing changes only. |
+
 ## Tests run
 
 | Test | Result |

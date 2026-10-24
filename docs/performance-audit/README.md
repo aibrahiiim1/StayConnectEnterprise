@@ -48,3 +48,21 @@ Each finding also says how it is known: **Measured** (a number from a run), **Co
 5. **Operational limits become settings** (CLAUDE.md §0C) when a fix introduces one.
 6. **Start from the latest master** and check that the cited code has not changed.
 7. **No guest data** in commits, PRs or these files. Load tests use generated data only.
+8. **A performance fix never weakens a compliance control** (below). Where the faster option and the compliant option differ, the finding says so and the compliant one is recommended.
+
+## Compliance
+
+Every finding that touches personal data, security controls or records the law requires is checked against the rules below. Each phase has a **Compliance** column or note saying which apply. The appliance's operator (the hotel) is the controller; OneGate is its processor (`docs/privacy/DPA_TEMPLATE.md`). The repository's own privacy programme is in `docs/privacy/` and is binding here.
+
+| Source | What it requires of a performance fix |
+|---|---|
+| **GDPR Art. 5(1)(c), (e): data minimisation and storage limitation** | Keep no more detail, and no longer, than the purpose needs. Coarser detail and shorter retention are preferred when a fix can choose. |
+| **GDPR Art. 25: data protection by design and by default** | New caches, logs, metrics, profiles and load-test data hold no guest data by default. Metric labels never carry user-supplied values (`internal/metrics/metrics.go:2`). |
+| **GDPR Art. 32: security of processing** | A fix keeps the security strength it replaces: password hashing, sign-in throttles, encryption, audit. |
+| **GDPR Art. 15, 17, 20: access, erasure, portability** | Moved, rolled-up or cached personal data must still be found by the guest export and erasure (`docs/privacy/ERASURE_LEDGER.md`, GDPR plan C3, C4). |
+| **ePrivacy Directive 2002/58/EC Art. 6: traffic data** | Traffic data (who used how many bytes, when) is erased or anonymised once it is no longer needed to deliver the service or for billing. Per-second accounting detail is traffic data. |
+| **National connection-log laws** | Some countries require Wi-Fi operators to keep connection logs for a set time. The log period is the hotel's setting (1–730 days, `docs/privacy/DPA_ANNEX_II_SECURITY_MEASURES.md` §9); a fix never shortens below what the hotel set. |
+| **Financial record retention** | Payment and posting records stay for the statutory period even after a guest is anonymised (`docs/privacy/HOTEL_RECORD_OF_PROCESSING_TEMPLATE.md` row 4). No trimming batch deletes them. |
+| **PCI DSS** | Card data never reaches the appliance (Stripe and Paymob take it directly). A fix never logs, caches or profiles payment payloads. |
+| **OWASP ASVS 4.0 and NIST SP 800-63B: authentication** | Password hashing stays at or above OWASP's Argon2id minimum (for example 19 MiB, 2 passes, or 46 MiB, 1 pass). Sign-in throttles and lockouts are not relaxed to gain speed. |
+| **ISO/IEC 27001:2022 A.8.15, A.8.16: logging and monitoring** | Performance logging is kept, protected and time-limited like other logs; slow-query logs never print bound parameters. |
