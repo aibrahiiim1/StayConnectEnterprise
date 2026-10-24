@@ -3,7 +3,6 @@
 // Sign-in protection is always on; sites without saved policy use approved defaults.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldAlert } from "lucide-react";
 import { api, ApiError, GuestSignInProtection } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
@@ -105,10 +104,10 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle className="flex flex-wrap items-center gap-2">
-            <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Client sign-in protection
+            Client sign-in protection
             <HelpTip title="Client sign-in protection">
               <HelpSection>
                 <p>
@@ -123,7 +122,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
             {policy.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
           {/* Make clear that default settings still protect sign-in. */}
-          <CardDescription className="max-w-2xl">
+          <CardDescription>
             It is always on — these settings decide how strict it is, not whether it runs.
           </CardDescription>
         </div>
@@ -179,7 +178,7 @@ export function GuestSignInProtectionCard({ canWrite }: { canWrite: boolean }) {
         </div>
 
         {/* New wait settings do not shorten a restriction already running. */}
-        <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-3 text-sm text-muted-foreground">
+        <div className="space-y-1 rounded-md border border-border bg-surface px-3.5 py-2.5 text-xs text-muted-foreground">
           <p>
             New settings apply to <strong>what happens next</strong>. A device already waiting keeps the time it
             was given — shortening the wait here does not end a wait already running.

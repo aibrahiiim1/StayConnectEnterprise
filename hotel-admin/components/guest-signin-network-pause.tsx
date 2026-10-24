@@ -4,7 +4,6 @@
 // Releasing a device or pause only permits another attempt; it never signs anyone in.
 
 import { useCallback, useEffect, useState } from "react";
-import { ShieldAlert } from "lucide-react";
 import { api, ApiError, inBackground } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { REASON_MAX_CHARS, REASON_MIN_CHARS } from "@/lib/reason";
@@ -113,17 +112,14 @@ export function NetworkPauseSettingsCard({ canWrite }: { canWrite: boolean }) {
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle className="flex flex-wrap items-center gap-2">
-            <ShieldAlert className="size-4 text-muted-foreground" aria-hidden /> Many wrong room sign-ins on one network
+            Many wrong room sign-ins on one network
             {p.is_default && <Badge tone="default">Using the standard settings</Badge>}
           </CardTitle>
-          <CardDescription className="max-w-2xl">
-            Someone can get round the device limit above by making their device look like a new one each time. So
-            when a client network gets this many wrong room sign-ins, from any devices, Room sign-in pauses on that
-            network for a while. Other sign-in methods keep working. Staff see the pause here and on Guest sign-in
-            attempts, and can let a genuine client try again or end the pause.
+          <CardDescription>
+            Room sign-in pauses on a network that gets this many wrong attempts from any devices. Other methods keep working.
           </CardDescription>
         </div>
       </CardHeader>
