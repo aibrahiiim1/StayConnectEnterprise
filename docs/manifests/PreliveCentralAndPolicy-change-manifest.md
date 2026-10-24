@@ -2,7 +2,7 @@
 
 - **Base commit:** `9394eb5fb217a4298b398d02381baea6f0791063`
 - **HEAD commit:** `f8e2cf28`
-- **Provenance (generation HEAD = inventory_head):** `b45890c6dbd8157ef6fbb22af168d04aaef97789`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `7e6aaded7c0da5e25f6a1b290c2cc653c18083b2`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/prelive-central-and-policy`
 - **Remote branch:** `origin/delivery/prelive-central-and-policy`
 - **Changed files:** 30
@@ -19,28 +19,28 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
-| `docs/manifests/PreliveCentralAndPolicy-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The change manifest records the PRE-LIVE mission delivery |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
+| `docs/manifests/PreliveCentralAndPolicy-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | The change manifest covers the export packs |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
 | `exports/chatgpt/phase-evidence/GIT_STAT_c31f3ae6.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | The export packs carry the T0243 state |
-| `exports/chatgpt/phase-evidence/GIT_STAT_d9187bc0.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs carry the T0243 state |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
+| `exports/chatgpt/phase-evidence/GIT_STAT_d955dde7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state with PR #227 |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | The export packs carry the T0243 state |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0243 names PR #227 |
 | `governance/transitions/T0243.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment |
 
 ## Total diff statistics (`git diff --stat`)
@@ -52,12 +52,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   6 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   6 +-
  docs/context/StayConnect-IAM-Handoff.md            |   6 +-
- .../PreliveCentralAndPolicy-change-manifest.md     |  57 +++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 351905 -> 351795 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 162239 -> 163136 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44029 -> 44008 bytes
+ .../PreliveCentralAndPolicy-change-manifest.md     |  93 ++++++++++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 351905 -> 351792 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 162239 -> 163110 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 44029 -> 44007 bytes
  .../chatgpt/phase-evidence/GIT_STAT_c31f3ae6.txt   |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_d9187bc0.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_d955dde7.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../governance/decision-register.json              |  14 +++
@@ -75,7 +75,7 @@
  governance/decision-register.json                  |  14 +++
  governance/project-state.json                      |  95 +++++++++++----------
  governance/transitions/T0243.json                  |  38 +++++++++
- 30 files changed, 333 insertions(+), 140 deletions(-)
+ 30 files changed, 369 insertions(+), 140 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -85,6 +85,9 @@
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 7e6aaded The export packs carry the T0243 state with PR #227
+HISTORICAL: d955dde7 Governance: T0243 names PR #227
+HISTORICAL: 8d516c35 The change manifest covers the export packs
 HISTORICAL: b45890c6 The export packs carry the T0243 state
 HISTORICAL: d9187bc0 The change manifest records the PRE-LIVE mission delivery
 HISTORICAL: 64fb34c5 Governance: D67 and T0243 record the PRE-LIVE mission policy and the appliance and Central deployment
