@@ -188,6 +188,7 @@ test("publishing sends the revision the operator believed was live", async ({ pa
   await page.goto("/pms-interfaces");
   await openSheet(page, "History");
 
+  await page.getByRole("button", { name: /^Version 2/ }).click();
   await page.getByRole("button", { name: "Put version 2 live" }).click();
   const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
   await confirm.getByLabel("Reason").selectOption("ENDPOINT_CHANGE");
@@ -207,6 +208,7 @@ test("a concurrent publication is shown as a refusal, not as success", async ({ 
   await page.goto("/pms-interfaces");
   await openSheet(page, "History");
 
+  await page.getByRole("button", { name: /^Version 2/ }).click();
   await page.getByRole("button", { name: "Put version 2 live" }).click();
   const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
   await confirm.getByLabel("Confirm your password").fill("operator-pw");
@@ -294,7 +296,7 @@ test("source conflicts name both interfaces by their labels", async ({ page }) =
 
   await expect(page.getByText("Main PMS")).toBeVisible();
   await expect(page.getByText("Spa PMS")).toBeVisible();
-  await expect(page.getByText("high", { exact: true })).toBeVisible();
+  await expect(page.getByText("High", { exact: true })).toBeVisible();
 });
 
 test("resolution evidence summarises outcomes and names no guest", async ({ page }) => {
@@ -346,6 +348,7 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
 
   await page.goto("/pms-interfaces");
   await openSheet(page, "History");
+  await page.getByRole("button", { name: /^Version 2/ }).click();
   await page.getByRole("button", { name: "Put version 2 live" }).click();
   const confirm = page.getByRole("dialog", { name: /Put version 2 live/ });
   await expect(confirm.getByLabel("Reason")).toBeVisible();
@@ -357,6 +360,7 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
   await installBackend(page, { mutations: mutations2, publishStatus: 409 });
   await page.goto("/pms-interfaces");
   await openSheet(page, "History");
+  await page.getByRole("button", { name: /^Version 2/ }).click();
   await page.getByRole("button", { name: "Put version 2 live" }).click();
   const refused = page.getByRole("dialog", { name: /Put version 2 live/ });
   await refused.getByLabel("Confirm your password").fill("pw");

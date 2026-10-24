@@ -167,7 +167,7 @@ test("stays list shows the stay and its occupants and room charge state on deman
   await page.goto("/stays");
   await page.getByLabel("Filter by status").selectOption("");
   await expect(page.getByText("R900")).toBeVisible();
-  await page.getByRole("button", { name: "View" }).click();
+  await page.getByRole("button", { name: /^View: stay/ }).click();
   await expect(page.getByText("Byron, Ada")).toBeVisible();
   await expect(page.getByRole("region", { name: "Room charge" }).getByText("The guest is not in house")).toBeVisible();
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
