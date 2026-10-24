@@ -5,12 +5,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { DoorClosed, ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { api, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { RoomSignInReadinessCallout, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardBody, SectionCard } from "@/components/ui/card";
+import { StatusBadge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -29,8 +29,8 @@ const ROOM_SIGN_IN_OPTIONS: { value: string; label: string; hint: string }[] = [
     label: "Room number + any one of: first name, surname or reservation number (recommended)",
     hint:
       "The guest types their room number, then one more detail in a single box — their first name, their " +
-      "surname or their reservation number. They are not asked which one. If the value matches more than one " +
-      "guest in that room, sign-in is refused rather than guessing between them.",
+      "surname or their reservation number, without being asked which. A value matching more than one guest " +
+      "in the room is refused rather than guessed.",
   },
   {
     value: "room_lastname",
@@ -96,8 +96,6 @@ export default function RoomSignInPage() {
 
   const header = (
     <PageHeader
-      icon={<DoorClosed />}
-      eyebrow="Hotel"
       title="Room sign-in"
       description="What a guest types besides their room number when signing in to the Wi-Fi."
       help={
@@ -158,36 +156,32 @@ export default function RoomSignInPage() {
       {pms.enabled && <RoomSignInReadinessCallout readiness={readiness} />}
 
       <Card>
-        <CardHeader className="items-start">
-          <div className="min-w-0 space-y-1.5">
-            <CardTitle>Offered on the Client Portal</CardTitle>
-            <CardDescription>
+        <CardBody className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-emphasis">Offered on the Client Portal</span>
+              <StatusBadge tone={pms.enabled ? "ok" : "default"}>{pms.enabled ? "On" : "Off"}</StatusBadge>
+            </div>
+            <p className="text-xs text-muted-foreground">
               {pms.enabled
                 ? "Guests can sign in with their room number."
                 : "Room sign-in is switched off. The choice below is kept and applies once it is switched on."}
-            </CardDescription>
+            </p>
           </div>
-          <Badge tone={pms.enabled ? "ok" : "default"} dot={!!pms.enabled}>{pms.enabled ? "On" : "Off"}</Badge>
-        </CardHeader>
-        <CardBody>
           <Link
             href="/sign-in-methods"
-            className="inline-flex items-center gap-0.5 text-sm text-primary underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-0.5 text-xs font-medium text-primary hover:underline"
           >
             Switch it on or off in Client access → Sign-in methods <ArrowUpRight className="size-3.5" aria-hidden />
           </Link>
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="min-w-0 space-y-1.5">
-            <CardTitle>What the guest types</CardTitle>
-            <CardDescription>The room number, plus one detail from their reservation.</CardDescription>
-          </div>
-          {busy && <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>}
-        </CardHeader>
-        <CardBody>
+      <SectionCard
+        title="What the guest types"
+        description="The room number, plus one detail from their reservation."
+        actions={busy ? <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span> : undefined}
+      >
           <fieldset className="space-y-3">
             <legend className="sr-only">What the guest types, besides the room number</legend>
             {modeIsLegacy && (
@@ -216,8 +210,7 @@ export default function RoomSignInPage() {
               <Link href="/pms-routing" className="text-primary underline underline-offset-2 hover:decoration-2">PMS routing</Link>.
             </p>
           </fieldset>
-        </CardBody>
-      </Card>
+      </SectionCard>
     </PageShell>
   );
 }

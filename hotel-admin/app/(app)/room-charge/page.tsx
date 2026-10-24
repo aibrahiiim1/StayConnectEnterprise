@@ -13,19 +13,21 @@ import {
   postingTargetLabel, saveErrorMessage,
 } from "@/lib/payment-admin";
 import { formatDate } from "@/lib/utils";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardDescription, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { DescriptionList } from "@/components/ui/data";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DialogForm } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input, InputGroup, Textarea } from "@/components/ui/input";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows } from "@/components/ui/misc";
 import { NotAvailable, ReadOnlyNotice } from "@/components/ui/patterns";
-import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { ArrowUpRight, BedDouble, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ShieldCheck, Undo2 } from "lucide-react";
 import { CodeList, CodeText } from "../payment-methods/codes";
 import { RoomChargeLiveNotice } from "@/components/room-charge-live-notice";
 
@@ -85,8 +87,6 @@ export default function RoomChargePage() {
 
   const header = (
     <PageHeader
-      icon={<BedDouble />}
-      eyebrow="Hotel"
       title="Room charge"
       description="Approve a PMS interface so verified guests can charge an Internet package to their room."
       help={
@@ -158,23 +158,20 @@ export default function RoomChargePage() {
       )}
       <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardHeader className="items-start">
-          <div className="min-w-0 space-y-1">
-            <CardTitle>PMS interfaces</CardTitle>
-            <CardDescription>
-              Room charge is supported on FIAS interfaces.{" "}
-              <Link href="/payment-methods" className="inline-flex items-center gap-0.5 text-primary underline-offset-4 hover:underline">
-                Payment methods <ArrowUpRight className="size-3.5" aria-hidden />
-              </Link>
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <TableWrap>
+      <SectionCard
+        flush
+        title="PMS interfaces"
+        description="Room charge is supported on FIAS interfaces."
+        actions={
+          <Link href="/payment-methods" className="inline-flex items-center gap-0.5 text-xs font-medium text-primary hover:underline">
+            Payment methods <ArrowUpRight className="size-3.5" aria-hidden />
+          </Link>
+        }
+      >
           {interfaces.length === 0 ? (
-            <p className="px-5 py-4 text-sm text-muted-foreground">No PMS interface exists yet. Add one under Hotel → PMS connection.</p>
+            <EmptyState size="sm" title="No PMS interface exists yet" hint="Add one under Hotel → PMS connection." />
           ) : (
-            <Table>
+            <Table label="PMS interfaces">
               <THead>
                 <TR>
                   <TH>Interface</TH>
@@ -182,7 +179,7 @@ export default function RoomChargePage() {
                   <TH>Currency</TH>
                   <TH>Posting target</TH>
                   <TH>Approved</TH>
-                  {isSiteAdmin && <TH className="text-right">Action</TH>}
+                  {isSiteAdmin && <TH className="text-end"><span className="sr-only">Action</span></TH>}
                 </TR>
               </THead>
               <TBody>
@@ -196,7 +193,7 @@ export default function RoomChargePage() {
                     </TD>
                     <TD>
                       {i.ready ? (
-                        <Badge tone="ok" dot>Ready</Badge>
+                        <StatusBadge tone="ok">Ready</StatusBadge>
                       ) : (
                         <div className="space-y-1">
                           <Badge tone={i.connector_kind === FIAS ? "warn" : "default"}>Not ready</Badge>
@@ -204,7 +201,7 @@ export default function RoomChargePage() {
                         </div>
                       )}
                     </TD>
-                    <TD className="font-mono">{i.financial_base_currency ?? "—"}</TD>
+                    <TD nowrap className="font-mono">{i.financial_base_currency ?? "—"}</TD>
                     <TD>{postingTargetLabel(i.posting_target_model)}</TD>
                     <TD className="text-xs">
                       {i.approved_at ? (
@@ -219,7 +216,7 @@ export default function RoomChargePage() {
                       ) : "—"}
                     </TD>
                     {isSiteAdmin && (
-                      <TD className="text-right">
+                      <TD className="whitespace-nowrap text-end">
                         {i.connector_kind === FIAS ? (
                           <Button
                             size="xs"
@@ -239,8 +236,7 @@ export default function RoomChargePage() {
               </TBody>
             </Table>
           )}
-        </TableWrap>
-      </Card>
+      </SectionCard>
 
       {interfaces.filter((i) => i.connector_kind === FIAS && i.financial_mirror).map((i) => (
         <GuestListProofCard key={`proof-${i.pms_interface_id}`} iface={i} canChange={isSiteAdmin} onChange={() => setMirrorChange(i)} />
@@ -330,7 +326,7 @@ function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
   return (
     <Card data-testid="room-charge-checklist">
       <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 space-y-0.5">
           <CardTitle>Room charge is not offered to clients yet</CardTitle>
           <CardDescription>
             Your configuration is saved. Until every required step below is done, clients do not see Room charge and
@@ -338,16 +334,16 @@ function SetupChecklist({ interfaces }: { interfaces: OnboardingInterface[] }) {
           </CardDescription>
         </div>
       </CardHeader>
-      <ol className="space-y-3 px-5 pb-5">
+      <ol className="divide-y divide-border">
         {steps.map((st, n) => (
-          <li key={st.title} className="flex gap-3">
-            <span className="mt-0.5 w-28 shrink-0">
+          <li key={st.title} className="flex flex-col gap-1.5 px-5 py-3 sm:flex-row sm:gap-3">
+            <span className="shrink-0 sm:w-28 sm:pt-0.5">
               {st.done ? (
-                <Badge tone="ok" dot>Done</Badge>
+                <StatusBadge tone="ok">Done</StatusBadge>
               ) : st.optional ? (
                 <Badge tone="default">Recommended</Badge>
               ) : (
-                <Badge tone="warn">Needed</Badge>
+                <StatusBadge tone="warn">Needed</StatusBadge>
               )}
             </span>
             <div className="min-w-0">
@@ -480,19 +476,17 @@ function AnswerMeaningsCard({
   const meanings = iface.answer_meanings ?? [];
   const name = iface.display_label || iface.pms_interface_id;
   return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle>Answer meanings (vendor-confirmed) — {name}</CardTitle>
-          <CardDescription>
-            Protel answers every room charge with a status. A status below counts as &ldquo;nothing was posted&rdquo; only
-            once the vendor has confirmed it for this interface. An unconfirmed status, and UR always, is treated as
-            unknown: the charge is held for Manual review, never counted as posted or failed. Recording these does not
-            switch posting on or off.
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <TableWrap>
+    <SectionCard
+      flush
+      title={`Answer meanings (vendor-confirmed) — ${name}`}
+      description={
+        <>
+          A status counts as &ldquo;nothing was posted&rdquo; only once the vendor has confirmed it for this interface.
+          An unconfirmed status, and UR always, is treated as unknown: the charge is held for Manual review, never
+          counted as posted or failed. Recording these does not switch posting on or off.
+        </>
+      }
+    >
         {meanings.length === 0 ? (
           <p className="px-5 py-4 text-sm text-muted-foreground">The answer meanings could not be read for this interface.</p>
         ) : (
@@ -502,7 +496,7 @@ function AnswerMeaningsCard({
                 <TH>Answer</TH>
                 <TH>When confirmed</TH>
                 <TH>State</TH>
-                {canChange && <TH className="text-right">Action</TH>}
+                {canChange && <TH className="text-end"><span className="sr-only">Action</span></TH>}
               </TR>
             </THead>
             <TBody>
@@ -515,7 +509,7 @@ function AnswerMeaningsCard({
                   <TD className="max-w-md text-sm">{ANSWER_EFFECT_WORDS[m.effect] ?? m.effect}</TD>
                   <TD className="text-xs">
                     {m.confirmed ? (
-                      <Badge tone="ok" dot>Confirmed</Badge>
+                      <StatusBadge tone="ok">Confirmed</StatusBadge>
                     ) : (
                       <Badge tone="default">Not confirmed — unknown</Badge>
                     )}
@@ -528,7 +522,7 @@ function AnswerMeaningsCard({
                     {m.evidence && <div className="mt-0.5 break-words text-muted-foreground">{m.evidence}</div>}
                   </TD>
                   {canChange && (
-                    <TD className="text-right">
+                    <TD className="whitespace-nowrap text-end">
                       {m.confirmed ? (
                         <Button
                           size="xs"
@@ -555,8 +549,7 @@ function AnswerMeaningsCard({
             </TBody>
           </Table>
         )}
-      </TableWrap>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -683,12 +676,12 @@ function GuestListProofCard({ iface, canChange, onChange }: { iface: OnboardingI
   return (
     <Card data-testid="guest-list-proof">
       <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 space-y-0.5">
           <CardTitle>Guest list proof for room charge — {iface.display_label || "Protel"}</CardTitle>
           <CardDescription>
-            Room charge uses the guest list only while Protel has recently sent it complete. A quiet hotel is fine:
-            OneGate asks Protel for a fresh complete list by itself after {hoursWords(m.max_age_seconds / 2)}. If no
-            complete list arrives within the limit, room charge pauses until one does.
+            Room charge uses the guest list only while Protel has recently sent it complete. OneGate asks Protel for a
+            fresh complete list by itself after {hoursWords(m.max_age_seconds / 2)}; if none arrives within the limit,
+            room charge pauses.
           </CardDescription>
         </div>
         {canChange && (
@@ -697,22 +690,29 @@ function GuestListProofCard({ iface, canChange, onChange }: { iface: OnboardingI
           </Button>
         )}
       </CardHeader>
-      <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
-        <div>
-          <div className="text-xs text-muted-foreground">Last complete guest list from Protel</div>
-          <div className="text-sm font-medium">
-            {ago(last)} {last && <span className="text-xs font-normal text-muted-foreground">({formatDate(last)})</span>}
-          </div>
-          <div className="mt-1">
-            {withinLimit ? <Badge tone="ok" dot>Within the limit</Badge> : <Badge tone="warn">Older than the limit — room charge paused</Badge>}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-muted-foreground">Maximum age</div>
-          <div className="text-sm font-medium">
-            {hoursWords(m.max_age_seconds)} {m.is_default && <span className="text-xs font-normal text-muted-foreground">(default)</span>}
-          </div>
-        </div>
+      <div className="px-5 py-3">
+        <DescriptionList
+          columns={2}
+          items={[
+            {
+              label: "Last complete guest list",
+              value: (
+                <>
+                  {ago(last)} {last && <span className="text-xs text-muted-foreground">({formatDate(last)})</span>}
+                  <div className="mt-1">
+                    {withinLimit
+                      ? <StatusBadge tone="ok">Within the limit</StatusBadge>
+                      : <StatusBadge tone="warn">Older than the limit — room charge paused</StatusBadge>}
+                  </div>
+                </>
+              ),
+            },
+            {
+              label: "Maximum age",
+              value: <>{hoursWords(m.max_age_seconds)} {m.is_default && <span className="text-xs text-muted-foreground">(default)</span>}</>,
+            },
+          ]}
+        />
       </div>
     </Card>
   );
@@ -761,7 +761,7 @@ function MirrorAgeDialog({ iface, onClose, onSaved }: { iface: OnboardingInterfa
       onSubmit={submit}
     >
       <Field label="Maximum age (hours)" required hint="Between 1 and 24 hours. 4 hours is the default.">
-        <Input type="number" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Maximum age in hours" />
+        <InputGroup suffix="hours" className="w-40"><Input type="number" inputMode="numeric" min={1} max={24} step={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Maximum age in hours" /></InputGroup>
       </Field>
       <Field label="Reason" required hint="Recorded in the activity log.">
         <Input value={reason} maxLength={REASON_MAX} onChange={(e) => setReason(e.target.value)} />
