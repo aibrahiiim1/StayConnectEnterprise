@@ -4,13 +4,105 @@ package pmsd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
 )
+
+func liveRows(t *testing.T, pool *pgxpool.Pool, s seeded) int {
+	t.Helper()
+	return scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND admission_kind='LIVE'`, s.tenant, s.site, s.iface)
+}
+
+// Protel re-sends a record it already sent; the identity is a keyed digest of the whole record, so the
+// repeat collides with se_live_identity. It must insert nothing, report the existing row and never be
+// applied again, while RESYNC staging keeps rejecting a repeat within one generation.
+func TestIntegration_LiveRetransmissionIsIdempotent(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	gen, err := repo.AllocateRuntimeGeneration(ctx, GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := testAdapter()
+	gi := "GI|RN1408|G#R810|GNSmith|GFJohn|GA260101|GD260105|"
+	row := func(rec string) InboxRow {
+		ev := mustEvent(t, a, rec)
+		r := inbox(s, gen, ev.ExternalEventIdentity, string(ev.RecordType))
+		r.Payload = eventPayloadJSON(ev)
+		return r
+	}
+
+	first, err := repo.AdmitLiveEvent(ctx, row(gi))
+	if err != nil {
+		t.Fatalf("first admit: %v", err)
+	}
+	again, err := repo.AdmitLiveEvent(ctx, row(gi))
+	var dup *DuplicateLiveEventError
+	if !errors.As(err, &dup) || dup.ExistingID != first || again != first || dup.ProcessingStatus != "PENDING" {
+		t.Fatalf("repeat = (%q, %v), want the existing row %q reported PENDING", again, err, first)
+	}
+	if n := liveRows(t, pool, s); n != 1 {
+		t.Fatalf("live rows = %d, want 1", n)
+	}
+
+	// Any field difference is a different record.
+	other, err := repo.AdmitLiveEvent(ctx, row("GI|RN1408|G#R810|GNSmith|GFJon|GA260101|GD260105|"))
+	if err != nil || other == first {
+		t.Fatalf("a changed record must be a new row: (%q, %v)", other, err)
+	}
+	if n := liveRows(t, pool, s); n != 2 {
+		t.Fatalf("live rows = %d, want 2", n)
+	}
+
+	// Once applied, a repeat is still only reported; nothing new waits to be applied.
+	pr := stayengine.NewProcessor(pool)
+	for i := 0; i < 2; i++ {
+		if ok, err := pr.ProcessNext(ctx, s.tenant, s.site, s.iface); err != nil || !ok {
+			t.Fatalf("process %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT processing_status FROM iam_v2.stay_events WHERE id=$1`, first).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AdmitLiveEvent(ctx, row(gi)); !errors.As(err, &dup) || dup.ProcessingStatus != status || status == "PENDING" {
+		t.Fatalf("repeat after processing = %v (status %q), want a duplicate reporting %q", err, dup.ProcessingStatus, status)
+	}
+	if n := liveRows(t, pool, s); n != 2 {
+		t.Fatalf("live rows = %d after the repeat, want 2", n)
+	}
+	if ok, err := pr.ProcessNext(ctx, s.tenant, s.site, s.iface); err != nil || ok {
+		t.Fatalf("a repeat left something to apply: ok=%v err=%v", ok, err)
+	}
+
+	// RESYNC staging is unchanged: a repeat inside one generation is still refused by se_resync_identity.
+	r := row(gi)
+	r.ResyncGeneration = 1
+	if _, err := repo.StageResyncEvent(ctx, r); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	_, err = repo.StageResyncEvent(ctx, r)
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "23505" || pg.ConstraintName != "se_resync_identity" {
+		t.Fatalf("resync repeat = %v, want 23505 on se_resync_identity", err)
+	}
+	if Classify(err) != CodeDBStatementFailed {
+		t.Fatalf("Classify = %q", Classify(err))
+	}
+}
 
 // Needs a disposable PostgreSQL 16 via PHASE3_TEST_DSN (scripts/pmsd-pg-integration.sh). Fails if the DSN is
 // set but the database is unusable; skips only when no DSN is configured.
@@ -392,8 +484,9 @@ func TestIntegration_LiveVsResyncIdempotency(t *testing.T) {
 	if _, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-A", "GI")); err != nil {
 		t.Fatalf("first live admit: %v", err)
 	}
-	if _, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-A", "GI")); err == nil {
-		t.Fatal("duplicate LIVE identity must be rejected")
+	var dup *DuplicateLiveEventError
+	if _, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-A", "GI")); !errors.As(err, &dup) {
+		t.Fatalf("duplicate LIVE identity must insert nothing and report the existing row, got %v", err)
 	}
 	// same identity as RESYNC (generation 1) is allowed (separate namespace)
 	r1 := inbox(s, gen, "id-A", "GI")

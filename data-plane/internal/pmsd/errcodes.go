@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Code is the closed vocabulary of error codes pmsd may persist, label or log. Nothing derived from err.Error()
@@ -36,6 +38,14 @@ const (
 	CodeOutboundBlocked     Code = "OUTBOUND_FRAME_BLOCKED"
 	CodeUnclassified        Code = "UNCLASSIFIED" // never carries the raw text
 
+	// Transport endings are named by what this side observed on the socket, never by who caused it: a reset
+	// may come from the PMS or from any device on the path.
+	CodeTransportRemoteClosed Code = "TRANSPORT_REMOTE_CLOSED"  // read returned EOF: an orderly close (FIN) arrived
+	CodeTransportReset        Code = "TRANSPORT_RESET"          // ECONNRESET, ECONNABORTED or EPIPE
+	CodeTransportTimeout      Code = "TRANSPORT_TIMEOUT"        // a read or write deadline set by pmsd expired
+	CodeTransportClosedLocal  Code = "TRANSPORT_CLOSED_LOCALLY" // pmsd had already closed its own socket
+	CodeDBStatementFailed     Code = "DB_STATEMENT_FAILED"      // the database rejected a statement (SQLSTATE logged)
+
 	CodeProviderAuth        Code = "PROVIDER_AUTH_FAILED"      // 401/403 or a refused token request
 	CodeProviderRateLimited Code = "PROVIDER_RATE_LIMITED"     // 429 persisted past the bounded retries
 	CodeProviderTimeout     Code = "PROVIDER_TIMEOUT"          // request timeout / 408 / 504 after retries
@@ -53,6 +63,8 @@ var codeSet = map[Code]struct{}{
 	CodeContextCanceled: {}, CodePanicRecovered: {}, CodeOutboundBlocked: {}, CodeUnclassified: {},
 	CodeProviderAuth: {}, CodeProviderRateLimited: {}, CodeProviderTimeout: {}, CodeProviderUnavailable: {},
 	CodeProviderResponse: {}, CodeProviderRejected: {},
+	CodeTransportRemoteClosed: {}, CodeTransportReset: {}, CodeTransportTimeout: {}, CodeTransportClosedLocal: {},
+	CodeDBStatementFailed: {},
 }
 
 func (c Code) Valid() bool { _, ok := codeSet[c]; return ok }
@@ -88,6 +100,14 @@ func Classify(err error) Code {
 	var te *typedErr
 	if errors.As(err, &te) {
 		return te.code
+	}
+	var tr *transportErr
+	if errors.As(err, &tr) {
+		return tr.code
+	}
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) {
+		return CodeDBStatementFailed
 	}
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
