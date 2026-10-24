@@ -1006,6 +1006,20 @@
       "does_not_authorize": "Go-Live or any official guest-production use; Central deployment; a destructive live restore; a legal GDPR claim; any change to the backup architecture, the dual Erasure Ledger or the financial safeguards.",
       "implementation": "Branch delivery/restore-retention-failsafe, PR #221, recorded by T0241. scd restore_retention.go, restore.go, set_aside_sweep.go, backup_cli.go; restore drill scenarios in restore_retention_integration_test.go; docs/BACKUP_AND_RESTORE.md (Retention and a restore).",
       "supersedes_in_part": "D65 (the restore's retention step ran after the swap and could fail without stopping the restore)"
+    },
+    {
+      "id": "D67",
+      "decided_on": "2026-10-24",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-24",
+      "status": "ACTIVE",
+      "title": "PRE-LIVE MISSIONS RUN END TO END ACROSS THE APPLIANCE AND CENTRAL (2026-10-24). A PRE-LIVE mission the Product Owner requests is the full authorization for executing it end to end on the PRE-LIVE appliance (172.21.60.25) and Central (172.21.96.196): deployments, database migrations, test-database reset or reconstruction, test-account resets, test-licence reissuance, directly related repairs, verification, documentation and governance synchronization, and Git delivery including push, pull request and the protected merge with the po-merge-approved label on that mission's tested head. PRE-LIVE data is disposable: preserving test accounts, historical test records or test licences is not a reason to interrupt a mission, and they are recreated when needed; a real person's account is not a test account. Routine technical decisions, migration or deployment approval, test-data loss and recoverable failures inside PRE-LIVE do not interrupt the mission, which returns one final report and never ends at READY FOR APPROVAL for an action it already authorized. Unchanged: master protection, the po-merge-authorization check and its per-head label, tests, CI, security and validation. Recorded in CLAUDE.md section 0G and docs/PO_LED_DELIVERY_MODEL.md section 9.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-24: 'Complete the current PRE-LIVE deployment, including Central, and establish the Product Owner's permanent PRE-LIVE execution policy', which explicitly authorized full end-to-end execution for user-requested PRE-LIVE missions across the Appliance and Central, Central deployment from current master including migrations 0052-0056, and recording the decision in the authoritative project policies.",
+      "does_not_authorize": "Go-Live; any effect on real production users, external financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside PRE-LIVE; weakening master protection, tests, CI, security or validation; Central deployment as part of a routine FAST change under the standing per-change PRE-LIVE authorization; touching a real person's account in place of a test account.",
+      "implementation": "Branch delivery/prelive-central-and-policy, recorded by T0243. CLAUDE.md section 0G; docs/PO_LED_DELIVERY_MODEL.md section 9 and the PRE-LIVE and controlled-boundary paragraphs; deploy/scripts/central-build.sh (ctrlapi archived as executable when the release is built on Windows).",
+      "supersedes_in_part": "D42 (the PRE-LIVE paragraph's 'No Central unless explicitly authorized' now reads together with section 9 for Product-Owner-requested PRE-LIVE missions)"
     }
   ]
 }
