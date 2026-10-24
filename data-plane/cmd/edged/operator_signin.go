@@ -332,6 +332,16 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		MustChangePassword: mustChange, PasswordFP: passwordFingerprint(hash)})
 }
 
+// restartSessions ends every session and pending sign-in of the operator, including any held elsewhere with a
+// stolen cookie, and gives the caller a fresh session that keeps its original start for the session limits.
+func (s *server) restartSessions(w http.ResponseWriter, sess *session) {
+	s.sessions.destroyOperator(sess.OperatorID)
+	s.pending.dropOperator(sess.OperatorID)
+	fresh := &session{OperatorID: sess.OperatorID, Email: sess.Email, DisplayName: sess.DisplayName, Roles: sess.Roles,
+		CreatedAt: sess.CreatedAt}
+	s.setSessionCookie(w, s.sessions.create(fresh))
+}
+
 func (s *server) setSessionCookie(w http.ResponseWriter, tok string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
@@ -513,11 +523,7 @@ func (s *server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wasForced := sess.MustChangePassword
-	s.sessions.destroyOperator(sess.OperatorID)
-	s.pending.dropOperator(sess.OperatorID)
-	fresh := &session{OperatorID: sess.OperatorID, Email: sess.Email, DisplayName: sess.DisplayName, Roles: sess.Roles,
-		CreatedAt: sess.CreatedAt}
-	s.setSessionCookie(w, s.sessions.create(fresh))
+	s.restartSessions(w, sess)
 	s.audit(r, "operator.password_changed", "operator", sess.OperatorID, map[string]any{
 		"self": true, "was_required": wasForced, "source_ip": clientIP(r),
 	})

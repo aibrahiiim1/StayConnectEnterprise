@@ -45,8 +45,9 @@ func TestIntegrationMFA_OptionalPerAccountAndEnforcedOnceOn(t *testing.T) {
 	if s1.code != 200 || s1.body["secret"] == "" || s1.body["otpauth_uri"] == nil {
 		t.Fatalf("set-up = %d %s", s1.code, s1.raw)
 	}
-	if r := sf.passwordStep(t, sf.email, sf.password, ip); r.body["second_step"] != "none" || r.cookie == "" {
-		t.Fatalf("an unconfirmed set-up changed sign-in: %s", r.raw)
+	elsewhere := sf.passwordStep(t, sf.email, sf.password, ip)
+	if elsewhere.body["second_step"] != "none" || elsewhere.cookie == "" {
+		t.Fatalf("an unconfirmed set-up changed sign-in: %s", elsewhere.raw)
 	}
 	s2 := sf.call(t, "POST", "/auth/mfa/setup", ip, sess, map[string]any{"password": sf.password}, nil)
 	if s2.code != 200 || s2.body["secret"] == s1.body["secret"] {
@@ -57,8 +58,18 @@ func TestIntegrationMFA_OptionalPerAccountAndEnforcedOnceOn(t *testing.T) {
 	}
 	done := sf.call(t, "POST", "/auth/mfa/confirm", ip, sess, map[string]any{"code": sf.mfa.codeFor(sf.operator)}, nil)
 	codes, _ := done.body["recovery_codes"].([]any)
-	if done.code != 200 || len(codes) != 10 {
+	if done.code != 200 || len(codes) != 10 || done.cookie == "" {
 		t.Fatalf("confirming the app = %d %s", done.code, done.raw)
+	}
+	// Turning it on ends every other session, including one a stolen cookie could hold, and renews the caller's.
+	for name, old := range map[string]string{"the caller's previous": sess, "another": elsewhere.cookie} {
+		if r := sf.call(t, "GET", "/auth/whoami", ip, old, nil, nil); r.code != 401 {
+			t.Fatalf("%s session survived turning two-step sign-in on: %d", name, r.code)
+		}
+	}
+	sess = done.cookie
+	if r := sf.call(t, "GET", "/auth/whoami", ip, sess, nil, nil); r.code != 200 {
+		t.Fatalf("the renewed session = %d %s", r.code, r.raw)
 	}
 	if r := sf.call(t, "POST", "/auth/mfa/confirm", ip, sess, map[string]any{"code": sf.mfa.codeFor(sf.operator)}, nil); r.code != 409 {
 		t.Fatalf("a confirmed authenticator was confirmed again: %d %s", r.code, r.raw)
@@ -118,8 +129,9 @@ func TestIntegrationMFA_OptionalPerAccountAndEnforcedOnceOn(t *testing.T) {
 	sf.age(t, scopeMFA, sf.operator, time.Minute)
 
 	// Turning it off needs the password and a code from the second factor.
+	cur := ok.cookie
 	off := func(body map[string]any) resp {
-		return sf.call(t, "POST", "/auth/mfa/disable", ip, ok.cookie, body, nil)
+		return sf.call(t, "POST", "/auth/mfa/disable", ip, cur, body, nil)
 	}
 	if r := off(map[string]any{"password": sf.password}); r.code != 400 || r.body["error"] != "code_required" {
 		t.Fatalf("off without a code = %d %s", r.code, r.raw)
@@ -135,9 +147,14 @@ func TestIntegrationMFA_OptionalPerAccountAndEnforcedOnceOn(t *testing.T) {
 		t.Fatal("a refused request turned two-step sign-in off")
 	}
 	sf.age(t, scopeMFA, sf.operator, time.Minute)
-	if r := off(map[string]any{"password": sf.password, "code": codes[1].(string)}); r.code != 200 || r.body["enrolled"] != false {
-		t.Fatalf("off with the password and a recovery code = %d %s", r.code, r.raw)
+	offed := off(map[string]any{"password": sf.password, "code": codes[1].(string)})
+	if offed.code != 200 || offed.body["enrolled"] != false || offed.cookie == "" {
+		t.Fatalf("off with the password and a recovery code = %d %s", offed.code, offed.raw)
 	}
+	if r := sf.call(t, "GET", "/auth/whoami", ip, cur, nil, nil); r.code != 401 {
+		t.Fatalf("the previous session survived turning two-step sign-in off: %d", r.code)
+	}
+	cur = offed.cookie
 	var disabled int
 	_ = sf.pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action='operator.mfa_disabled' AND target_id=$1
 		AND payload->>'second_step'='recovery_code' AND ts >= $2`, sf.operator, since).Scan(&disabled)
@@ -160,7 +177,7 @@ func TestIntegrationMFA_WrongCodesLockLikeWrongPasswords(t *testing.T) {
 	if r.code != 200 {
 		t.Fatalf("set-up sign-in = %d %s", r.code, r.raw)
 	}
-	sf.enableMFA(t, r.cookie, sf.operator, sf.password, ip)
+	_, _ = sf.enableMFA(t, r.cookie, sf.operator, sf.password, ip)
 	p := sf.passwordStep(t, sf.email, sf.password, ip)
 	for i := 1; i <= 5; i++ {
 		r := sf.codeStep(t, p.pending, "000000", ip)
@@ -291,7 +308,7 @@ func TestIntegrationMFA_AnAdministratorResetsAColleagueNotThemselves(t *testing.
 	if v := listed(); v != false {
 		t.Fatalf("the list shows two-step sign-in on before it was turned on: %v", v)
 	}
-	sf.enableMFA(t, cs.cookie, colleague, "colleague-password-2026", ip)
+	_, _ = sf.enableMFA(t, cs.cookie, colleague, "colleague-password-2026", ip)
 	if v := listed(); v != true {
 		t.Fatalf("the list does not show the colleague's app: %v", v)
 	}
@@ -333,9 +350,9 @@ func TestIntegrationMFA_NewRecoveryCodesNeedACurrentAuthenticatorCode(t *testing
 	if r := sf.call(t, "POST", "/auth/mfa/recovery-codes", ip, sess.cookie, map[string]any{"password": sf.password, "code": "123456"}, nil); r.code != 409 {
 		t.Fatalf("new codes without two-step sign-in on = %d %s", r.code, r.raw)
 	}
-	sf.enableMFA(t, sess.cookie, sf.operator, sf.password, ip)
+	_, fresh := sf.enableMFA(t, sess.cookie, sf.operator, sf.password, ip)
 	ask := func(body map[string]any) resp {
-		return sf.call(t, "POST", "/auth/mfa/recovery-codes", ip, sess.cookie, body, nil)
+		return sf.call(t, "POST", "/auth/mfa/recovery-codes", ip, fresh, body, nil)
 	}
 	if r := ask(map[string]any{"password": sf.password}); r.code != 400 || r.body["error"] != "code_required" {
 		t.Fatalf("without a code = %d %s", r.code, r.raw)
@@ -380,7 +397,7 @@ func TestIntegrationMFA_TheCodeStepReloadsTheAccount(t *testing.T) {
 	if first.code != 200 {
 		t.Fatalf("set-up sign-in = %d %s", first.code, first.raw)
 	}
-	sf.enableMFA(t, first.cookie, sf.operator, sf.password, ip)
+	_, _ = sf.enableMFA(t, first.cookie, sf.operator, sf.password, ip)
 
 	p := sf.passwordStep(t, sf.email, sf.password, ip)
 	if _, err := sf.pool.Exec(ctx, `DELETE FROM operator_roles WHERE operator_id=$1`, sf.operator); err != nil {

@@ -501,6 +501,7 @@ func (s *server) confirmOwnMFA(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("could not clear the code counter", "err", err)
 	}
 	s.audit(r, "operator.mfa_enrolled", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r)})
+	s.restartSessions(w, sess)
 	writeJSON(w, http.StatusOK, map[string]any{"enrolled": true, "recovery_codes": codes})
 }
 
@@ -556,7 +557,7 @@ func (s *server) disableOwnMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned off. Try again shortly.")
 		return
 	}
-	s.pending.dropOperator(sess.OperatorID)
+	s.restartSessions(w, sess)
 	if err := s.throttleClear(ctx, scopeMFA, sess.OperatorID); err != nil {
 		slog.Warn("could not clear the code counter", "err", err)
 	}

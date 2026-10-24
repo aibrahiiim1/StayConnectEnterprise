@@ -105,8 +105,9 @@ func TestTestToolsSignInWithOrWithoutTheCode(t *testing.T) {
 	if _, err := signIn(kr2); err != nil {
 		t.Fatalf("second sign-in (code): %v", err)
 	}
-	if sessions != 2 {
-		t.Fatalf("want 2 sessions, got %d", sessions)
+	// Password-only sign-in, the fresh session turning two-step on issues, and the code sign-in.
+	if sessions != 3 {
+		t.Fatalf("want 3 sessions, got %d", sessions)
 	}
 
 	empty, _ := opsignin.Open(filepath.Join(t.TempDir(), "none.json"))

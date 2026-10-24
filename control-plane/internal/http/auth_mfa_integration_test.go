@@ -278,6 +278,10 @@ func TestConsoleTwoStepManagementNeedsTheStepUp(t *testing.T) {
 	if st, b := do(cl, "GET", "/v1/auth/whoami", nil); st != 200 || b["operator_id"] != id {
 		t.Fatalf("whoami = %d %v", st, b)
 	}
+	elsewhere := client()
+	if st, b := do(elsewhere, "POST", "/v1/auth/login", creds); st != 200 || b["second_step"] != "none" {
+		t.Fatalf("a second password-only sign-in = %d %v", st, b)
+	}
 	if st, b := do(cl, "POST", "/v1/auth/mfa/setup", nil); st != 403 || b["error"] != "reauth_required" {
 		t.Fatalf("set-up without the step-up = %d %v", st, b)
 	}
@@ -297,6 +301,13 @@ func TestConsoleTwoStepManagementNeedsTheStepUp(t *testing.T) {
 	codes, _ := b["recovery_codes"].([]any)
 	if st != 200 || len(codes) != 10 {
 		t.Fatalf("confirm = %d %v", st, b)
+	}
+	// Turning it on ends every other session (a stolen cookie included); the caller continues on a fresh one.
+	if st, _ := do(elsewhere, "GET", "/v1/auth/whoami", nil); st != 401 {
+		t.Fatalf("another session survived turning two-step sign-in on: %d", st)
+	}
+	if st, _ := do(cl, "GET", "/v1/auth/whoami", nil); st != 200 {
+		t.Fatalf("the caller's renewed session = %d", st)
 	}
 
 	// The pending state opens nothing: not whoami, not the step-up, not the account routes.
@@ -328,8 +339,21 @@ func TestConsoleTwoStepManagementNeedsTheStepUp(t *testing.T) {
 	if st, b := do(other, "POST", "/v1/auth/mfa/disable", map[string]string{}); st != 400 || b["error"] != "code_required" {
 		t.Fatalf("off without a code = %d %v", st, b)
 	}
+	third := client()
+	if st, _ := do(third, "POST", "/v1/auth/login", creds); st != 200 {
+		t.Fatalf("third sign-in password step = %d", st)
+	}
+	if st, _ := do(third, "POST", "/v1/auth/login/code", map[string]string{"code": codes[1].(string)}); st != 200 {
+		t.Fatalf("third sign-in with a recovery code = %d", st)
+	}
 	if st, b := do(other, "POST", "/v1/auth/mfa/disable", map[string]string{"code": codes[0].(string)}); st != 200 || b["enrolled"] != false {
 		t.Fatalf("off = %d %v", st, b)
+	}
+	if st, _ := do(third, "GET", "/v1/auth/whoami", nil); st != 401 {
+		t.Fatalf("another session survived turning two-step sign-in off: %d", st)
+	}
+	if st, _ := do(other, "GET", "/v1/auth/whoami", nil); st != 200 {
+		t.Fatalf("the caller's renewed session after turning it off = %d", st)
 	}
 	if st, b := do(client(), "POST", "/v1/auth/login", creds); st != 200 || b["second_step"] != "none" {
 		t.Fatalf("after turning it off = %d %v", st, b)

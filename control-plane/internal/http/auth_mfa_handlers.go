@@ -143,6 +143,20 @@ func (d authDeps) loginCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d authDeps) openSession(w http.ResponseWriter, r *http.Request, op *auth.Operator, secondStep string) (*auth.Session, bool) {
+	sess, ok := d.issueSession(w, r, op)
+	if !ok {
+		return nil, false
+	}
+	if d.DB != nil {
+		_, _ = d.DB.Exec(r.Context(), `UPDATE operators SET last_login_at=now() WHERE id=$1`, op.ID)
+		audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "operator", ActorID: op.ID, TenantID: op.DefaultTenant,
+			Action: "auth.login_succeeded", TargetType: "operator", TargetID: op.ID,
+			IP: clientip.From(r), UserAgent: r.UserAgent(), Payload: map[string]any{"second_step": secondStep}})
+	}
+	return sess, true
+}
+
+func (d authDeps) issueSession(w http.ResponseWriter, r *http.Request, op *auth.Operator) (*auth.Session, bool) {
 	create := d.NewSession
 	if create == nil {
 		create = d.Store.Create
@@ -159,12 +173,6 @@ func (d authDeps) openSession(w http.ResponseWriter, r *http.Request, op *auth.O
 		api.Fail(w, r, http.StatusInternalServerError, api.CodeInternal, "session create failed")
 		return nil, false
 	}
-	if d.DB != nil {
-		_, _ = d.DB.Exec(r.Context(), `UPDATE operators SET last_login_at=now() WHERE id=$1`, op.ID)
-		audit.Emit(r.Context(), d.DB, audit.Entry{ActorType: "operator", ActorID: op.ID, TenantID: op.DefaultTenant,
-			Action: "auth.login_succeeded", TargetType: "operator", TargetID: op.ID,
-			IP: clientip.From(r), UserAgent: r.UserAgent(), Payload: map[string]any{"second_step": secondStep}})
-	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.SessionCookieName,
 		Value:    sess.Token,
@@ -175,6 +183,27 @@ func (d authDeps) openSession(w http.ResponseWriter, r *http.Request, op *auth.O
 		Expires:  sess.ExpiresAt,
 	})
 	return sess, true
+}
+
+// restartSessions ends every session of the operator, including any held elsewhere with a stolen cookie, after a
+// change to their second factor, and gives the caller a fresh one. The change itself is already committed, so a
+// failure here is logged and the caller keeps working; the other sessions still end through sessions_not_before.
+func (d authDeps) restartSessions(w http.ResponseWriter, r *http.Request, operatorID string) {
+	if d.DB == nil || d.Repo == nil {
+		return
+	}
+	if err := auth.EndOperatorSessions(r.Context(), d.DB, operatorID); err != nil {
+		slog.Error("two-step change: other sessions could not be ended", "err", err)
+		return
+	}
+	op, err := d.Repo.FindByID(r.Context(), operatorID)
+	if err != nil || op == nil {
+		slog.Error("two-step change: operator unreadable for a fresh session", "err", err)
+		return
+	}
+	if _, ok := d.issueSession(w, r, op); !ok {
+		slog.Error("two-step change: fresh session could not be issued")
+	}
 }
 
 func (d authDeps) mfaStatus(w http.ResponseWriter, r *http.Request) {
@@ -285,6 +314,7 @@ func (d authDeps) mfaConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.mfa_enrolled", "operator", s.OperatorID, nil)
+	d.restartSessions(w, r, s.OperatorID)
 	writeJSON(w, http.StatusOK, map[string]any{"enrolled": true, "recovery_codes": codes})
 }
 
@@ -320,5 +350,6 @@ func (d authDeps) mfaDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	audit.Op(r.Context(), d.DB, r, "auth.mfa_disabled", "operator", s.OperatorID, map[string]any{"second_step": method})
+	d.restartSessions(w, r, s.OperatorID)
 	writeJSON(w, http.StatusOK, map[string]any{"enrolled": false})
 }

@@ -167,7 +167,8 @@ func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
 
 // enableMFA turns two-step sign-in on for the session's operator the way the account page does, and answers the
 // recovery codes.
-func (sf *signinFixture) enableMFA(t *testing.T, cookie, operatorID, pw, ip string) []any {
+// enableMFA turns two-step sign-in on and returns the recovery codes and the fresh session that replaces cookie.
+func (sf *signinFixture) enableMFA(t *testing.T, cookie, operatorID, pw, ip string) ([]any, string) {
 	t.Helper()
 	sf.track(scopeMFA, operatorID)
 	sf.track(scopeReauth, operatorID)
@@ -176,10 +177,10 @@ func (sf *signinFixture) enableMFA(t *testing.T, cookie, operatorID, pw, ip stri
 	}
 	r := sf.call(t, "POST", "/auth/mfa/confirm", ip, cookie, map[string]any{"code": sf.mfa.codeFor(operatorID)}, nil)
 	codes, _ := r.body["recovery_codes"].([]any)
-	if r.code != 200 || len(codes) != 10 {
-		t.Fatalf("confirm = %d %s", r.code, r.raw)
+	if r.code != 200 || len(codes) != 10 || r.cookie == "" || r.cookie == cookie {
+		t.Fatalf("confirm = %d %s cookie=%q", r.code, r.raw, r.cookie)
 	}
-	return codes
+	return codes, r.cookie
 }
 
 func (sf *signinFixture) age(t *testing.T, scope, value string, d time.Duration) {
