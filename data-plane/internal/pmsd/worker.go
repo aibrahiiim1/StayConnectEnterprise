@@ -48,7 +48,7 @@ func (w *worker) run(ctx context.Context) {
 		} else if !warned {
 			warned = true
 			w.deps.log().Warn("pmsd: reconnect bounds unreadable; using compiled defaults",
-				"err", err, "interface", w.iface.ID)
+				append(safeErrAttrs(err), "interface", w.iface.ID)...)
 		}
 		w.attempt++
 		stable, err := w.ownAndServe(ctx)
@@ -314,13 +314,13 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 		if err := s.w.repo.RecordResyncCoverage(s.ctx, ResyncScope{s.ax()}, s.resyncGen,
 			s.covRooms, s.covRoster, s.covVacant, s.covConflicts); err != nil {
 			s.w.deps.log().Warn("pmsd: could not record what the sweep observed; reconciliation will defer",
-				"err", err, "generation", s.resyncGen)
+				append(safeErrAttrs(err), "generation", s.resyncGen)...)
 		}
 		s.covSeen = false
 	}
 	if out, err := s.w.repo.ReconcileRoster(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
 		s.w.deps.log().Warn("pmsd: automatic reconciliation could not run; the next complete sweep retries",
-			"err", err, "generation", s.resyncGen)
+			append(safeErrAttrs(err), "generation", s.resyncGen)...)
 	} else {
 		s.w.deps.log().Info("pmsd: automatic roster reconciliation",
 			"generation", s.resyncGen, "outcome", out.Outcome, "stays_closed", out.StaysClosed,

@@ -42,7 +42,7 @@ func expireDueReviews(ctx context.Context, a Assignment, repo Repo, deps *Deps) 
 
 	n, err := ex.ExpireDueReviews(ctx, a.TenantID, a.SiteID)
 	if err != nil {
-		deps.log().Warn("pmsd: review-expiry sweep could not run; the next pass retries", "err", err)
+		deps.log().Warn("pmsd: review-expiry sweep could not run; the next pass retries", safeErrAttrs(err)...)
 		return
 	}
 	if n > 0 {

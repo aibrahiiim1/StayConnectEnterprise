@@ -287,6 +287,11 @@ func safeProcessingStatus(s string) string {
 	}
 }
 
+// safeErrAttrs describes an error for a log line without its text, which can carry row values.
+func safeErrAttrs(err error) []any {
+	return []any{"code", Classify(err).String(), "error_chain", errorChain(err), "sqlstate", sqlState(err)}
+}
+
 // errorChain lists the Go types along the error chain: code identifiers, never values.
 func errorChain(err error) string {
 	var b strings.Builder
