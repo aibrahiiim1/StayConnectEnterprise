@@ -2,6 +2,7 @@ package pmsd
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -125,7 +126,7 @@ func TestBarrier_StaleOwnerAdmitsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.synced = true // even past the barrier, a stale owner must admit nothing
-	if err := s.OnDomainEvent(context.Background(), ev("X")); err != ErrStaleGeneration {
+	if err := s.OnDomainEvent(context.Background(), ev("X")); !errors.Is(err, ErrStaleGeneration) {
 		t.Fatalf("stale owner OnDomainEvent = %v, want ErrStaleGeneration", err)
 	}
 	if live, staged := counts(repo); live != 0 || staged != 0 {

@@ -120,9 +120,23 @@ export function describePmsReadiness(args: {
   transport?: string;
   sync?: string;
   roomAuthReady?: boolean;
+  /** Which roster answers while ready: the live feed, or the last complete guest list. */
+  source?: string;
   inHouse?: number;
 }): Explained {
-  const { transport, sync, roomAuthReady, inHouse } = args;
+  const { transport, sync, roomAuthReady, source, inHouse } = args;
+  if (roomAuthReady && source === "LAST_GOOD_ROSTER") {
+    const offline = transport !== "CONNECTED";
+    return {
+      headline: offline ? "Room sign-in working without the PMS" : "Room sign-in working while the guest list refreshes",
+      summary:
+        (offline ? "The PMS is not connected. " : "The PMS is sending a fresh guest list. ") +
+        "Clients sign in against the last complete guest list" +
+        (typeof inHouse === "number" ? ` (${num(inHouse)} in house)` : "") +
+        (offline ? " until the connection returns or the list grows too old." : " until the new one is in place."),
+      tone: "warn",
+    };
+  }
   if (roomAuthReady) {
     return {
       headline: "Room sign-in working",

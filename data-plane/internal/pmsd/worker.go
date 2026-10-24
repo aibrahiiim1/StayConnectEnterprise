@@ -48,7 +48,7 @@ func (w *worker) run(ctx context.Context) {
 		} else if !warned {
 			warned = true
 			w.deps.log().Warn("pmsd: reconnect bounds unreadable; using compiled defaults",
-				"err", err, "interface", w.iface.ID)
+				append(safeErrAttrs(err), "interface", w.iface.ID)...)
 		}
 		w.attempt++
 		stable, err := w.ownAndServe(ctx)
@@ -180,7 +180,12 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	if serr != nil {
 		code = Classify(serr)
 	}
-	logEvent(w.deps.log(), EventWorkerProtocolEnded, code, sf(StageServe))
+	ending := endingDetail{err: serr, publishedAt: sink.publishedAt}
+	if d, ok := conn.(linkDiagnoser); ok {
+		g := d.linkDiagnostics()
+		ending.diag = &g
+	}
+	logProtocolEnded(w.deps.log(), code, sf(StageServe), ending)
 	_ = w.repo.UpdateTransport(ctx, w.disc(gen, code))
 	return w.deps.now().Sub(start), serr
 }
@@ -212,6 +217,9 @@ type workerSink struct {
 	synced    bool
 	resyncing bool
 	resyncGen int64
+
+	// publishedAt is when this link last published a resync generation (wall clock, diagnostics only).
+	publishedAt time.Time
 
 	// received counts records staged under the open generation; reset at DS so the number describes this roster.
 	received int64
@@ -299,19 +307,20 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	}
 	s.resyncing = false
 	s.synced = true
+	s.publishedAt = time.Now()
 	// Coverage first, then reconcile, both after the publish. Neither can fail the sync (guests already
 	// authenticate against the published roster): a problem is logged and the next complete sweep retries.
 	if s.covSeen {
 		if err := s.w.repo.RecordResyncCoverage(s.ctx, ResyncScope{s.ax()}, s.resyncGen,
 			s.covRooms, s.covRoster, s.covVacant, s.covConflicts); err != nil {
 			s.w.deps.log().Warn("pmsd: could not record what the sweep observed; reconciliation will defer",
-				"err", err, "generation", s.resyncGen)
+				append(safeErrAttrs(err), "generation", s.resyncGen)...)
 		}
 		s.covSeen = false
 	}
 	if out, err := s.w.repo.ReconcileRoster(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
 		s.w.deps.log().Warn("pmsd: automatic reconciliation could not run; the next complete sweep retries",
-			"err", err, "generation", s.resyncGen)
+			append(safeErrAttrs(err), "generation", s.resyncGen)...)
 	} else {
 		s.w.deps.log().Info("pmsd: automatic roster reconciliation",
 			"generation", s.resyncGen, "outcome", out.Outcome, "stays_closed", out.StaysClosed,
@@ -350,7 +359,7 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	case s.resyncing:
 		row.ResyncGeneration = s.resyncGen
 		if _, err := s.w.repo.StageResyncEvent(s.ctx, row); err != nil {
-			return err
+			return failedAt(stepStageResync, err)
 		}
 		// Counts durably staged records; reported every 25 to avoid thousands of writes (exact count at COMPLETE).
 		s.received++
@@ -364,9 +373,17 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		return nil
 	default:
 		if _, err := s.w.repo.AdmitLiveEvent(s.ctx, row); err != nil {
-			return err
+			var dup *DuplicateLiveEventError
+			if errors.As(err, &dup) {
+				// An exact repeat carries no new state, so continuity is not advanced either.
+				s.w.deps.log().Info("pmsd: duplicate live record ignored",
+					"interface", NewUUIDValue(s.w.iface.ID).String(), "record_type", safeRecordType(ev.RecordType),
+					"processing_status", safeProcessingStatus(dup.ProcessingStatus))
+				return nil
+			}
+			return failedAt(stepAdmitLive, err)
 		}
-		return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)})
+		return failedAt(stepRecordContinuity, s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)}))
 	}
 }
 

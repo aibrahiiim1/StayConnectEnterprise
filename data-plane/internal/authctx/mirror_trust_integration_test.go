@@ -8,6 +8,7 @@ package authctx
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -213,8 +214,8 @@ func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testin
 	}
 }
 
-// Outage sequence: healthy, drop, serve locally, resync begins and completes, reconnect. Authorisation is
-// continuous apart from the pause while the mirror is mid-update, and the interface ends as it started.
+// Outage sequence: healthy, drop, serve locally, reconnect, resync runs and completes. Authorisation is
+// continuous throughout (D69), and the interface ends as it started.
 func TestIntegration_OutageAndReconnectSequence(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -237,7 +238,7 @@ func TestIntegration_OutageAndReconnectSequence(t *testing.T) {
 	step("socket drops, mirror intact", true, func() {
 		setFeed(t, p, s, "DISCONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now.Add(-time.Minute))
 	})
-	step("reconnected, complete resync running", false, func() {
+	step("reconnected, complete resync running: the published roster keeps answering (D69)", true, func() {
 		setFeed(t, p, s, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now)
 		startResync(t, p, s, now)
 	})
@@ -279,5 +280,116 @@ func TestIntegration_OfflineValidityIsTheExistingEvidenceCeiling(t *testing.T) {
 	if authorizable(t, p, s) {
 		t.Fatal("evidence older than the configured ceiling was authorised while offline. The ceiling IS the " +
 			"offline validity limit; if it does not bite here, an outage authorises forever")
+	}
+}
+
+// D69: a CONNECTED feed whose guest list is being refreshed (or whose refresh failed) keeps authorising from the
+// roster already published, exactly as a disconnected one does.
+func TestIntegration_ConnectedResyncKeepsTheLastGoodRoster(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+	now := time.Now().UTC()
+	establishMirror(t, p, s, now.Add(-30*time.Minute))
+	setEvidenceAge(t, p, s, now.Add(-time.Hour))
+
+	for _, syncSt := range []string{"RESYNC_REQUIRED", "RESYNC_IN_PROGRESS", "SYNC_FAILED", "UNKNOWN"} {
+		t.Run(syncSt, func(t *testing.T) {
+			setFeed(t, p, s, "CONNECTED", syncSt, "CONTINUOUS", now)
+			if syncSt == "RESYNC_IN_PROGRESS" {
+				startResync(t, p, s, now)
+			}
+			if !authorizable(t, p, s) {
+				t.Fatalf("a connected %s feed refused a guest on a roster that is published, whole and 30 minutes old", syncSt)
+			}
+		})
+	}
+}
+
+// What still fails closed while a connected resync runs.
+func TestIntegration_ConnectedResyncStillFailsClosed(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	now := time.Now().UTC()
+
+	t.Run("never synchronised", func(t *testing.T) {
+		s := seedCacheAge(t, p, "null")
+		setFeed(t, p, s, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now)
+		setEvidenceAge(t, p, s, now.Add(-time.Minute))
+		if authorizable(t, p, s) {
+			t.Fatal("a resync on an interface that never completed one authorised a guest")
+		}
+	})
+	t.Run("continuity gap", func(t *testing.T) {
+		s := seedCacheAge(t, p, "null")
+		establishMirror(t, p, s, now.Add(-time.Hour))
+		setFeed(t, p, s, "CONNECTED", "RESYNC_IN_PROGRESS", "GAP_DETECTED", now)
+		setEvidenceAge(t, p, s, now.Add(-time.Hour))
+		if authorizable(t, p, s) {
+			t.Fatal("a continuity gap during a resync authorised a guest")
+		}
+	})
+	t.Run("evidence older than the cache age", func(t *testing.T) {
+		s := seedCacheAge(t, p, "259200")
+		establishMirror(t, p, s, now.Add(-73*time.Hour))
+		setFeed(t, p, s, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now)
+		setEvidenceAge(t, p, s, now.Add(-73*time.Hour))
+		if authorizable(t, p, s) {
+			t.Fatal("evidence older than the 72-hour cache age authorised a guest during a connected resync")
+		}
+	})
+	t.Run("connected, in sync but silent", func(t *testing.T) {
+		s := seedCacheAge(t, p, "null")
+		establishMirror(t, p, s, now.Add(-time.Hour))
+		setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now.Add(-2*time.Hour))
+		setEvidenceAge(t, p, s, now.Add(-time.Hour))
+		if authorizable(t, p, s) {
+			t.Fatal("a hung IN_SYNC link authorised a guest: only a resync may fall back to the last good roster")
+		}
+	})
+}
+
+// A reconnect storm: the link drops and comes back repeatedly, each reconnect starting a full resync, with
+// partial generations arriving and a check-out reported live mid-resync. Authorisation never lapses on the
+// published roster, the partial generation never counts, and the live check-out blocks until it is applied.
+func TestIntegration_ReconnectStormKeepsRoomSignInOnTheLastGoodRoster(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+	now := time.Now().UTC()
+	establishMirror(t, p, s, now.Add(-10*time.Minute))
+	setEvidenceAge(t, p, s, now.Add(-10*time.Minute))
+	ctx := context.Background()
+
+	for i := 1; i <= 8; i++ {
+		setFeed(t, p, s, "DISCONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now.Add(-time.Second))
+		if !authorizable(t, p, s) {
+			t.Fatalf("drop %d: the roster stopped answering while the link was down", i)
+		}
+		setFeed(t, p, s, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now)
+		startResync(t, p, s, now)
+		if _, err := gexec(ctx, p, "stay", `INSERT INTO iam_v2.stay_events
+			(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
+			 processing_status,admission_kind,resync_generation,sequence_version,received_at)
+			SELECT gen_random_uuid(),$1,$2,$3,'storm-partial-'||$4,'GI','{}'::jsonb,'PENDING','RESYNC',
+			       published_resync_generation + 1, 1, now()
+			  FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$3`,
+			s.tenant, s.site, s.iface, strconv.Itoa(i)); err != nil {
+			t.Fatalf("stage partial generation %d: %v", i, err)
+		}
+		if !authorizable(t, p, s) {
+			t.Fatalf("reconnect %d: a connected resync with a partial generation arriving refused the published roster", i)
+		}
+	}
+
+	if _, err := gexec(ctx, p, "stay", `INSERT INTO iam_v2.stay_events
+		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
+		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
+		VALUES (gen_random_uuid(),$1,$2,$3,'storm-live-checkout','GO','{}'::jsonb,'PENDING','LIVE',0,1,now())`,
+		s.tenant, s.site, s.iface); err != nil {
+		t.Fatalf("stage the live check-out: %v", err)
+	}
+	if authorizable(t, p, s) {
+		t.Fatal("a live check-out not yet applied did not block sign-in during the resync")
 	}
 }

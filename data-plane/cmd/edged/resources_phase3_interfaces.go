@@ -741,6 +741,11 @@ const (
 	roomAuthMaterializing = "MATERIALIZATION_BEHIND"
 )
 
+const (
+	roomAuthSourceLiveFeed   = "LIVE_FEED"
+	roomAuthSourceLastRoster = "LAST_GOOD_ROSTER"
+)
+
 type interfaceHealth struct {
 	InterfaceID string `json:"pms_interface_id"`
 
@@ -751,6 +756,9 @@ type interfaceHealth struct {
 	// Stay-specific half (occupancy evidence, age, revision pin) is deliberately excluded.
 	RoomAuthReady  bool   `json:"room_auth_ready"`
 	RoomAuthReason string `json:"room_auth_reason,omitempty"`
+	// Which branch answers while ready: the live feed, or the last published roster (transport down or a resync
+	// running); the console says which, so a reader is never told the feed is live when it is not.
+	RoomAuthSource string `json:"room_auth_source,omitempty"`
 
 	Transport         string     `json:"transport_status"`
 	LastConnectedAt   *time.Time `json:"last_connected_at,omitempty"`
@@ -853,19 +861,27 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		                                                       THEN '`+roomAuthContinuityNone+`'
 		         WHEN rt.pinned_revision_id IS DISTINCT FROM pr.id
 		                                                       THEN '`+roomAuthRevisionUnpin+`'
-		         -- TRANSPORT DOWN: the mirror answers instead. Sign-in survives if a complete sync has
-		         -- actually happened -- that is the whole of the offline branch of p3_feed_authorizes (0060).
-		         -- A resync in flight does NOT close it: the published roster is untouched until a replacement
-		         -- completes, so the last good roster keeps authorising guests, and saying "down" here sent
-		         -- staff after an outage guests were not having (audit H-12).
-		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED' THEN
+		         -- Nothing claimable may be unapplied: term (2) of p3_feed_authorizes, on either branch.
+		         WHEN EXISTS (SELECT 1 FROM iam_v2.stay_events se
+		                       WHERE se.tenant_id=rt.tenant_id AND se.site_id=rt.site_id
+		                         AND se.pms_interface_id=rt.pms_interface_id
+		                         AND se.processing_status='PENDING'
+		                         AND (se.admission_kind='LIVE'
+		                              OR se.resync_generation <= rt.published_resync_generation))
+		                                                       THEN '`+roomAuthMaterializing+`'
+		         -- THE LAST GOOD ROSTER answers whenever the live branch is not satisfied because the transport is
+		         -- down or the guest list is not IN_SYNC (a resync requested, running or failed): the published
+		         -- roster is untouched until a replacement completes (0060, D69).
+		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED'
+		           OR COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC' THEN
 		           CASE
-		             WHEN rt.last_complete_sync_at IS NULL     THEN '`+roomAuthNeverSynced+`'
-		             ELSE ''
-		           END
-		         -- TRANSPORT UP: the live-feed branch, unchanged.
-		         WHEN COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC'
+		             WHEN rt.last_complete_sync_at IS NOT NULL THEN ''
+		             -- No roster has ever been published: the first one is still loading, or cannot load.
+		             WHEN COALESCE(rt.transport_status,'UNKNOWN') = 'CONNECTED'
 		                                                       THEN '`+roomAuthNotInSync+`'
+		             ELSE '`+roomAuthNeverSynced+`'
+		           END
+		         -- LIVE FEED: connected and in sync, so it must also be heard within the heartbeat timeout.
 		         WHEN COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NULL
 		           OR COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
 		              <= now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300))
@@ -888,6 +904,12 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		&h.MaterializationReady, &h.ResyncRequestedBy, &h.ResyncCommandAt,
 		&h.RoomAuthReason)
 	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
+	if h.RoomAuthReady {
+		h.RoomAuthSource = roomAuthSourceLiveFeed
+		if h.Transport != "CONNECTED" || h.Sync != "IN_SYNC" {
+			h.RoomAuthSource = roomAuthSourceLastRoster
+		}
+	}
 
 	// Refines "review" from recorded to outstanding where the disposition ledger exists: this field feeds the PMS
 	// connection row and Property-management card. A failure keeps the raw count rather than reporting zero.

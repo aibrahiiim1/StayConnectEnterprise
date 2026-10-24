@@ -158,7 +158,7 @@ is preserved and **no cloud availability is introduced anywhere in this design.*
 | **`room_auth_ready`** | Mirror the same term in the edged readiness CASE, with a new bounded code `MATERIALIZATION_BEHIND`. Distinct from `NOT_IN_SYNC`: the guest list is arriving, not absent. |
 | **Hotel Admin** | `COMPLETE` must mean *published and materialized*. Either hold `PUBLISHING` until the drain finishes, or add a terminal `FINALIZING` stage. Operator wording: "Applying the guest list". |
 | **`last_sync_in_house_count`** | **Remove.** It measures IN_HOUSE at the publish barrier — i.e. the roster the sync replaced — and contradicts the live figure on the same screen. Once `COMPLETE` genuinely means materialized, the ordinary live IN_HOUSE value is correct and sufficient. Drop the column, its write, its API field and its UI row. |
-| **During full sync** | Auth closed from DS (already, via `IN_SYNC`) through to drain completion (new). |
+| **During full sync** | Auth closed from DS (already, via `IN_SYNC`) through to drain completion (new). **Superseded by D69 (migration 0150):** during a resync the last published roster keeps answering; only the drain after publish (pending claimable events) closes it. |
 | **During LIVE backlog** | Auth closed while any event is pending — the continuous case, closed for the first time. |
 | **While disconnected** | Local-first unchanged, plus the same pending term. §4. |
 | **Migration/rollback** | `CREATE INDEX CONCURRENTLY` up, `DROP INDEX` down; the predicate change is a `CREATE OR REPLACE FUNCTION` with the prior body as the down. Rollback restores today's behaviour exactly, including the race. |
