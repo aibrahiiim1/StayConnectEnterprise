@@ -270,9 +270,6 @@ export default function BackupsPage() {
         </TabsList>
 
         <TabsContent value="backups" className="mt-5 space-y-5">
-          <BackupKeysCard writable={writable} />
-          {lastRestore && <LastRestoreCard result={lastRestore} />}
-
           <SectionCard
             flush
             title="Available backups"
@@ -345,6 +342,8 @@ export default function BackupsPage() {
               </Table>
             )}
           </SectionCard>
+          {lastRestore && <LastRestoreCard result={lastRestore} />}
+          <BackupKeysCard writable={writable} />
         </TabsContent>
 
         <TabsContent value="schedule" className="mt-5 space-y-5">
@@ -491,9 +490,9 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
           : <>{result.finished ? ` · ${formatDate(result.finished)}` : ""}{result.duration ? ` · took ${result.duration}` : ""}</>}
       </p>
       {result.steps && result.steps.length > 0 && (
-        <ol className="space-y-1.5">
+        <ol className="flex flex-wrap gap-x-4 gap-y-1.5">
           {result.steps.map((s, i) => (
-            <li key={i} className="flex items-start gap-2 text-xs">
+            <li key={i} className="flex items-start gap-1.5 text-xs">
               {s.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" aria-hidden />
                     : <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-hidden />}
               <span>

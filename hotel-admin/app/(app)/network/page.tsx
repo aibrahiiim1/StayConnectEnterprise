@@ -269,7 +269,7 @@ export default function NetworkPage() {
           <StatCard
             label="Devices connected"
             value={knownClients.length ? clientTotal : "—"}
-            hint="Across all client networks, now"
+            hint="On all client networks, now"
             icon={<Users />}
           />
         </StatGrid>
