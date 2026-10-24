@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
-import { errMsg, formatDate, formatRelative } from "@/lib/utils";
+import { formatDate, formatRelative } from "@/lib/utils";
 import {
   DNS_STATE_WORDS, PortalHTTPSDoc, domainStatus, fallbackWords, looksLikePortalDomain, portalHeadline,
 } from "@/lib/portal-https";
