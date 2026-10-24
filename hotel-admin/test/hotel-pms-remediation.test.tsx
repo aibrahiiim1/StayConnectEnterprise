@@ -58,7 +58,7 @@ describe("PMS activity decisions (H-15)", () => {
     expect(screen.queryByText("13,717")).toBeNull();
     expect(await screen.findByText(/automatic expiry of waiting messages/i)).toBeTruthy();
 
-    await userEvent.click((await screen.findAllByRole("button", { name: "Details" }))[0]);
+    await userEvent.click((await screen.findAllByRole("button", { name: /^Details/ }))[0]);
     await userEvent.click(await screen.findByRole("button", { name: "Acknowledge" }));
     const dialog = await screen.findByRole("dialog", { name: /acknowledge this message/i });
     await userEvent.type(within(dialog).getByLabelText(/^Reason/), "vendor test message");
@@ -80,7 +80,7 @@ describe("PMS activity decisions (H-15)", () => {
     eventsBackend(["front_office_operator"]);
     const { default: Page } = await import("@/app/(app)/stay-events/page");
     render(<Page />);
-    await userEvent.click((await screen.findAllByRole("button", { name: "Details" }))[0]);
+    await userEvent.click((await screen.findAllByRole("button", { name: /^Details/ }))[0]);
     await screen.findByRole("dialog");
     expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
     expect(screen.queryByText(/automatic expiry of waiting messages/i)).toBeNull();

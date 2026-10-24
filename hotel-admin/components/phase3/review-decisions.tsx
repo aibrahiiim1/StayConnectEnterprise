@@ -8,7 +8,8 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Checkbox, Field, Input, InputGroup, Select } from "@/components/ui/input";
+import { StatusBadge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/utils";
@@ -193,14 +194,17 @@ export function ReviewExpirySettingCard() {
   if (loadErr || !s) return null;
   return (
     <Card>
-      <CardBody className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="text-sm font-medium">Automatic expiry of waiting messages</div>
-          <p className="text-sm text-muted-foreground">
+      <CardBody className="flex flex-wrap items-center justify-between gap-3 py-3">
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-emphasis">Automatic expiry of waiting messages</span>
+            <StatusBadge tone={s.enabled ? "ok" : "default"}>{s.enabled ? "On" : "Off"}</StatusBadge>
+          </div>
+          <p className="text-xs text-muted-foreground">
             {s.enabled
-              ? `On: a message that arrived after ${s.applies_from ? formatDate(s.applies_from) : "it was switched on"} and has waited more than ${s.expire_after_days} day${s.expire_after_days === 1 ? "" : "s"} is recorded as expired.`
-              : "Off. Messages wait until somebody decides them."}{" "}
-            Messages that were already waiting when it was switched on are never expired by it.
+              ? `A message that arrived after ${s.applies_from ? formatDate(s.applies_from) : "it was switched on"} and has waited more than ${s.expire_after_days} day${s.expire_after_days === 1 ? "" : "s"} is recorded as expired.`
+              : "Messages wait until somebody decides them."}{" "}
+            Messages already waiting when it was switched on are never expired by it.
           </p>
         </div>
         <Button size="sm" variant="secondary" onClick={edit}>Change</Button>
@@ -216,13 +220,12 @@ export function ReviewExpirySettingCard() {
         disabled={!daysOk || reason.trim().length < 3 || password === ""}
         onSubmit={save}
       >
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Expire waiting messages automatically
-        </label>
+        <Checkbox label="Expire waiting messages automatically" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         <Field label="Expire after (days)" hint={`Between ${min} and ${max} days.`} required
           error={daysOk ? undefined : `Enter a whole number of days between ${min} and ${max}.`}>
-          <Input type="number" min={min} max={max} value={days} onChange={(e) => setDays(e.target.value)} />
+          <InputGroup suffix="days" className="w-48">
+            <Input type="number" inputMode="numeric" min={min} max={max} value={days} onChange={(e) => setDays(e.target.value)} />
+          </InputGroup>
         </Field>
         <Field label="Reason" hint="Recorded in the activity log." required>
           <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
