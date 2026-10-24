@@ -128,7 +128,7 @@ export function TH({
   numeric,
   align,
   ...p
-}: React.ThHTMLAttributes<HTMLTableCellElement> & { numeric?: boolean; align?: Align }) {
+}: Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "align"> & { numeric?: boolean; align?: Align }) {
   const density = React.useContext(DensityContext);
   return (
     <th
@@ -152,7 +152,7 @@ export function TD({
   muted,
   align,
   ...p
-}: React.TdHTMLAttributes<HTMLTableCellElement> & {
+}: Omit<React.TdHTMLAttributes<HTMLTableCellElement>, "align"> & {
   /** Right-aligned tabular figures, never wrapped: bytes, counts, money, durations. */
   numeric?: boolean;
   /** Keeps short values (dates, speeds, codes, badges) on one line. */

@@ -70,11 +70,18 @@ export function HistoryList({
             <span className="min-w-0 flex-1">
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm font-medium text-foreground">{it.title}</span>
+                {it.badge && <span className="sr-only"> · </span>}
                 {it.badge}
               </span>
-              {it.summary && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{it.summary}</span>}
+              {it.summary && (
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  <span className="sr-only"> · </span>
+                  {it.summary}
+                </span>
+              )}
               {(it.actor || it.at) && (
                 <span className="mt-0.5 block text-xs text-muted-foreground">
+                  <span className="sr-only"> · </span>
                   {it.actor}
                   {it.actor && it.at ? " · " : null}
                   {it.at ? <span className="tabular">{when(it.at)}</span> : null}
