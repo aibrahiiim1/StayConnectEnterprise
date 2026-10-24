@@ -79,6 +79,8 @@ govulncheck only lists advisories whose vulnerable function is reachable from th
 
 **Gap:** the build script for the appliance binaries (edged, scd, portald, netd, acctd, pmsd) was not found in `deploy/scripts`, so the toolchain that builds them is not pinned in the repository. **Finding P0-3 (Medium, Confirmed).**
 
+> **Corrected in Phase 10 (X1):** the script exists as `scripts/build-appliance-binaries.sh` and pins `golang:1.25.12`. P0-3 is lowered to Low; what remains is pinning by digest and a `toolchain` line.
+
 ### staticcheck
 
 - **Central:** 6 items. Dead code: `api.(*Base).issueAssignment` and `cmd/pkitest rawGet`; two unused values in `cmd/acceptance`; one error-string style issue.

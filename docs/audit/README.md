@@ -21,7 +21,9 @@ The audit changes no code. Fixes are made later, one batch at a time, on their o
 | 7 | PMS (pmsd) | [PHASE7_PMS.md](PHASE7_PMS.md) | done |
 | 8 | Networking (netd) | [PHASE8_NETWORKING.md](PHASE8_NETWORKING.md) | done |
 | 9 | Admin Console API (edged), in four parts | [PHASE9_ADMIN_CONSOLE_API.md](PHASE9_ADMIN_CONSOLE_API.md) | done |
-| 10 | Cross-cutting and final report | | not started |
+| 10 | Cross-cutting and final report | [PHASE10_CROSS_CUTTING.md](PHASE10_CROSS_CUTTING.md), [FINAL_REPORT.md](FINAL_REPORT.md) | done |
+
+**Start with [FINAL_REPORT.md](FINAL_REPORT.md):** totals, the High findings, the order of work and every open decision.
 
 The packages each phase covers are listed in the Phase 0 phase map.
 

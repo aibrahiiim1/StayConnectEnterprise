@@ -159,7 +159,7 @@ Room charge is reachable only through the room sign-in grant (`cmd/scd/phase3_pa
 - A failed read records nothing.
 - A 40 refund followed by a 100 lost dispute on a 100 charge opens a review case.
 
-### M4 — Shared-allowance sessions are re-rated as single-device ones on every plan (Possible)
+### M4 — Shared-allowance sessions are re-rated as single-device ones on every plan (Possible; confirmed on a real kernel in Phase 8 M4)
 
 **Where.**
 - `internal/shape/shape.go:306-326` (`ReRateSession`) and `:445-451` (`changeClass` with parent `RootParent`, and `rate` equal to `ceil`).
