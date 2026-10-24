@@ -9,7 +9,7 @@
 - the items Phase 2 handed on (how a busy scd is shown to the guest, and portald's timeouts toward scd).
 
 **How:**
-- **Code:** the request paths were traced in `cmd/portald` and `deploy/nftables`.
+- **Code:** the request paths were traced in `cmd/portald` and in the ruleset netd renders (`internal/netcfg/render_nft.go`).
 - **Benchmarks:** portald's own handler was benchmarked on 2 CPUs (`GOMAXPROCS=2`, parallel clients), in a throwaway copy of the module:
   - the landing page, compressed and not;
   - an unknown path (the catch-all);
@@ -166,7 +166,7 @@ Together these bring a page view to a fraction of a millisecond.
 
 ### D3-L3: Every TLS handshake checks the certificate files on disk (Low, Confirmed)
 
-**Where:** `cmd/portald/portal_https.go:356-386`. `GetCertificate` calls `os.Stat` twice under a mutex for every handshake. Port 443 from unsigned devices is redirected to portald (`deploy/nftables/stayconnect.nft:102`), so every HTTPS connection their apps make is a handshake that the app then refuses.
+**Where:** `cmd/portald/portal_https.go:356-386`. `GetCertificate` calls `os.Stat` twice under a mutex for every handshake. While the HTTPS portal is on, port 443 from unsigned devices is redirected to portald (`internal/netcfg/render_nft.go:262-265`; with it off, 443 is dropped, `:232`). So every HTTPS connection their apps make is a handshake that the app then refuses. *Corrected in Phase 4: an earlier version cited `deploy/nftables/stayconnect.nft`, a static file from the source import that netd does not load.*
 
 **Measured:** a refused handshake costs at most 0.74 ms, so 1,300 or more a second fit on 2 CPUs. The two file checks add to it, under one lock.
 

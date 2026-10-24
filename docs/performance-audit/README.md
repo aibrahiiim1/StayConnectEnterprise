@@ -17,7 +17,7 @@ It follows the backend audit in [`docs/audit/`](../audit/README.md). Where a per
 | 1 | Database foundations: Postgres settings, connection pools, growth, retention, indexes | [PHASE1_DATABASE.md](PHASE1_DATABASE.md) | done |
 | 2 | Guest sign-in (scd) under a sign-in storm | [PHASE2_GUEST_SIGN_IN.md](PHASE2_GUEST_SIGN_IN.md) | done |
 | 3 | Client Portal (portald) and captive-portal probe traffic | [PHASE3_CLIENT_PORTAL.md](PHASE3_CLIENT_PORTAL.md) | done |
-| 4 | Enforcement path (netd): nftables sets, tc shaping, conntrack, apply time | PHASE4_ENFORCEMENT.md | planned |
+| 4 | Enforcement path (netd): nftables sets, tc shaping, conntrack, apply time | [PHASE4_ENFORCEMENT.md](PHASE4_ENFORCEMENT.md) | done |
 | 5 | Background jobs and accounting (acctd, scd loops, posting, retention) | PHASE5_BACKGROUND_JOBS.md | planned |
 | 6 | PMS (pmsd): roster load, resync, FIAS throughput | PHASE6_PMS.md | planned |
 | 7 | Admin Console API (edged): lists, reports, exports, dashboards | PHASE7_ADMIN_API.md | planned |
