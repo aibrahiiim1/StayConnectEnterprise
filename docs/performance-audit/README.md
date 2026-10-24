@@ -21,7 +21,7 @@ It follows the backend audit in [`docs/audit/`](../audit/README.md). Where a per
 | 5 | Background jobs and accounting (acctd, scd loops, posting, retention) | [PHASE5_BACKGROUND_JOBS.md](PHASE5_BACKGROUND_JOBS.md) | done |
 | 6 | PMS (pmsd): roster load, resync, FIAS throughput | [PHASE6_PMS.md](PHASE6_PMS.md) | done |
 | 7 | Admin Console API (edged): lists, reports, exports, dashboards | [PHASE7_ADMIN_API.md](PHASE7_ADMIN_API.md) | done |
-| 8 | Admin front ends (hotel-admin, cloud-admin): bundles, polling, rendering | PHASE8_FRONT_ENDS.md | planned |
+| 8 | Admin front ends (hotel-admin, cloud-admin): bundles, polling, rendering | [PHASE8_FRONT_ENDS.md](PHASE8_FRONT_ENDS.md) | done |
 | 9 | Central (ctrlapi): fleet scale, appliance calls, Redis | PHASE9_CENTRAL.md | planned |
 | 10 | Appliance resource budget: memory, CPU, disk, startup, backups | PHASE10_RESOURCE_BUDGET.md | planned |
 | 11 | Load-test plan and final report | PHASE11_LOAD_TEST_PLAN.md, FINAL_REPORT.md | planned |
