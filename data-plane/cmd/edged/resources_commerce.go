@@ -237,7 +237,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	reason := strings.TrimSpace(in.ReasonCode)
 	if reason == "" {
 		// A bounded default: a publication without a recorded reason is unattributable.
-		reason = "HOTEL_ADMIN_UPDATE"
+		reason = "ADMIN_CONSOLE_UPDATE"
 	}
 	if !graceReasonCode.MatchString(reason) {
 		jsonErr(w, http.StatusBadRequest, "validation",

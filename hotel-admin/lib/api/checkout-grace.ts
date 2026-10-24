@@ -234,8 +234,12 @@ export function isValidReasonCode(code: string): boolean {
   return REASON_CODE_PATTERN.test(code);
 }
 
+/** The default recorded when a change names no reason; HOTEL_ADMIN_UPDATE is what earlier changes stored. */
+const DEFAULT_REASON_LABEL = "Admin Console update";
+
 export function reasonLabel(code: string): string {
   if (!code) return "No reason recorded";
+  if (code === "ADMIN_CONSOLE_UPDATE" || code === "HOTEL_ADMIN_UPDATE") return DEFAULT_REASON_LABEL;
   return REASON_CHOICES.find((r) => r.code === code)?.label ?? humanise(code);
 }
 
