@@ -27,7 +27,8 @@ REQUEST → SCOPE → IMPLEMENT → FOCUSED SELF-REVIEW → TARGETED TESTS → F
 * **PRE-LIVE.** When the mission or the standing PRE-LIVE authorization covers it: deploy the exact tested
   commit to PRE-LIVE `172.21.60.25`, keep rollback, run a practical smoke/health check, confirm the change is
   there to test, and report the exact deployed source. **Deploying before the merge is intended.** No Central,
-  Production or other environment unless that target is explicitly authorized.
+  Production or other environment unless that target is explicitly authorized; a PRE-LIVE mission the Product
+  Owner requests authorizes Central as part of PRE-LIVE (§9, D67).
 * **Then STOP** and report `READY FOR PRODUCT OWNER TESTING`. Requested changes continue on the same branch
   and pull request: fix, targeted tests, redeploy the affected component, return for testing. No new
   governance cycle per correction.
@@ -88,6 +89,7 @@ Product semantics or architecture · authentication / entitlement / security bou
 destructive data or DB migration · PMS configuration, posting or traffic · financial behaviour · networking
 architecture/topology · enrollment / assignment / licensing semantics · deployment to an unnamed or
 unauthorized environment · Go-Live. Routine actions already authorized inside a mission are not asked again.
+Inside a PRE-LIVE mission, migrations and destructive changes to PRE-LIVE test data are already authorized (§9).
 
 ## 6. Governance overhead in normal mode
 
@@ -112,3 +114,35 @@ PRE-LIVE:                - deployed commit / not applicable; smoke result
 Product Owner action:    - Test now / Approve merge / Decision required
 Blocker:                 - NONE / exact blocker
 ```
+
+## 9. PRE-LIVE missions run end to end, Appliance and Central (D67)
+
+**Permanent Product-Owner decision D67, 2026-10-24, recorded by T0243.**
+
+When the Product Owner requests a PRE-LIVE mission, that request is the full authorization for executing it
+end to end across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`):
+
+* deployments to either host, including Central releases built from master or from the mission's branch;
+* database migrations on either host;
+* resetting or reconstructing test databases, resetting test accounts and reissuing test licences;
+* directly related repairs, verification (including authenticated console checks), documentation and
+  governance synchronization;
+* Git delivery: commits, push, pull request, and the protected merge, with the `po-merge-approved` label applied
+  for that mission's tested head.
+
+**PRE-LIVE data is disposable.** Keeping test accounts, historical test records or test licences is not a reason
+to interrupt a mission; recreate them when the mission needs them. A real person's account is not a test
+account: verification uses a dedicated test operator.
+
+**No intermediate checkpoints.** Routine technical decisions, migration or deployment approval, test-data loss
+and recoverable failures inside PRE-LIVE are handled by the agent: investigate, fix, retry, complete, and return
+one final report with the exact deployed versions, the real verification results and any genuine blocker. A
+mission never ends at `READY FOR APPROVAL` for an action it already authorized.
+
+**Unchanged.** Master protection (§3), the `po-merge-authorization` check and its per-head label (§2), tests, CI,
+security and validation stay as they are. A PRE-LIVE mission must not affect real production users, external
+financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside PRE-LIVE, and it
+does not authorize Go-Live. New product, architecture or security decisions still return to the Product Owner.
+
+**Scope.** D67 applies to PRE-LIVE missions the Product Owner requests. A routine FAST change still deploys
+only to the appliance under the standing authorization, and Central is not part of that per-change deployment.

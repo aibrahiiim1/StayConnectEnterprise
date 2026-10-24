@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0243",
+  "seq": 243,
+  "timestamp": "2026-10-24T09:07:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the appliance and Central deployments were read back and verified, and before the commit that introduces this receipt.",
+  "record_type": "PRELIVE_MISSION_POLICY_AND_CENTRAL_DEPLOYMENT",
+  "authorisation": "D67 (2026-10-24), the Product Owner's mission 'Complete the current PRE-LIVE deployment, including Central, and establish the Product Owner's permanent PRE-LIVE execution policy', which authorised Central deployment from current master including migrations 0052-0056, test account resets, Git/PR/merge delivery and recording the policy. It does NOT authorise Go-Live.",
+  "deployment_provenance": {
+    "appliance": "PRE-LIVE 172.21.60.25, built from a clean clone of master 9394eb5f (PRs #223-#226, including the comment cleanup) with scripts/build-appliance-binaries.sh and read back from the installed bytes: netd, scd, edged, pmsd, portald, acctd all 9394eb5fb217, tags=stayconnect_production, vcs.modified=false; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261023-204731 (source_commit 9394eb5fb217, BUILD_ID NOPvwCVLQ13e0aVNqT7AQ). Schema 0149 unchanged: master carries no new site migration.",
+    "central": "Central 172.21.96.196, release onegate-central-f8e2cf2889ce (central-build.sh, clean clone of f8e2cf28 = master 9394eb5f plus the Windows build fix) deployed with central-deploy.sh: pre-deploy dump, migrations 0052-0056 applied and verified (56 applied, 0 pending, 0 modified), ctrlapi sha256 58f33bfc82a8 (vcs.revision f8e2cf28, vcs.modified=false), console BUILD_ID 3uI0OrEKPRyWCoPdVyWk_, smoke 9/9. central-infra.yml from the same release applied afterwards (database volume kept); smoke 9/9 again."
+  },
+  "verification": "Appliance: all eight units active; scd starts with build=production and every guest sign-in method on; pmsd WORKER_CONNECTED; licence Active (cloud_stale=false) and new signed trust registries adopted from the upgraded Central; authenticated API reads and all 37 required Admin Console routes 200 (/commercial-packages 308 to /internet-packages by design); browser two-step sign-in and 10 screens rendered with no page errors. Central: two-step sign-in, 11 console API reads 200, 9 console screens rendered in a browser; Overview shows the appliance Activated and Connected and its licence Active.",
+  "defect_fixed": "central-build.sh produced a release whose bin/ctrlapi was 0644 when built on Windows (Git Bash chmod cannot mark an extensionless ELF executable); central-deploy.sh refused it at step 1 with nothing changed. The binary is now appended to the archive with mode 0755 and the build asserts the archived mode (commit f8e2cf28).",
+  "test_accounts": "PRE-LIVE test operator acceptance-audit@onegate.invalid reset on the appliance (password, authenticator enrolled at sign-in) and on Central (ctrlapi seed-admin, authenticator enrolled at sign-in). No real person's account was changed. The appliance sign-in throttle rows were cleared. No licence needed reissuing: the PRE-LIVE licence is Active until 2027-09-30.",
+  "rollback": "Appliance: *.bak-pre-9394eb5f-* beside each binary; hotel-admin.previous -> 20261021-130129. Central: central-deploy.sh rollback (ctrlapi.bak-20261024T055733Z, console 20261016T151710Z); database from central-20261024T055734Z-pre-f8e2cf2889ce.dump per docs/DEPLOYMENT_CLOUD.md section 7; central-infra.yml.bak-20261024T055839Z.",
+  "follow_up": "Not caused by this delivery and left as found: the appliance's database superuser still has its default password (the Overview warns; docs/SECURITY_HARDENING.md), and six CHECKOUT_GRACE_CONFIG_INVALID alerts from 2026-09-08..14 are unacknowledged.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0242."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "9394eb5fb217a4298b398d02381baea6f0791063",
+  "base_note": "Master after the merge of PR #226; this delivery's lineage is built on it.",
+  "head": "f8e2cf28",
+  "head_note": "The content commit of branch delivery/prelive-central-and-policy. Policy and governance commits follow it.",
+  "previous_delivery": "T0242",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

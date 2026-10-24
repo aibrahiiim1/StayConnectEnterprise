@@ -285,6 +285,35 @@ Go-Live.
 SHA**, read back from the installed artifact rather than the build host; and **never** treat deployed PRE-LIVE
 provenance as authoritative master state.
 
+The exclusions above bound the *standing* per-change authorization. A **user-requested PRE-LIVE mission** is
+wider: see §0G (D67).
+
+---
+
+## 0G. PRE-LIVE MISSIONS RUN END TO END, APPLIANCE AND CENTRAL (D67)
+
+**Permanent Product-Owner decision D67, 2026-10-24 (T0243). The full form is
+[`docs/PO_LED_DELIVERY_MODEL.md`](docs/PO_LED_DELIVERY_MODEL.md) §9; where the two differ, that file wins.**
+
+> When the Product Owner requests a PRE-LIVE mission, that request is the full end-to-end authorization for it,
+> across the PRE-LIVE appliance (`172.21.60.25`) and Central (`172.21.96.196`): deployments, database
+> migrations, test-database reset or reconstruction, test-account resets, test-licence reissuance, directly
+> related repairs, verification, documentation, and Git delivery including push, PR and the protected merge.
+
+* **PRE-LIVE data is disposable.** Preserving test accounts, historical test records or test licences is never a
+  reason to stop. Recreate what the mission needs. Do not touch a real person's account to do it: use or create
+  a test operator.
+* **Do not stop** for routine technical decisions, migration or deployment approval, test-data loss, or a
+  recoverable failure inside PRE-LIVE. Investigate, fix, retry, complete, and return one final report. Never
+  return `READY FOR APPROVAL` for something the mission already authorized.
+* **What does NOT change.** GitHub's protected-master safeguards (the `po-merge-authorization` check and its
+  label), tests, CI, security and validation are not weakened. The mission must still not reach real production
+  users, external financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside
+  PRE-LIVE. **Go-Live stays unauthorized.** A new product, architecture or security decision is still the
+  Product Owner's.
+* **Scope.** D67 governs PRE-LIVE missions the Product Owner requests. It does not turn a routine FAST change into
+  a Central deployment, and it does not make Central part of the standing per-change deployment in §0F.
+
 ### Normal report format
 
 `STATUS: READY FOR PRODUCT OWNER TESTING / MERGED / BLOCKED` · Changed · Targeted verification · PRE-LIVE
