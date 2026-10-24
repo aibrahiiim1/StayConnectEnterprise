@@ -12,14 +12,14 @@ import { api, Whoami } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { SiteModule, SiteModules } from "@/lib/payment-admin";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Skeleton } from "@/components/ui/misc";
 import { NotAvailable, ReadOnlyNotice } from "@/components/ui/patterns";
 import { cn } from "@/lib/utils";
-import { ArrowUpRight, BedDouble, CreditCard, Gift, Ticket, Wallet } from "lucide-react";
+import { ArrowUpRight, BedDouble, CreditCard, Gift, Ticket } from "lucide-react";
 import { CardPaymentConfig } from "./card-config";
 import { CodeList } from "./codes";
 
@@ -89,8 +89,6 @@ export default function PaymentMethodsPage() {
 
   const header = (
     <PageHeader
-      icon={<Wallet />}
-      eyebrow="Internet offering"
       title="Payment methods"
       description="How clients may acquire Internet packages at this site."
       help={
@@ -197,8 +195,8 @@ export default function PaymentMethodsPage() {
       </section>
 
       {cardLicensed && (
-        <section aria-labelledby="card-config-heading" className="space-y-3">
-          <h2 id="card-config-heading" className="text-headline">Card payment configuration</h2>
+        <section aria-labelledby="card-config-heading" className="space-y-4">
+          <h2 id="card-config-heading" className="text-subtitle">Card payment configuration</h2>
           <CardPaymentConfig writable={writable} />
         </section>
       )}
@@ -223,7 +221,7 @@ function MethodCard({
             <span className="text-muted-foreground" aria-hidden>{icon}</span>
             {title}
           </CardTitle>
-          <Badge tone={state.tone} dot={state.tone === "ok"}>{state.label}</Badge>
+          <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
         </div>
       </CardHeader>
       <CardBody className="flex flex-1 flex-col gap-2 pt-0">

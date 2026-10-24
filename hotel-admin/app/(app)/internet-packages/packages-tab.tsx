@@ -12,24 +12,28 @@ import type { AccountsResp } from "@/lib/payment-admin";
 import {
   getActivity, getPackageDeletability, deletePackage, priceText, type PackageSummary, type RevisionInfo,
 } from "@/lib/api/commerce";
-import { StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { StatCard, StatGrid } from "@/components/ui/page";
+import { Card } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { RowActions } from "@/components/ui/row-actions";
+import { FilterBar } from "@/components/ui/toolbar";
+import { HistoryList } from "@/components/ui/history";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, ConfirmDialog,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetSection } from "@/components/ui/sheet";
-import { FilterChips, KeyValueGrid, MetricStrip, SearchInput, Timeline } from "@/components/ui/data";
+import { FilterChips, KeyValueGrid, MetricStrip, SearchInput } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { DeleteDialog } from "@/components/commerce/delete-dialog";
 import { focusSheetItself } from "@/components/commerce/sheet-focus";
 import { PackageForm, type ClientGroupOption, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
 import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
+import { formatSpeedPair } from "@/components/commerce/speed";
 import { formatSpeed, formatData, formatDuration, formatDevices, DEVICE_LIMIT_POLICIES } from "@/lib/units";
 import { allocationFromPolicy, stayLengthWarnings, readStayLength, type PackageStayRange } from "@/lib/stay-packages";
 import { formatDate } from "@/lib/utils";
@@ -334,24 +338,28 @@ export function PackagesTab({
 
   const planOf = (p: PackageSummary) => plans.find((x) => x.plan_id === p.service_plan_id);
 
+  const statusBadge = (p: PackageSummary) =>
+    !p.current_revision_id ? <StatusBadge tone="warn">Not configured</StatusBadge>
+      : p.active ? <StatusBadge tone="ok">Active</StatusBadge>
+        : <StatusBadge>Disabled</StatusBadge>;
+
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Offered to clients" value={rows ? counts.active : "—"} icon={<CheckCircle2 />} tone="ok"
-          hint={rows ? `${counts.all} package${counts.all === 1 ? "" : "s"} in total` : undefined} />
-        <StatCard label="Disabled" value={rows ? counts.disabled : "—"} icon={<Ban />}
-          hint="Kept with their history, not offered" />
-        <StatCard label="Packages still valid" value={activeNow ?? "—"} icon={<Users />} tone="info"
-          hint={!rows ? undefined : activeNow === null ? "Could not be counted right now" : "Given out and not yet ended, online or not"} />
+    <div className="space-y-5">
+      <StatGrid cols={4}>
+        <StatCard label="Offered to clients" value={rows ? counts.active : "—"} icon={<CheckCircle2 />}
+          hint={rows ? `of ${counts.all} package${counts.all === 1 ? "" : "s"}` : undefined} />
+        <StatCard label="Disabled" value={rows ? counts.disabled : "—"} icon={<Ban />} hint="Kept with their history" />
+        <StatCard label="Still valid" value={activeNow ?? "—"} icon={<Users />}
+          hint={!rows ? undefined : activeNow === null ? "Could not be counted right now" : "Not yet ended"} />
         <StatCard label="Service plans" value={rows ? plans.length : "—"} icon={<Gauge />} href="/service-plans"
-          hint="The speed and allowances packages hand out" />
-      </div>
+          hint="Speed and allowances" />
+      </StatGrid>
 
       {notice && <Callout tone="success">{notice}</Callout>}
       {stayWarnings.length > 0 && (
         <div data-testid="stay-length-warnings">
           <Callout tone="warning" title="Overlapping stay lengths">
-            <ul className="list-disc space-y-0.5 pl-4">
+            <ul className="list-disc space-y-0.5 ps-4">
               {stayWarnings.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
             <p className="mt-1 text-xs">
@@ -361,9 +369,10 @@ export function PackagesTab({
         </div>
       )}
 
-      <Card>
-        <div className="border-b border-border px-4 py-3">
-          <Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
             <FilterChips<Chip>
               label="Show packages"
               value={chip}
@@ -374,75 +383,72 @@ export function PackagesTab({
                 { value: "disabled", label: "Disabled", count: rows ? counts.disabled : undefined },
               ]}
             />
-            <SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name or code" />
-          </Toolbar>
-        </div>
-        <CardBody className="p-0">
-          {rows === null ? (
-            <SkeletonRows rows={4} cols={7} />
-          ) : rows.length === 0 ? (
-            <EmptyState icon={<Package />} title="No internet packages yet"
-              hint="Until a package exists, a verified client has nothing to be given and cannot get online."
-              action={writable ? <Button onClick={() => { setFormErr(null); setAdding(true); }}><Plus /> Add the first package</Button> : undefined} />
-          ) : shown.length === 0 ? (
-            <EmptyState icon={<Package />} title="No package matches"
-              hint="Clear the search or choose another filter to see the rest." />
-          ) : (
-            <Table>
-              <THead><TR>
-                <TH>Package</TH><TH>Status</TH><TH>Price</TH><TH>Speed</TH><TH>Data</TH><TH>Time</TH>
-                <TH>Devices</TH><TH>Still valid</TH><TH><span className="sr-only">Actions</span></TH>
-              </TR></THead>
-              <TBody>
-                {shown.map((p) => (
-                  <TR key={p.package_id} className="cursor-pointer" onClick={() => setSelected(p)}>
-                    <TD>
-                      <button type="button" className="text-left font-medium hover:underline"
-                        onClick={(e) => { e.stopPropagation(); setSelected(p); }}>
-                        {p.name || p.code}
-                      </button>
-                      {p.name && p.name !== p.code && <div className="text-xs text-muted-foreground">{p.code}</div>}
+          }
+          search={<SearchInput value={q} onChange={setQ} placeholder="Search packages" label="Search packages by name or code" />}
+        />
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={7} />
+        ) : rows.length === 0 ? (
+          <EmptyState size="sm" icon={<Package />} title="No internet packages yet"
+            hint="Until a package exists, a verified client has nothing to be given and cannot get online."
+            action={writable ? <Button onClick={() => { setFormErr(null); setAdding(true); }}><Plus /> Add the first package</Button> : undefined} />
+        ) : shown.length === 0 ? (
+          <EmptyState size="sm" icon={<Package />} title="No package matches"
+            hint="Clear the search or choose another filter." />
+        ) : (
+          <Table label="Internet packages">
+            <THead><TR>
+              <TH>Package</TH><TH>Status</TH><TH numeric>Price</TH><TH>Speed (down / up)</TH>
+              <TH className="hidden md:table-cell">Data</TH><TH className="hidden md:table-cell">Time</TH>
+              <TH className="hidden lg:table-cell">Devices</TH><TH numeric>Still valid</TH>
+              <TH><span className="sr-only">Actions</span></TH>
+            </TR></THead>
+            <TBody>
+              {shown.map((p) => {
+                const name = p.name || p.code;
+                return (
+                  <TR key={p.package_id} onClick={() => setSelected(p)}>
+                    <TD truncate title={name} className="max-w-[16rem]">
+                      <span className="font-medium">{name}</span>
+                      {p.name && p.name !== p.code && <div className="truncate text-xs text-muted-foreground">{p.code}</div>}
                       {p.plan_has_newer_revision && (
-                        <div className="mt-0.5 inline-flex items-center gap-1 text-xs text-warning-subtle-foreground">
-                          <AlertTriangle className="size-3" /> Plan has newer settings
+                        <div className="mt-0.5 flex items-center gap-1 text-xs text-warning-subtle-foreground">
+                          <AlertTriangle className="size-3" aria-hidden /> Plan has newer settings
                         </div>
                       )}
                     </TD>
-                    <TD>
-                      {!p.current_revision_id ? (
-                        <Badge tone="warn" dot>Not configured</Badge>
-                      ) : p.active ? (
-                        <Badge tone="ok" dot>Active</Badge>
-                      ) : (
-                        <Badge tone="default" dot>Disabled</Badge>
-                      )}
+                    <TD nowrap>{statusBadge(p)}</TD>
+                    <TD numeric>{priceText(p.price_minor, p.currency, p.currency_exponent)}</TD>
+                    <TD nowrap>
+                      {formatSpeedPair(p.down_kbps, p.up_kbps)}
+                      {p.speed_allocation === "SHARED" && <span className="text-muted-foreground"> · shared</span>}
                     </TD>
-                    <TD className="whitespace-nowrap">{priceText(p.price_minor, p.currency, p.currency_exponent)}</TD>
-                    <TD>
-                      <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
-                      <div className="text-xs text-muted-foreground">{formatSpeed(p.up_kbps)} up</div>
-                    </TD>
-                    <TD>{formatData(p.data_quota_bytes)}</TD>
-                    <TD>{formatDuration(p.time_quota_seconds)}</TD>
-                    <TD>{formatDevices(p.max_concurrent_devices)}</TD>
-                    <TD className="tabular">{activeBy ? (activeBy[p.package_id] ?? 0) : "—"}</TD>
-                    <TD className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                    <TD nowrap className="hidden md:table-cell">{formatData(p.data_quota_bytes)}</TD>
+                    <TD nowrap className="hidden md:table-cell">{formatDuration(p.time_quota_seconds)}</TD>
+                    <TD nowrap className="hidden lg:table-cell">{formatDevices(p.max_concurrent_devices)}</TD>
+                    <TD numeric>{activeBy ? (activeBy[p.package_id] ?? 0) : "—"}</TD>
+                    <TD className="w-0">
                       {writable && (
-                        <>
-                          <Button size="sm" variant="ghost" disabled={busy} aria-label={`Edit ${p.name || p.code}`} onClick={() => startEdit(p)}>Edit</Button>
-                          <Button size="sm" variant="ghost" disabled={busy} aria-label={`${p.active ? "Disable" : "Enable"} ${p.name || p.code}`}
-                            onClick={() => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); }}>
-                            {p.active ? "Disable" : "Enable"}
-                          </Button>
-                        </>
+                        <RowActions
+                          subject={name}
+                          primary={{ label: "Edit", disabled: busy, onSelect: () => startEdit(p) }}
+                          items={[
+                            {
+                              label: p.active ? "Disable" : "Enable", disabled: busy,
+                              icon: p.active ? <Ban /> : <CheckCircle2 />,
+                              onSelect: () => { setActionErr(null); if (p.active) setDisabling(p); else setEnabling(p); },
+                            },
+                            { label: "Delete…", danger: true, icon: <Trash2 />, onSelect: () => setDeleting(p) },
+                          ]}
+                        />
                       )}
                     </TD>
                   </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-        </CardBody>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
       </Card>
 
       <Sheet open={selected !== null} onOpenChange={(v) => !v && setSelected(null)}>
@@ -476,18 +482,14 @@ export function PackagesTab({
                     { label: "Still valid", value: activeBy ? (activeBy[p.package_id] ?? 0) : "—" },
                   ]} />
 
-                  {/* Saving keeps the pinned plan revision (decideSave, on purpose: a rename must not apply an
-                      unapproved technical change), so do not tell the operator to edit and save; "Apply current
-                      settings" on Service plans moves packages one by one. */}
+                  {/* Saving keeps the pinned plan revision (decideSave): a rename must not apply an unapproved
+                      technical change, so the operator is sent to Service plans, never told to edit and save. */}
                   {p.plan_has_newer_revision && (
                     <Callout tone="warning" title="The service plan has newer settings">
-                      The <strong>{p.service_plan_code}</strong> service plan has newer settings that this package
-                      does not use yet. Editing and saving this package will not move it: a package keeps the
-                      version of the plan it was pinned to.{" "}
-                      To move it, open <Link href="/service-plans" className="font-medium underline">Service
-                      plans</Link>, choose <strong>{p.service_plan_code}</strong> and use <strong>Apply current
-                      settings</strong> — that asks which packages should move. Clients already online keep what
-                      they have; the change applies to clients who connect afterwards.
+                      Saving this package will not move it to them: a package keeps the plan version it was pinned
+                      to. Open <Link href="/service-plans" className="font-medium underline">Service plans</Link>,
+                      choose <strong>{p.service_plan_code}</strong> and use <strong>Apply current settings</strong>.
+                      Clients already online keep what they have.
                     </Callout>
                   )}
 
@@ -495,7 +497,7 @@ export function PackagesTab({
                     <KeyValueGrid items={[
                       { label: "Service plan", value: plan?.name || p.service_plan_code || "—",
                         hint: p.service_plan_revision_no ? `Using version ${p.service_plan_revision_no} of the plan` : undefined },
-                      { label: "Speed", value: `${formatSpeed(p.down_kbps)} down · ${formatSpeed(p.up_kbps)} up` },
+                      { label: "Speed (down / up)", value: formatSpeedPair(p.down_kbps, p.up_kbps) },
                       { label: "Data allowance", value: formatData(p.data_quota_bytes) },
                       { label: "Time allowance", value: formatDuration(p.time_quota_seconds) },
                       { label: "Devices", value: formatDevices(p.max_concurrent_devices),
@@ -510,14 +512,15 @@ export function PackagesTab({
                   <SheetSection title="Saved versions">
                     <ErrorBanner err={historyErr} />
                     {history === null && !historyErr ? <SkeletonRows rows={2} cols={1} /> : (
-                      <Timeline
+                      <HistoryList
+                        label="Saved versions"
                         emptyLabel="No saved versions yet"
+                        className="rounded-md border border-border"
                         items={(history ?? []).map((r) => ({
-                          key: r.revision_id,
-                          title: <span>Version {r.revision_no}{" "}
-                            {r.is_current ? <Badge tone="info">in force</Badge> : <span className="text-muted-foreground">superseded</span>}
-                          </span>,
-                          body: priceText(r.price_minor, r.currency, r.currency_exponent),
+                          id: r.revision_id,
+                          title: `Version ${r.revision_no}`,
+                          badge: r.is_current ? <Badge tone="accent">in force</Badge> : <span className="text-xs text-muted-foreground">superseded</span>,
+                          summary: priceText(r.price_minor, r.currency, r.currency_exponent),
                           tone: r.is_current ? "ok" : "neutral",
                         }))}
                       />

@@ -14,8 +14,8 @@ import { NetworkPauseSettingsCard, NetworkPausesNotice } from "@/components/gues
 import { CodeRequestsCard } from "@/components/code-requests";
 import { EmailAccountsSettingsCard } from "@/components/email-accounts-settings";
 import { roomSignInImpaired, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardBody, CardDescription, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -27,7 +27,7 @@ import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
-import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, LogIn, PackageOpen, Smartphone, Route } from "lucide-react";
+import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
 
 // Only the keys this screen owns are typed; the server's per-key merge preserves the rest.
 type Method = { enabled?: boolean };
@@ -146,10 +146,8 @@ export default function SignInMethodsPage() {
 
   const header = (
     <PageHeader
-      icon={<LogIn />}
-      eyebrow="Client access"
       title="Sign-in methods"
-      description="Each switch applies immediately. Turning a method off does not disconnect clients already online."
+      description="How clients sign in. Each switch applies immediately; clients already online stay connected."
       help={
         <>
           <HelpSection title="What this page sets">
@@ -199,9 +197,9 @@ export default function SignInMethodsPage() {
     return (
       <PageShell>
         {header}
-        <div className="grid gap-4 md:grid-cols-2" aria-busy="true">
+        <div className="space-y-3" aria-busy="true">
           <span className="sr-only">Loading sign-in methods</span>
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32" />)}
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-16" />)}
         </div>
       </PageShell>
     );
@@ -232,184 +230,160 @@ export default function SignInMethodsPage() {
         </Callout>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <MethodCard
-          icon={<Ticket />}
-          title="Voucher code"
-          description="The client types a code from a printed or emailed voucher."
-          enabled={!!cfg.voucher?.enabled}
-          busy={busy === "Voucher"}
-          writable={writable}
-          onToggle={(v) => save({ voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "Voucher")}
-          manageHref="/vouchers"
-          manageLabel="Vouchers"
-        />
-
-        <MethodCard
-          icon={<KeyRound />}
-          title="Client account"
-          description="A username and password issued to the client, managed under Client accounts."
-          enabled={!!cfg.guest_account?.enabled}
-          busy={busy === "Client account"}
-          writable={writable}
-          onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
-          manageHref="/guest-accounts"
-          manageLabel="Client accounts"
-        />
-
-        <MethodCard
-          icon={<PackageOpen />}
-          title="Choose a package without signing in"
-          description={cardMod
-            ? "The client picks a Free package, or pays by card, with no code, account or sign-in. A returning client resumes with a recovery code shown on screen."
-            : "The client picks a Free package with no code, account or sign-in. A returning client resumes with a recovery code shown on screen."}
-          enabled={!!cfg.open?.enabled}
-          busy={busy === "Open package selection"}
-          writable={writable}
-          onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
-          manageHref="/payment-methods"
-          manageLabel="Payment methods"
-        />
-
-        {hospitality && (
-          <>
-        <Card className="flex flex-col md:col-span-2">
-          <CardHeader className="items-start border-b-0 pb-2">
-            <MethodTitle icon={<Hotel />} title="Room sign-in" enabled={!!pms.enabled} />
-            <MethodSwitch
-              label="Room sign-in"
+      <SectionCard title="Methods" description="Methods of modules this site is not licensed for are not shown." flush>
+        <ul className="divide-y divide-border">
+          <MethodRow
+            icon={<Ticket />}
+            title="Voucher code"
+            description="The client types a code from a printed or emailed voucher."
+            enabled={!!cfg.voucher?.enabled}
+            busy={busy === "Voucher"}
+            writable={writable}
+            onToggle={(v) => save({ voucher: { ...(cfg.voucher ?? {}), enabled: v } }, "Voucher")}
+            manageHref="/vouchers"
+            manageLabel="Vouchers"
+          />
+          <MethodRow
+            icon={<KeyRound />}
+            title="Client account"
+            description="A username and password issued to the client."
+            enabled={!!cfg.guest_account?.enabled}
+            busy={busy === "Client account"}
+            writable={writable}
+            onToggle={(v) => save({ guest_account: { ...(cfg.guest_account ?? {}), enabled: v } }, "Client account")}
+            manageHref="/guest-accounts"
+            manageLabel="Client accounts"
+          />
+          <MethodRow
+            icon={<PackageOpen />}
+            title="Choose a package without signing in"
+            description={cardMod
+              ? "The client picks a Free package, or pays by card, with no credential. A recovery code resumes it later."
+              : "The client picks a Free package with no credential. A recovery code resumes it later."}
+            enabled={!!cfg.open?.enabled}
+            busy={busy === "Open package selection"}
+            writable={writable}
+            onToggle={(v) => save({ open: { ...(cfg.open ?? {}), enabled: v } }, "Open package selection")}
+            manageHref="/payment-methods"
+            manageLabel="Payment methods"
+          />
+          {hospitality && (
+            <MethodRow
+              icon={<Hotel />}
+              title="Room sign-in"
+              description="Room number and one detail from the reservation, checked against the PMS."
               enabled={!!pms.enabled}
               busy={busy === "Room sign-in"}
               writable={writable}
-              onChange={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
-            />
-          </CardHeader>
-          <CardBody className="flex flex-1 flex-col gap-2 pt-0">
-            <p className="text-sm text-muted-foreground">
-              The client enters their room number and one detail from their reservation, checked against the PMS.
-            </p>
-            {pms.enabled && roomSignInImpaired(pmsReadiness) && (
-              <p className="text-xs text-warning-subtle-foreground" role="status">
-                {pmsReadiness.state === "down"
+              onToggle={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
+              warning={pms.enabled && roomSignInImpaired(pmsReadiness)
+                ? pmsReadiness.state === "down"
                   ? "Not working at the moment — the PMS is not available."
-                  : "Not working on some client networks — the PMS is not available for them."}
-              </p>
-            )}
-            <Link
-              href="/room-sign-in"
-              className="mt-auto inline-flex w-fit items-center gap-0.5 pt-1 text-xs text-primary underline-offset-4 hover:underline"
-            >
-              Room sign-in settings — under Hotel <ArrowUpRight className="size-3.5" aria-hidden />
-            </Link>
-          </CardBody>
-        </Card>
-          </>
-        )}
-
-        {emailMod && (
-        <MethodCard
-          icon={<Mail />}
-          title="Email accounts"
-          description="The client registers with their email address and a password, then signs in with them."
-          enabled={!!cfg.email_account?.enabled}
-          busy={busy === "Email accounts"}
-          writable={writable}
-          onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
-          // A missing sender warns but does not block the switch.
-          warning={emailReady ? undefined
-            : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
-          manageHref="/notifications"
-          manageLabel="Delivery"
-        />
-        )}
-
-        {smsMod && (
-        <MethodCard
-          icon={<MessageSquare />}
-          title="SMS code"
-          description="The client receives a one-time code by text message."
-          enabled={!!cfg.sms?.enabled}
-          busy={busy === "SMS code"}
-          writable={writable}
-          onToggle={(v) => save({ sms: { ...(cfg.sms ?? {}), enabled: v } }, "SMS code")}
-          ready={smsReady}
-          notReadyReason="Not available until a text-message sender exists and is switched on, so codes cannot be sent yet."
-          manageHref="/notifications"
-          manageLabel="Delivery"
-        />
-        )}
-
-        {whatsappMod && (
-          <MethodCard
-            icon={<Smartphone />}
-            title="WhatsApp code"
-            description="The client receives a one-time code on WhatsApp for their phone number."
-            enabled={!!cfg.whatsapp?.enabled}
-            busy={busy === "WhatsApp code"}
-            writable={writable}
-            onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
-            ready={whatsappReady}
-            notReadyReason="Not available until a WhatsApp sender exists and is switched on, so codes cannot be sent yet."
-            manageHref="/notifications"
-            manageLabel="Delivery"
-          />
-        )}
-
-        {socialMod && (
-        <Card className="md:col-span-2">
-          <CardHeader className="items-start">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Users aria-hidden /> Identity providers</CardTitle>
-              <CardDescription>
-                The client signs in with an existing account such as Google.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody>
-            {socialListed.length === 0 ? (
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge tone="default">Not available</Badge>
-                <span className="text-muted-foreground">No identity provider is configured.</span>
-                <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
-                  Set one up in Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
-                </Link>
+                  : "Not working on some client networks — the PMS is not available for them."
+                : undefined}
+              manageHref="/room-sign-in"
+              manageLabel="Room sign-in settings — under Hotel"
+            />
+          )}
+          {emailMod && (
+            <MethodRow
+              icon={<Mail />}
+              title="Email accounts"
+              description="The client registers with their email address and a password, then signs in with them."
+              enabled={!!cfg.email_account?.enabled}
+              busy={busy === "Email accounts"}
+              writable={writable}
+              onToggle={(v) => save({ email_account: { ...(cfg.email_account ?? {}), enabled: v } }, "Email accounts")}
+              // A missing sender warns but does not block the switch.
+              warning={emailReady ? undefined
+                : "No email sender is switched on under Delivery, so verification and password-reset emails cannot be sent."}
+              manageHref="/notifications"
+              manageLabel="Delivery"
+            />
+          )}
+          {smsMod && (
+            <MethodRow
+              icon={<MessageSquare />}
+              title="SMS code"
+              description="The client receives a one-time code by text message."
+              enabled={!!cfg.sms?.enabled}
+              busy={busy === "SMS code"}
+              writable={writable}
+              onToggle={(v) => save({ sms: { ...(cfg.sms ?? {}), enabled: v } }, "SMS code")}
+              ready={smsReady}
+              notReadyReason="Not available until a text-message sender exists and is switched on, so codes cannot be sent yet."
+              manageHref="/notifications"
+              manageLabel="Delivery"
+            />
+          )}
+          {whatsappMod && (
+            <MethodRow
+              icon={<Smartphone />}
+              title="WhatsApp code"
+              description="The client receives a one-time code on WhatsApp for their phone number."
+              enabled={!!cfg.whatsapp?.enabled}
+              busy={busy === "WhatsApp code"}
+              writable={writable}
+              onToggle={(v) => save({ whatsapp: { ...(cfg.whatsapp ?? {}), enabled: v } }, "WhatsApp code")}
+              ready={whatsappReady}
+              notReadyReason="Not available until a WhatsApp sender exists and is switched on, so codes cannot be sent yet."
+              manageHref="/notifications"
+              manageLabel="Delivery"
+            />
+          )}
+          {socialMod && (
+            <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
+              <MethodIcon icon={<Users />} />
+              <div className="min-w-0 flex-1 space-y-2.5">
+                <div>
+                  <div className="text-emphasis">Identity providers</div>
+                  <p className="text-sm text-muted-foreground">The client signs in with an existing account such as Google.</p>
+                </div>
+                {socialListed.length === 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge tone="default">Not available</Badge>
+                    <span className="text-muted-foreground">No identity provider is configured.</span>
+                    <Link href="/social-providers" className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:decoration-2">
+                      Set one up in Identity providers <ArrowUpRight className="size-3.5" aria-hidden />
+                    </Link>
+                  </div>
+                ) : (
+                  <ul className="grid gap-2 sm:grid-cols-2">
+                    {socialListed.map((p) => {
+                      const on = !!cfg.social?.[p]?.enabled;
+                      const ready = socialReady.includes(p);
+                      const name = SOCIAL_LABELS[p] ?? p;
+                      return (
+                        <li key={p} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3.5 py-2.5">
+                          {writable ? (
+                            <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                checked={on}
+                                disabled={busy === `Social (${p})` || (!ready && !on)}
+                                onChange={(e) =>
+                                  save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
+                                    `Social (${p})`)}
+                              />
+                              <span className="capitalize">{name}</span>
+                            </label>
+                          ) : (
+                            <span className="text-sm capitalize">{name}</span>
+                          )}
+                          {ready
+                            ? <StatusBadge tone={on ? "ok" : "default"}>{on ? "Offered" : "Not offered"}</StatusBadge>
+                            : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
-            ) : (
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {socialListed.map((p) => {
-                  const on = !!cfg.social?.[p]?.enabled;
-                  const ready = socialReady.includes(p);
-                  const name = SOCIAL_LABELS[p] ?? p;
-                  return (
-                    <li key={p} className="flex items-center justify-between gap-3 rounded-md border border-border px-3.5 py-2.5">
-                      {writable ? (
-                        <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-primary"
-                            checked={on}
-                            disabled={busy === `Social (${p})` || (!ready && !on)}
-                            onChange={(e) =>
-                              save({ social: { ...(cfg.social ?? {}), [p]: { ...(cfg.social?.[p] ?? {}), enabled: e.target.checked } } },
-                                `Social (${p})`)}
-                          />
-                          <span className="capitalize">{name}</span>
-                        </label>
-                      ) : (
-                        <span className="text-sm capitalize">{name}</span>
-                      )}
-                      {ready
-                        ? <Badge tone={on ? "ok" : "default"} dot={on}>{on ? "Offered" : "Not offered"}</Badge>
-                        : <Badge tone="warn">Not set up — switch it off or set it up under Identity providers</Badge>}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
-        )}
-      </div>
+            </li>
+          )}
+        </ul>
+      </SectionCard>
 
       {emailMod && <EmailAccountsSettingsCard canEdit={writable} />}
 
@@ -461,12 +435,10 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Route aria-hidden /> Client journey</CardTitle>
-          <CardDescription>
-            What the client sees first on the portal, and whether a device they have already verified is asked for a code again.
-          </CardDescription>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Client journey</CardTitle>
+          <CardDescription>What the client sees first, and whether a verified device is asked for a code again.</CardDescription>
         </div>
       </CardHeader>
       <CardBody>
@@ -481,7 +453,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
         >
           <Field
             label="Primary method"
-            hint="The method shown first on the Client Portal. Identity providers appear as quick sign-in buttons above it; every other enabled method is offered under 'Or sign in with'."
+            hint="Shown first on the portal. Identity providers appear above it; other methods under 'Or sign in with'."
           >
             <Select value={primary} disabled={!writable || busy} onChange={(e) => setPrimary(e.target.value as PrimaryMethod)}>
               <option value="">Automatic</option>
@@ -498,7 +470,7 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             max={REMEMBER_DAYS_MAX}
             defaultValue={REMEMBER_DAYS_DEFAULT}
             readOnly={!writable || busy}
-            explanation="After a client verifies a code or an identity provider on a device, that device can reconnect without another code for this long. Only over the portal's HTTPS address: without HTTPS, devices are not remembered. 0 = always ask."
+            explanation="How long a device that verified a code or identity provider reconnects without another code. Only over the portal's HTTPS address. 0 = always ask."
           />
           {storedOff && (
             <p className="text-xs text-warning-subtle-foreground md:col-span-2" role="status">
@@ -506,9 +478,9 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
             </p>
           )}
           {writable && (
-            <div className="flex items-center gap-3 md:col-span-2">
-              <Button type="submit" disabled={!dirty || !daysValid || busy}>{busy ? "Saving…" : "Save journey"}</Button>
+            <div className="flex items-center justify-end gap-3 border-t border-border pt-4 md:col-span-2">
               {dirty && !busy && <span className="text-xs text-muted-foreground">Not saved yet.</span>}
+              <Button type="submit" disabled={!dirty || !daysValid || busy}>{busy ? "Saving…" : "Save journey"}</Button>
             </div>
           )}
         </form>
@@ -517,42 +489,17 @@ function ClientJourneyCard({ cfg, writable, busy, hospitality, onSave }: {
   );
 }
 
-function MethodTitle({ icon, title, enabled, extra }: {
-  icon: React.ReactNode; title: string; enabled: boolean; extra?: React.ReactNode;
-}) {
+function MethodIcon({ icon }: { icon: React.ReactNode }) {
   return (
-    <div className="min-w-0 space-y-1.5">
-      <CardTitle className="flex items-center gap-2 [&_svg]:size-4">
-        <span className="text-muted-foreground" aria-hidden>{icon}</span>
-        {title}
-      </CardTitle>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={enabled ? "ok" : "default"} dot={enabled}>{enabled ? "On" : "Off"}</Badge>
-        {extra}
-      </div>
-    </div>
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground [&_svg]:size-4" aria-hidden>
+      {icon}
+    </span>
   );
 }
 
-function MethodSwitch({ label, enabled, busy, writable, disabled, onChange }: {
-  label: string; enabled: boolean; busy: boolean; writable: boolean; disabled?: boolean; onChange: (v: boolean) => void;
-}) {
-  if (!writable) return null;
-  return (
-    <div className="flex shrink-0 items-center gap-2">
-      {busy && <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>}
-      <Switch
-        checked={enabled}
-        disabled={busy || disabled}
-        onCheckedChange={onChange}
-        label={label}
-      />
-    </div>
-  );
-}
-
-// A method whose provider is not ready is shown unavailable with its switch disabled.
-function MethodCard({
+// A method whose provider is not ready is shown unavailable with its switch disabled; not ready blocks switching
+// on, never off.
+function MethodRow({
   icon, title, description, enabled, busy, writable, onToggle, ready = true, notReadyReason, warning, manageHref, manageLabel,
 }: {
   icon: React.ReactNode; title: string; description: string;
@@ -563,30 +510,32 @@ function MethodCard({
   manageHref?: string; manageLabel?: string;
 }) {
   return (
-    <Card className={cn("flex flex-col", !ready && "bg-surface/60")}>
-      <CardHeader className="items-start border-b-0 pb-2">
-        <MethodTitle
-          icon={icon}
-          title={title}
-          enabled={enabled}
-          extra={!ready ? <Badge tone="warn">Not available</Badge> : undefined}
-        />
-        {/* Not ready blocks switching on, never off. */}
-        <MethodSwitch label={title} enabled={enabled} busy={busy} writable={writable} disabled={!ready && !enabled} onChange={onToggle} />
-      </CardHeader>
-      <CardBody className="flex flex-1 flex-col gap-2 pt-0">
+    <li className={cn("flex items-start gap-3 px-5 py-4", !ready && "bg-surface/50")}>
+      <MethodIcon icon={icon} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-emphasis">{title}</span>
+          <StatusBadge tone={enabled ? "ok" : "default"}>{enabled ? "On" : "Off"}</StatusBadge>
+          {!ready && <Badge tone="warn">Not available</Badge>}
+        </div>
         <p className="text-sm text-muted-foreground">{description}</p>
         {!ready && notReadyReason && <p className="text-xs text-warning-subtle-foreground">{notReadyReason}</p>}
         {ready && warning && <p className="text-xs text-warning-subtle-foreground" role="status">{warning}</p>}
         {manageHref && (
           <Link
             href={manageHref}
-            className="mt-auto inline-flex w-fit items-center gap-0.5 pt-1 text-xs text-primary underline-offset-4 hover:underline"
+            className="inline-flex w-fit items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
           >
             {manageLabel} <ArrowUpRight className="size-3.5" aria-hidden />
           </Link>
         )}
-      </CardBody>
-    </Card>
+      </div>
+      {writable && (
+        <div className="flex shrink-0 items-center gap-2 pt-1">
+          {busy && <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>}
+          <Switch checked={enabled} disabled={busy || (!ready && !enabled)} onCheckedChange={onToggle} label={title} />
+        </div>
+      )}
+    </li>
   );
 }

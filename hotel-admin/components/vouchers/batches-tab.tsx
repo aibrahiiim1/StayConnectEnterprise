@@ -7,7 +7,7 @@ import { Ban, Download, Layers, List } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -15,7 +15,7 @@ import { KeyValueGrid, MetricStrip, Pagination } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
 import { Segmented } from "@/components/ui/tabs";
-import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   batchLabel,
@@ -83,23 +83,23 @@ export function BatchesTab({
           before batches were recorded. They are listed under Vouchers, but cannot be exported as a batch.
         </Callout>
       )}
-      <Card>
+      <Card className="overflow-hidden">
         {rows === null ? (
           <SkeletonRows rows={4} cols={5} />
         ) : rows.length === 0 ? (
           <EmptyState
+            size="sm"
             icon={<Layers />}
             title="No batches yet"
             hint="Every time you issue vouchers, the cards form a batch here, ready to export or print again."
           />
         ) : (
-          <TableWrap>
-            <Table>
+          <Table label="Voucher batches">
               <THead>
                 <TR>
                   <TH>Batch</TH>
                   <TH>Package</TH>
-                  <TH className="text-right">Cards</TH>
+                  <TH numeric>Cards</TH>
                   <TH>Status</TH>
                   <TH className="hidden md:table-cell">Issued by</TH>
                   <TH className="hidden lg:table-cell">Note</TH>
@@ -107,21 +107,15 @@ export function BatchesTab({
               </THead>
               <TBody>
                 {rows.map((b) => (
-                  <TR
-                    key={b.batch_id}
-                    tabIndex={0}
-                    className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
-                    onClick={() => setOpen(b)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setOpen(b))}
-                  >
-                    <TD>
+                  <TR key={b.batch_id} onClick={() => setOpen(b)}>
+                    <TD nowrap>
                       <div className="font-medium">
                         <When iso={b.created_at} />
                       </div>
                       <div className="font-mono text-2xs text-muted-foreground">{b.batch_id.slice(0, 8)}</div>
                     </TD>
-                    <TD>{b.package_name ?? "Earlier package version"}</TD>
-                    <TD className="text-right tabular">{b.count.toLocaleString()}</TD>
+                    <TD truncate title={b.package_name ?? undefined} className="max-w-[14rem]">{b.package_name ?? "Earlier package version"}</TD>
+                    <TD numeric>{b.count.toLocaleString()}</TD>
                     <TD>
                       <div className="flex flex-wrap gap-1">
                         <Badge tone="ok">{b.available.toLocaleString()} available</Badge>
@@ -131,18 +125,17 @@ export function BatchesTab({
                         {b.not_yet_valid > 0 && <Badge tone="info">{b.not_yet_valid.toLocaleString()} not yet valid</Badge>}
                       </div>
                     </TD>
-                    <TD className="hidden md:table-cell">{b.issued_by_label ?? "—"}</TD>
-                    <TD className="hidden max-w-[16rem] truncate text-muted-foreground lg:table-cell">{b.notes ?? ""}</TD>
+                    <TD nowrap className="hidden md:table-cell">{b.issued_by_label ?? "—"}</TD>
+                    <TD truncate muted title={b.notes ?? undefined} className="hidden max-w-[16rem] lg:table-cell">{b.notes ?? ""}</TD>
                   </TR>
                 ))}
               </TBody>
-            </Table>
-          </TableWrap>
+          </Table>
         )}
         {rows && rows.length > 0 && (
-          <div className="border-t border-border px-4 py-3">
+          <CardFooter>
             <Pagination offset={offset} limit={PAGE} shown={rows.length} total={data?.total ?? null} onChange={setOffset} />
-          </div>
+          </CardFooter>
         )}
       </Card>
 

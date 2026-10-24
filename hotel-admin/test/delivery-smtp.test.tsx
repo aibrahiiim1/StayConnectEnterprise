@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { chooseInRow } from "./row-actions-helper";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -150,7 +151,7 @@ describe("Send a test message", () => {
     post.mockResolvedValueOnce({ ok: true, kind: "smtp" });
     render(<NotificationsPage />);
     await screen.findByText("Site relay");
-    fireEvent.click(screen.getByRole("button", { name: /Send a test message/ }));
+    await chooseInRow(document.body, /Send a test message/);
     const dialog = await screen.findByRole("dialog");
     const to = within(dialog).getByLabelText(/Send to \(email address\)/) as HTMLInputElement;
     expect(to.type).toBe("email");
@@ -175,7 +176,7 @@ describe("Send a test message", () => {
     post.mockRejectedValue(new (ApiError as any)(502, { error: "scd_unavailable", message: "the session controller is not reachable" }));
     render(<NotificationsPage />);
     await screen.findByText("Site relay");
-    fireEvent.click(screen.getByRole("button", { name: /Send a test message/ }));
+    await chooseInRow(document.body, /Send a test message/);
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/Send to/), { target: { value: "me@example.com" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /Send test/ }));

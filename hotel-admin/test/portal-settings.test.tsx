@@ -482,8 +482,10 @@ describe("history", () => {
     expect(screen.getByText(/Clients see this/)).toBeTruthy();
     expect(screen.getByText(/Restored save #1/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Restore/ }));
-    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: /Save #3/ }));
+    const drawer = await screen.findByRole("dialog");
+    fireEvent.click(within(drawer).getByRole("button", { name: /Restore this save/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Restore save #3/ });
     const pw = within(dialog).getByLabelText(/Confirm your password/i) as HTMLInputElement;
     expect(pw.type).toBe("password");
     const confirm = within(dialog).getByRole("button", { name: /^Restore$/ }) as HTMLButtonElement;

@@ -8,7 +8,7 @@ import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -45,8 +45,6 @@ export default function InternetPackagesPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Package />}
-        eyebrow="Internet offering"
         title="Internet packages"
         description="What clients are offered, and how it is being used."
         help={
@@ -92,24 +90,24 @@ export default function InternetPackagesPage() {
         <ReadOnlyNotice>Your role can see the internet packages but not change them.</ReadOnlyNotice>
       )}
       {disabled ? (
-        <Card><CardBody>
+        <Card>
           <EmptyState
             icon={<Package />}
             title="The internet offering is not switched on for this appliance"
             hint="Internet packages become available once this capability is enabled for the site. Contact your Semantics administrator."
           />
-        </CardBody></Card>
+        </Card>
       ) : (
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
           <TabsList>
             <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="activity">Client activity</TabsTrigger>
           </TabsList>
-          <ErrorBanner err={err} className="mt-4" />
-          <TabsContent value="packages" className="mt-4">
+          <ErrorBanner err={err} className="mt-5" />
+          <TabsContent value="packages" className="mt-5">
             <PackagesTab guard={guard} setErr={setErr} addRequest={addRequest} onAddHandled={() => setAddRequest(0)} writable={writable} />
           </TabsContent>
-          <TabsContent value="activity" className="mt-4">
+          <TabsContent value="activity" className="mt-5">
             <ActivityTab guard={guard} setErr={setErr} />
           </TabsContent>
         </Tabs>

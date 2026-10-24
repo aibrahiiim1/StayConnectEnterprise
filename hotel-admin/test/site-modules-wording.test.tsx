@@ -243,7 +243,7 @@ describe("Client activity on Internet packages", () => {
     routes({ "/commercial-packages/activity": activity(rows) });
     const { ActivityTab } = await import("@/app/(app)/internet-packages/activity-tab");
     render(<ActivityTab guard={() => false} setErr={() => {}} />);
-    await screen.findByRole("button", { name: "Premium" });
+    await screen.findByText("Premium", { selector: "tbody span" });
   }
 
   it("lists no hospitality or identity way of giving access, and no room search, without those modules", async () => {
@@ -266,7 +266,7 @@ describe("Client activity on Internet packages", () => {
 
   it("shows no Room or Reservation rows on a grant that has no room", async () => {
     await renderTab();
-    await userEvent.click(screen.getByRole("button", { name: "Premium" }));
+    await userEvent.click(screen.getByText("Premium", { selector: "tbody span" }));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).queryByText("Room")).toBeNull();
     expect(within(sheet).queryByText("Reservation")).toBeNull();

@@ -23,10 +23,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
 import { cn, errMsg } from "@/lib/utils";
-import {
-  Palette, LayoutTemplate, Paintbrush, Type, TextCursorInput, Languages as LanguagesIcon, Code2, History as HistoryIcon,
-  Upload, Trash2, Check, AlertTriangle,
-} from "lucide-react";
+import { Upload, Trash2, Check, AlertTriangle } from "lucide-react";
 import {
   LIMITS, templateById, validateDesign, type BrandingState, type DesignIssue, type RevisionSummary,
   type TemplateId, type ValidateResp,
@@ -102,14 +99,14 @@ const DEFAULTS = {
 } as const;
 
 type Section = "template" | "brand" | "content" | "wording" | "languages" | "advanced" | "history";
-const SECTIONS: { id: Section; label: string; icon: typeof Palette }[] = [
-  { id: "template", label: "Template", icon: LayoutTemplate },
-  { id: "brand", label: "Brand", icon: Paintbrush },
-  { id: "content", label: "Content", icon: Type },
-  { id: "wording", label: "Sign-in page text", icon: TextCursorInput },
-  { id: "languages", label: "Languages", icon: LanguagesIcon },
-  { id: "advanced", label: "Advanced HTML & CSS", icon: Code2 },
-  { id: "history", label: "History", icon: HistoryIcon },
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "template", label: "Template" },
+  { id: "brand", label: "Brand" },
+  { id: "content", label: "Content" },
+  { id: "wording", label: "Sign-in page text" },
+  { id: "languages", label: "Languages" },
+  { id: "advanced", label: "Advanced HTML & CSS" },
+  { id: "history", label: "History" },
 ];
 
 type ImageKey = "logo_url" | "background_url" | "hero_image_url";
@@ -272,7 +269,7 @@ export default function PortalSettingsPage() {
   if (!saved) {
     return (
       <PageShell width="wide">
-        <PageHeader icon={<Palette />} eyebrow="Client access" title="Portal settings"
+        <PageHeader title="Portal settings"
           description="Design the Wi-Fi sign-in page clients see." help={pageHelp(hospitality)} />
         {loadErr ? <ErrorBanner err={loadErr} /> : (
           <div className="space-y-3" aria-label="Loading portal settings">
@@ -305,10 +302,8 @@ export default function PortalSettingsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Palette />}
-        eyebrow="Client access"
         title="Portal settings"
-        description="Design the Wi-Fi sign-in page clients see. Clients see your changes as soon as you save."
+        description="Design the Wi-Fi sign-in page clients see. Changes go live when you save."
         help={pageHelp(hospitality)}
         actions={
           writable ? (
@@ -352,7 +347,7 @@ export default function PortalSettingsPage() {
       )}
       {blocking.length > 0 && (
         <Callout tone="danger" title="Fix these before saving">
-          <ul className="list-disc space-y-0.5 pl-4">
+          <ul className="list-disc space-y-0.5 ps-4">
             {blocking.slice(0, 5).map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
             {blocking.length > 5 && <li>and {blocking.length - 5} more</li>}
           </ul>
@@ -363,17 +358,18 @@ export default function PortalSettingsPage() {
       )}
       {notes.length > 0 && blocking.length === 0 && (
         <Callout tone="warning" title="Worth knowing before you save">
-          <ul className="list-disc space-y-0.5 pl-4">
+          <ul className="list-disc space-y-0.5 ps-4">
             {notes.map((i, n) => <li key={n}>{fieldName(i.field)}: {i.message}</li>)}
           </ul>
         </Callout>
       )}
       {saveErr ? <ErrorBanner err={saveErr} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.05fr)]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(20rem,0.7fr)]">
+        <div className="min-w-0 space-y-5">
         {/* The tablist is entered at its selected tab (roving tabIndex); jsx-a11y reads the container role as a control. */}
         {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
-        <div role="tablist" aria-label="Portal settings sections" aria-orientation="vertical"
+        <div role="tablist" aria-label="Portal settings sections" aria-orientation="horizontal"
           onKeyDown={(e) => {
             const i = SECTIONS.findIndex((x) => x.id === section);
             const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
@@ -383,7 +379,7 @@ export default function PortalSettingsPage() {
             setSection(next.id);
             document.getElementById(`portal-tab-${next.id}`)?.focus();
           }}
-          className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:self-start lg:overflow-visible lg:px-0 xl:sticky xl:top-6">
+          className="flex gap-3.5 overflow-x-auto border-b border-border">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
@@ -395,17 +391,16 @@ export default function PortalSettingsPage() {
               aria-controls="portal-section"
               onClick={() => setSection(s.id)}
               className={cn(
-                "inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-start text-sm transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                "-mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-label transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 section === s.id
-                  ? "bg-primary-subtle font-medium text-primary-subtle-foreground"
-                  : "text-muted-foreground hover:bg-surface hover:text-foreground",
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
-              <s.icon className="size-4 shrink-0" aria-hidden />
               <span className="whitespace-nowrap">{s.label}</span>
               {sectionHasIssue(s.id) && (
-                <span className="ms-auto inline-flex items-center text-destructive">
+                <span className="inline-flex items-center text-destructive">
                   <AlertTriangle className="size-3.5" aria-hidden />
                   <span className="sr-only">has problems</span>
                 </span>
@@ -414,13 +409,15 @@ export default function PortalSettingsPage() {
           ))}
         </div>
 
-        <div id="portal-section" role="tabpanel" className="min-w-0 space-y-5">
+        <div id="portal-section" role="tabpanel" aria-labelledby={`portal-tab-${section}`} className="min-w-0 space-y-5">
           {section === "template" && (
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>Layout</CardTitle>
-                  <CardDescription>Each card is your own sign-in page in that layout.</CardDescription>
+                  <div className="min-w-0">
+                    <CardTitle>Layout</CardTitle>
+                    <CardDescription>Each card is your own sign-in page in that layout.</CardDescription>
+                  </div>
                 </CardHeader>
                 <CardBody>
                   <TemplateGallery design={d} value={tpl.id} disabled={!writable}
@@ -429,8 +426,10 @@ export default function PortalSettingsPage() {
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>{tpl.name} options</CardTitle>
-                  <CardDescription>Only the options this layout uses are shown.</CardDescription>
+                  <div className="min-w-0">
+                    <CardTitle>{tpl.name} options</CardTitle>
+                    <CardDescription>Only the options this layout uses are shown.</CardDescription>
+                  </div>
                 </CardHeader>
                 <CardBody className="space-y-5">
                   {tpl.options.includes("hero") && (
@@ -566,8 +565,10 @@ export default function PortalSettingsPage() {
           {section === "content" && (
             <Card>
               <CardHeader>
-                <CardTitle>Site identity and content</CardTitle>
-                <CardDescription>Your own words, shown to every client in every language.</CardDescription>
+                <div className="min-w-0">
+                  <CardTitle>Site identity and content</CardTitle>
+                  <CardDescription>Your own words, shown to every client in every language.</CardDescription>
+                </div>
               </CardHeader>
               <CardBody className="space-y-5">
                 <Field label="Site name" error={fieldError("hotel_name")}
@@ -597,11 +598,12 @@ export default function PortalSettingsPage() {
           {section === "content" && (
             <Card>
               <CardHeader>
-                <CardTitle>Privacy notice</CardTitle>
-                <CardDescription>
-                  What clients are told about their data before they sign in. Shown under every sign-in method as
-                  &ldquo;How we use your data&rdquo;, opening in place, so it can be read before the client is online.
-                </CardDescription>
+                <div className="min-w-0">
+                  <CardTitle>Privacy notice</CardTitle>
+                  <CardDescription>
+                    Shown under every sign-in method as &ldquo;How we use your data&rdquo;, readable before the client is online.
+                  </CardDescription>
+                </div>
               </CardHeader>
               <CardBody className="space-y-5">
                 {!(d.privacy_text ?? "").trim() && !(d.privacy_url ?? "").trim() && (
@@ -649,8 +651,9 @@ export default function PortalSettingsPage() {
             <HistorySection revisions={revisions} writable={writable} dirty={dirty} onRestored={load} />
           )}
         </div>
+        </div>
 
-        <div className="min-w-0 lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6 xl:self-start">
+        <div className="min-w-0 xl:sticky xl:top-6 xl:self-start">
           <PortalPreview design={d} sanitized={validation?.sanitized ?? null} />
         </div>
       </div>

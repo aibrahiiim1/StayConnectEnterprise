@@ -27,7 +27,7 @@ export function TemplateGallery({ design, value, onChange, disabled }: {
   }, [inlined]);
 
   return (
-    <div role="radiogroup" aria-label="Page template" className="grid gap-3 sm:grid-cols-2">
+    <div role="radiogroup" aria-label="Page template" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2">
       {PORTAL_TEMPLATES.map((t) => (
         <OptionCard
           key={t.id}

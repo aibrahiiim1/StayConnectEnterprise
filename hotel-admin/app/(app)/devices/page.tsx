@@ -6,19 +6,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ClientDeviceRow, type DeviceSettings } from "@/lib/api";
 import { canRead, canWrite } from "@/lib/roles";
 import { useOperatorRoles } from "@/lib/whoami-context";
-import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ResultsCount, SearchInput } from "@/components/ui/data";
 import { SkeletonRows } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
-import { Smartphone, Settings2 } from "lucide-react";
+import { Smartphone } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { DeviceDetailDialog } from "@/components/devices/device-detail";
 import { REASON_HINT, REASON_MAX_CHARS, reasonOk } from "@/lib/reason";
@@ -26,9 +28,9 @@ import { useEditFocus } from "@/lib/use-edit-focus";
 
 // Online means signed in with a live session; a device on Wi-Fi without one is not "Offline".
 function DeviceStatus({ r }: { r: ClientDeviceRow }) {
-  if (r.online) return <Badge tone="ok" dot>Online</Badge>;
-  if (r.on_network) return <Badge tone="warn" dot>On the Wi-Fi, not signed in</Badge>;
-  return <Badge tone="neutral" dot>Not connected</Badge>;
+  if (r.online) return <StatusBadge tone="ok">Online</StatusBadge>;
+  if (r.on_network) return <StatusBadge tone="warn">On the Wi-Fi, not signed in</StatusBadge>;
+  return <StatusBadge>Not connected</StatusBadge>;
 }
 
 function holder(r: ClientDeviceRow): string {
@@ -79,10 +81,8 @@ export default function DevicesPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Clients"
         title="Devices"
-        icon={<Smartphone />}
-        description="Every device that has used the Wi-Fi: what it holds, and what you can do about it."
+        description="Every device that has used the Wi-Fi, and the package places it holds."
         help={
           <>
             <HelpSection title="Places on a package">
@@ -108,19 +108,18 @@ export default function DevicesPage() {
       {maySeeSettings && <DeviceChangesCard canEdit={mayConfigure} />}
 
       <Card className="overflow-hidden">
-        <CardBody className="border-b border-border py-3">
-          <Toolbar>
-            <SearchInput value={q} onChange={setQ} delay={300} placeholder="Search MAC, address or account…" label="Search devices" />
-          </Toolbar>
-          <ResultsCount count={rows?.length} noun="device" more={more} />
-        </CardBody>
-        <ErrorBanner err={err} />
+        <FilterBar
+          inset
+          search={<SearchInput value={q} onChange={setQ} delay={300} placeholder="Search MAC, address or account…" label="Search devices" />}
+          actions={<ResultsCount count={rows?.length} noun="device" more={more} />}
+        />
+        <ErrorBanner err={err} className="mx-4 mt-3" />
         {rows === null ? (
-          <CardBody><SkeletonRows rows={5} /></CardBody>
+          <SkeletonRows rows={5} />
         ) : rows.length === 0 ? (
-          <EmptyState title={q ? "No device matches" : "No devices yet"} hint={q ? "Try part of the MAC address, the address or the account name." : "Devices appear here once they have used the Wi-Fi."} />
+          <EmptyState size="sm" icon={<Smartphone />} title={q ? "No device matches" : "No devices yet"} hint={q ? "Try part of the MAC address, the address or the account name." : "Devices appear here once they have used the Wi-Fi."} />
         ) : (
-          <Table>
+          <Table label="Devices">
             <THead>
               <TR>
                 <TH>Device</TH>
@@ -133,10 +132,10 @@ export default function DevicesPage() {
             </THead>
             <TBody>
               {rows.map((r) => (
-                <TR key={r.id || r.mac}>
-                  <TD>
+                <TR key={r.id || r.mac} onClick={r.id ? () => setOpen(r.id) : undefined}>
+                  <TD nowrap>
                     <div className="font-mono text-sm">{r.mac}</div>
-                    <div className="text-caption text-muted-foreground">
+                    <div className="max-w-[16rem] truncate text-caption text-muted-foreground">
                       {[r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ")}
                     </div>
                     {r.current && (
@@ -145,7 +144,7 @@ export default function DevicesPage() {
                       </div>
                     )}
                   </TD>
-                  <TD>
+                  <TD nowrap>
                     <DeviceStatus r={r} />
                     {!r.id && <div className="mt-1 text-caption text-muted-foreground">Has not signed in yet</div>}
                     {r.current && (
@@ -156,13 +155,13 @@ export default function DevicesPage() {
                       </div>
                     )}
                   </TD>
-                  <TD className="hidden text-sm md:table-cell">
+                  <TD nowrap className="hidden md:table-cell">
                     {r.current ? `${r.current.package_name || "Package"}${r.current.max_devices ? ` · ${r.current.places_in_use}/${r.current.max_devices}` : ""}` : "—"}
                   </TD>
-                  <TD className="hidden text-sm md:table-cell">{holder(r)}</TD>
-                  <TD className="hidden text-sm text-muted-foreground lg:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
-                  <TD className="text-end">
-                    {r.id && <Button size="sm" variant="ghost" aria-label={`Manage ${r.mac}`} onClick={() => setOpen(r.id)}><Settings2 /> Manage</Button>}
+                  <TD nowrap className="hidden md:table-cell">{holder(r)}</TD>
+                  <TD nowrap muted className="hidden lg:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
+                  <TD className="w-0">
+                    {r.id && <RowActions subject={r.mac} primary={{ label: "Manage", onSelect: () => setOpen(r.id) }} />}
                   </TD>
                 </TR>
               ))}
@@ -170,10 +169,10 @@ export default function DevicesPage() {
           </Table>
         )}
         {rows && rows.length > 0 && (page > 1 || more) && (
-          <CardBody className="flex justify-end gap-2 border-t border-border py-3">
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-            <Button size="sm" variant="outline" disabled={!more} onClick={() => setPage((p) => p + 1)}>Next</Button>
-          </CardBody>
+          <CardFooter className="justify-end">
+            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+            <Button size="sm" variant="secondary" disabled={!more} onClick={() => setPage((p) => p + 1)}>Next</Button>
+          </CardFooter>
         )}
       </Card>
 
@@ -222,14 +221,13 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
           <div className="min-w-0 space-y-1">
             <div className="text-emphasis">Device changes a client may make per day</div>
             <p className="text-caption text-muted-foreground">
-              How many times a day a client may replace or remove one of their devices on a package from the portal.
-              Default 3; from 1 to 10. It limits passing one package around between devices.
+              Replacing or removing a device on a package from the portal. Default 3; from 1 to 10.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{value === null ? "—" : `${value} per day`}</Badge>
             {canEdit && !editing && (
-              <Button ref={triggerRef} size="sm" variant="outline" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
+              <Button ref={triggerRef} size="sm" variant="secondary" onClick={() => { setDraft(String(value ?? 3)); setEditing(true); }}>Change</Button>
             )}
           </div>
         </div>
@@ -245,9 +243,9 @@ function DeviceChangesCard({ canEdit }: { canEdit: boolean }) {
             <Field label="Your password" required hint="Confirms the change.">
               <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
-            <div className="flex gap-2 sm:col-span-3">
+            <div className="flex justify-end gap-2 sm:col-span-3">
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
               <Button size="sm" variant="primary" disabled={busy || !valid} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>Cancel</Button>
             </div>
           </div>
         )}

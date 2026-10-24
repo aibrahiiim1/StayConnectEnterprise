@@ -9,12 +9,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { PERIODS, periodQuery, type Period } from "@/lib/usage-period";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Meter, MonoId, SkeletonRows } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -218,9 +219,7 @@ export default function UsageExplorerPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Clients"
         title="Usage explorer"
-        icon={<Activity />}
         description="Trace what an access source or a device used, down to the recorded samples."
         help={
           <>
@@ -265,22 +264,21 @@ export default function UsageExplorerPage() {
 
       <ErrorBanner err={err} />
 
-      <Card>
-        <CardBody className="flex flex-wrap items-end gap-3 py-3">
-          <Field label="Period" hint="Every total on this page covers this period.">
-            <Select aria-label="Period" value={period} onChange={(e) => { setPeriod(e.target.value as Period); setRows(null); setSource(null); setDevice(null); }}>
-              {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
-          </Field>
-          {period === "custom" && (
-            <>
-              <Field label="From"><Input type="date" aria-label="From" value={fromDay} onChange={(e) => setFromDay(e.target.value)} /></Field>
-              <Field label="To"><Input type="date" aria-label="To" value={toDay} onChange={(e) => setToDay(e.target.value)} /></Field>
-              <Button variant="secondary" disabled={!!range.error} onClick={() => { setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
-            </>
-          )}
-        </CardBody>
-      </Card>
+      <FilterBar>
+        <span className="text-label text-muted-foreground" aria-hidden>Period</span>
+        <Select aria-label="Period" className="w-full sm:w-48" value={period}
+          onChange={(e) => { setPeriod(e.target.value as Period); setRows(null); setSource(null); setDevice(null); }}>
+          {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </Select>
+        {period === "custom" && (
+          <>
+            <Input type="date" aria-label="From" className="w-full sm:w-44" value={fromDay} onChange={(e) => setFromDay(e.target.value)} />
+            <Input type="date" aria-label="To" className="w-full sm:w-44" value={toDay} onChange={(e) => setToDay(e.target.value)} />
+            <Button variant="secondary" disabled={!!range.error} onClick={() => { setRows(null); setSource(null); setDevice(null); }}>Apply</Button>
+          </>
+        )}
+        <span className="text-xs text-muted-foreground">Every total on this page covers this period.</span>
+      </FilterBar>
 
       <Tabs
         value={tab}
@@ -294,7 +292,7 @@ export default function UsageExplorerPage() {
         <TabsContent value="sources" className="mt-5 space-y-5">
           {!source && (
             <Card className="overflow-hidden">
-              <CardBody className="space-y-3 border-b border-border py-3">
+              <div className="space-y-3 border-b border-border px-4 py-3">
                 <FilterChips<TypeFilter>
                   label="Access source type"
                   value={typeFilter}
@@ -313,31 +311,31 @@ export default function UsageExplorerPage() {
                   <SearchInput value={q} onChange={setQ} onSearch={() => void search()} name="usage-source-filter"
                     id="usage-source-filter" className="min-w-0 flex-1 sm:w-auto"
                     label={hint.label} placeholder={hint.placeholder} />
-                  <Button disabled={busy} onClick={() => void search()}>{busy ? "Searching…" : "Search"}</Button>
+                  <Button variant="secondary" disabled={busy} onClick={() => void search()}>{busy ? "Searching…" : "Search"}</Button>
                 </div>
-              </CardBody>
+              </div>
 
               {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
-                <EmptyState icon={<Activity />} title={q.trim() ? "No access source matched" : "No usage recorded yet"}
+                <EmptyState size="sm" icon={<Activity />} title={q.trim() ? "No access source matched" : "No usage recorded yet"}
                   hint="Only access sources that were given internet access appear here." />
               ) : (
                 <div className={cn(busy && refreshingClass)}>
-                  <Table>
+                  <Table label="Access sources">
                     <THead>
                       <TR>
                         <TH>Access source</TH>
                         <TH className="hidden md:table-cell">Details</TH>
-                        <TH className="hidden text-end sm:table-cell">Downloaded</TH>
-                        <TH className="hidden text-end sm:table-cell">Uploaded</TH>
-                        <TH className="text-end">Total</TH>
+                        <TH numeric className="hidden sm:table-cell">Downloaded</TH>
+                        <TH numeric className="hidden sm:table-cell">Uploaded</TH>
+                        <TH numeric>Total</TH>
                         <TH className="hidden lg:table-cell">Allowance</TH>
                         <TH><span className="sr-only">Open</span></TH>
                       </TR>
                     </THead>
                     <TBody>
                       {rows.map((r) => (
-                        <TR key={`${r.source_type}:${r.source_id}`}>
-                          <TD>
+                        <TR key={`${r.source_type}:${r.source_id}`} onClick={() => void openSource(r.source_type, r.source_id)}>
+                          <TD nowrap>
                             <div className={cn("font-medium", r.source_type === "voucher" && "font-mono text-sm")}>
                               {sourceTitle(r)}
                             </div>
@@ -365,14 +363,15 @@ export default function UsageExplorerPage() {
                               )
                             )}
                           </TD>
-                          <TD className="hidden whitespace-nowrap text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
-                          <TD className="hidden whitespace-nowrap text-end tabular sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
-                          <TD className="whitespace-nowrap text-end font-medium tabular">{formatBytes(r.totals.bytes_total)}</TD>
+                          <TD numeric className="hidden sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
+                          <TD numeric className="hidden sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
+                          <TD numeric className="font-medium">{formatBytes(r.totals.bytes_total)}</TD>
                           <TD className="hidden lg:table-cell">
                             <AllowanceCell consumed={r.consumed_bytes} quota={r.quota_bytes} />
                           </TD>
-                          <TD className="text-end">
-                            <Button size="sm" variant="ghost" onClick={() => openSource(r.source_type, r.source_id)}
+                          <TD className="w-0 text-end">
+                            <Button size="xs" variant="ghost" className="text-foreground"
+                              onClick={(e) => { e.stopPropagation(); void openSource(r.source_type, r.source_id); }}
                               aria-label={`Details for ${sourceTitle(r)}`}>
                               Details <ChevronRight className="rtl:rotate-180" />
                             </Button>
@@ -384,7 +383,7 @@ export default function UsageExplorerPage() {
                 </div>
               )}
               {rows && rows.length > 0 && (offset > 0 || hasMore) && (
-                <CardBody className="border-t border-border py-3">
+                <CardFooter>
                   <Pagination
                     offset={offset}
                     limit={USAGE_PAGE}
@@ -392,7 +391,7 @@ export default function UsageExplorerPage() {
                     hasMore={hasMore}
                     onChange={(o) => void search(typeFilter, o)}
                   />
-                </CardBody>
+                </CardFooter>
               )}
             </Card>
           )}
@@ -473,31 +472,31 @@ export default function UsageExplorerPage() {
                   <CardTitle>{isStay ? "Devices used during this stay" : "Devices used under this access"}</CardTitle>
                 </CardHeader>
                 {source.devices.length === 0 ? (
-                  <EmptyState icon={<Smartphone />} title="No device recorded"
+                  <EmptyState size="sm" icon={<Smartphone />} title="No device recorded"
                     hint={isStay ? "Nothing connected under this stay's access." : "Nothing connected under this access."} />
                 ) : (
-                  <Table>
+                  <Table label="Devices">
                     <THead>
                       <TR>
                         <TH>Device</TH>
-                        <TH className="hidden text-end sm:table-cell">Downloaded</TH>
-                        <TH className="hidden text-end sm:table-cell">Uploaded</TH>
-                        <TH className="text-end">Total</TH>
-                        <TH className="hidden sm:table-cell">Sessions</TH>
+                        <TH numeric className="hidden sm:table-cell">Downloaded</TH>
+                        <TH numeric className="hidden sm:table-cell">Uploaded</TH>
+                        <TH numeric>Total</TH>
+                        <TH numeric className="hidden sm:table-cell">Sessions</TH>
                         <TH><span className="sr-only">Open</span></TH>
                       </TR>
                     </THead>
                     <TBody>
                       {source.devices.map((d) => (
                         <TR key={d.mac || "unknown"}>
-                          <TD className="font-mono text-xs">{d.mac || "unknown"}</TD>
-                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(d.bytes_down)}</TD>
-                          <TD className="hidden text-end tabular sm:table-cell">{formatBytes(d.bytes_up)}</TD>
-                          <TD className="text-end font-medium tabular">{formatBytes(d.bytes_total)}</TD>
-                          <TD className="hidden sm:table-cell">{d.sessions}</TD>
-                          <TD className="text-end">
+                          <TD nowrap className="font-mono text-xs">{d.mac || "unknown"}</TD>
+                          <TD numeric className="hidden sm:table-cell">{formatBytes(d.bytes_down)}</TD>
+                          <TD numeric className="hidden sm:table-cell">{formatBytes(d.bytes_up)}</TD>
+                          <TD numeric className="font-medium">{formatBytes(d.bytes_total)}</TD>
+                          <TD numeric className="hidden sm:table-cell">{d.sessions}</TD>
+                          <TD className="w-0 text-end">
                             {d.mac && (
-                              <Button size="sm" variant="ghost" onClick={() => lookUpDevice(d.mac)}>
+                              <Button size="xs" variant="ghost" className="text-foreground" onClick={() => lookUpDevice(d.mac)}>
                                 This device <ChevronRight className="rtl:rotate-180" />
                               </Button>
                             )}
@@ -522,13 +521,13 @@ export default function UsageExplorerPage() {
                 <SearchInput value={q} onChange={setQ} onSearch={(v) => { if (v.trim()) void lookUpDevice(v); }}
                   name="usage-device-lookup" id="usage-device-lookup" className="min-w-0 flex-1 font-mono sm:w-auto"
                   label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff" />
-                <Button disabled={busy || !q.trim()} onClick={() => void lookUpDevice(q)}>{busy ? "Looking…" : "Look up"}</Button>
+                <Button variant="secondary" disabled={busy || !q.trim()} onClick={() => void lookUpDevice(q)}>{busy ? "Looking…" : "Look up"}</Button>
               </div>
             </CardBody>
           </Card>
 
           {!device && !busy && (
-            <EmptyState icon={<FileSearch />} title="Look up a device to see its usage"
+            <EmptyState className="rounded-lg border border-dashed border-border" icon={<FileSearch />} title="Look up a device to see its usage"
               hint="Paste the device's MAC address from the handset or from Active sessions." />
           )}
 
@@ -594,16 +593,16 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
         </div>
       </CardHeader>
       {sessions.length === 0 ? (
-        <EmptyState icon={<Activity />} title="No sessions recorded"
+        <EmptyState size="sm" icon={<Activity />} title="No sessions recorded"
           hint="Nothing was measured in this period. That is not the same as zero usage — it means no session exists." />
       ) : (
-        <Table>
+        <Table label="Sessions">
           <THead>
             <TR>
               <TH>Started</TH>
               <TH className="hidden sm:table-cell">Ended</TH>
               <TH className="hidden md:table-cell">Device</TH>
-              <TH className="text-end">Total</TH>
+              <TH numeric>Total</TH>
               <TH className="hidden lg:table-cell">How it ended</TH>
               <TH><span className="sr-only">Evidence</span></TH>
             </TR>
@@ -613,12 +612,12 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
               const sm = samples[s.session_id];
               return (
                 <TR key={s.session_id}>
-                  <TD className="whitespace-nowrap text-sm">{s.started ? formatDate(s.started) : "—"}</TD>
-                  <TD className="hidden whitespace-nowrap text-sm sm:table-cell">
-                    {s.ended ? formatDate(s.ended) : <Badge tone="ok" dot>Still connected</Badge>}
+                  <TD nowrap>{s.started ? formatDate(s.started) : "—"}</TD>
+                  <TD nowrap className="hidden sm:table-cell">
+                    {s.ended ? formatDate(s.ended) : <StatusBadge tone="ok">Still connected</StatusBadge>}
                   </TD>
-                  <TD className="hidden font-mono text-xs md:table-cell">{s.mac || "—"}</TD>
-                  <TD className="text-end tabular">
+                  <TD nowrap className="hidden font-mono text-xs md:table-cell">{s.mac || "—"}</TD>
+                  <TD className="whitespace-nowrap text-end tabular">
                     {formatBytes(s.bytes_total)}
                     {sm && sm !== "loading" && (
                       <div className="text-caption text-muted-foreground">
@@ -628,9 +627,9 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                     )}
                   </TD>
                   <TD className="hidden text-sm lg:table-cell">{endReasonWords(s.end_reason) ?? "—"}</TD>
-                  <TD className="text-end">
+                  <TD className="w-0 text-end">
                     {!sm && (
-                      <Button size="sm" variant="ghost" onClick={() => onOpenSamples(s.session_id)}>
+                      <Button size="xs" variant="ghost" className="text-foreground" onClick={() => onOpenSamples(s.session_id)}>
                         Show evidence
                       </Button>
                     )}

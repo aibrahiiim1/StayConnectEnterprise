@@ -156,7 +156,8 @@ test("internet packages: publish via the plan selector, then step-up deactivate"
 
   let browserDialogs = 0;
   page.on("dialog", (d) => { browserDialogs += 1; d.dismiss(); });
-  await page.getByRole("button", { name: /^disable /i }).click();
+  await page.getByRole("button", { name: /^Actions for / }).first().click();
+  await page.getByRole("menuitem", { name: /^disable/i }).click();
   const confirm = page.getByRole("dialog");
   await expect(confirm.getByRole("button", { name: /stop offering it/i })).toBeDisabled();
   await confirm.getByLabel(/why are you disabling it/i).fill("retire it");
@@ -180,11 +181,11 @@ test("internet packages: guest activity rows are sanitized and carry no guest PI
 
   // Include grants without portal offers, such as vouchers.
   await expect(page.getByText(/Room 101/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Free Internet Package" }).first()).toBeVisible();
+  await expect(page.locator("tbody").getByText("Free Internet Package").first()).toBeVisible();
   await expect(page.getByText("A voucher client")).toBeVisible();
   await expect(page.getByText("In use").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Free Internet Package" }).first().click();
+  await page.locator("tbody").getByText("Free Internet Package").first().click();
   await expect(page.getByRole("link", { name: /open this stay/i })).toHaveAttribute("href", "/usage?stay=st1");
   await page.keyboard.press("Escape");
 
@@ -203,8 +204,8 @@ test("internet packages: Delete… of a used package explains what is attached a
     mutations,
   });
   await page.goto("/internet-packages");
-  await page.getByRole("button", { name: "Free WiFi", exact: true }).click();
-  await page.getByRole("button", { name: /delete…/i }).click();
+  await page.locator("tbody").getByText("Free WiFi", { exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /delete…/i }).click();
   await expect(page.getByText("2 internet grants given to guests record this package.")).toBeVisible();
   await expect(page.getByText(/why it can't be deleted/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /^delete package$/i })).toHaveCount(0);

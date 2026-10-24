@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { chooseInRow, rowMenuHas } from "./row-actions-helper";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -74,8 +75,8 @@ describe("Client accounts — manage and remove", () => {
     const gone = row(GONE.username);
     expect(within(gone).getByText("Removed")).toBeTruthy();
     expect(within(gone).getByRole("button", { name: /manage/i })).toBeTruthy();
-    expect(within(gone).queryByRole("button", { name: /^remove$/i })).toBeNull();
-    expect(within(gone).queryByRole("button", { name: /enable/i })).toBeNull();
+    expect(await rowMenuHas(gone, /remove/i)).toBe(false);
+    expect(await rowMenuHas(gone, /enable/i)).toBe(false);
   });
 
   it("shows packages and devices, and adjusts verification through edged", async () => {
@@ -145,7 +146,7 @@ describe("Client accounts — Disable (decision D-A)", () => {
     const patch = (await import("@/lib/api")).api.patch as unknown as ReturnType<typeof vi.fn>;
     patch.mockResolvedValue({ ...LATE, enabled: false, packages_suspended: 1, disconnected_sessions: 1 });
     await renderPage();
-    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /^disable\b/i }));
+    await chooseInRow(row("late@example.com"), /^disable\b/i);
     const confirm = await topDialog(/password|disconnected/i);
     expect(within(confirm).getByText(/will be disconnected/i)).toBeTruthy();
     expect(within(confirm).getByText(/package is paused/i)).toBeTruthy();

@@ -81,11 +81,11 @@ describe("a read-only role is offered no write control", () => {
   it("Service plans: a viewer sees the plans and no Add, Edit or Delete", async () => {
     routes(["site_viewer"]);
     render(<ServicePlansPage />);
-    expect(await screen.findByText("Gold", { selector: "button" })).toBeInTheDocument();
+    expect(await screen.findByText("Gold", { selector: "span" })).toBeInTheDocument();
     expect(await screen.findByText(/can see the service plans but not change them/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add plan|add the first plan/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^edit\b/i })).toBeNull();
-    fireEvent.click(screen.getByText("Gold", { selector: "button" }));
+    fireEvent.click(screen.getByText("Gold", { selector: "span" }));
     await screen.findByRole("dialog");
     expect(screen.queryByRole("button", { name: /delete…/i })).toBeNull();
   });

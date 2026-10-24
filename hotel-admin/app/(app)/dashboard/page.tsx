@@ -9,7 +9,7 @@ import { api, inBackground, CentralStatus, EdgeHealth, type ListResp, type Opera
 import {
   type OverviewRange, type OverviewSnapshot, OVERVIEW_RANGES, fetchOverview, fmtInt, normalizeOverview, reasonText,
 } from "@/lib/api/dashboard";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, StatusDot } from "@/components/ui/badge";
@@ -24,7 +24,7 @@ import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
 import { ArrowDownUp, CheckCircle2, Hotel, LogIn, RefreshCw, Users } from "lucide-react";
 import {
-  ApplianceCard, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
+  ApplianceCard, BlockLink, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
   SignInPatternCard, TrafficCard,
 } from "./overview-blocks";
 
@@ -130,7 +130,7 @@ export default function DashboardPage() {
       <PageHeader
         title="Overview"
         meta={context ? <span className="text-sm text-muted-foreground">{context}</span> : undefined}
-        description={`Clients, traffic, sign-ins and the health of this appliance over ${rangeLong}${snap?.timezone ? `, in the appliance's local time (${snap.timezone})` : ""}.`}
+        description={`Clients, traffic, sign-ins and appliance health over ${rangeLong}${snap?.timezone ? ` (${snap.timezone})` : ""}.`}
         help={
           <>
             <HelpSection title="Reading the overview">
@@ -201,7 +201,7 @@ export default function DashboardPage() {
           </ul>
         </Callout>
       ) : snap && health ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="all-normal">
+        <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3.5 py-2.5 text-sm text-muted-foreground shadow-card" data-testid="all-normal">
           <CheckCircle2 className="size-4 text-success" aria-hidden />
           All systems normal — nothing needs attention right now.
         </div>
@@ -222,18 +222,17 @@ export default function DashboardPage() {
 
       <div className={cn("space-y-5 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
         {!snap || !g || !t || !pms || !so ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
-          </div>
+          <StatGrid cols={hotel ? 4 : 3}>
+            {Array.from({ length: hotel ? 4 : 3 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
+          </StatGrid>
         ) : (
-          <div className={cn("grid gap-4 sm:grid-cols-2", hotel ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
+          <StatGrid cols={hotel ? 4 : 3}>
             <StatCard
               label="Clients online"
               value={g.available ? fmtInt(g.guests_online) : "—"}
               icon={<Users />}
-              tone="primary"
               href="/sessions"
-              hint={g.available ? `${fmtInt(g.devices_online)} device${g.devices_online === 1 ? "" : "s"} connected now` : reasonText(g.reason)}
+              hint={g.available ? `${fmtInt(g.devices_online)} device${g.devices_online === 1 ? "" : "s"} now` : reasonText(g.reason)}
               explain={
                 <Explain>
                   A <strong>client</strong> is one {hotel ? "room, account or voucher" : "account, voucher or sign-in"} — whatever the internet was granted to.
@@ -247,9 +246,8 @@ export default function DashboardPage() {
               label="Sign-ins"
               value={g.available ? fmtInt(g.sign_ins) : "—"}
               icon={<LogIn />}
-              tone="info"
               href="/sessions"
-              hint={g.available ? `${fmtInt(g.unique_devices)} different devices over ${rangeLong}` : reasonText(g.reason)}
+              hint={g.available ? `${fmtInt(g.unique_devices)} different devices` : reasonText(g.reason)}
               explain={
                 <Explain>
                   Every time a device is put online it starts a session, so a client reconnecting after losing
@@ -290,16 +288,16 @@ export default function DashboardPage() {
               href="/pms-interfaces"
               hint={
                 !pms.available || pms.active_interfaces === 0
-                  ? "No PMS connection is in use. Clients sign in with vouchers or accounts."
+                  ? "No PMS connection in use"
                   : so.available && so.total > 0
                     ? `${Math.round((so.verified / so.total) * 100)}% of ${fmtInt(so.total)} room checks verified`
                     : so.available
-                      ? "No room sign-in was attempted in this range."
+                      ? "No room sign-in attempted"
                       : reasonText(so.reason)
               }
               footer={pms.available && so.available && so.total > 0 ? <Sparkline values={so.series_verified} width={120} token="chart-4" /> : undefined}
             />}
-          </div>
+          </StatGrid>
         )}
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -324,13 +322,9 @@ export default function DashboardPage() {
             <CardHeader>
               <div className="min-w-0">
                 <CardTitle>Services</CardTitle>
-                <CardDescription className="mt-0.5 text-xs">
-                  What this appliance runs, as its health monitor last saw it.
-                </CardDescription>
+                <CardDescription>As the health monitor last saw them.</CardDescription>
               </div>
-              <Link href="/health" className="shrink-0 text-xs text-muted-foreground hover:text-foreground">
-                Diagnostics →
-              </Link>
+              <BlockLink href="/health" label="Diagnostics" />
             </CardHeader>
             <CardBody className="space-y-3">
               <ServicesGrid snap={snap} />

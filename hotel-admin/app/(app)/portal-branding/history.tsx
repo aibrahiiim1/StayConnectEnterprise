@@ -4,15 +4,17 @@
 // password because it can change custom CSS and HTML as much as any save.
 
 import { useState } from "react";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Timeline } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { HistoryList } from "@/components/ui/history";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
 import { formatDate, formatRelative } from "@/lib/utils";
-import { History as HistoryIcon, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { restoreRevision, type RevisionSummary } from "@/lib/api/portal-design";
 
 /** The only note the server writes itself is the restore marker. */
@@ -29,6 +31,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
   onRestored: () => Promise<void> | void;
 }) {
   const toast = useToast();
+  const [open, setOpen] = useState<RevisionSummary | null>(null);
   const [target, setTarget] = useState<RevisionSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
@@ -48,40 +51,52 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
   }
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><HistoryIcon className="h-4 w-4" aria-hidden /> History</CardTitle>
-        <CardDescription>
-          The most recent saves of this page (up to 20), newest first. Restoring one makes it what clients see
-          again.
-        </CardDescription>
+        <div className="min-w-0">
+          <CardTitle>History</CardTitle>
+          <CardDescription>The latest saves of this page (up to 20), newest first. Open one to restore it.</CardDescription>
+        </div>
       </CardHeader>
-      <CardBody>
-        <Timeline
-          emptyLabel="Nothing has been saved yet. Your first save will appear here."
-          items={revisions.map((r) => ({
-            key: String(r.version),
-            tone: r.version === current ? "ok" : "neutral",
-            title: (
-              <span className="inline-flex flex-wrap items-center gap-2">
-                Save #{r.version}
-                {r.version === current && <Badge tone="ok" dot>Clients see this</Badge>}
-              </span>
-            ),
-            when: <span title={formatDate(r.published_at)}>{formatRelative(r.published_at)}</span>,
-            body: (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span>{[r.published_by, describe(r.note)].filter(Boolean).join(" · ") || "—"}</span>
-                {r.version !== current && writable && (
-                  <Button size="xs" variant="outline" onClick={() => { setErr(null); setTarget(r); }}>
-                    <RotateCcw className="mr-1 h-3 w-3" aria-hidden /> Restore
-                  </Button>
-                )}
-              </div>
-            ),
-          }))}
-        />
-      </CardBody>
+      <HistoryList
+        label="Saves of this page"
+        emptyLabel="Nothing has been saved yet. Your first save will appear here."
+        onSelect={(it) => setOpen(revisions.find((r) => String(r.version) === it.id) ?? null)}
+        selectedId={open ? String(open.version) : null}
+        items={revisions.map((r) => ({
+          id: String(r.version),
+          title: `Save #${r.version}`,
+          badge: r.version === current ? <Badge tone="ok" dot>Clients see this</Badge> : undefined,
+          actor: r.published_by || undefined,
+          at: <span title={formatDate(r.published_at)}>{formatRelative(r.published_at)}</span>,
+          summary: describe(r.note) || undefined,
+          tone: r.version === current ? "ok" : "neutral",
+        }))}
+      />
+
+      <DetailsDrawer
+        open={open !== null}
+        onOpenChange={(o) => { if (!o) setOpen(null); }}
+        eyebrow="Portal design save"
+        title={open ? `Save #${open.version}` : ""}
+        badges={open && open.version === current ? <Badge tone="ok" dot>Clients see this</Badge> : undefined}
+        actions={open && open.version !== current && writable ? (
+          <Button onClick={() => { const r = open; setOpen(null); setErr(null); setTarget(r); }}>
+            <RotateCcw aria-hidden /> Restore this save…
+          </Button>
+        ) : undefined}
+      >
+        {open && (
+          <DetailsSection title="Record">
+            <DescriptionList items={[
+              { label: "Saved", value: formatDate(open.published_at) },
+              { label: "Saved by", value: open.published_by || "—" },
+              { label: "Note", value: describe(open.note) || "—" },
+            ]} />
+          </DetailsSection>
+        )}
+      </DetailsDrawer>
+
       <ConfirmDialog
         open={!!target}
         onOpenChange={(o) => { if (!o) setTarget(null); }}

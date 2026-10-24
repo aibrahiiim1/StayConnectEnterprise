@@ -7,11 +7,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Hourglass, Timer, Wifi, Ban } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Meter, SkeletonRows } from "@/components/ui/misc";
@@ -70,9 +70,7 @@ export function AggregateTimeView() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Clients"
         title="Online-time budgets"
-        icon={<Hourglass />}
         description="Packages sold as an amount of connected time. Check both the time left and the end date."
         help={
           <>
@@ -103,11 +101,11 @@ export function AggregateTimeView() {
       <ErrorBanner err={error} />
 
       {rows !== null && rows.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard label="Budgets in use" value={counts.active.toLocaleString()} icon={<Timer />} tone="primary" />
+        <StatGrid cols={3}>
+          <StatCard label="Budgets in use" value={counts.active.toLocaleString()} icon={<Timer />} />
           <StatCard label="Devices connected on them" value={counts.devices.toLocaleString()} icon={<Wifi />} />
-          <StatCard icon={<Ban />} label="Ended" value={counts.ended.toLocaleString()} hint="Time used up, end date reached, or validity over" />
-        </div>
+          <StatCard icon={<Ban />} label="Ended" value={counts.ended.toLocaleString()} hint="Used up, or past its end date" />
+        </StatGrid>
       )}
 
       <Card className="overflow-hidden">
@@ -116,19 +114,20 @@ export function AggregateTimeView() {
         ) : rows.length === 0 ? (
           <div data-testid="empty">
             <EmptyState
+              size="sm"
               icon={<Hourglass />}
               title="No package on this site uses an online-time budget"
               hint="Packages measured in connected time appear here while they are in use."
             />
           </div>
         ) : (
-          <Table>
+          <Table label="Online-time budgets">
             <THead>
               <TR>
                 <TH>Time left</TH>
                 <TH className="hidden sm:table-cell">Of budget</TH>
                 <TH>Ends on</TH>
-                <TH className="hidden sm:table-cell text-end">Devices</TH>
+                <TH numeric className="hidden sm:table-cell">Devices</TH>
                 <TH>State</TH>
               </TR>
             </THead>
@@ -149,16 +148,16 @@ export function AggregateTimeView() {
                         />
                       )}
                     </TD>
-                    <TD className="hidden text-sm text-muted-foreground sm:table-cell">{humanSeconds(r.budget_seconds)}</TD>
-                    <TD className="whitespace-nowrap text-sm text-muted-foreground" data-testid="expiry">
+                    <TD nowrap muted className="hidden sm:table-cell">{humanSeconds(r.budget_seconds)}</TD>
+                    <TD nowrap muted data-testid="expiry">
                       {r.hard_expiry ? formatDate(r.hard_expiry) : "No end date"}
                     </TD>
-                    <TD className="hidden text-end tabular text-sm text-muted-foreground sm:table-cell">{r.live_devices}</TD>
-                    <TD>
+                    <TD numeric muted className="hidden sm:table-cell">{r.live_devices}</TD>
+                    <TD nowrap>
                       {ended ? (
                         <Badge tone="neutral">{(r.terminal_cause && CAUSE_TEXT[r.terminal_cause]) || "Ended"}</Badge>
                       ) : (
-                        <Badge tone="ok" dot>Active</Badge>
+                        <StatusBadge tone="ok">Active</StatusBadge>
                       )}
                     </TD>
                   </TR>

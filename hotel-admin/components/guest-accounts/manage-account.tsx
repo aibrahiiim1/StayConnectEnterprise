@@ -130,17 +130,17 @@ export function ManageAccountDialog({
                 {canAdjust && (
                   <>
                     {mayVouch && (
-                      <Button size="sm" variant="outline" disabled={busy !== null}
+                      <Button size="sm" variant="secondary" disabled={busy !== null}
                         onClick={() => { setVouchErr(null); setVouching(true); }}>
                         <BadgeCheck /> {busy === "verify" ? "Saving…" : "Mark email verified"}
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" disabled={busy !== null}
+                    <Button size="sm" variant="secondary" disabled={busy !== null}
                       onClick={() => void act("restart", () => api.post(`/guest-accounts/${a!.id}/restart-verification`),
                         "A new verification period has started.")}>
                       <RotateCcw /> {busy === "restart" ? "Saving…" : "New verification period"}
                     </Button>
-                    <Button size="sm" variant="outline" disabled={busy !== null}
+                    <Button size="sm" variant="secondary" disabled={busy !== null}
                       onClick={() => void act("resend", () => api.post(`/guest-accounts/${a!.id}/resend-verification`),
                         "Verification email queued.")}>
                       <Send /> {busy === "resend" ? "Sending…" : "Resend verification email"}
@@ -148,13 +148,13 @@ export function ManageAccountDialog({
                   </>
                 )}
                 {(a?.active_devices ?? 0) > 0 && (
-                  <Button size="sm" variant="outline" disabled={busy !== null}
+                  <Button size="sm" variant="secondary" disabled={busy !== null}
                     onClick={() => void act("disconnect", () => api.post(`/guest-accounts/${a!.id}/disconnect`),
                       "The account's devices were disconnected.")}>
                     <Power /> {busy === "disconnect" ? "Disconnecting…" : "Disconnect devices"}
                   </Button>
                 )}
-                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"
+                <Button size="sm" variant="danger-outline"
                   disabled={busy !== null || !data}
                   onClick={() => data && onRemove(data.account, data.removal)}>
                   <Trash2 /> Remove account

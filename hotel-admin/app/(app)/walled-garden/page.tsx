@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, WalledGardenRule, WalledGardenPolicy } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
@@ -13,11 +14,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
-import { Plus, Shield, Globe } from "lucide-react";
+import { Plus, Shield } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatRelative, errMsg } from "@/lib/utils";
+import { formatRelative } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 
 function kindTone(kind: string): "info" | "default" | "warn" {
@@ -141,8 +142,6 @@ export default function WalledGardenPage() {
   return (
     <PageShell>
       <PageHeader
-        icon={<Globe />}
-        eyebrow="Client access"
         title="Allowed sites"
         description="Addresses reachable before sign-in. Keep the list to what the sign-in page needs."
         help={
@@ -171,59 +170,60 @@ export default function WalledGardenPage() {
       />
 
       {policy && (
-        <p className="text-sm text-muted-foreground">
-          Widest address range allowed: <strong className="font-mono">/{policy.widest_prefix_len}</strong>{" "}
-          ({(2 ** (32 - policy.widest_prefix_len)).toLocaleString()} addresses). Private, link-local and reserved
-          addresses are never allowed before sign-in.{" "}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-card">
+          <p className="min-w-0 text-sm text-muted-foreground">
+            Widest address range allowed: <strong className="font-mono text-foreground">/{policy.widest_prefix_len}</strong>{" "}
+            ({(2 ** (32 - policy.widest_prefix_len)).toLocaleString()} addresses). Private, link-local and reserved
+            addresses are never allowed before sign-in.
+          </p>
           {writable && (
-            <Button size="sm" variant="ghost" onClick={() => { setPolicyPrefix(String(policy.widest_prefix_len)); setPolicyErr(null); setEditingPolicy(true); }}>
+            <Button size="sm" variant="secondary" onClick={() => { setPolicyPrefix(String(policy.widest_prefix_len)); setPolicyErr(null); setEditingPolicy(true); }}>
               Change limit
             </Button>
           )}
-        </p>
+        </div>
       )}
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see which sites are allowed before sign-in but not change them.</ReadOnlyNotice>}
       <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardBody className="p-0">
+      <Card className="overflow-hidden">
           {rows === null ? (
             <SkeletonRows rows={4} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Shield />}
               title="Nothing is allowed before sign-in"
               hint="Add a rule to let captive-portal detection or a payment page load for a client who has not signed in yet."
               action={writable ? <Button onClick={openNew}><Plus /> Add the first rule</Button> : undefined}
             />
           ) : (
-            <Table>
+            <Table label="Allowed sites">
               <THead>
-                <TR><TH>Type</TH><TH>Address</TH><TH>Ports</TH><TH>Why</TH><TH>Added</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                <TR><TH>Type</TH><TH>Address</TH><TH>Ports</TH><TH className="hidden md:table-cell">Why</TH><TH className="hidden lg:table-cell">Added</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((r) => (
-                  <TR key={r.id}>
-                    <TD><Badge tone={kindTone(r.kind)}>{KIND_LABELS[r.kind] ?? r.kind}</Badge></TD>
+                  <TR key={r.id} onClick={writable ? () => openEdit(r) : undefined}>
+                    <TD nowrap><Badge tone={kindTone(r.kind)}>{KIND_LABELS[r.kind] ?? r.kind}</Badge></TD>
                     <TD className="font-mono text-sm">
-                      {r.value}
+                      <span className="break-all">{r.value}</span>
                       {r.wider_than_policy && (
-                        <Badge tone="warn" className="ms-2">Wider than this site allows — edit or remove it</Badge>
+                        <div className="mt-1"><Badge tone="warn">Wider than this site allows — edit or remove it</Badge></div>
                       )}
                     </TD>
-                    <TD className="font-mono text-xs text-muted-foreground">
+                    <TD nowrap muted className="font-mono text-xs">
                       {r.ports && r.ports.length ? r.ports.join(", ") : "all"}
                     </TD>
-                    <TD className="text-sm text-muted-foreground">{r.description || "—"}</TD>
-                    <TD className="text-sm text-muted-foreground">{formatRelative(r.created_at)}</TD>
-                    <TD className="text-right">
+                    <TD truncate muted title={r.description || undefined} className="hidden md:table-cell">{r.description || "—"}</TD>
+                    <TD nowrap muted className="hidden lg:table-cell">{formatRelative(r.created_at)}</TD>
+                    <TD className="w-0">
                       {writable && (
-                        <>
-                          <Button size="sm" variant="ghost" aria-label={`Edit ${r.value}`} onClick={() => openEdit(r)}>Edit</Button>
-                          <Button size="sm" variant="ghost" aria-label={`Remove ${r.value}`} onClick={() => { setFormErr(null); setDeleting(r); }}>
-                            Remove
-                          </Button>
-                        </>
+                        <RowActions
+                          subject={r.value}
+                          primary={{ label: "Edit", onSelect: () => openEdit(r) }}
+                          items={[{ label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(r); } }]}
+                        />
                       )}
                     </TD>
                   </TR>
@@ -231,7 +231,6 @@ export default function WalledGardenPage() {
               </TBody>
             </Table>
           )}
-        </CardBody>
       </Card>
 
       <DialogForm

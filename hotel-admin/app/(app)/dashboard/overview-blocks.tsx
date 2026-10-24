@@ -3,7 +3,7 @@
 // A block whose section is unavailable says why and draws no figure, never a zero for "could not be read".
 
 import Link from "next/link";
-import { Cpu, Gauge, HardDrive, Hotel, Info, MemoryStick, Network, Package, Router, Wifi } from "lucide-react";
+import { ChevronRight, Cpu, Gauge, HardDrive, Hotel, Info, MemoryStick, Network, Package, Router, Wifi } from "lucide-react";
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -34,6 +34,18 @@ export function Unavailable({ block, className }: { block: Block; className?: st
   );
 }
 
+export function BlockLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
+    >
+      {label}
+      <ChevronRight className="size-3.5 rtl:rotate-180" aria-hidden />
+    </Link>
+  );
+}
+
 function BlockCard({
   title, description, href, linkLabel, children, className, bodyClassName,
 }: {
@@ -50,13 +62,9 @@ function BlockCard({
       <CardHeader>
         <div className="min-w-0">
           <CardTitle>{title}</CardTitle>
-          {description && <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>}
+          {description && <CardDescription>{description}</CardDescription>}
         </div>
-        {href && (
-          <Link href={href} className="shrink-0 text-xs text-muted-foreground hover:text-foreground">
-            {linkLabel ?? "Open"} →
-          </Link>
-        )}
+        {href && <BlockLink href={href} label={linkLabel ?? "Open"} />}
       </CardHeader>
       <CardBody className={bodyClassName}>{children}</CardBody>
     </Card>
@@ -74,7 +82,7 @@ export function TrafficCard({ snap }: { snap: OverviewSnapshot | null }) {
   return (
     <BlockCard
       title="Internet traffic"
-      description={`Measured from usage records, ${snap ? rangeWords[snap.range] : ""}. Download is what clients pulled from the internet.`}
+      description={snap ? `Download and upload, ${rangeWords[snap.range]}.` : undefined}
       href="/usage"
       linkLabel="Usage"
     >
@@ -153,8 +161,8 @@ export function SignInOutcomesCard({ snap, rooms = true }: { snap: OverviewSnaps
       title="Sign-in outcomes"
       description={snap
         ? rooms
-          ? `Successful sign-ins by method, and room sign-in checks, ${rangeWords[snap.range]}. No client is named.`
-          : `Successful sign-ins by method, ${rangeWords[snap.range]}. No client is named.`
+          ? `By method, and room checks, ${rangeWords[snap.range]}.`
+          : `By method, ${rangeWords[snap.range]}.`
         : undefined}
       href={rooms ? "/guest-signin-attempts" : "/sessions"}
       linkLabel={rooms ? "Attempts" : "Sessions"}
@@ -262,7 +270,7 @@ export function PackagesCard({ snap }: { snap: OverviewSnapshot | null }) {
   const p = snap?.packages;
   const t = snap?.traffic;
   return (
-    <BlockCard title="Packages in use" description="Packages given out and still valid, online or not, and what was given out in this range." href="/internet-packages" linkLabel="Packages">
+    <BlockCard title="Packages in use" description="Still valid now, and given out in this range." href="/internet-packages" linkLabel="Packages">
       {!snap || !p ? (
         <Skeleton className="h-48" />
       ) : !p.available ? (
@@ -457,8 +465,8 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
               <TR>
                 <TH>Network</TH>
                 <TH className="min-w-44">Address pool</TH>
-                <TH className="text-right">Devices online</TH>
-                <TH className="text-right">Traffic</TH>
+                <TH numeric>Devices online</TH>
+                <TH numeric>Traffic</TH>
                 <TH>Services</TH>
               </TR>
             </THead>
@@ -492,8 +500,8 @@ export function NetworksCard({ snap }: { snap: OverviewSnapshot | null }) {
                       <span className="text-xs text-muted-foreground">{fmtInt(n.pool_size)} addresses · use not known</span>
                     )}
                   </TD>
-                  <TD className="text-right tabular">{fmtInt(n.devices_online)}</TD>
-                  <TD className="text-right tabular">
+                  <TD numeric>{fmtInt(n.devices_online)}</TD>
+                  <TD numeric>
                     {n.traffic_known ? (
                       <span title={`${formatBytes(n.bytes_down)} down · ${formatBytes(n.bytes_up)} up`}>{formatBytes(n.bytes_down + n.bytes_up)}</span>
                     ) : (
