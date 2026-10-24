@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0245",
+  "seq": 245,
+  "timestamp": "2026-10-24T17:15:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment was read back and verified live, and before the commit that introduces this receipt.",
+  "record_type": "PMS_RESILIENCE_AND_AUTHENTICATOR_BRANDING",
+  "authorisation": "D69 (2026-10-24) under the Product Owner's mission 'OneGate - PMS Resilience & Authenticator Branding', authorised by D67 for implementation, PRE-LIVE deployment and the protected merge. It does NOT authorise Go-Live or any change to the PRE-LIVE 72-hour cache-age test policy.",
+  "root_cause": "Protel did not drop the link. A passive headers-only capture on the appliance (port 5003, snaplen 66, no payload) showed the APPLIANCE sending the first FIN in every session end, preceded by our own 5-byte LE and no RST anywhere. 23 of 24 session ends since 2026-10-23 coincide to the millisecond with Postgres 'duplicate key value violates unique constraint se_live_identity' (the 24th was a deploy restart): Protel re-sent a byte-identical live record, the plain INSERT failed, pmsd treated the untyped error as fatal, reconnected, requested a full resync, and Protel re-sent again — the storms of 2026-10-24 10:40 and 12:37-12:46. Each resync then closed Room sign-in because the connected branch required IN_SYNC.",
+  "deployment_provenance": "PRE-LIVE 172.21.60.25: migration 0150 applied with scripts/edge-migrate.sh (live-site, expect-sha256 e2e9d6bf9d82, apply-role iam_v2_owner) after its mandatory encrypted pre-change backup; pmsd, edged, scd built from a clean clone of ae4f85d2 (sha256 7415b418d7a5, 5ada7c1faf77, e9f0cb1d3361; tags=stayconnect_production, vcs.modified=false); netd, portald, acctd unchanged at 9394eb5f; DEPLOYED_BINARIES 6/6 OK; Admin Console release 20261024-135448 (ae4f85d27864, BUILD_ID WDm_YkUKzSm6nKaPFPlcu). Central unchanged.",
+  "verification": "Go: authctx integration 40 (connected-resync matrix, reconnect storm with partial generations and a live check-out, fail-closed cases); edged readiness including readiness == p3_feed_authorizes in 360 feed states; pmsd 182 integration (retransmission idempotency, RESYNC staging unchanged) and loopback endings; edged, scd and pmsd suites; issuer tests on both consoles. hotel-admin: tsc clean, vitest 993/993, Playwright 174/174. Live: during a connected resync after a pmsd restart, 469 of 469 in-house stays stayed authorisable and the API reported ready from LAST_GOOD_ROSTER; a few seconds of MATERIALIZATION_BEHIND while the published list was applied, agreed by rule and readiness; the console read 'Working - From the last complete guest list'. Since the deploy no duplicate-key error and no unclassified session end. Two-step: new enrolments on both consoles issue 'OneGate Hotel Admin' / 'OneGate Central' (issuer, QR label and account verified in a real browser); existing authenticators unchanged.",
+  "rollback": "Appliance: pmsd/edged/scd .bak-pre-ae4f85d2-*; hotel-admin.previous -> 20261024-115541; migration 0150 down restores the 0060 function (round-trip verified); pre-change backup db-20261024T135334Z.sql.gz.age.",
+  "follow_up": "A few seconds after each publish Room sign-in still pauses while the new list is applied (the materialization safeguard, unchanged by design). The headers-only capture unit onegate-fias-capture is bounded to 8 hours and removed with its files at the end of the mission.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0244."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "008a4cb36920cbb004c05061690f5146ce7df394",
+  "base_note": "Master after the merge of PR #228; this delivery's lineage is built on it.",
+  "head": "7c3902d4",
+  "head_note": "The last content commit of branch delivery/pms-resilience-and-branding; deployed artifacts are from ae4f85d2.",
+  "previous_delivery": "T0244",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
