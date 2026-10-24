@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { chooseRowAction } from "./row-actions-helper";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
@@ -156,7 +157,7 @@ describe("deleting a group", () => {
     }));
     render(<ClientGroupsPage />);
     await screen.findByText("Partners");
-    fireEvent.click(screen.getByRole("button", { name: /^Delete\b/ }));
+    await chooseRowAction("Partners", /^Delete/);
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: "ended" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^Delete\b/ }));
@@ -170,7 +171,7 @@ describe("deleting a group", () => {
     del.mockImplementation(() => { routes([]); return Promise.resolve(undefined); });
     render(<ClientGroupsPage />);
     await screen.findByText("Partners");
-    fireEvent.click(screen.getByRole("button", { name: /^Delete\b/ }));
+    await chooseRowAction("Partners", /^Delete/);
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /^Delete\b/ }));
     await waitFor(() => expect(del).toHaveBeenCalledWith("/client-groups/g-par", undefined));

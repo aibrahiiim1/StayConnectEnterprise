@@ -10,17 +10,18 @@ import { PROVIDER_CONSOLE_HELP, PROVIDER_LABELS, PortalCallbackURL, keepAvailabl
 import { DEFAULT_SCOPES, extraScopes } from "@/lib/social-scopes";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { CopyButton, ReadOnlyNotice } from "@/components/ui/patterns";
-import { Plus, KeyRound, AtSign } from "lucide-react";
+import { Plus, KeyRound } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { useToast } from "@/components/ui/toast";
 import { formatRelative } from "@/lib/utils";
@@ -177,8 +178,6 @@ export default function SocialProvidersPage() {
   return (
     <PageShell>
       <PageHeader
-        icon={<AtSign />}
-        eyebrow="Client access"
         title="Identity providers"
         description="Let clients sign in with an account they already have."
         help={
@@ -217,52 +216,55 @@ export default function SocialProvidersPage() {
         </Callout>
       )}
 
-      <Card>
-        <CardBody className="p-0">
+      <Card className="overflow-hidden">
           {rows === null ? (
             <SkeletonRows rows={3} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<KeyRound />}
               title="No identity provider is configured"
               hint="Clients can still sign in with a room number, a voucher or an account."
               action={writable ? <Button onClick={openNew}><Plus /> Add a provider</Button> : undefined}
             />
           ) : (
-            <Table>
+            <Table label="Identity providers">
               <THead>
-                <TR><TH>Provider</TH><TH>Client ID</TH><TH>Status</TH><TH>Last used</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                <TR><TH>Provider</TH><TH className="hidden md:table-cell">Client ID</TH><TH>Status</TH><TH className="hidden sm:table-cell">Last used</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
-                {rows.map((p) => (
-                  <TR key={p.id}>
-                    <TD className="font-medium">{p.display_name || PROVIDER_LABELS[p.provider] || p.provider}</TD>
-                    <TD className="max-w-xs truncate font-mono text-xs" title={p.client_id}>{p.client_id}</TD>
-                    <TD className="max-w-sm">
-                      <div className="flex flex-col gap-1">
-                        {p.offered
-                          ? <Badge tone="ok" dot>Offered</Badge>
-                          : <Badge tone={p.enabled ? "warn" : "default"}>{p.enabled ? "Not offered" : "Hidden"}</Badge>}
-                        {!p.offered && <span className="text-xs text-muted-foreground">{offeredWords(p.offered_reason, p.provider)}</span>}
-                      </div>
-                    </TD>
-                    <TD className="text-sm text-muted-foreground">
-                      {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
-                    </TD>
-                    <TD className="whitespace-nowrap text-right">
-                      {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => openEdit(p)}>Edit</Button>}
-                      {writable && (
-                        <Button size="sm" variant="ghost" aria-label={`Remove ${p.display_name || PROVIDER_LABELS[p.provider] || p.provider}`} onClick={() => { setFormErr(null); setDeleting(p); }}>
-                          Remove
-                        </Button>
-                      )}
-                    </TD>
-                  </TR>
-                ))}
+                {rows.map((p) => {
+                  const name = p.display_name || PROVIDER_LABELS[p.provider] || p.provider;
+                  return (
+                    <TR key={p.id} onClick={writable ? () => openEdit(p) : undefined}>
+                      <TD nowrap className="font-medium">{name}</TD>
+                      <TD truncate title={p.client_id} className="hidden max-w-xs font-mono text-xs md:table-cell">{p.client_id}</TD>
+                      <TD className="max-w-sm">
+                        <div className="flex flex-col items-start gap-1">
+                          {p.offered
+                            ? <StatusBadge tone="ok">Offered</StatusBadge>
+                            : <StatusBadge tone={p.enabled ? "warn" : "default"}>{p.enabled ? "Not offered" : "Hidden"}</StatusBadge>}
+                          {!p.offered && <span className="text-xs text-muted-foreground">{offeredWords(p.offered_reason, p.provider)}</span>}
+                        </div>
+                      </TD>
+                      <TD nowrap muted className="hidden sm:table-cell">
+                        {p.last_success_at ? formatRelative(p.last_success_at) : "Never"}
+                      </TD>
+                      <TD className="w-0">
+                        {writable && (
+                          <RowActions
+                            subject={name}
+                            primary={{ label: "Edit", onSelect: () => openEdit(p) }}
+                            items={[{ label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(p); } }]}
+                          />
+                        )}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           )}
-        </CardBody>
       </Card>
 
       <DialogForm
@@ -340,7 +342,7 @@ export default function SocialProvidersPage() {
         </div>
 
         <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">Callback URLs</legend>
+          <legend className="text-label">Callback URLs</legend>
           <p className="text-xs text-muted-foreground">{PROVIDER_CONSOLE_HELP[f.provider]}</p>
           {callbacks.length === 0 ? (
             <Callout tone="warning">

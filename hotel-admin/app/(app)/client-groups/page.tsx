@@ -8,11 +8,15 @@ import Link from "next/link";
 import { api, ApiError, ListResp, Whoami, ClientGroup, ClientGroupChange, ClientGroupRule, ClientGroupRuleType } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
+import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select, Textarea } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
@@ -22,7 +26,7 @@ import { Plus, Trash2, UsersRound, ArrowUpRight } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { ruleSummary } from "./rule-summary";
 
 const PRIORITY_DEFAULT = 100;
@@ -87,6 +91,21 @@ const EMPTY: FormState = {
 
 const ACTION_WORDS: Record<ClientGroupChange["action"], string> = { CREATED: "Created", UPDATED: "Changed", DELETED: "Deleted" };
 
+function groupDiff(c: ClientGroupChange) {
+  const b = c.before ?? {};
+  const a = c.after ?? {};
+  const onOff = (v: boolean | undefined) => (v === undefined ? undefined : v ? "On" : "Off");
+  const rules = (g: Partial<ClientGroup>) => (g.rules ? ruleSummary(g.rules) : undefined);
+  const rows = [
+    { field: "Name", before: b.name, after: a.name },
+    { field: "Description", before: b.description ?? undefined, after: a.description ?? undefined },
+    { field: "Priority", before: b.priority?.toString(), after: a.priority?.toString() },
+    { field: "State", before: onOff(b.enabled), after: onOff(a.enabled) },
+    { field: "Members", before: rules(b), after: rules(a) },
+  ];
+  return rows.filter((r) => r.before !== r.after);
+}
+
 export default function ClientGroupsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<ClientGroup[] | null>(null);
@@ -104,6 +123,7 @@ export default function ClientGroupsPage() {
   const [tab, setTab] = useState<"groups" | "history">("groups");
   const [changes, setChanges] = useState<ClientGroupChange[] | null>(null);
   const [changesErr, setChangesErr] = useState<unknown>(null);
+  const [openChange, setOpenChange] = useState<ClientGroupChange | null>(null);
 
   const writable = roles !== null && canWrite("client-groups", roles);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -191,11 +211,11 @@ export default function ClientGroupsPage() {
     finally { setBusy(false); }
   }
 
+  const changeName = (c: ClientGroupChange) => c.after?.name ?? c.before?.name ?? nameOf(c.group_id) ?? c.group_id;
+
   return (
     <PageShell>
       <PageHeader
-        icon={<UsersRound />}
-        eyebrow="Client access"
         title="Client groups"
         description="Who a client is (staff, partners, VIPs), from a verified identity, so packages can target them."
         help={
@@ -243,9 +263,8 @@ export default function ClientGroupsPage() {
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="groups" className="mt-4">
-          <Card>
-            <CardBody className="p-0">
+        <TabsContent value="groups" className="mt-5">
+          <Card className="overflow-hidden">
               {rows === null ? (
                 <SkeletonRows rows={3} cols={5} />
               ) : rows.length === 0 ? (
@@ -263,26 +282,28 @@ export default function ClientGroupsPage() {
                   action={writable ? <Button onClick={openNew}><Plus /> Add the first group</Button> : undefined}
                 />
               ) : (
-                <Table>
+                <Table label="Client groups">
                   <THead>
-                    <TR><TH>Group</TH><TH>Priority</TH><TH>Members</TH><TH>State</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                    <TR><TH>Group</TH><TH numeric>Priority</TH><TH>Members</TH><TH>State</TH><TH><span className="sr-only">Actions</span></TH></TR>
                   </THead>
                   <TBody>
                     {sorted.map((g) => (
-                      <TR key={g.id}>
-                        <TD>
-                          <div className="font-medium">{g.name}</div>
-                          {g.description && <div className="text-xs text-muted-foreground">{g.description}</div>}
+                      <TR key={g.id} onClick={writable ? () => openEdit(g) : undefined}>
+                        <TD className="max-w-[16rem]">
+                          <div className="truncate font-medium" title={g.name}>{g.name}</div>
+                          {g.description && <div className="truncate text-xs text-muted-foreground" title={g.description}>{g.description}</div>}
                         </TD>
-                        <TD className="tabular text-sm">{g.priority}</TD>
-                        <TD className="max-w-md text-sm text-muted-foreground">{ruleSummary(g.rules)}</TD>
-                        <TD>{g.enabled ? <Badge tone="ok" dot>On</Badge> : <Badge tone="default">Off</Badge>}</TD>
-                        <TD className="whitespace-nowrap text-right">
-                          {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${g.name}`} onClick={() => openEdit(g)}>Edit</Button>}
+                        <TD numeric>{g.priority}</TD>
+                        <TD truncate muted title={ruleSummary(g.rules)} className="max-w-md">{ruleSummary(g.rules)}</TD>
+                        <TD nowrap>{g.enabled ? <StatusBadge tone="ok">On</StatusBadge> : <StatusBadge>Off</StatusBadge>}</TD>
+                        <TD className="w-0">
                           {writable && (
-                            <Button size="sm" variant="ghost" aria-label={`Delete ${g.name}`} onClick={() => { setFormErr(null); setDeleteReason(""); setDeleting(g); }}>
-                              Delete
-                            </Button>
+                            <RowActions
+                              subject={g.name}
+                              primary={{ label: "Edit", onSelect: () => openEdit(g) }}
+                              items={[{ label: "Delete…", danger: true, icon: <Trash2 />,
+                                onSelect: () => { setFormErr(null); setDeleteReason(""); setDeleting(g); } }]}
+                            />
                           )}
                         </TD>
                       </TR>
@@ -290,7 +311,6 @@ export default function ClientGroupsPage() {
                   </TBody>
                 </Table>
               )}
-            </CardBody>
           </Card>
           {rows !== null && rows.length > 0 && (
             <p className="mt-3 text-xs text-muted-foreground">
@@ -303,45 +323,55 @@ export default function ClientGroupsPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="history" className="mt-4">
-          <Card>
-            <CardBody className="p-0">
-              <ErrorBanner err={changesErr} className="m-4" />
-              {changes === null ? (
-                <SkeletonRows rows={3} cols={4} />
-              ) : changes.length === 0 ? (
-                <EmptyState title="No changes recorded" hint="Every creation, edit and deletion of a group is recorded here, with who made it and the reason given." />
-              ) : (
-                <Table>
-                  <THead>
-                    <TR><TH>When</TH><TH>What</TH><TH>Group</TH><TH>By</TH><TH>Reason</TH></TR>
-                  </THead>
-                  <TBody>
-                    {changes.map((c) => {
-                      const name = c.after?.name ?? c.before?.name ?? nameOf(c.group_id) ?? c.group_id;
-                      return (
-                        <TR key={c.id}>
-                          <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(c.changed_at)}>
-                            {formatRelative(c.changed_at)}
-                          </TD>
-                          <TD>
-                            <Badge tone={c.action === "DELETED" ? "err" : c.action === "CREATED" ? "ok" : "info"}>
-                              {ACTION_WORDS[c.action] ?? c.action}
-                            </Badge>
-                          </TD>
-                          <TD className="text-sm">{name}</TD>
-                          <TD className="text-sm text-muted-foreground">{c.changed_by || "—"}</TD>
-                          <TD className="text-sm text-muted-foreground">{c.reason || "—"}</TD>
-                        </TR>
-                      );
-                    })}
-                  </TBody>
-                </Table>
-              )}
-            </CardBody>
+        <TabsContent value="history" className="mt-5">
+          <Card className="overflow-hidden">
+            <ErrorBanner err={changesErr} className="m-4" />
+            {changes === null ? (
+              <SkeletonRows rows={3} cols={4} />
+            ) : changes.length === 0 ? (
+              <EmptyState size="sm" title="No changes recorded" hint="Every creation, edit and deletion of a group is recorded here, with who made it and the reason given." />
+            ) : (
+              <HistoryList
+                label="Client group history"
+                onSelect={(it) => setOpenChange(changes.find((c) => c.id === it.id) ?? null)}
+                selectedId={openChange?.id ?? null}
+                items={changes.map((c) => ({
+                  id: c.id,
+                  title: <span>{changeName(c)}</span>,
+                  badge: <Badge tone={c.action === "DELETED" ? "err" : c.action === "CREATED" ? "ok" : "info"}>{ACTION_WORDS[c.action] ?? c.action}</Badge>,
+                  actor: <span>{c.changed_by || "—"}</span>,
+                  at: c.changed_at,
+                  summary: c.reason || undefined,
+                  tone: c.action === "DELETED" ? "err" : c.action === "CREATED" ? "ok" : "info",
+                }))}
+              />
+            )}
           </Card>
         </TabsContent>
       </Tabs>
+
+      <DetailsDrawer
+        open={openChange !== null}
+        onOpenChange={(v) => !v && setOpenChange(null)}
+        eyebrow="Client group change"
+        title={openChange ? changeName(openChange) : ""}
+        badges={openChange ? <Badge tone={openChange.action === "DELETED" ? "err" : openChange.action === "CREATED" ? "ok" : "info"}>{ACTION_WORDS[openChange.action] ?? openChange.action}</Badge> : undefined}
+      >
+        {openChange && (
+          <>
+            <DetailsSection title="What changed">
+              <ChangeDiff changes={groupDiff(openChange)} />
+            </DetailsSection>
+            <DetailsSection title="Record">
+              <DescriptionList items={[
+                { label: "When", value: formatDate(openChange.changed_at) },
+                { label: "Changed by", value: openChange.changed_by || "—" },
+                { label: "Reason", value: openChange.reason || "—" },
+              ]} />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
 
       <DialogForm
         open={mode !== "closed"}
