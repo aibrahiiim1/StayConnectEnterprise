@@ -1775,7 +1775,7 @@
   "current_delivery": {
     "kind": "PRELIVE_MISSION_POLICY_AND_CENTRAL_DEPLOYMENT",
     "decision": "D67 (PRE-LIVE missions run end to end across the appliance and Central, 2026-10-24).",
-    "decision_note": "Master 9394eb5f deployed to the PRE-LIVE appliance and branch head f8e2cf28 (master plus the Central build fix) deployed to Central with migrations 0052-0056 (T0243). The pull request is merged under D67.",
+    "decision_note": "Master 9394eb5f deployed to the PRE-LIVE appliance and branch head f8e2cf28 (master plus the Central build fix) deployed to Central with migrations 0052-0056 (T0243). PR #227 carries the policy, the build fix and this record.",
     "manifest": "docs/manifests/PreliveCentralAndPolicy-change-manifest.md",
     "base": "9394eb5fb217a4298b398d02381baea6f0791063",
     "base_note": "Master after the merge of PR #226.",
@@ -1783,8 +1783,8 @@
     "head_note": "The content commit of branch delivery/prelive-central-and-policy (central-build.sh). Policy and governance commits follow it.",
     "transition": "T0243",
     "previous_delivery": "T0242",
-    "pr": null,
-    "pr_state": "OPEN until merged under D67",
+    "pr": 227,
+    "pr_state": "PR #227; its protected merge is authorised by the mission (D67)",
     "note": "T0243. PRE-LIVE runs netd, scd, edged, pmsd, portald, acctd 9394eb5f; keybootstrap fa32e3df; Admin Console release 20261023-204731 (9394eb5f); migrations through 0149. Central runs ctrlapi and console f8e2cf28, Central migrations through 0056. Go-Live not authorised.",
     "branch": "delivery/prelive-central-and-policy"
   },
