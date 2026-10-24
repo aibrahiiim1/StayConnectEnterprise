@@ -1,0 +1,4 @@
+commit 2583e96e56c60bca3db277f7f78ac6c943cb2db7
+Date:   Sat Oct 24 14:28:46 2026 +0300
+
+    The change manifest records the admin consoles delivery
