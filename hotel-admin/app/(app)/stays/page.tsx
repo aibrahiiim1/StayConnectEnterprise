@@ -293,7 +293,7 @@ export default function StaysPage() {
               <TR>
                 <TH>Room</TH>
                 <TH>Guest</TH>
-                <TH>Stay</TH>
+                <TH className="hidden sm:table-cell">Stay</TH>
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Internet package</TH>
                 <TH className="hidden lg:table-cell">Room charge</TH>
@@ -324,7 +324,7 @@ export default function StaysPage() {
                       </div>
                     )}
                   </TD>
-                  <TD nowrap className="tabular">{shortDate(s.arrival)} → {shortDate(s.departure)}</TD>
+                  <TD nowrap className="hidden tabular sm:table-cell">{shortDate(s.arrival)} → {shortDate(s.departure)}</TD>
                   <TD nowrap>
                     <StatusBadge tone={toneFor(s.status)}>{label(s.status)}</StatusBadge>
                     {s.effective_checkout_at && (

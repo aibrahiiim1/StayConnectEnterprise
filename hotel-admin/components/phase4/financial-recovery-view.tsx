@@ -393,7 +393,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                 {canAct && (
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
                     <Field
-                      label={`Conclusion for this ${KIND_TEXT[h.work_kind].toLowerCase()}`}
+                      label={`Conclusion for this ${h.work_kind === "POSTING_OUTBOX" ? "PMS posting" : KIND_TEXT[h.work_kind].toLowerCase()}`}
                       htmlFor={`res-${h.hold_id}`}
                     >
                       <Select

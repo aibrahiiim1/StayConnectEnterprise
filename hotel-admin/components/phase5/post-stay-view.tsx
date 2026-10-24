@@ -202,7 +202,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                 <TH className="hidden lg:table-cell">Stay</TH>
                 <TH>State</TH>
                 <TH className="hidden sm:table-cell">PIN</TH>
-                <TH>Valid until</TH>
+                <TH className="hidden sm:table-cell">Valid until</TH>
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
@@ -226,7 +226,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                     <TD nowrap muted className="hidden tabular sm:table-cell">
                       {row.pin_generation === 1 ? "First PIN" : `Reset ${row.pin_generation - 1}×`}
                     </TD>
-                    <TD nowrap muted>{formatDate(row.valid_until)}</TD>
+                    <TD nowrap muted className="hidden sm:table-cell">{formatDate(row.valid_until)}</TD>
                     <TD className="w-0">
                       {canAct && row.status === "ACTIVE" ? (
                         <RowActions

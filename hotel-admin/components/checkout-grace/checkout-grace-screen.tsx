@@ -213,7 +213,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
               tone={used > 0 ? "warn" : "default"}
               hint={
                 used > 0 && lastUsed ? (
-                  <>Most recently <span title={fmtWhen(lastUsed)}>{formatRelative(lastUsed)}</span> · critical alert raised</>
+                  <>Last <span title={fmtWhen(lastUsed)}>{formatRelative(lastUsed)}</span> · critical alert</>
                 ) : (
                   "Never used on this appliance"
                 )
