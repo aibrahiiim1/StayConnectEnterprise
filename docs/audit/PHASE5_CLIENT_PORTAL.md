@@ -26,8 +26,8 @@
 |---|---|
 | Critical | 0 |
 | High | 0 |
-| Medium | 3 |
-| Low | 11 |
+| Medium | 2 |
+| Low | 12 (M2 was lowered to Low by Phase 6 and keeps its number) |
 | Clean code | 4 |
 
 ### What was run
@@ -80,13 +80,15 @@ No database is needed for these packages; no container was started.
 
 **Test.** A test server built by the same constructor closes a connection that sends one byte per second after 15 s; a 1 MB form post is refused with 413; an idle keep-alive connection is closed after 60 s.
 
-### M2 — The commerce session cookie is a bearer capability, sent in clear on the HTTP fallback (Possible)
+### M2 — The commerce session cookie is a bearer capability, sent in clear on the HTTP fallback (Confirmed; Low after Phase 6)
 
 **Where.** `cmd/portald/commerce.go:51-83` (store and lookup by cookie only); `iamv2_commerce_session.go:253-283` (quote and confirm send the session's `device_id`, not the connection's IP and MAC); `cookies.go:13` (Secure only over TLS).
 
 **Problem.** After sign-in, `sc_commerce` holds the guest's auth context for 10 minutes. portald accepts it from any connection, and the quote and confirm calls to scd carry no proof of which device is asking. On the HTTP fallback the cookie crosses the guest network in clear text, and guest Wi-Fi is often open or shares one password.
 
-**Impact.** Someone on the same network who sees the cookie can, within 10 minutes, choose and confirm a package on the victim's sign-in. The access goes to the victim's device (activation re-checks the connection), so the attacker gains no internet, but can spend what the victim's sign-in allows. If that includes charging the room (`PMS_POSTING`) or a voucher, it is a financial act the guest did not choose. Phase 6 must confirm which confirm methods spend without a further guest step; until then this is Possible.
+**Impact.** Someone on the same network who sees the cookie can, within 10 minutes, choose and confirm a package on the victim's sign-in. The access goes to the victim's device (activation re-checks the connection), so the attacker gains no internet, but can spend what the victim's sign-in allows. If that includes charging the room (`PMS_POSTING`) or a voucher, it is a financial act the guest did not choose. 
+
+**Settled by Phase 6.** No money moves on this cookie alone. `ConfirmPurchase` (`internal/iamv2/commerce_flow.go:213-345`) handles three methods. Free grants at once. Voucher is allowed only for a voucher sign-in, and burns the voucher the guest already typed. Card only opens a checkout that someone must pay. Any other method, room charge included, is refused (`method_not_available`). Room charge goes only through the room sign-in grant (`cmd/scd/phase3_paid.go`), which consumes the sign-in against the connection's own device (`authctx.ConsumeTx` with the device from portald's IP and MAC). So someone holding the cookie can, at most, take a free package or redeem the victim's voucher for the victim's own device. That can replace a better access the victim already had. **Severity: Low.** The fix stays as written.
 
 **Recommended fix.**
 1. Store the connection's `ip|mac` in the commerce session when it is issued, and refuse the session in `resolveCommerceSession` when the current connection's pair differs. Treat a refusal as "please sign in again".
@@ -142,7 +144,7 @@ A batch is done when its tests pass and the portald package tests still pass.
 | Batch | Findings | Files | Area and notes |
 |---|---|---|---|
 | **B1** Server limits | M1 (steps 1–2) | `cmd/portald/main.go`, a body-limit middleware | Small, no behaviour change for real guests. **Do first.** Step 3 goes into the Phase 8 netd batch. |
-| **B2** Commerce session binding | M2, L3 | `cmd/portald/commerce.go`, `iamv2_commerce_session.go`, `cmd/scd/commerce_handlers.go` | CONTROLLED (guest authentication, commerce). Do after Phase 6 confirms which confirm methods spend without a guest step. |
+| **B2** Commerce session binding | M2, L3 | `cmd/portald/commerce.go`, `iamv2_commerce_session.go`, `cmd/scd/commerce_handlers.go` | CONTROLLED (guest authentication, commerce). Settled by Phase 6: no money moves, so this batch is no longer urgent. |
 | **B3** Notification honesty | M3, L5, L6, L11 | `internal/notifyloader`, `internal/{mail,sms,whatsapp}` stubs, `cmd/scd` code request | L11's unique index is a CONTROLLED migration: leave it out unless authorised, and use `ORDER BY` meanwhile. |
 | **B4** Device identity | L1 | `cmd/portald/arp.go`, `arp_resolve.go` | CONTROLLED (guest authentication). Needs a Linux host to test the netlink lookup. |
 | **B5** Flood damper coverage | L2 | `cmd/portald/main.go`, `pms_phase3_budget.go` | Guest authentication. Keep the room sign-in timing budget intact. |
@@ -166,7 +168,6 @@ No item in this phase needs a Product-Owner decision.
 ## Not verified
 
 - **Connection limits in the network layer** (M1 step 3) and whether guest networks carry IPv6 (L1). Phase 8.
-- **Which commerce confirm methods spend without a further guest step** (M2). Phase 6.
 - **Client isolation and DHCP snooping on guest networks**, which decide how easily a device can copy another's IP and MAC. Phase 8.
 - **The browser tests** (`csp_checkout_browser_test.go`, `portal_shots_test.go`) were run only as far as `go test` runs them without a browser.
 - **Race-detector runs.** These still need a Linux build host.
