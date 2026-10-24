@@ -1062,6 +1062,20 @@
       "does_not_authorize": "Go-Live; renaming internal services, repository paths, API paths or infrastructure; changing the translated guest portal wording; forcing any operator to re-enrol; any change to two-step verification, secrets, recovery codes or sessions.",
       "implementation": "Branch delivery/authenticator-admin-console-branding, PR #230, recorded by T0246. edged operator_mfa.go and scd operator_mfa.go (issuer), operator-facing strings in edged and scd, resources_commerce.go (default reason); hotel-admin and cloud-admin wording and the product-naming guard test; docs/PRODUCT_TERMINOLOGY.md and the backup, data-ownership and settings manuals.",
       "supersedes_in_part": "D69 (its issuer label 'OneGate Hotel Admin' for new appliance enrolments)"
+    },
+    {
+      "id": "D71",
+      "decided_on": "2026-10-24",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-24",
+      "status": "ACTIVE",
+      "title": "SHARED TEXT READS FOR ANY LICENSED SITE TYPE, INCLUDING THE GUEST PORTAL'S DEFAULT PRIVACY NOTICE (2026-10-24). The portal's built-in privacy notice (privacy.default) no longer names 'the hotel' or 'reception' in any of the six portal languages: the Wi-Fi's operator is responsible for the personal data (the same claim as before), the same records are listed, and the client is told to ask the staff here for the full notice or to see, correct or delete their data. A site's own notice always replaces it and existing configuration is untouched. Portal-domain hints and validation (appliance and Central) say 'portal domain' and 'custom domain' with the example wifi.example.com, the Walled-garden refusal, the data-request register and the backup key file (and its legacy StayConnect brand) lose the hotel wording. A test in every language fails if a string outside the Room, PMS and post-stay features speaks of hotels, reception or rooms. Real hospitality features, internal identifiers (custom_domain, needs_hotel_domain, hotel_name, service and path names), stored configuration and historical records are unchanged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-24 'Complete the remaining multi-industry terminology corrections from PR #230' (audit shared operator-facing and client-facing text, validation messages, portal defaults and translations; correct the Portal HTTPS domain hints and the default privacy notice so they support hotels, cafes, restaurants and other licensed site types), authorised under D67 for implementation, PRE-LIVE deployment, real-browser verification and the protected merge.",
+      "does_not_authorize": "Go-Live; any new legal privacy statement (the notice keeps its earlier claim and wording of what is recorded); changing authentication, PMS or financial behaviour; renaming internal identifiers or API fields; rewriting a site's own notice or any stored configuration or history.",
+      "implementation": "Branch delivery/multi-industry-terminology, PR #231, recorded by T0247. portald languages_privacy.go and templates.go; edged resources_portal_https.go; control-plane portaltls orders.go and worker.go; nft garden.go; backupcrypt.go; hotel-admin portal-branding strings, portal-https page and lib, data-request register, backup key sheet; docs/PRODUCT_TERMINOLOGY.md and the HTTPS portal contract's terminology note; portal_multi_industry_test.go and the console naming guards.",
+      "supersedes_in_part": "D70 (it left the guest portal's own wording and the portal-domain text for a later pass)"
     }
   ]
 }

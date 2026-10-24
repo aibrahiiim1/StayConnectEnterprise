@@ -88,7 +88,7 @@ no longer keeps its own copy: `hotel-admin/lib/role-permissions.generated.json` 
 
 **portal-https** (`portal_https.read` = R, `portal_https.manage` = W) is the Portal HTTPS screen under
 Networking ([ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md](architecture/ONEGATE_HTTPS_PORTAL_AND_SOCIAL_LOGIN.md)
-§8): the portal address, the hotel portal domain, the hostnames and certificates scd installed, Check now and
+§8): the portal address, the portal domain, the hostnames and certificates scd installed, Check now and
 Renew now. It follows `network`: the portal address is a network change and the domain points at it. Changing
 the address or the domain and Renew now additionally require the operator's password (step-up); Check now
 changes nothing and needs only **W**. Applying a new address still goes through the Client networks

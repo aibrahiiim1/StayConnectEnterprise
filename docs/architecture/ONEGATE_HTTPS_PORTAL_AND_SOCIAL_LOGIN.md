@@ -4,6 +4,11 @@ Status: **authoritative design contract** for the HTTPS portal delivery (branch 
 It records the Product-Owner decisions this delivery implements and the technical decisions taken within that
 authorisation. Where this document and code disagree, the code is wrong.
 
+> **Terminology (D71, 2026-10-24).** OneGate serves hotels, offices and campuses, so where this contract says
+> *hotel domain* or *hotel portal domain* the screens say **portal domain** (appliance) and **custom domain**
+> (Central), and the examples on `nilehotel.com` are illustrations only. The identifiers `custom_domain` and
+> `needs_hotel_domain` are unchanged. Nothing else in this contract changes.
+
 ## 1. Product-Owner decisions this contract implements (not re-opened here)
 
 1. Central manages licensing, activation, **appliance portal hostnames**, and the **HTTPS certificate lifecycle**

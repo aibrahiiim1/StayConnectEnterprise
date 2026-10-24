@@ -200,8 +200,9 @@ The Product Owner chose:
 - Sign-in methods warns while Portal HTTPS is not active and a typed sign-in method is on.
 
 **A5: the privacy notice.**
-- The portal shows a short built-in notice (`privacy.default`, in every portal language) whenever the hotel
-  has written none.
+- The portal shows a short built-in notice (`privacy.default`, in every portal language) whenever the site
+  has written none. It names the Wi-Fi's operator as responsible, lists what is recorded and says where to ask
+  (D71: it no longer assumes a hotel or a reception desk; the claim itself is unchanged).
 - Saving the portal design warns while there is none.
 
 **A6: the 0066 copy (migration 0135).**

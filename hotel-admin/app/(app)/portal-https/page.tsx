@@ -176,7 +176,7 @@ export default function PortalHTTPSPage() {
             <HelpSection title="Your domain">
               <p>
                 Optional, and required for Google sign-in. Enter a subdomain you own (for example
-                <code> wifi.yourhotel.com</code>), publish the three DNS records shown, then use <strong>Check now</strong>.
+                <code> wifi.example.com</code>), publish the three DNS records shown, then use <strong>Check now</strong>.
               </p>
             </HelpSection>
           </>
@@ -374,8 +374,8 @@ export default function PortalHTTPSPage() {
                 className="flex flex-col gap-2 sm:flex-row sm:items-end"
                 onSubmit={(e) => { e.preventDefault(); if (!domainProblem && domainInput.trim()) { setDialogErr(null); setConfirmDomain(true); } }}
               >
-                <Field label="Domain" hint="For example wifi.yourhotel.com" error={domainProblem ?? undefined} className="flex-1">
-                  <Input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="wifi.yourhotel.com"
+                <Field label="Domain" hint="For example wifi.example.com" error={domainProblem ?? undefined} className="flex-1">
+                  <Input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="wifi.example.com"
                     autoComplete="off" spellCheck={false} />
                 </Field>
                 <Button type="submit" variant="secondary" disabled={busy !== null || !domainInput.trim() || domainProblem !== null}>

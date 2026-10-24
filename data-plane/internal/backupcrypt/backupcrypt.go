@@ -126,8 +126,8 @@ func CheckCodeHash(code string) string {
 // KeyFile is an age identity file (usable with `age -d -i`) carrying holder, public key and check code as comments.
 func KeyFile(holder, site, secret, public, checkCode string, created time.Time) string {
 	return strings.Join([]string{
-		"# StayConnect backup key -- KEEP THIS FILE SECRET AND SAFE.",
-		"# Anyone with this file can read this hotel's backups. Without it (or another holder's key) they",
+		"# OneGate backup key -- KEEP THIS FILE SECRET AND SAFE.",
+		"# Anyone with this file can read this site's backups. Without it (or another holder's key) they",
 		"# cannot be read by anyone, including the appliance and its supplier.",
 		"# holder:     " + oneLine(holder),
 		"# site:       " + oneLine(site),

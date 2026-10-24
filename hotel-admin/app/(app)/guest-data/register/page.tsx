@@ -152,7 +152,7 @@ export default function RequestRegisterPage() {
 
       {file && (
         <Callout tone="success" title={`Request ${String(file.reference)} closed`}>
-          The hotel&rsquo;s file of this request (shown once, then removed from the register): {REGISTER_KIND_WORDS[String(file.kind)] ?? String(file.kind)},
+          The site&rsquo;s file of this request (shown once, then removed from the register): {REGISTER_KIND_WORDS[String(file.kind)] ?? String(file.kind)},
           from <strong>{String(file.requester)}</strong>, received {String(file.received_at)}, due {String(file.due_at)},
           {file.answered_in_time ? " answered in time" : " answered late"}.{" "}
           <Button size="xs" variant="secondary" onClick={() => setFile(null)}>Dismiss</Button>
