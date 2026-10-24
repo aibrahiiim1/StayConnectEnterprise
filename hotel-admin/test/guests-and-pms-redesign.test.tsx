@@ -3,6 +3,7 @@
 // roles that cannot use a button never see it, and raw ids are not the main content.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { chooseInRow, rowMenuHas } from "./row-actions-helper";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -158,7 +159,8 @@ describe("Active sessions", () => {
     const user = userEvent.setup();
     render(<Page />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Active sessions");
-    await user.click(await screen.findByRole("button", { name: /disconnect/i }));
+    await screen.findByRole("button", { name: /^Actions for Room 318/ });
+    await chooseInRow(document.body, /disconnect/i);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Disconnect Room 318's device?")).toBeTruthy();
     expect(within(dialog).getByText(/Their 2 other devices stay online/)).toBeTruthy();
@@ -204,7 +206,8 @@ describe("Guest accounts", () => {
     const user = userEvent.setup();
     render(<Page />);
 
-    await user.click(await screen.findByRole("button", { name: /password/i }));
+    await screen.findByRole("button", { name: /^Actions for / });
+    await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByLabelText(/generate a strong password/i));
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
