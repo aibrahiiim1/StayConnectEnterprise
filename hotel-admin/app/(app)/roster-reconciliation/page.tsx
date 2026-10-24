@@ -7,21 +7,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DialogForm } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, FieldGrid, Input, Select } from "@/components/ui/input";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { useToast } from "@/components/ui/toast";
 import Link from "next/link";
-import { ShieldCheck, Building2, AlertTriangle, BookMarked, ListChecks, History, BedDouble, Hotel } from "lucide-react";
+import { History } from "lucide-react";
 import { api, RosterReconciliationState, ReconcileRunRecord, ReconcileRun } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection, HelpTip } from "@/components/help";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { DescriptionList } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
@@ -107,9 +108,7 @@ export default function RosterReconciliationPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Roster reconciliation"
-        icon={<ListChecks />}
         description="Keeps this appliance's guest list identical to the PMS's, automatically."
         help={
           <>
@@ -154,229 +153,182 @@ export default function RosterReconciliationPage() {
 
       <div className={cn("space-y-5", busy && state !== null && refreshingClass)}>
       {state === null && !err && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true">
-          <Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" />
-        </div>
+        <StatGrid cols={4}>
+          <Skeleton className="h-[5.5rem]" /><Skeleton className="h-[5.5rem]" /><Skeleton className="h-[5.5rem]" /><Skeleton className="h-[5.5rem]" />
+        </StatGrid>
       )}
 
       {/* Operational and historical blockers must not share a footer: "these clear themselves" is false for the historical one. */}
       {operational.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="size-4 text-warning-subtle-foreground" aria-hidden /> Needs attention
-            </CardTitle>
-          </CardHeader>
-          <CardBody className="space-y-3">
-            {operational.map((b, i) => (
-              <div key={i} className="rounded-md border border-warning/30 bg-warning-subtle p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone="warn">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
-                  {b.since && (
-                    <span className="text-xs text-muted-foreground">
-                      since {formatDate(b.since)}
-                    </span>
-                  )}
-                  <Badge tone={b.guests_affected ? "err" : "ok"}>
-                    {b.guests_affected ? "guests affected" : "guests not affected"}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-sm text-warning-subtle-foreground">{b.detail}</p>
+        <section aria-label="Needs attention" className="space-y-2">
+          {operational.map((b, i) => (
+            <Callout key={i} tone="warning" title="Needs attention">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="warn">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
+                {b.since && <span className="text-xs">since {formatDate(b.since)}</span>}
+                <StatusBadge tone={b.guests_affected ? "err" : "ok"}>
+                  {b.guests_affected ? "guests affected" : "guests not affected"}
+                </StatusBadge>
               </div>
-            ))}
-            <p className="text-xs text-muted-foreground">
-              These clear themselves when the condition ends. There is nothing to acknowledge.
-            </p>
-          </CardBody>
-        </Card>
+              <p className="mt-1.5">{b.detail}</p>
+            </Callout>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            These clear themselves when the condition ends. There is nothing to acknowledge.
+          </p>
+        </section>
       )}
 
       {historical.length > 0 && (
-        <Card id="historical-exception">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BookMarked className="size-4 text-muted-foreground" aria-hidden /> Historical exception — for information
-              <HelpTip title="Historical exception">
-                <HelpSection title="What this is">
-                  <p>
-                    When this appliance was first connected it joined a site that was already running, and its
-                    first roster sweeps did not yet cover every room. A guest checked out during that window, so
-                    the PMS announced a departure for a stay this appliance had never been told about.
-                  </p>
-                  <p>
-                    Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
-                    not grow — the connector has covered the whole site on every sweep since.
-                  </p>
-                </HelpSection>
-                <HelpSection title="What to do about it">
-                  <p>
-                    It stays on this list because closing it locally would mean inventing the arrival that was
-                    never received, and this system does not invent guest records. There are exactly two ways it
-                    ends: ask the site&rsquo;s PMS whether that reservation existed, or decide to leave it as a
-                    known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
-                    is also safe.
-                  </p>
-                </HelpSection>
-              </HelpTip>
-            </CardTitle>
-          </CardHeader>
-          <CardBody className="space-y-3">
-            {historical.map((b, i) => (
-              <div key={i} className="rounded-md border border-border p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone="neutral">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
-                  {b.since && (
-                    <span className="text-xs text-muted-foreground">
-                      recorded {formatDate(b.since)}
-                    </span>
-                  )}
-                  <Badge tone="ok">guests not affected</Badge>
-                </div>
-                <p className="mt-2 text-sm">{b.detail}</p>
+        <SectionCard
+          id="historical-exception"
+          title="Historical exception — for information"
+          actions={
+            <HelpTip title="Historical exception">
+              <HelpSection title="What this is">
+                <p>
+                  When this appliance was first connected it joined a site that was already running, and its
+                  first roster sweeps did not yet cover every room. A guest checked out during that window, so
+                  the PMS announced a departure for a stay this appliance had never been told about.
+                </p>
+                <p>
+                  Nobody is affected. No guest is online because of it, no stay is held open by it, and it will
+                  not grow — the connector has covered the whole site on every sweep since.
+                </p>
+              </HelpSection>
+              <HelpSection title="What to do about it">
+                <p>
+                  It stays on this list because closing it locally would mean inventing the arrival that was
+                  never received, and this system does not invent guest records. There are exactly two ways it
+                  ends: ask the site&rsquo;s PMS whether that reservation existed, or decide to leave it as a
+                  known gap from the appliance&rsquo;s first days. Either is a legitimate answer; doing nothing
+                  is also safe.
+                </p>
+              </HelpSection>
+            </HelpTip>
+          }
+          bodyClassName="divide-y divide-border py-0"
+        >
+          {historical.map((b, i) => (
+            <div key={i} className="py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="neutral">{b.blocker.replace(/_/g, " ").toLowerCase()}</Badge>
+                {b.since && <span className="text-xs text-muted-foreground">recorded {formatDate(b.since)}</span>}
+                <StatusBadge tone="ok">guests not affected</StatusBadge>
               </div>
-            ))}
-          </CardBody>
-        </Card>
+              <p className="mt-1.5 text-sm">{b.detail}</p>
+            </div>
+          ))}
+        </SectionCard>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {(state?.interfaces?.length ?? 0) > 1 && (
+        <Field label="PMS connection" hint="Each connection has its own guest list and its own runs." className="max-w-sm">
+          <Select value={iface || state?.pms_interface_id || ""} onChange={(e) => { setDry(null); setIface(e.target.value); }}>
+            {state!.interfaces!.map((i) => (
+              <option key={i.id} value={i.id}>
+                {(i.label || i.connector_kind) + (i.lifecycle_state !== "ACTIVE" ? ` (${i.lifecycle_state.toLowerCase()})` : "")}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+
+      <StatGrid cols={4}>
         <StatCard
-          icon={<Building2 />}
           label="Rooms named by this sweep"
           value={p ? `${p.rooms_enumerated} of ${p.rooms_expected}` : "—"}
           tone={p ? (complete ? "ok" : "warn") : "default"}
           hint={complete ? "The sweep covered the site" : "Incomplete — the run will refuse"}
         />
-        <StatCard icon={<BedDouble />} label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
-        <StatCard icon={<Hotel />} label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />
+        <StatCard label="Occupied per the PMS" value={p?.roster_size ?? "—"} hint={`Guest-list refresh #${state?.generation ?? "—"}`} />
+        <StatCard label="In house per this appliance" value={p?.mirror_in_house ?? "—"} />
         <StatCard
-          icon={<ShieldCheck />}
           label="Held back — PMS spoke since"
           value={p?.protected_by_newer_events ?? "—"}
-          hint="Arrivals and changes after the snapshot are never closed"
+          hint="Later arrivals are never closed"
         />
-      </div>
+      </StatGrid>
 
       {/* No manual trigger: reconciliation runs itself on every complete published generation. */}
-      {(state?.interfaces?.length ?? 0) > 1 && (
-        <Card>
-          <CardBody>
-            <Field label="PMS connection" hint="Each connection has its own guest list and its own runs.">
-              <Select value={iface || state?.pms_interface_id || ""} onChange={(e) => { setDry(null); setIface(e.target.value); }}>
-                {state!.interfaces!.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {(i.label || i.connector_kind) + (i.lifecycle_state !== "ACTIVE" ? ` (${i.lifecycle_state.toLowerCase()})` : "")}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </CardBody>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{dry ? "What a run would do now (dry run)" : "What the last run decided"}</CardTitle>
-          {p && <Badge tone={refused ? "warn" : "ok"} dot>{outcomeWords(p.outcome)}</Badge>}
-        </CardHeader>
-        <CardBody className="space-y-4">
-          <ErrorBanner err={dryErr} />
-          {!p && (
-            <p className="text-sm text-muted-foreground">
-              No run has been recorded for this connection yet. One is recorded each time the PMS publishes a
-              complete guest list.
-            </p>
-          )}
-          {!dry && state?.last_run_at && (
-            <p className="text-xs text-muted-foreground">
-              {state.last_run_mode === "APPLY" ? "Automatic run" : "Dry run"} recorded {formatDate(state.last_run_at)}.
-            </p>
-          )}
-
-          {refused && p && (
-            <p className="text-sm text-muted-foreground">
-              {REFUSAL_MEANING[p.outcome] ?? "The run refused, and nothing was changed."}
-            </p>
-          )}
-
-          {!refused && p && (
-            <p className="text-sm">
-              <strong>{p.absent_from_roster}</strong> stay{p.absent_from_roster === 1 ? "" : "s"} absent from a
-              roster that named {p.rooms_enumerated} of {p.rooms_expected} rooms
-              {dry ? " would be checked out" : state?.last_run_mode === "APPLY" ? ` — ${p.stays_closed} sent to check-out` : " would be checked out"}
-              . {p.protected_by_newer_events} further stay
-              {p.protected_by_newer_events === 1 ? " is" : "s are"} absent but held back, because the PMS has
-              said something about {p.protected_by_newer_events === 1 ? "it" : "them"} since the snapshot.
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <SectionCard
+        title={dry ? "What a run would do now (dry run)" : "What the last run decided"}
+        actions={p ? <StatusBadge tone={refused ? "warn" : "ok"}>{outcomeWords(p.outcome)}</StatusBadge> : undefined}
+        bodyClassName="space-y-3"
+        footer={
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
               This happens on its own when the PMS publishes a complete roster. Nothing here needs pressing.
             </p>
             {writable && (
-              <Button size="sm" variant="secondary" disabled={dryBusy || !state} onClick={() => void runDry()}>
-                {dryBusy ? "Running…" : "Run dry run"}
+              <Button size="sm" variant="secondary" loading={dryBusy} disabled={!state} onClick={() => void runDry()}>
+                Run dry run
               </Button>
             )}
           </div>
-        </CardBody>
-      </Card>
+        }
+      >
+        <ErrorBanner err={dryErr} />
+        {!p && (
+          <p className="text-sm text-muted-foreground">
+            No run has been recorded for this connection yet. One is recorded each time the PMS publishes a
+            complete guest list.
+          </p>
+        )}
+        {!dry && state?.last_run_at && (
+          <p className="text-xs text-muted-foreground">
+            {state.last_run_mode === "APPLY" ? "Automatic run" : "Dry run"} recorded {formatDate(state.last_run_at)}.
+          </p>
+        )}
+        {refused && p && (
+          <p className="text-sm text-muted-foreground">
+            {REFUSAL_MEANING[p.outcome] ?? "The run refused, and nothing was changed."}
+          </p>
+        )}
+        {!refused && p && (
+          <p className="text-sm">
+            <strong>{p.absent_from_roster}</strong> stay{p.absent_from_roster === 1 ? "" : "s"} absent from a
+            roster that named {p.rooms_enumerated} of {p.rooms_expected} rooms
+            {dry ? " would be checked out" : state?.last_run_mode === "APPLY" ? ` — ${p.stays_closed} sent to check-out` : " would be checked out"}
+            . {p.protected_by_newer_events} further stay
+            {p.protected_by_newer_events === 1 ? " is" : "s are"} absent but held back, because the PMS has
+            said something about {p.protected_by_newer_events === 1 ? "it" : "them"} since the snapshot.
+          </p>
+        )}
+      </SectionCard>
 
       {state && <RosterSettingsCard settings={state.settings} writable={writable} onSaved={() => void load()} />}
 
-      <Card>
-        <CardHeader><CardTitle>Historical roster-snapshot artifacts</CardTitle></CardHeader>
-        <CardBody className="space-y-2">
-          {(state?.undisposed_cases ?? 0) === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              None outstanding. The recorded roster snapshots were answered as what they actually were — a
-              sweep mentioning empty rooms, never a departure anybody announced — and no stay changed state
-              and no record was deleted. New ones cannot arrive: the connector no longer admits them.
-            </p>
-          ) : (
-            <p className="text-sm">
-              <strong>{state!.undisposed_cases}</strong> recorded roster snapshot
-              {state!.undisposed_cases === 1 ? "" : "s"} still to answer. They are answered automatically;
-              nothing needs doing here.
-            </p>
-          )}
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle>Connection recovery</CardTitle></CardHeader>
-        <CardBody className="space-y-1">
+      <SectionCard title="Historical roster-snapshot artifacts">
+        {(state?.undisposed_cases ?? 0) === 0 ? (
           <p className="text-sm text-muted-foreground">
-            How the PMS link retries after a drop, and how long a problem may last before it is reported, are
-            configured with the connection itself on{" "}
-            <Link href="/pms-interfaces" className="font-medium underline underline-offset-2">
-              PMS connection
-            </Link>
-            , under Advanced configuration.
+            None outstanding. The recorded roster snapshots were answered as what they actually were — a sweep
+            mentioning empty rooms, never an announced departure — and no stay changed state and no record was
+            deleted. New ones cannot arrive: the connector no longer admits them.
           </p>
-        </CardBody>
-      </Card>
-
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <History className="size-4 text-muted-foreground" aria-hidden /> Every run, including the refusals
-          </CardTitle>
-        </CardHeader>
-        {runs.length === 0 ? (
-          <EmptyState icon={<History />} title="No runs yet" hint="A run is recorded each time the PMS publishes a complete guest list." />
         ) : (
-          <Table>
+          <p className="text-sm">
+            <strong>{state!.undisposed_cases}</strong> recorded roster snapshot
+            {state!.undisposed_cases === 1 ? "" : "s"} still to answer. They are answered automatically;
+            nothing needs doing here.
+          </p>
+        )}
+      </SectionCard>
+
+      <SectionCard flush title="Every run, including the refusals">
+        {runs.length === 0 ? (
+          <EmptyState size="sm" icon={<History />} title="No runs yet" hint="A run is recorded each time the PMS publishes a complete guest list." />
+        ) : (
+          <Table label="Every run, including the refusals" stickyHeader maxHeight="32rem">
             <THead>
               <TR>
                 <TH>When</TH>
                 <TH className="hidden sm:table-cell">Mode</TH>
                 <TH>Outcome</TH>
-                <TH className="hidden md:table-cell">Rooms</TH>
-                <TH className="hidden md:table-cell text-end">Absent</TH>
-                <TH className="text-end">Checked out</TH>
-                <TH className="hidden lg:table-cell text-end">Held back</TH>
+                <TH numeric className="hidden md:table-cell">Rooms</TH>
+                <TH numeric className="hidden md:table-cell">Absent</TH>
+                <TH numeric>Checked out</TH>
+                <TH numeric className="hidden lg:table-cell">Held back</TH>
                 <TH className="hidden lg:table-cell">By</TH>
                 <TH className="hidden xl:table-cell">Reason</TH>
               </TR>
@@ -384,25 +336,25 @@ export default function RosterReconciliationPage() {
             <TBody>
               {runs.map((r, i) => (
                 <TR key={i}>
-                  <TD className="whitespace-nowrap text-sm">{formatDate(r.run_at)}</TD>
-                  <TD className="hidden text-sm sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Dry run"}</TD>
-                  <TD>
-                    <Badge tone={r.outcome === "COMPLETED" ? "ok" : "warn"} dot>
+                  <TD nowrap>{formatDate(r.run_at)}</TD>
+                  <TD nowrap className="hidden sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Dry run"}</TD>
+                  <TD nowrap>
+                    <StatusBadge tone={r.outcome === "COMPLETED" ? "ok" : "warn"}>
                       {r.outcome.replace(/^REFUSED_/, "").replace(/_/g, " ").toLowerCase()}
-                    </Badge>
+                    </StatusBadge>
                   </TD>
-                  <TD className="hidden tabular md:table-cell">{r.rooms_enumerated}/{r.rooms_expected}</TD>
-                  <TD className="hidden text-end tabular md:table-cell">{r.absent_from_roster}</TD>
-                  <TD className="text-end tabular">{r.stays_closed}</TD>
-                  <TD className="hidden text-end tabular lg:table-cell">{r.protected_by_newer_events}</TD>
-                  <TD className="hidden text-sm text-muted-foreground lg:table-cell">{r.run_by}</TD>
-                  <TD className="hidden text-sm text-muted-foreground xl:table-cell">{r.reason}</TD>
+                  <TD numeric className="hidden md:table-cell">{r.rooms_enumerated}/{r.rooms_expected}</TD>
+                  <TD numeric className="hidden md:table-cell">{r.absent_from_roster}</TD>
+                  <TD numeric>{r.stays_closed}</TD>
+                  <TD numeric className="hidden lg:table-cell">{r.protected_by_newer_events}</TD>
+                  <TD muted className="hidden lg:table-cell">{r.run_by}</TD>
+                  <TD muted truncate title={r.reason} className="hidden xl:table-cell">{r.reason}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
         )}
-      </Card>
+      </SectionCard>
       </div>
     </PageShell>
   );
@@ -458,27 +410,31 @@ function RosterSettingsCard({
     }
   }
 
-  const row = (label: string, value: number, hint: string) => (
-    <div className="flex items-baseline justify-between gap-3 text-sm">
-      <span>{label} <span className="text-xs text-muted-foreground">— {hint}</span></span>
-      <span className="tabular font-medium">{value}</span>
-    </div>
-  );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>When a roster is trusted</CardTitle>
-        {writable && <Button size="sm" variant="secondary" onClick={edit}>Change</Button>}
-      </CardHeader>
-      <CardBody className="space-y-1.5">
-        {row("Smallest roster acted on", settings.roster_trust_min, "occupied rooms; a smaller list is treated as broken")}
-        {row("Most stays one run may check out", settings.max_close_per_run, "more stops for a person")}
-        {row("Rooms a sweep may miss", settings.inventory_tolerance, "and still count as complete")}
-        {row("Sweeps remembered for the building", settings.inventory_lookback, "")}
-        <p className="pt-1 text-xs text-muted-foreground">
-          {settings.is_default ? "These are the defaults." : `Version ${settings.config_version}.`}
-        </p>
-      </CardBody>
+    <SectionCard
+      title="When a roster is trusted"
+      description={settings.is_default ? "These are the defaults." : `Version ${settings.config_version}.`}
+      actions={writable ? <Button size="sm" variant="secondary" onClick={edit}>Change</Button> : undefined}
+    >
+      <DescriptionList
+        items={[
+          { label: "Smallest roster acted on", value: <span className="tabular">{settings.roster_trust_min}</span>, hint: "Occupied rooms; a smaller list is treated as broken" },
+          { label: "Most stays one run may check out", value: <span className="tabular">{settings.max_close_per_run}</span>, hint: "More stops for a person" },
+          { label: "Rooms a sweep may miss", value: <span className="tabular">{settings.inventory_tolerance}</span>, hint: "And still count as complete" },
+          { label: "Sweeps remembered for the building", value: <span className="tabular">{settings.inventory_lookback}</span> },
+          {
+            label: "Connection recovery",
+            value: (
+              <span className="text-muted-foreground">
+                How the PMS link retries after a drop, and how long a problem may last before it is reported, are
+                configured with the connection itself on{" "}
+                <Link href="/pms-interfaces" className="font-medium text-primary hover:underline">PMS connection</Link>
+                , under Advanced configuration.
+              </span>
+            ),
+          },
+        ]}
+      />
       <DialogForm
         open={open}
         onOpenChange={(v) => { if (!busy) setOpen(v); }}
@@ -489,18 +445,20 @@ function RosterSettingsCard({
         disabled={!allOk || reason.trim().length < 3 || password === ""}
         onSubmit={save}
       >
-        <Field label="Smallest roster acted on (rooms)" hint="1 – 100000. Default 50." required error={ok("floor") ? undefined : "1 – 100000"}>
-          <Input type="number" value={vals.floor} onChange={(e) => setVals({ ...vals, floor: e.target.value })} />
-        </Field>
-        <Field label="Most stays one run may check out" hint="1 – 100000. Default 500." required error={ok("cap") ? undefined : "1 – 100000"}>
-          <Input type="number" value={vals.cap} onChange={(e) => setVals({ ...vals, cap: e.target.value })} />
-        </Field>
-        <Field label="Rooms a sweep may miss" hint="0 – 10000. Default 2." required error={ok("tol") ? undefined : "0 – 10000"}>
-          <Input type="number" value={vals.tol} onChange={(e) => setVals({ ...vals, tol: e.target.value })} />
-        </Field>
-        <Field label="Sweeps remembered" hint="1 – 1000. Default 10." required error={ok("look") ? undefined : "1 – 1000"}>
-          <Input type="number" value={vals.look} onChange={(e) => setVals({ ...vals, look: e.target.value })} />
-        </Field>
+        <FieldGrid cols={2}>
+          <Field label="Smallest roster acted on (rooms)" hint="1 – 100000. Default 50." required error={ok("floor") ? undefined : "1 – 100000"}>
+            <Input type="number" inputMode="numeric" value={vals.floor} onChange={(e) => setVals({ ...vals, floor: e.target.value })} />
+          </Field>
+          <Field label="Most stays one run may check out" hint="1 – 100000. Default 500." required error={ok("cap") ? undefined : "1 – 100000"}>
+            <Input type="number" inputMode="numeric" value={vals.cap} onChange={(e) => setVals({ ...vals, cap: e.target.value })} />
+          </Field>
+          <Field label="Rooms a sweep may miss" hint="0 – 10000. Default 2." required error={ok("tol") ? undefined : "0 – 10000"}>
+            <Input type="number" inputMode="numeric" value={vals.tol} onChange={(e) => setVals({ ...vals, tol: e.target.value })} />
+          </Field>
+          <Field label="Sweeps remembered" hint="1 – 1000. Default 10." required error={ok("look") ? undefined : "1 – 1000"}>
+            <Input type="number" inputMode="numeric" value={vals.look} onChange={(e) => setVals({ ...vals, look: e.target.value })} />
+          </Field>
+        </FieldGrid>
         <Field label="Reason" hint="Recorded in the activity log." required>
           <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
         </Field>
@@ -508,6 +466,6 @@ function RosterSettingsCard({
           <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
       </DialogForm>
-    </Card>
+    </SectionCard>
   );
 }
