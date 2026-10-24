@@ -8,8 +8,8 @@ import { api, ListResp, OperationalAlert } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { RowActions } from "@/components/ui/row-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { SkeletonRows } from "@/components/ui/misc";
@@ -83,8 +83,6 @@ export function OperationalAlertsView({
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<BellRing />}
-        eyebrow="System"
         title="Alerts"
         description="Checkouts the configured policy could not handle on its own."
         help={
@@ -121,18 +119,19 @@ export function OperationalAlertsView({
       <Card className="overflow-hidden">
         {rows === null ? (
           err ? (
-            <EmptyState icon={<BellRing />} title="Alerts could not be read" hint="The queue appears here once the appliance answers." />
+            <EmptyState size="sm" icon={<BellRing />} title="Alerts could not be read" hint="The queue appears here once the appliance answers." />
           ) : (
             <SkeletonRows rows={3} cols={5} />
           )
         ) : rows.length === 0 ? (
           <EmptyState
+            size="sm"
             icon={<CheckCheck />}
             title="No open alerts"
             hint="Every checkout was handled with the configured policy."
           />
         ) : (
-          <Table>
+          <Table label="Alerts">
             <THead>
               <TR>
                 <TH>Alert</TH>
@@ -141,7 +140,7 @@ export function OperationalAlertsView({
                 <TH className="hidden lg:table-cell">Reason</TH>
                 <TH className="hidden sm:table-cell">Boundary time</TH>
                 <TH className="hidden sm:table-cell">Raised</TH>
-                {canAct && <TH className="text-end"><span className="sr-only">Actions</span></TH>}
+                {canAct && <TH><span className="sr-only">Actions</span></TH>}
               </TR>
             </THead>
             <TBody>
@@ -153,12 +152,12 @@ export function OperationalAlertsView({
                       Raised {formatRelative(a.created_at)}
                     </div>
                   </TD>
-                  <TD>
-                    <Badge tone={stateTone(a.state)} dot>{stateWord(a.state)}</Badge>
+                  <TD nowrap>
+                    <StatusBadge tone={stateTone(a.state)}>{stateWord(a.state)}</StatusBadge>
                   </TD>
                   <TD className="hidden md:table-cell">{sentence(a.trigger)}</TD>
-                  <TD className="hidden lg:table-cell">{sentence(a.reason_code)}</TD>
-                  <TD className="hidden whitespace-nowrap sm:table-cell">
+                  <TD muted className="hidden lg:table-cell">{sentence(a.reason_code)}</TD>
+                  <TD nowrap className="hidden sm:table-cell">
                     <span title={formatDate(a.boundary_at)}>{formatRelative(a.boundary_at)}</span>
                     {a.boundary_clock_suspect && (
                       <>
@@ -167,33 +166,23 @@ export function OperationalAlertsView({
                       </>
                     )}
                   </TD>
-                  <TD className="hidden whitespace-nowrap sm:table-cell">
+                  <TD nowrap muted className="hidden sm:table-cell">
                     <span title={formatDate(a.created_at)}>{formatRelative(a.created_at)}</span>
                   </TD>
                   {canAct && (
-                    <TD className="text-end">
-                      <span className="inline-flex justify-end gap-2 whitespace-nowrap">
-                        {a.state === "OPEN" && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            aria-label={"Acknowledge alert " + a.alert_code}
-                            disabled={busy === a.audit_id + "acknowledge"}
-                            onClick={() => act(a, "acknowledge")}
-                          >
-                            Acknowledge
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          aria-label={"Resolve alert " + a.alert_code}
-                          disabled={busy === a.audit_id + "resolve"}
-                          onClick={() => act(a, "resolve")}
-                        >
-                          Resolve
-                        </Button>
-                      </span>
+                    <TD className="w-0">
+                      <RowActions
+                        subject={"alert " + a.alert_code}
+                        primary={a.state === "OPEN"
+                          ? { label: "Acknowledge", disabled: busy === a.audit_id + "acknowledge", onSelect: () => void act(a, "acknowledge") }
+                          : { label: "Resolve", disabled: busy === a.audit_id + "resolve", onSelect: () => void act(a, "resolve") }}
+                        items={[{
+                          label: "Resolve",
+                          hidden: a.state !== "OPEN",
+                          disabled: busy === a.audit_id + "resolve",
+                          onSelect: () => void act(a, "resolve"),
+                        }]}
+                      />
                     </TD>
                   )}
                 </TR>

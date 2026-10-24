@@ -5,7 +5,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const IDLE_WARNING_MS = 2 * 60_000;
 
@@ -122,7 +122,7 @@ export function IdleWarning({
             changes would be lost.
           </DialogDescription>
         </DialogHeader>
-        <div className="px-5 py-4">
+        <DialogBody>
           {/* Announce milestones through the status line instead of reading every countdown tick. */}
           <p className="text-sm text-muted-foreground" aria-hidden="true" data-testid="idle-countdown">
             Signing out in <span className="tabular font-semibold text-foreground">{clock(left ?? 0)}</span>
@@ -130,7 +130,7 @@ export function IdleWarning({
           <p role="status" aria-live="polite" className="sr-only">
             {said}
           </p>
-        </div>
+        </DialogBody>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onSignOut} disabled={busy}>
             Sign out
