@@ -372,7 +372,7 @@ refused CSR/name, 429 over 10/day, 503 Central not configured) · `GET /v1/appli
 **Worker** (in ctrlapi, every 30 s; idle until configured): publishes and deletes A records, revokes what was asked to
 be revoked, issues queued orders within the weekly cap on *new* `gw.onegate.work` certificates (renewals are exempt),
 refreshes ACME Renewal Information daily (the appliance renews after `renew_after`, earlier when the CA's window moves),
-and re-checks verified hotel domains daily. Every action is in the append-only `portal_tls_events`.
+and re-checks verified custom domains daily. Every action is in the append-only `portal_tls_events`.
 
 **Lifecycle**: retire, emergency retire, replace and delete all pass through `revokeApplianceBoundLicenses`, which in
 the same transaction releases the hostname, queues every valid portal certificate for revocation, cancels open orders

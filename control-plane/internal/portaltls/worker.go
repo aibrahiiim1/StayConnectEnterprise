@@ -224,7 +224,7 @@ func (s *Service) runOrder(ctx context.Context, st *Settings, prov DNSProvider, 
 			return nil, false, err
 		}
 		if d == nil || d.FQDN != hostname || d.Status != "VERIFIED" {
-			return nil, true, errors.New("the hotel domain is no longer verified for this appliance")
+			return nil, true, errors.New("the custom domain is no longer verified for this appliance")
 		}
 		challengeLabel = d.ChallengeLabel
 	}

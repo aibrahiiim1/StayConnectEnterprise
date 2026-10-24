@@ -186,7 +186,7 @@ func GardenTargetRefusal(value string, widest int) string {
 		return "this address cannot be reached through the walled garden"
 	case ip.IsPrivate(), ip.IsLinkLocalUnicast(), inCIDR(ip, "100.64.0.0/10"), inCIDR(ip, "240.0.0.0/4"), inCIDR(ip, "0.0.0.0/8"):
 		return "private, shared, link-local and reserved addresses are not walled-garden targets: clients reach " +
-			"public sign-in and payment services through it, and a private entry would open the hotel's own networks"
+			"public sign-in and payment services through it, and a private entry would open the site's own networks"
 	}
 	return ""
 }

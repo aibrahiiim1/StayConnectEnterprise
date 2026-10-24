@@ -497,7 +497,7 @@ const landingHTML = `<!doctype html>
         <summary data-i18n="privacy.link" data-i18n-en="How we use your data">{{index .T "privacy.link"}}</summary>
         <div class="privacy-text" id="privacy-text" dir="auto"{{if not .PrivacyText}} hidden{{end}}>{{.PrivacyText}}</div>
         <p class="privacy-text" id="privacy-default"{{if .PrivacyText}} hidden{{end}}
-           data-i18n="privacy.default" data-i18n-en="This Wi-Fi is provided by the hotel, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask at reception for the hotel’s full privacy notice, or to see, correct or delete your data.">{{index .T "privacy.default"}}</p>
+           data-i18n="privacy.default" data-i18n-en="This Wi-Fi is provided by its operator, which is responsible for your personal data on it. To give you internet access and keep the network secure, it records your device’s network addresses, when you connect and how much data you use, and what you sign in with. These records are deleted or made anonymous after a set time. Ask the staff here for the full privacy notice, or to see, correct or delete your data.">{{index .T "privacy.default"}}</p>
       </details>
       <!-- Both outside links open a new tab, and say so to a screen reader before it happens (WCAG 3.2.5). The
            words are in their own spans: the language pass rewrites a data-i18n element's whole text. -->
