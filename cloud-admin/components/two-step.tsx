@@ -5,9 +5,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, useFieldErrors } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { DialogForm } from "@/components/ui/dialog";
+import { Stepper } from "@/components/ui/data";
+import { CopyButton } from "@/components/ui/patterns";
 import { api, ApiError, reauth, withStepUp } from "@/lib/api";
 
 /** Fired on window when this operator's two-step sign-in changes, so the sidebar hint can re-check. */
@@ -26,18 +30,21 @@ function passwordProblem(e: unknown): Error | unknown {
     ? new Error("Your password was not accepted.") : e;
 }
 
+const isCodeError = (e: unknown): e is ApiError =>
+  e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required");
+
 export function RecoveryCodes({ codes, label = "Recovery codes" }: { codes: string[]; label?: string }) {
-  const [copied, setCopied] = useState(false);
   const text = codes.join("\n") + "\n";
   return (
     <div className="space-y-3">
-      <ul aria-label={label} className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card p-3 font-mono text-sm">
-        {codes.map((c) => <li key={c}>{c}</li>)}
+      <ul
+        aria-label={label}
+        className="grid grid-cols-1 gap-x-6 gap-y-1.5 rounded-lg border border-border bg-surface px-4 py-3 font-mono text-sm tabular min-[400px]:grid-cols-2"
+      >
+        {codes.map((c) => <li key={c} className="select-all">{c}</li>)}
       </ul>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="secondary" onClick={async () => {
-          try { await navigator.clipboard.writeText(text); setCopied(true); } catch { setCopied(false); }
-        }}>{copied ? "Copied" : "Copy"}</Button>
+        <CopyButton value={text} />
         <Button type="button" size="sm" variant="secondary" onClick={() => {
           const blob = new Blob([text], { type: "text/plain" });
           const a = document.createElement("a");
@@ -45,7 +52,7 @@ export function RecoveryCodes({ codes, label = "Recovery codes" }: { codes: stri
           a.download = "central-recovery-codes.txt";
           a.click();
           URL.revokeObjectURL(a.href);
-        }}>Download</Button>
+        }}><Download /> Download</Button>
       </div>
     </div>
   );
@@ -53,8 +60,15 @@ export function RecoveryCodes({ codes, label = "Recovery codes" }: { codes: stri
 
 type Setup = { secret: string; otpauth_uri: string };
 
+const STEPS = ["Confirm your password", "Add to your app", "Save recovery codes"];
+
 /** Password, then the QR code and the first code, then the recovery codes once. */
-export function TwoStepEnable({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+export function TwoStepEnable({ onDone, onCancel, onEnabled }: {
+  onDone: () => void;
+  onCancel: () => void;
+  /** Called as soon as the first code is accepted, before the recovery codes are acknowledged. */
+  onEnabled?: () => void;
+}) {
   const [password, setPassword] = useState("");
   const [setup, setSetup] = useState<Setup | null>(null);
   const [qr, setQr] = useState("");
@@ -93,100 +107,112 @@ export function TwoStepEnable({ onDone, onCancel }: { onDone: () => void; onCanc
       const r = await withStepUp(() => api.post<{ recovery_codes: string[] }>("/v1/auth/mfa/confirm", { code: c }));
       setCodes(r.recovery_codes);
       announceChange();
+      onEnabled?.();
     } catch (e) {
-      if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
-        setCode(""); f.fail({ code: e.message });
-      } else setErr(e);
+      if (isCodeError(e)) { setCode(""); f.fail({ code: e.message }); } else setErr(e);
     } finally { setBusy(false); }
   }
 
-  if (codes) {
-    return (
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <h3 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">Two-step sign-in is on. Save your recovery codes</h3>
-          <p className="text-sm text-muted-foreground">
-            If you lose your phone, each of these codes signs you in once instead of the app. They are shown only
-            now. Print them or keep them somewhere safe that is not your phone.
-          </p>
-        </div>
-        <RecoveryCodes codes={codes} />
-        <Button type="button" size="sm" variant="primary" onClick={onDone}>I have saved them</Button>
-      </div>
-    );
-  }
+  const step = codes ? 2 : setup ? 1 : 0;
+  return (
+    <div className="space-y-5">
+      <Stepper steps={STEPS} current={step} />
 
-  if (setup) {
-    return (
-      <form onSubmit={confirmCode} className="space-y-3" noValidate>
-        <ErrorBanner err={err} className="mb-0" />
-        <p className="text-sm text-muted-foreground">
-          Open an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or any other), add an
-          account and scan this code. Then enter the 6-digit code it shows.
-        </p>
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-start">
-          {/* The browser-generated data URL needs no Next.js image optimization. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {qr && <img src={qr} alt="QR code to scan with your authenticator app" width={208} height={208} className="rounded bg-white p-1" />}
-          <div className="text-caption text-muted-foreground">
-            Cannot scan? Enter this key in the app:
-            <div className="mt-1 select-all break-all font-mono text-sm text-foreground">{groupKey(setup.secret)}</div>
+      {codes ? (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h3 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">
+              Two-step sign-in is on. Save your recovery codes
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Each code signs you in once if you lose your phone. They are shown only now: keep them somewhere safe
+              that is not your phone.
+            </p>
+          </div>
+          <RecoveryCodes codes={codes} />
+          <div className="flex justify-end border-t border-border pt-4">
+            <Button type="button" variant="primary" onClick={onDone}>I have saved them</Button>
           </div>
         </div>
-        <Field label="Code from the app" required error={f.error("code")}>
-          <Input
-            id={f.id("code")}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={9}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="max-w-[12rem] font-mono tracking-widest"
-          />
-        </Field>
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" size="sm" variant="primary" disabled={busy}>{busy ? "Checking…" : "Turn on"}</Button>
-          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
-        </div>
-      </form>
-    );
-  }
-
-  return (
-    <form onSubmit={start} className="space-y-3">
-      <ErrorBanner err={err} className="mb-0" />
-      <Field label="Your password" required hint="Confirms it is you before an authenticator is added.">
-        <Input
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </Field>
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" variant="primary" disabled={busy || password === ""}>
-          {busy ? "Checking…" : "Continue"}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
-      </div>
-    </form>
+      ) : setup ? (
+        <form onSubmit={confirmCode} className="space-y-4" noValidate>
+          <ErrorBanner err={err} className="mb-0" />
+          <div className="grid gap-5 sm:grid-cols-[auto_minmax(0,1fr)]">
+            <div className="flex justify-center sm:block">
+              {/* The browser-generated data URL needs no Next.js image optimization. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {qr && <img src={qr} alt="QR code to scan with your authenticator app" width={176} height={176} className="rounded-md border border-border bg-white p-1.5" />}
+            </div>
+            <div className="min-w-0 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                In an authenticator app on your phone, add an account and scan this code. Then enter the 6-digit code
+                it shows.
+              </p>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Cannot scan? Enter this key instead</div>
+                <div className="select-all break-all font-mono text-sm text-foreground">{groupKey(setup.secret)}</div>
+              </div>
+              <Field label="Code from the app" required error={f.error("code")}>
+                <Input
+                  id={f.id("code")}
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={9}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="max-w-[10rem] font-mono tracking-widest"
+                />
+              </Field>
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={busy}>Turn on</Button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={start} className="space-y-4">
+          <ErrorBanner err={err} className="mb-0" />
+          <Field label="Your password" required hint="Confirms it is you before an authenticator is added." className="max-w-sm">
+            <Input
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={busy} disabled={password === ""}>Continue</Button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 
 /** Turning it off needs the password and a code from the second factor. */
-export function TwoStepDisable({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+export function TwoStepDisable({ open, onOpenChange, onDone }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDone: () => void;
+}) {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const f = useFieldErrors<"code">();
+  const { clear } = f;
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    if (!open) { setPassword(""); setCode(""); setErr(null); clear(); }
+  }, [open, clear]);
+
+  async function submit() {
     setErr(null); f.clear();
     setBusy(true);
     try {
@@ -201,18 +227,26 @@ export function TwoStepDisable({ onDone, onCancel }: { onDone: () => void; onCan
       announceChange();
       onDone();
     } catch (e) {
-      if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
-        setCode(""); f.fail({ code: e.message });
-      } else setErr(e);
+      if (isCodeError(e)) { setCode(""); f.fail({ code: e.message }); } else setErr(e);
     } finally { setBusy(false); }
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3" noValidate>
-      <ErrorBanner err={err} className="mb-0" />
-      <p className="text-sm text-muted-foreground">
-        After this, your password alone signs you in. Your authenticator app and recovery codes stop working.
-      </p>
+    <DialogForm
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      title="Turn off two-step sign-in?"
+      description="Your password alone will sign you in. Your authenticator app and recovery codes stop working, and you are signed out everywhere else."
+      submitLabel="Turn off two-step sign-in"
+      submitVariant="danger"
+      busyLabel="Turning off…"
+      busy={busy}
+      error={err}
+      disabled={password === "" || code.trim() === ""}
+      disabledReason="Enter your password and a code to continue."
+      onSubmit={submit}
+    >
       <Field label="Your password" required>
         <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
@@ -220,18 +254,13 @@ export function TwoStepDisable({ onDone, onCancel }: { onDone: () => void; onCan
         <Input
           id={f.id("code")}
           autoComplete="one-time-code"
+          spellCheck={false}
           maxLength={32}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          className="max-w-[16rem] font-mono"
+          className="font-mono"
         />
       </Field>
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" variant="danger" disabled={busy || password === "" || code.trim() === ""}>
-          {busy ? "Turning off…" : "Turn off two-step sign-in"}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
-      </div>
-    </form>
+    </DialogForm>
   );
 }

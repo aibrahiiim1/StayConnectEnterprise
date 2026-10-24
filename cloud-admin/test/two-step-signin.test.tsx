@@ -78,11 +78,18 @@ describe("resetting a colleague's two-step sign-in", () => {
     ]);
     renderAs(PLATFORM_ME, <UsersManager base="/cloud/v1/team" roles={["platform_support"]} canManage meId="op-1" canResetPassword noun="member" />);
     await screen.findAllByText("colleague@example.test");
-    expect(screen.getByText("Two-step off")).toBeInTheDocument();
-    expect(screen.getAllByText("Two-step on").length).toBeGreaterThanOrEqual(2);
-    const buttons = screen.getAllByRole("button", { name: /Reset two-step/ });
-    expect(buttons).toHaveLength(1);
-    await user.click(buttons[0]);
+    const row = (email: string) => screen.getByText(email).closest("tr") as HTMLElement;
+    expect(within(row("admin@example.test")).getByText("On")).toBeInTheDocument();
+    expect(within(row("colleague@example.test")).getByText("On")).toBeInTheDocument();
+    expect(within(row("new@example.test")).getByText("Off")).toBeInTheDocument();
+    // Your own row has no actions; a colleague without an app has no reset.
+    expect(screen.queryByRole("button", { name: "Actions for admin@example.test" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Actions for new@example.test" }));
+    expect(await screen.findByRole("menuitem", { name: /Disable sign-in/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Reset two-step/ })).toBeNull();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Actions for colleague@example.test" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Reset two-step sign-in/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Reset two-step sign-in" });
     expect(submit).toBeDisabled();
@@ -119,6 +126,7 @@ describe("your two-step sign-in", () => {
     await user.click(screen.getByRole("button", { name: "I have saved them" }));
     expect(await screen.findByText("On")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Recovery codes" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Two-step sign-in is on.*signed out/);
   });
 
   it("a wrong password stops before anything is set up", async () => {
@@ -163,6 +171,11 @@ describe("your two-step sign-in", () => {
     const disables = calls.filter((c) => c.url === "/api/v1/auth/mfa/disable");
     expect(disables.at(-1)?.body).toEqual({ code: "ABCDE-FGHJK" });
     expect(calls.filter((c) => c.url === "/api/v1/auth/reauth")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent(/Two-step sign-in is off.*signed out/);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The state is read again on the renewed session, and the page offers turning it back on.
+    expect(calls.filter((c) => c.url === "/api/v1/auth/mfa" && c.method === "GET").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("button", { name: "Turn on two-step sign-in" })).toBeInTheDocument();
   });
 });
 

@@ -106,11 +106,22 @@ describe("an administrator resetting a colleague", () => {
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
     await screen.findAllByText("colleague@hotel");
-    expect(screen.queryByRole("button", { name: "Reset two-step sign-in for me@hotel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reset two-step sign-in for new@hotel" })).toBeNull();
-    expect(screen.getByText("Two-step off")).toBeTruthy();
-    expect(screen.getAllByText("Two-step on").length).toBe(2);
-    await userEvent.click(screen.getByRole("button", { name: "Reset two-step sign-in for colleague@hotel" }));
+    const row = (email: string) => screen.getByText(email).closest("tr") as HTMLElement;
+    expect(within(row("me@hotel")).getByText("On")).toBeTruthy();
+    expect(within(row("colleague@hotel")).getByText("On")).toBeTruthy();
+    expect(within(row("new@hotel")).getByText("Off")).toBeTruthy();
+    // Neither your own row nor a colleague without an app offers a reset.
+    await userEvent.click(screen.getByRole("button", { name: "Actions for me@hotel" }));
+    expect(await screen.findByRole("menuitem", { name: /Roles and details/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Reset two-step sign-in/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Disable/ })).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for new@hotel" }));
+    expect(await screen.findByRole("menuitem", { name: /Disable/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Reset two-step sign-in/ })).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for colleague@hotel" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /Reset two-step sign-in/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Reset two-step sign-in" });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
@@ -156,6 +167,8 @@ describe("your account: two-step sign-in", () => {
     await userEvent.click(screen.getByRole("button", { name: "I have saved them" }));
     expect(await screen.findByText("On")).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Recovery codes" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toMatch(/Two-step sign-in is on.*signed out/);
+    expect(screen.getByText("10 left")).toBeTruthy();
   });
 
   it("a wrong password at the start is reported and nothing is set up", async () => {
@@ -183,7 +196,7 @@ describe("your account: two-step sign-in", () => {
     expect(await screen.findByText("On")).toBeTruthy();
     expect(screen.getByText("8 left")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Turn off" }));
-    const submit = screen.getByRole("button", { name: "Turn off two-step sign-in" });
+    const submit = await screen.findByRole("button", { name: "Turn off two-step sign-in" });
     await userEvent.type(screen.getByLabelText(/^Your password/), "my-password");
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     await userEvent.type(screen.getByLabelText(/^Code/), "000000");
@@ -194,7 +207,11 @@ describe("your account: two-step sign-in", () => {
     await userEvent.click(screen.getByRole("button", { name: "Turn off two-step sign-in" }));
     expect(post).toHaveBeenLastCalledWith("/auth/mfa/disable", { password: "my-password", code: "123456" });
     expect(await screen.findByText("Off")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toMatch(/Two-step sign-in is off/);
+    expect(screen.getByRole("status").textContent).toMatch(/Two-step sign-in is off.*signed out/);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The page keeps working on the renewed session: the state was read again and can be turned back on.
+    expect(get.mock.calls.filter(([p]) => p === "/auth/mfa").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("button", { name: "Turn on two-step sign-in" })).toBeTruthy();
   });
 });
 

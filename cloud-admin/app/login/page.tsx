@@ -2,8 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ShieldCheck } from "lucide-react";
-import { BySemantics, OneGateLockup, OneGateMark } from "@/components/brand";
+import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -68,87 +67,70 @@ function LoginInner() {
   }, []);
 
   return (
-    <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-      <aside className="relative hidden flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-foreground lg:flex">
-        <OneGateLockup product="Central" inverse />
-        <div className="relative z-10 max-w-md space-y-4">
-          <p className="text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-white">
-            Customers, sites and appliances: activate each appliance and manage its license for its lifetime.
-          </p>
-          <p className="text-sm leading-relaxed text-sidebar-muted">
-            Central is used for licensing only. Each site&apos;s network and clients are run from the Admin Console on its
-            own appliance.
-          </p>
-        </div>
-        <BySemantics className="relative z-10 text-sidebar-muted" />
-        <OneGateMark className="pointer-events-none absolute -bottom-16 -end-24 size-[26rem] opacity-[0.07]" />
-      </aside>
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <OneGateLockup product="Central" />
+        <ThemeToggle />
+      </header>
 
-      <div className="flex min-h-screen flex-col">
-        <div className="flex items-center justify-between p-4 sm:p-6">
-          <div className="lg:invisible">
-            <OneGateLockup product="Central" />
-          </div>
-          <ThemeToggle />
-        </div>
-
-        <main className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-6">
-          <div className="w-full max-w-[25rem]">
-            <div className="mb-7 space-y-1.5">
-              <OneGateMark className="mb-3 size-10" />
+      <main className="flex flex-1 items-start justify-center px-4 pb-12 pt-6 sm:items-center sm:px-6 sm:pt-0">
+        <div className="w-full max-w-[24rem] space-y-4">
+          <div className="rounded-xl border border-border bg-card p-6 text-card-foreground shadow-card sm:p-7">
+            <div className="mb-6 space-y-1">
               <h1 className="text-title">OneGate Central</h1>
-              <p className="text-sm text-muted-foreground">Admin sign-in. Use your Central operator account.</p>
+              <p className="text-sm text-muted-foreground">
+                {codeStep ? "One more step to finish signing in." : "Sign in with your Central account."}
+              </p>
             </div>
 
             {codeStep ? (
               <SigninSecondStep onDone={finish} onRestart={restart} />
             ) : (
-            <form onSubmit={onSubmit} className="space-y-4">
-              {/* The alert already announces itself; an outer live wrapper would announce it twice. */}
-              <ErrorBanner err={err} className="mb-0" />
-              <div role="status" aria-live="polite">
-                {notice && !err && <Callout tone="info">{notice}</Callout>}
-              </div>
-              <Field label="Email">
-                <Input
-                  type="email"
-                  required
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                  autoComplete="username"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </Field>
-              <Field label="Password">
-                <Input
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Field>
-              <Button type="submit" disabled={loading} className="w-full" size="lg">
-                {loading ? "Signing in…" : "Sign in"}
-              </Button>
-            </form>
+              <form onSubmit={onSubmit} className="space-y-4">
+                {/* The alert already announces itself; an outer live wrapper would announce it twice. */}
+                <ErrorBanner err={err} className="mb-0" />
+                <div role="status" aria-live="polite">
+                  {notice && !err && <Callout tone="neutral">{notice}</Callout>}
+                </div>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    required
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </Field>
+                <Field label="Password">
+                  <Input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </Field>
+                <Button type="submit" loading={loading} className="w-full" size="lg">
+                  Sign in
+                </Button>
+              </form>
             )}
-
-            <div className="mt-6 flex gap-2.5 rounded-lg border border-border bg-card px-3.5 py-3 text-caption leading-relaxed text-muted-foreground">
-              <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <p>
-                A Central account signs in to this console only. It opens nothing on a site&apos;s appliance, and an
-                Admin Console account does not work here.
-              </p>
-            </div>
-
-            <p className="mt-8 text-center">
-              <BySemantics className="text-muted-foreground" />
-            </p>
           </div>
-        </main>
-      </div>
+
+          <p className="px-1 text-center text-caption text-muted-foreground">
+            A Central account signs in to this console only. It opens nothing on a site&apos;s appliance, and an Admin
+            Console account does not work here.
+          </p>
+        </div>
+      </main>
+
+      <footer className="px-4 pb-6 text-center text-muted-foreground sm:px-6">
+        <BySemantics />
+      </footer>
     </div>
   );
 }

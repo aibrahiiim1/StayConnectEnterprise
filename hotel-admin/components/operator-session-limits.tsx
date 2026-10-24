@@ -71,9 +71,8 @@ export function OperatorSessionLimits({ writable }: { writable: boolean }) {
         </summary>
         <div className="space-y-5 border-t border-border px-5 py-5">
           <p className="text-sm text-muted-foreground">
-            How long a signed-in session lasts. A session with no activity for the first limit ends, and so does any
-            session once it reaches the second, however active. An open tab that is only being looked at counts as
-            inactive. Changes apply to every open session, yours included, from its next request.
+            A session ends after the idle limit, and at the maximum however active; a tab that is only open counts as
+            idle. Changes apply to every open session, yours included, from its next request.
             {settings.config_version === 0
               ? " No value has been saved yet, so the defaults below are in force."
               : settings.updated_at ? ` Last changed ${formatDate(settings.updated_at)}${settings.updated_by ? ` by ${settings.updated_by}` : ""}.` : ""}

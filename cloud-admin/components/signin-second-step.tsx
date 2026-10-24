@@ -3,10 +3,10 @@
 // The code step, for an account that turned two-step sign-in on (D68). Turning it on happens under Two-step sign-in.
 
 import { useEffect, useId, useRef, useState } from "react";
-import { KeyRound } from "lucide-react";
+import { ArrowLeft, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { api, ApiError } from "@/lib/api";
 
 type CodeResult = { must_change_password?: boolean; recovery_codes_left?: number };
@@ -18,10 +18,11 @@ export function SigninSecondStep({ onDone, onRestart }: {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [codeErr, setCodeErr] = useState<string | null>(null);
+  const [locked, setLocked] = useState<string | null>(null);
   const [lowOnCodes, setLowOnCodes] = useState<number | null>(null);
   const hintId = useId();
 
-  // Focus the warning so screen readers announce it.
   const heading = useRef<HTMLHeadingElement | null>(null);
   useEffect(() => {
     if (lowOnCodes !== null) heading.current?.focus();
@@ -29,7 +30,7 @@ export function SigninSecondStep({ onDone, onRestart }: {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
+    setErr(null); setCodeErr(null); setLocked(null);
     setBusy(true);
     try {
       const r = await api.post<CodeResult>("/v1/auth/login/code", { code: code.trim() });
@@ -43,7 +44,9 @@ export function SigninSecondStep({ onDone, onRestart }: {
         onRestart(e.message);
         return;
       }
-      setErr(e);
+      if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) setCodeErr(e.message);
+      else if (e instanceof ApiError && (e.status === 429 || e.code === "too_many_attempts")) setLocked(e.message);
+      else setErr(e);
       setCode("");
     } finally {
       setBusy(false);
@@ -53,45 +56,60 @@ export function SigninSecondStep({ onDone, onRestart }: {
   if (lowOnCodes !== null) {
     return (
       <div className="space-y-4">
-        <h2 ref={heading} tabIndex={-1} className="text-emphasis focus:outline-none">Recovery codes running low</h2>
-        <p className="text-sm">
+        <Callout tone="warning" title={<h2 ref={heading} tabIndex={-1} className="focus:outline-none">Recovery codes running low</h2>}>
           You signed in with a recovery code. {lowOnCodes === 0 ? "You have none left." : `You have ${lowOnCodes} left.`}{" "}
           Make a new set under Two-step sign-in in the sidebar.
-        </p>
-        <Button type="button" variant="primary" onClick={onDone}>Continue</Button>
+        </Callout>
+        <Button type="button" variant="primary" size="lg" className="w-full" onClick={onDone}>Continue</Button>
       </div>
     );
   }
 
   const why = busy ? null : code.trim() === "" ? "Enter your code to continue." : null;
   return (
-    <form onSubmit={submit} className="space-y-4">
-      {/* The alert already announces itself; an outer live wrapper would repeat it. */}
+    <form onSubmit={submit} className="space-y-4" noValidate>
       <ErrorBanner err={err} className="mb-0" />
-      <div className="space-y-1.5">
-        <h2 className="flex items-center gap-2 text-emphasis"><KeyRound className="size-4" aria-hidden />Enter your code</h2>
-        <p className="text-sm text-muted-foreground">
-          The 6-digit code your authenticator app shows now. Lost your phone? Enter one of your recovery codes.
-        </p>
+      {locked && <Callout tone="warning" title="Too many wrong codes">{locked}</Callout>}
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-muted-foreground" aria-hidden>
+          <Smartphone className="size-4" />
+        </span>
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-emphasis">Enter your code</h2>
+          <p className="text-caption text-muted-foreground">
+            The 6-digit code your authenticator app shows now, or one of your recovery codes.
+          </p>
+        </div>
       </div>
-      <Field label="Code">
+      <Field label="Code" error={codeErr ?? undefined}>
         <Input
-          // Focus the new code field after password entry.
+          // Focus the code field once it replaces the password form.
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           required
           inputMode="text"
           autoComplete="one-time-code"
+          spellCheck={false}
           maxLength={32}
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={(e) => { setCode(e.target.value); setCodeErr(null); }}
+          className="h-11 text-center font-mono text-lg tracking-[0.2em]"
         />
       </Field>
-      <Button type="submit" disabled={busy || why !== null} aria-describedby={why ? hintId : undefined} className="w-full" size="lg">
-        {busy ? "Checking…" : "Sign in"}
+      <Button
+        type="submit"
+        loading={busy}
+        disabled={why !== null}
+        aria-describedby={why ? hintId : undefined}
+        className="w-full"
+        size="lg"
+      >
+        Sign in
       </Button>
-      {why && <p id={hintId} className="text-center text-caption text-muted-foreground">{why}</p>}
-      <Button type="button" variant="ghost" className="w-full" onClick={() => onRestart("")}>Back</Button>
+      {why && <p id={hintId} className="-mt-2 text-center text-caption text-muted-foreground">{why}</p>}
+      <Button type="button" variant="ghost" className="w-full" onClick={() => onRestart("")}>
+        <ArrowLeft className="rtl:-scale-x-100" /> Back
+      </Button>
     </form>
   );
 }

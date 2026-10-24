@@ -71,10 +71,9 @@ export function OperatorSigninProtection({ writable }: { writable: boolean }) {
         </summary>
         <div className="space-y-5 border-t border-border px-5 py-5">
           <p className="text-sm text-muted-foreground">
-            Protects this console&rsquo;s sign-in and every password confirmation. Wrong passwords are counted per
-            account and per address; reaching a limit locks it for the lockout period, and every failure is recorded
-            in Activity. Changes apply to the next attempt. An account already locked keeps its lockout &mdash;
-            resetting that operator&rsquo;s password ends it.
+            Wrong passwords are counted per account and per address; reaching a limit locks it for the lockout period.
+            Changes apply to the next attempt. A locked account stays locked until the lockout ends or its password is
+            reset.
             {settings.config_version === 0
               ? " No value has been saved yet, so the defaults below are in force."
               : settings.updated_at ? ` Last changed ${formatDate(settings.updated_at)}${settings.updated_by ? ` by ${settings.updated_by}` : ""}.` : ""}

@@ -71,9 +71,8 @@ export function OperatorAccountRetention({ writable }: { writable: boolean }) {
         </summary>
         <div className="space-y-5 border-t border-border px-5 py-5">
           <p className="text-sm text-muted-foreground">
-            Disabling an operator keeps their account so the activity log can still say who did what. After this
-            period the account is anonymised: its email, name, password and authenticator are removed, and the
-            activity log shows it as a removed account. An anonymised account cannot be enabled again.
+            A disabled account is kept so the activity log can say who did what. After this period its email, name,
+            password and authenticator are removed, and it can never be enabled again.
             {settings.config_version === 0
               ? " No value has been saved yet, so the defaults below are in force."
               : settings.updated_at ? ` Last changed ${formatDate(settings.updated_at)}${settings.updated_by ? ` by ${settings.updated_by}` : ""}.` : ""}
