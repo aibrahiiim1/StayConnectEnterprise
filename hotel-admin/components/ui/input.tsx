@@ -76,20 +76,31 @@ export const Checkbox = React.forwardRef<
 
 /** An input with a fixed unit or prefix beside it, e.g. "Mbps" or "https://". */
 export function InputGroup({
-  prefix, suffix, className, children,
+  prefix, suffix, className, children, id, ...aria
 }: {
   prefix?: React.ReactNode;
   suffix?: React.ReactNode;
   className?: string;
   children: React.ReactElement;
+  // Field hands these to its direct child; they belong on the input itself, or the label points at nothing.
+  id?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean | "true" | "false";
+  "aria-required"?: boolean | "true" | "false";
 }) {
   const affix = "inline-flex shrink-0 items-center border border-input/70 bg-surface px-3 text-sm text-muted-foreground";
+  const inner = children.props as Record<string, unknown> & { className?: string; id?: string };
+  const describedBy = [inner["aria-describedby"], aria["aria-describedby"]].filter(Boolean).join(" ") || undefined;
   return (
     <div className={cn("flex items-stretch", className)}>
       {prefix && <span className={cn(affix, "rounded-s-md border-e-0")}>{prefix}</span>}
-      {React.cloneElement(children as React.ReactElement<{ className?: string }>, {
+      {React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
+        id: inner.id ?? id,
+        "aria-describedby": describedBy,
+        ...(aria["aria-invalid"] !== undefined && inner["aria-invalid"] === undefined ? { "aria-invalid": aria["aria-invalid"] } : null),
+        ...(aria["aria-required"] !== undefined && inner["aria-required"] === undefined ? { "aria-required": aria["aria-required"] } : null),
         className: cn(
-          (children.props as { className?: string }).className,
+          inner.className,
           "min-w-0 flex-1",
           prefix && "rounded-s-none",
           suffix && "rounded-e-none",
@@ -158,7 +169,12 @@ export function Field({
   let controlId = htmlFor;
   if (React.isValidElement(children)) {
     const childProps = children.props as Record<string, unknown>;
-    controlId = htmlFor ?? (childProps.id as string | undefined) ?? `${generated}-control`;
+    // An InputGroup passes the id on to its input, so an id the input already has is the one the label must name.
+    const groupedId =
+      children.type === InputGroup
+        ? ((childProps.children as React.ReactElement<{ id?: string }> | undefined)?.props?.id)
+        : undefined;
+    controlId = htmlFor ?? (childProps.id as string | undefined) ?? groupedId ?? `${generated}-control`;
     control = React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
       id: controlId,
       ...(hasDescription
