@@ -1,4 +1,0 @@
-commit d9187bc07ab30d979579839d1a1cef06cb6098a5
-Date:   Sat Oct 24 09:09:38 2026 +0300
-
-    The change manifest records the PRE-LIVE mission delivery
