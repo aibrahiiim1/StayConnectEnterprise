@@ -243,7 +243,8 @@ type Repo interface {
 	MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error
 
 	AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error)
-	// AdmitLiveEvent proves ownership and inserts in one transaction; a stale owner inserts nothing.
+	// AdmitLiveEvent proves ownership and inserts in one transaction; a stale owner inserts nothing. An exact
+	// repeat of an admitted LIVE record inserts nothing and returns the existing id with *DuplicateLiveEventError.
 	AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error)
 	// StageResyncEvent appends an immutable STAGED row, invisible to the Stay engine until publication.
 	StageResyncEvent(ctx context.Context, row InboxRow) (string, error)
@@ -353,6 +354,15 @@ var (
 	// Distinct from "no identity" so a corrupt or tampered identity is never reported as never-enrolled.
 	ErrIdentityUnreadable = errors.New("pmsd: appliance identity present but unreadable or invalid")
 )
+
+// DuplicateLiveEventError reports that a LIVE record was already admitted with the same identity, so nothing
+// was inserted. ProcessingStatus is the existing row's status.
+type DuplicateLiveEventError struct {
+	ExistingID       string
+	ProcessingStatus string
+}
+
+func (e *DuplicateLiveEventError) Error() string { return "pmsd: live record already admitted" }
 
 func (d *Deps) now() time.Time {
 	if d.Now != nil {

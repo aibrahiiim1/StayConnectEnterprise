@@ -278,18 +278,36 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}
+	// A LIVE row that repeats an admitted one byte for byte is the PMS retransmitting it: nothing is inserted
+	// and the existing row is reported. The conflict target repeats the partial index predicate so Postgres
+	// infers se_live_identity; RESYNC rows keep failing on se_resync_identity as before.
+	onConflict := ""
+	if row.AdmissionKind == "LIVE" {
+		onConflict = `
+		ON CONFLICT (tenant_id, site_id, pms_interface_id, external_event_identity) WHERE admission_kind = 'LIVE' DO NOTHING`
+	}
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
 		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type,
 		 pms_timestamp_raw, pms_timestamp_utc, source_timezone, received_at,
 		 sequence_version, normalization_version, clock_suspect, payload,
 		 admission_kind, admission_runtime_generation, resync_generation, fingerprint_key_version)
-		VALUES ($1,$2,$3,$4,$5, NULLIF($6,''),$7, NULLIF($8,''), $9, $10,$11,$12,$13::jsonb, $14,$15,$16,$17)
+		VALUES ($1,$2,$3,$4,$5, NULLIF($6,''),$7, NULLIF($8,''), $9, $10,$11,$12,$13::jsonb, $14,$15,$16,$17)`+onConflict+`
 		RETURNING id::text`,
 		row.TenantID, row.SiteID, row.PMSInterfaceID, row.ExternalEventIdentity, row.EventType,
 		row.PMSTimestampRaw, row.PMSTimestampUTC, row.SourceTimezone, row.ReceivedAt,
 		row.SequenceVersion, row.NormalizationVersion, row.ClockSuspect, string(payload),
 		row.AdmissionKind, row.ExpectedGeneration, row.ResyncGeneration, row.FingerprintKeyVersion).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) && onConflict != "" {
+		var status string
+		if err := tx.QueryRow(ctx, `SELECT id::text, processing_status FROM iam_v2.stay_events
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND external_event_identity=$4
+			  AND admission_kind='LIVE'`,
+			row.TenantID, row.SiteID, row.PMSInterfaceID, row.ExternalEventIdentity).Scan(&id, &status); err != nil {
+			return "", err
+		}
+		return id, &DuplicateLiveEventError{ExistingID: id, ProcessingStatus: status}
+	}
 	if err != nil {
 		return "", err
 	}

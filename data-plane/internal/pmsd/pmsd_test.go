@@ -197,6 +197,11 @@ func (r *fakeRepo) AdmitLiveEvent(ctx context.Context, row InboxRow) (string, er
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, id := range r.liveRows {
+		if id == row.ExternalEventIdentity {
+			return "live-" + id, &DuplicateLiveEventError{ExistingID: "live-" + id, ProcessingStatus: "PENDING"}
+		}
+	}
 	r.liveRows = append(r.liveRows, row.ExternalEventIdentity)
 	return "live-" + row.ExternalEventIdentity, nil
 }

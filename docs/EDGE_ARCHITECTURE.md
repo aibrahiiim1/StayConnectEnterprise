@@ -127,6 +127,25 @@ condition**, and on its own it means nothing about whether clients can get onlin
 - Entitlement enforcement, shaping and accounting.
 - Every existing session.
 
+### While the guest list refreshes (D69, 2026-10-24)
+
+Every reconnect to the PMS starts a full resync. While it runs, Room sign-in answers from the **last published
+guest list**, connected or not, exactly as it does while the transport is down: the new list is applied only
+once it is complete. What still refuses is unchanged — a list never published, a continuity gap, an unpinned
+revision, an event received but not yet applied (a few seconds after each publish, and any live check-out until
+it is applied), and evidence older than the cache age. The Admin Console says "working from the last complete
+guest list" in that state. `iam_v2.p3_feed_authorizes` (migration 0150) is the rule; edged's `room_auth_ready`
+mirrors it clause for clause and reports `room_auth_source`.
+
+### Why a PMS session ended
+
+pmsd's `WORKER_PROTOCOL_ENDED` line names the cause: `TRANSPORT_REMOTE_CLOSED` (the PMS closed it),
+`TRANSPORT_RESET`, `TRANSPORT_TIMEOUT` (pmsd's own read or write deadline), `TRANSPORT_CLOSED_LOCALLY`,
+`PROTOCOL_LINK_ENDED` (the PMS sent LE), `DB_STATEMENT_FAILED` (with `sqlstate`, `pg_constraint` and `failed_at`),
+`CONTEXT_CANCELED` (shutdown), plus link timing, the last record types in each direction and whether a resync had
+just published — never payload. An exact retransmission of a live record the inbox already holds is ignored
+(`pmsd: duplicate live record ignored`); before D69 it ended the session and caused reconnect storms.
+
 ### What cannot work, and must be said plainly
 
 Arrivals, departures and changes the PMS made **after the last completed sync are unknown locally** until the

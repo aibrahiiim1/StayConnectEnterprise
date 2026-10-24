@@ -77,6 +77,7 @@ type dashPmsInterface struct {
 	SyncStage      string     `json:"sync_stage,omitempty"`
 	RoomAuthReady  bool       `json:"room_auth_ready"`
 	RoomAuthReason string     `json:"room_auth_reason,omitempty"`
+	RoomAuthSource string     `json:"room_auth_source,omitempty"`
 	InHouseStays   int        `json:"in_house_stays"`
 	PendingEvents  int        `json:"pending_events"`
 	ReviewEvents   int        `json:"review_events"`
@@ -317,6 +318,7 @@ func (s *server) dashPMS(ctx context.Context) dashPms {
 			row.SyncStage = h.SyncStage
 			row.RoomAuthReady = h.RoomAuthReady
 			row.RoomAuthReason = h.RoomAuthReason
+			row.RoomAuthSource = h.RoomAuthSource
 			row.InHouseStays = h.InHouseStays
 			row.PendingEvents = h.PendingEvents
 			row.ReviewEvents = h.ReviewEvents

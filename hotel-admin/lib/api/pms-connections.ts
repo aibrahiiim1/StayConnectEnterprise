@@ -369,7 +369,7 @@ export const ROOM_AUTH_WORDS: Record<string, string> = {
   NO_PUBLISHED_REVISION: "No configuration has been put live for this connection.",
   CONTINUITY_GAP: "Updates from the PMS were missed, so the guest list cannot be trusted until a full refresh.",
   CONTINUITY_NOT_ESTABLISHED: "No updates have been received yet, so there is nothing to verify clients against.",
-  NOT_IN_SYNC: "The guest list is not up to date. A full refresh will fix it.",
+  NOT_IN_SYNC: "The first guest list is still loading. Room sign-in starts as soon as it finishes.",
   FEED_SILENT: "The PMS has gone quiet for longer than this connection allows.",
   REVISION_NOT_PINNED: "The live configuration changed and the connection has not picked it up yet.",
   MIRROR_NEVER_SYNCHRONIZED: "No complete guest list has ever been loaded, so there is nothing to fall back on.",
@@ -521,4 +521,27 @@ export function pmsErrorText(e: unknown): string | null {
   }
   if (x.status === 404) return say("This action is not available on this appliance.");
   return msg ? say(msg) : "Something went wrong.";
+}
+
+// pmsd's closed set of reasons a connection or refresh ended. Named by what the appliance observed: a reset
+// can come from the PMS or from any device in between, so it is never blamed on either.
+const CONNECTION_END_WORDS: Record<string, string> = {
+  TRANSPORT_REMOTE_CLOSED: "The PMS closed the connection",
+  TRANSPORT_RESET: "The connection was reset",
+  TRANSPORT_TIMEOUT: "No reply within the time limit",
+  TRANSPORT_CLOSED_LOCALLY: "The appliance closed the connection",
+  PROTOCOL_LINK_ENDED: "The PMS ended the link",
+  PROTOCOL_FRAMING_ERROR: "The PMS sent a message the appliance could not read",
+  DIAL_FAILED: "The PMS could not be reached",
+  DIAL_TIMEOUT: "The PMS did not answer the connection attempt",
+  DB_STATEMENT_FAILED: "The appliance could not save what the PMS sent",
+  DB_UNAVAILABLE: "The appliance's database was unavailable",
+  CONTEXT_CANCELED: "The appliance stopped the connection",
+  UNCLASSIFIED: "The connection ended for an unrecognised reason",
+};
+
+/** Plain words for a transport or sync failure code; an unknown code is shown as sent. */
+export function connectionEndWords(code?: string | null): string {
+  if (!code) return "";
+  return CONNECTION_END_WORDS[code] ?? code;
 }
