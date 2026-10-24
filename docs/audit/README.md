@@ -14,7 +14,7 @@ The audit changes no code. Fixes are made later, one batch at a time, on their o
 | 0 | Tooling baseline, toolchain, phase map | [PHASE0_BASELINE.md](PHASE0_BASELINE.md) | done |
 | 1 | Central (ctrlapi) | [PHASE1_CENTRAL.md](PHASE1_CENTRAL.md) | done |
 | 2 | Appliance security foundations | [PHASE2_APPLIANCE_FOUNDATIONS.md](PHASE2_APPLIANCE_FOUNDATIONS.md) | done |
-| 3 | Database and migrations | | not started |
+| 3 | Database and migrations | [PHASE3_DATABASE_AND_MIGRATIONS.md](PHASE3_DATABASE_AND_MIGRATIONS.md) | done |
 | 4 | Guest sign-in (scd) | | not started |
 | 5 | Client Portal (portald) | | not started |
 | 6 | Payments, ledger, posting, accounting (acctd) | | not started |
