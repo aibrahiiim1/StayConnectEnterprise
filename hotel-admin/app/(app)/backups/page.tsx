@@ -5,12 +5,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, BACKGROUND_HEADER, ListResp, BackupHealth, BackupSettings, Whoami } from "@/lib/api";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { RowActions } from "@/components/ui/row-actions";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -29,7 +33,7 @@ import { ScheduledBackupsCard } from "./scheduled-backups-card";
 import { SCHEDULE_SETTING_KEYS, backupKindLabel } from "@/lib/ledger-words";
 import { submitDownload } from "@/lib/backup-download";
 import {
-  Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2, HardDrive, ChevronRight,
+  Archive, ShieldCheck, Download, RotateCcw, AlertTriangle, CheckCircle2, Loader2,
 } from "lucide-react";
 
 type Artifact = {
@@ -55,6 +59,8 @@ export default function BackupsPage() {
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<Artifact | null>(null);
+  const [inspecting, setInspecting] = useState<Artifact | null>(null);
+  const [tab, setTab] = useState("backups");
 
   const writable = roles ? canWrite("backups", roles) : false;
   const canDownload = roles ? canWrite("backup-download", roles) : false;
@@ -134,11 +140,12 @@ export default function BackupsPage() {
 
   const openBackup = () => { setBackupErr(null); setBackupOpen(true); };
 
+  const verifyLabel = (a: Artifact) => (verifying === a.name ? "Checking…" : a.verified_at ? "Re-verify" : "Verify");
+  const startDownload = (a: Artifact) => { setDownloadErr(null); setDownloading(a); };
+
   return (
     <PageShell>
       <PageHeader
-        icon={<Archive />}
-        eyebrow="System"
         title="Backups"
         description="A complete copy of this site’s data: on a schedule you set, and on demand."
         help={
@@ -254,94 +261,156 @@ export default function BackupsPage() {
         </CardBody>
       </Card>
 
-      <BackupKeysCard writable={writable} />
-      <LedgerCard writable={writable} />
-      <ScheduledBackupsCard writable={writable} />
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList aria-label="Backup sections">
+          <TabsTrigger value="backups">Backups</TabsTrigger>
+          <TabsTrigger value="schedule">Schedule &amp; storage</TabsTrigger>
+          <TabsTrigger value="ledger">Erasure ledger</TabsTrigger>
+          <TabsTrigger value="retention">Data retention</TabsTrigger>
+        </TabsList>
 
-      {lastRestore && <LastRestoreCard result={lastRestore} />}
+        <TabsContent value="backups" className="mt-5 space-y-5">
+          <SectionCard
+            flush
+            title="Available backups"
+            description="Only a verified backup can be restored. Select one for its details."
+          >
+            {artifacts === null ? (
+              err ? null : <SkeletonRows rows={3} cols={4} />
+            ) : artifacts.length === 0 ? (
+              <EmptyState size="sm" icon={<Archive />} title="No backups yet"
+                hint="Use Back up now, or switch on scheduled backups."
+                action={writable ? <Button variant="secondary" size="sm" onClick={openBackup}>Back up now</Button> : undefined} />
+            ) : (
+              <Table label="Available backups">
+                <THead>
+                  <TR>
+                    <TH>Backup</TH>
+                    <TH>Status</TH>
+                    <TH numeric className="hidden sm:table-cell">Size</TH>
+                    <TH className="hidden md:table-cell">Checked</TH>
+                    <TH><span className="sr-only">Actions</span></TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {artifacts.map((a) => (
+                    <TR key={a.name} onClick={() => setInspecting(a)} selected={inspecting?.name === a.name}>
+                      <TD className="min-w-48">
+                        <div className="font-medium">{a.modified_at ? formatDate(a.modified_at) : a.name}</div>
+                        <div className="max-w-[22rem] truncate font-mono text-2xs text-muted-foreground" title={a.name}>{a.name}</div>
+                      </TD>
+                      <TD>
+                        <div className="flex flex-wrap gap-1">
+                          {a.backup_kind && <Badge tone="default">{backupKindLabel(a.backup_kind)}</Badge>}
+                          {a.verified_at
+                            ? <StatusBadge tone="ok">Verified</StatusBadge>
+                            : <StatusBadge>Not checked</StatusBadge>}
+                          {isEncrypted(a.name) && <Badge tone="info">Encrypted</Badge>}
+                        </div>
+                      </TD>
+                      <TD numeric className="hidden sm:table-cell">{formatBytes(a.size_bytes)}</TD>
+                      <TD nowrap muted className="hidden md:table-cell">
+                        {a.verified_at
+                          ? `${formatDate(a.verified_at)}${a.verified_tables ? ` · ${a.verified_tables} tables` : ""}`
+                          : "—"}
+                      </TD>
+                      <TD className="w-0">
+                        <RowActions
+                          subject={a.name}
+                          primary={{
+                            label: verifyLabel(a),
+                            icon: <ShieldCheck />,
+                            hidden: !writable,
+                            disabled: verifying === a.name,
+                            onSelect: () => startVerify(a.name),
+                          }}
+                          items={[
+                            { label: "Download…", icon: <Download />, hidden: !canDownload, onSelect: () => startDownload(a) },
+                            {
+                              label: "Restore…",
+                              icon: <RotateCcw />,
+                              danger: true,
+                              hidden: !(writable && a.verified_at),
+                              onSelect: () => setRestoring(a),
+                            },
+                          ]}
+                        />
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </SectionCard>
+          {lastRestore && <LastRestoreCard result={lastRestore} />}
+          <BackupKeysCard writable={writable} />
+        </TabsContent>
 
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <div className="space-y-0.5">
-            <CardTitle>Available backups</CardTitle>
-            <CardDescription>
-              Verify proves a backup can be loaded back. Only a verified backup can be restored.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        {artifacts === null ? (
-          err ? null : <SkeletonRows rows={3} cols={4} />
-        ) : artifacts.length === 0 ? (
-          <EmptyState icon={<Archive />} title="No backups yet"
-            hint="Use Back up now, or switch on scheduled backups."
-            action={writable ? <Button variant="secondary" size="sm" onClick={openBackup}>Back up now</Button> : undefined} />
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Backup</TH>
-                <TH>Status</TH>
-                <TH className="hidden sm:table-cell">Size</TH>
-                <TH className="hidden md:table-cell">Checked</TH>
-                <TH className="text-end"><span className="sr-only">Actions</span></TH>
-              </TR>
-            </THead>
-            <TBody>
-              {artifacts.map((a) => (
-                <TR key={a.name}>
-                  <TD>
-                    <div className="font-medium">{a.modified_at ? formatDate(a.modified_at) : a.name}</div>
-                    <div className="break-all font-mono text-2xs text-muted-foreground">{a.name}</div>
-                    {(a.reason || a.by) && <div className="text-2xs text-muted-foreground">{[a.reason, a.by && `by ${a.by}`].filter(Boolean).join(" · ")}</div>}
-                  </TD>
-                  <TD>
-                    <div className="flex flex-wrap gap-1">
-                      {a.backup_kind && <Badge tone="default">{backupKindLabel(a.backup_kind)}</Badge>}
-                      {a.verified_at
-                        ? <Badge tone="ok" dot>Verified</Badge>
-                        : <Badge tone="default">Not checked</Badge>}
-                      {isEncrypted(a.name) && <Badge tone="info">Encrypted</Badge>}
-                    </div>
-                  </TD>
-                  <TD className="hidden tabular sm:table-cell">{formatBytes(a.size_bytes)}</TD>
-                  <TD className="hidden text-sm text-muted-foreground md:table-cell">
-                    {a.verified_at
-                      ? `${formatDate(a.verified_at)}${a.verified_tables ? ` · ${a.verified_tables} tables` : ""}`
-                      : "—"}
-                  </TD>
-                  <TD className="text-end">
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {writable && (
-                        <Button size="sm" variant="secondary" disabled={verifying === a.name}
-                          aria-label={`${a.verified_at ? "Re-verify" : "Verify"} ${a.name}`}
-                          onClick={() => startVerify(a.name)}>
-                          <ShieldCheck />
-                          {verifying === a.name ? "Checking…" : a.verified_at ? "Re-verify" : "Verify"}
-                        </Button>
-                      )}
-                      {canDownload && (
-                        <Button size="sm" variant="outline" aria-label={`Download ${a.name}`}
-                          onClick={() => { setDownloadErr(null); setDownloading(a); }}>
-                          <Download /> Download
-                        </Button>
-                      )}
-                      {writable && a.verified_at && (
-                        <Button size="sm" variant="danger" aria-label={`Restore ${a.name}`} onClick={() => setRestoring(a)}>
-                          <RotateCcw /> Restore
-                        </Button>
-                      )}
-                    </div>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+        <TabsContent value="schedule" className="mt-5 space-y-5">
+          <ScheduledBackupsCard writable={writable} />
+          <StorageAndRetention writable={writable} />
+        </TabsContent>
+
+        <TabsContent value="ledger" className="mt-5 space-y-5">
+          <LedgerCard writable={writable} />
+        </TabsContent>
+
+        <TabsContent value="retention" className="mt-5 space-y-5">
+          <AccountingRetentionCard writable={writable} />
+          <DataRetentionCard writable={writable} />
+        </TabsContent>
+      </Tabs>
+
+      <DetailsDrawer
+        open={inspecting !== null}
+        onOpenChange={(v) => !v && setInspecting(null)}
+        eyebrow="Backup"
+        title={inspecting ? (inspecting.modified_at ? formatDate(inspecting.modified_at) : inspecting.name) : ""}
+        badges={inspecting && (
+          <>
+            {inspecting.verified_at ? <StatusBadge tone="ok">Verified</StatusBadge> : <StatusBadge>Not checked</StatusBadge>}
+            {isEncrypted(inspecting.name) && <Badge tone="info">Encrypted</Badge>}
+          </>
         )}
-      </Card>
-
-      <StorageAndRetention writable={writable} />
-      <AccountingRetentionCard writable={writable} />
-      <DataRetentionCard writable={writable} />
+        actions={inspecting && (writable || canDownload) ? (
+          <>
+            {canDownload && (
+              <Button variant="secondary" onClick={() => { const a = inspecting; setInspecting(null); startDownload(a); }}>
+                <Download /> Download…
+              </Button>
+            )}
+            {writable && (
+              <Button variant="secondary" disabled={verifying === inspecting.name}
+                onClick={() => { const n = inspecting.name; setInspecting(null); startVerify(n); }}>
+                <ShieldCheck /> {verifyLabel(inspecting)}
+              </Button>
+            )}
+            {writable && inspecting.verified_at && (
+              <Button variant="danger" onClick={() => { const a = inspecting; setInspecting(null); setRestoring(a); }}>
+                <RotateCcw /> Restore…
+              </Button>
+            )}
+          </>
+        ) : undefined}
+      >
+        {inspecting && (
+          <DetailsSection title="Record">
+            <DescriptionList
+              items={[
+                { label: "File", value: <span className="break-all font-mono text-xs">{inspecting.name}</span> },
+                { label: "Kind", value: inspecting.backup_kind ? backupKindLabel(inspecting.backup_kind) : "—" },
+                { label: "Taken", value: inspecting.modified_at ? formatDate(inspecting.modified_at) : "—" },
+                { label: "Size", value: <span className="tabular">{formatBytes(inspecting.size_bytes)}</span> },
+                { label: "Reason", value: inspecting.reason, hidden: !inspecting.reason },
+                { label: "Taken by", value: inspecting.by, hidden: !inspecting.by },
+                { label: "Verified", value: inspecting.verified_at ? formatDate(inspecting.verified_at) : "Not checked" },
+                { label: "Tables loaded", value: inspecting.verified_tables, hidden: !inspecting.verified_tables },
+                { label: "Encryption", value: isEncrypted(inspecting.name) ? "Encrypted to the hotel’s keys" : "Not encrypted" },
+              ]}
+            />
+          </DetailsSection>
+        )}
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={backupOpen}
@@ -395,46 +464,46 @@ function LastRestoreCard({ result }: { result: RestoreResult }) {
   // A restore in progress (ok:false until it finishes) must not render as a failure.
   const running = result.running === true;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+    <SectionCard
+      title={
+        <span className="flex items-center gap-2">
           {running ? <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />
             : result.ok ? <CheckCircle2 className="size-4 text-success" aria-hidden />
                         : <AlertTriangle className="size-4 text-destructive" aria-hidden />}
           {running ? "Restore in progress" : "Last restore"}
-        </CardTitle>
-        {!running && (
-          <Badge tone={result.ok ? "ok" : "err"} dot>{result.ok ? "Succeeded" : "Did not complete"}</Badge>
-        )}
-      </CardHeader>
-      <CardBody className="space-y-3 text-sm">
-        <p>
-          {running
-            ? "The appliance is replacing the database. It stops serving clients until this finishes. Do not start another restore."
-            : result.summary}
-        </p>
-        <p className="text-caption text-muted-foreground">
-          <span className="font-mono">{result.backup}</span>
-          {running
-            ? (result.started ? ` · started ${formatDate(result.started)}` : "")
-            : <>{result.finished ? ` · ${formatDate(result.finished)}` : ""}{result.duration ? ` · took ${result.duration}` : ""}</>}
-        </p>
-        {result.steps && result.steps.length > 0 && (
-          <ol className="space-y-1.5">
-            {result.steps.map((s, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs">
-                {s.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" aria-hidden />
-                      : <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-hidden />}
-                <span>
-                  <span className="sr-only">{s.ok ? "Done: " : "Not done: "}</span>
-                  <strong className="font-semibold">{s.step.replace(/_/g, " ")}</strong>{s.detail ? ` — ${s.detail}` : ""}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </CardBody>
-    </Card>
+        </span>
+      }
+      actions={!running && (
+        <StatusBadge tone={result.ok ? "ok" : "err"}>{result.ok ? "Succeeded" : "Did not complete"}</StatusBadge>
+      )}
+      bodyClassName="space-y-3 text-sm"
+    >
+      <p>
+        {running
+          ? "The appliance is replacing the database. It stops serving clients until this finishes. Do not start another restore."
+          : result.summary}
+      </p>
+      <p className="text-caption text-muted-foreground">
+        <span className="font-mono">{result.backup}</span>
+        {running
+          ? (result.started ? ` · started ${formatDate(result.started)}` : "")
+          : <>{result.finished ? ` · ${formatDate(result.finished)}` : ""}{result.duration ? ` · took ${result.duration}` : ""}</>}
+      </p>
+      {result.steps && result.steps.length > 0 && (
+        <ol className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {result.steps.map((s, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-xs">
+              {s.ok ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" aria-hidden />
+                    : <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-hidden />}
+              <span>
+                <span className="sr-only">{s.ok ? "Done: " : "Not done: "}</span>
+                <strong className="font-semibold">{s.step.replace(/_/g, " ")}</strong>{s.detail ? ` — ${s.detail}` : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </SectionCard>
   );
 }
 
@@ -596,112 +665,102 @@ function StorageAndRetention({ writable }: { writable: boolean }) {
   const diskPct = Number(ret.disk_pct ?? 0);
 
   return (
-    <Card>
-      <details className="group">
-        <summary className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-5 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90 rtl:-scale-x-100" aria-hidden />
-          <HardDrive className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="text-emphasis">Storage &amp; retention</span>
-          <span className="ms-auto hidden text-caption text-muted-foreground sm:inline">
-            Disk used, backups kept, the nightly sweep and how long things are kept
-          </span>
-        </summary>
-        <div className="space-y-5 border-t border-border px-5 py-5">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <StatCard
-              label="Disk used"
-              value={health?.retention_readable ? `${diskPct}%` : "—"}
-              tone={health?.retention_readable
-                ? (diskPct >= Number(ret.disk_crit ?? 101) ? "err" : diskPct >= Number(ret.disk_warn ?? 101) ? "warn" : "default")
-                : "default"}
-              hint={health?.retention_readable
-                ? `Warns at ${ret.disk_warn ?? "—"}%, critical at ${ret.disk_crit ?? "—"}%`
-                : (health?.retention_error ?? "Checking…")}
-            />
-            <StatCard
-              label="Backups kept"
-              value={health ? String(health.database_backups ?? 0) : "—"}
-              hint={health?.newest_database_backup ? `Newest ${formatDate(health.newest_database_backup)}` : undefined}
-            />
-            <StatCard
-              label="Nightly sweep"
-              value={<span className="text-subtitle">{health ? (health.timer_readable ? (health.timer_active ? "Scheduled" : "Not scheduled") : "Unknown") : "—"}</span>}
-              hint={settings?.schedule_known ? `Runs at ${settings.schedule}` : undefined}
-            />
+    <SectionCard
+      title="Storage & retention"
+      description="Disk used, the nightly sweep, and how long things are kept."
+      bodyClassName="space-y-5"
+    >
+      <StatGrid cols={3}>
+        <StatCard
+          label="Disk used"
+          value={health?.retention_readable ? `${diskPct}%` : "—"}
+          tone={health?.retention_readable
+            ? (diskPct >= Number(ret.disk_crit ?? 101) ? "err" : diskPct >= Number(ret.disk_warn ?? 101) ? "warn" : "default")
+            : "default"}
+          hint={health?.retention_readable
+            ? `Warns at ${ret.disk_warn ?? "—"}%, critical at ${ret.disk_crit ?? "—"}%`
+            : (health?.retention_error ?? "Checking…")}
+        />
+        <StatCard
+          label="Backups kept"
+          value={health ? String(health.database_backups ?? 0) : "—"}
+          hint={health?.newest_database_backup ? `Newest ${formatDate(health.newest_database_backup)}` : undefined}
+        />
+        <StatCard
+          label="Nightly sweep"
+          value={<span className="text-subtitle">{health ? (health.timer_readable ? (health.timer_active ? "Scheduled" : "Not scheduled") : "Unknown") : "—"}</span>}
+          hint={settings?.schedule_known ? `Runs at ${settings.schedule}` : undefined}
+        />
+      </StatGrid>
+
+      {health?.retention_readable && Number(ret.failures ?? 0) > 0 && (
+        <Callout tone="danger" title={`${String(ret.failures)} failure(s) on the last sweep`}>
+          {String(ret.failure_detail || "no detail")}
+        </Callout>
+      )}
+
+      {settings && (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {settings.config_present
+              ? "What the nightly sweep keeps, and when it runs. These values are stored on the appliance."
+              : "No policy has been saved yet, so the built-in defaults below are in force."}
+          </p>
+          <div className="grid gap-5 sm:grid-cols-2">
+            {settings.retention.map((sIt) => (
+              <SettingField
+                key={sIt.key}
+                label={sIt.label}
+                unit={sIt.unit}
+                min={sIt.min}
+                max={sIt.max}
+                defaultValue={sIt.default}
+                explanation={sIt.explains}
+                readOnly={!writable}
+                value={edits[sIt.key] ?? String(sIt.value)}
+                onChange={(v) => setEdits((m) => ({ ...m, [sIt.key]: v }))}
+              />
+            ))}
+            <Field
+              label="Nightly sweep runs at"
+              hint={<>Appliance local time.{" "}
+                {settings.schedule_known
+                  ? `Currently scheduled for ${settings.schedule}.`
+                  : "The current schedule could not be read from the appliance."}</>}
+            >
+              <Input type="time" value={schedule} disabled={!writable} className="w-40"
+                onChange={(e) => setSchedule(e.target.value)} />
+            </Field>
           </div>
 
-          {health?.retention_readable && Number(ret.failures ?? 0) > 0 && (
-            <Callout tone="danger" title={`${String(ret.failures)} failure(s) on the last sweep`}>
-              {String(ret.failure_detail || "no detail")}
-            </Callout>
-          )}
-
-          {settings && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                What the nightly sweep keeps, and when it runs.{" "}
-                {settings.config_present
-                  ? "These values are stored on the appliance."
-                  : "No policy has been saved yet, so the built-in defaults below are in force."}
-              </p>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {settings.retention.map((sIt) => (
-                  <SettingField
-                    key={sIt.key}
-                    label={sIt.label}
-                    unit={sIt.unit}
-                    min={sIt.min}
-                    max={sIt.max}
-                    defaultValue={sIt.default}
-                    explanation={sIt.explains}
-                    readOnly={!writable}
-                    value={edits[sIt.key] ?? String(sIt.value)}
-                    onChange={(v) => setEdits((m) => ({ ...m, [sIt.key]: v }))}
-                  />
-                ))}
-                <Field
-                  label="Nightly sweep runs at"
-                  hint={<>Appliance local time.{" "}
-                    {settings.schedule_known
-                      ? `Currently scheduled for ${settings.schedule}.`
-                      : "The current schedule could not be read from the appliance."}</>}
-                >
-                  <Input type="time" value={schedule} disabled={!writable} className="w-40"
-                    onChange={(e) => setSchedule(e.target.value)} />
-                </Field>
+          {writable && dirty && (
+            <div className="space-y-3 rounded-md border border-border bg-surface p-4">
+              <ErrorBanner err={saveErr} className="mb-0" />
+              <Field label="Confirm your password" className="max-w-sm"
+                hint="Changing what is kept, and when, is recorded against your account.">
+                <Input type="password" autoComplete="current-password" value={settingsPw}
+                  onChange={(e) => setSettingsPw(e.target.value)} />
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                <Button disabled={saving || !settingsPw || outOfRange} onClick={save}>
+                  {saving ? "Saving…" : "Save retention policy"}
+                </Button>
+                <Button variant="ghost" disabled={saving} onClick={() => {
+                  setEdits(Object.fromEntries(settings.retention.map((x) => [x.key, String(x.value)])));
+                  setSchedule(settings.schedule ?? "");
+                  setSettingsPw("");
+                  setSaveErr(null);
+                }}>Discard changes</Button>
               </div>
-
-              {writable && dirty && (
-                <div className="space-y-3 rounded-md border border-border bg-surface p-4">
-                  <ErrorBanner err={saveErr} className="mb-0" />
-                  <Field label="Confirm your password" className="max-w-sm"
-                    hint="Changing what is kept, and when, is recorded against your account.">
-                    <Input type="password" autoComplete="current-password" value={settingsPw}
-                      onChange={(e) => setSettingsPw(e.target.value)} />
-                  </Field>
-                  <div className="flex flex-wrap gap-2">
-                    <Button disabled={saving || !settingsPw || outOfRange} onClick={save}>
-                      {saving ? "Saving…" : "Save retention policy"}
-                    </Button>
-                    <Button variant="ghost" disabled={saving} onClick={() => {
-                      setEdits(Object.fromEntries(settings.retention.map((x) => [x.key, String(x.value)])));
-                      setSchedule(settings.schedule ?? "");
-                      setSettingsPw("");
-                      setSaveErr(null);
-                    }}>Discard changes</Button>
-                  </div>
-                </div>
-              )}
-
-              <p className="text-caption text-muted-foreground">
-                {String(ret.retained ?? 0)} artefacts retained, {String(ret.protected ?? 0)} protected and never
-                deleted, {String(ret.pinned ?? 0)} pinned by an operator.
-              </p>
-
-            </>
+            </div>
           )}
-        </div>
-      </details>
-    </Card>
+
+          <p className="text-caption text-muted-foreground">
+            {String(ret.retained ?? 0)} artefacts retained, {String(ret.protected ?? 0)} protected and never
+            deleted, {String(ret.pinned ?? 0)} pinned by an operator.
+          </p>
+        </>
+      )}
+    </SectionCard>
   );
 }

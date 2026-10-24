@@ -8,13 +8,15 @@ import {
 } from "@/lib/api";
 import { ManageAccountDialog } from "@/components/guest-accounts/manage-account";
 import { canRead, canWrite } from "@/lib/roles";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardBody, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import {
@@ -27,7 +29,7 @@ import { Switch, SkeletonRows } from "@/components/ui/misc";
 import { PasswordFormatCard } from "@/components/guest-accounts/password-format";
 import { OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, Settings2, LogIn, Monitor } from "lucide-react";
+import { Plus, KeyRound, Eye, EyeOff, Pencil, Power, Users, Send, LogIn, Monitor } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { isRemovedAccount, verificationStatus } from "@/lib/account-verification";
 import { ACCOUNT_NAME_MAX, ACCOUNT_NOTES_MAX, accountEditBody, validityWindow } from "@/lib/account-form";
@@ -337,9 +339,7 @@ export default function GuestAccountsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Clients"
         title="Client accounts"
-        icon={<KeyRound />}
         description="Usernames and passwords clients can sign in with."
         help={
           <>
@@ -379,15 +379,15 @@ export default function GuestAccountsPage() {
       {roles !== null && !mayWrite && <ReadOnlyNotice />}
       <ErrorBanner err={err} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} tone="primary" />
+      <StatGrid cols={3}>
+        <StatCard label="Accounts" value={rows ? totals.all.toLocaleString() : "—"} icon={<Users />} />
         <StatCard icon={<LogIn />} label="Able to sign in" value={rows ? totals.enabled.toLocaleString() : "—"} />
         <StatCard icon={<Monitor />}
           label="Devices online"
           value={rows ? totals.online.toLocaleString() : "—"}
           href="/sessions"
         />
-      </div>
+      </StatGrid>
 
       <Card>
         <CardBody className="flex flex-wrap items-center justify-between gap-4">
@@ -396,13 +396,12 @@ export default function GuestAccountsPage() {
               <label htmlFor="portal-offer" className="text-emphasis">
                 Offer username-and-password sign-in on the Client Portal
               </label>
-              <Badge tone={portalOn ? "ok" : "neutral"} dot>{portalOn ? "Shown on the portal" : "Hidden"}</Badge>
+              <StatusBadge tone={portalOn ? "ok" : "default"}>{portalOn ? "Shown on the portal" : "Hidden"}</StatusBadge>
             </div>
             <p className="text-caption text-muted-foreground">
               {portalOn
-                ? "Clients see a Username & Password tab and can sign in with the accounts staff created here."
+                ? "Clients can sign in with the accounts staff created here."
                 : "The tab is hidden, so accounts staff created cannot be used even though they exist."}
-              {" "}Self-service accounts follow the Email accounts switch on Sign-in methods.
               {roles !== null && !mayOfferOnPortal && " Your role cannot change which sign-in methods are offered."}
             </p>
           </div>
@@ -433,8 +432,9 @@ export default function GuestAccountsPage() {
       </OneTimeReveal>
 
       <Card className="overflow-hidden">
-        <CardBody className="border-b border-border py-3">
-          <Toolbar>
+        <FilterBar
+          inset
+          search={
             <SearchInput
               value={q}
               onChange={setQ}
@@ -442,25 +442,26 @@ export default function GuestAccountsPage() {
               placeholder="Search username or name…"
               label="Search client accounts"
             />
-            <Select
-              aria-label="Filter by status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-44"
-            >
-              {STATUS_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
-            </Select>
-            <Select
-              aria-label="Accounts per page"
-              value={String(pageSize)}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              className="w-32"
-            >
-              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
-            </Select>
-          </Toolbar>
-          <ResultsCount count={rows === null ? null : filtered.length} noun="client account" />
-        </CardBody>
+          }
+          actions={<ResultsCount count={rows === null ? null : filtered.length} noun="client account" />}
+        >
+          <Select
+            aria-label="Filter by status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="w-full sm:w-44"
+          >
+            {STATUS_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
+          </Select>
+          <Select
+            aria-label="Accounts per page"
+            value={String(pageSize)}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="w-full sm:w-32"
+          >
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
+          </Select>
+        </FilterBar>
         {loadFailed ? (
           <EmptyState
             title="Could not load client accounts"
@@ -471,6 +472,7 @@ export default function GuestAccountsPage() {
           <SkeletonRows rows={5} cols={6} />
         ) : filtered.length === 0 ? (
           <EmptyState
+            size="sm"
             icon={<KeyRound />}
             title={searching ? "No account matches that search" : "No client accounts"}
             hint={searching ? undefined : mayWrite ? "Create one to let a client sign in with a username and password." : undefined}
@@ -480,15 +482,14 @@ export default function GuestAccountsPage() {
             }
           />
         ) : (
-          <Table>
+          <Table label="Client accounts">
             <THead>
               <TR>
                 <TH>Account</TH>
-                <TH>Devices</TH>
+                <TH numeric>Devices</TH>
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Valid until</TH>
                 <TH className="hidden lg:table-cell">Last sign-in</TH>
-                <TH className="hidden text-end lg:table-cell">Sign-ins</TH>
                 {mayWrite && <TH><span className="sr-only">Actions</span></TH>}
               </TR>
             </THead>
@@ -498,75 +499,66 @@ export default function GuestAccountsPage() {
                 const atCap = cap ? (a.active_devices ?? 0) >= cap : false;
                 const verification = verificationStatus(a);
                 return (
-                  <TR key={a.id}>
-                    <TD>
+                  <TR key={a.id} onClick={() => setManaging(a)}>
+                    <TD className="max-w-[15rem]">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-sm font-medium">{a.username}</span>
+                        <span className="min-w-0 max-w-full truncate font-mono text-sm font-medium" title={a.username}>{a.username}</span>
                         {a.self_registered && <Badge tone="info">Self-service</Badge>}
                         {isRemovedAccount(a) && <Badge tone="neutral">Removed</Badge>}
                       </div>
                       {a.display_name && (
-                        <div className="text-caption text-muted-foreground">{a.display_name}</div>
+                        <div className="truncate text-caption text-muted-foreground" title={a.display_name}>{a.display_name}</div>
                       )}
                     </TD>
-                    <TD className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
-                      <span className="tabular">{a.active_devices ?? 0}</span>
-                      {cap ? <span className="tabular"> / {cap}</span> : ""}
+                    <TD numeric className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
+                      {a.active_devices ?? 0}
+                      {cap ? ` / ${cap}` : ""}
                       {atCap && <div className="text-caption">At the limit</div>}
                     </TD>
-                    <TD>
-                      <Badge tone={a.enabled ? "ok" : "err"} dot>
+                    <TD nowrap>
+                      <StatusBadge tone={a.enabled ? "ok" : "err"}>
                         {a.enabled ? "Can sign in" : "Disabled"}
-                      </Badge>
+                      </StatusBadge>
                       {verification && (
-                        <div className="mt-1">
-                          <Badge tone={verification.tone}>{verification.label}</Badge>
+                        <div className="mt-1 max-w-[10rem]">
+                          <Badge tone={verification.tone} title={verification.label}>
+                            <span className="min-w-0 truncate">{verification.label}</span>
+                          </Badge>
                         </div>
                       )}
                     </TD>
-                    <TD className="hidden text-sm text-muted-foreground md:table-cell">
+                    <TD nowrap muted className="hidden md:table-cell">
                       {a.valid_until ? formatRelative(a.valid_until) : "No end date"}
                     </TD>
-                    <TD className="hidden text-sm text-muted-foreground lg:table-cell">
+                    <TD nowrap muted className="hidden lg:table-cell">
                       {a.last_login_at ? formatRelative(a.last_login_at) : "Never"}
-                    </TD>
-                    <TD className="hidden text-end tabular text-muted-foreground lg:table-cell">{a.login_count}</TD>
-                    {mayWrite && (
-                      <TD className="text-end">
-                        <div className="flex flex-wrap justify-end gap-1">
-                          <Button size="sm" variant="ghost" aria-label={`Manage ${a.username}`} onClick={() => setManaging(a)}>
-                            <Settings2 /> Manage
-                          </Button>
-                          {!isRemovedAccount(a) && (<>
-                          <Button size="sm" variant="ghost" aria-label={`Edit ${a.username}`} onClick={() => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); }}>
-                            <Pencil /> Edit
-                          </Button>
-                          {/* A self-service account's password is the client's, recovered only by reset email;
-                              staff cannot set or show it. */}
-                          {!a.self_registered && (
-                            <Button size="sm" variant="ghost" aria-label={`Password for ${a.username}`} onClick={() => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); }}>
-                              <KeyRound /> Password
-                            </Button>
-                          )}
-                          {a.self_registered && !a.email_verified && (
-                            <Button size="sm" variant="ghost" disabled={resending === a.id} onClick={() => void onResend(a)}>
-                              <Send /> {resending === a.id ? "Sending…" : "Resend verification email"}
-                            </Button>
-                          )}
-                          <Button size="sm" variant="ghost" aria-label={`${a.enabled ? "Disable" : "Enable"} ${a.username}`}
-                            onClick={() => (a.enabled ? (setActionErr(null), setDisabling(a)) : void onToggle(a))}>
-                            {a.enabled ? "Disable" : "Enable"}
-                          </Button>
-                          {(a.active_devices ?? 0) > 0 && (
-                            <Button size="sm" variant="ghost" aria-label={`Disconnect ${a.username}`} onClick={() => { setActionErr(null); setDisconnecting(a); }}>
-                              <Power /> Disconnect
-                            </Button>
-                          )}
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={`Remove ${a.username}`} onClick={() => { setActionErr(null); setRemoval(null); setDeleting(a); }}>
-                            Remove
-                          </Button>
-                          </>)}
+                      {a.login_count > 0 && (
+                        <div className="tabular text-caption">
+                          {a.login_count.toLocaleString()} sign-in{a.login_count === 1 ? "" : "s"}
                         </div>
+                      )}
+                    </TD>
+                    {mayWrite && (
+                      <TD className="w-0">
+                        {/* A self-service account's password is the client's, recovered only by reset email;
+                            staff cannot set or show it. */}
+                        <RowActions
+                          subject={a.username}
+                          primary={{ label: "Manage", onSelect: () => setManaging(a) }}
+                          items={isRemovedAccount(a) ? [] : [
+                            { label: "Edit", icon: <Pencil />, onSelect: () => { setFormErr(null); setEditing(a); setPwFor(null); setShowNew(false); } },
+                            { label: "Set password", icon: <KeyRound />, hidden: a.self_registered,
+                              onSelect: () => { setFormErr(null); setPwFor(a); setEditing(null); setShowNew(false); } },
+                            { label: resending === a.id ? "Sending…" : "Resend verification email", icon: <Send />,
+                              hidden: !(a.self_registered && !a.email_verified), disabled: resending === a.id,
+                              onSelect: () => void onResend(a) },
+                            { label: "Disconnect devices", icon: <Power />, hidden: (a.active_devices ?? 0) === 0,
+                              onSelect: () => { setActionErr(null); setDisconnecting(a); } },
+                            { label: a.enabled ? "Disable" : "Enable",
+                              onSelect: () => (a.enabled ? (setActionErr(null), setDisabling(a)) : void onToggle(a)) },
+                            { label: "Remove…", danger: true, onSelect: () => { setActionErr(null); setRemoval(null); setDeleting(a); } },
+                          ]}
+                        />
                       </TD>
                     )}
                   </TR>
@@ -576,7 +568,7 @@ export default function GuestAccountsPage() {
           </Table>
         )}
         {!loadFailed && filtered.length > 0 && (
-          <CardBody className="border-t border-border py-3">
+          <CardFooter>
             <Pagination
               offset={offset}
               limit={pageSize}
@@ -584,7 +576,7 @@ export default function GuestAccountsPage() {
               total={resp?.summary?.total ?? null}
               onChange={setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
 

@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { api, withStepUp } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, Input, useFieldErrors } from "@/components/ui/input";
+import { SectionCard } from "@/components/ui/card";
+import { Field, FieldGrid, Input, useFieldErrors } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
@@ -100,89 +101,83 @@ export function SessionLifetimeSetting({ canManage }: { canManage: boolean }) {
     }
   }
 
+  const unchanged = !!s && hours === String(s.operator_session_max_hours) && idle === String(s.operator_idle_minutes)
+    && lockN === String(s.signin_lock_failures) && lockMins === String(s.signin_lock_minutes);
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="space-y-0.5">
-          <CardTitle>Sign-in limits</CardTitle>
-          <CardDescription>
-            A console sign-in ends after this many minutes without activity, and this many hours after it began however
-            active the person is. A tab that is only open counts as inactive. Disabling a person, changing their role
-            or resetting their password or two-step sign-in ends their sign-ins at once. Repeated wrong passwords or
-            authenticator codes lock the account for a while; the lock ends by itself.
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <CardBody className="space-y-4">
-        <ErrorBanner err={err} />
-        {s && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Hours"
-              required
-              hint={`From ${s.min} to ${s.max} hours. Default ${s.default}.`}
-              error={fields.error("hours")}
-            >
-              <Input id={fields.id("hours")} inputMode="numeric" aria-label="Sign-in lifetime in hours" value={hours} disabled={!canManage}
-                onChange={(e) => setHours(e.target.value)} />
+    <SectionCard
+      title="Sign-in limits"
+      description="How long a console sign-in lasts, and when wrong attempts lock an account. Disabling a person, or changing their role, password or two-step sign-in, ends their sign-ins at once."
+      footer={canManage && s ? (
+        <>
+          <LastChanged at={s.updated_at} by={s.updated_by} />
+          {unchanged && !busy && <span id={fields.id("unchanged")} className="text-xs text-muted-foreground">No changes to save.</span>}
+          <Button size="sm" disabled={unchanged} loading={busy} onClick={save}
+            aria-describedby={unchanged && !busy ? fields.id("unchanged") : undefined}>
+            Save
+          </Button>
+        </>
+      ) : undefined}
+      bodyClassName="space-y-4"
+    >
+      <ErrorBanner err={err} />
+      {!s && !err && <Skeleton className="h-32" />}
+      {s && (
+        <FieldGrid cols={2}>
+          <Field
+            label="Hours"
+            required
+            hint={`From ${s.min} to ${s.max} hours. Default ${s.default}.`}
+            error={fields.error("hours")}
+          >
+            <Input id={fields.id("hours")} inputMode="numeric" aria-label="Sign-in lifetime in hours" value={hours} disabled={!canManage}
+              onChange={(e) => setHours(e.target.value)} />
+          </Field>
+          <Field
+            label="Minutes without activity"
+            required
+            hint={`From ${s.idle_bounds.min} to ${s.idle_bounds.max} minutes. Default ${s.idle_bounds.default}.`}
+            error={fields.error("idle")}
+          >
+            <Input id={fields.id("idle")} inputMode="numeric" aria-label="Sign out after this many minutes without activity" value={idle}
+              disabled={!canManage} onChange={(e) => setIdle(e.target.value)} />
+          </Field>
+          <Field
+            label="Wrong attempts before a lock"
+            required
+            hint={`From ${s.signin_lock_failures_bounds.min} to ${s.signin_lock_failures_bounds.max}. Default ${s.signin_lock_failures_bounds.default}.`}
+            error={fields.error("lockN")}
+          >
+            <Input id={fields.id("lockN")} inputMode="numeric" aria-label="Wrong passwords or codes before the account is locked" value={lockN}
+              disabled={!canManage} onChange={(e) => setLockN(e.target.value)} />
+          </Field>
+          <Field
+            label="Lock time (minutes)"
+            required
+            hint={`From ${s.signin_lock_minutes_bounds.min} to ${s.signin_lock_minutes_bounds.max} minutes. Default ${s.signin_lock_minutes_bounds.default}. Wrong attempts are counted over the same time.`}
+            error={fields.error("lockMins")}
+          >
+            <Input id={fields.id("lockMins")} inputMode="numeric" aria-label="Minutes an account stays locked" value={lockMins}
+              disabled={!canManage} onChange={(e) => setLockMins(e.target.value)} />
+          </Field>
+          {canManage && (
+            <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
+              <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. shared workstation" />
             </Field>
-            <Field
-              label="Minutes without activity"
-              required
-              hint={`From ${s.idle_bounds.min} to ${s.idle_bounds.max} minutes. Default ${s.idle_bounds.default}.`}
-              error={fields.error("idle")}
-            >
-              <Input id={fields.id("idle")} inputMode="numeric" aria-label="Sign out after this many minutes without activity" value={idle}
-                disabled={!canManage} onChange={(e) => setIdle(e.target.value)} />
-            </Field>
-            <Field
-              label="Wrong attempts before a lock"
-              required
-              hint={`From ${s.signin_lock_failures_bounds.min} to ${s.signin_lock_failures_bounds.max}. Default ${s.signin_lock_failures_bounds.default}.`}
-              error={fields.error("lockN")}
-            >
-              <Input id={fields.id("lockN")} inputMode="numeric" aria-label="Wrong passwords or codes before the account is locked" value={lockN}
-                disabled={!canManage} onChange={(e) => setLockN(e.target.value)} />
-            </Field>
-            <Field
-              label="Lock time (minutes)"
-              required
-              hint={`From ${s.signin_lock_minutes_bounds.min} to ${s.signin_lock_minutes_bounds.max} minutes. Default ${s.signin_lock_minutes_bounds.default}. Wrong attempts are counted over the same time.`}
-              error={fields.error("lockMins")}
-            >
-              <Input id={fields.id("lockMins")} inputMode="numeric" aria-label="Minutes an account stays locked" value={lockMins}
-                disabled={!canManage} onChange={(e) => setLockMins(e.target.value)} />
-            </Field>
-            {canManage && (
-              <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
-                <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. shared workstation" />
-              </Field>
-            )}
-          </div>
-        )}
-        {s?.updated_at && (
-          <p className="text-caption text-muted-foreground">
-            Last changed {formatDateTime(s.updated_at)}{s.updated_by ? ` by ${s.updated_by}` : ""}.
-          </p>
-        )}
-      </CardBody>
-      {canManage && s && (
-        <CardFooter>
-          {(() => {
-            const unchanged = hours === String(s.operator_session_max_hours) && idle === String(s.operator_idle_minutes)
-              && lockN === String(s.signin_lock_failures) && lockMins === String(s.signin_lock_minutes);
-            return (
-              <>
-                {unchanged && !busy && <span id={fields.id("unchanged")} className="text-caption text-muted-foreground">No changes to save.</span>}
-                <Button size="sm" disabled={busy || unchanged} onClick={save}
-                  aria-describedby={unchanged && !busy ? fields.id("unchanged") : undefined}>
-                  {busy ? "Saving…" : "Save"}
-                </Button>
-              </>
-            );
-          })()}
-        </CardFooter>
+          )}
+        </FieldGrid>
       )}
-    </Card>
+      {s && !canManage && <LastChanged at={s.updated_at} by={s.updated_by} />}
+    </SectionCard>
+  );
+}
+
+/** "Last changed … by …", shown with a setting's save button. */
+export function LastChanged({ at, by }: { at?: string | null; by?: string | null }) {
+  if (!at) return null;
+  return (
+    <span className="me-auto text-xs text-muted-foreground">
+      Last changed {formatDateTime(at)}{by ? ` by ${by}` : ""}
+    </span>
   );
 }

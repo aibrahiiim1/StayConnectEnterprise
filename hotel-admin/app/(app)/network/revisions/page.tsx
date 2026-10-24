@@ -5,23 +5,24 @@ import {
   api, ListResp,
   NetRevision, NetRevisionDetail,
 } from "@/lib/api";
-import { Card } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageShell, PageHeader, Toolbar } from "@/components/ui/page";
-import { FilterChips, KeyValueGrid, Timeline } from "@/components/ui/data";
-import { Skeleton, SkeletonRows } from "@/components/ui/misc";
-import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
+import { PageShell, PageHeader } from "@/components/ui/page";
+import { DescriptionList, FilterChips, Timeline } from "@/components/ui/data";
+import { SkeletonRows } from "@/components/ui/misc";
+import { FilterBar } from "@/components/ui/toolbar";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { ChevronRight, History } from "lucide-react";
 import { errMsg, formatDate } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import {
-  HealthCheckList, REVISION_STATE, RevisionStateBadge, ValidationIssueList, useNetworkAccess,
+  HealthCheckList, RevisionStateBadge, ValidationIssueList, revisionStateLabel, useNetworkAccess,
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 
@@ -84,12 +85,11 @@ export default function RevisionsPage() {
   }
 
   const d = open ? detail[open.id] : undefined;
+  const hidden = filtered.length - visible.length;
 
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<History />}
-        eyebrow="Networking"
         title="Config history"
         description="Every network validate and apply, with what it checked and how it ended."
         help={
@@ -109,7 +109,7 @@ export default function RevisionsPage() {
             <HelpSection title="States that need attention">
               <HelpList
                 items={[
-                  <><strong>Awaiting confirmation</strong> — live now; keep it or it rolls back automatically.</>,
+                  <><strong>Pending confirmation</strong> — live now; keep it or it rolls back automatically.</>,
                   <><strong>Rolled back</strong> — the previous configuration was put back.</>,
                   <><strong>Failed</strong> — the apply did not complete; see the failure reason.</>,
                 ]}
@@ -135,166 +135,162 @@ export default function RevisionsPage() {
         />
       )}
 
-      {/* No delete: a revision is a rollback target and the current configuration's provenance, so clutter is
-          handled by filtering and folding. */}
-      {rows !== null && rows.length > 0 && (
-        <Toolbar className="items-center">
-          <FilterChips
-            label="Filter revisions"
-            value={filter}
-            onChange={(v) => { setFilter(v); setShowAll(false); }}
-            options={[
-              { value: "needs-attention", label: "Needs attention", count: needsCount, tone: needsCount ? "warn" : undefined },
-              { value: "all", label: "All", count: rows.length },
-            ]}
+      {/* No delete: a revision is a rollback target and the current configuration's provenance. */}
+      <Card className="overflow-hidden">
+        {rows !== null && rows.length > 0 && (
+          <FilterBar
+            inset
+            filters={
+              <FilterChips
+                label="Filter revisions"
+                value={filter}
+                onChange={(v) => { setFilter(v); setShowAll(false); }}
+                options={[
+                  { value: "needs-attention", label: "Needs attention", count: needsCount, tone: needsCount ? "warn" : undefined },
+                  { value: "all", label: "All", count: rows.length },
+                ]}
+              />
+            }
           />
-          <span className="text-caption text-muted-foreground">
-            {filter === "needs-attention"
-              ? "Awaiting confirmation, rolled back or failed."
-              : "Newest first. Select a row for its checks and events."}
-          </span>
-        </Toolbar>
-      )}
-
-      <Card>
+        )}
         {rows === null ? (
           <SkeletonRows rows={6} cols={5} />
         ) : rows.length === 0 ? (
-          <EmptyState icon={<History />} title="No revisions yet" hint="Every validate and apply of the network configuration is recorded here." />
+          <EmptyState size="sm" icon={<History />} title="No revisions yet" hint="Every validate and apply of the network configuration is recorded here." />
         ) : filtered.length === 0 ? (
           <EmptyState
+            size="sm"
             title="Nothing needs attention"
-            hint="No revision is awaiting confirmation, rolled back or failed."
+            hint="No revision is pending confirmation, rolled back or failed."
             action={<Button variant="secondary" size="sm" onClick={() => setFilter("all")}>Show all</Button>}
           />
         ) : (
           <>
-            <Table>
+            <Table label="Configuration revisions">
               <THead>
                 <TR>
-                  <TH>#</TH>
+                  <TH numeric className="w-0">#</TH>
                   <TH>State</TH>
                   <TH className="hidden sm:table-cell">Summary</TH>
                   <TH className="hidden md:table-cell">Applied</TH>
-                  <TH className="hidden lg:table-cell">Confirmed</TH>
+                  <TH className="hidden 2xl:table-cell">Confirmed</TH>
                   <TH className="hidden lg:table-cell">Failure</TH>
-                  <TH><span className="sr-only">Actions</span></TH>
+                  <TH pinEnd><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <TBody>
                 {visible.map((r) => (
-                  <TR key={r.id} className="cursor-pointer" onClick={() => openDetail(r)}>
-                    <TD className="font-mono tabular">#{r.seq}</TD>
-                    <TD><RevisionStateBadge state={r.state} /></TD>
-                    <TD className="hidden max-w-sm sm:table-cell">{r.summary || "—"}</TD>
-                    <TD className="hidden whitespace-nowrap text-muted-foreground md:table-cell">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
-                    <TD className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
-                    <TD className="hidden max-w-xs truncate text-caption text-destructive lg:table-cell" title={r.failure_reason ?? ""}>
+                  <TR key={r.id} onClick={() => openDetail(r)} selected={open?.id === r.id}>
+                    <TD numeric className="font-mono">#{r.seq}</TD>
+                    <TD nowrap><RevisionStateBadge state={r.state} /></TD>
+                    <TD truncate className="hidden max-w-[14rem] sm:table-cell" title={r.summary || undefined}>{r.summary || "—"}</TD>
+                    <TD nowrap muted className="hidden md:table-cell">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
+                    <TD nowrap muted className="hidden 2xl:table-cell">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
+                    <TD truncate className="hidden max-w-[12rem] text-caption text-destructive lg:table-cell" title={r.failure_reason ?? ""}>
                       {r.failure_reason || <span className="text-muted-foreground">—</span>}
                     </TD>
-                    <TD className="whitespace-nowrap text-end" onClick={(e) => e.stopPropagation()}>
-                      <Button size="sm" variant="ghost" onClick={() => openDetail(r)} aria-label={`Details for revision ${r.seq}`}>
-                        <span className="hidden sm:inline">Details</span> <ChevronRight className="rtl:rotate-180" />
+                    <TD pinEnd className="w-0" onClick={(e) => e.stopPropagation()}>
+                      <Button size="icon-xs" variant="ghost" onClick={() => openDetail(r)} aria-label={`Details for revision ${r.seq}`}>
+                        <ChevronRight className="rtl:rotate-180" />
                       </Button>
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
-            {filtered.length > visible.length && (
-              <div className="border-t border-border p-3">
+            {hidden > 0 && (
+              <CardFooter>
                 <Button size="sm" variant="secondary" onClick={() => setShowAll(true)}>
-                  Show {filtered.length - visible.length} older revision{filtered.length - visible.length === 1 ? "" : "s"}
+                  Show {hidden} older revision{hidden === 1 ? "" : "s"}
                 </Button>
-              </div>
+              </CardFooter>
             )}
           </>
         )}
       </Card>
 
-      <Sheet open={open !== null} onOpenChange={(v) => !v && setOpen(null)}>
-        <SheetContent width="lg">
-          {open && (
-            <>
-              <SheetHeader
-                eyebrow="Config history"
-                title={`Revision #${open.seq}`}
-                description={open.summary || undefined}
-                badges={<RevisionStateBadge state={open.state} />}
-                icon={<History />}
-              />
-              <SheetBody>
-                <ErrorBanner err={detailErr} className="mb-0" />
-                <KeyValueGrid
-                  items={[
-                    { label: "State", value: REVISION_STATE[open.state]?.label ?? open.state },
-                    { label: "Created", value: open.created_at ? formatDate(open.created_at) : "—" },
-                    { label: "Applied", value: open.applied_at ? formatDate(open.applied_at) : "—" },
-                    { label: "Confirmed", value: open.confirmed_at ? formatDate(open.confirmed_at) : "—" },
-                    ...(open.confirm_deadline && open.state === "pending_confirmation"
-                      ? [{ label: "Rolls back at", value: formatDate(open.confirm_deadline) }] : []),
-                    ...(open.failure_reason ? [{ label: "Failure", value: <span className="text-destructive">{open.failure_reason}</span>, wide: true }] : []),
-                  ]}
-                />
-                {!d && !detailErr ? (
-                  <div className="space-y-3" aria-busy="true">
-                    <span className="sr-only">Loading</span>
-                    <Skeleton className="h-16 w-full" />
-                    <Skeleton className="h-24 w-full" />
-                  </div>
-                ) : d ? (
-                  <>
-                    <SheetSection title="Validation">
-                      {d.validation ? (
-                        <div className="space-y-2">
-                          <Badge tone={d.validation.ok ? "ok" : "err"}>{d.validation.ok ? "Passed" : "Issues found"}</Badge>
-                          {d.validation.issues && <ValidationIssueList issues={d.validation.issues} />}
-                        </div>
-                      ) : <p className="text-sm text-muted-foreground">Not recorded.</p>}
-                    </SheetSection>
-                    <SheetSection title="Apply events">
-                      <Timeline
-                        emptyLabel="No apply events recorded."
-                        items={(d.events ?? []).map((e, k) => ({
-                          key: String(k),
-                          tone: e.ok ? "ok" : "err",
-                          title: (
-                            <span className="inline-flex items-center gap-2">
-                              <span className="font-mono text-xs">{e.phase}</span>
-                              <Badge tone={e.ok ? "ok" : "err"}>{e.ok ? "OK" : "Failed"}</Badge>
-                            </span>
-                          ),
-                          when: e.at ? formatDate(e.at) : undefined,
-                          body: e.detail != null
-                            ? <span className="break-words font-mono text-caption">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>
-                            : undefined,
-                        }))}
-                      />
-                    </SheetSection>
-                    <SheetSection title="Health checks">
-                      {d.health && d.health.length > 0 ? (
-                        <HealthCheckList
-                          checks={d.health.map((h) => ({ name: h.check_name, ok: h.ok, detail: h.detail, at: h.at ? formatDate(h.at) : undefined }))}
-                        />
-                      ) : <p className="text-sm text-muted-foreground">No health checks recorded.</p>}
-                    </SheetSection>
-                  </>
-                ) : null}
-              </SheetBody>
-              {writable && open.state === "pending_confirmation" && (
-                <SheetFooter>
-                  <Button variant="secondary" disabled={busy !== null} onClick={() => { void onRollback(open.id); setOpen(null); }}>
-                    Roll back now
-                  </Button>
-                  <Button disabled={busy !== null} onClick={() => { void onConfirm(open.id); setOpen(null); }}>
-                    Keep this change
-                  </Button>
-                </SheetFooter>
-              )}
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+      <DetailsDrawer
+        open={open !== null}
+        onOpenChange={(v) => !v && setOpen(null)}
+        width="lg"
+        eyebrow="Configuration revision"
+        title={open ? `Revision #${open.seq}` : ""}
+        description={open?.summary || undefined}
+        badges={open ? <RevisionStateBadge state={open.state} /> : undefined}
+        error={detailErr}
+        loading={!!open && !d && !detailErr}
+        actions={writable && open?.state === "pending_confirmation" ? (
+          <>
+            <Button variant="secondary" disabled={busy !== null} onClick={() => { void onRollback(open.id); setOpen(null); }}>
+              Roll back now
+            </Button>
+            <Button disabled={busy !== null} onClick={() => { void onConfirm(open.id); setOpen(null); }}>
+              Keep this change
+            </Button>
+          </>
+        ) : undefined}
+      >
+        {open && (
+          <div className="space-y-6">
+            <DescriptionList
+              items={[
+                { label: "State", value: revisionStateLabel(open.state) },
+                { label: "Created", value: open.created_at ? formatDate(open.created_at) : "—" },
+                { label: "Applied", value: open.applied_at ? formatDate(open.applied_at) : "—" },
+                { label: "Confirmed", value: open.confirmed_at ? formatDate(open.confirmed_at) : "—" },
+                {
+                  label: "Rolls back at",
+                  value: open.confirm_deadline ? formatDate(open.confirm_deadline) : "—",
+                  hidden: !(open.confirm_deadline && open.state === "pending_confirmation"),
+                },
+                {
+                  label: "Failure",
+                  value: <span className="text-destructive">{open.failure_reason}</span>,
+                  hidden: !open.failure_reason,
+                },
+              ]}
+            />
+            {d && (
+              <>
+                <DetailsSection title="Validation">
+                  {d.validation ? (
+                    <div className="space-y-2">
+                      <StatusBadge tone={d.validation.ok ? "ok" : "err"}>{d.validation.ok ? "Passed" : "Issues found"}</StatusBadge>
+                      {d.validation.issues && <ValidationIssueList issues={d.validation.issues} />}
+                    </div>
+                  ) : <p className="text-sm text-muted-foreground">Not recorded.</p>}
+                </DetailsSection>
+                <DetailsSection title="Apply events">
+                  <Timeline
+                    emptyLabel="No apply events recorded."
+                    items={(d.events ?? []).map((e, k) => ({
+                      key: String(k),
+                      tone: e.ok ? "ok" : "err",
+                      title: (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="font-mono text-xs">{e.phase}</span>
+                          <StatusBadge tone={e.ok ? "ok" : "err"}>{e.ok ? "OK" : "Failed"}</StatusBadge>
+                        </span>
+                      ),
+                      when: e.at ? formatDate(e.at) : undefined,
+                      body: e.detail != null
+                        ? <span className="break-words font-mono text-caption">{typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)}</span>
+                        : undefined,
+                    }))}
+                  />
+                </DetailsSection>
+                <DetailsSection title="Health checks">
+                  {d.health && d.health.length > 0 ? (
+                    <HealthCheckList
+                      checks={d.health.map((h) => ({ name: h.check_name, ok: h.ok, detail: h.detail, at: h.at ? formatDate(h.at) : undefined }))}
+                    />
+                  ) : <p className="text-sm text-muted-foreground">No health checks recorded.</p>}
+                </DetailsSection>
+              </>
+            )}
+          </div>
+        )}
+      </DetailsDrawer>
       {stepUp.dialog}
     </PageShell>
   );

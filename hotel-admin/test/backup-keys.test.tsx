@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const get = vi.fn();
@@ -91,14 +91,15 @@ describe("Backup encryption", () => {
     post.mockResolvedValue({ ok: true, tables: 90, duration: "3s" });
     await renderPage();
     expect(await screen.findByText("Encrypted")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: `Re-verify ${ENC}` }));
+    await userEvent.click(screen.getByRole("button", { name: `Re-verify: ${ENC}` }));
     let dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText("Backup key"), "AGE-SECRET-KEY-1XYZ");
     await userEvent.click(within(dialog).getByRole("button", { name: "Verify" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith(`/backups/artifacts/${encodeURIComponent(ENC)}/verify`, { identity: "AGE-SECRET-KEY-1XYZ" }));
 
     post.mockReset(); post.mockResolvedValue({});
-    await userEvent.click(screen.getByRole("button", { name: `Restore ${ENC}` }));
+    fireEvent.keyDown(screen.getByRole("button", { name: `Actions for ${ENC}` }), { key: "Enter" });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Restore…" }));
     dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
     await userEvent.type(within(dialog).getByLabelText(/to confirm/), ENC);

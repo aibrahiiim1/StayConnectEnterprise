@@ -132,7 +132,8 @@ describe("form controls are programmatically labelled", () => {
     const src = read(join(ROOT, "components/ui/input.tsx"));
     // The id is generated and injected into the child, so a caller that forgets htmlFor still gets a bound pair.
     expect(src).toMatch(/React\.cloneElement/);
-    expect(src).toMatch(/htmlFor \?\? \(childProps\.id as string \| undefined\) \?\? `\$\{generated\}-control`/);
+    // An InputGroup's inner input id is honoured too, so a grouped control keeps its label.
+    expect(src).toMatch(/htmlFor \?\? \(childProps\.id as string \| undefined\) \?\? groupedId \?\? `\$\{generated\}-control`/);
     expect(src).toMatch(/<Label htmlFor=\{controlId\}>/);
   });
 

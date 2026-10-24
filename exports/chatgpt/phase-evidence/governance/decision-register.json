@@ -1020,6 +1020,20 @@
       "does_not_authorize": "Go-Live; any effect on real production users, external financial systems, live PMS posting, Root CA or trust roots, or networking/topology outside PRE-LIVE; weakening master protection, tests, CI, security or validation; Central deployment as part of a routine FAST change under the standing per-change PRE-LIVE authorization; touching a real person's account in place of a test account.",
       "implementation": "Branch delivery/prelive-central-and-policy, recorded by T0243. CLAUDE.md section 0G; docs/PO_LED_DELIVERY_MODEL.md section 9 and the PRE-LIVE and controlled-boundary paragraphs; deploy/scripts/central-build.sh (ctrlapi archived as executable when the release is built on Windows).",
       "supersedes_in_part": "D42 (the PRE-LIVE paragraph's 'No Central unless explicitly authorized' now reads together with section 9 for Product-Owner-requested PRE-LIVE missions)"
+    },
+    {
+      "id": "D68",
+      "decided_on": "2026-10-24",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-24",
+      "status": "ACTIVE",
+      "title": "TWO-STEP SIGN-IN IS OPTIONAL PER ACCOUNT, AND THE ADMIN CONSOLES SHARE ONE MODERN DESIGN SYSTEM (2026-10-24). In the appliance Admin Console and the Central console, an account without a confirmed authenticator signs in with its password alone; an account that turned two-step sign-in on must still complete the code step (authenticator or recovery code) with the existing throttling, lockout, replay protection, pending-sign-in expiry and account re-check. A started but unconfirmed set-up does not count as on. Each operator turns it on (password, QR or key, first code, ten recovery codes shown once) and off (password plus a code) on their account page; turning it on or off ends the operator's other sessions and the caller continues on a fresh session. An administrator can still reset a colleague's authenticator. A subtle, dismissible sidebar suggestion recommends it to accounts without it. Both consoles use one shared design system (components, tokens, page anatomy; docs/ui/DESIGN_SYSTEM.md): compact page headers with details in page help, version and history details in drawers, row actions in menus, search fields that never autofocus or autofill, and tables that keep their actions reachable.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-24 'OneGate - Complete Admin Consoles Redesign & UX Refactor' (optional per-account MFA in both consoles without an authentication bypass for accounts that enabled it; Usage explorer focus and autofill fix; version and history details in dialogs or drawers; simplified page content; complete UI modernization; refactoring), authorised under D67 for implementation, PRE-LIVE deployment and the protected merge.",
+      "does_not_authorize": "Go-Live; any change to guest (client) authentication, Entitlement, PMS behaviour, financial safeguards, networking or local-first operation; weakening throttling, lockout, replay protection, recovery or auditing for accounts that turned two-step sign-in on.",
+      "implementation": "Branch delivery/admin-consoles-redesign, PR #228, recorded by T0244. edged operator_signin.go, operator_mfa.go, main.go; scd operator_mfa.go; ctrlapi internal/http/auth_mfa_handlers.go, router.go, internal/auth/mfa.go, internal/opsignin; hotel-admin and cloud-admin components/ui (parity-tested), every page; docs/ui/DESIGN_SYSTEM.md. No schema change.",
+      "supersedes_in_part": "D64 (D-C10: an authenticator as the second step for EVERY Admin Console account, set up at the next sign-in)"
     }
   ]
 }

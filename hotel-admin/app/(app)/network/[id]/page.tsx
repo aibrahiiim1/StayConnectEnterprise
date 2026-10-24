@@ -7,25 +7,24 @@ import {
   api, ListResp, Pool,
   GuestNetwork, GuestNetworkStatus, Reservation, GuestNetworkInput,
 } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { SectionCard } from "@/components/ui/card";
+import { Button, LinkButton } from "@/components/ui/button";
+import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
 import { MonoId, Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { ArrowLeft, Network, Pencil, Plus, Save, Trash2, X, Pin, Shuffle } from "lucide-react";
-import { cn, errMsg } from "@/lib/utils";
+import { ArrowLeft, Plus, Save, X, Pin, Shuffle } from "lucide-react";
 import { HelpList, HelpSection } from "@/components/help";
+import { errMsg } from "@/lib/utils";
 import { ReplaceTopologyDialog, type ReplaceResult } from "@/components/network/replace-topology-dialog";
 import {
-  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, SwitchRow,
-  DhcpModeBadge, networkTypeLabel, useNetworkAccess,
+  AddReservationDialog, EditReservationDialog, RemoveReservationDialog, ReservationTable, SwitchRow,
+  DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
 } from "@/components/network/shared";
 
 const FORM_ID = "guest-network-settings";
@@ -135,28 +134,26 @@ export default function EditGuestNetworkPage() {
 
   const ro = !writable;
   const enabled = status?.enabled ?? net?.enabled;
-
-  const backLink = (
-    <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
-      <ArrowLeft /> Client networks
-    </Link>
+  const saveButton = (
+    <Button type="submit" form={FORM_ID} disabled={busy}>
+      <Save /> {busy ? "Saving…" : "Save changes"}
+    </Button>
   );
 
   return (
     <PageShell>
-      {backLink}
+      <LinkButton href="/network" variant="ghost" size="sm" className="-ms-2.5 self-start">
+        <ArrowLeft className="rtl:rotate-180" /> Client networks
+      </LinkButton>
       <PageHeader
-        icon={<Network />}
-        eyebrow="Networking · Client networks"
         title={net?.name || "Client network"}
-        description={
-          net ? (
-            <span className="inline-flex flex-wrap items-center gap-1.5">
-              <Badge tone={net.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(net)}</Badge>
-              {enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}
-            </span>
-          ) : "Loading the network…"
-        }
+        meta={net && (
+          <>
+            <Badge tone={net.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(net)}</Badge>
+            <EnabledBadge enabled={enabled} />
+          </>
+        )}
+        description={net ? undefined : "Loading the network…"}
         helpTitle="Client network"
         help={
           <>
@@ -173,6 +170,14 @@ export default function EditGuestNetworkPage() {
                 settings and PMS route, and disables this one. Nothing changes until you apply and confirm.
               </p>
             </HelpSection>
+            <HelpSection title="Client access switches">
+              <HelpList
+                items={[
+                  <><strong>Captive portal</strong> — with it off, nobody on this network can sign in, so it has no internet access (only allowed sites).</>,
+                  <><strong>Client isolation</strong> — the appliance drops traffic between client devices that passes through it. Devices on the same access point or switch port also need the access point&rsquo;s own client isolation.</>,
+                ]}
+              />
+            </HelpSection>
             <HelpSection title="DHCP reservations">
               <HelpList
                 items={[
@@ -183,11 +188,7 @@ export default function EditGuestNetworkPage() {
             </HelpSection>
           </>
         }
-        actions={writable && net && (
-          <Button type="submit" form={FORM_ID} disabled={busy}>
-            <Save /> {busy ? "Saving…" : "Save changes"}
-          </Button>
-        )}
+        actions={writable && net && saveButton}
       />
 
       {known && !writable && <ReadOnlyNotice>Your role can view this client network but not change it.</ReadOnlyNotice>}
@@ -233,34 +234,31 @@ export default function EditGuestNetworkPage() {
               </p>
             </Callout>
           )}
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>Status &amp; topology</CardTitle>
-                <CardDescription>Not editable in place — change it with a replacement.</CardDescription>
-              </div>
-              {writable && enabled && !replaced && (
-                <Button variant="secondary" onClick={() => setReplacing(true)}>
-                  <Shuffle /> Change VLAN or port
-                </Button>
-              )}
-            </CardHeader>
-            <CardBody>
-              <KeyValueGrid
-                columns={3}
-                items={[
-                  { label: "Type", value: networkTypeLabel(net) },
-                  { label: "Parent interface", value: <span className="font-mono">{net.parent_interface}</span> },
-                  { label: "Bridge", value: <span className="font-mono">{net.bridge_name}</span> },
-                  { label: "Sign-in page URL", value: net.portal_url ? <span className="font-mono break-all">{net.portal_url}</span> : "—" },
-                  { label: "Status", value: enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge> },
-                  { label: "Devices connected", value: <span className="tabular">{String(status?.active_clients ?? "—")}</span> },
-                  { label: "DHCP", value: <DhcpModeBadge mode={net.dhcp_mode} /> },
-                  { label: "Network ID", value: <MonoId value={net.id} title="Network ID" /> },
-                ]}
-              />
-            </CardBody>
-          </Card>
+
+          <SectionCard
+            title="Status & topology"
+            description="Not editable in place — change it with a replacement."
+            actions={writable && enabled && !replaced && (
+              <Button variant="secondary" size="sm" onClick={() => setReplacing(true)}>
+                <Shuffle /> Change VLAN or port
+              </Button>
+            )}
+          >
+            <DescriptionList
+              layout="stacked"
+              columns={3}
+              items={[
+                { label: "Type", value: networkTypeLabel(net) },
+                { label: "Parent interface", value: <span className="font-mono">{net.parent_interface}</span> },
+                { label: "Bridge", value: <span className="font-mono">{net.bridge_name}</span> },
+                { label: "Sign-in page URL", value: net.portal_url ? <span className="break-all font-mono">{net.portal_url}</span> : "—" },
+                { label: "Status", value: <EnabledBadge enabled={enabled} /> },
+                { label: "Devices connected", value: <span className="tabular">{String(status?.active_clients ?? "—")}</span> },
+                { label: "DHCP", value: <DhcpModeBadge mode={net.dhcp_mode} /> },
+                { label: "Network ID", value: <MonoId value={net.id} title="Network ID" /> },
+              ]}
+            />
+          </SectionCard>
 
           {replacing && (
             <ReplaceTopologyDialog
@@ -277,150 +275,108 @@ export default function EditGuestNetworkPage() {
             onSubmit={(e) => { e.preventDefault(); if (writable) void onSave(); }}
             className="grid gap-5 lg:grid-cols-2"
           >
-            <Card>
-              <CardHeader><CardTitle>Identity</CardTitle></CardHeader>
-              <CardBody className="space-y-4">
-                <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} disabled={ro} /></Field>
-                <Field label="SSID label" hint="For reference: the SSID your wireless controller maps to this network.">
-                  <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} disabled={ro} />
+            <SectionCard title="Identity" bodyClassName="space-y-4">
+              <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} disabled={ro} /></Field>
+              <Field label="SSID label" optional hint="The SSID your wireless controller maps to this network.">
+                <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} disabled={ro} />
+              </Field>
+              <Field label="Description" optional><Input value={description} onChange={(e) => setDescription(e.target.value)} disabled={ro} /></Field>
+            </SectionCard>
+
+            <SectionCard title="Addressing" bodyClassName="space-y-4">
+              <FieldGrid cols={2}>
+                <Field label="Subnet (CIDR)" required>
+                  <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} disabled={ro} className="font-mono" />
                 </Field>
-                <Field label="Description"><Input value={description} onChange={(e) => setDescription(e.target.value)} disabled={ro} /></Field>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>Addressing</CardTitle></CardHeader>
-              <CardBody className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Subnet (CIDR)" required>
-                    <Input value={subnetCidr} onChange={(e) => setSubnetCidr(e.target.value)} disabled={ro} className="font-mono" />
-                  </Field>
-                  <Field label="Gateway IP" required>
-                    <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} disabled={ro} className="font-mono" />
-                  </Field>
-                </div>
-                <fieldset className="space-y-2">
-                  <legend className="mb-1.5 text-label">Address pools</legend>
-                  {pools.map((p, i) => (
-                    <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-                      <Input
-                        aria-label={`Pool ${i + 1} start`} placeholder="start" value={p.start_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))}
-                      />
-                      <span className="text-muted-foreground" aria-hidden>–</span>
-                      <Input
-                        aria-label={`Pool ${i + 1} end`} placeholder="end" value={p.end_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
-                        onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))}
-                      />
-                      {writable && (
-                        <Button
-                          size="icon" variant="ghost" disabled={pools.length === 1} aria-label={`Remove pool ${i + 1}`}
-                          onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}
-                        >
-                          <X />
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  {writable && (
-                    <Button size="sm" variant="secondary" onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
-                      <Plus /> Add pool
-                    </Button>
-                  )}
-                </fieldset>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle>DNS &amp; leases</CardTitle></CardHeader>
-              <CardBody className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="DNS for clients">
-                    <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value)} disabled={ro}>
-                      <option value="appliance">The appliance</option>
-                      <option value="custom">Custom servers</option>
-                    </Select>
-                  </Field>
-                  <Field label="Domain name">
-                    <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} disabled={ro} />
-                  </Field>
-                </div>
-                {dnsMode === "custom" && (
-                  <Field label="DNS servers" hint="Separate several with commas.">
-                    <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} disabled={ro} className="font-mono" />
-                  </Field>
+                <Field label="Gateway IP" required>
+                  <Input value={gatewayIp} onChange={(e) => setGatewayIp(e.target.value)} disabled={ro} className="font-mono" />
+                </Field>
+              </FieldGrid>
+              <fieldset className="space-y-2">
+                <legend className="mb-1.5 text-label">Address pools</legend>
+                {pools.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      aria-label={`Pool ${i + 1} start`} placeholder="start" value={p.start_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
+                      onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))}
+                    />
+                    <span className="text-muted-foreground" aria-hidden>–</span>
+                    <Input
+                      aria-label={`Pool ${i + 1} end`} placeholder="end" value={p.end_ip} disabled={ro} className="min-w-0 flex-1 font-mono"
+                      onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, end_ip: e.target.value } : x))}
+                    />
+                    {writable && (
+                      <Button
+                        size="icon" variant="ghost" disabled={pools.length === 1} aria-label={`Remove pool ${i + 1}`}
+                        onClick={() => setPools((ps) => ps.filter((_, k) => k !== i))}
+                      >
+                        <X />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                {writable && (
+                  <Button size="sm" variant="secondary" onClick={() => setPools((ps) => [...ps, { start_ip: "", end_ip: "" }])}>
+                    <Plus /> Add pool
+                  </Button>
                 )}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Field label="Lease time (s)"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} disabled={ro} /></Field>
-                  <Field label="Shortest (s)"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} disabled={ro} /></Field>
-                  <Field label="Longest (s)"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} disabled={ro} /></Field>
-                </div>
-              </CardBody>
-            </Card>
+              </fieldset>
+            </SectionCard>
 
-            <Card>
-              <CardHeader><CardTitle>Client access</CardTitle></CardHeader>
-              <CardBody className="space-y-4">
-                <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. With it off, nobody on this network can sign in, so it has no internet access (only allowed sites)." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
-                <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
-                <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
-                <SwitchRow label="Client isolation" hint="The appliance drops traffic between client devices that passes through it. Devices on the same access point or switch port also need the access point's own client isolation switched on." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
-              </CardBody>
-              {writable && (
-                <CardFooter className="justify-end">
-                  <Button type="submit" disabled={busy}><Save /> {busy ? "Saving…" : "Save changes"}</Button>
-                </CardFooter>
+            <SectionCard title="DNS & leases" bodyClassName="space-y-4">
+              <FieldGrid cols={2}>
+                <Field label="DNS for clients">
+                  <Select value={dnsMode} onChange={(e) => setDnsMode(e.target.value)} disabled={ro}>
+                    <option value="appliance">The appliance</option>
+                    <option value="custom">Custom servers</option>
+                  </Select>
+                </Field>
+                <Field label="Domain name">
+                  <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} disabled={ro} />
+                </Field>
+              </FieldGrid>
+              {dnsMode === "custom" && (
+                <Field label="DNS servers" hint="Separate several with commas.">
+                  <Input value={dnsServers} onChange={(e) => setDnsServers(e.target.value)} disabled={ro} className="font-mono" />
+                </Field>
               )}
-            </Card>
+              <FieldGrid cols={3}>
+                <Field label="Lease time">
+                  <InputGroup suffix="s"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} disabled={ro} /></InputGroup>
+                </Field>
+                <Field label="Shortest">
+                  <InputGroup suffix="s"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} disabled={ro} /></InputGroup>
+                </Field>
+                <Field label="Longest">
+                  <InputGroup suffix="s"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} disabled={ro} /></InputGroup>
+                </Field>
+              </FieldGrid>
+            </SectionCard>
+
+            <SectionCard title="Client access" bodyClassName="space-y-4" footer={writable ? saveButton : undefined}>
+              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. Off means no internet on this network." checked={captivePortal} onChange={setCaptivePortal} disabled={ro} />
+              <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} disabled={ro} />
+              <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} disabled={ro} />
+              <SwitchRow label="Client isolation" hint="Drops device-to-device traffic that passes through the appliance." checked={clientIsolation} onChange={setClientIsolation} disabled={ro} />
+            </SectionCard>
           </form>
 
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>DHCP reservations</CardTitle>
-                <CardDescription>Devices that always get the same address on this network.</CardDescription>
-              </div>
-              {writable && (
-                <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button>
-              )}
-            </CardHeader>
+          <SectionCard
+            flush
+            title="DHCP reservations"
+            description="Devices that always get the same address on this network."
+            actions={writable && (
+              <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button>
+            )}
+          >
             {reservations === null ? (
               <SkeletonRows rows={2} cols={4} />
             ) : reservations.length === 0 ? (
-              <EmptyState
-                icon={<Pin />}
-                title="No reservations"
-                hint="Pin a device to a fixed address inside this network."
-                action={writable ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> Add reservation</Button> : undefined}
-              />
+              <EmptyState size="sm" icon={<Pin />} title="No reservations" hint="Pin a device to a fixed address inside this network." />
             ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>MAC address</TH><TH>Reserved IP</TH>
-                    <TH className="hidden sm:table-cell">Hostname</TH><TH>Status</TH>
-                    {writable && <TH><span className="sr-only">Actions</span></TH>}
-                  </TR>
-                </THead>
-                <TBody>
-                  {reservations.map((r) => (
-                    <TR key={r.id}>
-                      <TD className="font-mono text-xs">{r.mac}</TD>
-                      <TD className="font-mono text-xs">{r.reserved_ip}</TD>
-                      <TD className="hidden text-muted-foreground sm:table-cell">{r.hostname || "—"}</TD>
-                      <TD>{r.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
-                      {writable && (
-                        <TD className="whitespace-nowrap text-end">
-                          <Button size="icon-sm" variant="ghost" aria-label={`Edit reservation ${r.reserved_ip}`} onClick={() => setEditRes(r)}><Pencil /></Button>
-                          <Button size="icon-sm" variant="ghost" aria-label={`Remove reservation ${r.reserved_ip}`} onClick={() => setRemoving(r)}><Trash2 /></Button>
-                        </TD>
-                      )}
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
+              <ReservationTable reservations={reservations} writable={writable} onEdit={setEditRes} onRemove={setRemoving} />
             )}
-          </Card>
+          </SectionCard>
         </>
       )}
 

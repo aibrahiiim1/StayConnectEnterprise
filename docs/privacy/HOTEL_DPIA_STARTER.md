@@ -89,7 +89,7 @@ the password again before exporting or deleting a guest's data.
 *Could happen if:* an attacker on your network, or a guest, tries to get into the system.
 
 **OneGate already:** keeps guests off the management network and away from each other; serves Hotel Admin only on
-the management network; requires a password **and** an authenticator code from every staff member; locks an
+the management network; requires a password from every staff member **and** an authenticator code from each one who turns on two-step sign-in (recommended); locks an
 account after repeated wrong passwords; runs each service with only the rights it needs.
 
 **Yours:**

@@ -1,5 +1,6 @@
-// Package opsignin signs a test operator in through both steps for test tools only, never production.
-// Central shows the TOTP secret once, so the tool keeps the secrets of operators it set up in its own keyring (0600).
+// Package opsignin signs a test operator in for test tools only, never production: the password alone for an
+// account without two-step sign-in, otherwise also the code. Central shows the TOTP secret once, so the tool keeps
+// the secrets of operators it turned it on for in its own keyring (0600; Enable).
 package opsignin
 
 import (
@@ -87,19 +88,9 @@ func (k *Keyring) SignIn(cl *http.Client, base, email, password string) error {
 	}
 	e := k.m[key(email)]
 	switch first.SecondStep {
-	case "enrol":
-		var en struct {
-			Secret string `json:"secret"`
-		}
-		if err := call(cl, base+"/v1/auth/login/enrol", map[string]string{}, &en); err != nil {
-			return fmt.Errorf("authenticator set-up for %s: %w", email, err)
-		}
-		e = &entry{Secret: en.Secret}
-		k.m[key(email)] = e
-		// Save before confirming: Central never shows this secret again.
-		if err := k.save(); err != nil {
-			return fmt.Errorf("keyring %s: %w", k.path, err)
-		}
+	case "none":
+		// Two-step sign-in is optional (D68): an account that never turned it on is signed in by the password.
+		return nil
 	case "code":
 		if e == nil {
 			return fmt.Errorf("%s already has an authenticator that keyring %s does not know; on Central run "+
@@ -121,6 +112,37 @@ func (k *Keyring) SignIn(cl *http.Client, base, email, password string) error {
 		return fmt.Errorf("keyring %s: %w", k.path, err)
 	}
 	return nil
+}
+
+// Enable turns two-step sign-in on for the operator signed in on cl, keeping the secret in the keyring.
+func (k *Keyring) Enable(cl *http.Client, base, email, password string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if err := call(cl, base+"/v1/auth/reauth", map[string]string{"password": password}, nil); err != nil {
+		return fmt.Errorf("password step-up for %s: %w", email, err)
+	}
+	var en struct {
+		Secret string `json:"secret"`
+	}
+	if err := call(cl, base+"/v1/auth/mfa/setup", map[string]string{}, &en); err != nil {
+		return fmt.Errorf("authenticator set-up for %s: %w", email, err)
+	}
+	e := &entry{Secret: en.Secret}
+	k.m[key(email)] = e
+	// Save before confirming: Central never shows this secret again.
+	if err := k.save(); err != nil {
+		return fmt.Errorf("keyring %s: %w", k.path, err)
+	}
+	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(e.Secret))
+	if err != nil {
+		return fmt.Errorf("keyring secret for %s: %w", email, err)
+	}
+	step := totp.Step(time.Now())
+	if err := call(cl, base+"/v1/auth/mfa/confirm", map[string]string{"code": totp.Code(secret, step)}, nil); err != nil {
+		return fmt.Errorf("confirming the authenticator for %s: %w", email, err)
+	}
+	e.LastStep = step
+	return k.save()
 }
 
 // nextStep is the step whose code to send: Central refuses a step at or before the last accepted (replay), so

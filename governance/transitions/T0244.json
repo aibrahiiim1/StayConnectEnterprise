@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0244",
+  "seq": 244,
+  "timestamp": "2026-10-24T14:30:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after both PRE-LIVE hosts were deployed, read back and verified in a browser, and before the commit that introduces this receipt.",
+  "record_type": "ADMIN_CONSOLES_REDESIGN_AND_OPTIONAL_TWO_STEP_SIGN_IN",
+  "authorisation": "D68 (2026-10-24) under the Product Owner's mission 'OneGate - Complete Admin Consoles Redesign & UX Refactor', authorised by D67 for implementation, PRE-LIVE deployment and the protected merge. It does NOT authorise Go-Live.",
+  "deployment_provenance": {
+    "appliance": "PRE-LIVE 172.21.60.25: edged and scd built from a clean clone of 1a610e8a with scripts/build-appliance-binaries.sh (edged sha256 e94e722ac3d6, scd 1dda2ddd469b; tags=stayconnect_production, vcs.modified=false); netd, pmsd, portald, acctd unchanged at 9394eb5f; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261024-115541 (source_commit 30f3ef52c45e, BUILD_ID R_Aba5rCWQ21VWbZ6QbTz). Schema 0149 unchanged.",
+    "central": "Central 172.21.96.196: release onegate-central-30f3ef52c45e deployed with central-deploy.sh (pre-deploy dump, migrations 56/0/0 unchanged, ctrlapi sha256 3dd7e5152115 vcs.revision 30f3ef52, console BUILD_ID slGxcV2ELTPuxNvpsk7df, smoke 9/9)."
+  },
+  "verification": "Go: edged sign-in/MFA integration 18/18 and unit tests; control-plane full suite including the two-step and opsignin integration tests. Consoles: tsc clean; vitest hotel-admin 986/986, cloud-admin 243/243; next build both; hotel-admin Playwright 174/174. Live in a real browser on both hosts with the test operator: sign-in with the code; turning two-step off through the account page ends another session while the caller continues; password-only sign-in; turning it on again via the key and first code shows ten recovery codes once; the code is required again; the sidebar suggestion shows only while off; every page renders with no page errors (44 Admin Console, 11 Central); the Usage explorer opens with no focused field and its search has autocomplete off outside any form; no table is wider than its card at 1280 or 1440.",
+  "test_accounts": "Only the PRE-LIVE test operator acceptance-audit@onegate.invalid was used; its authenticator was turned off and on again through the UI on both hosts and is ON at the end. No real person's account was changed.",
+  "rollback": "Appliance: edged.bak-pre-1a610e8a-*, scd.bak-pre-1a610e8a-*; hotel-admin.previous -> 20261024-111828, pre-redesign release 20261023-204731 retained. Central: central-deploy.sh rollback; database dump central-20261024T115558Z-pre-30f3ef52c45e.dump (no migration in this delivery).",
+  "follow_up": "Not caused by this delivery: the appliance database superuser still has its default password; six September CHECKOUT_GRACE_CONFIG_INVALID alerts unacknowledged; Central's Team screen has no way to remove an already-disabled account (unchanged behaviour); some wide tables still scroll (with pinned actions) between 1024 and 1279 px.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0243."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "493d85194b32e403ebadaebc9bcf1ff48b037972",
+  "base_note": "Master after the merge of PR #227; this delivery's lineage is built on it.",
+  "head": "30f3ef52",
+  "head_note": "The last content commit of branch delivery/admin-consoles-redesign. Governance commits follow it.",
+  "previous_delivery": "T0243",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE.",
+  "review_findings": "One Codex finding on PR #228 (P2): an InputGroup inside a Field dropped the field's id, aria-describedby and invalid state, so grouped inputs had no accessible name. Fixed in 30f3ef52 with tests in both consoles; both consoles redeployed from it."
+}

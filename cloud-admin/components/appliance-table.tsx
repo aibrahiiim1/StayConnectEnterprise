@@ -3,10 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ApplianceRow } from "@/lib/api";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { RowActions } from "@/components/ui/row-actions";
 import { ActivationBadge, ConnectionBadge, LicenseBadge } from "@/components/status-badge";
-import { connectionSentence, licenseSentence } from "@/lib/status";
+import { connectionInfo, connectionSentence, licenseInfo, licenseSentence } from "@/lib/status";
+
+/** The detail under a state badge, omitted when it would only repeat the badge. */
+function SecondLine({ text, unless }: { text: string; unless: string }) {
+  if (!text || text === unless) return null;
+  return <div className="mt-0.5 text-xs text-muted-foreground">{text}</div>;
+}
 
 export function sortAppliances(rows: ApplianceRow[]): ApplianceRow[] {
   return [...rows].sort((a, b) => {
@@ -15,6 +21,9 @@ export function sortAppliances(rows: ApplianceRow[]): ApplianceRow[] {
     return wa - wb || a.serial.localeCompare(b.serial);
   });
 }
+
+export const ROW_LINK =
+  "rounded font-mono text-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function ApplianceTable({
   rows,
@@ -35,72 +44,54 @@ export function ApplianceTable({
           <TH>Activation</TH>
           <TH className="hidden sm:table-cell">Connection</TH>
           <TH className="hidden lg:table-cell">License</TH>
-          <TH><span className="sr-only">Actions</span></TH>
+          <TH className="w-0"><span className="sr-only">Actions</span></TH>
         </TR>
       </THead>
-      <tbody>
+      <TBody>
         {rows.map((a) => {
           const href = `/appliances/${a.id}`;
           return (
-            <TR key={a.id} className="cursor-pointer" onClick={() => router.push(href)}>
-              <TD>
-                <Link
-                  href={href}
-                  onClick={(e) => e.stopPropagation()}
-                  className="rounded font-mono text-sm font-semibold hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
+            <TR key={a.id} onClick={() => router.push(href)}>
+              <TD className="max-w-[16rem]">
+                <Link href={href} onClick={(e) => e.stopPropagation()} className={ROW_LINK}>
                   {a.serial}
                 </Link>
-                <div className="text-caption text-muted-foreground">
+                <div className="truncate text-xs text-muted-foreground" title={[a.hostname, a.model].filter(Boolean).join(" · ") || undefined}>
                   {[a.hostname, a.model].filter(Boolean).join(" · ") || "—"}
                 </div>
               </TD>
               {showCustomer && (
-                <TD className="hidden md:table-cell">
+                <TD className="hidden max-w-[16rem] md:table-cell">
                   {a.customer_name ? (
                     <>
-                      <div className="text-sm">{a.customer_name}</div>
-                      <div className="text-caption text-muted-foreground">{a.site_name ?? "—"}</div>
+                      <div className="truncate" title={a.customer_name}>{a.customer_name}</div>
+                      <div className="truncate text-xs text-muted-foreground" title={a.site_name ?? undefined}>{a.site_name ?? "—"}</div>
                     </>
                   ) : (
-                    <span className="text-caption text-muted-foreground">Not assigned yet</span>
+                    <span className="text-muted-foreground">Not assigned yet</span>
                   )}
                 </TD>
               )}
-              <TD><ActivationBadge value={a.activation} /></TD>
+              <TD nowrap><ActivationBadge value={a.activation} /></TD>
               <TD className="hidden sm:table-cell">
-                <div className="flex flex-col items-start gap-1">
-                  <ConnectionBadge value={a.connection} />
-                  {a.connection !== "connected" && (
-                    <span className="text-caption text-muted-foreground">{connectionSentence(a)}</span>
-                  )}
-                </div>
+                <ConnectionBadge value={a.connection} />
+                <SecondLine text={connectionSentence(a)} unless={connectionInfo(a.connection).label} />
               </TD>
               <TD className="hidden lg:table-cell">
-                <div className="flex flex-col items-start gap-1">
-                  <LicenseBadge value={a.license?.state} />
-                  {a.license && a.license.state !== "none" && (
-                    <span className="text-caption text-muted-foreground">{licenseSentence(a.license)}</span>
-                  )}
-                </div>
+                <LicenseBadge value={a.license?.state} />
+                {a.license && a.license.state !== "none" && (
+                  <SecondLine text={licenseSentence(a.license)} unless={licenseInfo(a.license.state).label} />
+                )}
               </TD>
-              <TD className="text-end">
+              <TD className="w-0">
                 {a.activation === "waiting" && onActivate && (
-                  <Button
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onActivate(a);
-                    }}
-                  >
-                    Activate<span className="sr-only"> {a.serial}</span>
-                  </Button>
+                  <RowActions subject={a.serial} primary={{ label: "Activate", onSelect: () => onActivate(a) }} />
                 )}
               </TD>
             </TR>
           );
         })}
-      </tbody>
+      </TBody>
     </Table>
   );
 }

@@ -334,7 +334,7 @@ func writeAwaitingAssignment(w http.ResponseWriter, what string) {
 }
 
 // runResetMFA removes one operator's authenticator from the command line: the break-glass for the last site
-// administrator. Whoever can run it is already root. The operator sets up a new authenticator at next sign-in.
+// administrator. Whoever can run it is already root. The operator then signs in with the password alone.
 func runResetMFA(args []string) error {
 	fs := flag.NewFlagSet("reset-mfa", flag.ExitOnError)
 	email := fs.String("email", "", "the operator's email / username")
@@ -368,6 +368,6 @@ func runResetMFA(args []string) error {
 		c.TenantID, id, strings.TrimSpace(*reason), removed); err != nil {
 		slog.Warn("reset-mfa: the audit entry could not be written", "err", err)
 	}
-	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", removed)
+	slog.Info("two-step sign-in reset; the operator signs in with the password alone until they turn it on again", "id", id, "had_authenticator", removed)
 	return nil
 }

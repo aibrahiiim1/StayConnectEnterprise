@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { chooseInRow, rowMenuHas } from "./row-actions-helper";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -81,7 +82,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     const user = userEvent.setup();
     await openPage();
 
-    await user.click(screen.getByRole("button", { name: /password/i }));
+    await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-one");
     await user.click(within(dialog).getByLabelText(/disconnect this account’s devices now/i));
@@ -101,7 +102,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     const user = userEvent.setup();
     await openPage();
 
-    await user.click(screen.getByRole("button", { name: /password/i }));
+    await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-two");
     await user.click(within(dialog).getByRole("button", { name: "Set password" }));
@@ -121,7 +122,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     const user = userEvent.setup();
     await openPage();
 
-    await user.click(screen.getByRole("button", { name: /password/i }));
+    await chooseInRow(document.body, /password/i);
     const dialog = await screen.findByRole("dialog");
     await user.type(passwordBox(dialog), "fresh-three");
     await user.click(within(dialog).getByLabelText(/disconnect this account’s devices now/i));
@@ -138,7 +139,7 @@ describe("Client accounts — disconnecting an account's devices", () => {
     const user = userEvent.setup();
     await openPage();
 
-    await user.click(screen.getByRole("button", { name: /disconnect/i }));
+    await chooseInRow(document.body, /disconnect/i);
     const confirm = await screen.findByRole("dialog");
     expect(within(confirm).getByText(/The account still works, so they can sign in again/)).toBeTruthy();
     await user.click(within(confirm).getByRole("button", { name: /disconnect devices/i }));

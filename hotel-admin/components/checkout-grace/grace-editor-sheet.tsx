@@ -299,7 +299,7 @@ export function GraceEditorSheet({
                 </SheetSection>
 
                 <section aria-label="Guest will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
-                  <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  <div className="text-xs font-medium text-muted-foreground">
                     Guest will receive
                   </div>
                   <p className="mt-1.5 text-sm leading-relaxed" data-testid="grace-preview">
@@ -361,7 +361,7 @@ export function GraceEditorSheet({
               </SheetSection>
 
               <section aria-label="Guest will receive" className="rounded-lg border border-primary/20 bg-primary-subtle/40 p-4">
-                <div className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
+                <div className="text-xs font-medium text-muted-foreground">
                   Guest will receive
                 </div>
                 <p className="mt-1.5 text-sm leading-relaxed">{guestReceivesSentence(terms)}</p>

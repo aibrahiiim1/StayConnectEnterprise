@@ -21,7 +21,8 @@ describe("a Central user's own data", () => {
     ]);
     renderAs(PLATFORM_ME, <UsersManager base="/cloud/v1/team" roles={["platform_support"]} canManage meId="op-1" canResetPassword noun="member" />);
     await screen.findAllByText("grace@example.test");
-    await user.click(screen.getByRole("button", { name: /Email\s*of grace@example.test/ }));
+    await user.click(screen.getByRole("button", { name: "Actions for grace@example.test" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Correct the email/ }));
     const dialog = await screen.findByRole("dialog");
     const field = within(dialog).getByLabelText(/^Email/);
     await user.clear(field);
@@ -40,7 +41,8 @@ describe("a Central user's own data", () => {
     ]);
     const { unmount } = renderAs(PLATFORM_ME, <UsersManager base="/cloud/v1/team" roles={["platform_support"]} canManage meId="op-1" canResetPassword canExportData noun="member" />);
     await screen.findAllByText("grace@example.test");
-    await user.click(screen.getByRole("button", { name: /Data\s*of grace@example.test/ }));
+    await user.click(screen.getByRole("button", { name: "Actions for grace@example.test" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Download their data/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Download" });
     expect(submit).toBeDisabled();
@@ -51,6 +53,8 @@ describe("a Central user's own data", () => {
 
     renderAs(PLATFORM_ME, <UsersManager base="/cloud/v1/team" roles={["platform_support"]} canManage meId="op-1" canResetPassword noun="member" />);
     await screen.findAllByText("grace@example.test");
-    expect(screen.queryByRole("button", { name: /^Data/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Actions for grace@example.test" }));
+    expect(await screen.findByRole("menuitem", { name: /Correct the email/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Download their data/ })).toBeNull();
   });
 });

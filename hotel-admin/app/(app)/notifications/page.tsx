@@ -10,16 +10,17 @@ import { useEffect, useState } from "react";
 import { api, ListResp, Whoami, NotificationProvider, NotificationTestResult } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { RowActions } from "@/components/ui/row-actions";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Switch, SkeletonRows } from "@/components/ui/misc";
-import { Plus, Send, MessageSquare } from "lucide-react";
+import { Plus, Send } from "lucide-react";
 import { canWrite } from "@/lib/roles";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
@@ -241,8 +242,6 @@ export default function NotificationsPage() {
   return (
     <PageShell>
       <PageHeader
-        icon={<MessageSquare />}
-        eyebrow="Client access"
         title="Delivery"
         description="How the appliance sends sign-in codes by SMS or WhatsApp, and account emails."
         help={
@@ -276,45 +275,45 @@ export default function NotificationsPage() {
       {roles !== null && !writable && <ReadOnlyNotice>Your role can see the senders but not change them.</ReadOnlyNotice>}
       <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardBody className="p-0">
+      <Card className="overflow-hidden">
           {rows === null ? (
             <SkeletonRows rows={3} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Send />}
               title="No sender is configured"
               hint="Clients cannot be sent an SMS or WhatsApp code, or an Email account's verification email, until one is. Room numbers, vouchers and staff-created accounts do not need this."
               action={writable && channels.length > 0 ? <Button onClick={openNew}><Plus /> Add a sender</Button> : undefined}
             />
           ) : (
-            <Table>
+            <Table label="Senders">
               <THead>
-                <TR><TH>Sender</TH><TH>Service</TH><TH>Sends as</TH><TH>Health</TH><TH>Offered</TH><TH><span className="sr-only">Actions</span></TH></TR>
+                <TR><TH>Sender</TH><TH className="hidden md:table-cell">Service</TH><TH className="hidden lg:table-cell">Sends as</TH><TH>Health</TH><TH>Offered</TH><TH><span className="sr-only">Actions</span></TH></TR>
               </THead>
               <TBody>
                 {rows.map((n) => {
                   const h = health(n);
                   return (
-                    <TR key={n.id}>
-                      <TD>
-                        <div className="font-medium">{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
+                    <TR key={n.id} onClick={writable ? () => openEdit(n) : undefined}>
+                      <TD nowrap className="max-w-[16rem]">
+                        <div className="truncate font-medium" title={n.display_name || undefined}>{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
                         <div className="text-xs text-muted-foreground">
                           {CHANNEL_LABELS[n.channel] ?? n.channel}
                         </div>
                       </TD>
-                      <TD className="text-sm">
+                      <TD nowrap className="hidden max-w-[16rem] md:table-cell">
                         {KIND_LABELS[n.kind] ?? n.kind}
                         {n.kind === "smtp" && n.extra?.host && (
-                          <div className="font-mono text-xs text-muted-foreground">{n.extra.host}{n.extra.port ? `:${n.extra.port}` : ""}</div>
+                          <div className="truncate font-mono text-xs text-muted-foreground" title={n.extra.host}>{n.extra.host}{n.extra.port ? `:${n.extra.port}` : ""}</div>
                         )}
                       </TD>
-                      <TD className="text-xs text-muted-foreground">
+                      <TD muted className="hidden max-w-[14rem] truncate text-xs lg:table-cell">
                         {n.from_address || n.api_user || "—"}
                         {n.from_name && <div>{n.from_name}</div>}
                       </TD>
                       <TD>
-                        <Badge tone={h.tone} dot>{h.label}</Badge>
+                        <StatusBadge tone={h.tone}>{h.label}</StatusBadge>
                         {n.last_success_at && (
                           <div className="mt-0.5 text-2xs text-muted-foreground">
                             Last delivered {formatRelative(n.last_success_at)}
@@ -326,16 +325,19 @@ export default function NotificationsPage() {
                           </div>
                         )}
                       </TD>
-                      <TD>
+                      <TD nowrap>
                         {n.enabled ? <Badge tone="ok">In use</Badge> : <Badge tone="default">Off</Badge>}
                       </TD>
-                      <TD className="whitespace-nowrap text-right">
-                        {writable && <Button size="sm" variant="ghost" aria-label={`Send a test message from ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => openTest(n)}>Send a test message</Button>}
-                        {writable && <Button size="sm" variant="ghost" aria-label={`Edit ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => openEdit(n)}>Edit</Button>}
+                      <TD className="w-0">
                         {writable && (
-                          <Button size="sm" variant="ghost" aria-label={`Remove ${n.display_name || CHANNEL_LABELS[n.channel] || n.channel}`} onClick={() => { setFormErr(null); setDeleting(n); }}>
-                            Remove
-                          </Button>
+                          <RowActions
+                            subject={n.display_name || CHANNEL_LABELS[n.channel] || n.channel}
+                            primary={{ label: "Edit", onSelect: () => openEdit(n) }}
+                            items={[
+                              { label: "Send a test message", icon: <Send />, onSelect: () => openTest(n) },
+                              { label: "Remove…", danger: true, onSelect: () => { setFormErr(null); setDeleting(n); } },
+                            ]}
+                          />
                         )}
                       </TD>
                     </TR>
@@ -344,7 +346,6 @@ export default function NotificationsPage() {
               </TBody>
             </Table>
           )}
-        </CardBody>
       </Card>
 
       <DialogForm

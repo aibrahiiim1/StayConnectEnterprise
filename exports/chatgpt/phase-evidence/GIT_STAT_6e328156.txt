@@ -1,0 +1,4 @@
+commit 6e328156a60eeafb6f09543a90d285798eec2153
+Date:   Sat Oct 24 15:09:10 2026 +0300
+
+    Governance: T0244 records the redeployment of both consoles from 30f3ef52

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -77,34 +77,27 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
 
   const lastRun = data?.runs?.[0];
   return (
-    <Card>
-      <CardBody className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="text-emphasis">Guest data kept for</div>
-            <p className="text-caption text-muted-foreground">
-              When a period ends, the appliance anonymises that data within the hour: the person behind it can no
-              longer be identified, while totals and reports keep working. Data still in use, such as a guest who is
-              online or a package that is still valid, is never touched. Anonymised data cannot be brought back.
-            </p>
-            {lastRun && (
-              <p className="text-caption text-muted-foreground">
-                Last run {formatDate(lastRun.ran_at)}: {lastRun.rows_anonymised} records anonymised.
-              </p>
-            )}
-          </div>
-          {writable && !editing && data && (
-            <Button ref={triggerRef} size="sm" variant="outline" onClick={() => {
-              setDraft(Object.fromEntries(RETENTION_ROWS.map((x) => [x.key, String(data.settings[x.key])])) as Record<Key, string>);
-              setEditing(true);
-            }}>Change</Button>
-          )}
-        </div>
+    <SectionCard
+      title="Guest data kept for"
+      description="When a period ends, that data is anonymised within the hour; totals and reports keep working."
+      actions={writable && !editing && data && (
+        <Button ref={triggerRef} size="sm" variant="secondary" onClick={() => {
+          setDraft(Object.fromEntries(RETENTION_ROWS.map((x) => [x.key, String(data.settings[x.key])])) as Record<Key, string>);
+          setEditing(true);
+        }}>Change</Button>
+      )}
+      bodyClassName="space-y-3"
+    >
+        <p className="text-caption text-muted-foreground">
+          Data still in use, such as a guest who is online or a valid package, is never touched. Anonymised data cannot
+          be brought back.
+          {lastRun && <> Last run {formatDate(lastRun.ran_at)}: {lastRun.rows_anonymised} records anonymised.</>}
+        </p>
         <ErrorBanner err={err} />
         {!editing && data && (
-          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
             {RETENTION_ROWS.map((x) => (
-              <div key={x.key} className="min-w-0">
+              <div key={x.key} className="min-w-0 border-b border-border pb-2">
                 <dt className="text-sm">{x.label}</dt>
                 <dd className="text-caption text-muted-foreground">
                   <span className="text-foreground">{data.settings[x.key]} days</span> · {x.what}
@@ -142,7 +135,6 @@ export function DataRetentionCard({ writable }: { writable: boolean }) {
             </div>
           </div>
         )}
-      </CardBody>
-    </Card>
+    </SectionCard>
   );
 }

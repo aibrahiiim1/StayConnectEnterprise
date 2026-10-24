@@ -79,6 +79,7 @@ describe("Portal certificates", () => {
       { match: "/api/cloud/v1/portal-tls/settings", method: "GET", body: { ...SETTINGS, token_set: true, available: true } },
       { match: "/api/cloud/v1/portal-tls/fleet", body: { items: [ROW] } },
       { match: "/api/cloud/v1/portal-tls/appliances/a1/revoke", method: "POST", body: { revocations_requested: 1 } },
+      { match: /\/api\/cloud\/v1\/portal-tls\/events/, body: { items: [] } },
     ]);
     renderAs(PLATFORM_ME, <PortalCertificatesPage />);
 
@@ -90,8 +91,11 @@ describe("Portal certificates", () => {
     expect(within(row).getByText("Staging")).toBeInTheDocument();
     expect(within(row).getByText("Published")).toBeInTheDocument();
 
-    await user.click(within(row).getByRole("button", { name: "Revoke" }));
-    const dialog = await screen.findByRole("dialog");
+    await user.click(row);
+    const drawer = await screen.findByRole("dialog", { name: "OG-0001" });
+    expect(within(drawer).getByText("Certificate orders")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "Revoke" }));
+    const dialog = await screen.findByRole("dialog", { name: "Revoke portal certificates" });
     const confirm = within(dialog).getByRole("button", { name: "Revoke" });
     expect(confirm).toBeDisabled();
     await user.type(within(dialog).getByLabelText(/Reason/), "key exposure suspected");
@@ -124,13 +128,18 @@ describe("Portal certificates", () => {
       { match: "/api/cloud/v1/portal-tls/settings", method: "GET", body: { ...SETTINGS, token_set: true, available: true,
         test_overrides: ["CTRLAPI_PORTAL_DNS_PROVIDER=challtestsrv"] } },
       { match: "/api/cloud/v1/portal-tls/fleet", body: { items: [ROW] } },
+      { match: /\/api\/cloud\/v1\/portal-tls\/events/, body: { items: [{ id: 1, at: "2026-10-01T08:00:00Z", kind: "ISSUED", hostname: ROW.hostname }] } },
     ]);
+    const user = userEvent.setup();
     renderAs(SUPPORT_ME, <PortalCertificatesPage />);
-    await screen.findByRole("table", { name: "Portal certificates" });
+    const table = await screen.findByRole("table", { name: "Portal certificates" });
     expect(screen.getByText("Test overrides are active on this Central")).toBeInTheDocument();
     for (const name of ["Revoke", "Store token", "Test DNS access", "Apply CAA", "Save settings"]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
-    expect(screen.getByRole("button", { name: "Events for OG-0001" })).toBeInTheDocument();
+    await user.click(within(table).getAllByRole("row")[1]);
+    const drawer = await screen.findByRole("dialog", { name: "OG-0001" });
+    expect(await within(drawer).findByRole("list", { name: "Portal certificate events" })).toHaveTextContent("Issued");
+    expect(within(drawer).queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
   });
 });

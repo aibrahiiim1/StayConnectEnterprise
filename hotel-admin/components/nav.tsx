@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
+import { MfaRecommendation } from "@/components/mfa-recommendation";
 
 // Build-time flags can hide mounted routes; use edged capabilities and role permissions for navigation.
 // edged enforces authorization even when a route is opened directly.
@@ -234,7 +235,7 @@ export function Nav({
     <aside
       data-collapsed={collapsed ? "true" : undefined}
       className={cn(
-        "sidebar-motion flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        "sidebar-motion flex h-full shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground",
         onToggleCollapsed
           ? "w-[var(--sidebar-width)] transition-[width] duration-base ease-out motion-reduce:transition-none"
           : "w-64",
@@ -258,8 +259,8 @@ export function Nav({
               aria-controls="sidebar-nav"
               className={cn(
                 "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
@@ -278,8 +279,8 @@ export function Nav({
               aria-label="Find a screen"
               className={cn(
                 "flex size-10 w-full items-center justify-center rounded-md text-sidebar-muted",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               <Search className="size-4" />
@@ -287,7 +288,7 @@ export function Nav({
           </Tooltip>
         ) : (
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-muted" />
+            <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-muted" />
             <input
               ref={searchRef}
               value={query}
@@ -298,9 +299,9 @@ export function Nav({
               aria-keyshortcuts="Control+K Meta+K"
               title="Find a screen (Ctrl+K)"
               className={cn(
-                "h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/70 pl-8 pr-8 text-xs pointer-coarse:pr-11",
-                "text-sidebar-foreground placeholder:text-sidebar-muted",
-                "focus:border-sidebar-active focus:outline-none focus:ring-2 focus:ring-sidebar-active/30",
+                "h-8 w-full rounded-md border border-sidebar-border bg-card ps-8 pe-8 text-xs shadow-control pointer-coarse:h-11 pointer-coarse:pe-11",
+                "text-sidebar-accent-foreground placeholder:text-sidebar-muted",
+                "focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/15",
               )}
             />
             {query && (
@@ -309,9 +310,9 @@ export function Nav({
                 onClick={() => setQuery("")}
                 aria-label="Clear filter"
                 className={cn(
-                  "absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded",
-                  "text-sidebar-muted hover:text-white pointer-coarse:right-0 pointer-coarse:size-11",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active/60",
+                  "absolute end-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded",
+                  "text-sidebar-muted hover:text-sidebar-accent-foreground pointer-coarse:end-0 pointer-coarse:size-11",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
               >
                 <X className="size-3.5" />
@@ -351,10 +352,10 @@ export function Nav({
                     aria-expanded={open}
                     aria-controls={listId}
                     className={cn(
-                      "group flex min-h-8 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left pointer-coarse:min-h-11",
-                      "text-nano font-normal uppercase tracking-[0.12em] text-sidebar-muted transition-colors",
+                      "group flex min-h-7 w-full items-center gap-2 rounded-md px-2.5 py-1 text-start pointer-coarse:min-h-11",
+                      "text-xs font-medium text-sidebar-muted transition-colors",
                       "hover:text-sidebar-foreground disabled:cursor-default disabled:hover:text-sidebar-muted",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     )}
                   >
                     <span className="flex-1 truncate">{sec.title}</span>
@@ -382,22 +383,13 @@ export function Nav({
                       // Keep real hidden text so collapsed links retain the same accessible name.
                       className={cn(
                         "group relative flex items-center rounded-md text-xs transition-colors duration-press",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                        collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
                         active
-                          ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
+                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
                       )}
                     >
-                      {/* Keep an active marker visible when labels are hidden. */}
-                      <span
-                        className={cn(
-                          "absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full bg-sidebar-active transition-opacity",
-                          collapsed ? "h-6 w-[3px]" : "h-5 w-[3px]",
-                          active ? "opacity-100" : "opacity-0",
-                        )}
-                        aria-hidden
-                      />
                       <Icon
                         className={cn(
                           "size-4 shrink-0 transition-colors",
@@ -446,8 +438,8 @@ export function Nav({
               aria-label={`Signed in as ${email ?? "unknown"}${roleLabel ? `, ${roleLabel}` : ""}`}
               className={cn(
                 "mx-auto flex size-8 items-center justify-center rounded-full bg-sidebar-accent",
-                "text-2xs font-semibold uppercase text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                "text-2xs font-semibold uppercase text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               {(email ?? "?").slice(0, 2)}
@@ -456,7 +448,7 @@ export function Nav({
         ) : (
           <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
             <span
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-white"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-sidebar-accent-foreground"
               aria-hidden
             >
               {(email ?? "?").slice(0, 2)}
@@ -480,10 +472,10 @@ export function Nav({
               onClick={onNavigate}
               aria-label={collapsed ? "Change my password" : undefined}
               className={cn(
-                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                "mt-0.5 flex w-full items-center rounded-md text-xs text-sidebar-foreground",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
               )}
             >
               <KeyRound className="size-4 shrink-0 text-sidebar-muted" />
@@ -500,10 +492,10 @@ export function Nav({
               onClick={onNavigate}
               aria-label={collapsed ? "Two-step sign-in" : undefined}
               className={cn(
-                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                "mt-0.5 flex w-full items-center rounded-md text-xs text-sidebar-foreground",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
               )}
             >
               <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
@@ -512,6 +504,7 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
         })()}
+        <MfaRecommendation email={email} collapsed={collapsed} onNavigate={onNavigate} />
 
         {(() => {
           const signOut = (
@@ -520,10 +513,10 @@ export function Nav({
               onClick={onLogout}
               aria-label={collapsed ? "Sign out" : undefined}
               className={cn(
-                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                "mt-0.5 flex w-full items-center rounded-md text-xs text-sidebar-foreground",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
               )}
             >
               <LogOut className="size-4 shrink-0 text-sidebar-muted" />

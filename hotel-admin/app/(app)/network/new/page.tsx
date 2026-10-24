@@ -8,18 +8,19 @@ import {
   GuestNetworkInput, ValidateResult, ApplyResult, ValidationIssue,
 } from "@/lib/api";
 import { Card, CardBody, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Button, LinkButton } from "@/components/ui/button";
+import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
+import { DescriptionList, KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
+import { Segmented } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/misc";
 import { NotAvailable, PendingChangeBanner } from "@/components/ui/patterns";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ArrowLeft, ArrowRight, Cable, Network, Plus, Radio, X } from "lucide-react";
-import { cn, errMsg } from "@/lib/utils";
+import { ArrowLeft, ArrowRight, Cable, Plus, Radio, X } from "lucide-react";
+import { errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import { HealthCheckList, SwitchRow, ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
@@ -294,16 +295,16 @@ export default function NewGuestNetworkPage() {
   const onOff = (b: boolean) => (b ? <Badge tone="ok">On</Badge> : <Badge tone="default">Off</Badge>);
 
   const backLink = (
-    <Link href="/network" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ms-3 self-start")}>
-      <ArrowLeft /> Client networks
-    </Link>
+    <LinkButton href="/network" variant="ghost" size="sm" className="-ms-2.5 self-start">
+      <ArrowLeft className="rtl:rotate-180" /> Client networks
+    </LinkButton>
   );
 
   if (!known) {
     return (
       <PageShell width="narrow">
         {backLink}
-        <PageHeader icon={<Network />} eyebrow="Networking" title="New client network" />
+        <PageHeader title="New client network" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-72 w-full" />
       </PageShell>
@@ -314,7 +315,7 @@ export default function NewGuestNetworkPage() {
     return (
       <PageShell width="narrow">
         {backLink}
-        <PageHeader icon={<Network />} eyebrow="Networking" title="New client network" />
+        <PageHeader title="New client network" />
         <NotAvailable
           title="You cannot create client networks"
           reason="Your role can view client networks but not change them. Ask a Site IT manager or site admin."
@@ -327,8 +328,6 @@ export default function NewGuestNetworkPage() {
     <PageShell width="narrow">
       {backLink}
       <PageHeader
-        icon={<Network />}
-        eyebrow="Networking"
         title="New client network"
         description="Seven short steps; nothing reaches clients until the last one."
         help={
@@ -385,13 +384,10 @@ export default function NewGuestNetworkPage() {
               <Field label="Name" required>
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Client Wi-Fi" />
               </Field>
-              <Field label="Description" hint="Optional. Shown under the name in the list.">
+              <Field label="Description" optional hint="Shown under the name in the list.">
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
-              <Field
-                label="SSID label"
-                hint="For reference only. OneGate does not broadcast Wi-Fi — this label records which SSID your wireless controller maps to this network."
-              >
+              <Field label="SSID label" optional hint="For reference: the SSID your wireless controller maps to this network.">
                 <Input value={ssidLabel} onChange={(e) => setSsidLabel(e.target.value)} placeholder="Wi-Fi" />
               </Field>
             </>
@@ -459,15 +455,12 @@ export default function NewGuestNetworkPage() {
                       ))}
                     </ul>
                   )}
-                  <p className="mt-1">
-                    A port carries at most one untagged client network, and any number of tagged VLANs, each with
-                    its own VLAN id and its own subnet.
-                  </p>
+                  <p className="mt-1">At most one untagged network per port; any number of tagged VLANs.</p>
                 </Callout>
               )}
               <SwitchRow
                 label="VLAN tagged (802.1Q)"
-                hint="Turn on when the switch port is a trunk. One tagged port can carry several client networks — one per VLAN."
+                hint="Turn on when the switch port is a trunk; each VLAN becomes its own client network."
                 checked={vlanTagged}
                 onChange={setVlanTagged}
               />
@@ -476,9 +469,8 @@ export default function NewGuestNetworkPage() {
                   <legend className="mb-1.5 text-label">VLANs on this trunk</legend>
                   <VlanIdList rows={vlans} onChange={setVlanRows} problems={vlanProblems} />
                   <p className="text-xs text-muted-foreground">
-                    Each VLAN becomes its own client network. Your switch must carry these VLAN ids on
-                    <span className="font-mono"> {parentInterface || "this port"}</span>, and your wireless controller must tag
-                    each SSID onto the matching VLAN — OneGate configures its own side only.
+                    Your switch must carry these VLAN ids on
+                    <span className="font-mono"> {parentInterface || "this port"}</span>; OneGate configures its own side only.
                   </p>
                 </fieldset>
               )}
@@ -492,19 +484,20 @@ export default function NewGuestNetworkPage() {
                   {multi && (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-label">DHCP and DNS</span>
-                      <div className="flex gap-1" role="radiogroup" aria-label="DHCP and DNS for these VLANs">
-                        {([["common", "Same settings for every VLAN"], ["separate", "Configure each VLAN separately"]] as const).map(([v, label]) => (
-                          <Button key={v} type="button" size="sm" variant={addrMode === v ? "primary" : "secondary"}
-                            role="radio" aria-checked={addrMode === v} onClick={() => setAddrMode(v)}>
-                            {label}
-                          </Button>
-                        ))}
-                      </div>
+                      <Segmented
+                        size="sm"
+                        label="DHCP and DNS for these VLANs"
+                        value={addrMode}
+                        onChange={setAddrMode}
+                        options={[
+                          { value: "common", label: "Same settings for every VLAN" },
+                          { value: "separate", label: "Configure each VLAN separately" },
+                        ]}
+                      />
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Every VLAN gets its own subnet, gateway and DHCP scope — they are never shared. The suggested
-                    ranges avoid every subnet this appliance already serves; change any of them if your plan differs.
+                    Each VLAN has its own subnet, gateway and DHCP scope. The suggestions avoid every subnet already in use.
                   </p>
                   <VlanAddressingTable rows={vlans} onChange={setVlans} problems={vlanProblems} separate={separate} />
                 </div>
@@ -527,8 +520,7 @@ export default function NewGuestNetworkPage() {
 
           {step === 3 && separate && (
             <Callout tone="info" title="Each VLAN carries its own DHCP and DNS">
-              You chose to configure each VLAN separately, so the pools, DNS, search domain and lease times are set
-              per VLAN on the previous step. Captive portal and internet access below apply to all of them.
+              Pools, DNS, search domain and lease times were set per VLAN on the previous step.
             </Callout>
           )}
 
@@ -536,8 +528,7 @@ export default function NewGuestNetworkPage() {
             <>
               {vlanTagged ? (
                 <Callout tone="info" title="One DHCP and DNS policy for every VLAN">
-                  Each VLAN keeps its own address pool, taken from its own subnet on the previous step. The DNS,
-                  search domain and lease times below apply to all of them.
+                  Each VLAN keeps its own pool; the DNS, search domain and lease times below apply to all of them.
                 </Callout>
               ) : (
               <fieldset className="space-y-2">
@@ -545,7 +536,7 @@ export default function NewGuestNetworkPage() {
                   Address pools<span className="ms-0.5 text-destructive">*</span>
                 </legend>
                 {pools.map((p, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                  <div key={i} className="flex items-center gap-2">
                     <Input
                       aria-label={`Pool ${i + 1} start`} placeholder="10.20.0.100" value={p.start_ip} className="min-w-0 flex-1 font-mono"
                       onChange={(e) => setPools((ps) => ps.map((x, k) => k === i ? { ...x, start_ip: e.target.value } : x))}
@@ -582,26 +573,32 @@ export default function NewGuestNetworkPage() {
               <Field label="Domain name">
                 <Input value={domainName} onChange={(e) => setDomainName(e.target.value)} placeholder="guest.local" />
               </Field>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Field label="Lease time (seconds)"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} /></Field>
-                <Field label="Shortest lease (seconds)"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} /></Field>
-                <Field label="Longest lease (seconds)"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} /></Field>
-              </div>
+              <FieldGrid cols={3}>
+                <Field label="Lease time">
+                  <InputGroup suffix="s"><Input type="number" value={leaseDefault} onChange={(e) => setLeaseDefault(e.target.value)} /></InputGroup>
+                </Field>
+                <Field label="Shortest lease">
+                  <InputGroup suffix="s"><Input type="number" value={leaseMin} onChange={(e) => setLeaseMin(e.target.value)} /></InputGroup>
+                </Field>
+                <Field label="Longest lease">
+                  <InputGroup suffix="s"><Input type="number" value={leaseMax} onChange={(e) => setLeaseMax(e.target.value)} /></InputGroup>
+                </Field>
+              </FieldGrid>
             </>
           )}
 
           {step === 4 && (
             <div className="space-y-4">
-              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. With it off, nobody on this network can sign in, so it has no internet access (only allowed sites)." checked={captivePortal} onChange={setCaptivePortal} />
+              <SwitchRow label="Captive portal" hint="Clients see the sign-in page before they get online. Off means no internet on this network." checked={captivePortal} onChange={setCaptivePortal} />
               <SwitchRow label="Internet access" hint="Clients can reach the internet once signed in." checked={internetAccess} onChange={setInternetAccess} />
               <SwitchRow label="NAT (masquerade)" hint="Client traffic leaves through the appliance's own address." checked={nat} onChange={setNat} />
-              <SwitchRow label="Client isolation" hint="The appliance drops traffic between client devices that passes through it. Devices on the same access point or switch port also need the access point's own client isolation switched on." checked={clientIsolation} onChange={setClientIsolation} />
+              <SwitchRow label="Client isolation" hint="Drops device-to-device traffic through the appliance; also enable it on the access points." checked={clientIsolation} onChange={setClientIsolation} />
             </div>
           )}
 
           {step === 5 && (
             <div className="space-y-5">
-              <KeyValueGrid
+              <DescriptionList
                 items={[
                   { label: "Name", value: name },
                   { label: "SSID label", value: ssidLabel || "—" },
@@ -628,11 +625,11 @@ export default function NewGuestNetworkPage() {
                   <TBody>
                     {vlans.map((r) => (
                       <TR key={r.key}>
-                        <TD>{r.name}</TD>
-                        <TD><Badge tone="info">{r.vlan}</Badge></TD>
-                        <TD className="font-mono">{r.subnet}</TD>
-                        <TD className="font-mono">{r.gateway}</TD>
-                        <TD className="font-mono">{r.poolStart} – {r.poolEnd}</TD>
+                        <TD truncate title={r.name}>{r.name}</TD>
+                        <TD nowrap><Badge tone="info">{r.vlan}</Badge></TD>
+                        <TD nowrap className="font-mono text-xs">{r.subnet}</TD>
+                        <TD nowrap className="font-mono text-xs">{r.gateway}</TD>
+                        <TD nowrap className="font-mono text-xs">{r.poolStart} – {r.poolEnd}</TD>
                       </TR>
                     ))}
                   </TBody>
@@ -662,8 +659,7 @@ export default function NewGuestNetworkPage() {
             <div className="space-y-4">
               {!created && !applied && (
                 <p className="text-sm text-muted-foreground">
-                  Ready to create the client network, validate the full configuration, then apply it. After applying you
-                  have a short window to keep the change; if you do not, it rolls back automatically.
+                  Ready to create, validate and apply. Keep the change afterwards, or it rolls back automatically.
                 </p>
               )}
               {created && (
@@ -728,20 +724,20 @@ export default function NewGuestNetworkPage() {
         <CardFooter className="justify-between">
           {step < 6 ? (
             <>
-              <Button variant="ghost" onClick={back} disabled={step === 0}><ArrowLeft /> Back</Button>
-              <Button onClick={next}>{step === 5 ? "Continue to apply" : "Next"} <ArrowRight /></Button>
+              <Button variant="ghost" onClick={back} disabled={step === 0}><ArrowLeft className="rtl:rotate-180" /> Back</Button>
+              <Button onClick={next}>{step === 5 ? "Continue to apply" : "Next"} <ArrowRight className="rtl:rotate-180" /></Button>
             </>
           ) : !applied ? (
             <>
-              <Button variant="ghost" onClick={back} disabled={busy}><ArrowLeft /> Back</Button>
+              <Button variant="ghost" onClick={back} disabled={busy}><ArrowLeft className="rtl:rotate-180" /> Back</Button>
               <Button disabled={busy} onClick={onRunApply}>
                 {busy ? "Working…" : created ? "Re-validate & apply" : "Create, validate & apply"}
               </Button>
             </>
           ) : applied.state !== "pending_confirmation" ? (
-            <Link href="/network" className={cn(buttonVariants({ variant: "secondary" }), "ms-auto")}>
+            <LinkButton href="/network" variant="secondary" className="ms-auto">
               Back to client networks
-            </Link>
+            </LinkButton>
           ) : (
             <span className="text-caption text-muted-foreground">Keep or roll back the change above.</span>
           )}

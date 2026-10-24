@@ -323,7 +323,7 @@ describe("zero-attempt recovery", () => {
     render(<FinancialRecoveryView />);
     await screen.findByText(/Never transmitted/);
     await userEvent.click(screen.getByRole("button", { name: /authorize one attempt/i }));
-    expect(await screen.findByRole("status")).toHaveTextContent(/nothing has been sent/i);
+    await waitFor(() => expect(screen.getAllByRole("status").some((s) => /nothing has been sent/i.test(s.textContent ?? ""))).toBe(true));
   });
 
   it("offers no authorization for an item nobody has reconciled, and says why", async () => {

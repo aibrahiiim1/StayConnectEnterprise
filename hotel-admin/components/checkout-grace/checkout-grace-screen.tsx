@@ -4,17 +4,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import {
-  AlertTriangle,
-  CalendarClock,
-  Gauge,
-  History,
-  LogOut,
-  Pencil,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-} from "lucide-react";
+import { History, Pencil, Plus, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   type GraceHistoryItem,
@@ -30,11 +20,11 @@ import {
   guestReceivesSentence,
   termsFromEffective,
 } from "@/lib/api/checkout-grace";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { KeyValueGrid, MetricStrip } from "@/components/ui/data";
+import { SectionCard } from "@/components/ui/card";
+import { DescriptionList, MetricStrip } from "@/components/ui/data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -106,8 +96,6 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
   return (
     <PageShell>
       <PageHeader
-        icon={<LogOut />}
-        eyebrow="Hotel"
         title="Grace Period"
         description="A short, capped period online after checkout."
         help={
@@ -167,11 +155,11 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
       {!state && !loadError && (
         <div className="space-y-5" aria-busy="true">
           <span className="sr-only">Loading the Grace Period policy</span>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatGrid cols={4}>
             {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-24" />
+              <Skeleton key={i} className="h-[5.5rem]" />
             ))}
-          </div>
+          </StatGrid>
           <Skeleton className="h-64" />
         </div>
       )}
@@ -184,18 +172,16 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
             </Callout>
           )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatGrid cols={4}>
             <StatCard
               label="Policy in force"
               value={isEmergency ? "Emergency fallback" : "Site policy"}
               tone={isEmergency ? "warn" : "ok"}
-              icon={isEmergency ? <AlertTriangle /> : <ShieldCheck />}
-              hint={isEmergency ? "Built-in safe default — not chosen for this site" : "Terms this site published"}
+              hint={isEmergency ? "Built-in default, not chosen for this site" : "Terms this site published"}
             />
             <StatCard
               label="Published version"
               value={published ? `v${version}` : "None"}
-              icon={<Gauge />}
               hint={published ? "Applies to every checkout from now on" : "No site policy published yet"}
             />
             <StatCard
@@ -211,7 +197,6 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                   "Never"
                 )
               }
-              icon={<CalendarClock />}
               hint={
                 current
                   ? `by ${current.actor}`
@@ -226,20 +211,16 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
               label="Emergency fallback used"
               value={used}
               tone={used > 0 ? "warn" : "default"}
-              icon={<History />}
               hint={
                 used > 0 && lastUsed ? (
-                  <>
-                    Most recently <span title={fmtWhen(lastUsed)}>{formatRelative(lastUsed)}</span> · each use raised a
-                    critical alert
-                  </>
+                  <>Last <span title={fmtWhen(lastUsed)}>{formatRelative(lastUsed)}</span> · critical alert</>
                 ) : (
                   "Never used on this appliance"
                 )
               }
               href={used > 0 ? "/operational-alerts" : undefined}
             />
-          </div>
+          </StatGrid>
 
           {warnings.length > 0 && (
             <section aria-label="Needs attention" className="space-y-2">
@@ -259,28 +240,19 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
           )}
 
           {effective && baseTerms && (
-            <Card>
-              <CardHeader>
-                <div className="min-w-0 space-y-0.5">
-                  <CardTitle>What a departing guest receives</CardTitle>
-                  <CardDescription>
-                    {isEmergency
-                      ? "The built-in emergency terms, because no site policy is published."
-                      : `Site policy version ${version}.`}
-                  </CardDescription>
-                </div>
-                {isEmergency ? (
-                  <Badge tone="warn" dot>
-                    Emergency fallback
-                  </Badge>
-                ) : (
-                  <Badge tone="ok" dot>
-                    Site policy · v{version}
-                  </Badge>
-                )}
-              </CardHeader>
-              <CardBody className="space-y-5">
-                <p className="text-base leading-relaxed" data-testid="grace-sentence">
+            <SectionCard
+              title="What a departing guest receives"
+              description={isEmergency
+                ? "The built-in emergency terms, because no site policy is published."
+                : `Site policy version ${version}.`}
+              actions={isEmergency ? (
+                <Badge tone="warn" dot>Emergency fallback</Badge>
+              ) : (
+                <Badge tone="ok" dot>Site policy · v{version}</Badge>
+              )}
+              bodyClassName="space-y-5"
+            >
+                <p className="text-sm leading-relaxed text-foreground sm:text-base" data-testid="grace-sentence">
                   {guestReceivesSentence(baseTerms)}
                 </p>
 
@@ -296,12 +268,12 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                 </section>
 
                 <section aria-label="Policy details">
-                  <KeyValueGrid
+                  <DescriptionList
                     items={[
                       {
                         label: "Who qualifies",
                         value: "Guests who still have active internet access when they check out",
-                        hint: "Free, paid or included with the room alike. No active access at checkout means no Grace Period. Once per stay.",
+                        hint: "Free, paid or included with the room alike. Once per stay.",
                       },
                       {
                         label: "Devices",
@@ -331,36 +303,34 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
                     ]}
                   />
                 </section>
-              </CardBody>
-            </Card>
+            </SectionCard>
           )}
 
-          <Card>
-            <CardHeader>
-              <div className="min-w-0 space-y-0.5">
-                <CardTitle>Policy history</CardTitle>
-                <CardDescription>Every published version, newest first.</CardDescription>
-              </div>
-              {historyAvailable && history.length > 0 && (
-                <Badge tone="neutral">
-                  {history.length} version{history.length === 1 ? "" : "s"}
-                </Badge>
-              )}
-            </CardHeader>
-            <CardBody>
+          <SectionCard
+            flush
+            title="Policy history"
+            description="Every published version, newest first."
+            actions={historyAvailable && history.length > 0 ? (
+              <Badge tone="neutral">
+                {history.length} version{history.length === 1 ? "" : "s"}
+              </Badge>
+            ) : undefined}
+          >
               {!historyAvailable ? (
                 <EmptyState
+                  size="sm"
                   icon={<History />}
                   title="History cannot be read on this appliance"
                   hint="The record exists, but this appliance's admin service cannot read it, so versions are not listed here."
                 />
               ) : history.length === 0 ? (
                 <EmptyState
+                  size="sm"
                   icon={<History />}
                   title="No version published yet"
                   hint={
                     canWrite
-                      ? "Create the site's policy to replace the emergency fallback. Each version you publish is recorded here with who published it and why."
+                      ? "Create the site's policy to replace the emergency fallback. Each version is recorded here."
                       : "When a manager publishes the site's policy, each version is recorded here."
                   }
                   action={
@@ -374,8 +344,7 @@ export function CheckoutGraceScreen({ canWrite = true }: { canWrite?: boolean })
               ) : (
                 <GraceHistory history={history} inForce={version} />
               )}
-            </CardBody>
-          </Card>
+          </SectionCard>
 
           {baseTerms && (
             <GraceEditorSheet

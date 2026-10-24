@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
+import { MfaRecommendation } from "@/components/mfa-recommendation";
 import { usePermissions, type Capability } from "@/lib/permissions";
 
 export type NavItem = {
@@ -99,8 +100,8 @@ export function Nav({
               aria-controls="sidebar-nav"
               className={cn(
                 "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               {collapsed ? <PanelLeftOpen className="size-4 rtl:-scale-x-100" /> : <PanelLeftClose className="size-4 rtl:-scale-x-100" />}
@@ -121,21 +122,13 @@ export function Nav({
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "group relative flex items-center rounded-md text-label font-normal transition-colors duration-press",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                  collapsed ? "h-10 justify-center px-0" : "min-h-9 gap-2.5 px-2.5 py-1.5",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
                   active
-                    ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-white",
+                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
                 )}
               >
-                <span
-                  className={cn(
-                    "absolute start-0 top-1/2 -translate-y-1/2 rounded-e-full bg-sidebar-active transition-opacity",
-                    collapsed ? "h-6 w-[3px]" : "h-5 w-[3px]",
-                    active ? "opacity-100" : "opacity-0",
-                  )}
-                  aria-hidden
-                />
                 <Icon
                   className={cn(
                     "size-4 shrink-0 transition-colors",
@@ -163,8 +156,8 @@ export function Nav({
               aria-label={`Signed in as ${email ?? "unknown"}`}
               className={cn(
                 "mx-auto flex size-8 items-center justify-center rounded-full bg-sidebar-accent",
-                "text-2xs font-semibold uppercase text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
+                "text-2xs font-semibold uppercase text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               {(email ?? "?").slice(0, 2)}
@@ -173,7 +166,7 @@ export function Nav({
         ) : (
           <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
             <span
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-white"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-2xs font-semibold uppercase text-sidebar-accent-foreground"
               aria-hidden
             >
               {(email ?? "?").slice(0, 2)}
@@ -196,10 +189,10 @@ export function Nav({
               onClick={onNavigate}
               aria-label={collapsed ? "Two-step sign-in" : undefined}
               className={cn(
-                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                "mt-0.5 flex w-full items-center rounded-md text-xs text-sidebar-foreground",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
               )}
             >
               <Smartphone className="size-4 shrink-0 text-sidebar-muted" />
@@ -208,6 +201,7 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
         })()}
+        <MfaRecommendation email={email} collapsed={collapsed} onNavigate={onNavigate} />
         {(() => {
           const signOut = (
             <button
@@ -215,10 +209,10 @@ export function Nav({
               onClick={onLogout}
               aria-label={collapsed ? "Sign out" : undefined}
               className={cn(
-                "mt-1 flex w-full items-center rounded-md text-sm text-sidebar-foreground/85",
-                "transition-colors hover:bg-sidebar-accent/60 hover:text-white",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-active",
-                collapsed ? "h-10 justify-center px-0" : "gap-2.5 px-2.5 py-1.5",
+                "mt-0.5 flex w-full items-center rounded-md text-xs text-sidebar-foreground",
+                "transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                collapsed ? "h-9 justify-center px-0" : "min-h-8 gap-2.5 px-2.5 py-1.5",
               )}
             >
               <LogOut className="size-4 shrink-0 text-sidebar-muted rtl:-scale-x-100" />

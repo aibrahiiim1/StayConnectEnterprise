@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { api, withStepUp } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, Input, useFieldErrors } from "@/components/ui/input";
+import { SectionCard } from "@/components/ui/card";
+import { Field, FieldGrid, Input, useFieldErrors } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
-import { formatDateTime } from "@/lib/status";
+import { LastChanged } from "@/components/session-lifetime";
 
 type Bounds = { default: number; min: number; max: number; unit: string };
 
@@ -107,54 +108,45 @@ export function DataRetentionSetting({ canManage }: { canManage: boolean }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="space-y-0.5">
-          <CardTitle>Data retention</CardTitle>
-          <CardDescription>
-            How long Central keeps its own records. Every hour, records older than these periods are deleted or
-            have the people in them removed. Open security alerts and current licences are never removed.
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <CardBody className="space-y-4">
-        <ErrorBanner err={err} />
-        {s && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {FIELDS.map((f) => {
-              const b = s[`${f.key}_bounds`];
-              return (
-                <Field key={f.key} label={f.label} required
-                  hint={`${f.explain} From ${b.min} to ${b.max} ${b.unit}. Default ${b.default}.`}
-                  error={fields.error(f.key)}>
-                  <Input id={fields.id(f.key)} inputMode="numeric" aria-label={f.aria} value={vals[f.key]} disabled={!canManage}
-                    onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} />
-                </Field>
-              );
-            })}
-            {canManage && (
-              <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
-                <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. auditor's request" />
-              </Field>
-            )}
-          </div>
-        )}
-        {s?.updated_at && (
-          <p className="text-caption text-muted-foreground">
-            Last changed {formatDateTime(s.updated_at)}{s.updated_by ? ` by ${s.updated_by}` : ""}.
-          </p>
-        )}
-      </CardBody>
-      {canManage && s && (
-        <CardFooter>
-          {!changed && !busy && <span id={fields.id("unchanged")} className="text-caption text-muted-foreground">No changes to save.</span>}
-          <Button size="sm" disabled={busy || !changed} onClick={save}
+    <SectionCard
+      title="Data retention"
+      description="How long Central keeps its own records. Older records are deleted or anonymised every hour; open security alerts and current licences are never removed."
+      footer={canManage && s ? (
+        <>
+          <LastChanged at={s.updated_at} by={s.updated_by} />
+          {!changed && !busy && <span id={fields.id("unchanged")} className="text-xs text-muted-foreground">No changes to save.</span>}
+          <Button size="sm" disabled={!changed} loading={busy} onClick={save}
             aria-describedby={!changed && !busy ? fields.id("unchanged") : undefined}>
-            {busy ? "Saving…" : "Save"}
+            Save
           </Button>
-        </CardFooter>
+        </>
+      ) : undefined}
+      bodyClassName="space-y-4"
+    >
+      <ErrorBanner err={err} />
+      {!s && !err && <Skeleton className="h-32" />}
+      {s && (
+        <FieldGrid cols={2}>
+          {FIELDS.map((f) => {
+            const b = s[`${f.key}_bounds`];
+            return (
+              <Field key={f.key} label={f.label} required
+                hint={`${f.explain} From ${b.min} to ${b.max} ${b.unit}. Default ${b.default}.`}
+                error={fields.error(f.key)}>
+                <Input id={fields.id(f.key)} inputMode="numeric" aria-label={f.aria} value={vals[f.key]} disabled={!canManage}
+                  onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} />
+              </Field>
+            );
+          })}
+          {canManage && (
+            <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
+              <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. auditor's request" />
+            </Field>
+          )}
+        </FieldGrid>
       )}
-    </Card>
+      {s && !canManage && <LastChanged at={s.updated_at} by={s.updated_by} />}
+    </SectionCard>
   );
 }

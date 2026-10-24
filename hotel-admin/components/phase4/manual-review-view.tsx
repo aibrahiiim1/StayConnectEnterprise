@@ -4,7 +4,7 @@
 // CREATE_REVERSAL records a ledger row; Front Office must correct the PMS folio manually.
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { ClipboardCheck, Inbox } from "lucide-react";
+import { Inbox } from "lucide-react";
 import {
   api,
   ReviewActionDoc,
@@ -12,16 +12,17 @@ import {
   ReviewQueueRow,
   surfaceUnavailableMessage,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { HistoryList } from "@/components/ui/history";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { Field, FieldGrid, Input, Select, Textarea } from "@/components/ui/input";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { KeyValueGrid, Timeline } from "@/components/ui/data";
+import { KeyValueGrid } from "@/components/ui/data";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetSection } from "@/components/ui/sheet";
@@ -149,8 +150,6 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
   return (
     <PageShell>
       <PageHeader
-        icon={<ClipboardCheck />}
-        eyebrow="Hotel"
         title="Manual review"
         description="Decide what happened to a room charge whose outcome is unknown."
         help={
@@ -178,47 +177,53 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
 
       <ErrorBanner err={err} className="mb-0" />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Awaiting a decision{rows ? ` (${rows.length})` : ""}</CardTitle>
-        </CardHeader>
-        <CardBody className="p-0">
+      <SectionCard
+        flush
+        title="Awaiting a decision"
+        actions={rows ? <Badge tone={rows.length ? "warn" : "neutral"}>{rows.length}</Badge> : undefined}
+      >
           {!rows ? (
             err ? null : <SkeletonRows rows={3} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Inbox />}
               title="Nothing is waiting on you"
               hint="Postings appear here when their outcome could not be determined, or when someone escalated them."
             />
           ) : (
-            <Table>
+            <Table label="Room charges awaiting a decision">
               <THead>
                 <TR>
-                  <TH>Amount</TH>
+                  <TH numeric>Amount</TH>
                   <TH>State</TH>
-                  <TH className="hidden sm:table-cell">Last attempt</TH>
+                  <TH numeric className="hidden sm:table-cell">Last attempt</TH>
                   <TH className="hidden md:table-cell">PMS answer</TH>
-                  <TH>
+                  <TH pinEnd>
                     <span className="sr-only">Actions</span>
                   </TH>
                 </TR>
               </THead>
               <TBody>
                 {rows.map((r) => (
-                  <TR key={r.posting_id}>
-                    <TD className="font-medium tabular">{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
-                    <TD>
-                      <Badge tone={r.awaiting_manual_review ? "err" : "warn"} dot>
+                  <TR key={r.posting_id} onClick={() => void open(r.posting_id)}>
+                    <TD numeric className="font-medium">{money(r.amount_minor, r.currency, r.currency_exponent)}</TD>
+                    <TD nowrap>
+                      <StatusBadge tone={r.awaiting_manual_review ? "err" : "warn"}>
                         {humanize(r.execution_state)}
-                      </Badge>
+                      </StatusBadge>
                     </TD>
-                    <TD className="hidden tabular sm:table-cell">
+                    <TD numeric className="hidden sm:table-cell">
                       {r.latest_attempt_no != null ? `#${r.latest_attempt_no}` : "—"}
                     </TD>
-                    <TD className="hidden text-muted-foreground md:table-cell">{r.latest_pa_as_status ?? "no answer"}</TD>
-                    <TD className="text-right">
-                      <Button size="sm" variant="secondary" onClick={() => void open(r.posting_id)}>
+                    <TD muted className="hidden md:table-cell">{r.latest_pa_as_status ?? "no answer"}</TD>
+                    <TD pinEnd className="w-0 text-end">
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={(e) => { e.stopPropagation(); void open(r.posting_id); }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
                         Review
                       </Button>
                     </TD>
@@ -227,22 +232,20 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
               </TBody>
             </Table>
           )}
-        </CardBody>
-      </Card>
+      </SectionCard>
 
       <Sheet open={selected !== null} onOpenChange={(v) => !v && !busy && close()}>
         <SheetContent width="lg">
           <SheetHeader
-            icon={<ClipboardCheck />}
             eyebrow="Room charge"
             title={detail ? money(detail.posting.amount_minor, detail.posting.currency, detail.posting.currency_exponent) : "Room charge"}
             description="What it was attached to, every attempt to post it, and what has been decided."
             badges={
               detail ? (
                 <>
-                  <Badge tone={detail.posting.awaiting_manual_review ? "err" : "warn"} dot>
+                  <StatusBadge tone={detail.posting.awaiting_manual_review ? "err" : "warn"}>
                     {humanize(detail.posting.execution_state)}
-                  </Badge>
+                  </StatusBadge>
                   {detail.review.terminal_action && (
                     <Badge tone="neutral">Decided: {humanize(detail.review.terminal_action)}</Badge>
                   )}
@@ -266,7 +269,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
               <>
                 <SheetSection title="What this charge was attached to">
                   <KeyValueGrid
-                    columns={3}
+                    columns={2}
                     items={[
                       {
                         label: "Amount",
@@ -295,11 +298,11 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                     <p className="text-sm text-muted-foreground">This posting has never been transmitted.</p>
                   ) : (
                     <div className="overflow-hidden rounded-md border border-border">
-                      <Table>
+                      <Table density="compact" label="Attempts">
                         <THead>
                           <TR>
-                            <TH>#</TH>
-                            <TH>P#</TH>
+                            <TH numeric>#</TH>
+                            <TH numeric>P#</TH>
                             <TH>Room / Reservation</TH>
                             <TH>Outcome</TH>
                             <TH>PMS answer</TH>
@@ -309,9 +312,9 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                         <TBody>
                           {detail.attempts.map((a) => (
                             <TR key={a.attempt_no}>
-                              <TD className="tabular">{a.attempt_no}</TD>
-                              <TD className="tabular">{a.p_number}</TD>
-                              <TD>
+                              <TD numeric>{a.attempt_no}</TD>
+                              <TD numeric>{a.p_number}</TD>
+                              <TD nowrap>
                                 {a.rn}
                                 {a.g_number ? ` / ${a.g_number}` : ""}
                               </TD>
@@ -339,28 +342,27 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                     </p>
                   )}
                   {detail.diagnostics.has_unknown_history ? (
-                    <div className="rounded-md border border-warning/30 bg-warning-subtle px-3.5 py-2.5 text-sm text-warning-subtle-foreground">
+                    <Callout tone="warning">
                       An attempt ended UNKNOWN. Nobody knows whether the folio was charged, and nothing has been
                       retried automatically — that is what this decision is for.
-                    </div>
+                    </Callout>
                   ) : null}
                 </SheetSection>
 
                 {detail.review.history.length > 0 ? (
                   <SheetSection title="Decisions already recorded">
-                    <Timeline
-                      items={detail.review.history.map((h, i) => ({
-                        key: String(i),
-                        title: humanize(h.action),
-                        when: formatDate(h.created_at),
-                        body: (
-                          <>
-                            <span className="block text-foreground">{h.reason}</span>
-                            {h.actor && <span className="text-xs">by {h.actor}</span>}
-                          </>
-                        ),
-                      }))}
-                    />
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <HistoryList
+                        label="Decisions already recorded"
+                        items={detail.review.history.map((h, i) => ({
+                          id: String(i),
+                          title: humanize(h.action),
+                          actor: h.actor || undefined,
+                          at: formatDate(h.created_at),
+                          summary: h.reason,
+                        }))}
+                      />
+                    </div>
                   </SheetSection>
                 ) : null}
 
@@ -407,7 +409,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                       </Field>
 
                       {spec?.needs_evidence ? (
-                        <div className="grid gap-4 sm:grid-cols-2">
+                        <FieldGrid cols={2}>
                           <Field label="Evidence source" htmlFor="review-ev-source">
                             <Select id="review-ev-source" value={evSource} onChange={(e) => setEvSource(e.target.value)}>
                               <option value="">Choose…</option>
@@ -430,7 +432,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                               onChange={(e) => setEvRef(e.target.value)}
                             />
                           </Field>
-                        </div>
+                        </FieldGrid>
                       ) : null}
 
                       <Field label="Your password" htmlFor="review-password" hint="Every decision is confirmed with your password.">
@@ -462,8 +464,8 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
               Close
             </Button>
             {canDecide && (
-              <Button type="submit" form={formId} disabled={busy || !action}>
-                {busy ? "Recording…" : "Record decision"}
+              <Button type="submit" form={formId} loading={busy} disabled={!action}>
+                Record decision
               </Button>
             )}
           </SheetFooter>

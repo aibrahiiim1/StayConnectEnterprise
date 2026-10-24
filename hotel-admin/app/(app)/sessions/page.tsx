@@ -7,24 +7,27 @@ import { usePoll } from "@/lib/use-poll";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { HelpList, HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge, StatusDot } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Segmented } from "@/components/ui/tabs";
-import { ConfirmDialog, DetailDialog } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { DetailsDrawer } from "@/components/ui/details-drawer";
 import { Explain } from "@/components/ui/tooltip";
 import { DList, Meter, MonoId, Metric, SkeletonRows } from "@/components/ui/misc";
 import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { formatBytes, formatRelative, formatDate, errMsg } from "@/lib/utils";
+import { formatBytes, formatRelative, formatDate } from "@/lib/utils";
 import {
   identifySession, methodLabel, stateWords, endReasonWords, speedPair, acquisitionOrdinal,
 } from "@/lib/session-words";
@@ -149,9 +152,7 @@ export default function SessionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Clients"
         title="Active sessions"
-        icon={<Monitor />}
         description="Which devices are online, and whose they are."
         help={
           <>
@@ -198,12 +199,11 @@ export default function SessionsPage() {
 
       <ErrorBanner err={err} />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid cols={4}>
         <StatCard
           label="Devices online"
           value={haveSummary ? summary.devices.toLocaleString() : "—"}
           icon={<Monitor />}
-          tone="primary"
         />
         <StatCard
           label="Clients online"
@@ -221,29 +221,31 @@ export default function SessionsPage() {
             label="Rooms online"
             value={summary.rooms.toLocaleString()}
             icon={<Hotel />}
-            hint="Distinct rooms signed in with a room number"
+            hint="Signed in with a room number"
           />
         )}
         <StatCard
           label="Data in this list"
           value={haveSummary ? formatBytes(summary.bytes) : "—"}
           icon={<ArrowDownUp />}
-          hint={tab === "active" ? "Recorded against every session online now" : "Recorded against every session in this list"}
+          hint={tab === "active" ? "Sessions online now" : "Sessions in this list"}
         />
-      </div>
+      </StatGrid>
 
-      <Card>
-        <CardBody className="border-b border-border py-3">
-          <Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          search={
             <SearchInput
               value={query}
               onChange={setQuery}
               placeholder={rooms ? "Room, name, username, IP or MAC…" : "Name, username, IP or MAC…"}
               label="Search sessions"
-              className="sm:w-80"
               delay={300}
             />
-            <div className="flex items-end gap-2">
+          }
+          actions={<ResultsCount count={rows?.length} noun="session" more={list.hasMore} />}
+        >
               <Select
                 value={kind}
                 onChange={(e) => setKind(e.target.value)}
@@ -262,16 +264,14 @@ export default function SessionsPage() {
                   Clear
                 </Button>
               )}
-            </div>
-          </Toolbar>
-          <ResultsCount count={rows?.length} noun="session" more={list.hasMore} />
-        </CardBody>
+        </FilterBar>
 
-        <CardBody className={cn("p-0", refreshing && rows !== null && refreshingClass)}>
+        <div className={cn(refreshing && rows !== null && refreshingClass)}>
           {rows === null ? (
             <SkeletonRows rows={6} cols={6} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Monitor />}
               title={
                 searching
@@ -289,7 +289,7 @@ export default function SessionsPage() {
               }
             />
           ) : (
-            <Table>
+            <Table label="Sessions">
               <THead>
                 <TR>
                   <TH>Client</TH>
@@ -297,8 +297,8 @@ export default function SessionsPage() {
                   <TH className="hidden lg:table-cell">Package</TH>
                   <TH className="hidden xl:table-cell">Allowance used</TH>
                   <TH className="hidden lg:table-cell">Network / device</TH>
-                  <TH className="hidden text-end sm:table-cell">Data</TH>
-                  <TH className="text-end">Status</TH>
+                  <TH numeric className="hidden sm:table-cell">Data (down / up)</TH>
+                  <TH>Status</TH>
                   {mayDisconnect && <TH><span className="sr-only">Actions</span></TH>}
                 </TR>
               </THead>
@@ -309,30 +309,31 @@ export default function SessionsPage() {
               </TBody>
             </Table>
           )}
-          {rows && rows.length > 0 && (list.offset > 0 || list.hasMore) && (
-            <div className="border-t border-border px-4 py-3">
-              <Pagination
-                offset={list.offset}
-                limit={list.pageSize}
-                shown={rows.length}
-                total={list.total}
-                hasMore={list.hasMore}
-                onChange={list.setOffset}
-              />
-            </div>
-          )}
-        </CardBody>
+        </div>
+        {rows && rows.length > 0 && (list.offset > 0 || list.hasMore) && (
+          <CardFooter>
+            <Pagination
+              offset={list.offset}
+              limit={list.pageSize}
+              shown={rows.length}
+              total={list.total}
+              hasMore={list.hasMore}
+              onChange={list.setOffset}
+            />
+          </CardFooter>
+        )}
       </Card>
 
-      <DetailDialog
+      <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
+        eyebrow="Session"
         title={detail ? identifySession(detail).title : ""}
         description={detail ? identifySession(detail).subtitle : undefined}
-        footer={
+        actions={
           detail?.state === "active" && mayDisconnect ? (
             <>
-              <Button variant="ghost" onClick={() => setDetail(null)}>Close</Button>
+              <Button variant="secondary" onClick={() => setDetail(null)}>Close</Button>
               <Button variant="danger" onClick={() => { setConfirm(detail); }}>
                 <Power /> Disconnect this device
               </Button>
@@ -340,8 +341,8 @@ export default function SessionsPage() {
           ) : undefined
         }
       >
-        {detail && <SessionDetail s={detail} />}
-      </DetailDialog>
+        {detail && <div className="space-y-5"><SessionDetail s={detail} /></div>}
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={confirm !== null}
@@ -399,28 +400,25 @@ const SessionRow = memo(function SessionRow({
   const Icon = KIND_ICON[(s.subject_kind ?? "") as keyof typeof KIND_ICON] ?? Monitor;
   const st = stateWords(s.state);
   return (
-    <TR>
-      <TD>
-        <button
-          type="button"
-          onClick={() => onOpen(s)}
-          className="group flex items-start gap-2.5 text-start"
-        >
-          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground">
+    <TR onClick={() => onOpen(s)}>
+      <TD className="max-w-[18rem]">
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface text-muted-foreground" aria-hidden>
             <Icon className="size-3.5" />
           </span>
           <span className="min-w-0">
             <span
               className={
                 id.anonymous
-                  ? "block font-mono text-xs text-muted-foreground group-hover:text-foreground"
-                  : "block font-medium group-hover:text-primary"
+                  ? "block truncate font-mono text-xs text-muted-foreground"
+                  : "block truncate font-medium"
               }
+              title={id.title}
             >
               {id.title}
             </span>
             {id.subtitle && (
-              <span className="block truncate text-xs text-muted-foreground">{id.subtitle}</span>
+              <span className="block truncate text-xs text-muted-foreground" title={id.subtitle}>{id.subtitle}</span>
             )}
             {id.anonymous && (
               <span className="block text-2xs text-muted-foreground">
@@ -428,17 +426,17 @@ const SessionRow = memo(function SessionRow({
               </span>
             )}
           </span>
-        </button>
+        </div>
       </TD>
-      <TD className="hidden text-muted-foreground md:table-cell">
+      <TD nowrap className="hidden text-muted-foreground md:table-cell">
         <div className="text-xs">{methodLabel(s.credential_method)}</div>
         <div className="text-2xs">{formatRelative(s.started_at)}</div>
       </TD>
-      <TD className="hidden lg:table-cell">
+      <TD nowrap className="hidden max-w-[13rem] lg:table-cell">
         {s.package_name || s.package_code ? (
           <>
             <div className="flex items-center gap-1.5 text-sm">
-              <span>{s.package_name || s.package_code}</span>
+              <span className="min-w-0 truncate" title={s.package_name || s.package_code || undefined}>{s.package_name || s.package_code}</span>
               {acquisitionOrdinal(s.package_acquisitions) && (
                 <span title="How many times this client has had this package, counting this one">
                   <Badge tone="warn">{acquisitionOrdinal(s.package_acquisitions)}</Badge>
@@ -456,18 +454,16 @@ const SessionRow = memo(function SessionRow({
       <TD className="hidden min-w-40 xl:table-cell">
         <AllowanceCell s={s} />
       </TD>
-      <TD className="hidden lg:table-cell">
-        <div className="text-xs">{s.guest_network_name ?? "—"}</div>
+      <TD nowrap className="hidden max-w-[11rem] lg:table-cell">
+        <div className="truncate text-xs" title={s.guest_network_name ?? undefined}>{s.guest_network_name ?? "—"}</div>
         <div className="font-mono text-2xs text-muted-foreground">{s.ip}</div>
       </TD>
-      <TD className="hidden text-end sm:table-cell">
-        <div className="tabular">{formatBytes(s.bytes_down)}</div>
-        <div className="text-2xs tabular text-muted-foreground">
-          {formatBytes(s.bytes_up)} up
-        </div>
+      <TD numeric className="hidden sm:table-cell">
+        {formatBytes(s.bytes_down)}
+        <span className="text-muted-foreground"> / {formatBytes(s.bytes_up)}</span>
       </TD>
-      <TD className="text-end">
-        <Badge tone={st.tone} dot>{st.label}</Badge>
+      <TD nowrap>
+        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
         {s.end_reason && (
           <div className="mt-0.5 text-2xs text-muted-foreground">
             {endReasonWords(s.end_reason)}
@@ -475,16 +471,15 @@ const SessionRow = memo(function SessionRow({
         )}
       </TD>
       {mayDisconnect && (
-        <TD className="text-end">
+        <TD className="w-0">
           {s.state === "active" && (
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={`Disconnect ${s.mac}`}
-              onClick={() => onDisconnect(s)}
-            >
-              <Power /> Disconnect
-            </Button>
+            <RowActions
+              subject={id.title}
+              items={[
+                { label: "Details", onSelect: () => onOpen(s) },
+                { label: "Disconnect this device", icon: <Power />, danger: true, onSelect: () => onDisconnect(s) },
+              ]}
+            />
           )}
         </TD>
       )}
@@ -535,7 +530,7 @@ function SessionDetail({ s }: { s: Session }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={st.tone} dot>{st.label}</Badge>
+        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
         <Badge tone="neutral">{id.kindLabel}</Badge>
         {s.entitlement_status && s.entitlement_status !== "ACTIVE" && (
           <Badge tone="warn">Access {s.entitlement_status.toLowerCase()}</Badge>

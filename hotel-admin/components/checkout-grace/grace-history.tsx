@@ -3,7 +3,6 @@
 // Publication history is append-only; Show more only collapses older versions.
 
 import * as React from "react";
-import { History } from "lucide-react";
 import {
   type GraceHistoryItem,
   changedTerms,
@@ -15,8 +14,9 @@ import {
   guestReceivesSentence,
   reasonLabel,
 } from "@/lib/api/checkout-grace";
-import { Timeline, KeyValueGrid } from "@/components/ui/data";
-import { Sheet, SheetBody, SheetContent, SheetHeader, SheetSection } from "@/components/ui/sheet";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelative } from "@/lib/utils";
@@ -32,117 +32,107 @@ function headline(p: GraceHistoryItem["policy"]): string {
   return bits.join(" · ") || "Terms not recorded";
 }
 
+// Newest first, so the previous version is the next entry.
+const previousOf = (history: GraceHistoryItem[], h: GraceHistoryItem) => history[history.indexOf(h) + 1];
+
+function changeLine(history: GraceHistoryItem[], h: GraceHistoryItem): string {
+  const prev = previousOf(history, h);
+  if (!prev) return `First recorded version: ${headline(h.policy)}`;
+  const changes = changedTerms(prev.policy, h.policy);
+  if (changes.length === 0) return `No term changes from version ${prev.config_version}`;
+  return changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(", ");
+}
+
 export function GraceHistory({ history, inForce }: { history: GraceHistoryItem[]; inForce: number }) {
   const [showAll, setShowAll] = React.useState(false);
-  const [open, setOpen] = React.useState<GraceHistoryItem | null>(null);
+  const [openVersion, setOpenVersion] = React.useState<number | null>(null);
   const shown = showAll ? history : history.slice(0, PREVIEW);
-
-  const items = shown.map((h) => {
-    const idx = history.indexOf(h);
-    const prev = history[idx + 1]; // newest first, so the previous version is the next entry
-    const changes = prev ? changedTerms(prev.policy, h.policy) : [];
-    return {
-      key: String(h.config_version),
-      tone: (h.config_version === inForce ? "ok" : "neutral") as "ok" | "neutral",
-      title: (
-        <span className="inline-flex flex-wrap items-center gap-2">
-          Version {h.config_version}
-          {h.config_version === inForce && (
-            <Badge tone="ok" dot>
-              In force
-            </Badge>
-          )}
-        </span>
-      ),
-      when: <time dateTime={h.published_at} title={fmtWhen(h.published_at)}>{formatRelative(h.published_at)}</time>,
-      body: (
-        <div className="space-y-1.5">
-          <div>
-            {h.actor} · <span title={h.reason_code}>{reasonLabel(h.reason_code)}</span>
-          </div>
-          {prev ? (
-            changes.length ? (
-              <ul className="space-y-0.5 text-xs" aria-label={`Changes in version ${h.config_version}`}>
-                {changes.map((c) => (
-                  <li key={c.key}>
-                    <span className="text-foreground">{c.label}</span>: {c.from} → {c.to}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-xs">No term changes from version {prev.config_version}.</div>
-            )
-          ) : (
-            <div className="text-xs">First recorded version: {headline(h.policy)}</div>
-          )}
-          <Button variant="link" size="xs" className="h-auto" onClick={() => setOpen(h)}>
-            View terms of version {h.config_version}
-          </Button>
-        </div>
-      ),
-    };
-  });
+  const open = history.find((h) => h.config_version === openVersion) ?? null;
+  const prev = open ? previousOf(history, open) : undefined;
+  const changes = open && prev ? changedTerms(prev.policy, open.policy) : [];
 
   return (
     <>
       <section aria-label="Grace Period policy history">
-        <Timeline items={items} emptyLabel="No version has been published yet." />
+        <HistoryList
+          label="Published versions"
+          selectedId={openVersion === null ? null : String(openVersion)}
+          onSelect={(it) => setOpenVersion(Number(it.id))}
+          emptyLabel="No version has been published yet."
+          items={shown.map((h) => ({
+            id: String(h.config_version),
+            title: `Version ${h.config_version}`,
+            badge: h.config_version === inForce ? <Badge tone="ok" dot size="sm">In force</Badge> : undefined,
+            tone: h.config_version === inForce ? "ok" : "neutral",
+            actor: `${h.actor} · ${reasonLabel(h.reason_code)}`,
+            at: <time dateTime={h.published_at} title={fmtWhen(h.published_at)}>{formatRelative(h.published_at)}</time>,
+            summary: changeLine(history, h),
+          }))}
+        />
       </section>
       {history.length > PREVIEW && (
-        <Button variant="secondary" size="sm" className="mt-4" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? `Show the latest ${PREVIEW} only` : `Show ${history.length - PREVIEW} older version${history.length - PREVIEW === 1 ? "" : "s"}`}
-        </Button>
+        <div className="border-t border-border px-4 py-2.5">
+          <Button variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? `Show the latest ${PREVIEW} only` : `Show ${history.length - PREVIEW} older version${history.length - PREVIEW === 1 ? "" : "s"}`}
+          </Button>
+        </div>
       )}
 
-      <Sheet open={open !== null} onOpenChange={(v) => !v && setOpen(null)}>
-        <SheetContent width="md">
-          {open && (
-            <>
-              <SheetHeader
-                eyebrow="Grace Period history"
-                icon={<History />}
-                title={`Version ${open.config_version}`}
-                description={`Published ${fmtWhen(open.published_at)} by ${open.actor}`}
-                badges={
-                  open.config_version === inForce ? (
-                    <Badge tone="ok" dot>
-                      In force
-                    </Badge>
-                  ) : (
-                    <Badge tone="neutral">Superseded</Badge>
-                  )
-                }
+      <DetailsDrawer
+        open={open !== null}
+        onOpenChange={(v) => !v && setOpenVersion(null)}
+        eyebrow="Grace Period version"
+        title={open ? `Version ${open.config_version}` : ""}
+        description={open ? `Published ${fmtWhen(open.published_at)} by ${open.actor}` : undefined}
+        badges={open ? (
+          open.config_version === inForce
+            ? <Badge tone="ok" dot>In force</Badge>
+            : <Badge tone="neutral">Superseded</Badge>
+        ) : undefined}
+      >
+        {open && (
+          <>
+            <DetailsSection title="Why">
+              <DescriptionList
+                items={[
+                  { label: "Reason", value: reasonLabel(open.reason_code), hint: open.reason_code || undefined },
+                  { label: "Published by", value: open.actor },
+                ]}
               />
-              <SheetBody>
-                <SheetSection title="Why">
-                  <KeyValueGrid
-                    items={[
-                      { label: "Reason", value: reasonLabel(open.reason_code), hint: open.reason_code || undefined },
-                      { label: "Published by", value: open.actor },
-                    ]}
+            </DetailsSection>
+            <DetailsSection title={prev ? `Changes from version ${prev.config_version}` : "Changes"}>
+              <section aria-label={`Changes in version ${open.config_version}`}>
+                {prev ? (
+                  <ChangeDiff
+                    changes={changes.map((c) => ({ field: c.label, before: c.from, after: c.to }))}
+                    beforeLabel={`Version ${prev.config_version}`}
+                    afterLabel={`Version ${open.config_version}`}
+                    emptyLabel={`No term changes from version ${prev.config_version}.`}
                   />
-                </SheetSection>
-                {open.policy ? (
-                  <>
-                    <SheetSection title="What a departing guest received">
-                      <p className="text-sm leading-relaxed">{guestReceivesSentence(open.policy)}</p>
-                    </SheetSection>
-                    <SheetSection title="Terms">
-                      <section aria-label={`Version ${open.config_version} terms`}>
-                        <KeyValueGrid
-                          items={compareTerms(null, open.policy).map((c) => ({ label: c.label, value: c.to }))}
-                        />
-                      </section>
-                    </SheetSection>
-                  </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">This version&rsquo;s terms were not recorded.</p>
+                  <p className="text-sm text-muted-foreground">The first recorded version.</p>
                 )}
-              </SheetBody>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+              </section>
+            </DetailsSection>
+            {open.policy ? (
+              <>
+                <DetailsSection title="What a departing guest received">
+                  <p className="text-sm leading-relaxed">{guestReceivesSentence(open.policy)}</p>
+                </DetailsSection>
+                <DetailsSection title="Terms">
+                  <section aria-label={`Version ${open.config_version} terms`}>
+                    <DescriptionList
+                      items={compareTerms(null, open.policy).map((c) => ({ label: c.label, value: c.to }))}
+                    />
+                  </section>
+                </DetailsSection>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">This version&rsquo;s terms were not recorded.</p>
+            )}
+          </>
+        )}
+      </DetailsDrawer>
     </>
   );
 }

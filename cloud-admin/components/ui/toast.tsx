@@ -1,6 +1,6 @@
 "use client";
 
-// Keep durable information on the page; toasts only confirm or report actions.
+// Toasts only confirm or report an action; anything the operator must still see later stays on the page.
 
 import * as React from "react";
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from "lucide-react";
@@ -33,15 +33,13 @@ const ICON: Record<Tone, React.ComponentType<{ className?: string }>> = {
 
 const TONE: Record<Tone, string> = {
   ok: "text-success",
-  warn: "text-warning-subtle-foreground",
+  warn: "text-warning",
   err: "text-destructive",
   info: "text-info",
 };
 
-// Allow time to read confirmations; interaction pauses the timer.
-const DISMISS_AFTER_MS = 8000;
-// The live region must exist before content arrives.
-const REGION = "flex w-full flex-col items-center gap-2 sm:items-end";
+// Errors stay until dismissed so they cannot vanish before the operator reads them.
+const DISMISS_AFTER_MS: Partial<Record<Tone, number>> = { ok: 5000, info: 5000, warn: 8000 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = React.useState<ToastItem[]>([]);
@@ -61,67 +59,46 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Pause while the operator reads a toast; errors stay until dismissed.
-  const [paused, setPaused] = React.useState(false);
-
-  // Separate live regions announce errors assertively and confirmations politely.
-  const polite = items.filter((t) => t.tone !== "err");
-  const assertive = items.filter((t) => t.tone === "err");
-
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6"
-        onMouseEnter={() => setPaused(true)}
-        onMouseLeave={() => setPaused(false)}
-        onFocus={() => setPaused(true)}
-        onBlur={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
-        }}
-      >
-        {/* Keep empty live regions mounted; Safari drops display:contents regions from the accessibility tree. */}
-        <div aria-live="polite" aria-relevant="additions" className={REGION}>
-          {polite.map((t) => (
-            <ToastCard key={t.id} item={t} paused={paused} onDismiss={dismiss} />
-          ))}
-        </div>
-        <div aria-live="assertive" aria-relevant="additions" className={REGION}>
-          {assertive.map((t) => (
-            <ToastCard key={t.id} item={t} paused={paused} onDismiss={dismiss} />
-          ))}
-        </div>
+      {/* Each toast owns its live role; nesting live regions would announce twice. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end sm:p-6">
+        {items.map((t) => (
+          <ToastCard key={t.id} item={t} onDismiss={dismiss} />
+        ))}
       </div>
     </Ctx.Provider>
   );
 }
 
-function ToastCard({
-  item: t,
-  paused,
-  onDismiss,
-}: {
-  item: ToastItem;
-  paused: boolean;
-  onDismiss: (id: number) => void;
-}) {
-  // Pausing preserves elapsed time.
-  const remaining = React.useRef(DISMISS_AFTER_MS);
+// The timer pauses while the pointer or keyboard focus is on the toast, and keeps the time already elapsed.
+function ToastCard({ item: t, onDismiss }: { item: ToastItem; onDismiss: (id: number) => void }) {
+  const [paused, setPaused] = React.useState(false);
+  const remaining = React.useRef(DISMISS_AFTER_MS[t.tone]);
+
   React.useEffect(() => {
-    if (t.tone === "err" || paused) return;
+    if (remaining.current === undefined || paused) return;
     const started = Date.now();
     const timer = window.setTimeout(() => onDismiss(t.id), remaining.current);
     return () => {
       window.clearTimeout(timer);
-      remaining.current = Math.max(0, remaining.current - (Date.now() - started));
+      if (remaining.current !== undefined) remaining.current = Math.max(0, remaining.current - (Date.now() - started));
     };
-  }, [paused, t.id, t.tone, onDismiss]);
+  }, [paused, onDismiss, t.id]);
 
   const Icon = ICON[t.tone];
   return (
     <div
+      role={t.tone === "err" ? "alert" : "status"}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
+      }}
       className={cn(
-        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border border-border bg-popover p-3.5 text-popover-foreground shadow-lg",
+        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border border-border bg-popover px-3.5 py-3 text-popover-foreground shadow-overlay",
         "animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none",
       )}
     >
@@ -134,8 +111,8 @@ function ToastCard({
         type="button"
         onClick={() => onDismiss(t.id)}
         className={cn(
-          "-me-1.5 -mt-1.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-          "hover:bg-surface hover:text-foreground pointer-coarse:size-11",
+          "-me-1.5 -mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+          "hover:bg-accent hover:text-foreground pointer-coarse:size-11",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
       >

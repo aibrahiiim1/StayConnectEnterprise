@@ -4,7 +4,7 @@
 // Saving site-wide terms requires a reason and operator password.
 
 import * as React from "react";
-import { History, Mail, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import {
   api,
   type SelfServiceBound,
@@ -16,11 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input, Select } from "@/components/ui/input";
-import { Timeline } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
 import { Skeleton, Switch } from "@/components/ui/misc";
 import { SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { formatRelative } from "@/lib/utils";
+import { formatDate, formatRelative } from "@/lib/utils";
 
 type NumericKey = Exclude<keyof SelfServiceSettings, "verification_required" | "suspension_policy">;
 
@@ -96,6 +98,67 @@ export function changeSummary(c: SelfServiceChange): string {
   if (parts.length) return parts.join("; ");
   const first = ALL_KEYS.every((k) => c[`old_${k}`] === undefined || c[`old_${k}`] === null);
   return first ? "First saved settings" : "Settings saved";
+}
+
+function changeRows(c: SelfServiceChange) {
+  return ALL_KEYS
+    .filter((k) => c[`new_${k}`] !== undefined && c[`old_${k}`] !== c[`new_${k}`])
+    .map((k) => {
+      const ov = c[`old_${k}`];
+      return { field: LABELS[k], before: ov === undefined || ov === null ? undefined : valueWords(k, ov), after: valueWords(k, c[`new_${k}`]) };
+    });
+}
+
+const HISTORY_SHOWN = 3;
+
+function ChangeHistory({ changes }: { changes: SelfServiceChange[] }) {
+  const [open, setOpen] = React.useState<number | null>(null);
+  const [all, setAll] = React.useState(false);
+  const shown = all ? changes : changes.slice(0, HISTORY_SHOWN);
+  const sel = open !== null ? changes[open] : null;
+  return (
+    <>
+      <HistoryList
+        label="Email accounts settings history"
+        className="rounded-md border border-border"
+        onSelect={(it) => setOpen(Number(it.id))}
+        selectedId={open !== null ? String(open) : null}
+        items={shown.map((c, i) => ({
+          id: String(i),
+          title: changeSummary(c),
+          actor: c.changed_by || undefined,
+          at: formatRelative(c.changed_at),
+          summary: c.change_reason ? `“${c.change_reason}”` : undefined,
+          tone: "info" as const,
+        }))}
+      />
+      {changes.length > HISTORY_SHOWN && (
+        <Button type="button" size="sm" variant="ghost" onClick={() => setAll((v) => !v)}>
+          {all ? "Show latest" : `View all ${changes.length}`}
+        </Button>
+      )}
+      <DetailsDrawer
+        open={sel !== null}
+        onOpenChange={(v) => !v && setOpen(null)}
+        eyebrow="Email accounts settings change"
+        title={sel ? formatDate(sel.changed_at) : ""}
+      >
+        {sel && (
+          <>
+            <DetailsSection title="Changes">
+              <ChangeDiff changes={changeRows(sel)} />
+            </DetailsSection>
+            <DetailsSection title="Record">
+              <DescriptionList items={[
+                { label: "Changed by", value: sel.changed_by || "—" },
+                { label: "Reason", value: sel.change_reason || "—" },
+              ]} />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
+    </>
+  );
 }
 
 /** Server reasons require 4–500 characters. */
@@ -189,13 +252,11 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Mail aria-hidden /> Email accounts: verification and limits</CardTitle>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Email accounts: verification and limits</CardTitle>
           <CardDescription>
-            A client who registers with an email address and a password can use the Internet straight away. They then
-            have a set time to confirm the address from the email they are sent. These settings decide that time, what
-            happens if they do not, and how often they may ask for help.
+            How long a newly registered client has to confirm their address, and how often they may ask for help.
           </CardDescription>
         </div>
       </CardHeader>
@@ -304,25 +365,17 @@ export function EmailAccountsSettingsCard({ canEdit }: { canEdit: boolean }) {
               <p className="text-xs text-muted-foreground">This appliance has no site yet, so these are the defaults and nothing can be saved.</p>
             )}
 
-            <div className="space-y-2">
-              <p className="inline-flex items-center gap-2 text-sm font-medium">
-                <History className="size-4" aria-hidden /> Change history
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {data.config_version === 0 || !data.updated_at
-                  ? "Not changed yet: the defaults are in use."
-                  : `Last changed ${formatRelative(data.updated_at)}${data.updated_by ? ` by ${data.updated_by}` : ""}.`}
-              </p>
+            <div className="space-y-2 border-t border-border pt-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-label">Change history</p>
+                <p className="text-xs text-muted-foreground">
+                  {data.config_version === 0 || !data.updated_at
+                    ? "Not changed yet: the defaults are in use."
+                    : `Last changed ${formatRelative(data.updated_at)}${data.updated_by ? ` by ${data.updated_by}` : ""}.`}
+                </p>
+              </div>
               {(data.changes ?? []).length > 0 && (
-                <Timeline
-                  items={(data.changes ?? []).map((c, i) => ({
-                    key: `${c.changed_at}-${i}`,
-                    title: changeSummary(c),
-                    when: formatRelative(c.changed_at),
-                    body: [c.changed_by, c.change_reason && `“${c.change_reason}”`].filter(Boolean).join(" · "),
-                    tone: "info" as const,
-                  }))}
-                />
+                <ChangeHistory changes={data.changes ?? []} />
               )}
             </div>
           </form>

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { chooseInRow, rowMenuHas } from "./row-actions-helper";
 import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -61,20 +62,20 @@ describe("Client accounts — self-service email accounts", () => {
     const late = row("late@example.com");
     expect(within(late).getByText("Self-service")).toBeTruthy();
     expect(within(late).getByText("Suspended: email not verified")).toBeTruthy();
-    expect(within(late).queryByRole("button", { name: /password/i })).toBeNull();
-    expect(within(late).getByRole("button", { name: /resend verification email/i })).toBeTruthy();
+    expect(await rowMenuHas(late, /password/i)).toBe(false);
+    expect(await rowMenuHas(late, /resend verification email/i)).toBe(true);
 
     expect(within(row("new@example.com")).getByText(/^Verify by /)).toBeTruthy();
 
     const done = row("done@example.com");
     expect(within(done).getByText("Email verified")).toBeTruthy();
-    expect(within(done).queryByRole("button", { name: /resend verification email/i })).toBeNull();
-    expect(within(done).queryByRole("button", { name: /password/i })).toBeNull();
+    expect(await rowMenuHas(done, /resend verification email/i)).toBe(false);
+    expect(await rowMenuHas(done, /password/i)).toBe(false);
 
     const staff = row("room-desk");
     expect(within(staff).queryByText("Self-service")).toBeNull();
-    expect(within(staff).getByRole("button", { name: /password/i })).toBeTruthy();
-    expect(within(staff).queryByRole("button", { name: /resend verification email/i })).toBeNull();
+    expect(await rowMenuHas(staff, /password/i)).toBe(true);
+    expect(await rowMenuHas(staff, /resend verification email/i)).toBe(false);
   });
 
   it("resends through edged, and says so when the appliance cannot", async () => {
@@ -84,17 +85,17 @@ describe("Client accounts — self-service email accounts", () => {
     const { ToastProvider } = await import("@/components/ui/toast");
     render(<ToastProvider><Page /></ToastProvider>);
     await screen.findByText("late@example.com");
-    await userEvent.click(within(row("late@example.com")).getByRole("button", { name: /resend verification email/i }));
+    await chooseInRow(row("late@example.com"), /resend verification email/i);
     await waitFor(() => expect(post).toHaveBeenCalledWith("/guest-accounts/s1/resend-verification"));
     expect(await screen.findByText(/verification email queued for late@example.com/i)).toBeTruthy();
 
     post.mockRejectedValueOnce(new ApiError(501, { error: "resend_unavailable",
       message: "This appliance's sign-in service cannot resend verification emails yet." }));
-    await userEvent.click(within(row("new@example.com")).getByRole("button", { name: /resend verification email/i }));
+    await chooseInRow(row("new@example.com"), /resend verification email/i);
     expect(await screen.findByText(/cannot be resent from here yet/i)).toBeTruthy();
 
     post.mockRejectedValueOnce(new ApiError(429, { error: "resend_wait", retry_after_seconds: 42 }));
-    await userEvent.click(within(row("new@example.com")).getByRole("button", { name: /resend verification email/i }));
+    await chooseInRow(row("new@example.com"), /resend verification email/i);
     expect(await screen.findByText(/try again in 42 seconds/i)).toBeTruthy();
   });
 });

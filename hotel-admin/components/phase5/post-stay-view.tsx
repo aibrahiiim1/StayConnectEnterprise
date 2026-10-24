@@ -4,20 +4,21 @@
 // Plaintext PINs are never stored, so a reset response can reveal its new PIN only once.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, KeyRound, ShieldOff, PauseCircle } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Checkbox, Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { DetailDialog, DialogForm } from "@/components/ui/dialog";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DialogForm } from "@/components/ui/dialog";
+import { DetailsDrawer } from "@/components/ui/details-drawer";
+import { RowActions } from "@/components/ui/row-actions";
+import { DescriptionList } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 import { ConsequenceList, OneTimeReveal, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
@@ -144,9 +145,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Post-stay access"
-        icon={<CalendarClock />}
         description="Reset a lost post-stay PIN, or end a guest's post-stay access."
         help={
           <>
@@ -175,24 +174,24 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
       {rolesKnown && !canAct && <ReadOnlyNotice />}
       <ErrorBanner err={error} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Can reconnect now" value={rows ? counts.usable.toLocaleString() : "—"} tone="ok" icon={<KeyRound />} />
-        <StatCard icon={<PauseCircle />}
+      <StatGrid cols={3}>
+        <StatCard label="Can reconnect now" value={rows ? counts.usable.toLocaleString() : "—"} />
+        <StatCard
           label="Active, not usable"
           value={rows ? counts.notUsable.toLocaleString() : "—"}
           hint="Expired, or the stay moved on"
         />
-        <StatCard label="Ended by staff" value={rows ? counts.ended.toLocaleString() : "—"} icon={<ShieldOff />} />
-      </div>
+        <StatCard label="Ended by staff" value={rows ? counts.ended.toLocaleString() : "—"} />
+      </StatGrid>
 
       <Card className="overflow-hidden">
         {rows === null ? (
           <SkeletonRows rows={4} cols={6} />
         ) : rows.length === 0 ? (
-          <EmptyState
+          <EmptyState size="sm"
             icon={<CalendarClock />}
             title="No post-stay access yet"
-            hint="A departing guest who is given post-stay access appears here with their room and how long the PIN is valid."
+            hint="A departing guest given post-stay access appears here with their room and PIN validity."
           />
         ) : (
           <Table>
@@ -203,7 +202,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                 <TH className="hidden lg:table-cell">Stay</TH>
                 <TH>State</TH>
                 <TH className="hidden sm:table-cell">PIN</TH>
-                <TH>Valid until</TH>
+                <TH className="hidden sm:table-cell">Valid until</TH>
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
@@ -211,45 +210,38 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
               {rows.map((row) => {
                 const st = stateOf(row);
                 return (
-                  <TR key={row.id}>
-                    <TD>
-                      <button
-                        type="button"
-                        onClick={() => setDetail(row)}
-                        className="text-start font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                      >
-                        {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
-                      </button>
+                  <TR key={row.id} onClick={() => setDetail(row)}>
+                    <TD nowrap className="font-medium">
+                      {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
                     </TD>
-                    <TD className="hidden text-sm md:table-cell">{row.external_reservation_id || "—"}</TD>
-                    <TD className="hidden text-sm text-muted-foreground lg:table-cell">
+                    <TD truncate title={row.external_reservation_id || undefined} className="hidden max-w-[12rem] md:table-cell">{row.external_reservation_id || "—"}</TD>
+                    <TD muted className="hidden lg:table-cell">
                       {stayWords(row.stay_status)}
-                      <div className="text-caption">Stay episode {row.origin_lifecycle_version}</div>
+                      <div className="text-xs">Stay episode {row.origin_lifecycle_version}</div>
                     </TD>
-                    <TD>
-                      <Badge tone={st.tone} dot>{st.label}</Badge>
-                      {st.hint && <div className="mt-0.5 text-caption text-muted-foreground">{st.hint}</div>}
+                    <TD nowrap>
+                      <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+                      {st.hint && <div className="mt-0.5 text-xs text-muted-foreground">{st.hint}</div>}
                     </TD>
-                    <TD className="hidden text-sm tabular text-muted-foreground sm:table-cell">
+                    <TD nowrap muted className="hidden tabular sm:table-cell">
                       {row.pin_generation === 1 ? "First PIN" : `Reset ${row.pin_generation - 1}×`}
                     </TD>
-                    <TD className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(row.valid_until)}</TD>
-                    <TD className="whitespace-nowrap text-end">
+                    <TD nowrap muted className="hidden sm:table-cell">{formatDate(row.valid_until)}</TD>
+                    <TD className="w-0">
                       {canAct && row.status === "ACTIVE" ? (
-                        <div className="flex justify-end gap-1.5">
-                          <Button size="sm" variant="secondary"
-                            aria-label={`Reset PIN, ${row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}`}
-                            onClick={() => setDialog({ kind: "reset", row })}>
-                            Reset PIN
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive"
-                            aria-label={`End access, ${row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}`}
-                            onClick={() => setDialog({ kind: "revoke", row })}>
-                            End access
-                          </Button>
-                        </div>
+                        <RowActions
+                          subject={row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}
+                          primary={{ label: "Reset PIN", onSelect: () => setDialog({ kind: "reset", row }) }}
+                          items={[
+                            { label: "Details", onSelect: () => setDetail(row) },
+                            { label: "End access", danger: true, onSelect: () => setDialog({ kind: "revoke", row }) },
+                          ]}
+                        />
                       ) : (
-                        <Button size="sm" variant="ghost" onClick={() => setDetail(row)}>Details</Button>
+                        <RowActions
+                          subject={row.normalized_room_number ? `room ${row.normalized_room_number}` : "no room"}
+                          primary={{ label: "Details", onSelect: () => setDetail(row) }}
+                        />
                       )}
                     </TD>
                   </TR>
@@ -260,25 +252,27 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
         )}
       </Card>
 
-      <DetailDialog
+      <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
+        eyebrow="Post-stay access"
         title={detail?.normalized_room_number ? `Room ${detail.normalized_room_number}` : "Post-stay access"}
         description={detail ? `Reservation ${detail.external_reservation_id || "—"}` : undefined}
-        size="md"
+        badges={detail ? (
+          <>
+            <StatusBadge tone={stateOf(detail).tone}>{stateOf(detail).label}</StatusBadge>
+            <Badge tone="neutral">{stayWords(detail.stay_status)}</Badge>
+          </>
+        ) : undefined}
       >
         {detail && (
           <>
-            <div className="flex flex-wrap gap-2">
-              <Badge tone={stateOf(detail).tone} dot>{stateOf(detail).label}</Badge>
-              <Badge tone="neutral">{stayWords(detail.stay_status)}</Badge>
-            </div>
             {detail.status === "REVOKED" && (
               <Callout tone="neutral" title="Access was ended for this stay">
                 {detail.revoke_reason ? <>Reason recorded: {detail.revoke_reason}</> : "No reason was recorded."}
               </Callout>
             )}
-            <KeyValueGrid
+            <DescriptionList
               items={[
                 { label: "Stay episode", value: String(detail.origin_lifecycle_version) },
                 { label: "PIN generation", value: String(detail.pin_generation) },
@@ -292,7 +286,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
             />
           </>
         )}
-      </DetailDialog>
+      </DetailsDrawer>
 
       <DialogForm
         open={dialog !== null}
@@ -322,13 +316,12 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
           />
         )}
         {dialog?.kind === "reset" && (
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" checked={extendValidity} onChange={(e) => setExtendValidity(e.target.checked)} />
-            <span>
-              Also restart the validity: the new PIN works for 24 hours from now. Leave this off to keep it valid
-              until {formatDate(dialog.row.valid_until)}.
-            </span>
-          </label>
+          <Checkbox
+            checked={extendValidity}
+            onChange={(e) => setExtendValidity(e.target.checked)}
+            label="Also restart the validity"
+            description={`The new PIN works for 24 hours from now. Leave this off to keep it valid until ${formatDate(dialog.row.valid_until)}.`}
+          />
         )}
         <Field label="Reason" required hint="Recorded in the activity log. At least 4 characters.">
           <Input

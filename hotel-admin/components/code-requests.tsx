@@ -14,8 +14,8 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
-import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/table";
-import { KeyRound, LifeBuoy } from "lucide-react";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { KeyRound } from "lucide-react";
 
 export type CodeRequest = {
   challenge_id: string; channel: string; destination: string; issued_at: string; expires_at: string;
@@ -53,28 +53,26 @@ export function CodeRequestsCard({ roles }: { roles: string[] }) {
 
   return (
     <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><LifeBuoy aria-hidden /> Code requests</CardTitle>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Code requests</CardTitle>
           <CardDescription>
-            Clients who asked for a sign-in code by SMS or WhatsApp in the last 24 hours, and the device that asked. If a
-            client cannot get their code, you can read it to them. That asks for your password and is recorded.
+            SMS and WhatsApp code requests in the last 24 hours. Showing a code to read to a client is recorded.
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()}>Refresh</Button>
+        <Button variant="secondary" size="sm" onClick={() => void load()}>Refresh</Button>
       </CardHeader>
-      <CardBody>
+      <CardBody className={data && data.requests.length > 0 ? "p-0" : undefined}>
         {error ? <ErrorBanner err={error} /> : null}
         {!data && !error && <SkeletonRows rows={3} />}
         {data && data.requests.length === 0 && <p className="text-sm text-muted-foreground">No code requests in the last 24 hours.</p>}
         {data && data.requests.length > 0 && (
-          <TableWrap>
-            <Table>
-              <THead><TR><TH>Requested</TH><TH>Sent to</TH><TH>Code</TH><TH><span className="sr-only">Actions</span></TH></TR></THead>
+            <Table label="Code requests">
+              <THead><TR><TH>Requested</TH><TH>Sent to</TH><TH>Code</TH><TH pinEnd><span className="sr-only">Actions</span></TH></TR></THead>
               <TBody>
                 {data.requests.map((r) => (
                   <TR key={r.challenge_id}>
-                    <TD className="whitespace-nowrap">{formatDate(r.issued_at)}</TD>
+                    <TD nowrap>{formatDate(r.issued_at)}</TD>
                     <TD><div className="break-all">{r.destination}</div><div className="text-xs text-muted-foreground">{CHANNEL[r.channel] ?? r.channel}{r.device_mac ? ` · ${r.device_mac}` : ""}</div></TD>
                     <TD>
                       <Badge tone={STATE[r.state].tone}>{STATE[r.state].label}</Badge>
@@ -84,19 +82,18 @@ export function CodeRequestsCard({ roles }: { roles: string[] }) {
                         <div className="text-xs text-muted-foreground">Existing client — the code cannot be shown; they must use the code they received.</div>
                       )}
                     </TD>
-                    <TD className="whitespace-nowrap text-right">
+                    <TD pinEnd className="w-0 whitespace-nowrap text-end">
                       {mayReveal && r.code_available && (
-                        <Button size="sm" variant="outline" onClick={() => setRevealing(r)}><KeyRound aria-hidden /> Show code</Button>
+                        <Button size="xs" variant="ghost" className="text-foreground" onClick={() => setRevealing(r)}><KeyRound aria-hidden /> Show code</Button>
                       )}
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
-          </TableWrap>
         )}
         {data && !data.code_copy_available && mayReveal && (
-          <p className="mt-3 text-xs text-muted-foreground">Codes cannot be shown on this appliance: its local sealing key is missing.</p>
+          <p className={data.requests.length > 0 ? "border-t border-border px-5 py-3 text-xs text-muted-foreground" : "mt-3 text-xs text-muted-foreground"}>Codes cannot be shown on this appliance: its local sealing key is missing.</p>
         )}
       </CardBody>
       <RevealDialog request={revealing} onClose={() => setRevealing(null)} />

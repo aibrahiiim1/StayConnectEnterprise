@@ -331,7 +331,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     mockLoad([], [ONEDAY]);
     p.mockResolvedValue({ current_revision_id: "new" });
     render(<ServicePlansPage />);
-    await screen.findByText("OneDay", { selector: "button" });
+    await screen.findByText("OneDay", { selector: "span" });
 
     fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
     fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "NEWPLAN" } });
@@ -352,7 +352,7 @@ describe("ServicePlansPage — add, record and delete", () => {
   it("offers only the device-limit policies the appliance enforces", async () => {
     mockLoad([], [ONEDAY]);
     render(<ServicePlansPage />);
-    await screen.findByText("OneDay", { selector: "button" });
+    await screen.findByText("OneDay", { selector: "span" });
     fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
     const select = document.querySelector('[name="device_limit_policy"]') as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.value)).toEqual(["REJECT_NEW_DEVICE", "DISCONNECT_OLDEST"]);
@@ -364,7 +364,7 @@ describe("ServicePlansPage — add, record and delete", () => {
     const { ApiError } = await import("@/lib/api");
     p.mockRejectedValue(new (ApiError as unknown as new (s: number, b: unknown) => Error)(409, { error: "code_exists" }));
     render(<ServicePlansPage />);
-    await screen.findByText("OneDay", { selector: "button" });
+    await screen.findByText("OneDay", { selector: "span" });
     fireEvent.click(screen.getByRole("button", { name: /add plan/i }));
     fireEvent.change(document.querySelector('[name="code"]')!, { target: { value: "OneDay" } });
     fireEvent.click(screen.getByRole("button", { name: /^add plan$/i }));
@@ -375,10 +375,10 @@ describe("ServicePlansPage — add, record and delete", () => {
   it("presents no enable/disable state for a plan", async () => {
     mockLoad([], [{ ...ONEDAY, enabled: false }]);
     render(<ServicePlansPage />);
-    await screen.findByText("OneDay", { selector: "button" });
+    await screen.findByText("OneDay", { selector: "span" });
     expect(screen.queryByText(/^disabled$/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^(disable|enable)$/i })).toBeNull();
-    fireEvent.click(screen.getByText("OneDay", { selector: "button" }));
+    fireEvent.click(screen.getByText("OneDay", { selector: "span" }));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText(/does not change what clients receive/i)).toBeInTheDocument();
   });
@@ -395,7 +395,7 @@ describe("ServicePlansPage — add, record and delete", () => {
       return Promise.resolve(list([]));
     });
     render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "span" }));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText("Freee")).toBeInTheDocument();
     expect(within(sheet).getByText("Older settings")).toBeInTheDocument();
@@ -417,7 +417,7 @@ describe("ServicePlansPage — add, record and delete", () => {
       return Promise.resolve(list([]));
     });
     render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "span" }));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
     expect(await screen.findByText(/2 package versions are built on this plan/)).toBeInTheDocument();
     expect(screen.getByText(/why it can't be deleted/i)).toBeInTheDocument();
@@ -437,7 +437,7 @@ describe("ServicePlansPage — add, record and delete", () => {
       return Promise.resolve(list([]));
     });
     render(<ServicePlansPage />);
-    fireEvent.click(await screen.findByText("Free Internet", { selector: "button" }));
+    fireEvent.click(await screen.findByText("Free Internet", { selector: "span" }));
     fireEvent.click(await screen.findByRole("button", { name: /delete…/i }));
     fireEvent.change(await screen.findByLabelText(/why are you deleting it/i), { target: { value: "Test plan" } });
     fireEvent.change(screen.getByLabelText(/confirm your password/i), { target: { value: "pw" } });

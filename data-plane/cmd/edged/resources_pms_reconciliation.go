@@ -156,9 +156,9 @@ func (s *server) reconciliationSummary(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cases": totalCases, "recorded_rows": totalRows,
-		"by_state":              buckets,
-		"rooms_multi_occupancy": multiRooms,
-		"stays_past_departure":  pastDeparture,
+		"by_state":                                buckets,
+		"rooms_multi_occupancy":                   multiRooms,
+		"stays_past_departure":                    pastDeparture,
 		"stays_past_departure_absent_from_roster": pastDepartureAbsent,
 	})
 }

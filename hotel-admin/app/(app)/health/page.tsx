@@ -8,24 +8,23 @@ import { useEffect, useState, useCallback } from "react";
 import { api, ApiError, inBackground, Whoami } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
+import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton, SkeletonRows } from "@/components/ui/misc";
-import { KeyValueGrid, Timeline } from "@/components/ui/data";
-import { Sheet, SheetContent, SheetHeader, SheetBody, SheetSection } from "@/components/ui/sheet";
+import { DescriptionList, Timeline } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { LiveStatus, ReadOnlyNotice, refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
-import {
-  Stethoscope, RefreshCw, RotateCw, FileText, CheckCircle2, XCircle, Server, Hourglass,
-} from "lucide-react";
+import { FileText, CheckCircle2, XCircle, Server, Hourglass } from "lucide-react";
 
 type ServiceHealth = {
   service: string;
@@ -78,14 +77,12 @@ const STATE_WORDS: Record<string, string> = {
 };
 const stateWord = (s: string) => STATE_WORDS[s] ?? (s ? s.replace(/_/g, " ") : "Unknown");
 
-const TILES: { key: string; label: string; tone: "ok" | "warn" | "err" | "info" | "default" }[] = [
-  { key: "healthy", label: "Healthy", tone: "ok" },
-  { key: "waiting", label: "Waiting", tone: "default" },
-  { key: "degraded", label: "Degraded", tone: "warn" },
-  { key: "recovering", label: "Recovering", tone: "info" },
-  { key: "crash_loop", label: "Crash-loop", tone: "err" },
-  { key: "failed", label: "Failed", tone: "err" },
-  { key: "starting", label: "Starting", tone: "info" },
+const TILES: { keys: string[]; label: string; tone: "ok" | "warn" | "err" | "default" }[] = [
+  { keys: ["healthy"], label: "Healthy", tone: "ok" },
+  { keys: ["waiting"], label: "Waiting", tone: "default" },
+  { keys: ["starting", "recovering"], label: "Starting or recovering", tone: "default" },
+  { keys: ["degraded"], label: "Degraded", tone: "warn" },
+  { keys: ["crash_loop", "failed"], label: "Crash-loop or failed", tone: "err" },
 ];
 
 function ago(ts?: string | null): string {
@@ -185,8 +182,6 @@ export default function HealthPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Stethoscope />}
-        eyebrow="System"
         title="Diagnostics"
         description="Whether each service on this appliance is running."
         help={
@@ -216,17 +211,17 @@ export default function HealthPage() {
                   <><strong>Restart</strong> — stops and starts the service. It asks for a reason and your password, says what it will interrupt, and is recorded against your account.</>,
                 ]}
               />
-              <p>Select a service name for its details, recent logs and recovery history.</p>
+              <p>Select a service for its details, recent logs and recovery history.</p>
             </HelpSection>
           </>
         }
+        meta={sum && (
+          <StatusBadge tone={overallTone(sum.overall)}>
+            Appliance: {stateWord(sum.overall)}
+          </StatusBadge>
+        )}
         actions={
           <>
-            {sum && (
-              <Badge tone={overallTone(sum.overall)} dot>
-                Appliance: {stateWord(sum.overall)}
-              </Badge>
-            )}
             <LiveStatus
               updatedAt={updatedAt}
               refreshing={refreshing}
@@ -267,67 +262,55 @@ export default function HealthPage() {
         </Callout>
       ))}
 
-      <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7", refreshing && sum && refreshingClass)}>
+      <StatGrid cols={5} className={cn(refreshing && sum && refreshingClass)}>
         {loading
-          ? TILES.map((t) => <Skeleton key={t.key} className="h-[5.5rem] rounded-lg" />)
+          ? TILES.map((t) => <Skeleton key={t.label} className="h-[4.75rem] rounded-lg" />)
           : TILES.map((t) => {
-              const n = c[t.key] ?? 0;
-              return (
-                <StatCard
-                  key={t.key}
-                  label={t.label}
-                  value={n}
-                  tone={n > 0 ? t.tone : "default"}
-                />
-              );
+              const n = t.keys.reduce((a, k) => a + (c[k] ?? 0), 0);
+              return <StatCard key={t.label} label={t.label} value={n} tone={n > 0 ? t.tone : "default"} />;
             })}
-      </div>
+      </StatGrid>
 
-      <Card>
-        <CardHeader>
-          <div className="space-y-0.5">
-            <CardTitle>Services</CardTitle>
-            <CardDescription>Select a service for its details.</CardDescription>
-          </div>
-        </CardHeader>
+      <SectionCard flush title="Services" description="Select a service for its details, logs and recovery history.">
         <div className={cn(refreshing && sum && refreshingClass)}>
           {loading ? (
             <SkeletonRows rows={6} cols={5} />
           ) : services.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Server />}
               title={sum ? "No services reported" : "Services could not be read"}
               hint={sum ? "The appliance did not report any monitored services." : "The list appears here once the appliance answers."}
             />
           ) : (
-            <Table>
+            <Table label="Services">
               <THead>
                 <TR>
                   <TH>Service</TH>
                   <TH>State</TH>
                   <TH className="hidden md:table-cell">Health check</TH>
-                  <TH className="hidden lg:table-cell">Restarts</TH>
-                  <TH className="hidden lg:table-cell">Backoff / next</TH>
-                  <TH className="hidden md:table-cell">Last failure</TH>
-                  <TH className="hidden sm:table-cell">Last healthy check</TH>
-                  <TH className="text-end"><span className="sr-only">Actions</span></TH>
+                  <TH numeric className="hidden lg:table-cell">Restarts</TH>
+                  <TH className="hidden 2xl:table-cell">Backoff</TH>
+                  <TH className="hidden 2xl:table-cell">Last failure</TH>
+                  <TH className="hidden sm:table-cell">Last healthy</TH>
+                  {writable && <TH><span className="sr-only">Actions</span></TH>}
                 </TR>
               </THead>
               <TBody>
                 {services.map((s) => (
-                  <TR key={s.service}>
-                    <TD>
-                      <button
-                        type="button"
-                        className="rounded-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => openDetail(s.service)}
-                      >
-                        {s.service}
-                      </button>
-                      <div className="text-caption text-muted-foreground">{s.process_state}</div>
+                  <TR key={s.service} onClick={() => openDetail(s.service)} selected={sel === s.service}>
+                    <TD nowrap className="max-w-[12rem]">
+                      <div className="truncate font-medium text-foreground" title={s.service}>{s.service}</div>
+                      <div className="truncate text-caption text-muted-foreground" title={s.process_state}>{s.process_state}</div>
                     </TD>
-                    <TD><Badge tone={stateTone(s.state)}>{stateWord(s.state)}</Badge></TD>
-                    <TD className="hidden max-w-[16rem] md:table-cell">
+                    <TD nowrap>
+                      <StatusBadge tone={stateTone(s.state)}>{stateWord(s.state)}</StatusBadge>
+                      {/* The Backoff column needs a 2xl screen; below it the retry sits under the state. */}
+                      {s.backoff_level > 0 && (
+                        <div className="mt-1 text-caption text-warning-subtle-foreground 2xl:hidden">Retry {until(s.next_retry_at)}</div>
+                      )}
+                    </TD>
+                    <TD className="hidden max-w-[14rem] md:table-cell">
                       <div className="flex items-start gap-1.5 text-xs text-muted-foreground" title={s.health_detail}>
                         {s.health_ok === false ? (
                           <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="Check failing" />
@@ -340,159 +323,136 @@ export default function HealthPage() {
                         </span>
                       </div>
                     </TD>
-                    <TD className="hidden text-xs tabular lg:table-cell">
+                    <TD numeric className="hidden text-xs lg:table-cell">
                       {s.restart_count}
-                      <span className="text-muted-foreground"> ({s.restarts_in_window} in {s.restart_window_secs}s)</span>
+                      <div className="text-caption text-muted-foreground">{s.restarts_in_window} in {s.restart_window_secs}s</div>
                       {s.consecutive_failures > 0 && (
                         <div className="text-caption text-destructive">{s.consecutive_failures} failures in a row</div>
                       )}
                     </TD>
-                    <TD className="hidden text-xs lg:table-cell">
+                    <TD nowrap className="hidden text-xs 2xl:table-cell">
                       {s.backoff_level > 0
                         ? <span className="text-warning-subtle-foreground">Level {s.backoff_level} · retry {until(s.next_retry_at)}</span>
                         : <span className="text-muted-foreground">—</span>}
                     </TD>
-                    <TD className="hidden max-w-[14rem] text-xs text-muted-foreground md:table-cell" title={s.last_failure_reason}>
+                    <TD className="hidden max-w-[14rem] text-xs text-muted-foreground 2xl:table-cell" title={s.last_failure_reason}>
                       {s.last_failure_reason
                         ? <><div className="truncate">{s.last_failure_reason}</div><div className="text-caption">{ago(s.last_failure_at)}</div></>
                         : "—"}
                     </TD>
-                    <TD className="hidden text-xs text-muted-foreground sm:table-cell">
+                    <TD nowrap muted className="hidden text-xs sm:table-cell">
                       {s.state === "healthy" ? ago(s.last_healthy_at) : (s.last_recovery_at ? "recovered " + ago(s.last_recovery_at) : "—")}
                     </TD>
-                    <TD className="text-end">
-                      <div className="flex flex-wrap justify-end gap-1">
-                        {writable && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            aria-label={`Recheck ${s.service}`}
-                            disabled={busy === "recheck:" + s.service}
-                            onClick={() => recheck(s.service)}
-                          >
-                            <RefreshCw /> <span className="hidden sm:inline">Recheck</span>
-                          </Button>
-                        )}
-                        {writable && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            aria-label={`Logs for ${s.service}`}
-                            disabled={busy === "logs:" + s.service}
-                            onClick={() => { openDetail(s.service); viewLogs(s.service); }}
-                          >
-                            <FileText /> <span className="hidden sm:inline">Logs</span>
-                          </Button>
-                        )}
-                        {writable && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            aria-label={`Restart ${s.service}`}
-                            disabled={busy === "restart:" + s.service}
-                            onClick={() => { setRestartErr(null); setRestarting(s.service); }}
-                          >
-                            <RotateCw /> <span className="hidden sm:inline">Restart</span>
-                          </Button>
-                        )}
-                      </div>
-                    </TD>
+                    {writable && (
+                      <TD className="w-0">
+                        <RowActions
+                          subject={s.service}
+                          primary={{ label: "Recheck", disabled: busy === "recheck:" + s.service, onSelect: () => void recheck(s.service) }}
+                          items={[
+                            {
+                              label: "Logs",
+                              icon: <FileText />,
+                              disabled: busy === "logs:" + s.service,
+                              onSelect: () => { void openDetail(s.service); void viewLogs(s.service); },
+                            },
+                            {
+                              label: "Restart…",
+                              danger: true,
+                              disabled: busy === "restart:" + s.service,
+                              onSelect: () => { setRestartErr(null); setRestarting(s.service); },
+                            },
+                          ]}
+                        />
+                      </TD>
+                    )}
                   </TR>
                 ))}
               </TBody>
             </Table>
           )}
         </div>
-      </Card>
+      </SectionCard>
 
-      <Sheet open={sel !== null} onOpenChange={(v) => !v && closeDetail()}>
-        <SheetContent width="lg">
-          <SheetHeader
-            icon={<Server />}
-            eyebrow="Service"
-            title={sel ?? "Service"}
-            description="Details, recent logs and recovery history."
-            badges={detail ? <Badge tone={stateTone(detail.service.state)}>{stateWord(detail.service.state)}</Badge> : undefined}
-          />
-          <SheetBody>
-            {sel && !detail ? (
-              <div className="space-y-3" aria-busy="true">
-                <Skeleton className="h-4 w-1/2" />
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/3" />
-              </div>
-            ) : detail ? (
-              <>
-                <SheetSection title="Details">
-                  <KeyValueGrid
-                    columns={2}
-                    items={[
-                      { label: "Process", value: detail.service.process_state || "—" },
-                      { label: "Restarts (lifetime)", value: String(detail.service.restart_count) },
-                      { label: "Restarts in window", value: `${detail.service.restarts_in_window} in ${detail.service.restart_window_secs}s` },
-                      { label: "Failures in a row", value: String(detail.service.consecutive_failures) },
-                      { label: "Backoff", value: detail.service.backoff_level > 0 ? `Level ${detail.service.backoff_level} (about ${Math.round(detail.service.backoff_ms / 1000)}s)` : "None" },
-                      { label: "Next retry", value: until(detail.service.next_retry_at) },
-                      { label: "First failure", value: ago(detail.service.first_failure_at) },
-                      { label: "Last failure", value: ago(detail.service.last_failure_at) },
-                      { label: "Last recovery", value: ago(detail.service.last_recovery_at) },
-                      { label: "Last healthy", value: ago(detail.service.last_healthy_at) },
-                      { label: "Exit", value: detail.service.last_exit_signal || (detail.service.last_exit_code != null ? `code ${detail.service.last_exit_code}` : "—") },
-                      { label: "Dependency", value: detail.service.degraded_dependency || "—" },
-                    ]}
-                  />
-                  {detail.service.last_failure_reason && (
-                    <Callout tone="warning" title="Last failure">{detail.service.last_failure_reason}</Callout>
-                  )}
-                </SheetSection>
+      <DetailsDrawer
+        open={sel !== null}
+        onOpenChange={(v) => !v && closeDetail()}
+        width="lg"
+        eyebrow="Service"
+        title={sel ?? "Service"}
+        badges={detail ? <StatusBadge tone={stateTone(detail.service.state)}>{stateWord(detail.service.state)}</StatusBadge> : undefined}
+        loading={sel !== null && !detail}
+      >
+        {detail && (
+          <div className="space-y-6">
+            <DetailsSection title="Details">
+              <DescriptionList
+                items={[
+                  { label: "Process", value: detail.service.process_state || "—" },
+                  { label: "Restarts (lifetime)", value: String(detail.service.restart_count) },
+                  { label: "Restarts in window", value: `${detail.service.restarts_in_window} in ${detail.service.restart_window_secs}s` },
+                  { label: "Failures in a row", value: String(detail.service.consecutive_failures) },
+                  { label: "Backoff", value: detail.service.backoff_level > 0 ? `Level ${detail.service.backoff_level} (about ${Math.round(detail.service.backoff_ms / 1000)}s)` : "None" },
+                  { label: "Next retry", value: until(detail.service.next_retry_at) },
+                  { label: "First failure", value: ago(detail.service.first_failure_at) },
+                  { label: "Last failure", value: ago(detail.service.last_failure_at) },
+                  { label: "Last recovery", value: ago(detail.service.last_recovery_at) },
+                  { label: "Last healthy", value: ago(detail.service.last_healthy_at) },
+                  { label: "Exit", value: detail.service.last_exit_signal || (detail.service.last_exit_code != null ? `code ${detail.service.last_exit_code}` : "—") },
+                  { label: "Dependency", value: detail.service.degraded_dependency || "—" },
+                ]}
+              />
+              {detail.service.last_failure_reason && (
+                <Callout tone="warning" title="Last failure">{detail.service.last_failure_reason}</Callout>
+              )}
+            </DetailsSection>
 
-                {writable && <SheetSection
-                  title="Recent logs"
-                  description="Sanitised: secrets and client details are removed by the appliance."
-                  actions={
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      disabled={busy === "logs:" + sel}
-                      onClick={() => sel && viewLogs(sel)}
-                    >
-                      <FileText /> {logs ? "Reload" : "Load logs"}
-                    </Button>
-                  }
-                >
-                  {logs ? (
-                    <pre className="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-[11px] leading-relaxed text-foreground">
-                      {logs.join("\n") || "(no logs)"}
-                    </pre>
-                  ) : busy === "logs:" + sel ? (
-                    <Skeleton className="h-24 w-full" />
-                  ) : null}
-                </SheetSection>}
+            {writable && (
+              <DetailsSection
+                title="Recent logs"
+                description="Sanitised: secrets and client details are removed by the appliance."
+                actions={
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    disabled={busy === "logs:" + sel}
+                    onClick={() => sel && viewLogs(sel)}
+                  >
+                    <FileText /> {logs ? "Reload" : "Load logs"}
+                  </Button>
+                }
+              >
+                {logs ? (
+                  <pre className="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-2xs leading-relaxed text-foreground">
+                    {logs.join("\n") || "(no logs)"}
+                  </pre>
+                ) : busy === "logs:" + sel ? (
+                  <Skeleton className="h-24 w-full" />
+                ) : null}
+              </DetailsSection>
+            )}
 
-                <SheetSection title="Recovery history">
-                  <Timeline
-                    emptyLabel="No events recorded."
-                    items={(detail.recovery_events || []).map((e) => ({
-                      key: String(e.id),
-                      title: e.event.replace(/_/g, " "),
-                      when: ago(e.created_at),
-                      tone: e.event.includes("recover") || e.event.includes("converged") ? "ok"
-                        : e.event.includes("crash") || e.event.includes("not_converged") ? "err"
-                        : e.event.includes("manual") ? "info" : "warn",
-                      body: (
-                        <>
-                          {e.action || e.cause || e.result}
-                          {e.actor && e.actor !== "system" ? ` · by ${e.actor.slice(0, 8)}` : ""}
-                        </>
-                      ),
-                    }))}
-                  />
-                </SheetSection>
-              </>
-            ) : null}
-          </SheetBody>
-        </SheetContent>
-      </Sheet>
+            <DetailsSection title="Recovery history">
+              <Timeline
+                emptyLabel="No events recorded."
+                items={(detail.recovery_events || []).map((e) => ({
+                  key: String(e.id),
+                  title: e.event.replace(/_/g, " "),
+                  when: ago(e.created_at),
+                  tone: e.event.includes("recover") || e.event.includes("converged") ? "ok"
+                    : e.event.includes("crash") || e.event.includes("not_converged") ? "err"
+                    : e.event.includes("manual") ? "info" : "warn",
+                  body: (
+                    <>
+                      {e.action || e.cause || e.result}
+                      {e.actor && e.actor !== "system" ? ` · by ${e.actor.slice(0, 8)}` : ""}
+                    </>
+                  ),
+                }))}
+              />
+            </DetailsSection>
+          </div>
+        )}
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={restarting !== null}

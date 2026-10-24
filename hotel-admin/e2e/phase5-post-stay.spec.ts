@@ -138,7 +138,9 @@ test.describe("the post-stay identity screen", () => {
     await installBackend(page, mutations);
     await page.goto("/post-stay");
 
-    await page.getByRole("row", { name: /RES-77/ }).getByRole("button", { name: /end access/i }).click();
+    // Ending access is destructive, so it sits in the row's actions menu rather than beside Reset PIN.
+    await page.getByRole("row", { name: /RES-77/ }).getByRole("button", { name: /^actions for/i }).click();
+    await page.getByRole("menuitem", { name: /end access/i }).click();
     await expect(page.getByText(/cannot be undone/i)).toBeVisible();
     await expect(page.getByText(/no replacement pin/i)).toBeVisible();
     await expect(page.getByText(/only lost their pin, reset it instead/i)).toBeVisible();
@@ -165,7 +167,7 @@ test.describe("the post-stay identity screen", () => {
     const row = page.getByRole("row", { name: /RES-78/ });
     await expect(row).toBeVisible();
     await expect(row.getByRole("button", { name: /reset pin/i })).toHaveCount(0);
-    await expect(row.getByRole("button", { name: /end access/i })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: /end access|^actions for/i })).toHaveCount(0);
   });
 
   test("a read-only operator sees the evidence and cannot act", async ({ page }) => {

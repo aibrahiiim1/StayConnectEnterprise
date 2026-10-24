@@ -9,8 +9,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips } from "@/components/ui/data";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
-import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Toolbar } from "@/components/ui/page";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { FilterBar } from "@/components/ui/toolbar";
 import { selectionWords, type VoucherReveal } from "@/lib/api/vouchers";
 import { When } from "./shared";
 
@@ -22,15 +22,16 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
   const count = (k: Kind) => (reveals ?? []).filter((r) => k === "all" || r.action === k).length;
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
-        <div className="space-y-0.5">
+        <div className="min-w-0">
           <CardTitle>Who has read a code</CardTitle>
           <CardDescription>Every reveal and batch export, with the operator and reason. Latest 200 records.</CardDescription>
         </div>
       </CardHeader>
-      <div className="px-4 py-3">
-        <Toolbar>
+      <FilterBar
+        inset
+        filters={
           <FilterChips
             label="Record type"
             value={kind}
@@ -41,25 +42,25 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
               { value: "EXPORT", label: "Batch export", count: count("EXPORT") },
             ]}
           />
-        </Toolbar>
-      </div>
-      <ErrorBanner err={error} className="mx-4" />
+        }
+      />
+      <ErrorBanner err={error} className="mx-4 mt-3" />
       {reveals === null && !error ? (
         <SkeletonRows rows={4} cols={5} />
       ) : rows.length === 0 ? (
         <EmptyState
+          size="sm"
           icon={<ShieldCheck />}
           title={kind === "all" ? "Nobody has read a code yet" : "No records of this type"}
           hint="When an operator shows a card's full code or exports a batch, it is recorded here."
         />
       ) : (
-        <TableWrap>
-          <Table>
+          <Table label="Code access log">
             <THead>
               <TR>
                 <TH>When</TH>
                 <TH>What</TH>
-                <TH className="text-right">Codes</TH>
+                <TH numeric>Codes</TH>
                 <TH>Who</TH>
                 <TH>Why</TH>
               </TR>
@@ -67,7 +68,7 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
             <TBody>
               {rows.map((r, i) => (
                 <TR key={`${r.revealed_at}-${i}`}>
-                  <TD className="whitespace-nowrap">
+                  <TD nowrap>
                     <When iso={r.revealed_at} />
                   </TD>
                   <TD>
@@ -79,14 +80,13 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
                       <span>Batch export {selectionWords(r.selection) && <span className="text-muted-foreground">· {selectionWords(r.selection)}</span>}</span>
                     )}
                   </TD>
-                  <TD className="text-right tabular">{r.voucher_count.toLocaleString()}</TD>
-                  <TD>{r.operator_label}</TD>
-                  <TD className="max-w-[20rem] text-muted-foreground">{r.reason}</TD>
+                  <TD numeric>{r.voucher_count.toLocaleString()}</TD>
+                  <TD truncate title={r.operator_label} className="max-w-[14rem]">{r.operator_label}</TD>
+                  <TD truncate muted title={r.reason} className="max-w-[16rem]">{r.reason}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
-        </TableWrap>
       )}
     </Card>
   );

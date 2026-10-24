@@ -10,11 +10,13 @@ import { Sheet, SheetBody, SheetContent, SheetHeader, SheetSection } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, FieldGrid, Input, InputGroup, Select } from "@/components/ui/input";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { HelpSection, HelpTip } from "@/components/help";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
-import { KeyValueGrid, MetricStrip, Timeline } from "@/components/ui/data";
+import { KeyValueGrid, MetricStrip } from "@/components/ui/data";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { Skeleton } from "@/components/ui/misc";
 import { useToast } from "@/components/ui/toast";
 import { describePmsReadiness } from "@/lib/health-words";
@@ -554,19 +556,13 @@ function ChangeSummary({ rev, prev, provider }: { rev: PmsRevision; prev?: PmsRe
   const a = configRows(provider, prev);
   const b = configRows(provider, rev);
   const changes = b
-    .map((row, i) => ({ field: row.label, from: a[i]?.value ?? "—", to: row.value }))
-    .filter((c) => c.from !== c.to);
+    .map((row, i) => ({ field: row.label, before: a[i]?.value ?? "—", after: row.value }))
+    .filter((c) => c.before !== c.after);
   if (changes.length > 0) {
     return (
-      <div className="text-sm">
-        <p className="font-medium">Changed from version {prev.revision_no}:</p>
-        <ul className="mt-1 space-y-0.5">
-          {changes.map((c, i) => (
-            <li key={i} className="text-muted-foreground">
-              {c.field}: <span className="line-through">{c.from}</span> → {c.to}
-            </li>
-          ))}
-        </ul>
+      <div className="space-y-2 text-sm">
+        <p className="font-medium">Changed from version {prev.revision_no}</p>
+        <ChangeDiff changes={changes} beforeLabel={`Version ${prev.revision_no}`} afterLabel={`Version ${rev.revision_no}`} />
       </div>
     );
   }
@@ -707,40 +703,43 @@ function ConnectionRecovery({ id, writable }: { id: string; writable: boolean })
       }
     >
       <ErrorBanner err={pmsErrorText(err)} />
-      <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-        <strong className="text-foreground">These apply to this connection only.</strong> Another PMS connection at
-        this site keeps its own values and is unaffected by anything changed here.
+      <p className="text-xs text-muted-foreground">
+        <strong className="font-medium text-foreground">These apply to this connection only.</strong> Another PMS
+        connection at this site keeps its own values and is unaffected by anything changed here.
       </p>
-      <div className="grid gap-3 lg:grid-cols-2">
-        {CONN_FIELDS.map((f) => (
-          <div key={f.key} className="space-y-2 rounded-md border border-border p-3">
-            <Field label={`${f.label} (${f.unit})`}>
-              <Input
-                type="number"
-                className="w-40"
-                value={form[f.key] ?? settings[f.key] ?? ""}
-                onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
-                disabled={busy || !writable}
-              />
+      <div className="rounded-lg border border-border p-4">
+        <FieldGrid cols={2}>
+          {CONN_FIELDS.map((f) => (
+            <Field
+              key={f.key}
+              label={f.label}
+              hint={`Currently ${settings[f.key]} ${f.unit}${settings.is_default ? " (nobody has changed this one)" : ""}`}
+            >
+              <InputGroup suffix={f.unit}>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  className="tabular"
+                  value={form[f.key] ?? settings[f.key] ?? ""}
+                  onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })}
+                  disabled={busy || !writable}
+                />
+              </InputGroup>
             </Field>
-            <p className="text-xs text-muted-foreground">
-              <strong>Currently:</strong> {settings[f.key]} {f.unit}
-              {settings.is_default ? " (nobody has changed this one)" : ""}
-            </p>
+          ))}
+        </FieldGrid>
+        {writable && (
+          <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-4">
+            <Field label="Reason" className="min-w-[14rem] flex-1">
+              <Input placeholder="Reason - recorded against this change" value={reason}
+                onChange={(e) => setReason(e.target.value)} disabled={busy} />
+            </Field>
+            <Button variant="secondary" loading={busy} onClick={() => void save()} disabled={busy || Object.keys(form).length === 0}>
+              Save recovery settings
+            </Button>
           </div>
-        ))}
+        )}
       </div>
-      {writable && (
-        <div className="flex flex-wrap items-end gap-2">
-          <Field label="Reason" className="min-w-[14rem] flex-1">
-            <Input placeholder="Reason - recorded against this change" value={reason}
-              onChange={(e) => setReason(e.target.value)} disabled={busy} />
-          </Field>
-          <Button onClick={() => void save()} disabled={busy || Object.keys(form).length === 0}>
-            Save recovery settings
-          </Button>
-        </div>
-      )}
     </SheetSection>
   );
 }
@@ -873,49 +872,73 @@ function HistoryTab({
   onChanged: () => void | Promise<void>;
 }) {
   const [publishing, setPublishing] = useState<PmsRevision | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   if (revisions === null) return <Skeleton className="h-40 w-full" />;
   const { ordered, current } = orderRevisions(revisions);
+  const status = (r: PmsRevision) => {
+    const isDraft = !r.published && (!current || r.revision_no > current.revision_no);
+    return {
+      isDraft,
+      tone: (r.published ? "ok" : isDraft ? "info" : "neutral") as "ok" | "info" | "neutral",
+      badgeTone: (r.published ? "ok" : isDraft ? "info" : "default") as "ok" | "info" | "default",
+      label: r.published ? "In use" : isDraft ? "Draft" : "Previous",
+    };
+  };
+  const rev = ordered.find((r) => r.id === viewing) ?? null;
+  const older = rev ? ordered.find((o) => o.revision_no === rev.revision_no - 1) : undefined;
+  const st = rev ? status(rev) : null;
 
   return (
     <SheetSection
       title="Configuration history"
-      description="Every saved version of this connection, newest first. They are kept permanently and cannot be edited or removed."
+      description="Every saved version, newest first. Versions are kept permanently and cannot be edited."
     >
-      <Timeline
-        emptyLabel="No configuration has been saved yet."
-        items={ordered.map((rev) => {
-          const older = ordered.find((o) => o.revision_no === rev.revision_no - 1);
-          const isDraft = !rev.published && (!current || rev.revision_no > current.revision_no);
-          return {
-            key: rev.id,
-            tone: rev.published ? "ok" : isDraft ? "info" : "neutral",
-            title: (
-              <span className="inline-flex items-center gap-2">
-                Version {rev.revision_no}
-                <Badge tone={rev.published ? "ok" : isDraft ? "info" : "default"}>
-                  {rev.published ? "In use" : isDraft ? "Draft" : "Previous"}
-                </Badge>
-              </span>
-            ),
-            when: (rev.published_at ?? rev.authored_at) ? <When at={rev.published_at ?? rev.authored_at} /> : undefined,
-            body: (
-              <div className="space-y-2">
-                <VersionProvenance rev={rev} unavailable={provenance === "UNAVAILABLE"} />
-                <ChangeSummary rev={rev} prev={older} provider={provider} />
-                <details>
-                  <summary className="cursor-pointer text-xs">All settings in this version</summary>
-                  <div className="mt-2"><ConfigSummary provider={provider} rev={rev} /></div>
-                </details>
-                {writable && !rev.published && (
-                  <Button size="sm" variant="secondary" onClick={() => setPublishing(rev)}>
-                    {isDraft ? `Put version ${rev.revision_no} live` : "Put this version back in use"}
-                  </Button>
-                )}
-              </div>
-            ),
-          };
-        })}
-      />
+      <div className="overflow-hidden rounded-lg border border-border">
+        <HistoryList
+          label="Configuration versions"
+          emptyLabel="No configuration has been saved yet."
+          selectedId={viewing}
+          onSelect={(it) => setViewing(it.id)}
+          items={ordered.map((r) => {
+            const s = status(r);
+            return {
+              id: r.id,
+              title: `Version ${r.revision_no}`,
+              badge: <Badge tone={s.badgeTone} size="sm">{s.label}</Badge>,
+              tone: s.tone,
+              actor: r.actor_label || (r.actor_id ? "A former operator" : undefined),
+              at: (r.published_at ?? r.authored_at) ? <When at={r.published_at ?? r.authored_at} /> : undefined,
+              summary: r.reason_code ? REASON_WORDS[r.reason_code] ?? "Not described" : undefined,
+            };
+          })}
+        />
+      </div>
+      <DetailsDrawer
+        open={rev !== null}
+        onOpenChange={(v) => { if (!v) setViewing(null); }}
+        eyebrow="Configuration version"
+        title={rev ? `Version ${rev.revision_no}` : ""}
+        badges={rev && st ? <Badge tone={st.badgeTone}>{st.label}</Badge> : undefined}
+        actions={writable && rev && !rev.published ? (
+          <Button size="sm" onClick={() => { setViewing(null); setPublishing(rev); }}>
+            {st?.isDraft ? `Put version ${rev.revision_no} live` : "Put this version back in use"}
+          </Button>
+        ) : undefined}
+      >
+        {rev && (
+          <>
+            <DetailsSection title="Record">
+              <VersionProvenance rev={rev} unavailable={provenance === "UNAVAILABLE"} />
+            </DetailsSection>
+            <DetailsSection title="What changed">
+              <ChangeSummary rev={rev} prev={older} provider={provider} />
+            </DetailsSection>
+            <DetailsSection title="All settings in this version">
+              <ConfigSummary provider={provider} rev={rev} />
+            </DetailsSection>
+          </>
+        )}
+      </DetailsDrawer>
       <PublishDialog iface={iface} target={publishing} onClose={() => setPublishing(null)} onDone={onChanged} />
     </SheetSection>
   );

@@ -109,7 +109,7 @@ describe("guest sign-in attempts", () => {
     wire(["front_office_operator"]);
     const user = await renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: /^Details/ }));
     expect(screen.queryByText("Nottheguest")).toBeNull();
     expect(post).not.toHaveBeenCalled();
     await revealWithPassword(user);
@@ -127,7 +127,7 @@ describe("guest sign-in attempts", () => {
     wire(["site_viewer"]);
     const user = await renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: /^Details/ }));
 
     expect(await screen.findByText(/do not have permission/i)).toBeTruthy();
     expect(screen.getByText(/allowed to see guest sign-in details/)).toBeTruthy();
@@ -149,7 +149,7 @@ describe("guest sign-in attempts", () => {
     });
     const user = await renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: /^Details/ }));
 
     await revealWithPassword(user);
     expect(await screen.findByText(/No eligible stay for this room exists in the appliance's guest list/i)).toBeTruthy();
@@ -162,7 +162,7 @@ describe("guest sign-in attempts", () => {
     wire(["site_admin"], { credentials_available: false });
     const user = await renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: /^Details/ }));
 
     expect(await screen.findByText(/No values were recorded for this attempt/i)).toBeTruthy();
     expect(screen.queryByText(/do not have permission/i)).toBeNull();

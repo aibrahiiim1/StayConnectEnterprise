@@ -1,21 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { api, ListResp, Whoami, EdgeOperator } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Button, LinkButton } from "@/components/ui/button";
 import { Input, Field, Select } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
-import { Plus, X, Users } from "lucide-react";
+import { RowActions } from "@/components/ui/row-actions";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { DescriptionList } from "@/components/ui/data";
+import { Plus, Smartphone, UserCog, UserMinus, Users, X } from "lucide-react";
 import { canWrite, SITE_ROLES, ROLE_LABELS, SiteRole } from "@/lib/roles";
 import { formatRelative } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
@@ -24,6 +26,7 @@ import { OperatorSessionLimits } from "@/components/operator-session-limits";
 import { OperatorAccountRetention } from "@/components/operator-account-retention";
 
 const MIN_PASSWORD = 10;
+const INLINE_FROM_SM = "max-sm:[&>a]:hidden max-sm:[&>button:not([aria-haspopup])]:hidden";
 
 export default function OperatorsPage() {
   const toast = useToast();
@@ -48,6 +51,7 @@ export default function OperatorsPage() {
   const [requireChangeReset, setRequireChangeReset] = useState(true);
 
   const [disabling, setDisabling] = useState<EdgeOperator | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mfaFor, setMfaFor] = useState<EdgeOperator | null>(null);
   const [mfaReason, setMfaReason] = useState("");
   const [mfaPassword, setMfaPassword] = useState("");
@@ -118,7 +122,7 @@ export default function OperatorsPage() {
     setBusy(true); setFormErr(null);
     try {
       await api.post(`/operators/${mfaFor.id}/reset-mfa`, { reason: mfaReason.trim(), password: mfaPassword });
-      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and sets up a new app at the next sign-in.`);
+      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and now signs in with the password alone until they turn two-step sign-in on again.`);
       setMfaFor(null); setMfaReason(""); setMfaPassword("");
       await load();
     } catch (e) { setFormErr(e); }
@@ -164,11 +168,28 @@ export default function OperatorsPage() {
     finally { setBusy(false); }
   }
 
+  const selected = rows?.find((o) => o.id === selectedId) ?? null;
+  const nameOf = (op: EdgeOperator) => op.display_name || op.email;
+  const roleName = (r: string) => ROLE_LABELS[r as SiteRole] ?? r;
+
+  function openReset(op: EdgeOperator) {
+    setFormErr(null); setNewPw(""); setConfirmPw(""); setYourPw(""); setRequireChangeReset(true); setPwFor(op);
+  }
+  function openResetMfa(op: EdgeOperator) {
+    setFormErr(null); setMfaReason(""); setMfaPassword(""); setMfaFor(op);
+  }
+  function askRemoveRole(op: EdgeOperator, r: string) {
+    if (op.id === me?.operator_id && r === "site_admin") {
+      setErr("You cannot remove your own Site admin role.");
+      return;
+    }
+    setFormErr(null);
+    setRemovingRole({ op, role: r });
+  }
+
   return (
     <PageShell>
       <PageHeader
-        icon={<Users />}
-        eyebrow="System"
         title="Operators"
         description="Staff accounts that can sign in to this appliance."
         help={
@@ -183,7 +204,7 @@ export default function OperatorsPage() {
                 items={[
                   "A role decides what an operator can see and change. An operator can hold several.",
                   "An operator with no role can sign in but cannot see anything.",
-                  "Adding or removing a role is confirmed first, because it changes what someone can do.",
+                  "Open an operator to add or remove roles. Each change is confirmed first.",
                   "You cannot remove your own Site admin role, or disable your own account.",
                 ]}
               />
@@ -204,9 +225,9 @@ export default function OperatorsPage() {
             <HelpSection title="Two-step sign-in">
               <HelpList
                 items={[
-                  "Signing in asks for the password and the 6-digit code from an authenticator app on the operator's phone.",
-                  "The app is set up at the first sign-in, which also gives ten single-use recovery codes.",
-                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and set up a new app at their next sign-in.",
+                  "Optional for each operator and recommended: each turns it on under Your account > Two-step sign-in, which also gives ten single-use recovery codes.",
+                  "Once on, signing in asks for the password and the 6-digit code from the authenticator app on the operator's phone.",
+                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and sign in with the password alone until they turn it on again.",
                   "You cannot reset your own; another site administrator must.",
                 ]}
               />
@@ -220,132 +241,93 @@ export default function OperatorsPage() {
       <ErrorBanner err={err} className="mb-0" />
 
       <Card className="overflow-hidden">
-        <CardBody className="p-0">
-          {rows === null ? (
-            <SkeletonRows rows={4} cols={5} />
-          ) : rows.length === 0 ? (
-            <EmptyState icon={<Users />} title="No operators" hint="Nobody but you can sign in to this appliance." />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Operator</TH>
-                  <TH>Roles</TH>
-                  <TH className="hidden sm:table-cell">Status</TH>
-                  <TH className="hidden md:table-cell">Added</TH>
-                  {writable && <TH className="text-end"><span className="sr-only">Actions</span></TH>}
-                </TR>
-              </THead>
-              <TBody>
-                {rows.map((op) => {
-                  const isMe = op.id === me?.operator_id;
-                  return (
-                    <TR key={op.id}>
-                      <TD>
-                        <div className="flex flex-wrap items-center gap-1.5 font-medium">
-                          {op.display_name || op.email}
-                          {isMe && <Badge tone="accent">You</Badge>}
+        {rows === null ? (
+          <SkeletonRows rows={4} cols={5} />
+        ) : rows.length === 0 ? (
+          <EmptyState size="sm" icon={<Users />} title="No operators" hint="Nobody but you can sign in to this appliance." />
+        ) : (
+          <Table aria-label="Operators">
+            <THead>
+              <TR>
+                <TH>Operator</TH>
+                <TH className="hidden sm:table-cell">Roles</TH>
+                <TH className="hidden md:table-cell">Two-step</TH>
+                <TH className="hidden sm:table-cell">Status</TH>
+                <TH className="hidden lg:table-cell">Added</TH>
+                {writable && <TH className="w-0"><span className="sr-only">Actions</span></TH>}
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((op) => {
+                const isMe = op.id === me?.operator_id;
+                const active = op.status === "active";
+                return (
+                  <TR key={op.id} onClick={() => setSelectedId(op.id)}>
+                    <TD className="max-w-[16rem]">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="min-w-0 max-w-full truncate font-medium" title={nameOf(op)}>{nameOf(op)}</span>
+                        {isMe && <Badge tone="accent" size="sm">You</Badge>}
+                      </div>
+                      {op.display_name && <div className="truncate text-xs text-muted-foreground" title={op.email}>{op.email}</div>}
+                      {(!active || op.must_change_password) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {!active && <StatusBadge className="sm:hidden">Disabled</StatusBadge>}
+                          {active && op.must_change_password && <Badge tone="warn" size="sm">Must set a new password</Badge>}
                         </div>
-                        <div className="text-xs text-muted-foreground">{op.email}</div>
-                        {op.status !== "active" && (
-                          <Badge tone="neutral" className="mt-1 sm:hidden">Disabled</Badge>
-                        )}
-                        {op.status === "active" && op.must_change_password && (
-                          <Badge tone="warn" className="mt-1">Must set a new password</Badge>
-                        )}
-                        {op.status === "active" && op.two_step_enrolled === false && (
-                          <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
-                        )}
-                      </TD>
-                      <TD>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {op.roles.length === 0 && (
-                            <span className="text-xs text-muted-foreground">No role — cannot see anything</span>
-                          )}
-                          {op.roles.map((r) => (
-                            <span key={r} className="inline-flex items-center gap-0.5">
-                              <Badge tone="info">{ROLE_LABELS[r as SiteRole] ?? r}</Badge>
-                              {writable && (
-                                <button
-                                  type="button"
-                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-surface hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  title={`Remove ${ROLE_LABELS[r as SiteRole] ?? r}`}
-                                  aria-label={`Remove ${ROLE_LABELS[r as SiteRole] ?? r} from ${op.email}`}
-                                  onClick={() => {
-                                    if (isMe && r === "site_admin") {
-                                      setErr("You cannot remove your own Site admin role.");
-                                      return;
-                                    }
-                                    setFormErr(null);
-                                    setRemovingRole({ op, role: r });
-                                  }}
-                                ><X className="size-3" /></button>
-                              )}
-                            </span>
-                          ))}
-                          {writable && (
-                            <Select
-                              value=""
-                              aria-label={`Give ${op.email} another role`}
-                              onChange={(e) => {
-                                const role = e.target.value;
-                                e.currentTarget.value = "";
-                                if (role) { setFormErr(null); setAddingRole({ op, role }); }
-                              }}
-                              className="h-7 w-auto pe-8 text-xs"
-                            >
-                              <option value="" disabled>+ role</option>
-                              {SITE_ROLES.filter((r) => !op.roles.includes(r)).map((r) => (
-                                <option key={r} value={r}>{ROLE_LABELS[r as SiteRole]}</option>
-                              ))}
-                            </Select>
-                          )}
-                        </div>
-                      </TD>
-                      <TD className="hidden sm:table-cell">
-                        <Badge tone={op.status === "active" ? "ok" : "neutral"} dot>
-                          {op.status === "active" ? "Can sign in" : "Disabled"}
-                        </Badge>
-                      </TD>
-                      <TD className="hidden text-sm text-muted-foreground md:table-cell">{formatRelative(op.created_at)}</TD>
-                      {writable && (
-                      <TD className="text-end">
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {isMe ? (
-                            <Link href="/account/password" className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium hover:bg-surface">
-                              Change my password
-                            </Link>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              aria-label={`Reset the password for ${op.email}`}
-                              onClick={() => { setFormErr(null); setNewPw(""); setConfirmPw(""); setYourPw(""); setRequireChangeReset(true); setPwFor(op); }}
-                            >
-                              Reset password
-                            </Button>
-                          )}
-                        {writable && op.status === "active" && !isMe && op.two_step_enrolled && (
-                          <Button size="sm" variant="ghost" aria-label={`Reset two-step sign-in for ${op.email}`}
-                            onClick={() => { setFormErr(null); setMfaReason(""); setMfaPassword(""); setMfaFor(op); }}>
-                            Reset two-step
-                          </Button>
-                        )}
-                        {writable && op.status === "active" && !isMe && (
-                          <Button size="sm" variant="ghost" aria-label={`Disable ${op.email}`} onClick={() => { setFormErr(null); setDisabling(op); }}>
-                            Disable
-                          </Button>
-                        )}
-                        </div>
-                      </TD>
                       )}
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
-          )}
-        </CardBody>
+                    </TD>
+                    <TD className="hidden sm:table-cell">
+                      {op.roles.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">No role</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {op.roles.map((r) => <Badge key={r} tone="neutral" size="sm">{roleName(r)}</Badge>)}
+                        </div>
+                      )}
+                    </TD>
+                    <TD nowrap className="hidden md:table-cell">
+                      {active && typeof op.two_step_enrolled === "boolean"
+                        ? <TwoStepBadge on={op.two_step_enrolled} />
+                        : <span className="text-muted-foreground">—</span>}
+                    </TD>
+                    <TD nowrap className="hidden sm:table-cell">
+                      <StatusBadge tone={active ? "ok" : "default"}>{active ? "Can sign in" : "Disabled"}</StatusBadge>
+                    </TD>
+                    <TD nowrap muted className="hidden lg:table-cell">{formatRelative(op.created_at)}</TD>
+                    {writable && (
+                      <TD nowrap className="w-0">
+                        <RowActions
+                          subject={op.email}
+                          // On a phone the inline action moves to the row's details, so the menu stays on screen.
+                          className={INLINE_FROM_SM}
+                          primary={isMe
+                            ? { label: "Change my password", href: "/account/password" }
+                            : { label: "Reset password", onSelect: () => openReset(op) }}
+                          items={[
+                            { label: "Roles and details", icon: <UserCog />, onSelect: () => setSelectedId(op.id) },
+                            {
+                              label: "Reset two-step sign-in",
+                              icon: <Smartphone />,
+                              hidden: isMe || !active || !op.two_step_enrolled,
+                              onSelect: () => openResetMfa(op),
+                            },
+                            {
+                              label: "Disable",
+                              icon: <UserMinus />,
+                              danger: true,
+                              hidden: isMe || !active,
+                              onSelect: () => { setFormErr(null); setDisabling(op); },
+                            },
+                          ]}
+                        />
+                      </TD>
+                    )}
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
       </Card>
 
       <OperatorSigninProtection writable={writable} />
@@ -354,12 +336,113 @@ export default function OperatorsPage() {
 
       <OperatorAccountRetention writable={writable} />
 
+      <DetailsDrawer
+        open={selected !== null}
+        onOpenChange={(v) => { if (!v) setSelectedId(null); }}
+        eyebrow="Operator"
+        title={selected ? nameOf(selected) : ""}
+        description={selected?.display_name ? selected.email : undefined}
+        badges={selected && (
+          <>
+            <StatusBadge tone={selected.status === "active" ? "ok" : "default"}>
+              {selected.status === "active" ? "Can sign in" : "Disabled"}
+            </StatusBadge>
+            {selected.id === me?.operator_id && <Badge tone="accent">You</Badge>}
+          </>
+        )}
+        actions={selected && writable && (
+          selected.id === me?.operator_id ? (
+            <LinkButton href="/account/password" variant="secondary">Change my password</LinkButton>
+          ) : (
+            <>
+              {selected.status === "active" && (
+                <Button variant="danger-outline" className="me-auto" onClick={() => { setFormErr(null); setDisabling(selected); }}>
+                  Disable
+                </Button>
+              )}
+              {selected.status === "active" && selected.two_step_enrolled && (
+                <Button variant="secondary" onClick={() => openResetMfa(selected)}>Reset two-step</Button>
+              )}
+              <Button variant="secondary" onClick={() => openReset(selected)}>Reset password</Button>
+            </>
+          )
+        )}
+      >
+        {selected && (
+          <div className="space-y-6">
+            <DetailsSection title="Account">
+              <DescriptionList
+                items={[
+                  { label: "Email or username", value: selected.email },
+                  { label: "Name", value: selected.display_name || undefined },
+                  {
+                    label: "Two-step sign-in",
+                    value: typeof selected.two_step_enrolled === "boolean"
+                      ? <TwoStepBadge on={selected.two_step_enrolled} /> : undefined,
+                  },
+                  {
+                    label: "Password",
+                    value: selected.must_change_password ? "Must set a new one at the next sign-in" : "Set",
+                    hidden: selected.status !== "active",
+                  },
+                  { label: "Added", value: formatRelative(selected.created_at) },
+                ]}
+              />
+            </DetailsSection>
+            <DetailsSection
+              title="Roles"
+              description={selected.roles.length === 0
+                ? "No role: they can sign in but cannot see anything."
+                : "What they can see and change."}
+            >
+              {selected.roles.length > 0 && (
+                <ul className="space-y-1.5">
+                  {selected.roles.map((r) => (
+                    <li key={r} className="flex min-h-9 items-center justify-between gap-3 rounded-md border border-border px-3 py-1">
+                      <span className="text-sm">{roleName(r)}</span>
+                      {writable && (
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          title={`Remove ${roleName(r)}`}
+                          aria-label={`Remove ${roleName(r)} from ${selected.email}`}
+                          onClick={() => askRemoveRole(selected, r)}
+                        >
+                          <X />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {writable && SITE_ROLES.some((r) => !selected.roles.includes(r)) && (
+                <Select
+                  value=""
+                  aria-label={`Give ${selected.email} another role`}
+                  onChange={(e) => {
+                    const role = e.target.value;
+                    e.currentTarget.value = "";
+                    if (role) { setFormErr(null); setAddingRole({ op: selected, role }); }
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  <option value="" disabled>Add a role…</option>
+                  {SITE_ROLES.filter((r) => !selected.roles.includes(r)).map((r) => (
+                    <option key={r} value={r}>{ROLE_LABELS[r as SiteRole]}</option>
+                  ))}
+                </Select>
+              )}
+            </DetailsSection>
+          </div>
+        )}
+      </DetailsDrawer>
+
       <DialogForm
         open={mfaFor !== null}
         onOpenChange={(v) => !v && setMfaFor(null)}
         size="sm"
         title={mfaFor ? `Reset two-step sign-in for ${mfaFor.display_name || mfaFor.email}` : "Reset two-step sign-in"}
-        description="Their authenticator app and recovery codes stop working, they are signed out everywhere, and they set up a new app at their next sign-in."
+        description="Their authenticator app and recovery codes stop working and they are signed out everywhere. They then sign in with the password alone until they turn two-step sign-in on again."
         submitLabel="Reset two-step sign-in"
         busy={busy}
         error={formErr}
@@ -534,4 +617,8 @@ function RequireChangeBox({ checked, onChange }: { checked: boolean; onChange: (
       </span>
     </label>
   );
+}
+
+function TwoStepBadge({ on }: { on: boolean }) {
+  return <StatusBadge tone={on ? "ok" : "default"}>{on ? "On" : "Off"}</StatusBadge>;
 }

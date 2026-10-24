@@ -82,7 +82,7 @@ The annex has three parts:
 
 ### User identification and authorisation
 
-- **Staff sign in with a password and an authenticator-app code** (TOTP, RFC 6238). Ten single-use recovery codes
+- **Staff sign in with a password, and with an authenticator-app code once they turn on two-step sign-in** (TOTP, RFC 6238; optional per account and recommended). Ten single-use recovery codes
   are issued. A code is never accepted twice.
 - **Wrong passwords and codes are throttled** per account and per address: by default 5 per account or 20 per
   address within 15 minutes locks for 15 minutes.

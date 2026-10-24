@@ -9,21 +9,23 @@
 // A case with no answer stays on the list, saying which evidence it waits for.
 
 import { useCallback, useEffect, useState } from "react";
-import { ClipboardCheck, DoorOpen, CalendarClock, Users } from "lucide-react";
+import { ClipboardCheck, DoorOpen, Users } from "lucide-react";
 import {
   api, ReconciliationCase, ReconciliationState, ReconciliationSummary,
   MultiOccupancyRoom, StayPastDeparture, Whoami,
 } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { HelpSection } from "@/components/help";
 import { SkeletonRows } from "@/components/ui/misc";
-import { FilterChips } from "@/components/ui/data";
+import { DescriptionList, FilterChips } from "@/components/ui/data";
+import { FilterBar } from "@/components/ui/toolbar";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
@@ -91,6 +93,7 @@ export default function PMSReconciliationPage() {
   const [err, setErr] = useState<unknown>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [viewing, setViewing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -124,12 +127,13 @@ export default function PMSReconciliationPage() {
     void load();
   }, [load]);
 
+  const selectedCase = cases?.find((c) => c.case_key === viewing) ?? null;
+  const selectedWords = selectedCase ? STATE_WORDS[selectedCase.resolution_state] : undefined;
+
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Unresolved departures"
-        icon={<ClipboardCheck />}
         description="Departures the appliance received but could not match to exactly one stay."
         help={
           <>
@@ -175,184 +179,207 @@ export default function PMSReconciliationPage() {
       />
 
       <ErrorBanner err={err} />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <StatGrid cols={4}>
         <StatCard label="Unresolved departures" value={summary ? num(summary.cases) : "—"} />
         <StatCard
           label="Recorded copies of them"
           value={summary ? num(summary.recorded_rows) : "—"}
-          hint="One departure is restaged every time the PMS connection is re-established."
+          hint="Restaged on every reconnect"
         />
         <StatCard
           label="The PMS could settle now"
           value={summary ? num(summary.by_state.find((b) => b.state === "RESOLVABLE")?.cases ?? 0) : "—"}
-          hint="Two independent facts already agree; a departure sent from the PMS would apply cleanly."
+          hint="A PMS departure would apply cleanly"
         />
         <StatCard
           label="Rooms with more than one stay"
           value={summary ? num(summary.rooms_multi_occupancy) : "—"}
-          hint="Shared occupancy is ordinary — it is what makes a room-only departure undecidable."
+          hint="Shared occupancy is ordinary"
         />
-      </div>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList aria-label="Which view">
-          <TabsTrigger value="cases"><ClipboardCheck className="size-4" aria-hidden /> Unresolved departures</TabsTrigger>
-          <TabsTrigger value="rooms"><Users className="size-4" aria-hidden /> Rooms with several stays ({rooms.length})</TabsTrigger>
-          <TabsTrigger value="past"><CalendarClock className="size-4" aria-hidden /> Past their departure date ({stays.length})</TabsTrigger>
+          <TabsTrigger value="cases">Unresolved departures</TabsTrigger>
+          <TabsTrigger value="rooms">Rooms with several stays ({rooms.length})</TabsTrigger>
+          <TabsTrigger value="past">Past their departure date ({stays.length})</TabsTrigger>
         </TabsList>
 
-      <div className={cn("mt-5 space-y-4", refreshing && cases !== null && refreshingClass)}>
-      <TabsContent value="cases" className="space-y-4">
-          {summary && summary.by_state.length > 0 && (
-            <FilterChips
-              label="Filter by state"
-              value={filter}
-              onChange={(v) => setFilter(v as ReconciliationState | "")}
-              options={[
-                { value: "" as ReconciliationState | "", label: "All", count: summary.cases },
-                ...summary.by_state.map((b) => ({
-                  value: b.state as ReconciliationState | "",
-                  label: STATE_WORDS[b.state]?.label ?? b.state.replace(/_/g, " ").toLowerCase(),
-                  count: b.cases,
-                  tone: (STATE_WORDS[b.state]?.tone === "neutral" ? undefined : STATE_WORDS[b.state]?.tone) as "ok" | "warn" | "err" | "info" | undefined,
-                })),
-              ]}
-            />
-          )}
+        <div className={cn("mt-5", refreshing && cases !== null && refreshingClass)}>
+          <TabsContent value="cases">
+            <Card className="overflow-hidden">
+              {summary && summary.by_state.length > 0 && (
+                <FilterBar
+                  inset
+                  filters={
+                    <FilterChips
+                      label="Filter by state"
+                      value={filter}
+                      onChange={(v) => setFilter(v as ReconciliationState | "")}
+                      options={[
+                        { value: "" as ReconciliationState | "", label: "All", count: summary.cases },
+                        ...summary.by_state.map((b) => ({
+                          value: b.state as ReconciliationState | "",
+                          label: STATE_WORDS[b.state]?.label ?? b.state.replace(/_/g, " ").toLowerCase(),
+                          count: b.cases,
+                          tone: (STATE_WORDS[b.state]?.tone === "neutral" ? undefined : STATE_WORDS[b.state]?.tone) as "ok" | "warn" | "err" | "info" | undefined,
+                        })),
+                      ]}
+                    />
+                  }
+                />
+              )}
+              {cases === null ? (
+                <SkeletonRows rows={6} cols={6} />
+              ) : cases.length === 0 ? (
+                <EmptyState
+                  size="sm"
+                  icon={<ClipboardCheck />}
+                  title="No unresolved departures"
+                  hint="Every departure the PMS has sent was matched to exactly one stay."
+                />
+              ) : (
+                <Table label="Unresolved departures">
+                  <THead>
+                    <TR>
+                      <TH>Room</TH>
+                      <TH>Reservation</TH>
+                      <TH>Departure raised</TH>
+                      <TH numeric>Recorded copies</TH>
+                      <TH>State</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {cases.map((c) => {
+                      const w = STATE_WORDS[c.resolution_state];
+                      return (
+                        <TR key={c.case_key} onClick={() => setViewing(c.case_key)} selected={viewing === c.case_key}>
+                          <TD nowrap className="font-mono text-xs">{c.room || "—"}</TD>
+                          <TD nowrap className="font-mono text-xs">{c.reservation || "—"}</TD>
+                          <TD nowrap muted>
+                            {c.event_at ? formatDate(c.event_at) : formatDate(c.last_seen_at)}
+                          </TD>
+                          <TD numeric>
+                            {num(c.repeat_count)}
+                            <span className="ms-1 text-xs text-muted-foreground">
+                              across {num(c.generations)} reconnect{c.generations === 1 ? "" : "s"}
+                            </span>
+                          </TD>
+                          <TD nowrap>
+                            <StatusBadge tone={w?.tone ?? "neutral"}>{w?.label ?? c.resolution_state}</StatusBadge>
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              )}
+            </Card>
+          </TabsContent>
 
-          <Card className="overflow-hidden">
-            {cases === null ? (
-              <SkeletonRows rows={6} cols={6} />
-            ) : cases.length === 0 ? (
-              <EmptyState
-                icon={<ClipboardCheck />}
-                title="No unresolved departures"
-                hint="Every departure the PMS has sent was matched to exactly one stay."
-              />
-            ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>Room</TH>
-                    <TH>Reservation</TH>
-                    <TH>Departure raised</TH>
-                    <TH>Recorded copies</TH>
-                    <TH>State</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {cases.map((c) => {
-                    const w = STATE_WORDS[c.resolution_state];
-                    return (
-                      <TR key={c.case_key}>
-                        <TD className="font-mono text-xs">{c.room || "—"}</TD>
-                        <TD className="font-mono text-xs">{c.reservation || "—"}</TD>
-                        <TD className="whitespace-nowrap text-sm text-muted-foreground">
-                          {c.event_at ? formatDate(c.event_at) : formatDate(c.last_seen_at)}
-                        </TD>
-                        <TD className="text-sm">
-                          {num(c.repeat_count)}
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            across {num(c.generations)} reconnect{c.generations === 1 ? "" : "s"}
-                          </span>
-                        </TD>
+          <TabsContent value="rooms">
+            <Card className="overflow-hidden">
+              {rooms.length === 0 ? (
+                <EmptyState size="sm" icon={<Users />} title="Every occupied room holds exactly one stay" />
+              ) : (
+                <Table label="Rooms with several stays">
+                  <THead>
+                    <TR>
+                      <TH>Room</TH>
+                      <TH numeric>Stays in the room</TH>
+                      <TH>Earliest arrival</TH>
+                      <TH>Latest planned departure</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {rooms.map((r) => (
+                      <TR key={r.room}>
+                        <TD nowrap className="font-mono text-xs">{r.room}</TD>
+                        <TD numeric>{r.stays_in_room}</TD>
+                        <TD nowrap muted>{r.earliest_arrival ? formatDate(r.earliest_arrival) : "—"}</TD>
+                        <TD nowrap muted>{r.latest_planned_departure ? formatDate(r.latest_planned_departure) : "—"}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="past">
+            <Card className="overflow-hidden">
+              {stays.length === 0 ? (
+                <EmptyState size="sm" icon={<DoorOpen />} title="No in-house stay is past its planned departure" />
+              ) : (
+                <Table label="Past their departure date">
+                  <THead>
+                    <TR>
+                      <TH>Room</TH>
+                      <TH>Reservation</TH>
+                      <TH>Planned departure</TH>
+                      <TH numeric>Days past</TH>
+                      <TH>On the PMS&apos;s current list</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {stays.map((s) => (
+                      <TR key={s.stay_id}>
+                        <TD nowrap className="font-mono text-xs">{s.room || "—"}</TD>
+                        <TD nowrap className="font-mono text-xs">{s.reservation || "—"}</TD>
+                        <TD nowrap muted>{s.departure ? formatDate(s.departure) : "—"}</TD>
+                        <TD numeric>{s.days_past_departure}</TD>
                         <TD>
-                          <Badge tone={w?.tone ?? "neutral"} dot>
-                            {w?.label ?? c.resolution_state}
-                          </Badge>
-                          <p className="mt-1 max-w-md text-xs text-muted-foreground">{w?.meaning}</p>
+                          {s.roster_present ? (
+                            <StatusBadge tone="info">Still listed — they may have extended</StatusBadge>
+                          ) : s.room_now_holds_another_stay ? (
+                            // The PMS has the room under another reservation, so our record of this guest is stale.
+                            <StatusBadge tone="err">Room re-let — the PMS has it under another reservation</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="warn">Not listed — this appliance&apos;s guest list may be behind</StatusBadge>
+                          )}
                         </TD>
                       </TR>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            )}
-          </Card>
-      </TabsContent>
-
-      <TabsContent value="rooms">
-        <Card className="overflow-hidden">
-          {rooms.length === 0 ? (
-            <EmptyState icon={<Users />} title="Every occupied room holds exactly one stay" />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Room</TH>
-                  <TH>Stays in the room</TH>
-                  <TH>Earliest arrival</TH>
-                  <TH>Latest planned departure</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {rooms.map((r) => (
-                  <TR key={r.room}>
-                    <TD className="font-mono text-xs">{r.room}</TD>
-                    <TD className="text-sm">{r.stays_in_room}</TD>
-                    <TD className="text-sm text-muted-foreground">
-                      {r.earliest_arrival ? formatDate(r.earliest_arrival) : "—"}
-                    </TD>
-                    <TD className="text-sm text-muted-foreground">
-                      {r.latest_planned_departure ? formatDate(r.latest_planned_departure) : "—"}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="past">
-        <Card className="overflow-hidden">
-          {stays.length === 0 ? (
-            <EmptyState icon={<DoorOpen />} title="No in-house stay is past its planned departure" />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Room</TH>
-                  <TH>Reservation</TH>
-                  <TH>Planned departure</TH>
-                  <TH>Days past</TH>
-                  <TH>On the PMS&apos;s current list</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {stays.map((s) => (
-                  <TR key={s.stay_id}>
-                    <TD className="font-mono text-xs">{s.room || "—"}</TD>
-                    <TD className="font-mono text-xs">{s.reservation || "—"}</TD>
-                    <TD className="text-sm text-muted-foreground">
-                      {s.departure ? formatDate(s.departure) : "—"}
-                    </TD>
-                    <TD className="text-sm">{s.days_past_departure}</TD>
-                    <TD>
-                      {s.roster_present ? (
-                        <Badge tone="info" dot>
-                          Still listed — they may have extended
-                        </Badge>
-                      ) : s.room_now_holds_another_stay ? (
-                        // The PMS has the room under another reservation, so our record of this guest is stale.
-                        <Badge tone="err" dot>
-                          Room re-let — the PMS has it under another reservation
-                        </Badge>
-                      ) : (
-                        <Badge tone="warn" dot>
-                          Not listed — this appliance&apos;s guest list may be behind
-                        </Badge>
-                      )}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-        </Card>
-      </TabsContent>
-      </div>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+            </Card>
+          </TabsContent>
+        </div>
       </Tabs>
+
+      <DetailsDrawer
+        open={selectedCase !== null}
+        onOpenChange={(v) => { if (!v) setViewing(null); }}
+        eyebrow="Unresolved departure"
+        title={selectedCase ? `Room ${selectedCase.room || "—"}` : ""}
+        description={selectedCase?.reservation ? `Reservation ${selectedCase.reservation}` : undefined}
+        badges={selectedCase ? (
+          <StatusBadge tone={selectedWords?.tone ?? "neutral"}>{selectedWords?.label ?? selectedCase.resolution_state}</StatusBadge>
+        ) : undefined}
+      >
+        {selectedCase && (
+          <>
+            <DetailsSection title="What this state means">
+              <p className="text-sm text-muted-foreground">{selectedWords?.meaning ?? "No explanation is recorded for this state."}</p>
+            </DetailsSection>
+            <DetailsSection title="Case">
+              <DescriptionList
+                items={[
+                  { label: "Room", value: selectedCase.room || "—" },
+                  { label: "Reservation", value: selectedCase.reservation || "—" },
+                  { label: "Departure raised", value: selectedCase.event_at ? formatDate(selectedCase.event_at) : "—" },
+                  { label: "Last seen", value: formatDate(selectedCase.last_seen_at) },
+                  { label: "Recorded copies", value: `${num(selectedCase.repeat_count)} across ${num(selectedCase.generations)} reconnect${selectedCase.generations === 1 ? "" : "s"}` },
+                ]}
+              />
+            </DetailsSection>
+            <p className="text-xs text-muted-foreground">
+              Read-only: a case is resolved when the PMS sends a departure that applies.
+            </p>
+          </>
+        )}
+      </DetailsDrawer>
     </PageShell>
   );
 }

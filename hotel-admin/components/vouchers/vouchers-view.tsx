@@ -7,17 +7,18 @@ import * as React from "react";
 import { Ban, CalendarClock, CheckCircle2, Plus, Settings2, Ticket, TicketCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
+import { FilterBar } from "@/components/ui/toolbar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { FilterChips, Pagination, SearchInput } from "@/components/ui/data";
 import { Explain } from "@/components/ui/tooltip";
-import { Field, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { SkeletonRows } from "@/components/ui/misc";
 import { ReadOnlyNotice } from "@/components/ui/patterns";
-import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
-import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   batchLabel,
@@ -202,8 +203,6 @@ export function VouchersView(props: {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Ticket />}
-        eyebrow="Internet offering"
         title="Vouchers"
         description="Printed cards a client redeems for internet access."
         help={
@@ -256,42 +255,40 @@ export function VouchersView(props: {
 
       {readOnly && <ReadOnlyNotice>Your role can see the voucher cards but not issue, cancel or reveal them.</ReadOnlyNotice>}
       <ErrorBanner err={summaryErr} />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <StatGrid cols={5}>
         <StatCard
           label="Available now"
           value={summary ? (summary.available ?? summary.unused).toLocaleString() : "—"}
           icon={<CheckCircle2 />}
-          tone="ok"
-          hint="Unused and inside their validity window"
+          hint="Unused, still valid"
         />
         <StatCard
           label="Used"
           value={summary ? summary.redeemed.toLocaleString() : "—"}
           icon={<TicketCheck />}
-          hint="A client signed in with them"
+          hint="Redeemed by clients"
         />
         <StatCard
           label="Expired unused"
           value={summary ? (summary.expired_unused ?? summary.redemption_expired).toLocaleString() : "—"}
           icon={<CalendarClock />}
           tone={summary && (summary.expired_unused ?? 0) > 0 ? "warn" : "default"}
-          hint="Past valid-until; refused at sign-in"
+          hint="Refused at sign-in"
         />
         <StatCard
           label="Cancelled"
           value={summary ? summary.revoked.toLocaleString() : "—"}
           icon={<Ban />}
-          hint="Cancelled before use"
+          hint="Before use"
         />
         <StatCard
           label="Issued this week"
           value={summary?.issued_last_7_days != null ? summary.issued_last_7_days.toLocaleString() : "—"}
           icon={<Ticket />}
-          tone="primary"
-          hint="Cards issued in the last 7 days"
+          hint="Last 7 days"
           className="col-span-2 sm:col-span-1"
         />
-      </div>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="overflow-x-auto">
@@ -301,84 +298,83 @@ export function VouchersView(props: {
           {canReadFormat && <TabsTrigger value="security">Code security</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="vouchers" className="space-y-4 pt-4">
-          <Card>
-            <div className="space-y-3 border-b border-border px-4 py-3">
-              <Toolbar>
-                <div className="flex w-full flex-wrap items-end gap-3">
-                  <div className="w-full sm:w-auto">
-                    <SearchInput
-                      value={search}
-                      onChange={setSearch}
-                      delay={300}
-                      placeholder="Last 4 characters"
-                      label="Search by the last 4 characters of a code"
-                      className="sm:w-56"
-                    />
-                  </div>
-                  <Field label="Package" className="w-full sm:w-56">
-                    <Select value={pkg} onChange={(e) => setPkg(e.target.value)}>
-                      <option value="">All packages</option>
-                      {packageOptions.map(([id, label]) => (
-                        <option key={id} value={id}>
-                          {label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Batch" className="w-full sm:w-64">
-                    <Select value={batch} onChange={(e) => setBatch(e.target.value)}>
-                      <option value="">All batches</option>
-                      {!batchKnown && <option value={batch}>Batch {batch.slice(0, 8)}</option>}
-                      {batches.map((b) => (
-                        <option key={b.batch_id} value={b.batch_id}>
-                          {batchLabel(b)} · {b.count} cards
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  {narrowed && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setSearch("");
-                        setPkg("");
-                        setBatch("");
-                      }}
-                    >
-                      Clear filters
-                    </Button>
-                  )}
-                </div>
-              </Toolbar>
-              {searchProblem && <p className="text-xs text-destructive">{searchProblem}</p>}
-              <div className="flex flex-wrap items-center gap-2">
-                <FilterChips
-                  label="Status"
-                  value={status}
-                  onChange={setStatus}
-                  options={[
-                    { value: "all", label: "All", count: counts.all },
-                    { value: "available", label: "Available", count: counts.available, tone: "ok" },
-                    { value: "not_yet_valid", label: "Not yet valid", count: counts.not_yet_valid, tone: "info" },
-                    { value: "expired", label: "Expired (never used)", count: counts.expired, tone: "warn" },
-                    { value: "redeemed", label: "Used", count: counts.redeemed },
-                    { value: "cancelled", label: "Cancelled", count: counts.cancelled, tone: "err" },
-                  ]}
+        <TabsContent value="vouchers" className="space-y-4 pt-5">
+          <Card className="overflow-hidden">
+            <FilterBar
+              inset
+              search={
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  delay={300}
+                  placeholder="Last 4 characters"
+                  label="Search by the last 4 characters of a code"
                 />
-                <Explain>
-                  Expiry is enforced when a client signs in: a card past its valid-until is refused there, while its record
-                  still says unused. These statuses show what each card is right now.
-                </Explain>
-              </div>
-            </div>
+              }
+              actions={narrowed ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearch("");
+                    setPkg("");
+                    setBatch("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : undefined}
+            >
+              <Select aria-label="Package" className="w-full sm:w-56" value={pkg} onChange={(e) => setPkg(e.target.value)}>
+                <option value="">All packages</option>
+                {packageOptions.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+              <Select aria-label="Batch" className="w-full sm:w-64" value={batch} onChange={(e) => setBatch(e.target.value)}>
+                <option value="">All batches</option>
+                {!batchKnown && <option value={batch}>Batch {batch.slice(0, 8)}</option>}
+                {batches.map((b) => (
+                  <option key={b.batch_id} value={b.batch_id}>
+                    {batchLabel(b)} · {b.count} cards
+                  </option>
+                ))}
+              </Select>
+            </FilterBar>
+            {searchProblem && <p className="border-b border-border px-4 py-2 text-xs text-destructive">{searchProblem}</p>}
+            <FilterBar
+              inset
+              filters={
+                <>
+                  <FilterChips
+                    label="Status"
+                    value={status}
+                    onChange={setStatus}
+                    options={[
+                      { value: "all", label: "All", count: counts.all },
+                      { value: "available", label: "Available", count: counts.available, tone: "ok" },
+                      { value: "not_yet_valid", label: "Not yet valid", count: counts.not_yet_valid, tone: "info" },
+                      { value: "expired", label: "Expired (never used)", count: counts.expired, tone: "warn" },
+                      { value: "redeemed", label: "Used", count: counts.redeemed },
+                      { value: "cancelled", label: "Cancelled", count: counts.cancelled, tone: "err" },
+                    ]}
+                  />
+                  <Explain>
+                    Expiry is enforced when a client signs in: a card past its valid-until is refused there, while its record
+                    still says unused. These statuses show what each card is right now.
+                  </Explain>
+                </>
+              }
+            />
 
             <ErrorBanner err={listErr} className="mx-4 mt-3" />
             {rows === null ? (
               <SkeletonRows rows={6} cols={5} />
             ) : rows.length === 0 ? (
               <EmptyState
+                size="sm"
                 icon={<Ticket />}
                 title={narrowed || status !== "all" ? "No cards match these filters" : "No vouchers yet"}
                 hint={
@@ -397,8 +393,7 @@ export function VouchersView(props: {
                 }
               />
             ) : (
-              <TableWrap>
-                <Table>
+              <Table label="Voucher cards">
                   <THead>
                     <TR>
                       <TH>Card</TH>
@@ -411,25 +406,15 @@ export function VouchersView(props: {
                   </THead>
                   <TBody>
                     {rows.map((r) => (
-                      <TR
-                        key={r.id}
-                        tabIndex={0}
-                        aria-label={`Card ${maskedCode(r.code_last4)}`}
-                        className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
-                        onClick={() => setSelected(r)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setSelected(r);
-                          }
-                        }}
-                      >
-                        <TD className="whitespace-nowrap font-mono tracking-widest">{maskedCode(r.code_last4)}</TD>
-                        <TD>{r.package_name ?? <span className="text-muted-foreground">Earlier package version</span>}</TD>
-                        <TD>
+                      <TR key={r.id} aria-label={`Card ${maskedCode(r.code_last4)}`} onClick={() => setSelected(r)}>
+                        <TD nowrap className="font-mono tracking-widest">{maskedCode(r.code_last4)}</TD>
+                        <TD truncate title={r.package_name ?? undefined} className="max-w-[14rem]">
+                          {r.package_name ?? <span className="text-muted-foreground">Earlier package version</span>}
+                        </TD>
+                        <TD nowrap>
                           <StatusBadge status={effectiveStatus(r)} />
                         </TD>
-                        <TD className="hidden whitespace-nowrap sm:table-cell">
+                        <TD nowrap className="hidden sm:table-cell">
                           {validityWords(r.redemption_valid_from, r.redemption_valid_until)}
                         </TD>
                         <TD className="hidden md:table-cell">
@@ -439,25 +424,24 @@ export function VouchersView(props: {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </TD>
-                        <TD className="hidden whitespace-nowrap lg:table-cell">
+                        <TD nowrap className="hidden lg:table-cell">
                           <When iso={r.created_at} />
                           {r.issued_by_label && <div className="text-xs text-muted-foreground">{r.issued_by_label}</div>}
                         </TD>
                       </TR>
                     ))}
                   </TBody>
-                </Table>
-              </TableWrap>
+              </Table>
             )}
             {rows && rows.length > 0 && (
-              <div className="border-t border-border px-4 py-3">
+              <CardFooter>
                 <Pagination offset={offset} limit={PAGE} shown={rows.length} total={list?.total ?? null} onChange={setOffset} />
-              </div>
+              </CardFooter>
             )}
           </Card>
         </TabsContent>
 
-        <TabsContent value="batches" className="pt-4">
+        <TabsContent value="batches" className="pt-5">
           <BatchesTab
             canRevealCodes={canRevealCodes}
             canCancel={canIssue}
@@ -469,13 +453,13 @@ export function VouchersView(props: {
         </TabsContent>
 
         {canRevealCodes && (
-          <TabsContent value="access" className="pt-4">
+          <TabsContent value="access" className="pt-5">
             <AccessLogTab reveals={reveals} error={revealsErr} />
           </TabsContent>
         )}
 
         {canReadFormat && (
-          <TabsContent value="security" className="pt-4">
+          <TabsContent value="security" className="pt-5">
             <CodeSecurityTab canEditFormat={canEditFormat} />
           </TabsContent>
         )}

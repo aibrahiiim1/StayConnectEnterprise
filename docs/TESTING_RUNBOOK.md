@@ -166,7 +166,7 @@ ssh $C '/tmp/nats-acctest'    # NATS points 11–19
 | Appliance unit installer skips Central units | `deploy/scripts/install-service-units-selftest.sh` |
 | Consoles | `npm test` in `cloud-admin/` and `hotel-admin/` |
 
-The Central test tools (`cmd/acceptance`, `cmd/pkitest`, and the two scripts through `cmd/regtest -signin`) sign in with the password and an authenticator code (`control-plane/internal/opsignin`). The first run sets the operator's authenticator up and keeps its secret in a 0600 keyring (`OPERATOR_TOTP_KEYRING`); an operator set up in the console first needs `ctrlapi reset-mfa --email E --reason R` before a tool can use it.
+The Central test tools (`cmd/acceptance`, `cmd/pkitest`, and the two scripts through `cmd/regtest -signin`) sign in through `control-plane/internal/opsignin`: the password alone for an operator without two-step sign-in (optional per account, D68), otherwise also the code. `Keyring.Enable` turns it on for a test operator and keeps the secret in a 0600 keyring (`OPERATOR_TOTP_KEYRING`); an operator who turned it on in the console first needs `ctrlapi reset-mfa --email E --reason R` before a tool can use it.
 
 Removed with the features they tested (2026-09-27 and the Central redesign): `scripts/phase5-nats-test.sh`,
 `phase5-ha-test.sh`, `phase5-reload-test.sh`, `phase17-offline-test.sh`, `phase3-api-test.sh`,

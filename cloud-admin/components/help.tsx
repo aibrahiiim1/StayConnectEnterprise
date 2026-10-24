@@ -4,7 +4,8 @@ import { Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTrigger } from "@/components/ui/sheet";
 
-// Keep action consequences and disabled-state warnings beside the control, outside optional help.
+// The side sheet holds the detailed, optional guidance for a page. Consequences of an action, and the reason a control
+// is disabled, stay beside the control.
 
 export function HelpTip({
   title,
@@ -27,9 +28,9 @@ export function HelpTip({
         aria-label={aria}
         title={aria}
         className={cn(
-          "inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground",
-          "transition-colors hover:border-warning/40 hover:bg-warning-subtle hover:text-warning-subtle-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+          "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground pointer-coarse:size-11",
+          "transition-colors hover:bg-warning-subtle hover:text-warning-subtle-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           className,
         )}
       >
@@ -58,7 +59,7 @@ export function HelpSection({ title, children }: { title?: React.ReactNode; chil
 
 export function HelpList({ items }: { items: React.ReactNode[] }) {
   return (
-    <ul className="list-disc space-y-1 pl-5 marker:text-muted-foreground/60">
+    <ul className="list-disc space-y-1 ps-5 marker:text-muted-foreground/60">
       {items.map((it, i) => (
         <li key={i}>{it}</li>
       ))}

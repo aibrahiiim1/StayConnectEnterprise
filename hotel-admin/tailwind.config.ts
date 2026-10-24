@@ -1,9 +1,8 @@
 import type { Config } from "tailwindcss";
 import plugin from "tailwindcss/plugin";
 
-// Every colour resolves to a CSS variable in app/globals.css, so theme is a class on <html>. `<alpha-value>` is
-// Tailwind's
-// substitution point that makes `bg-primary/10` work.
+// Every colour resolves to a CSS variable from app/tokens.css, so a theme is a class on <html>; `<alpha-value>` is what
+// makes `bg-primary/10` work.
 const token = (variable: string) => `hsl(var(${variable}) / <alpha-value>)`;
 
 const config: Config = {
@@ -32,8 +31,7 @@ const config: Config = {
           foreground: token("--surface-foreground"),
         },
         // `text-muted` must be the quiet LABEL (--muted-foreground): --muted is a near-white surface and made labels
-        // illegible.
-        // Places wanting the quiet panel use `muted-surface`.
+        // illegible. The quiet panel is `muted-surface`.
         muted: {
           DEFAULT: token("--muted-foreground"),
           foreground: token("--muted-foreground"),
@@ -107,8 +105,7 @@ const config: Config = {
           6: token("--chart-6"),
         },
 
-        // Compatibility aliases for existing screens; each points at the role token with the same meaning. New code
-        // uses role names.
+        // Compatibility aliases for screens still written in the old vocabulary; new code uses role names.
         bg: token("--background"),
         panel: token("--card"),
         panel2: token("--surface"),
@@ -119,9 +116,8 @@ const config: Config = {
         warn: token("--warning"),
         err: token("--destructive"),
       },
-      // Radius scale by role (design-system/tokens.css): md controls, lg cards and sheets, xl overlays.
       borderRadius: {
-        sm: "5px",
+        sm: "4px",
         md: "var(--radius-control)",
         lg: "var(--radius-card)",
         xl: "var(--radius-overlay)",
@@ -139,23 +135,23 @@ const config: Config = {
           "Consolas", "monospace",
         ],
       },
+      // The type scale (docs/ui/DESIGN_SYSTEM.md). Weights stop at 600: hierarchy comes from size and colour.
       fontSize: {
-        "2xs": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.01em" }],
+        "2xs": ["0.75rem", { lineHeight: "1rem" }],
         xs: ["0.8125rem", { lineHeight: "1.25rem" }],
-        title: ["1.625rem", { lineHeight: "1.3", letterSpacing: "-0.025em", fontWeight: "700" }],
-        metric: ["1.5rem", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }],
-        subtitle: ["1.25rem", { lineHeight: "1.4", letterSpacing: "-0.02em", fontWeight: "700" }],
-        headline: ["1.125rem", { lineHeight: "1.4", letterSpacing: "-0.015em", fontWeight: "700" }],
-        emphasis: ["0.9375rem", { lineHeight: "1.5", fontWeight: "650" }],
-        body: ["0.875rem", { lineHeight: "1.45" }],
-        label: ["0.8125rem", { lineHeight: "1.45", fontWeight: "600" }],
-        caption: ["0.8125rem", { lineHeight: "1.45" }],
-        micro: ["0.75rem", { lineHeight: "1.45", fontWeight: "700" }],
-        nano: ["0.6875rem", { lineHeight: "1.45", fontWeight: "700" }],
+        title: ["1.375rem", { lineHeight: "1.75rem", letterSpacing: "-0.018em", fontWeight: "600" }],
+        metric: ["1.5rem", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600" }],
+        subtitle: ["1.125rem", { lineHeight: "1.5rem", letterSpacing: "-0.012em", fontWeight: "600" }],
+        headline: ["1rem", { lineHeight: "1.5rem", letterSpacing: "-0.008em", fontWeight: "600" }],
+        emphasis: ["0.875rem", { lineHeight: "1.25rem", fontWeight: "600" }],
+        body: ["0.875rem", { lineHeight: "1.25rem" }],
+        label: ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "500" }],
+        caption: ["0.8125rem", { lineHeight: "1.25rem" }],
+        micro: ["0.75rem", { lineHeight: "1rem", fontWeight: "500" }],
+        nano: ["0.6875rem", { lineHeight: "1rem", fontWeight: "600" }],
       },
-      // Elevation only for what floats or responds; flat lists get none.
       boxShadow: {
-        xs: "var(--shadow-card)",
+        xs: "var(--shadow-control)",
         sm: "var(--shadow-card)",
         md: "var(--shadow-card-hover)",
         lg: "var(--shadow-overlay)",
@@ -175,9 +171,6 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
-        shimmer: {
-          "100%": { transform: "translateX(100%)" },
-        },
       },
       animation: {
         "fade-in": "fade-in 160ms ease-out",
@@ -187,8 +180,7 @@ const config: Config = {
   },
   plugins: [
     require("tailwindcss-animate"),
-    // `pointer-coarse:` (Tailwind 3.4 has no pointer variant): touch screens get 44px targets without changing desktop
-    // density.
+    // Touch screens get 44px targets without changing desktop density (Tailwind 3.4 has no pointer variant).
     plugin(({ addVariant }) => {
       addVariant("pointer-coarse", "@media (pointer: coarse)");
     }),

@@ -382,6 +382,6 @@ export type CentralUser = {
   roles: string[];
   created_at?: string;
   last_login_at?: string | null;
-  /** Without enrollment, the next sign-in starts authenticator setup. */
+  /** Whether the account turned two-step sign-in on; without it the password alone signs in (D68). */
   two_step_enrolled?: boolean;
 };

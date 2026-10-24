@@ -140,7 +140,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex min-w-0 flex-1 flex-col">
                 <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
                   <DialogPrimitive.Trigger
-                    className="-ms-1 inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors pointer-coarse:size-11 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
+                    className="-ms-1.5 inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:size-11 lg:hidden"
                     aria-label="Open navigation"
                   >
                     <Menu className="size-5" />

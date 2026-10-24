@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { fakeAudit } from "./fake-paged";
 
@@ -26,6 +26,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 beforeEach(() => { get.mockReset(); post.mockReset(); put.mockReset(); del.mockReset(); });
+
+// A row's secondary actions live in its "⋯" menu (RowActions); Radix opens it from the keyboard.
+async function openRowMenu(subject: string) {
+  fireEvent.keyDown(await screen.findByRole("button", { name: `Actions for ${subject}` }), { key: "Enter" });
+  return screen.findByRole("menu");
+}
 afterEach(() => { cleanup(); vi.resetModules(); });
 
 function routes(map: Record<string, unknown>, roles: string[]) {
@@ -59,7 +65,6 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     expect(screen.getByRole("heading", { level: 1, name: "Diagnostics" })).toBeTruthy();
-    expect(screen.getByText("System")).toBeTruthy();
     expect(await screen.findByText(/still starting after boot/i)).toBeTruthy();
   });
 
@@ -68,7 +73,8 @@ describe("Diagnostics", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    await userEvent.click(await screen.findByRole("button", { name: "Restart scd" }));
+    await openRowMenu("scd");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Every client currently online is disconnected/)).toBeTruthy();
@@ -87,16 +93,16 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     await screen.findByText(/can view diagnostics, but not read service logs/i);
-    expect(screen.queryByRole("button", { name: "Logs for scd" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Restart scd" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Recheck scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Recheck/ })).toBeNull();
   });
 
   it("offers the IT manager the logs", async () => {
     routes({ "/diagnostics/services": SUMMARY }, ["hotel_it_manager"]);
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    expect(await screen.findByRole("button", { name: "Logs for scd" })).toBeTruthy();
+    const menu = await openRowMenu("scd");
+    expect(within(menu).getByRole("menuitem", { name: "Logs" })).toBeTruthy();
   });
 });
 
@@ -130,12 +136,12 @@ describe("Activity", () => {
     expect(security.getAttribute("aria-checked")).toBe("true");
     expect(await screen.findByText("1 entry")).toBeTruthy();
 
-    const row = screen
-      .getAllByRole("button", { expanded: false })
-      .filter((b) => !(b.getAttribute("aria-label") ?? "").startsWith("Tips"))[0];
-    await userEvent.click(row);
-    expect(screen.getByText("backup.downloaded")).toBeTruthy();
-    const disclosure = screen.getByText("Raw payload");
+    // The row opens the exact record in a side drawer.
+    const table = screen.getByRole("table");
+    await userEvent.click(within(table).getAllByRole("row")[1]);
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("backup.downloaded")).toBeTruthy();
+    const disclosure = within(drawer).getByText("Raw payload");
     expect(disclosure.closest("details")).toBeTruthy();
   });
 });
@@ -159,8 +165,12 @@ describe("Backups", () => {
     routes(base, ["site_admin"]);
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
-    expect(await screen.findByRole("button", { name: "Restore db-20260921T095526Z.sql.gz" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Restore db-20260920T095526Z.sql.gz" })).toBeNull();
+    let menu = await openRowMenu("db-20260921T095526Z.sql.gz");
+    expect(within(menu).getByRole("menuitem", { name: "Restore…" })).toBeTruthy();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    menu = await openRowMenu("db-20260920T095526Z.sql.gz");
+    expect(within(menu).queryByRole("menuitem", { name: "Restore…" })).toBeNull();
     expect(screen.getByText("This site can be recovered from its latest backup")).toBeTruthy();
   });
 
@@ -170,7 +180,8 @@ describe("Backups", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     const name = "db-20260921T095526Z.sql.gz";
-    await userEvent.click(await screen.findByRole("button", { name: `Restore ${name}` }));
+    await openRowMenu(name);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restore…" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/current data will be replaced/)).toBeTruthy();
     expect(within(dialog).getByText(/Take a fresh safety copy/)).toBeTruthy();
@@ -223,7 +234,8 @@ describe("Backups", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     await screen.findByText(/can see and download backups/);
-    await userEvent.click(await screen.findByRole("button", { name: "Download db-20260921T095526Z.sql.gz" }));
+    await openRowMenu("db-20260921T095526Z.sql.gz");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Download…" }));
     const dialog = await screen.findByRole("dialog");
     const go = within(dialog).getByRole("button", { name: "Download" }) as HTMLButtonElement;
     expect(go.disabled, "the password is required").toBe(true);
@@ -249,7 +261,8 @@ describe("Operators", () => {
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
     expect(await screen.findByText("You")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Disable desk@hotel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Actions for desk@hotel" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /Disable/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByText(/can be re-enabled/)).toBeNull();
     expect(within(dialog).getByText(/no way to re-enable/i)).toBeTruthy();
@@ -260,10 +273,14 @@ describe("Operators", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/operators/page")).default;
     render(<Page />);
-    const select = await screen.findByLabelText("Give desk@hotel another role");
+    // Roles are managed in the operator's details, opened by clicking the row.
+    await userEvent.click(await screen.findByText("desk@hotel"));
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("Client services operator")).toBeTruthy();
+    const select = within(drawer).getByLabelText("Give desk@hotel another role");
     await userEvent.selectOptions(select, "site_viewer");
     expect(post).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: /Give this role\?/ });
     expect(within(dialog).getByText(/Give this role\?/)).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "Add role" })).toBeDisabled();
     await userEvent.type(within(dialog).getByLabelText(/Your password/), "admin-pass-1");

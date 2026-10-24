@@ -160,8 +160,8 @@ func (d authDeps) login(w http.ResponseWriter, r *http.Request) {
 	}
 	d.signinSucceeded(r, req.Email)
 
-	// The password is only the first step: no session until the authenticator code.
-	d.beginSecondStep(w, r, op)
+	// With a confirmed authenticator the password is only the first step: no session until its code.
+	d.finishPasswordStep(w, r, op)
 }
 
 // reauth re-verifies the current operator's password; licence, activation and other SU writes require it on top of the permission.

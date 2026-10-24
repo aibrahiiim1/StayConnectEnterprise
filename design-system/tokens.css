@@ -1,5 +1,5 @@
 /*
-  ONEGATE DESIGN TOKENS — the single source of truth for colour, radius, elevation and motion.
+  ONEGATE DESIGN TOKENS — the single source of truth for colour, radius, elevation, motion and layout.
 
   This file is canonical. `node tools/sync-design-tokens.mjs` copies it into each admin console
   (hotel-admin/app/tokens.css, cloud-admin/app/tokens.css); a unit test in each console fails if a copy
@@ -10,78 +10,69 @@
   Every colour is an HSL triple behind a ROLE name, consumed as `hsl(var(--role) / <alpha>)` by Tailwind.
   A theme is a set of token values and nothing else: no component names a colour.
 
-  PALETTE ORIGIN (light theme hex, for reference):
-    brand        #1773bd  hover #125c97  press #0f4b7b  tint #e8f1f8  tint text #0f4b7b   (brand blue)
-    ink          #14161a  slate #5a6270                                                   (text)
-    canvas       #f1f2f4  surface #ffffff  recessed #f6f7f9                               (layers)
-    hairline     #dcdfe4  (dividers, no meaning)   edge #7f8795 (control borders, >= 3:1)
-    inverse      #1e1e21  (navigation column, dark panels)
-    waiting      #9a5b0a / #fbf0dd   owned #157a52 / #e6f4ee   info #245d92 / #eaf2f8
-    danger       #b42318 / #fdeceb / #8f1c13   (added: the brand book had no error colour)
-
-  CONTRAST (checked, WCAG 2.1): every text token >= 4.5:1 on the grounds it is used on, in BOTH themes;
-  control borders and the focus ring >= 3:1. Re-run the check when a value changes.
+  CONTRAST (checked by test, WCAG 2.1): every text token >= 4.5:1 on the grounds it is used on, in BOTH
+  themes; control borders and the focus ring >= 3:1. Re-run the tests when a value changes.
 */
 
 :root {
   /* ---- layers ---------------------------------------------------------------------------------------- */
-  --background: 220 12% 95%;          /* app canvas, behind cards */
-  --foreground: 220 13% 9%;           /* ink: primary text and headings */
+  --background: 220 16% 97.5%;        /* app canvas, behind cards */
+  --foreground: 222 16% 11%;          /* ink: primary text and headings */
   --card: 0 0% 100%;
-  --card-foreground: 220 13% 9%;
+  --card-foreground: 222 16% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 220 13% 9%;
-  --surface: 220 20% 97%;             /* recessed: table headers, inset panels, row hover */
-  --surface-foreground: 220 13% 9%;
-  --muted: 220 20% 97%;               /* a quiet PANEL */
-  --muted-foreground: 218 11% 40%;    /* slate: a quiet LABEL (5.5:1 on canvas, 6.2:1 on card) */
-  --accent: 220 12% 93%;              /* hover / selection fill */
-  --accent-foreground: 220 13% 9%;
+  --popover-foreground: 222 16% 11%;
+  --surface: 220 18% 97%;             /* recessed: table headers, inset panels */
+  --surface-foreground: 222 16% 11%;
+  --muted: 220 18% 97%;               /* a quiet PANEL */
+  --muted-foreground: 219 10% 40%;    /* a quiet LABEL */
+  --accent: 220 16% 94.5%;            /* hover / selection fill */
+  --accent-foreground: 222 16% 11%;
 
   /* ---- brand (the ONE primary action per screen, active navigation, the logo) ------------------------ */
   --primary: 207 78% 42%;
-  --primary-foreground: 0 0% 100%;    /* 5.0:1 on primary */
-  --primary-hover: 207 79% 33%;
-  --primary-press: 207 78% 27%;
-  --primary-subtle: 206 53% 94%;
-  --primary-subtle-foreground: 207 78% 27%;
+  --primary-foreground: 0 0% 100%;
+  --primary-hover: 207 79% 36%;
+  --primary-press: 207 78% 30%;
+  --primary-subtle: 206 60% 95%;
+  --primary-subtle-foreground: 207 78% 29%;
 
-  --secondary: 220 12% 95%;
-  --secondary-foreground: 220 13% 9%;
+  --secondary: 220 16% 95%;
+  --secondary-foreground: 222 16% 11%;
 
   /* ---- state (never decorative; every badge also carries its word) ----------------------------------- */
   --success: 156 71% 28%;
   --success-foreground: 0 0% 100%;
-  --success-subtle: 154 39% 93%;
-  --success-subtle-foreground: 156 71% 24%;
+  --success-subtle: 152 45% 94.5%;
+  --success-subtle-foreground: 156 71% 23%;
   --warning: 34 88% 32%;
   --warning-foreground: 0 0% 100%;
-  --warning-subtle: 38 79% 93%;
-  --warning-subtle-foreground: 34 88% 28%;
-  --destructive: 4 76% 40%;
+  --warning-subtle: 40 85% 94.5%;
+  --warning-subtle-foreground: 32 88% 27%;
+  --destructive: 4 74% 44%;
   --destructive-foreground: 0 0% 100%;
-  --destructive-subtle: 3 82% 96%;
-  --destructive-subtle-foreground: 4 77% 32%;
-  --info: 209 60% 36%;
+  --destructive-subtle: 4 86% 96.5%;
+  --destructive-subtle-foreground: 4 77% 34%;
+  --info: 209 60% 38%;
   --info-foreground: 0 0% 100%;
-  --info-subtle: 206 50% 95%;
+  --info-subtle: 208 60% 96%;
   --info-subtle-foreground: 209 60% 30%;
 
   /* ---- lines ----------------------------------------------------------------------------------------- */
-  --border: 218 13% 88%;              /* hairline: dividers, card edges */
-  --border-strong: 217 12% 79%;
-  --input: 218 9% 54%;                /* edge: control boundaries, 3.6:1 on card */
-  --ring: 220 13% 9%;                 /* focus: 2px ink, never brand, so focus never reads as a primary */
-  --scrim: 225 12% 7%;                /* behind dialogs, sheets and the drawer: dark in BOTH themes, so it dims */
+  --border: 220 14% 90.5%;            /* hairline: dividers, card edges */
+  --border-strong: 220 12% 83%;       /* button edges, hovered card edges */
+  --input: 220 9% 58%;                /* control boundaries, >= 3:1 on card */
+  --ring: 222 16% 11%;                /* focus: ink, never brand, so focus never reads as a primary action */
+  --scrim: 225 14% 8%;                /* behind dialogs, sheets and the drawer: dark in BOTH themes */
 
-  /* ---- navigation column: inverse in BOTH themes ------------------------------------------------------ */
-  --sidebar: 240 5% 12%;
-  --sidebar-foreground: 214 8% 84%;
-  --sidebar-muted: 217 7% 65%;
-  --sidebar-accent: 240 5% 18%;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-border: 240 6% 20%;
-  --sidebar-active: 208 66% 65%;      /* the accent bar and icon of the current item */
+  /* ---- navigation column ------------------------------------------------------------------------------ */
+  --sidebar: 220 16% 96%;
+  --sidebar-foreground: 222 12% 22%;
+  --sidebar-muted: 219 9% 41%;
+  --sidebar-accent: 220 14% 91%;
+  --sidebar-accent-foreground: 222 16% 11%;
+  --sidebar-border: 220 14% 89.5%;
+  --sidebar-active: 207 78% 42%;      /* the icon of the current item */
 
   /* ---- charts (categorical, fixed order, none is a state colour) ------------------------------------- */
   --chart-1: 207 78% 42%;
@@ -92,20 +83,20 @@
   --chart-6: 330 60% 48%;
 
   /* ---- shape ------------------------------------------------------------------------------------------ */
-  --radius-flat: 0px;                 /* queue rows, status channels, dividers */
-  --radius-control: 7px;              /* buttons, inputs, chips */
-  --radius-card: 9px;                 /* cards, settings sections, sheets */
-  --radius-overlay: 12px;             /* dialogs, command palette, menus */
-  --radius-pill: 999px;               /* badges, switches, the launcher */
-  --radius: 9px;
+  --radius-flat: 0px;
+  --radius-control: 6px;              /* buttons, inputs, chips */
+  --radius-card: 10px;                /* cards, settings sections */
+  --radius-overlay: 12px;             /* dialogs, drawers, menus */
+  --radius-pill: 999px;               /* badges, switches */
+  --radius: 10px;
 
   /* ---- elevation: only what floats or responds -------------------------------------------------------- */
-  --shadow-control: 0 1px 2px rgba(18, 22, 28, 0.06);
-  --shadow-control-hover: 0 1px 2px rgba(18, 22, 28, 0.10);
-  --shadow-control-press: inset 0 1px 2px rgba(18, 22, 28, 0.18);
-  --shadow-card: 0 1px 2px rgba(18, 22, 28, 0.04);
-  --shadow-card-hover: 0 5px 14px rgba(22, 28, 32, 0.06);
-  --shadow-overlay: 0 16px 40px rgba(18, 22, 28, 0.16);
+  --shadow-control: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-control-hover: 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-control-press: inset 0 1px 2px rgba(16, 24, 40, 0.12);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-card-hover: 0 4px 12px rgba(16, 24, 40, 0.07);
+  --shadow-overlay: 0 12px 32px rgba(16, 24, 40, 0.14), 0 2px 6px rgba(16, 24, 40, 0.06);
 
   /* ---- motion ----------------------------------------------------------------------------------------- */
   --motion-press: 80ms;
@@ -113,7 +104,7 @@
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* ---- layout ----------------------------------------------------------------------------------------- */
-  --sidebar-width: 16rem;
+  --sidebar-width: 15rem;
   --sidebar-width-rail: 3.75rem;
   --topbar-height: 3.5rem;
 }
@@ -123,11 +114,11 @@
    moves; every other token is shared, which is what keeps the two consoles one family. */
 [data-product="central"] {
   --primary: 185 81% 29%;
-  --primary-hover: 185 82% 23%;
-  --primary-press: 185 82% 18%;
-  --primary-subtle: 184 44% 92%;
+  --primary-hover: 185 82% 24%;
+  --primary-press: 185 82% 19%;
+  --primary-subtle: 184 48% 94%;
   --primary-subtle-foreground: 185 81% 21%;
-  --sidebar-active: 184 60% 58%;
+  --sidebar-active: 185 81% 29%;
   --chart-1: 185 81% 29%;
 }
 
@@ -138,15 +129,15 @@
   --card-foreground: 216 15% 94%;
   --popover: 228 10% 12%;
   --popover-foreground: 216 15% 94%;
-  --surface: 223 10% 14%;
+  --surface: 225 10% 12.5%;
   --surface-foreground: 216 15% 94%;
-  --muted: 223 10% 14%;
-  --muted-foreground: 218 10% 67%;    /* 7.5:1 on card */
-  --accent: 222 9% 18%;
+  --muted: 225 10% 12.5%;
+  --muted-foreground: 218 10% 67%;
+  --accent: 222 9% 16.5%;
   --accent-foreground: 216 15% 96%;
 
   --primary: 208 74% 63%;
-  --primary-foreground: 208 76% 13%;  /* dark text on the lightened fill, 6.1:1 */
+  --primary-foreground: 208 76% 13%;
   --primary-hover: 208 75% 70%;
   --primary-press: 208 75% 76%;
   --primary-subtle: 208 48% 16%;
@@ -172,19 +163,19 @@
   --info-subtle: 212 51% 15%;
   --info-subtle-foreground: 209 74% 81%;
 
-  --border: 220 9% 19%;
-  --border-strong: 220 9% 25%;
-  --input: 218 7% 50%;                /* 4.3:1 on card */
+  --border: 222 9% 17.5%;
+  --border-strong: 222 9% 24%;
+  --input: 218 7% 50%;
   --ring: 216 15% 94%;
   --scrim: 225 14% 3%;
 
-  --sidebar: 225 11% 8%;
-  --sidebar-foreground: 214 8% 84%;
-  --sidebar-muted: 217 7% 62%;
+  --sidebar: 228 11% 8.5%;
+  --sidebar-foreground: 214 10% 82%;
+  --sidebar-muted: 217 8% 62%;
   --sidebar-accent: 225 9% 15%;
   --sidebar-accent-foreground: 0 0% 100%;
   --sidebar-border: 225 9% 14%;
-  --sidebar-active: 208 66% 65%;
+  --sidebar-active: 208 74% 63%;
 
   --chart-1: 208 74% 63%;
   --chart-2: 172 60% 45%;
@@ -193,7 +184,9 @@
   --chart-5: 198 80% 55%;
   --chart-6: 330 60% 64%;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-control-hover: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-card-hover: 0 6px 16px rgba(0, 0, 0, 0.45);
   --shadow-overlay: 0 18px 44px rgba(0, 0, 0, 0.6);
 }

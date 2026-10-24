@@ -1,16 +1,23 @@
 "use client";
 
-// Rotating recovery codes requires password step-up and a current authenticator code, never a recovery code.
-// A stolen session and password must not remove the second factor.
+// Two-step sign-in is optional per account and recommended (D68). Turning it on needs the password; turning it off,
+// and making new recovery codes, need the password and a code, so a stolen session cannot remove or bypass it.
+// Turning it on or off ends this operator's other sessions; the API renews this session's cookie, so the page only
+// re-reads the state.
 
 import { useCallback, useEffect, useState } from "react";
+import { KeyRound } from "lucide-react";
 import { api, ApiError, withStepUp } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input, useFieldErrors } from "@/components/ui/input";
+import { DialogForm } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/misc";
+import { HelpList, HelpSection } from "@/components/help";
+import { RecoveryCodes, TwoStepDisable, TwoStepEnable } from "@/components/two-step";
 import { formatDateTime } from "@/lib/status";
 
 type MFAState = { enrolled: boolean; confirmed_at?: string; recovery_codes_left: number };
@@ -18,18 +25,27 @@ type MFAState = { enrolled: boolean; confirmed_at?: string; recovery_codes_left:
 export default function TwoStepSigninPage() {
   const [state, setState] = useState<MFAState | null>(null);
   const [err, setErr] = useState<unknown>(null);
+  const [mode, setMode] = useState<"idle" | "enable" | "disable">("idle");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [making, setMaking] = useState(false);
+  const [makeErr, setMakeErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
   const [code, setCode] = useState("");
   const f = useFieldErrors<"code">();
 
   const load = useCallback(async () => {
-    try { setState(await api.get<MFAState>("/v1/auth/mfa")); } catch (e) { setErr(e); }
+    try { setState(await api.get<MFAState>("/v1/auth/mfa")); setErr(null); } catch (e) { setErr(e); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  function openMaking() {
+    setCode(""); setMakeErr(null); f.clear(); setCodes(null); setNotice(null);
+    setMaking(true);
+  }
+
   async function makeCodes() {
-    setErr(null); f.clear();
+    setMakeErr(null); f.clear();
     const c = code.replace(/[\s-]/g, "");
     if (!/^\d{6}$/.test(c)) {
       f.fail({ code: "Enter the 6-digit code your authenticator app shows now. A recovery code cannot be used here." });
@@ -40,85 +56,172 @@ export default function TwoStepSigninPage() {
       const r = await withStepUp(() => api.post<{ recovery_codes: string[] }>("/v1/auth/mfa/recovery-codes", { code: c }));
       setCodes(r.recovery_codes);
       setCode("");
+      setMaking(false);
       await load();
     } catch (e) {
       // Code errors belong to the field; service failures belong to the banner.
       if (e instanceof ApiError && (e.code === "wrong_code" || e.code === "code_required")) {
         setCode("");
         f.fail({ code: e.message });
-      } else setErr(e);
+      } else setMakeErr(e);
     } finally { setBusy(false); }
   }
 
+  const on = state?.enrolled === true;
+  const low = on && state !== null && state.recovery_codes_left <= 3;
+
   return (
-    <PageShell width="narrow">
-      <PageHeader title="Two-step sign-in" description="Signing in asks for your password and the code from your authenticator app." />
-      <ErrorBanner err={err} />
-      <Card>
-        <CardHeader>
-          <div className="flex w-full flex-wrap items-center justify-between gap-3">
-            <CardTitle>Authenticator app</CardTitle>
-            <Badge tone={state?.enrolled ? "ok" : "neutral"}>{state ? (state.enrolled ? "Set up" : "Not set up") : "—"}</Badge>
+    <PageShell width="form">
+      <PageHeader
+        title="Two-step sign-in"
+        description="Ask for a code from your phone as well as your password when you sign in."
+        help={
+          <>
+            <HelpSection title="How it works">
+              <HelpList
+                items={[
+                  "Optional for each account, and recommended. With it on, signing in asks for your password and then the 6-digit code your authenticator app shows.",
+                  "Any authenticator app works: Google Authenticator, Microsoft Authenticator, 1Password and others.",
+                  "Someone who learns your password still cannot sign in without your phone.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Recovery codes">
+              <HelpList
+                items={[
+                  "Turning it on gives ten single-use recovery codes. Each signs you in once instead of the app.",
+                  "Making a new set replaces every earlier code, and needs your password and a code from the app.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="A new phone">
+              <HelpList
+                items={[
+                  "Turn two-step sign-in off with a recovery code, then on again with the new phone.",
+                  "Or ask an administrator to reset it under Team.",
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Other sign-ins">
+              <p>Turning it on or off signs you out everywhere else. You stay signed in here.</p>
+            </HelpSection>
+          </>
+        }
+      />
+
+      <ErrorBanner err={err} className="mb-0" />
+      {notice && <Callout tone="success">{notice}</Callout>}
+
+      <SectionCard
+        title="Authenticator app"
+        description={
+          state === null
+            ? "Checking…"
+            : on
+              ? "Signing in asks for your password and a code from your app."
+              : "Your password alone signs you in."
+        }
+        actions={state && <StatusBadge tone={on ? "ok" : "default"}>{on ? "On" : "Off"}</StatusBadge>}
+      >
+        {state === null ? (
+          <div className="space-y-2" aria-hidden>
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-8 w-48" />
           </div>
-        </CardHeader>
-        <CardBody className="space-y-2">
-          {state?.enrolled && state.confirmed_at && (
-            <p className="text-caption text-muted-foreground">Set up {formatDateTime(state.confirmed_at)}.</p>
-          )}
-          <p className="text-sm text-muted-foreground">
-            New phone? Ask an administrator to reset your two-step sign-in; you set up the app again the next time you
-            sign in.
-          </p>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader>
-          <div className="flex w-full flex-wrap items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <CardTitle>Recovery codes</CardTitle>
-              <CardDescription>Each signs you in once without the app. A new set replaces every earlier code.</CardDescription>
-            </div>
-            <Badge tone={state && state.recovery_codes_left <= 3 ? "warn" : "neutral"}>
-              {state ? `${state.recovery_codes_left} left` : "—"}
-            </Badge>
+        ) : mode === "enable" ? (
+          <TwoStepEnable
+            onCancel={() => setMode("idle")}
+            onEnabled={() => void load()}
+            onDone={() => {
+              setMode("idle");
+              setNotice("Two-step sign-in is on. Anywhere else you were signed in has been signed out.");
+              void load();
+            }}
+          />
+        ) : on ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              {state.confirmed_at ? `Turned on ${formatDateTime(state.confirmed_at)}.` : "Turned on."}
+            </p>
+            <Button variant="secondary" onClick={() => { setMode("disable"); setNotice(null); }}>Turn off</Button>
           </div>
-        </CardHeader>
-        <CardBody className="space-y-3">
-          {codes && (
-            <ul aria-label="New recovery codes" className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card p-3 font-mono text-sm">
-              {codes.map((c) => <li key={c}>{c}</li>)}
-            </ul>
-          )}
-          {state?.enrolled && (
-            <form
-              className="space-y-3"
-              noValidate
-              onSubmit={(e) => { e.preventDefault(); void makeCodes(); }}
-            >
-              <Field
-                label="Code from your authenticator app"
-                hint="The 6-digit code the app shows now. You will also be asked for your password."
-                error={f.error("code")}
-              >
-                <Input
-                  id={f.id("code")}
-                  name="code"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]*"
-                  maxLength={9}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="max-w-[12rem] font-mono tracking-widest"
-                />
-              </Field>
-              <Button type="submit" size="sm" variant="secondary" disabled={busy}>
-                {busy ? "Making…" : "Make new recovery codes"}
-              </Button>
-            </form>
-          )}
-        </CardBody>
-      </Card>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Recommended: protects this account if your password leaks.</p>
+            <Button variant="primary" onClick={() => { setMode("enable"); setNotice(null); setCodes(null); }}>
+              Turn on two-step sign-in
+            </Button>
+          </div>
+        )}
+      </SectionCard>
+
+      {on && mode !== "enable" && (
+        <SectionCard
+          title="Recovery codes"
+          description="Each signs you in once if you lose your phone."
+          actions={<Badge tone={low ? "warn" : "neutral"}>{`${state!.recovery_codes_left} left`}</Badge>}
+        >
+          <div className="space-y-4">
+            {low && !codes && <Callout tone="warning">Make a new set before you run out.</Callout>}
+            {codes ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Your earlier codes no longer work. These are shown only now.
+                </p>
+                <RecoveryCodes codes={codes} label="New recovery codes" />
+                <div className="flex justify-end border-t border-border pt-4">
+                  <Button variant="primary" onClick={() => setCodes(null)}>I have saved them</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">A new set replaces every earlier code.</p>
+                <Button variant="secondary" onClick={openMaking}><KeyRound /> Make new recovery codes</Button>
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      )}
+
+      <TwoStepDisable
+        open={mode === "disable"}
+        onOpenChange={(v) => { if (!v) setMode("idle"); }}
+        onDone={() => {
+          setMode("idle"); setCodes(null); setMaking(false);
+          setNotice("Two-step sign-in is off. Your password alone signs you in, and anywhere else you were signed in has been signed out.");
+          void load();
+        }}
+      />
+
+      <DialogForm
+        open={making}
+        onOpenChange={(v) => { if (!v) setMaking(false); }}
+        size="sm"
+        title="Make new recovery codes"
+        description="Every earlier recovery code stops working. You may be asked for your password."
+        submitLabel="Make codes"
+        busyLabel="Making…"
+        busy={busy}
+        error={makeErr}
+        onSubmit={makeCodes}
+      >
+        <Field
+          label="Code from your authenticator app"
+          hint="The 6-digit code the app shows now. A recovery code cannot be used here."
+          error={f.error("code")}
+        >
+          <Input
+            id={f.id("code")}
+            name="code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={9}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="max-w-[10rem] font-mono tracking-widest"
+          />
+        </Field>
+      </DialogForm>
     </PageShell>
   );
 }

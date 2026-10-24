@@ -167,7 +167,7 @@ test("stays list shows the stay and its occupants and room charge state on deman
   await page.goto("/stays");
   await page.getByLabel("Filter by status").selectOption("");
   await expect(page.getByText("R900")).toBeVisible();
-  await page.getByRole("button", { name: "View" }).click();
+  await page.getByRole("button", { name: /^View: stay/ }).click();
   await expect(page.getByText("Byron, Ada")).toBeVisible();
   await expect(page.getByRole("region", { name: "Room charge" }).getByText("The guest is not in house")).toBeVisible();
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
@@ -216,7 +216,7 @@ test("an operator acknowledges an operational alert", async ({ page }) => {
     mutations,
   });
   await page.goto("/operational-alerts");
-  await page.getByRole("button", { name: /Acknowledge alert/ }).click();
+  await page.getByRole("button", { name: /^Acknowledge: alert/ }).click();
   await expect
     .poll(() => mutations.find((m) => m.path === "/operational-alerts/a1/acknowledge"))
     .toBeTruthy();
@@ -383,6 +383,6 @@ test("an alert changed by someone else refreshes the queue instead of overwritin
     mutations,
   });
   await page.goto("/operational-alerts");
-  await page.getByRole("button", { name: /Acknowledge alert/ }).click();
+  await page.getByRole("button", { name: /^Acknowledge: alert/ }).click();
   await expect(page.getByText(/changed while you were looking at it/i)).toBeVisible();
 });

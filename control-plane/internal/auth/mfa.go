@@ -1,7 +1,9 @@
 package auth
 
-// Central console sign-in is two steps: the password opens a five-minute pending state, and a TOTP code (RFC 6238)
-// or single-use recovery code opens the session. The TOTP secret is sealed with AES-256-GCM under
+// Two-step sign-in to the Central console is optional per account (D68). For an account with a confirmed
+// authenticator the password opens only a five-minute pending state, and a TOTP code (RFC 6238) or single-use
+// recovery code opens the session; an account without one (or with a set-up never confirmed) signs in with the
+// password alone. The TOTP secret is sealed with AES-256-GCM under
 // CTRLAPI_OPERATOR_MFA_KEY and bound to the operator; recovery codes are stored as an HMAC under the same key.
 // A code is never accepted twice. The appliance Admin Console does the same (data-plane cmd/scd/operator_mfa.go).
 
@@ -319,6 +321,28 @@ func (s *MFA) NewRecoveryCodes(ctx context.Context, operatorID, code string) (co
 	return codes, ok, lockedUntil, nil
 }
 
+// Disable turns the operator's own two-step sign-in off against a code from the second factor (the app's or a
+// recovery code), checked like a sign-in code; the check and the removal are one transaction. ok=false is a wrong
+// code; lockedUntil is set when it started a lockout.
+func (s *MFA) Disable(ctx context.Context, operatorID, code string) (method string, ok bool, lockedUntil *time.Time, err error) {
+	if err := s.ready(); err != nil {
+		return "", false, nil, err
+	}
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		var err error
+		method, ok, lockedUntil, err = s.verifyTx(ctx, tx, operatorID, code, true)
+		if err != nil || !ok {
+			return err
+		}
+		_, err = ResetMFA(ctx, tx, operatorID)
+		return err
+	})
+	if err != nil {
+		return "", false, nil, err
+	}
+	return method, ok, lockedUntil, nil
+}
+
 // ResetMFA removes an operator's authenticator and recovery codes. It needs no key, only a database (break-glass).
 func ResetMFA(ctx context.Context, q interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
@@ -381,7 +405,6 @@ func normalizeRecoveryCode(code string) string {
 
 type PendingSignin struct {
 	OperatorID string
-	Enrol      bool
 }
 
 func pendingHash(tok string) string {
@@ -390,7 +413,7 @@ func pendingHash(tok string) string {
 }
 
 // CreatePending stores a pending sign-in and returns the cookie token. One per operator: a new password step replaces it.
-func CreatePending(ctx context.Context, db *pgxpool.Pool, operatorID string, enrol bool) (string, error) {
+func CreatePending(ctx context.Context, db *pgxpool.Pool, operatorID string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -401,8 +424,9 @@ func CreatePending(ctx context.Context, db *pgxpool.Pool, operatorID string, enr
 			operatorID); err != nil {
 			return err
 		}
+		// The enrol column (0052) stays false: an authenticator is set up from the account page, never at sign-in.
 		_, err := tx.Exec(ctx, `INSERT INTO operator_signin_pending (token_hash, operator_id, enrol, expires_at)
-			VALUES ($1, $2::uuid, $3, now() + make_interval(secs => $4))`, pendingHash(tok), operatorID, enrol,
+			VALUES ($1, $2::uuid, false, now() + make_interval(secs => $3))`, pendingHash(tok), operatorID,
 			PendingSigninTTL.Seconds())
 		return err
 	})
@@ -411,16 +435,12 @@ func CreatePending(ctx context.Context, db *pgxpool.Pool, operatorID string, enr
 
 func LookupPending(ctx context.Context, db *pgxpool.Pool, tok string) (*PendingSignin, error) {
 	var p PendingSignin
-	err := db.QueryRow(ctx, `SELECT operator_id::text, enrol FROM operator_signin_pending
-		WHERE token_hash = $1 AND expires_at > now()`, pendingHash(tok)).Scan(&p.OperatorID, &p.Enrol)
+	err := db.QueryRow(ctx, `SELECT operator_id::text FROM operator_signin_pending
+		WHERE token_hash = $1 AND expires_at > now()`, pendingHash(tok)).Scan(&p.OperatorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return &p, err
-}
-
-func SetPendingEnrol(ctx context.Context, db *pgxpool.Pool, tok string, enrol bool) {
-	_, _ = db.Exec(ctx, `UPDATE operator_signin_pending SET enrol = $2 WHERE token_hash = $1`, pendingHash(tok), enrol)
 }
 
 func DropPending(ctx context.Context, db *pgxpool.Pool, tok string) {

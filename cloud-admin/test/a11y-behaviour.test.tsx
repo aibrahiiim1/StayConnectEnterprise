@@ -14,6 +14,7 @@ import LoginPage from "@/app/login/page";
 import CustomersPage from "@/app/(app)/customers/page";
 import CustomerPage from "@/app/(app)/customers/[id]/page";
 import { SigninSecondStep } from "@/components/signin-second-step";
+import { TwoStepEnable } from "@/components/two-step";
 import { TimezoneSelect } from "@/components/placement-fields";
 import { Field } from "@/components/ui/input";
 import { MonoId } from "@/components/ui/misc";
@@ -105,23 +106,33 @@ describe("the sign-in page", () => {
 });
 
 describe("the second sign-in step", () => {
-  it("moves focus to the recovery codes' heading when they replace the form", async () => {
-    const user = userEvent.setup();
-    mockFetch([{ method: "POST", match: "/api/v1/auth/login/code", body: { recovery_codes: ["AAAA-BBBB", "CCCC-DDDD"] } }]);
-    render(<SigninSecondStep step="code" onDone={vi.fn()} onRestart={vi.fn()} />);
+  it("says why the submit is disabled", () => {
+    render(<SigninSecondStep onDone={vi.fn()} onRestart={vi.fn()} />);
     const submit = screen.getByRole("button", { name: "Sign in" });
     expect(submit).toBeDisabled();
     expect(submit).toHaveAccessibleDescription("Enter your code to continue.");
-    await user.type(screen.getByLabelText(/^Code/), "123456");
-    await user.click(submit);
-    const heading = await screen.findByRole("heading", { name: "Save your recovery codes" });
+  });
+
+  it("turning two-step sign-in on moves focus to the recovery codes' heading", async () => {
+    const user = userEvent.setup();
+    mockFetch([
+      { method: "POST", match: "/api/v1/auth/reauth", body: { ok: true } },
+      { method: "POST", match: "/api/v1/auth/mfa/setup", body: { secret: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/x" } },
+      { method: "POST", match: "/api/v1/auth/mfa/confirm", body: { enrolled: true, recovery_codes: ["AAAA-BBBB", "CCCC-DDDD"] } },
+    ]);
+    render(<TwoStepEnable onDone={vi.fn()} onCancel={vi.fn()} />);
+    await user.type(screen.getByLabelText(/^Your password/), "pw");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(await screen.findByLabelText(/Code from the app/), "123456");
+    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    const heading = await screen.findByRole("heading", { name: /Save your recovery codes/ });
     expect(heading).toHaveFocus();
   });
 
   it("moves focus to the heading of the codes-running-low notice", async () => {
     const user = userEvent.setup();
     mockFetch([{ method: "POST", match: "/api/v1/auth/login/code", body: { recovery_codes_left: 2 } }]);
-    render(<SigninSecondStep step="code" onDone={vi.fn()} onRestart={vi.fn()} />);
+    render(<SigninSecondStep onDone={vi.fn()} onRestart={vi.fn()} />);
     await user.type(screen.getByLabelText(/^Code/), "ABCD-EFGH");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("heading", { name: "Recovery codes running low" })).toHaveFocus();

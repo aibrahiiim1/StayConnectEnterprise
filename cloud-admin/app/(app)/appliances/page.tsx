@@ -11,19 +11,22 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
 import { FilterChips, SearchInput } from "@/components/ui/data";
-import { SkeletonRows } from "@/components/ui/misc";
 import { refreshingClass } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
 import { ApplianceTable, sortAppliances } from "@/components/appliance-table";
 import { ActivateDialog } from "@/components/appliance-dialogs";
+import { ListState } from "@/components/record-view";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
 import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
+
+const FILTER_SELECT = "w-auto min-w-36 max-w-56";
 
 const FILTERS = ["activation", "connection", "license", "customer_id", "site_id", "q"] as const;
 
@@ -116,7 +119,7 @@ function Appliances() {
     <PageShell width="wide">
       <PageHeader
         title="Appliances"
-        description="Every appliance, with where it is installed, whether it is connected and what its license allows."
+        description="Every appliance: where it is installed, whether it is connected and what its license allows."
         help={
           <>
             <HelpSection title="Getting a new appliance working">
@@ -149,31 +152,37 @@ function Appliances() {
                 aria-hidden
                 onChange={(e) => importRequest(e.target.files?.[0] ?? null)}
               />
-              <Button variant="secondary" disabled={importing} onClick={() => fileRef.current?.click()}>
-                <FileUp /> {importing ? "Importing…" : "Import activation request"}
+              <Button variant="secondary" loading={importing} onClick={() => fileRef.current?.click()}>
+                {!importing && <FileUp />} Import activation request
               </Button>
             </>
           ) : undefined
         }
       />
 
-      <Card>
-        <div className="space-y-3 border-b border-border px-4 py-3">
-          <FilterChips
-            label="Activation"
-            value={f.activation}
-            onChange={(v) => setF({ activation: v })}
-            options={[
-              { value: "", label: "All", count: counts?.total },
-              ...ACTIVATION_ORDER.map((k) => ({
-                value: k,
-                label: k === "waiting" ? "Waiting" : ACTIVATION[k].label,
-                count: counts?.[k],
-                tone: ACTIVATION[k].tone === "default" ? undefined : (ACTIVATION[k].tone as "ok" | "warn" | "err" | "info"),
-              })),
-            ]}
-          />
-          <Toolbar className="items-center">
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
+            <FilterChips
+              label="Activation"
+              value={f.activation}
+              onChange={(v) => setF({ activation: v })}
+              options={[
+                { value: "", label: "All", count: counts?.total },
+                ...ACTIVATION_ORDER.map((k) => ({
+                  value: k,
+                  label: k === "waiting" ? "Waiting" : ACTIVATION[k].label,
+                  count: counts?.[k],
+                  tone: ACTIVATION[k].tone === "default" ? undefined : (ACTIVATION[k].tone as "ok" | "warn" | "err" | "info"),
+                })),
+              ]}
+            />
+          }
+        />
+        <FilterBar
+          className="border-b border-border px-4 py-3"
+          search={
             <SearchInput
               value={f.q}
               onChange={(v) => setF({ q: v })}
@@ -181,64 +190,75 @@ function Appliances() {
               placeholder="Search serial or hostname"
               label="Search appliances"
             />
-            <div className="flex flex-wrap items-center gap-2">
-              <Select aria-label="Connection" className="h-9 w-auto min-w-40" value={f.connection} onChange={(e) => setF({ connection: e.target.value })}>
-                <option value="">Any connection</option>
-                {CONNECTION_ORDER.map((k) => <option key={k} value={k}>{CONNECTION[k].label}</option>)}
-              </Select>
-              <Select aria-label="License" className="h-9 w-auto min-w-40" value={f.license} onChange={(e) => setF({ license: e.target.value })}>
-                <option value="">Any license</option>
-                {LICENSE_ORDER.map((k) => <option key={k} value={k}>{LICENSE[k].label}</option>)}
-              </Select>
-              {can["customers.list"] && (
-                <Select
-                  aria-label="Customer"
-                  className="h-9 w-auto min-w-40"
-                  value={f.customer_id}
-                  onChange={(e) => setF({ customer_id: e.target.value, site_id: "" })}
-                >
-                  <option value="">All customers</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </Select>
-              )}
-              {f.customer_id && (
-                <Select aria-label="Site" className="h-9 w-auto min-w-40" value={f.site_id} onChange={(e) => setF({ site_id: e.target.value })}>
-                  <option value="">All sites</option>
-                  {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </Select>
-              )}
-              {filtered && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setF({ activation: "", connection: "", license: "", customer_id: "", site_id: "", q: "" })}
-                >
-                  Clear filters
-                </Button>
-              )}
-            </div>
-          </Toolbar>
-        </div>
+          }
+          actions={
+            filtered ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setF({ activation: "", connection: "", license: "", customer_id: "", site_id: "", q: "" })}
+              >
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        >
+          <Select aria-label="Connection" className={FILTER_SELECT} value={f.connection} onChange={(e) => setF({ connection: e.target.value })}>
+            <option value="">Any connection</option>
+            {CONNECTION_ORDER.map((k) => <option key={k} value={k}>{CONNECTION[k].label}</option>)}
+          </Select>
+          <Select aria-label="License" className={FILTER_SELECT} value={f.license} onChange={(e) => setF({ license: e.target.value })}>
+            <option value="">Any license</option>
+            {LICENSE_ORDER.map((k) => <option key={k} value={k}>{LICENSE[k].label}</option>)}
+          </Select>
+          {can["customers.list"] && (
+            <Select
+              aria-label="Customer"
+              className={FILTER_SELECT}
+              value={f.customer_id}
+              onChange={(e) => setF({ customer_id: e.target.value, site_id: "" })}
+            >
+              <option value="">All customers</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          )}
+          {f.customer_id && (
+            <Select aria-label="Site" className={FILTER_SELECT} value={f.site_id} onChange={(e) => setF({ site_id: e.target.value })}>
+              <option value="">All sites</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          )}
+        </FilterBar>
 
         <ErrorBanner err={err} className="m-4" />
 
-        {rows === null ? (
-          <SkeletonRows rows={6} cols={5} />
-        ) : rows.length === 0 ? (
-          filtered ? (
-            <EmptyState title="No appliances match" hint="Nothing matches these filters." />
-          ) : (
+        <ListState
+          rows={rows}
+          cols={5}
+          filtered={filtered}
+          noMatch={
+            <EmptyState
+              title="No appliances match"
+              hint="Nothing matches these filters."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setF({ activation: "", connection: "", license: "", customer_id: "", site_id: "", q: "" })}>
+                  Clear filters
+                </Button>
+              }
+            />
+          }
+          empty={
             <EmptyState
               icon={<Server />}
               title="No appliances yet"
-              hint="A new appliance appears here by itself, waiting for activation, a minute after it is powered on with internet access."
+              hint="A new appliance appears here by itself a minute after it is powered on with internet access."
             />
-          )
-        ) : (
+          }
+        >
           <div className={cn(refreshing && refreshingClass)}>
-            <ApplianceTable rows={rows} onActivate={can["appliances.activate"] ? setActivate : undefined} />
+            <ApplianceTable rows={rows ?? []} onActivate={can["appliances.activate"] ? setActivate : undefined} />
           </div>
-        )}
+        </ListState>
       </Card>
 
       {activate && (

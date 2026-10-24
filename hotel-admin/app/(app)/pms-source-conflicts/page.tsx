@@ -5,23 +5,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Layers, AlertTriangle, Hourglass } from "lucide-react";
+import { Layers } from "lucide-react";
 import { api, PmsSourceConflict } from "@/lib/api";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
 
 const SEVERITY: Record<string, { tone: "err" | "warn" | "info"; label: string }> = {
-  HIGH: { tone: "err", label: "high" },
-  MEDIUM: { tone: "warn", label: "medium" },
-  LOW: { tone: "info", label: "low" },
+  HIGH: { tone: "err", label: "High" },
+  MEDIUM: { tone: "warn", label: "Medium" },
+  LOW: { tone: "info", label: "Low" },
   // Detected from published configuration: two connections whose live versions dial the same PMS source.
-  DUPLICATE_SOURCE: { tone: "err", label: "same PMS source" },
+  DUPLICATE_SOURCE: { tone: "err", label: "Same PMS source" },
 };
 
 const RESOLUTION_WORDS: Record<string, string> = {
@@ -72,10 +72,8 @@ export default function PMSSourceConflictsPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Duplicate sources"
-        icon={<Layers />}
-        description="Rooms claimed by two PMS connections. Their guests cannot be verified until one is given authority."
+        description="Rooms claimed by two PMS connections, whose guests cannot be verified until one has authority."
         help={
           <>
             <HelpSection title="What a duplicate source is">
@@ -97,11 +95,11 @@ export default function PMSSourceConflictsPage() {
       <ErrorBanner err={err} />
 
       {rows !== null && rows.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard label="Conflicts" value={counts.all.toLocaleString()} icon={<Layers />} tone="primary" />
-          <StatCard icon={<AlertTriangle />} label="High severity" value={counts.high.toLocaleString()} tone={counts.high > 0 ? "err" : "default"} />
-          <StatCard icon={<Hourglass />} label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
-        </div>
+        <StatGrid cols={3}>
+          <StatCard label="Conflicts" value={counts.all.toLocaleString()} />
+          <StatCard label="High severity" value={counts.high.toLocaleString()} tone={counts.high > 0 ? "err" : "default"} />
+          <StatCard label="Not decided yet" value={counts.open.toLocaleString()} tone={counts.open > 0 ? "warn" : "default"} />
+        </StatGrid>
       )}
 
       <Card className="overflow-hidden">
@@ -109,14 +107,14 @@ export default function PMSSourceConflictsPage() {
           <SkeletonRows rows={3} cols={4} />
         ) : rows.length === 0 ? (
           err ? null : (
-            <EmptyState
+            <EmptyState size="sm"
               icon={<Layers />}
               title="No source conflicts"
               hint="No two PMS connections are claiming the same rooms."
             />
           )
         ) : (
-          <Table>
+          <Table label="Source conflicts">
             <THead>
               <TR>
                 <TH>Connection</TH>
@@ -132,9 +130,9 @@ export default function PMSSourceConflictsPage() {
                   <TR key={c.id}>
                     <TD><ConnectionName label={c.interface_a_label} id={c.interface_a} /></TD>
                     <TD><ConnectionName label={c.interface_b_label} id={c.interface_b} /></TD>
-                    <TD>
+                    <TD nowrap>
                       {c.severity ? (
-                        <Badge tone={sev?.tone ?? "default"} dot>{sev?.label ?? c.severity.toLowerCase()}</Badge>
+                        <StatusBadge tone={sev?.tone ?? "default"}>{sev?.label ?? c.severity.toLowerCase()}</StatusBadge>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
