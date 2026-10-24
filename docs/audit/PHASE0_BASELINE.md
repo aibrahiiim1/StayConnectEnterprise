@@ -2,6 +2,10 @@
 
 Audited commit: `008a4cb3` (master, 2026-10-24). Read-only: no source code was changed.
 
+PR #229 (`9ffa981b`) merged after this scan. It changes appliance code, so each later phase re-runs `govulncheck`, `staticcheck` and `gosec` on its own packages, at the latest master, before reviewing them.
+
+Each finding has a recommended fix. The fixes are grouped into batch B0 at the end of this file. No fix is applied by the audit.
+
 ## Severity scale
 
 | Severity | Meaning |
@@ -108,6 +112,60 @@ The appliance categories worth particular attention in later phases:
 - **Central (`go test ./...`):** all packages pass.
 - **Not run: 33 tests that need a migrated Postgres.** `CTRLAPI_TEST_DB_URL` was not set. They are scheduled for Phase 3 (database), which needs a disposable database container.
 - **Not run: race detector.** The workstation has no C compiler, which `-race` needs on Windows. It needs a Linux build host or a C toolchain.
+
+## Recommended fixes
+
+### P0-1 — Add an automated security and static-analysis gate
+
+1. Add `tools/go-checks.sh`. For each module it runs:
+   - `go vet ./...`
+   - `staticcheck ./...`
+   - `govulncheck ./...`
+
+   The tool versions are pinned with `go run <tool>@<version>`, so nothing is installed globally.
+2. Run it in `tools/preflight.sh`, so it is part of FULL CHECK, and as a manual GitHub workflow next to the existing gates. Do not make it a required merge check; under D42 the only required check is `po-merge-authorization`.
+3. Keep `gosec` out of the gate until each phase's triage is done. It is too noisy to block on today. Add it later with a reviewed exclusion list.
+
+**Test:** the script exits non-zero on a planted `go vet` error and on a known-vulnerable module version.
+
+### P0-2 — Move to a supported Go release and update the vulnerable modules
+
+**DECISION** (dependency and toolchain change across both services).
+
+1. Set `go 1.26` and a `toolchain go1.26.x` line (the latest patch) in both `go.mod` files. Change `GO_IMAGE` in `deploy/scripts/central-build.sh` to the same version.
+2. Update the modules to at least:
+
+   | Module | Version |
+   |---|---|
+   | golang.org/x/net | v0.60.0 |
+   | golang.org/x/text | v0.41.0 |
+   | golang.org/x/crypto | v0.56.0 |
+   | github.com/jackc/pgx/v5 | v5.9.2 |
+   | github.com/go-chi/chi/v5 | v5.3.0 |
+   | github.com/redis/go-redis/v9 | v9.7.3 |
+
+   Run `go mod tidy`.
+3. Read the release notes of pgx (v5.7 → v5.9) and chi (v5.1 → v5.3) for behaviour changes.
+4. Re-run `govulncheck` with the new toolchain; it must report nothing reachable.
+5. Run both modules' full unit and database test suites, then deploy to PRE-LIVE for Product Owner testing before merge.
+
+**Test:** `govulncheck` clean; both test suites pass; PRE-LIVE smoke check (sign-in, guest sign-in, licence fetch, mTLS assignment fetch).
+
+### P0-3 — Pin the toolchain that builds the appliance binaries
+
+1. Find where edged, scd, portald, netd, acctd and pmsd are built for PRE-LIVE.
+2. Make that build use a pinned Go image, as `central-build.sh` does: `-trimpath`, `CGO_ENABLED=0`, a pinned `GOOS` and `GOARCH`, and the same version as P0-2.
+3. Record the toolchain version in the build provenance.
+
+**Test:** the build prints the pinned version, and `go version -m <binary>` on the output shows it.
+
+### Batch B0
+
+| Batch | Findings | Files | Notes |
+|---|---|---|---|
+| **B0a** | P0-1 | `tools/go-checks.sh`, `tools/preflight.sh`, `.github/workflows/` (manual only) | No product code. Safe at any time. |
+| **B0b** | P0-2 | `control-plane/go.mod`, `go.sum`, `data-plane/go.mod`, `go.sum`, `deploy/scripts/central-build.sh` | DECISION. Touches every package's build: do it on its own branch, when no other backend branch is open, to avoid `go.sum` conflicts. |
+| **B0c** | P0-3 | appliance build script | Do together with B0b. |
 
 ## Phase map
 
