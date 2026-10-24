@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0246",
+  "seq": 246,
+  "timestamp": "2026-10-24T18:50:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after both PRE-LIVE hosts were deployed, read back and verified in a browser, and before the commit that introduces this receipt.",
+  "record_type": "AUTHENTICATOR_ADMIN_CONSOLE_BRANDING_AND_MULTI_INDUSTRY_WORDING",
+  "authorisation": "D70 (2026-10-24) under the Product Owner's mission 'Correct OneGate's authenticator branding to reflect its multi-industry product identity', authorised by D67 for implementation, PRE-LIVE deployment and the protected merge. It does NOT authorise Go-Live.",
+  "deployment_provenance": {
+    "appliance": "PRE-LIVE 172.21.60.25: scd built from a clean clone of 45cc1697 (sha256 0c1c75f68fcc) and edged from 25500afb (sha256 9ba91a5df156), both tags=stayconnect_production and vcs.modified=false; pmsd ae4f85d2, netd, portald and acctd 9394eb5f unchanged; DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261024-153930 (source_commit 25500afb16f8, BUILD_ID fsTQck2PiatQZumaN_wgQ), previous 20261024-152234. Schema 0150 unchanged.",
+    "central": "Central 172.21.96.196: release onegate-central-45cc1697b2d3 deployed with central-deploy.sh (pre-deploy dump, migrations 56/0/0 unchanged, ctrlapi sha256 3191d0a804b4, console BUILD_ID Q-uOCCxfSvUnrdt4YNOel, smoke 9/9). The later branch commit 25500afb changed nothing in control-plane or cloud-admin."
+  },
+  "verification": "Go: edged and scd unit suites; edged sign-in and two-step integration (13 tests) and the scd operator-authenticator integration, against a private site database; issuer, QR label and account identity tests on both consoles; gofmt and vet clean. Consoles: tsc clean; vitest hotel-admin 996/996, cloud-admin 244/244, including a guard test in each that fails if 'Hotel Admin' reappears in user-visible source (shown to fail when the name was reintroduced); hotel-admin Playwright 174/174. Live in a real browser on both hosts with the test operator: the authenticator enrolled before this deployment still signed in (existing authenticators keep working, no re-enrolment); after turning two-step off and on again, the QR payload, label and issuer are 'OneGate Admin Console' (appliance) and 'OneGate Central' (Central), with the account identity as the label suffix and the QR secret equal to the key shown; the confirmed authenticator count (3 of 3) is unchanged; 44 Admin Console and 11 Central screens render with no page errors and no 'Hotel Admin' text. A first live run found the Grace Period history still reading 'Hotel admin update'; fixed in 25500afb and re-verified.",
+  "rollback": "Appliance: edged.bak-pre-25500afb-*, scd.bak-pre-45cc1697-*; hotel-admin.previous -> 20261024-152234. Central: central-deploy.sh rollback; database dump central-20261024T152256Z-pre-45cc1697b2d3.dump (no migration in this delivery).",
+  "follow_up": "Left as found, on purpose: the guest portal's own wording ('provided by the hotel' in the privacy default and similar, translated into every portal language) needs translators and is not an operator-console string; the PMS, room and stay screens and the 'Hotel' site type are real hospitality features; service and path names such as hotel-admin stay as identifiers.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0245."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "9ffa981b408a042e5548fb4d790965a9b1914bea",
+  "base_note": "Master after the merge of PR #229; this delivery's lineage is built on it.",
+  "head": "25500afb",
+  "head_note": "The last content commit of branch delivery/authenticator-admin-console-branding. Governance commits follow it.",
+  "previous_delivery": "T0245",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
