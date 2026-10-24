@@ -172,7 +172,7 @@ The appliance categories worth particular attention in later phases:
 | Phase | Packages |
 |---|---|
 | 1 | control-plane (all) |
-| 2 | data-plane/internal: identity, applianceauth, appliancecert, localkeys, keybootstrap, sealbox, backupcrypt, otp, otpkey, totp, passwordhash, throttle, authctx, signinattempt, writerguard, licstate, activation, assignment, offline, portaltls, crockford, hwid |
+| 2 | license/ (shared module), cmd/keybootstrap, data-plane/internal: identity, applianceauth, appliancecert, localkeys, keybootstrap, sealbox, backupcrypt, otp, otpkey, totp, passwordhash, throttle, authctx, signinattempt, writerguard, licstate, activation, assignment, offline, portaltls, crockford, hwid |
 | 3 | control-plane/migrations, data-plane/migrations, deployment, buildprofile |
 | 4 | cmd/scd, iamv2, stayengine, staygrant, grace, social, socialloader, deviceselfservice, enforce, namenorm, phone |
 | 5 | cmd/portald, portaldesign, mail, sms, whatsapp, notifyloader, codegen |
