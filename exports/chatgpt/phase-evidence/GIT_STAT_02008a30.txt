@@ -1,4 +1,0 @@
-commit 02008a30091ae35b7a4baa823945e514c4ca58e9
-Date:   Sat Oct 24 17:06:16 2026 +0300
-
-    The change manifest records the PMS resilience delivery
