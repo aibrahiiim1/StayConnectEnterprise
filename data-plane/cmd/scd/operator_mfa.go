@@ -46,12 +46,12 @@ var operatorIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 func (k operatorMFAKeys) present() bool { return k.seal.Present() && len(k.mac) == 32 }
 
-// initOperatorMFAKey loads the sealing key. Without it no authenticator can be set up or checked, and edged
-// refuses Admin Console sign-in rather than letting a password alone through (fail closed).
+// initOperatorMFAKey loads the sealing key. Without it no authenticator can be set up or checked: an operator who
+// turned two-step sign-in on is refused at the code step rather than let through on the password (fail closed).
 func (s *server) initOperatorMFAKey(secretsDir string) {
 	raw, err := localkeys.LoadExistingKey(filepath.Join(secretsDir, operatorMFAKeyFile))
 	if err != nil {
-		slog.Error("admin console authenticator: sealing key missing (run keybootstrap at deploy); sign-in will be refused", "err", err)
+		slog.Error("admin console authenticator: sealing key missing (run keybootstrap at deploy); two-step sign-in cannot be set up or checked", "err", err)
 		return
 	}
 	k, err := sealbox.NewKey(operatorMFADomain, raw)

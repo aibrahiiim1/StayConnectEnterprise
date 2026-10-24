@@ -1,8 +1,11 @@
 package main
 
-// Sign-in is two steps: the password opens only a five-minute "password accepted" state under its own cookie, and
-// the session is created when the second step (authenticator code or recovery code) succeeds. Wrong codes are
-// throttled like wrong passwords (scope 'mfa') and audited. scd seals the secret; edged never sees it after the QR code.
+// Two-step sign-in is optional per account (D68). An account without a confirmed authenticator signs in with its
+// password alone; one with a confirmed authenticator gets only a five-minute "password accepted" state under its own
+// cookie, and the session is created when the second step (authenticator code or recovery code) succeeds. A set-up
+// that was started but never confirmed does not count. Wrong codes are throttled like wrong passwords (scope 'mfa')
+// and audited. scd seals the secret; edged never sees it after the QR code.
+// An operator turns it on from their account (password, then the first code) and off with the password and a code.
 // Password step-up inside a two-factor session stays a password (NIST SP 800-63B 7.2).
 // Sessions end after idle minutes or total hours (public.operator_session_policy); the console's background whoami
 // does not count as activity, or an open tab would never idle out.
@@ -151,7 +154,6 @@ type pendingSignin struct {
 	Roles              []string
 	MustChangePassword bool
 	PasswordFP         string
-	Enrol              bool
 	Expires            time.Time
 }
 
@@ -185,7 +187,7 @@ func (p *pendingSignins) create(ps *pendingSignin) string {
 	return tok
 }
 
-// get returns a copy so concurrent handlers never share the struct; changes go through setEnrol under the lock.
+// get returns a copy so concurrent handlers never share the struct.
 func (p *pendingSignins) get(tok string) *pendingSignin {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -196,14 +198,6 @@ func (p *pendingSignins) get(tok string) *pendingSignin {
 	}
 	cp := *ps
 	return &cp
-}
-
-func (p *pendingSignins) setEnrol(tok string, enrol bool) {
-	p.mu.Lock()
-	if ps, ok := p.m[tok]; ok {
-		ps.Enrol = enrol
-	}
-	p.mu.Unlock()
 }
 
 func (p *pendingSignins) drop(tok string) {
@@ -246,7 +240,9 @@ func (s *server) pendingFrom(w http.ResponseWriter, r *http.Request) (string, *p
 	return ck.Value, ps, true
 }
 
-func (s *server) beginSecondStep(w http.ResponseWriter, r *http.Request, ctx context.Context, ps *pendingSignin) {
+// finishPasswordStep opens the session at once for an account without a confirmed authenticator, and otherwise only
+// the pending sign-in that the code step completes. An unreadable state refuses: it cannot tell which applies.
+func (s *server) finishPasswordStep(w http.ResponseWriter, r *http.Request, ctx context.Context, ps *pendingSignin) {
 	if s.mfa == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
 		return
@@ -257,38 +253,28 @@ func (s *server) beginSecondStep(w http.ResponseWriter, r *http.Request, ctx con
 		jsonErr(w, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
 		return
 	}
-	ps.Enrol = !st.Enrolled
-	s.setPendingCookie(w, s.pending.create(ps))
-	step := "code"
-	if ps.Enrol {
-		step = "enrol"
+	if !st.Enrolled {
+		s.pending.dropOperator(ps.OperatorID)
+		s.clearPendingCookie(w)
+		_, out := s.openSession(w, r, ps, "none")
+		out["second_step"] = "none"
+		writeJSON(w, http.StatusOK, out)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"second_step": step})
+	s.setPendingCookie(w, s.pending.create(ps))
+	writeJSON(w, http.StatusOK, map[string]any{"second_step": "code"})
 }
 
-func (s *server) loginEnrol(w http.ResponseWriter, r *http.Request) {
-	tok, ps, ok := s.pendingFrom(w, r)
-	if !ok {
-		return
-	}
-	if !ps.Enrol {
-		jsonErr(w, http.StatusConflict, "already_enrolled", "An authenticator is already set up. Enter its code.")
-		return
-	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	secret, uri, err := s.mfa.Enrol(ctx, ps.OperatorID, ps.Email)
-	switch {
-	case errors.Is(err, errMFAAlreadyEnrolled):
-		s.pending.setEnrol(tok, false)
-		jsonErr(w, http.StatusConflict, "already_enrolled", "An authenticator is already set up. Enter its code.")
-		return
-	case err != nil:
-		slog.Error("sign-in: authenticator set-up failed", "err", err)
-		jsonErr(w, http.StatusServiceUnavailable, "signin_unavailable", "Sign-in is unavailable right now. Try again shortly.")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": mfaIssuer, "account": ps.Email})
+// openSession creates the session, sets its cookie and audits the sign-in. It answers the request carrying the new
+// session (for further audit rows) and the operator payload.
+func (s *server) openSession(w http.ResponseWriter, r *http.Request, ps *pendingSignin, secondStep string) (*http.Request, map[string]any) {
+	sess := &session{OperatorID: ps.OperatorID, Email: ps.Email, DisplayName: ps.DisplayName, Roles: ps.Roles,
+		MustChangePassword: ps.MustChangePassword}
+	s.setSessionCookie(w, s.sessions.create(sess))
+	ar := r.WithContext(context.WithValue(r.Context(), sessKey, sess))
+	s.audit(ar, "operator.login", "operator", ps.OperatorID, map[string]any{
+		"source_ip": clientIP(r), "must_change_password": ps.MustChangePassword, "second_step": secondStep})
+	return ar, map[string]any{"operator_id": ps.OperatorID, "roles": ps.Roles, "must_change_password": ps.MustChangePassword}
 }
 
 func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
@@ -322,18 +308,10 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var recovery []string
-	method, left := "totp", -1
-	var valid bool
-	var err error
-	if ps.Enrol {
-		recovery, valid, err = s.mfa.Confirm(ctx, ps.OperatorID, in.Code)
-		method = "enrolled"
-	} else {
-		method, left, valid, err = s.mfa.Verify(ctx, ps.OperatorID, in.Code)
-	}
+	method, left, valid, err := s.mfa.Verify(ctx, ps.OperatorID, in.Code)
 	switch {
-	case errors.Is(err, errMFANotEnrolled), errors.Is(err, errMFAAlreadyEnrolled):
+	case errors.Is(err, errMFANotEnrolled):
+		// The authenticator was reset meanwhile: the password step must be taken again, never skipped.
 		s.pending.drop(tok)
 		s.clearPendingCookie(w)
 		jsonErr(w, http.StatusConflict, "signin_restart", "Your sign-in changed while you were entering the code. Sign in again.")
@@ -368,24 +346,10 @@ func (s *server) loginCode(w http.ResponseWriter, r *http.Request) {
 	ps = cur
 	s.pending.drop(tok)
 	s.clearPendingCookie(w)
-	sess := &session{OperatorID: ps.OperatorID, Email: ps.Email, DisplayName: ps.DisplayName, Roles: ps.Roles,
-		MustChangePassword: ps.MustChangePassword}
-	s.setSessionCookie(w, s.sessions.create(sess))
-	ar := r.WithContext(context.WithValue(r.Context(), sessKey, sess))
-	if ps.Enrol {
-		s.audit(ar, "operator.mfa_enrolled", "operator", ps.OperatorID, map[string]any{"source_ip": ip})
-	}
+	ar, out := s.openSession(w, r, ps, method)
 	if method == "recovery_code" {
 		s.audit(ar, "operator.mfa_recovery_code_used", "operator", ps.OperatorID, map[string]any{
 			"source_ip": ip, "recovery_codes_left": left})
-	}
-	s.audit(ar, "operator.login", "operator", ps.OperatorID, map[string]any{
-		"source_ip": ip, "must_change_password": ps.MustChangePassword, "second_step": method})
-	out := map[string]any{"operator_id": ps.OperatorID, "roles": ps.Roles, "must_change_password": ps.MustChangePassword}
-	if recovery != nil {
-		out["recovery_codes"] = recovery
-	}
-	if left >= 0 && method == "recovery_code" {
 		out["recovery_codes_left"] = left
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -432,6 +396,174 @@ func (s *server) getOwnMFA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// codeGate serialises an operator's code checks and refuses while the wrong-code counter (sign-in's) is throttled.
+// It answers the unlock, or nil after answering the refusal.
+func (s *server) codeGate(w http.ResponseWriter, r *http.Request, ctx context.Context, operatorID, what string) func() {
+	unlock := signinLocks.lock("mfa\x00" + operatorID)
+	ip := clientIP(r)
+	stIP, err1 := s.throttleStateFor(ctx, scopeIP, ip)
+	stOp, err2 := s.throttleStateFor(ctx, scopeMFA, operatorID)
+	if err1 != nil || err2 != nil {
+		unlock()
+		slog.Error("code throttle unreadable; refusing", "for", what, "ip_err", err1, "operator_err", err2)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in is unavailable right now. Try again shortly.")
+		return nil
+	}
+	if wait := max(stIP.refusal(false), stOp.refusal(true)); wait > 0 {
+		unlock()
+		writeThrottled(w, wait, "codes")
+		return nil
+	}
+	return unlock
+}
+
+func (s *server) wrongOwnCode(w http.ResponseWriter, r *http.Request, operatorID, msg string) {
+	s.recordFailure(r, "operator.mfa_failed", "operator.mfa_locked", operatorID, "wrong_code",
+		map[string]string{scopeMFA: operatorID, scopeIP: clientIP(r)})
+	jsonErr(w, http.StatusUnauthorized, "wrong_code", msg)
+}
+
+// setupOwnMFA starts turning two-step sign-in on: after the password, a new secret for the QR code. A set-up that
+// was never confirmed is replaced; a confirmed authenticator never is (scd refuses), so this cannot swap one out.
+func (s *server) setupOwnMFA(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "password required")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "Your password is not correct.")
+		return
+	}
+	if s.mfa == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in is unavailable right now.")
+		return
+	}
+	sess := sessFrom(r.Context())
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	secret, uri, err := s.mfa.Enrol(ctx, sess.OperatorID, sess.Email)
+	switch {
+	case errors.Is(err, errMFAAlreadyEnrolled):
+		jsonErr(w, http.StatusConflict, "already_enrolled", "Two-step sign-in is already on for your account.")
+		return
+	case err != nil:
+		slog.Error("two-step set-up failed", "err", err)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be set up. Try again shortly.")
+		return
+	}
+	s.audit(r, "operator.mfa_setup_started", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r)})
+	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri, "issuer": mfaIssuer, "account": sess.Email})
+}
+
+// confirmOwnMFA turns two-step sign-in on with the first code from the app, and answers the recovery codes once.
+func (s *server) confirmOwnMFA(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Code string `json:"code"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "code required")
+		return
+	}
+	code := totp.Normalize(in.Code)
+	if !isTOTPCode(code) {
+		jsonErr(w, http.StatusBadRequest, "code_required", "Enter the 6-digit code your authenticator app shows now.")
+		return
+	}
+	if s.mfa == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in is unavailable right now.")
+		return
+	}
+	sess := sessFrom(r.Context())
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	unlock := s.codeGate(w, r, ctx, sess.OperatorID, "confirming an authenticator")
+	if unlock == nil {
+		return
+	}
+	defer unlock()
+	codes, valid, err := s.mfa.Confirm(ctx, sess.OperatorID, code)
+	switch {
+	case errors.Is(err, errMFANotEnrolled), errors.Is(err, errMFAAlreadyEnrolled):
+		jsonErr(w, http.StatusConflict, "nothing_to_confirm", "There is no set-up waiting to be confirmed. Start again.")
+		return
+	case err != nil:
+		slog.Error("two-step confirm failed", "err", err)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned on. Try again shortly.")
+		return
+	case !valid:
+		s.wrongOwnCode(w, r, sess.OperatorID, "That code is not right. Enter the 6-digit code your authenticator app shows now.")
+		return
+	}
+	if err := s.throttleClear(ctx, scopeMFA, sess.OperatorID); err != nil {
+		slog.Warn("could not clear the code counter", "err", err)
+	}
+	s.audit(r, "operator.mfa_enrolled", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r)})
+	writeJSON(w, http.StatusOK, map[string]any{"enrolled": true, "recovery_codes": codes})
+}
+
+// disableOwnMFA turns two-step sign-in off. It needs the password and a code from the second factor (the app's, or
+// a recovery code), checked with sign-in's replay rule and throttle: a stolen session plus the password is not enough.
+func (s *server) disableOwnMFA(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "password and code required")
+		return
+	}
+	code := strings.TrimSpace(in.Code)
+	if code == "" || len(code) > maxMFACodeLen {
+		jsonErr(w, http.StatusBadRequest, "code_required",
+			"Enter the 6-digit code your authenticator app shows now, or one of your recovery codes.")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		s.reauthRefused(w, r, "Your password is not correct.")
+		return
+	}
+	if s.mfa == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in is unavailable right now.")
+		return
+	}
+	sess := sessFrom(r.Context())
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	unlock := s.codeGate(w, r, ctx, sess.OperatorID, "turning two-step sign-in off")
+	if unlock == nil {
+		return
+	}
+	defer unlock()
+	method, _, valid, err := s.mfa.Verify(ctx, sess.OperatorID, code)
+	switch {
+	case errors.Is(err, errMFANotEnrolled):
+		jsonErr(w, http.StatusConflict, "not_enrolled", "Two-step sign-in is not on for your account.")
+		return
+	case err != nil:
+		slog.Error("two-step disable: code check failed", "err", err)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned off. Try again shortly.")
+		return
+	case !valid:
+		s.wrongOwnCode(w, r, sess.OperatorID,
+			"That code is not right. Enter the 6-digit code your authenticator app shows now, or a recovery code.")
+		return
+	}
+	if _, err := s.mfa.Reset(ctx, sess.OperatorID); err != nil {
+		slog.Error("two-step disable failed", "err", err)
+		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "Two-step sign-in could not be turned off. Try again shortly.")
+		return
+	}
+	s.pending.dropOperator(sess.OperatorID)
+	if err := s.throttleClear(ctx, scopeMFA, sess.OperatorID); err != nil {
+		slog.Warn("could not clear the code counter", "err", err)
+	}
+	s.audit(r, "operator.mfa_disabled", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r), "second_step": method})
+	writeJSON(w, http.StatusOK, map[string]any{"enrolled": false})
+}
+
 // Replaces every earlier recovery code. Needs the password and a current authenticator code (never a recovery
 // code): otherwise a stolen session plus the password could mint codes and bypass the second factor for good.
 // The code is checked with sign-in's replay rule and counted against its wrong-code throttle.
@@ -459,22 +591,13 @@ func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := sessFrom(r.Context())
-	ip := clientIP(r)
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	unlock := signinLocks.lock("mfa\x00" + sess.OperatorID)
+	unlock := s.codeGate(w, r, ctx, sess.OperatorID, "new recovery codes")
+	if unlock == nil {
+		return
+	}
 	defer unlock()
-	stIP, err1 := s.throttleStateFor(ctx, scopeIP, ip)
-	stOp, err2 := s.throttleStateFor(ctx, scopeMFA, sess.OperatorID)
-	if err1 != nil || err2 != nil {
-		slog.Error("code throttle unreadable; refusing new recovery codes", "ip_err", err1, "operator_err", err2)
-		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
-		return
-	}
-	if wait := max(stIP.refusal(false), stOp.refusal(true)); wait > 0 {
-		writeThrottled(w, wait, "codes")
-		return
-	}
 	codes, valid, err := s.mfa.NewRecoveryCodes(ctx, sess.OperatorID, code)
 	switch {
 	case errors.Is(err, errMFANotEnrolled):
@@ -485,16 +608,14 @@ func (s *server) newOwnRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusServiceUnavailable, "mfa_unavailable", "New recovery codes could not be made. Try again shortly.")
 		return
 	case !valid:
-		s.recordFailure(r, "operator.mfa_failed", "operator.mfa_locked", sess.OperatorID, "wrong_code",
-			map[string]string{scopeMFA: sess.OperatorID, scopeIP: ip})
-		jsonErr(w, http.StatusUnauthorized, "wrong_code",
+		s.wrongOwnCode(w, r, sess.OperatorID,
 			"That code is not right. Enter the 6-digit code your authenticator app shows now; a code already used is not accepted again.")
 		return
 	}
 	if err := s.throttleClear(ctx, scopeMFA, sess.OperatorID); err != nil {
 		slog.Warn("could not clear the code counter", "err", err)
 	}
-	s.audit(r, "operator.mfa_recovery_codes_replaced", "operator", sess.OperatorID, map[string]any{"source_ip": ip})
+	s.audit(r, "operator.mfa_recovery_codes_replaced", "operator", sess.OperatorID, map[string]any{"source_ip": clientIP(r)})
 	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
 }
 
@@ -510,8 +631,8 @@ func isTOTPCode(code string) bool {
 	return true
 }
 
-// Ends every session of the colleague, who sets up a new authenticator at next sign-in. Not for one's own
-// account: a stolen session plus the password must not be enough to remove the second factor.
+// Ends every session of the colleague, who then signs in with the password alone until they turn two-step sign-in
+// on again. Not for one's own account: turning it off oneself needs a code (disableOwnMFA).
 func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
 	id, ok := operatorIDParam(w, r)
 	if !ok {
@@ -562,7 +683,7 @@ func (s *server) resetEdgeOperatorMFA(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "operator.mfa_reset", "operator", id, map[string]any{
 		"reason": reason, "had_authenticator": removed, "sessions_ended": true})
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed,
-		"notice": "Their sessions were ended. They set up a new authenticator the next time they sign in."})
+		"notice": "Their sessions were ended. They now sign in with their password alone and can turn two-step sign-in on again from their account."})
 }
 
 type sessionPolicy struct {
