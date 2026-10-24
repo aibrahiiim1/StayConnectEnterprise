@@ -263,3 +263,119 @@ func (f *apiFixture) beginResync(t *testing.T, iface string, at time.Time) {
 		t.Fatalf("begin resync: %v", err)
 	}
 }
+
+func (f *apiFixture) readinessSource(t *testing.T, iface string) string {
+	t.Helper()
+	_, raw := f.doRaw(t, http.MethodGet, "/pms-interfaces/"+iface+"/health", nil)
+	var out struct {
+		Health struct {
+			Source string `json:"room_auth_source"`
+		} `json:"health"`
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode health: %v — %s", err, raw)
+	}
+	return out.Health.Source
+}
+
+// D69: connected, guest list being refreshed, a roster already published: Room sign-in is served from that roster
+// and the console is told so.
+func TestIntegration_API_ConnectedResyncServesFromTheLastGoodRoster(t *testing.T) {
+	f := newAPI(t)
+	iface, rev1, _ := f.seedInterface(t)
+	f.runtimeState(t, iface, rev1, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", ptrTime(time.Now()))
+	f.completeSync(t, iface, time.Now().Add(-20*time.Minute))
+	f.beginResync(t, iface, time.Now().Add(-10*time.Second))
+
+	if ready, reason := f.readiness(t, iface); !ready {
+		t.Fatalf("a connected resync with a published roster reported Room sign-in unavailable (reason %q)", reason)
+	}
+	if src := f.readinessSource(t, iface); src != roomAuthSourceLastRoster {
+		t.Fatalf("source = %q, want %q", src, roomAuthSourceLastRoster)
+	}
+}
+
+func TestIntegration_API_HealthyFeedReportsTheLiveSource(t *testing.T) {
+	f := newAPI(t)
+	iface, rev1, _ := f.seedInterface(t)
+	f.runtimeState(t, iface, rev1, "CONNECTED", "IN_SYNC", "CONTINUOUS", ptrTime(time.Now()))
+	f.completeSync(t, iface, time.Now().Add(-time.Hour))
+	if src := f.readinessSource(t, iface); src != roomAuthSourceLiveFeed {
+		t.Fatalf("source = %q, want %q", src, roomAuthSourceLiveFeed)
+	}
+}
+
+func (f *apiFixture) pendingLiveEvent(t *testing.T, iface, identity string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); err != nil {
+		t.Fatalf("open the stay operation: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_events
+		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
+		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
+		VALUES (gen_random_uuid(),$1,$2,$3::uuid,$4,'GO','{}'::jsonb,'PENDING','LIVE',0,1,now())`,
+		f.tenant, f.site, iface, identity); err != nil {
+		t.Fatalf("stage a pending live event: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A live event not yet applied closes Room sign-in in the authorisation rule, so readiness says so too.
+func TestIntegration_API_UnappliedLiveEventIsNotReady(t *testing.T) {
+	f := newAPI(t)
+	iface, rev1, _ := f.seedInterface(t)
+	f.runtimeState(t, iface, rev1, "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", ptrTime(time.Now()))
+	f.completeSync(t, iface, time.Now().Add(-time.Hour))
+	f.pendingLiveEvent(t, iface, "readiness-pending-go")
+	if ready, reason := f.readiness(t, iface); ready || reason != roomAuthMaterializing {
+		t.Fatalf("an unapplied live check-out: ready=%v reason=%q, want not ready / %q", ready, reason, roomAuthMaterializing)
+	}
+}
+
+// Readiness and authorisation agree in every feed state: the console never says Ready when
+// iam_v2.p3_feed_authorizes would refuse, nor the reverse.
+func TestIntegration_API_ReadinessAgreesWithTheAuthorisationRule(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	n := 0
+	for _, transport := range []string{"CONNECTED", "DISCONNECTED", "ERROR"} {
+		for _, sync := range []string{"IN_SYNC", "RESYNC_REQUIRED", "RESYNC_IN_PROGRESS", "SYNC_FAILED", "UNKNOWN"} {
+			for _, continuity := range []string{"CONTINUOUS", "GAP_DETECTED", "UNKNOWN"} {
+				for _, published := range []bool{true, false} {
+					for _, heard := range []time.Duration{-2 * time.Second, -2 * time.Hour} {
+						for _, pending := range []bool{false, true} {
+							n++
+							iface, rev1, _ := f.seedInterface(t)
+							f.runtimeState(t, iface, rev1, transport, sync, continuity, ptrTime(time.Now().Add(heard)))
+							if published {
+								f.completeSync(t, iface, time.Now().Add(-time.Hour))
+							}
+							if pending {
+								f.pendingLiveEvent(t, iface, "agree-"+iface)
+							}
+							var auth bool
+							if err := f.pool.QueryRow(ctx, `SELECT iam_v2.p3_feed_authorizes($1,$2,$3::uuid,$4::uuid,now())`,
+								f.tenant, f.site, iface, rev1).Scan(&auth); err != nil {
+								t.Fatalf("p3_feed_authorizes: %v", err)
+							}
+							ready, reason := f.readiness(t, iface)
+							if ready != auth {
+								t.Fatalf("%s/%s/%s published=%v heard=%v pending=%v: readiness=%v (%q) but the rule says %v",
+									transport, sync, continuity, published, heard, pending, ready, reason, auth)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	t.Logf("%d feed states agree", n)
+}

@@ -97,7 +97,7 @@ export function ConnectionCard({
   const h = health;
   const active = iface.lifecycle_state === "ACTIVE";
   const readiness = describePmsReadiness({
-    transport: h?.transport_status, sync: h?.sync_status, roomAuthReady: h?.room_auth_ready, inHouse: h?.in_house_stays,
+    transport: h?.transport_status, sync: h?.sync_status, roomAuthReady: h?.room_auth_ready, source: h?.room_auth_source, inHouse: h?.in_house_stays,
   });
   const syncing = isSyncing(h);
   const heard = lastCommunication(h);

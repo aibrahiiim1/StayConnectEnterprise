@@ -345,7 +345,7 @@ export function PmsCard({ snap, canCharges }: { snap: OverviewSnapshot | null; c
         <div className="space-y-4">
           {inUse.map((i) => {
             const words = describePmsReadiness({
-              transport: i.transport_status, sync: i.sync_status, roomAuthReady: i.room_auth_ready, inHouse: i.in_house_stays,
+              transport: i.transport_status, sync: i.sync_status, roomAuthReady: i.room_auth_ready, source: i.room_auth_source, inHouse: i.in_house_stays,
             });
             const last = i.last_heartbeat_at ?? i.last_stay_event_at;
             return (

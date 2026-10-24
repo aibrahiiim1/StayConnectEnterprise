@@ -70,6 +70,7 @@ export type OvPmsInterface = {
   sync_stage?: string;
   room_auth_ready: boolean;
   room_auth_reason?: string;
+  room_auth_source?: "LIVE_FEED" | "LAST_GOOD_ROSTER";
   in_house_stays: number;
   pending_events: number;
   review_events: number;

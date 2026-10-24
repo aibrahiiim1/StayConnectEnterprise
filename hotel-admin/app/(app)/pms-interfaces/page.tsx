@@ -194,7 +194,8 @@ export default function PMSInterfacesPage() {
             value={<span>{active.length}<span className="text-sm font-normal text-muted-foreground"> active</span></span>}
             hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive` : ""}`}
           />
-          <RoomSignInStat signIn={signIn} activeCount={active.length} ready={ready} />
+          <RoomSignInStat signIn={signIn} activeCount={active.length} ready={ready}
+            fromLastRoster={active.some((i) => health[i.id]?.room_auth_ready && health[i.id]?.room_auth_source === "LAST_GOOD_ROSTER")} />
           <StatCard
             label="Guests in house"
             value={inHouse.toLocaleString()}
@@ -382,15 +383,20 @@ function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
 }
 
 function RoomSignInStat({
-  signIn, activeCount, ready,
+  signIn, activeCount, ready, fromLastRoster,
 }: {
   signIn: ReturnType<typeof roomSignInReadiness>;
   activeCount: number;
   ready: number;
+  /** A ready connection is answering from its last complete guest list rather than a live feed. */
+  fromLastRoster: boolean;
 }) {
   // Per guest network when routing is known; otherwise the per-connection count.
   if (activeCount === 0) {
     return <StatCard label="Room sign-in" value={<span className="text-muted-foreground">Not in use</span>} hint="No connection is active" />;
+  }
+  if (signIn.state === "ready" && fromLastRoster) {
+    return <StatCard label="Room sign-in" tone="warn" value="Working" hint="From the last complete guest list" />;
   }
   if (signIn.state === "ready") {
     return (

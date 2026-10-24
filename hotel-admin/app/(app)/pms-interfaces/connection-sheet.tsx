@@ -184,7 +184,7 @@ function OverviewTab({
   }
   const readiness = describePmsReadiness({
     transport: health.transport_status, sync: health.sync_status,
-    roomAuthReady: health.room_auth_ready, inHouse: health.in_house_stays,
+    roomAuthReady: health.room_auth_ready, source: health.room_auth_source, inHouse: health.in_house_stays,
   });
   const active = iface.lifecycle_state === "ACTIVE";
   const reason = !health.room_auth_ready && health.room_auth_reason

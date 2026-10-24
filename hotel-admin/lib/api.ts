@@ -1334,6 +1334,8 @@ export type PmsInterfaceHealth = {
   // excludes per-guest occupancy evidence. room_auth_reason is a closed-set code, empty when ready.
   room_auth_ready?: boolean;
   room_auth_reason?: string;
+  // While ready: the live feed, or the last complete guest list (the PMS is unreachable or a refresh is running).
+  room_auth_source?: "LIVE_FEED" | "LAST_GOOD_ROSTER";
   transport_status: string; last_connected_at?: string | null; last_heartbeat_at?: string | null;
   disconnected_since?: string | null; transport_error_code?: string;
   continuity_status: string; last_valid_event_at?: string | null; discontinuity_detected_at?: string | null;

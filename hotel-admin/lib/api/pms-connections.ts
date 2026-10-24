@@ -369,7 +369,7 @@ export const ROOM_AUTH_WORDS: Record<string, string> = {
   NO_PUBLISHED_REVISION: "No configuration has been put live for this connection.",
   CONTINUITY_GAP: "Updates from the PMS were missed, so the guest list cannot be trusted until a full refresh.",
   CONTINUITY_NOT_ESTABLISHED: "No updates have been received yet, so there is nothing to verify clients against.",
-  NOT_IN_SYNC: "The guest list is not up to date. A full refresh will fix it.",
+  NOT_IN_SYNC: "The first guest list is still loading. Room sign-in starts as soon as it finishes.",
   FEED_SILENT: "The PMS has gone quiet for longer than this connection allows.",
   REVISION_NOT_PINNED: "The live configuration changed and the connection has not picked it up yet.",
   MIRROR_NEVER_SYNCHRONIZED: "No complete guest list has ever been loaded, so there is nothing to fall back on.",
