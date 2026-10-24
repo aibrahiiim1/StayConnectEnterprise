@@ -16,7 +16,7 @@ The audit changes no code. Fixes are made later, one batch at a time, on their o
 | 2 | Appliance security foundations | [PHASE2_APPLIANCE_FOUNDATIONS.md](PHASE2_APPLIANCE_FOUNDATIONS.md) | done |
 | 3 | Database and migrations | [PHASE3_DATABASE_AND_MIGRATIONS.md](PHASE3_DATABASE_AND_MIGRATIONS.md) | done |
 | 4 | Guest sign-in (scd) | [PHASE4_GUEST_SIGN_IN.md](PHASE4_GUEST_SIGN_IN.md) | done |
-| 5 | Client Portal (portald) | | not started |
+| 5 | Client Portal (portald) | [PHASE5_CLIENT_PORTAL.md](PHASE5_CLIENT_PORTAL.md) | done |
 | 6 | Payments, ledger, posting, accounting (acctd) | | not started |
 | 7 | PMS (pmsd) | | not started |
 | 8 | Networking (netd) | | not started |
