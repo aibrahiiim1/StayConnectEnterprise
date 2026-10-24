@@ -1048,6 +1048,20 @@
       "does_not_authorize": "Go-Live; any change to the 72-hour max_auth_cache_age_seconds PRE-LIVE test policy (not a production default); PMS configuration changes, active protocol probes, financial posting or any relaxation of the room-charge freshness gate (p4_interface_freshness_block is unchanged); weakening continuity, materialization, checkout or freshness safeguards.",
       "implementation": "Branch delivery/pms-resilience-and-branding, PR #229, recorded by T0245. data-plane/migrations/0150; edged resources_phase3_interfaces.go and resources_dashboard.go; pmsd pg.go, worker.go, adapter_fias.go, transport_diag.go, errcodes.go; edged and scd operator_mfa.go; hotel-admin readiness wording and PMS connection screens; docs/EDGE_ARCHITECTURE.md section 5A.",
       "supersedes_in_part": "The 0060 rule that a CONNECTED resync refuses Room sign-in (docs/design/Room-Auth-Materialization-Readiness.md 'During full sync')."
+    },
+    {
+      "id": "D70",
+      "decided_on": "2026-10-24",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-24",
+      "status": "ACTIVE",
+      "title": "THE APPLIANCE AUTHENTICATOR IS LABELLED 'ONEGATE ADMIN CONSOLE', AND SHARED SCREENS NO LONGER ASSUME A HOTEL (2026-10-24). OneGate serves hotels, offices and campuses, so a new two-step enrolment on the appliance shows 'OneGate Admin Console' as its issuer and QR label (it was 'OneGate Hotel Admin' from D69, 'StayConnect Hotel Admin' before); Central keeps 'OneGate Central'. The issuer is display only and is not part of the sealed secret, so existing authenticators, their secrets and recovery codes keep working and nobody re-enrols. The product name 'Hotel Admin' is replaced by 'Admin Console' wherever an operator reads it (operator messages, the backup key sheet, backup settings labels, the manuals and PRODUCT_TERMINOLOGY), and screens shared by every site type say 'site', 'portal domain' or 'custom domain' instead of 'hotel' (backups, portal domain, identity providers, audit and data-request wording, Central's custom-domain labels). A Grace Period change recorded without a reason is stored as ADMIN_CONSOLE_UPDATE instead of HOTEL_ADMIN_UPDATE; the screen words both as 'Admin Console update' and no stored history is rewritten. Real hospitality features (the Hotel section, PMS and room screens, the Hotel site type), internal identifiers (service, repository, path and API names) and the translated guest portal strings are unchanged.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-24 'Correct OneGate's authenticator branding to reflect its multi-industry product identity', authorised under D67 for implementation, PRE-LIVE deployment, verification of real enrolment on both consoles and the protected merge.",
+      "does_not_authorize": "Go-Live; renaming internal services, repository paths, API paths or infrastructure; changing the translated guest portal wording; forcing any operator to re-enrol; any change to two-step verification, secrets, recovery codes or sessions.",
+      "implementation": "Branch delivery/authenticator-admin-console-branding, PR #230, recorded by T0246. edged operator_mfa.go and scd operator_mfa.go (issuer), operator-facing strings in edged and scd, resources_commerce.go (default reason); hotel-admin and cloud-admin wording and the product-naming guard test; docs/PRODUCT_TERMINOLOGY.md and the backup, data-ownership and settings manuals.",
+      "supersedes_in_part": "D69 (its issuer label 'OneGate Hotel Admin' for new appliance enrolments)"
     }
   ]
 }

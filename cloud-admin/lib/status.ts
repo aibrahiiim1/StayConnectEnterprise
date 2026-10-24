@@ -126,7 +126,7 @@ export function portalDNSInfo(v: string | null | undefined): StateInfo {
 export function portalDomainInfo(v: string | null | undefined): StateInfo {
   switch (v) {
     case "VERIFIED": return { label: "Verified", tone: "ok", explain: "All three records are published and seen by both resolvers." };
-    case "PENDING": return { label: "Waiting for records", tone: "info", explain: "The hotel has not published all three records yet." };
+    case "PENDING": return { label: "Waiting for records", tone: "info", explain: "The site has not published all three records yet." };
     case "FAILED": return { label: "Broken", tone: "err", explain: "A record the delegation depends on is missing or wrong; renewals are stopped." };
     case "REMOVED": return { label: "Removed", tone: "default", explain: "" };
     default: return unknown(v);

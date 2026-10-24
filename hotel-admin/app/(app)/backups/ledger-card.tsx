@@ -177,7 +177,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
             )}
             {form.kind === "sftp" && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Server"><Input value={form.host} onChange={(e) => { set("host", e.target.value); set("fingerprint", ""); setProbed(null); }} placeholder="nas.hotel.example" /></Field>
+                <Field label="Server"><Input value={form.host} onChange={(e) => { set("host", e.target.value); set("fingerprint", ""); setProbed(null); }} placeholder="nas.example.org" /></Field>
                 <Field label="Port"><Input value={form.port} onChange={(e) => set("port", e.target.value)} inputMode="numeric" /></Field>
                 <Field label="User name"><Input value={form.user} onChange={(e) => set("user", e.target.value)} autoComplete="off" /></Field>
                 <Field label="Folder on the server"><Input value={form.dir} onChange={(e) => set("dir", e.target.value)} placeholder="/backups/onegate" /></Field>

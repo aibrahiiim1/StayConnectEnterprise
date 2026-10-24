@@ -88,7 +88,7 @@ func (g *GraceProvisioner) EnsureSiteGracePackage(ctx context.Context, repo Grac
 		display := map[string]any{
 			"name":   "Checkout grace",
 			"system": true,
-			"note":   "System-provisioned per-site checkout grace (D32). Policy is set in Hotel Admin.",
+			"note":   "System-provisioned per-site checkout grace (D32). Policy is set in the Admin Console.",
 		}
 		revID, err = tx.InsertSystemGraceRevision(ctx, tenantID, siteID, pkgID, planRev, 1, display)
 		if err != nil {

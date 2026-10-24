@@ -108,7 +108,7 @@ export function looksLikePortalDomain(raw: string): string | null {
   const v = raw.trim().toLowerCase().replace(/\.$/, "");
   if (!v) return "Enter a domain such as wifi.yourhotel.com.";
   if (/^https?:\/\//.test(v) || v.includes("/")) return "Enter only the host name, without https:// or a path.";
-  if (v === "onegate.work" || v.endsWith(".onegate.work")) return "Use a domain your hotel owns, not one under onegate.work.";
+  if (v === "onegate.work" || v.endsWith(".onegate.work")) return "Use a domain you own, not one under onegate.work.";
   if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/.test(v)) {
     return "Use letters, digits, hyphens and dots only, for example wifi.yourhotel.com.";
   }
@@ -134,7 +134,7 @@ export function offeredWords(reason: string | null | undefined, provider: string
     case "http_fallback":
       return "Not offered: the portal is on the HTTP fallback, and providers accept HTTPS callbacks only.";
     case "needs_hotel_domain":
-      return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} needs your hotel portal domain (see Portal HTTPS).`;
+      return `Not offered: ${PROVIDER_LABELS[provider] ?? provider} needs your portal domain (see Portal HTTPS).`;
     case "callback_not_registered":
       return "Not offered: the callback URL of the portal's current address is not ticked as registered.";
     case "method_off":
@@ -148,7 +148,7 @@ export function offeredWords(reason: string | null | undefined, provider: string
 
 export const PROVIDER_CONSOLE_HELP: Record<string, string> = {
   google:
-    "Google Cloud console: verify your hotel portal domain in Google Search Console, add that domain as an authorized domain on the OAuth consent screen, and add the callback URL of the hotel domain as an authorized redirect URI. Google does not accept the OneGate hostname.",
+    "Google Cloud console: verify your portal domain in Google Search Console, add that domain as an authorized domain on the OAuth consent screen, and add the callback URL of the portal domain as an authorized redirect URI. Google does not accept the OneGate hostname.",
   apple:
     "Apple Developer: create a Services ID with Sign in with Apple, add the portal hostname under Domains and Subdomains and the callback URL under Return URLs, and create a Sign in with Apple key (.p8).",
   microsoft:

@@ -4,7 +4,7 @@
 export const PRIVACY_TEMPLATE = `Privacy notice: guest Wi-Fi
 
 WHO IS RESPONSIBLE
-[[Hotel legal name]], [[address]], is responsible for your personal data on this Wi-Fi network (the "controller"). Contact: [[privacy contact email]]. [[If you have a data protection officer: their name and email. Otherwise delete this sentence.]]
+[[Organisation legal name]], [[address]], is responsible for your personal data on this Wi-Fi network (the "controller"). Contact: [[privacy contact email]]. [[If you have a data protection officer: their name and email. Otherwise delete this sentence.]]
 
 WHAT WE RECORD
 - Your device's network addresses (MAC and IP address), the name your device gives itself on the network while it is connected (often its owner's name), when you connect and disconnect, and how much data each session uses. Not the websites you visit.
@@ -20,7 +20,7 @@ WHY
 - [[Only if a law in your country requires you to keep connection records: name the law. Otherwise delete this line.]]
 
 WHO ELSE RECEIVES IT
-The Wi-Fi system runs on equipment in this hotel. [[Name of the Wi-Fi system supplier]] maintains it for us and may see these records only to do so.
+The Wi-Fi system runs on equipment at this site. [[Name of the Wi-Fi system supplier]] maintains it for us and may see these records only to do so.
 [[Delete the lines that do not apply:]]
 - Codes sent by email, text message or WhatsApp pass through the company that delivers them ([[SendGrid / Twilio / Meta]]).
 - If you sign in with Google, Apple, Facebook or Microsoft, that company learns that you signed in here.

@@ -38,12 +38,12 @@ Install on a host: `make backup-cleanup-install`.
 | UI releases (cloud-admin / hotel-admin) | `/opt/stayconnect/releases/*` | newest **5** + current + previous |
 | DB dumps (**Central only**) | `/root/backups/*.sql*`, `central-*.dump` | newest **7** (`KEEP_DB`); newest is never deleted |
 | Appliance database backups | `/opt/stayconnect/backups/db` | **not swept here**: the one backup system in `scd` rotates them by count (`BACKUP_KEEP`, `SAFETY_BACKUP_KEEP`); the sweep never deletes one |
-| Earlier backups (the retired nightly sets in `/var/backups/stayconnect`, un-noted dumps) | appliance | **never deleted automatically**; an administrator removes them in Hotel Admin ([BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md)) |
+| Earlier backups (the retired nightly sets in `/var/backups/stayconnect`, un-noted dumps) | appliance | **never deleted automatically**; an administrator removes them in the Admin Console ([BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md)) |
 | Config backups (`*.bak*`) | `/etc/netplan`, `/etc/stayconnect` | newest **3** |
 
 Tunable in `/etc/stayconnect/backup-retention.conf` (`KEEP_BINARIES`, `KEEP_RELEASES`,
 `KEEP_CONFIG`, `DISK_WARN`, `DISK_CRIT`; and `KEEP_DB` on Central only). The appliance's backup settings (`BACKUP_ENABLED`, `BACKUP_HOUR`,
-`BACKUP_EVERY_DAYS`, `BACKUP_KEEP`, `SAFETY_BACKUP_KEEP`) are in the same file, written by Hotel Admin; the sweep ignores them.
+`BACKUP_EVERY_DAYS`, `BACKUP_KEEP`, `SAFETY_BACKUP_KEEP`) are in the same file, written by the Admin Console; the sweep ignores them.
 
 ## Never deleted (hard guarantees)
 

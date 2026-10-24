@@ -64,12 +64,12 @@ function printSheet(k: NewKey) {
 <style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px}code{font:15px/1.6 ui-monospace,monospace;word-break:break-all}
 .box{border:2px solid #111;padding:16px;margin:16px 0}.check{font:24px ui-monospace,monospace;letter-spacing:2px}</style></head><body>
 <h1>StayConnect backup key — ${esc(k.label)}</h1>
-<p>Created ${esc(new Date(k.created_at).toLocaleString())}. Keep this sheet somewhere only authorised people can reach, such as the hotel safe.
+<p>Created ${esc(new Date(k.created_at).toLocaleString())}. Keep this sheet somewhere only authorised people can reach, such as a safe.
 Anyone with this key can read this hotel’s backups. Without it, or another key holder’s key, nobody can — not the appliance and not its supplier.</p>
 <div class="box"><div>Private key</div><code>${esc(k.private_key)}</code></div>
 <div class="box"><div>Check code</div><div class="check">${esc(k.check_code)}</div></div>
 <p>Public key: <code>${esc(k.public_key)}</code></p>
-<p><strong>To restore:</strong> Hotel Admin → System → Backups → Restore, and type the private key exactly as printed when asked for the backup key.</p>
+<p><strong>To restore:</strong> Admin Console → System → Backups → Restore, and type the private key exactly as printed when asked for the backup key.</p>
 </body></html>`);
   w.document.close();
   w.focus();
@@ -204,12 +204,12 @@ function AddHolderDialog({ onClose, onDone }: { onClose: () => void; onDone: (la
         description="The appliance creates a key for this person or place and shows it once. Every new backup is encrypted to it."
         submitLabel="Create key" busy={busy} error={err}
         disabled={label.trim() === "" || !ack || password === ""} onSubmit={create}>
-        <Field label="Key holder" required hint="Who or where keeps it, for example “IT manager”, “General manager” or “Hotel safe”.">
+        <Field label="Key holder" required hint="Who or where keeps it, for example “IT manager”, “General manager” or “Office safe”.">
           <Input value={label} maxLength={80} onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-          <span>I understand that if every backup key is lost, the backups cannot be read by anyone — not the hotel, the appliance or its supplier. Keep more than one key holder.</span>
+          <span>I understand that if every backup key is lost, the backups cannot be read by anyone — not the site, the appliance or its supplier. Keep more than one key holder.</span>
         </label>
         <Field label="Your password" required>
           <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />

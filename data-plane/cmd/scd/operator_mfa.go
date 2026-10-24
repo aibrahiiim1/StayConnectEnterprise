@@ -103,7 +103,7 @@ func (s *server) operatorMFAEnrol(w http.ResponseWriter, r *http.Request) {
 	}
 	issuer, account := strings.TrimSpace(req.Issuer), strings.TrimSpace(req.Account)
 	if issuer == "" {
-		issuer = "OneGate Hotel Admin"
+		issuer = "OneGate Admin Console"
 	}
 	if len(issuer) > 80 || account == "" || len(account) > 320 {
 		httpErr(w, http.StatusBadRequest, "issuer and account are required")
