@@ -334,7 +334,7 @@ describe("Source conflicts page", () => {
 
     expect(await screen.findByText("Main PMS")).toBeTruthy();
     expect(screen.getByText("Spa PMS")).toBeTruthy();
-    expect(screen.getByText("high")).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
     expect(screen.queryByText("i1")).toBeNull();
     expect(screen.queryByText("i2")).toBeNull();
   });

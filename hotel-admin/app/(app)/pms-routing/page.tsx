@@ -8,9 +8,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, PmsGuestNetworkRoute, PmsInterface, Whoami } from "@/lib/api";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { SectionCard } from "@/components/ui/card";
+import { RowActions } from "@/components/ui/row-actions";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+
 import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -20,7 +21,7 @@ import { DialogForm, ConfirmDialog } from "@/components/ui/dialog";
 import { Explain } from "@/components/ui/tooltip";
 import { SkeletonRows } from "@/components/ui/misc";
 import { canWrite } from "@/lib/roles";
-import { Router, Network, Route } from "lucide-react";
+import { Router, Network } from "lucide-react";
 
 type Unmapped = { guest_network_id: string; guest_network_name?: string };
 
@@ -103,9 +104,7 @@ export default function PMSRoutingPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="PMS routing"
-        icon={<Route />}
         description="Which PMS connection each client network's room sign-ins are checked against."
         help={
           <>
@@ -154,26 +153,22 @@ export default function PMSRoutingPage() {
         </Callout>
       )}
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Networks that can offer room sign-in</CardTitle>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              A device on one of these networks is checked against the PMS named here.
-            </p>
-          </div>
-        </CardHeader>
-        <CardBody className="p-0">
+      <SectionCard
+        flush
+        title="Networks that can offer room sign-in"
+        description="A device on one of these networks is checked against the PMS named here."
+      >
           {routes === null ? (
             <SkeletonRows rows={3} cols={4} />
           ) : routes.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Router />}
               title="No network is pointed at a PMS"
               hint="Nobody at this site can sign in with a room number until at least one client network is mapped."
             />
           ) : (
-            <Table>
+            <Table label="Networks that can offer room sign-in">
               <THead>
                 <TR>
                   <TH>Client network</TH>
@@ -191,7 +186,7 @@ export default function PMSRoutingPage() {
                   <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {routes.map((r) => (
                   <TR key={r.guest_network_id}>
                     <TD>
@@ -204,80 +199,69 @@ export default function PMSRoutingPage() {
                       {/* is_default is not shown: it is per guest network and always true here (setPMSRoute replaces other mappings). */}
                       <div className="text-sm">{r.pms_interface_label || "Unnamed connection"}</div>
                     </TD>
-                    <TD className="text-sm text-muted-foreground">
+                    <TD nowrap muted>
                       {MODE_WORDS[r.routing_mode] ?? r.routing_mode.replace(/_/g, " ").toLowerCase()}
                     </TD>
-                    <TD className="whitespace-nowrap text-right">
+                    <TD className="w-0">
                       {writable && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Change ${r.guest_network_name || "Unnamed network"}`}
-                            onClick={() => {
+                        <RowActions
+                          subject={r.guest_network_name || "Unnamed network"}
+                          primary={{
+                            label: "Change",
+                            onSelect: () => {
                               setFormErr(null);
                               setEditing({
                                 id: r.guest_network_id,
                                 name: r.guest_network_name || r.guest_network_id,
                                 current: r,
                               });
-                            }}
-                          >
-                            Change
-                          </Button>
-                          <Button size="sm" variant="ghost" aria-label={`Remove ${r.guest_network_name || "Unnamed network"}`} onClick={() => { setFormErr(null); setClearing(r); }}>
-                            Remove
-                          </Button>
-                        </>
+                            },
+                          }}
+                          items={[
+                            { label: "Remove mapping", danger: true, onSelect: () => { setFormErr(null); setClearing(r); } },
+                          ]}
+                        />
                       )}
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
-        </CardBody>
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Networks with no PMS</CardTitle>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Room sign-in is not offered on these. Vouchers and client accounts still work.
-            </p>
-          </div>
-        </CardHeader>
-        <CardBody className={unmapped.length ? "p-0" : undefined}>
+      <SectionCard
+        flush
+        title="Networks with no PMS"
+        description="A guest who types a room number on these will not be recognised. Vouchers and client accounts still work."
+      >
           {routes === null ? (
             <SkeletonRows rows={2} cols={2} />
           ) : unmapped.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Network />}
               title="Every client network is pointed at a PMS"
               hint="Nothing to do here."
             />
           ) : (
-            <Table>
+            <Table label="Networks with no PMS">
               <THead>
                 <TR>
                   <TH>Client network</TH>
                   <TH><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
-              <tbody>
+              <TBody>
                 {unmapped.map((u) => (
                   <TR key={u.guest_network_id}>
                     <TD>
                       <div className="font-medium">{u.guest_network_name || "Unnamed network"}</div>
-                      <div className="text-xs text-muted-foreground">
-                        A guest on this network who types a room number will not be recognised.
-                      </div>
                     </TD>
-                    <TD className="text-right">
+                    <TD className="w-0 whitespace-nowrap text-end">
                       {writable && (
                         <Button
-                          size="sm"
+                          size="xs"
                           variant="secondary"
                           disabled={nothingPublishable}
                           onClick={() => {
@@ -294,11 +278,10 @@ export default function PMSRoutingPage() {
                     </TD>
                   </TR>
                 ))}
-              </tbody>
+              </TBody>
             </Table>
           )}
-        </CardBody>
-      </Card>
+      </SectionCard>
 
       <RouteDialog
         open={editing !== null}
