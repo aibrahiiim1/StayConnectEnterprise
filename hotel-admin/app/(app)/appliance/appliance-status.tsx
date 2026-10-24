@@ -6,16 +6,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle2, CircleDashed, Download, FileUp, Loader2, RefreshCw, ServerCog, ShieldCheck, Upload, Unplug,
-  Wrench, XCircle, Cloud,
+  CheckCircle2, ChevronDown, CircleDashed, Download, Loader2, RefreshCw, ServerCog, ShieldCheck, Upload, Unplug,
+  XCircle, Cloud,
 } from "lucide-react";
 import { api, ApiError, CentralRefresh, CentralStatus, Whoami } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Meter, Skeleton } from "@/components/ui/misc";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
 import { CopyButton, LiveStatus, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { canWrite } from "@/lib/roles";
@@ -162,21 +162,24 @@ function StateIcon({ tone }: { tone: Tone }) {
   return <CircleDashed className={`${cls} text-warning`} aria-hidden />;
 }
 
-function Part({ icon, label, badge, children }: {
-  icon: React.ReactNode; label: string; badge: React.ReactNode; children: React.ReactNode;
+function Part({ icon, label, badge, className, children }: {
+  icon: React.ReactNode; label: string; badge: React.ReactNode; className?: string; children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-2 py-5 first:pt-0 last:pb-0" aria-label={label}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">{icon}{label}</h2>
-        {badge}
-      </div>
-      <div className="space-y-3 text-sm">{children}</div>
-    </section>
+    <Card className={className}>
+      <section className="space-y-3 px-5 py-4" aria-label={label}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-label text-muted-foreground [&_svg]:size-4">{icon}{label}</h2>
+          {badge}
+        </div>
+        <div className="space-y-3 text-sm">{children}</div>
+      </section>
+    </Card>
   );
 }
 
-export function ApplianceStatus() {
+/** `header` receives the page's live status and Check now, so they sit in the PageHeader's actions. */
+export function ApplianceStatus({ header }: { header?: (actions: React.ReactNode) => React.ReactNode }) {
   const router = useRouter();
   // A ref keeps load() stable across renders (its effect runs once).
   const routerRef = useRef(router);
@@ -288,18 +291,41 @@ export function ApplianceStatus() {
     }
   }
 
+  const headerActions = loaded && st ? (
+    <>
+      <LiveStatus updatedAt={updatedAt} intervalSeconds={(activating ? POLL_ACTIVATING_MS : POLL_MS) / 1000}
+        error={!!err} onRefresh={() => void load()} />
+      <Button variant="secondary" onClick={() => void checkNow()} disabled={checking}>
+        {checking ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw aria-hidden />}
+        {checking ? "Checking…" : "Check now"}
+      </Button>
+    </>
+  ) : null;
+
   if (!loaded) {
     return (
-      <div className="space-y-5" aria-busy="true">
-        <span className="sr-only">Loading the appliance status</span>
-        <Skeleton className="h-64 w-full rounded-lg" />
-        <Skeleton className="h-28 w-full rounded-lg" />
-      </div>
+      <>
+        {header?.(null)}
+        <div className="space-y-5" aria-busy="true">
+          <span className="sr-only">Loading the appliance status</span>
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Skeleton className="h-40 w-full rounded-lg" />
+            <Skeleton className="h-40 w-full rounded-lg" />
+            <Skeleton className="h-40 w-full rounded-lg" />
+          </div>
+          <Skeleton className="h-28 w-full rounded-lg" />
+        </div>
+      </>
     );
   }
 
   if (!st) {
-    return <ErrorBanner err={err ? `Couldn't read the appliance status: ${err}` : "Couldn't read the appliance status."} />;
+    return (
+      <>
+        {header?.(null)}
+        <ErrorBanner err={err ? `Couldn't read the appliance status: ${err}` : "Couldn't read the appliance status."} />
+      </>
+    );
   }
 
   const act = activationWords(st);
@@ -315,15 +341,8 @@ export function ApplianceStatus() {
   const d = st.details;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <LiveStatus updatedAt={updatedAt} intervalSeconds={(activating ? POLL_ACTIVATING_MS : POLL_MS) / 1000}
-          error={!!err} onRefresh={() => void load()} />
-        <Button variant="secondary" size="sm" onClick={() => void checkNow()} disabled={checking}>
-          {checking ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw aria-hidden />}
-          {checking ? "Checking…" : "Check now"}
-        </Button>
-      </div>
+    <>
+      {header ? header(headerActions) : <div className="flex flex-wrap items-center justify-end gap-3">{headerActions}</div>}
 
       <ErrorBanner err={err ? `Couldn't refresh the status (retrying): ${err}` : null} className="mb-0" />
 
@@ -370,132 +389,124 @@ export function ApplianceStatus() {
         </Callout>
       )}
 
-      <Card>
-        <CardBody className="divide-y divide-border">
-          <Part icon={<ServerCog className="size-4" aria-hidden />} label="Activation"
-            badge={<Badge tone={act.tone === "info" ? "info" : act.tone} dot>{act.title}</Badge>}>
-            <div className="flex items-start gap-3">
-              <StateIcon tone={act.tone} />
-              <p className="text-base text-foreground">{act.body}</p>
-            </div>
-            {(st.activation === "waiting" || st.activation === "not_registered") && (
-              <div className="flex flex-wrap items-center gap-2 ps-8">
-                <span className="text-muted-foreground">Serial number</span>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Part icon={<ServerCog aria-hidden />} label="Activation"
+          badge={<StatusBadge tone={act.tone}>{act.title}</StatusBadge>}>
+          <div className="flex items-start gap-3">
+            <StateIcon tone={act.tone} />
+            <p className="text-foreground">{act.body}</p>
+          </div>
+          {(st.activation === "waiting" || st.activation === "not_registered") && (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">Serial number</div>
+              <div className="flex flex-wrap items-center gap-2">
                 <code className="rounded-md border border-border bg-surface px-3 py-1.5 font-mono text-lg font-semibold tracking-wide">
                   {st.serial || "—"}
                 </code>
                 {st.serial && <CopyButton value={st.serial} label="Copy serial number" size="sm" />}
               </div>
-            )}
-          </Part>
+            </div>
+          )}
+        </Part>
 
-          <Part icon={<ShieldCheck className="size-4" aria-hidden />} label="Licence"
-            badge={<Badge tone={lic.tone === "info" ? "info" : lic.tone} dot>{lic.title}</Badge>}>
-            {lic.line && <p className="text-foreground">{lic.line}</p>}
-            {l.state !== "none" && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Clients online, all client networks</span>
-                  <span className="text-metric tabular">
-                    {current ?? "—"}
-                    <span className="text-sm font-normal text-muted-foreground"> / {limited ? max : "Unlimited"}</span>
-                  </span>
-                </div>
-                {limited && (
-                  <Meter value={current ?? 0} max={max!} tone={meterTone}
-                    caption={`${Math.round(pct)}% of the licensed capacity${meterTone === "err" ? " · full" : meterTone === "warn" ? " · nearly full" : ""}`} />
-                )}
+        <Part icon={<ShieldCheck aria-hidden />} label="Licence"
+          badge={<StatusBadge tone={lic.tone}>{lic.title}</StatusBadge>}>
+          {lic.line && <p className="text-foreground">{lic.line}</p>}
+          {l.state !== "none" && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-muted-foreground">Clients online</span>
+                <span className="text-metric tabular">
+                  {current ?? "—"}
+                  <span className="text-sm font-normal text-muted-foreground"> / {limited ? max : "Unlimited"}</span>
+                </span>
               </div>
-            )}
-          </Part>
-
-          <Part icon={st.central.state === "unreachable" ? <Unplug className="size-4" aria-hidden /> : <Cloud className="size-4" aria-hidden />}
-            label="OneGate Central" badge={<Badge tone={cen.tone === "info" ? "info" : cen.tone} dot>{cen.title}</Badge>}>
-            <p className="text-foreground">{cen.line}</p>
-            {st.central.state !== "not_configured" && (
-              <KeyValueGrid
-                columns={2}
-                items={[
-                  { label: "Last answered", value: st.central.last_contact_at ? formatRelative(st.central.last_contact_at) : "Not yet" },
-                  ...(st.central.last_error ? [{ label: "Last problem", value: st.central.last_error }] : []),
-                ]}
-              />
-            )}
-            {diag && (
-              <p className="text-caption text-muted-foreground" role="status">
-                Checked just now: {diag.dns_ok === false ? "the Central address could not be resolved" : "address resolved"}
-                {diag.central_https === false ? ", but no connection could be opened" : diag.central_https ? ", connection opened" : ""}.
-              </p>
-            )}
-          </Part>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="space-y-0.5">
-            <CardTitle className="flex items-center gap-2"><FileUp className="size-4" aria-hidden /> Files from your OneGate vendor</CardTitle>
-            <CardDescription>For an appliance without an internet connection, or when your vendor sends you a file.</CardDescription>
-          </div>
-        </CardHeader>
-        <CardBody className="space-y-4">
-          {roles !== null && !canActivate && !canInstall ? (
-            <ReadOnlyNotice>Your role can see this appliance&apos;s status but not install files.</ReadOnlyNotice>
-          ) : (
-            <div className="divide-y divide-border">
-              {showOffline && canActivate && (
-                <div className="space-y-2 pb-4">
-                  <div className="text-emphasis">Offline activation</div>
-                  <p className="text-sm text-muted-foreground">
-                    {st.activation === "not_registered"
-                      ? "1. Download this appliance's activation request and send it to your vendor. 2. Upload the activation package they return."
-                      : "Upload an activation or licence package your vendor sent you."}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {st.activation === "not_registered" && (
-                      <Button variant="secondary" size="sm" onClick={() => void downloadRequest()}>
-                        <Download aria-hidden /> Download activation request
-                      </Button>
-                    )}
-                    <input ref={pkgRef} id="pkg-file" type="file" accept=".json,application/json" className="sr-only" tabIndex={-1}
-                      aria-label="Activation package" onChange={(e) => void uploadFile("package", e.target.files?.[0])} />
-                    <Button variant="secondary" size="sm" disabled={fileBusy !== null} onClick={() => pkgRef.current?.click()}>
-                      <Upload aria-hidden /> {fileBusy === "package" ? "Checking…" : "Upload activation package"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {canInstall && (
-                <div className={showOffline && canActivate ? "space-y-2 pt-4" : "space-y-2"}>
-                  <div className="text-emphasis">Licence file</div>
-                  <p className="text-sm text-muted-foreground">
-                    Renewals normally arrive by themselves. Upload a licence file only when your vendor sends you one.
-                    The appliance refuses a file for another appliance or an older licence, and nothing changes.
-                  </p>
-                  <input ref={licRef} id="lic-file" type="file" accept=".license,.json,application/json" className="sr-only" tabIndex={-1}
-                    aria-label="Licence file" onChange={(e) => void uploadFile("licence", e.target.files?.[0])} />
-                  <Button variant="secondary" size="sm" disabled={fileBusy !== null} onClick={() => licRef.current?.click()}>
-                    <Upload aria-hidden /> {fileBusy === "licence" ? "Installing…" : "Upload licence file"}
-                  </Button>
-                </div>
+              {limited && (
+                <Meter value={current ?? 0} max={max!} tone={meterTone}
+                  caption={`${Math.round(pct)}% of the licensed capacity${meterTone === "err" ? " · full" : meterTone === "warn" ? " · nearly full" : ""}`} />
               )}
             </div>
           )}
-          {fileMsg && <Callout tone="success">{fileMsg}</Callout>}
-          <ErrorBanner err={fileErr} className="mb-0" />
-        </CardBody>
-      </Card>
+        </Part>
+
+        <Part icon={st.central.state === "unreachable" ? <Unplug aria-hidden /> : <Cloud aria-hidden />}
+          label="OneGate Central" badge={<StatusBadge tone={cen.tone}>{cen.title}</StatusBadge>}>
+          <p className="text-foreground">{cen.line}</p>
+          {st.central.state !== "not_configured" && (
+            <DescriptionList
+              items={[
+                { label: "Last answered", value: st.central.last_contact_at ? formatRelative(st.central.last_contact_at) : "Not yet" },
+                { label: "Last problem", value: st.central.last_error, hidden: !st.central.last_error },
+              ]}
+            />
+          )}
+          {diag && (
+            <p className="text-caption text-muted-foreground" role="status">
+              Checked just now: {diag.dns_ok === false ? "the Central address could not be resolved" : "address resolved"}
+              {diag.central_https === false ? ", but no connection could be opened" : diag.central_https ? ", connection opened" : ""}.
+            </p>
+          )}
+        </Part>
+      </div>
+
+      <SectionCard
+        title="Files from your OneGate vendor"
+        description="For an appliance without an internet connection, or when your vendor sends you a file."
+        bodyClassName="space-y-4"
+      >
+        {roles !== null && !canActivate && !canInstall ? (
+          <ReadOnlyNotice>Your role can see this appliance&apos;s status but not install files.</ReadOnlyNotice>
+        ) : (
+          <div className="grid gap-5 md:grid-cols-2">
+            {showOffline && canActivate && (
+              <div className="space-y-2">
+                <div className="text-label">Offline activation</div>
+                <p className="text-caption text-muted-foreground">
+                  {st.activation === "not_registered"
+                    ? "Download the activation request, send it to your vendor, then upload the package they return."
+                    : "Upload an activation or licence package your vendor sent you."}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {st.activation === "not_registered" && (
+                    <Button variant="secondary" size="sm" onClick={() => void downloadRequest()}>
+                      <Download aria-hidden /> Download activation request
+                    </Button>
+                  )}
+                  <input ref={pkgRef} id="pkg-file" type="file" accept=".json,application/json" className="sr-only" tabIndex={-1}
+                    aria-label="Activation package" onChange={(e) => void uploadFile("package", e.target.files?.[0])} />
+                  <Button variant="secondary" size="sm" disabled={fileBusy !== null} onClick={() => pkgRef.current?.click()}>
+                    <Upload aria-hidden /> {fileBusy === "package" ? "Checking…" : "Upload activation package"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {canInstall && (
+              <div className="space-y-2">
+                <div className="text-label">Licence file</div>
+                <p className="text-caption text-muted-foreground">
+                  Renewals normally arrive by themselves. A file for another appliance, or an older licence, is refused.
+                </p>
+                <input ref={licRef} id="lic-file" type="file" accept=".license,.json,application/json" className="sr-only" tabIndex={-1}
+                  aria-label="Licence file" onChange={(e) => void uploadFile("licence", e.target.files?.[0])} />
+                <Button variant="secondary" size="sm" disabled={fileBusy !== null} onClick={() => licRef.current?.click()}>
+                  <Upload aria-hidden /> {fileBusy === "licence" ? "Installing…" : "Upload licence file"}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+        {fileMsg && <Callout tone="success">{fileMsg}</Callout>}
+        <ErrorBanner err={fileErr} className="mb-0" />
+      </SectionCard>
 
       <Card>
         <details className="group" data-testid="technical-details">
-          <summary className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-5 py-4 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Wrench className="size-4 text-muted-foreground" aria-hidden />
+          <summary className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-5 py-3.5 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
             Technical details
-            <span className="ms-auto text-caption font-normal text-muted-foreground group-open:hidden">Show</span>
-            <span className="ms-auto hidden text-caption font-normal text-muted-foreground group-open:inline">Hide</span>
           </summary>
           <div className="border-t border-border px-5 py-4">
-            <KeyValueGrid
+            <DescriptionList
               columns={2}
               items={[
                 { label: "Serial number", value: <code className="text-xs">{st.serial || "—"}</code> },
@@ -508,12 +519,16 @@ export function ApplianceStatus() {
                 { label: "LAN MAC address", value: <code className="text-xs">{d.lan_mac || "—"}</code> },
                 { label: "Central endpoint", value: <code className="break-all text-xs">{d.central_endpoint || "—"}</code> },
                 { label: "Software", value: d.software_version || "—", hint: d.build_profile ? `${d.build_profile} build` : undefined },
-                ...(diag ? [{ label: "Last check", value: `DNS ${diag.dns_ok ? "ok" : "failed"} · HTTPS ${diag.central_https ? "open" : "closed"}${diag.central_mtls != null ? ` · mutual TLS ${diag.central_mtls ? "open" : "closed"}` : ""}` }] : []),
+                {
+                  label: "Last check",
+                  hidden: !diag,
+                  value: diag ? `DNS ${diag.dns_ok ? "ok" : "failed"} · HTTPS ${diag.central_https ? "open" : "closed"}${diag.central_mtls != null ? ` · mutual TLS ${diag.central_mtls ? "open" : "closed"}` : ""}` : null,
+                },
               ]}
             />
           </div>
         </details>
       </Card>
-    </div>
+    </>
   );
 }
