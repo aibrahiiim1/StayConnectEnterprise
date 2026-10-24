@@ -77,7 +77,7 @@ names the route served, never the person or their address, and is kept within th
 
 **(g) Security measures.**
 
-- Two-step sign-in (password and authenticator code) for every account. After 5 wrong codes the account locks
+- Two-step sign-in (password and authenticator code), optional per account and recommended (D68), enforced for every account that turns it on. After 5 wrong codes the account locks
   for 15 minutes.
 - Sessions end after 30 minutes idle and 12 hours at most.
 - The password is asked again for sensitive actions.

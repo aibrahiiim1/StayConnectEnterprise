@@ -34,8 +34,8 @@ appliance at the hotel, and the hotel's own privacy notice covers it.
 | **The web server's access log** | The time, the page or service asked for (without anything after `?`), the answer, and your IP address. Not your email address, what you typed or your browser's headers | To keep Central running and find faults and attacks | Legitimate interest: security (Art. 6(1)(f)) |
 | **Certificate contact** *(only if you are the one we name)* | One contact email for all of Central, registered with Let's Encrypt for the guest-portal certificates, normally one of ours. A change to it is recorded in the history with the old and new address | To obtain and renew the certificates | Legitimate interest in running the service (Art. 6(1)(f)) |
 
-You must give an email address and set a password and an authenticator to have an account. Without them we
-cannot give you access.
+You must give an email address and set a password to have an account. Without them we cannot give you
+access. An authenticator is optional and recommended.
 
 We do not use your data for marketing, sell it, or make decisions about you by automated means. An account that
 receives repeated wrong passwords is locked automatically for a short time (15 minutes by default). The lock ends
@@ -91,7 +91,7 @@ There is no tracking or analytics, and the console loads nothing from other webs
 
 ## How we protect it
 
-Every account signs in with a password and an authenticator code. Sessions end on their own, and some actions
+Every account signs in with a password; an account that turns on two-step sign-in (recommended) also needs an authenticator code. Sessions end on their own, and some actions
 ask for your password again. Each role sees only what it needs. Central is reached only over HTTPS, and
 appliances connect with their own certificates. Secrets are encrypted, and database backups are encrypted to our
 own key holders once one is registered.

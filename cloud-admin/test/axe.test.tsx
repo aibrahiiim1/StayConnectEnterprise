@@ -15,6 +15,7 @@ import LoginPage from "@/app/login/page";
 import CustomersPage from "@/app/(app)/customers/page";
 import CustomerPage from "@/app/(app)/customers/[id]/page";
 import { SigninSecondStep } from "@/components/signin-second-step";
+import { TwoStepEnable } from "@/components/two-step";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -47,13 +48,20 @@ describe("axe-core finds no WCAG A/AA violations", () => {
     await expectNoViolations();
   });
 
-  it("on both second sign-in steps", async () => {
-    mockFetch([{ method: "POST", match: "/api/v1/auth/login/enrol", body: { secret: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/x", account: "a" } }]);
-    const { unmount } = render(<main><SigninSecondStep step="enrol" onDone={() => {}} onRestart={() => {}} /></main>);
-    await screen.findByAltText(/QR code/);
+  it("on the code step and on turning two-step sign-in on", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<main><SigninSecondStep onDone={() => {}} onRestart={() => {}} /></main>);
     await expectNoViolations();
     unmount();
-    render(<main><SigninSecondStep step="code" onDone={() => {}} onRestart={() => {}} /></main>);
+    mockFetch([
+      { method: "POST", match: "/api/v1/auth/reauth", body: { ok: true } },
+      { method: "POST", match: "/api/v1/auth/mfa/setup", body: { secret: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/x" } },
+    ]);
+    render(<main><TwoStepEnable onDone={() => {}} onCancel={() => {}} /></main>);
+    await expectNoViolations();
+    await user.type(screen.getByLabelText(/^Your password/), "pw");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByAltText(/QR code/);
     await expectNoViolations();
   });
 

@@ -43,15 +43,18 @@ func newSigninAPI(t *testing.T, roles ...string) *signinFixture {
 	r.Route("/edge/v1", func(r chi.Router) {
 		r.Use(sameOrigin)
 		r.Post("/auth/login", s.login)
-		r.Post("/auth/login/enrol", s.loginEnrol)
 		r.Post("/auth/login/code", s.loginCode)
 		r.Post("/auth/logout", s.logout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/whoami", s.whoami)
+			r.Get("/auth/keepalive", s.keepalive)
 			r.Post("/auth/password", s.changeOwnPassword)
 			r.Get("/auth/mfa", s.getOwnMFA)
 			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
+			r.Post("/auth/mfa/setup", s.setupOwnMFA)
+			r.Post("/auth/mfa/confirm", s.confirmOwnMFA)
+			r.Post("/auth/mfa/disable", s.disableOwnMFA)
 			mountResource(r, s, "operators", s.operatorsRoutes)
 			mountResource(r, s, "backup-download", s.backupDownloadRoutes)
 		})
@@ -139,29 +142,44 @@ func (sf *signinFixture) codeStep(t *testing.T, pending, code, ip string) resp {
 	return sf.call(t, "POST", "/auth/login/code", ip, "", map[string]any{"code": code}, map[string]string{"pending": pending})
 }
 
-// login signs in the way a person does: the password, then -- setting up the authenticator the first time --
-// the code the phone shows. It answers the final response, or the password step's when that one refused.
+// login signs in the way a person does: the password, then -- when the account has turned two-step sign-in on --
+// the code the phone shows. It answers the final response, or the password step's when that refused or was enough.
 func (sf *signinFixture) login(t *testing.T, email, pw, ip string) resp {
 	t.Helper()
 	first := sf.passwordStep(t, email, pw, ip)
 	if first.code != 200 {
 		return first
 	}
+	switch first.body["second_step"] {
+	case "none":
+		return first
+	case "code":
+	default:
+		t.Fatalf("password step answered %s", first.raw)
+	}
 	var id string
 	if err := sf.pool.QueryRow(context.Background(), `SELECT id::text FROM operators WHERE lower(email)=lower($1)`, email).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	sf.track(scopeMFA, id)
-	switch first.body["second_step"] {
-	case "enrol":
-		if e := sf.call(t, "POST", "/auth/login/enrol", ip, "", nil, map[string]string{"pending": first.pending}); e.code != 200 {
-			t.Fatalf("set-up step = %d %s", e.code, e.raw)
-		}
-	case "code":
-	default:
-		t.Fatalf("password step answered %s", first.raw)
-	}
 	return sf.codeStep(t, first.pending, sf.mfa.codeFor(id), ip)
+}
+
+// enableMFA turns two-step sign-in on for the session's operator the way the account page does, and answers the
+// recovery codes.
+func (sf *signinFixture) enableMFA(t *testing.T, cookie, operatorID, pw, ip string) []any {
+	t.Helper()
+	sf.track(scopeMFA, operatorID)
+	sf.track(scopeReauth, operatorID)
+	if r := sf.call(t, "POST", "/auth/mfa/setup", ip, cookie, map[string]any{"password": pw}, nil); r.code != 200 || r.body["secret"] == "" {
+		t.Fatalf("set-up = %d %s", r.code, r.raw)
+	}
+	r := sf.call(t, "POST", "/auth/mfa/confirm", ip, cookie, map[string]any{"code": sf.mfa.codeFor(operatorID)}, nil)
+	codes, _ := r.body["recovery_codes"].([]any)
+	if r.code != 200 || len(codes) != 10 {
+		t.Fatalf("confirm = %d %s", r.code, r.raw)
+	}
+	return codes
 }
 
 func (sf *signinFixture) age(t *testing.T, scope, value string, d time.Duration) {

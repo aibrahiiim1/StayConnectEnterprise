@@ -327,8 +327,8 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		mustChange = true
 		s.audit(r, "operator.password_change_required", "operator", id, map[string]any{"reason": "weak_password"})
 	}
-	// No session yet: the authenticator code opens it.
-	s.beginSecondStep(w, r, ctx, &pendingSignin{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
+	// With a confirmed authenticator no session yet: its code opens it.
+	s.finishPasswordStep(w, r, ctx, &pendingSignin{OperatorID: id, Email: in.Email, DisplayName: display, Roles: roles,
 		MustChangePassword: mustChange, PasswordFP: passwordFingerprint(hash)})
 }
 

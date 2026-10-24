@@ -584,7 +584,7 @@ func runResetMFA(args []string) error {
 	}
 	audit.System(ctx, pool, "user.mfa_reset", "operator", id, map[string]any{
 		"reason": strings.TrimSpace(*reason), "had_authenticator": had, "via": "command line"})
-	slog.Info("two-step sign-in reset; a new authenticator is set up at the next sign-in", "id", id, "had_authenticator", had)
+	slog.Info("two-step sign-in reset; the operator signs in with the password alone until they turn it on again", "id", id, "had_authenticator", had)
 	return nil
 }
 

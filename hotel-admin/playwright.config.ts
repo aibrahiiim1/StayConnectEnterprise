@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Browser E2E for the Hotel Admin using a local Chrome; edged is mocked per-test via page.route, so no real backend or
 // data.
-const PORT = Number(process.env.E2E_PORT ?? 3123);
+const PORT = Number(process.env.E2E_PORT) || 3123;
 
 export default defineConfig({
   testDir: "./e2e",

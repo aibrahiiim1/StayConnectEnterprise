@@ -80,9 +80,24 @@ func TestIntegrationOperatorMFA_SealedSingleUseAndReset(t *testing.T) {
 		return rec.Code, out
 	}
 
-	st, e := post(s.operatorMFAEnrol, map[string]string{"operator_id": op, "account": "ada@hotel.example"})
+	// A set-up started twice (two-step sign-in is turned on from the account page, D68): the second replaces the
+	// unconfirmed first, whose codes then confirm nothing.
+	st, abandoned := post(s.operatorMFAEnrol, map[string]string{"operator_id": op, "account": "ada@hotel.example"})
 	if st != 200 {
-		t.Fatalf("enrol = %d %v", st, e)
+		t.Fatalf("first enrol = %d %v", st, abandoned)
+	}
+	st, e := post(s.operatorMFAEnrol, map[string]string{"operator_id": op, "account": "ada@hotel.example"})
+	if st != 200 || e["secret"] == abandoned["secret"] {
+		t.Fatalf("enrol again = %d %v", st, e)
+	}
+	var rows int
+	_ = owner.QueryRow(ctx, `SELECT count(*) FROM public.operator_mfa WHERE operator_id=$1 AND confirmed_at IS NULL`, op).Scan(&rows)
+	if rows != 1 {
+		t.Fatalf("%d unconfirmed authenticators after two set-ups", rows)
+	}
+	old, _ := totpSecret(abandoned["secret"].(string))
+	if st, c := post(s.operatorMFAConfirm, map[string]string{"operator_id": op, "code": totp.Code(old, totp.Step(time.Now()))}); st != 200 || c["confirmed"] != false {
+		t.Fatalf("the replaced set-up's code = %d %v", st, c)
 	}
 	u, _ := url.Parse(e["otpauth_uri"].(string))
 	secretB32 := u.Query().Get("secret")
@@ -193,7 +208,7 @@ func TestIntegrationOperatorMFA_SealedSingleUseAndReset(t *testing.T) {
 	if st, _ := post(s.operatorMFAVerify, map[string]string{"operator_id": op, "code": next}); st != http.StatusConflict {
 		t.Fatalf("verify after reset = %d, want 409 not_enrolled", st)
 	}
-	// Without the key nothing is set up or checked: sign-in fails closed in edged.
+	// Without the key nothing is set up or checked: the code step fails closed in edged.
 	s.operatorMFA = operatorMFAKeys{}
 	if st, _ := post(s.operatorMFAEnrol, map[string]string{"operator_id": op, "account": "x"}); st != http.StatusServiceUnavailable {
 		t.Fatalf("enrol without the key = %d", st)

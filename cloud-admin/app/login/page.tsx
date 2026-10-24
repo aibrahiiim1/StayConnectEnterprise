@@ -10,7 +10,7 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
 import { destinationAfterSignIn } from "@/lib/session-expiry";
-import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
+import { SigninSecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
   // Next.js requires Suspense around useSearchParams in production builds.
@@ -39,17 +39,18 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Password entry alone never opens a session.
-  const [second, setSecond] = useState<SecondStep | null>(null);
+  // With two-step sign-in on, the password opens no session: the code step does.
+  const [codeStep, setCodeStep] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setLoading(true);
     try {
-      const r = await api.post<{ second_step?: SecondStep }>("/v1/auth/login", { email, password });
+      const r = await api.post<{ second_step?: "none" | "code" }>("/v1/auth/login", { email, password });
       setPassword("");
-      setSecond(r.second_step === "enrol" ? "enrol" : "code");
+      if (r.second_step === "none") finish();
+      else setCodeStep(true);
     } catch (e: any) {
       setErr(e?.message || "Login failed");
     } finally {
@@ -62,7 +63,7 @@ function LoginInner() {
     router.refresh();
   }, [router, next]);
   const restart = useCallback((why: string) => {
-    setSecond(null);
+    setCodeStep(false);
     setErr(why || null);
   }, []);
 
@@ -99,8 +100,8 @@ function LoginInner() {
               <p className="text-sm text-muted-foreground">Admin sign-in. Use your Central operator account.</p>
             </div>
 
-            {second ? (
-              <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
+            {codeStep ? (
+              <SigninSecondStep onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4">
               {/* The alert already announces itself; an outer live wrapper would announce it twice. */}

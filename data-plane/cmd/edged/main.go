@@ -303,7 +303,6 @@ func main() {
 		r.Use(sameOrigin)
 		r.Get("/health", s.health)
 		r.Post("/auth/login", s.login)
-		r.Post("/auth/login/enrol", s.loginEnrol)
 		r.Post("/auth/login/code", s.loginCode)
 		r.Post("/auth/logout", s.logout)
 
@@ -315,6 +314,9 @@ func main() {
 			r.Post("/auth/password", s.changeOwnPassword)
 			r.Get("/auth/mfa", s.getOwnMFA)
 			r.Post("/auth/mfa/recovery-codes", s.newOwnRecoveryCodes)
+			r.Post("/auth/mfa/setup", s.setupOwnMFA)
+			r.Post("/auth/mfa/confirm", s.confirmOwnMFA)
+			r.Post("/auth/mfa/disable", s.disableOwnMFA)
 
 			// Plain routes that bypass mountResource must still be recorded as surfaces, or /capabilities reports them unavailable.
 			s.surfaces.add("license")

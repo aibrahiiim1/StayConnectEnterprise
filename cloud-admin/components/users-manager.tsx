@@ -169,8 +169,10 @@ export function UsersManager({
                       {self && <Badge tone="accent">You</Badge>}
                     </div>
                     {u.display_name && <div className="text-caption text-muted-foreground">{u.display_name}</div>}
-                    {u.status === "active" && u.two_step_enrolled === false && (
-                      <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
+                    {u.status === "active" && typeof u.two_step_enrolled === "boolean" && (
+                      <Badge tone={u.two_step_enrolled ? "ok" : "neutral"} className="mt-1">
+                        {u.two_step_enrolled ? "Two-step on" : "Two-step off"}
+                      </Badge>
                     )}
                   </TD>
                   <TD>
@@ -378,7 +380,7 @@ export function UsersManager({
         onOpenChange={(v) => { if (!v) setDialog(null); }}
         title="Reset two-step sign-in"
         description={dialog?.kind === "mfa"
-          ? `${dialog.u.email}: their authenticator app and recovery codes stop working, they are signed out, and they set up a new app at their next sign-in.`
+          ? `${dialog.u.email}: their authenticator app and recovery codes stop working and they are signed out. They then sign in with the password alone until they turn two-step sign-in on again.`
           : undefined}
         size="sm"
         submitLabel="Reset two-step sign-in"

@@ -31,11 +31,12 @@ test.describe("the authentication gate", () => {
     await expect(page.getByRole("heading", { name: /manual review/i })).toHaveCount(0);
   });
 
-  test("sends an operator who already has a session away from the login page", async ({ page }) => {
+  test("sends an operator who already has a session away from the login page", async ({ page, baseURL }) => {
     // Cover both hosts so cookie scope does not confound redirect behavior.
+    const port = new URL(baseURL!).port;
     await page.context().addCookies([
-      { name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" },
-      { name: "sc_edge_session", value: "e2e-test", url: "http://localhost:3123" },
+      { name: "sc_edge_session", value: "e2e-test", url: `http://127.0.0.1:${port}` },
+      { name: "sc_edge_session", value: "e2e-test", url: `http://localhost:${port}` },
     ]);
     await page.goto("/login");
     expect(new URL(page.url()).pathname).toBe("/dashboard");
@@ -49,7 +50,7 @@ test.describe("the authentication gate", () => {
   });
 
   test("redirects with an absolute Location, which is what the framework requires of middleware", async ({
-    page,
+    page, baseURL,
   }) => {
     await page.context().clearCookies();
     // Follow redirects because a relative Location can fail Next's URL normalization.
@@ -57,7 +58,7 @@ test.describe("the authentication gate", () => {
     expect(resp?.status()).toBe(200);
     const url = new URL(page.url());
     expect(url.protocol).toBe("http:");
-    expect(url.host).toMatch(/^(127\.0\.0\.1|localhost):3123$/);
+    expect(url.host).toMatch(new RegExp(`^(127\\.0\\.0\\.1|localhost):${new URL(baseURL!).port}$`));
     expect(url.pathname).toBe("/login");
   });
 });
