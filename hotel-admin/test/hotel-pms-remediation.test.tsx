@@ -206,7 +206,7 @@ describe("Post-stay reset (H-17)", () => {
     post.mockResolvedValue({ pin: "123456", valid_until: profile.valid_until });
     const { PostStayView } = await import("@/components/phase5/post-stay-view");
     render(<PostStayView canAct rolesKnown />);
-    await userEvent.click(await screen.findByRole("button", { name: /^Reset PIN,/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Reset PIN: room/ }));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByLabelText(/^Reason/), "guest lost the printout");
     await userEvent.type(within(dialog).getByLabelText(/confirm your password/i), "pw");

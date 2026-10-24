@@ -10,7 +10,7 @@ import { formatDate } from "@/lib/utils";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -167,9 +167,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Cross-PMS transfer"
-        icon={<ArrowLeftRight />}
         description="Move a guest's live access from a stay on one PMS to a stay on another."
         help={
           <>
@@ -207,7 +205,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
       {canAct && (
         <Card>
           <CardHeader>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <CardTitle>Transfer a guest</CardTitle>
               <CardDescription>
                 Enter both stays, then preview. Nothing moves until you confirm with a reason and your password.
@@ -220,7 +218,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr_auto]"
               onSubmit={(e) => { e.preventDefault(); void runPreview(); }}
             >
-              <Field label="From stay" hint="The reservation number on the PMS the guest is leaving (a stay id also works).">
+              <Field label="From stay" hint="Reservation number on the PMS the guest is leaving, or a stay id.">
                 <Input
                   value={fromStay}
                   onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
@@ -230,7 +228,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
                 />
               </Field>
               <ArrowRight className="mb-9 hidden size-4 text-muted-foreground sm:block rtl:rotate-180" aria-hidden />
-              <Field label="To stay" hint="The reservation number on the PMS the guest is moving to (a stay id also works).">
+              <Field label="To stay" hint="Reservation number on the PMS the guest is moving to, or a stay id.">
                 <Input
                   value={toStay}
                   onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
@@ -281,10 +279,10 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         </Card>
       )}
 
-      <Card data-testid="review-signals">
+      <Card data-testid="review-signals" className="overflow-hidden">
         <CardHeader>
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2"><Radar className="size-4 text-muted-foreground" aria-hidden /> Review signals</CardTitle>
+          <div className="space-y-0.5">
+            <CardTitle>Review signals</CardTitle>
             {/* Preserve the API's warning so ambiguous outcomes cannot be mistaken for moves. */}
             <CardDescription data-testid="signal-notice">
               {signalNotice ||
@@ -295,29 +293,29 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         {signals === null ? (
           <SkeletonRows rows={2} cols={4} />
         ) : signals.length === 0 ? (
-          <EmptyState icon={<Radar />} title="No ambiguous sign-ins in the last 7 days" />
+          <EmptyState size="sm" icon={<Radar />} title="No ambiguous sign-ins in the last 7 days" />
         ) : (
-          <Table>
+          <Table density="compact">
             <THead>
               <TR>
                 <TH>Outcome</TH>
                 <TH>Client network</TH>
-                <TH className="text-end">Occurrences</TH>
+                <TH numeric>Occurrences</TH>
                 <TH>Most recent</TH>
               </TR>
             </THead>
             <TBody>
               {signals.map((s) => (
                 <TR key={`${s.outcome_code}-${s.guest_network_id}`}>
-                  <TD><Badge tone="warn">{outcomeWords(s.outcome_code)}</Badge></TD>
+                  <TD nowrap><StatusBadge tone="warn">{outcomeWords(s.outcome_code)}</StatusBadge></TD>
                   {/* Keep this evidence panel free of action controls. */}
                   <TD>
                     <span className="font-mono text-caption text-muted-foreground" title={`Client network ${s.guest_network_id}`}>
                       {s.guest_network_id.length > 12 ? `${s.guest_network_id.slice(0, 8)}…` : s.guest_network_id}
                     </span>
                   </TD>
-                  <TD className="text-end tabular">{s.occurrences.toLocaleString()}</TD>
-                  <TD className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(s.resolved_at)}</TD>
+                  <TD numeric>{s.occurrences.toLocaleString()}</TD>
+                  <TD nowrap muted>{formatDate(s.resolved_at)}</TD>
                 </TR>
               ))}
             </TBody>
@@ -325,16 +323,16 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
         )}
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><History className="size-4 text-muted-foreground" aria-hidden /> Recorded transfers</CardTitle>
+          <CardTitle>Recorded transfers</CardTitle>
         </CardHeader>
         {rows === null ? (
           <SkeletonRows rows={3} cols={3} />
         ) : rows.length === 0 ? (
-          <EmptyState icon={<History />} title="No transfers recorded" hint="Every transfer is kept here with both stays and when it happened." />
+          <EmptyState size="sm" icon={<History />} title="No transfers recorded" hint="Every transfer is kept here with both stays and when it happened." />
         ) : (
-          <Table>
+          <Table density="compact">
             <THead>
               <TR>
                 <TH>From</TH>
@@ -347,7 +345,7 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
                 <TR key={r.id}>
                   <TD><StayLabel room={r.from_room} reservation={r.from_external_reservation_id} /></TD>
                   <TD><StayLabel room={r.to_room} reservation={r.to_external_reservation_id} /></TD>
-                  <TD className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(r.created_at)}</TD>
+                  <TD nowrap muted>{formatDate(r.created_at)}</TD>
                 </TR>
               ))}
             </TBody>

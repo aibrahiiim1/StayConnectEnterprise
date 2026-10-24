@@ -61,7 +61,7 @@ describe("Post-stay access", () => {
     const user = userEvent.setup();
     render(<PostStayView canAct />);
 
-    await user.click(await screen.findByRole("button", { name: /^Reset PIN,/ }));
+    await user.click(await screen.findByRole("button", { name: /^Reset PIN: room/ }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Reset PIN" });
     expect(submit).toBeDisabled();
@@ -89,7 +89,8 @@ describe("Post-stay access", () => {
     const user = userEvent.setup();
     render(<PostStayView canAct />);
 
-    await user.click(await screen.findByRole("button", { name: /^End access,/ }));
+    await user.click(await screen.findByRole("button", { name: /^Actions for room/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "End access" }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "End access permanently" });
     expect(within(dialog).getByText(/cannot be undone/i)).toBeTruthy();
