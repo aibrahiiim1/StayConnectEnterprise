@@ -216,9 +216,9 @@ export function ActivityTab({ guard, setErr }: TabProps) {
                       <span className="font-medium">{r.package_name}</span>
                       <div className="text-xs text-muted-foreground">{priceText(r.price_minor, r.currency, r.currency_exponent)}</div>
                     </TD>
-                    <TD nowrap>
+                    <TD className="max-w-[14rem]">
                       <div>{whoWords(r)}</div>
-                      {r.room && r.pms_interface && <div className="text-xs text-muted-foreground">{r.pms_interface}</div>}
+                      {r.room && r.pms_interface && <div className="truncate text-xs text-muted-foreground" title={r.pms_interface}>{r.pms_interface}</div>}
                     </TD>
                     <TD nowrap muted className="hidden md:table-cell">{r.source_label}</TD>
                     <TD nowrap>

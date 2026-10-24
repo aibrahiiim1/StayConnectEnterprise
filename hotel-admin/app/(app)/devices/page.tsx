@@ -126,21 +126,23 @@ export default function DevicesPage() {
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Package</TH>
                 <TH className="hidden md:table-cell">Held by</TH>
-                <TH className="hidden lg:table-cell">Last seen</TH>
+                <TH className="hidden 2xl:table-cell">Last seen</TH>
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
             <TBody>
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const where = [r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ");
+                const pkg = r.current ? r.current.package_name || "Package" : "";
+                const held = holder(r);
+                return (
                 <TR key={r.id || r.mac} onClick={r.id ? () => setOpen(r.id) : undefined}>
-                  <TD nowrap>
+                  <TD nowrap className="max-w-[13rem]">
                     <div className="font-mono text-sm">{r.mac}</div>
-                    <div className="max-w-[16rem] truncate text-caption text-muted-foreground">
-                      {[r.hostname, r.online_ip || r.lease_ip || r.last_ip].filter(Boolean).join(" · ")}
-                    </div>
+                    <div className="truncate text-caption text-muted-foreground" title={where || undefined}>{where}</div>
                     {r.current && (
-                      <div className="text-caption text-muted-foreground md:hidden">
-                        {r.current.package_name || "Package"} · {holder(r)}
+                      <div className="truncate text-caption text-muted-foreground md:hidden" title={`${pkg} · ${held}`}>
+                        {pkg} · {held}
                       </div>
                     )}
                   </TD>
@@ -154,17 +156,31 @@ export default function DevicesPage() {
                         </Badge>
                       </div>
                     )}
+                    {/* The Last seen column needs the room of a 2xl screen; below it the time sits here. */}
+                    {r.last_seen && (
+                      <div className="mt-1 text-caption text-muted-foreground 2xl:hidden">Seen {formatRelative(r.last_seen)}</div>
+                    )}
                   </TD>
-                  <TD nowrap className="hidden md:table-cell">
-                    {r.current ? `${r.current.package_name || "Package"}${r.current.max_devices ? ` · ${r.current.places_in_use}/${r.current.max_devices}` : ""}` : "—"}
+                  <TD className="hidden max-w-[12rem] md:table-cell">
+                    {r.current ? (
+                      <>
+                        <div className="truncate" title={pkg}>{pkg}</div>
+                        {r.current.max_devices ? (
+                          <div className="tabular text-caption text-muted-foreground">
+                            {r.current.places_in_use}/{r.current.max_devices} places
+                          </div>
+                        ) : null}
+                      </>
+                    ) : "—"}
                   </TD>
-                  <TD nowrap className="hidden md:table-cell">{holder(r)}</TD>
-                  <TD nowrap muted className="hidden lg:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
+                  <TD truncate title={held} className="hidden max-w-[12rem] md:table-cell">{held}</TD>
+                  <TD nowrap muted className="hidden 2xl:table-cell">{r.last_seen ? formatRelative(r.last_seen) : "—"}</TD>
                   <TD className="w-0">
                     {r.id && <RowActions subject={r.mac} primary={{ label: "Manage", onSelect: () => setOpen(r.id) }} />}
                   </TD>
                 </TR>
-              ))}
+                );
+              })}
             </TBody>
           </Table>
         )}

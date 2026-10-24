@@ -25,16 +25,26 @@ export function Table({
   // Only an overflowing table gets a tab stop, so keyboard users can scroll the hidden columns.
   const scroller = React.useRef<HTMLDivElement | null>(null);
   const [overflowing, setOverflowing] = React.useState(false);
+  // True while columns sit under the pinned actions cell (it then draws its edge shadow). scrollLeft is negative in
+  // RTL, so the distance to the inline end is measured on its magnitude.
+  const [scrollUnder, setScrollUnder] = React.useState(false);
   React.useEffect(() => {
     const el = scroller.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () =>
+    if (!el) return;
+    const measure = () => {
       setOverflowing(el.scrollWidth > el.clientWidth + 1 || (!!maxHeight && el.scrollHeight > el.clientHeight + 1));
+      setScrollUnder(el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) > 1);
+    };
+    el.addEventListener("scroll", measure, { passive: true });
+    measure();
+    if (typeof ResizeObserver === "undefined") return () => el.removeEventListener("scroll", measure);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    measure();
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", measure);
+    };
   }, [maxHeight]);
 
   // `relative` makes the scroller the containing block, so an absolute descendant cannot widen the page on phones.
@@ -43,6 +53,7 @@ export function Table({
       <div
         ref={scroller}
         data-sticky={stickyHeader ? "true" : undefined}
+        data-scroll-under={scrollUnder ? "true" : undefined}
         style={maxHeight ? { maxHeight } : undefined}
         className={cn(
           "relative w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -127,8 +138,14 @@ export function TH({
   className,
   numeric,
   align,
+  pinEnd,
   ...p
-}: Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "align"> & { numeric?: boolean; align?: Align }) {
+}: Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "align"> & {
+  numeric?: boolean;
+  align?: Align;
+  /** Sticks the header cell to the inline end while the table scrolls (see `TD pinEnd`). */
+  pinEnd?: boolean;
+}) {
   const density = React.useContext(DensityContext);
   return (
     <th
@@ -137,6 +154,7 @@ export function TH({
         density === "compact" ? "h-8 px-3" : "h-9 px-4",
         numeric && "text-end",
         align && ALIGN[align],
+        pinEnd && "cell-pin-end",
         className,
       )}
       {...p}
@@ -151,6 +169,7 @@ export function TD({
   truncate,
   muted,
   align,
+  pinEnd,
   ...p
 }: Omit<React.TdHTMLAttributes<HTMLTableCellElement>, "align"> & {
   /** Right-aligned tabular figures, never wrapped: bytes, counts, money, durations. */
@@ -161,6 +180,11 @@ export function TD({
   truncate?: boolean;
   muted?: boolean;
   align?: Align;
+  /**
+   * Sticks the last cell to the inline end, so it stays reachable when the table scrolls sideways. Automatic for a
+   * last cell holding RowActions; use this for any other actions cell (and `TH pinEnd` above it).
+   */
+  pinEnd?: boolean;
 }) {
   const density = React.useContext(DensityContext);
   return (
@@ -173,6 +197,7 @@ export function TD({
         truncate && "max-w-[18rem] truncate",
         muted && "text-muted-foreground",
         align && ALIGN[align],
+        pinEnd && "cell-pin-end",
         className,
       )}
       {...p}

@@ -39,9 +39,9 @@ export function LicenseTable({ rows, showCustomer = true }: { rows: LicenseRow[]
                 </Link>
               </TD>
               {showCustomer && (
-                <TD className="hidden md:table-cell">
-                  <div className="truncate">{l.customer_name ?? "—"}</div>
-                  <div className="truncate text-xs text-muted-foreground">{l.site_name ?? "—"}</div>
+                <TD className="hidden max-w-[16rem] md:table-cell">
+                  <div className="truncate" title={l.customer_name ?? undefined}>{l.customer_name ?? "—"}</div>
+                  <div className="truncate text-xs text-muted-foreground" title={l.site_name ?? undefined}>{l.site_name ?? "—"}</div>
                 </TD>
               )}
               <TD nowrap><LicenseBadge value={l.state} /></TD>

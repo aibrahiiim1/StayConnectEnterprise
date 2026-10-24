@@ -320,7 +320,7 @@ export default function GuestSignInAttemptsPage() {
                   <TR key={a.id} onClick={() => void open(a)}>
                     <TD nowrap muted title={formatDate(a.occurred_at)}>{formatRelative(a.occurred_at)}</TD>
                     <TD nowrap className="font-medium">{a.room || "—"}</TD>
-                    <TD nowrap muted className="hidden md:table-cell">{a.guest_network || "—"}</TD>
+                    <TD truncate muted title={a.guest_network || undefined} className="hidden max-w-[12rem] md:table-cell">{a.guest_network || "—"}</TD>
                     <TD nowrap>
                       <StatusBadge tone={tone(a.result)}>{a.succeeded ? "Connected" : "Refused"}</StatusBadge>
                     </TD>

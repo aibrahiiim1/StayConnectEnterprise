@@ -413,11 +413,12 @@ const SessionRow = memo(function SessionRow({
                   ? "block truncate font-mono text-xs text-muted-foreground"
                   : "block truncate font-medium"
               }
+              title={id.title}
             >
               {id.title}
             </span>
             {id.subtitle && (
-              <span className="block truncate text-xs text-muted-foreground">{id.subtitle}</span>
+              <span className="block truncate text-xs text-muted-foreground" title={id.subtitle}>{id.subtitle}</span>
             )}
             {id.anonymous && (
               <span className="block text-2xs text-muted-foreground">
@@ -431,11 +432,11 @@ const SessionRow = memo(function SessionRow({
         <div className="text-xs">{methodLabel(s.credential_method)}</div>
         <div className="text-2xs">{formatRelative(s.started_at)}</div>
       </TD>
-      <TD nowrap className="hidden lg:table-cell">
+      <TD nowrap className="hidden max-w-[13rem] lg:table-cell">
         {s.package_name || s.package_code ? (
           <>
             <div className="flex items-center gap-1.5 text-sm">
-              <span>{s.package_name || s.package_code}</span>
+              <span className="min-w-0 truncate" title={s.package_name || s.package_code || undefined}>{s.package_name || s.package_code}</span>
               {acquisitionOrdinal(s.package_acquisitions) && (
                 <span title="How many times this client has had this package, counting this one">
                   <Badge tone="warn">{acquisitionOrdinal(s.package_acquisitions)}</Badge>
@@ -453,8 +454,8 @@ const SessionRow = memo(function SessionRow({
       <TD className="hidden min-w-40 xl:table-cell">
         <AllowanceCell s={s} />
       </TD>
-      <TD nowrap className="hidden lg:table-cell">
-        <div className="text-xs">{s.guest_network_name ?? "—"}</div>
+      <TD nowrap className="hidden max-w-[11rem] lg:table-cell">
+        <div className="truncate text-xs" title={s.guest_network_name ?? undefined}>{s.guest_network_name ?? "—"}</div>
         <div className="font-mono text-2xs text-muted-foreground">{s.ip}</div>
       </TD>
       <TD numeric className="hidden sm:table-cell">

@@ -125,7 +125,7 @@ export function BatchesTab({
                         {b.not_yet_valid > 0 && <Badge tone="info">{b.not_yet_valid.toLocaleString()} not yet valid</Badge>}
                       </div>
                     </TD>
-                    <TD nowrap className="hidden md:table-cell">{b.issued_by_label ?? "—"}</TD>
+                    <TD truncate title={b.issued_by_label ?? undefined} className="hidden max-w-[12rem] md:table-cell">{b.issued_by_label ?? "—"}</TD>
                     <TD truncate muted title={b.notes ?? undefined} className="hidden max-w-[16rem] lg:table-cell">{b.notes ?? ""}</TD>
                   </TR>
                 ))}

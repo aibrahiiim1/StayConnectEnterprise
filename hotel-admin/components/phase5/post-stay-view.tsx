@@ -214,7 +214,7 @@ export function PostStayView({ canAct, rolesKnown = true }: { canAct: boolean; r
                     <TD nowrap className="font-medium">
                       {row.normalized_room_number ? `Room ${row.normalized_room_number}` : "No room"}
                     </TD>
-                    <TD nowrap className="hidden md:table-cell">{row.external_reservation_id || "—"}</TD>
+                    <TD truncate title={row.external_reservation_id || undefined} className="hidden max-w-[12rem] md:table-cell">{row.external_reservation_id || "—"}</TD>
                     <TD muted className="hidden lg:table-cell">
                       {stayWords(row.stay_status)}
                       <div className="text-xs">Stay episode {row.origin_lifecycle_version}</div>

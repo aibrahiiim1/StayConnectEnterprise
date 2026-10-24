@@ -290,8 +290,8 @@ export default function HealthPage() {
                   <TH>State</TH>
                   <TH className="hidden md:table-cell">Health check</TH>
                   <TH numeric className="hidden lg:table-cell">Restarts</TH>
-                  <TH className="hidden lg:table-cell">Backoff</TH>
-                  <TH className="hidden xl:table-cell">Last failure</TH>
+                  <TH className="hidden 2xl:table-cell">Backoff</TH>
+                  <TH className="hidden 2xl:table-cell">Last failure</TH>
                   <TH className="hidden sm:table-cell">Last healthy</TH>
                   {writable && <TH><span className="sr-only">Actions</span></TH>}
                 </TR>
@@ -299,12 +299,18 @@ export default function HealthPage() {
               <TBody>
                 {services.map((s) => (
                   <TR key={s.service} onClick={() => openDetail(s.service)} selected={sel === s.service}>
-                    <TD nowrap>
-                      <span className="font-medium text-foreground">{s.service}</span>
-                      <div className="text-caption text-muted-foreground">{s.process_state}</div>
+                    <TD nowrap className="max-w-[12rem]">
+                      <div className="truncate font-medium text-foreground" title={s.service}>{s.service}</div>
+                      <div className="truncate text-caption text-muted-foreground" title={s.process_state}>{s.process_state}</div>
                     </TD>
-                    <TD nowrap><StatusBadge tone={stateTone(s.state)}>{stateWord(s.state)}</StatusBadge></TD>
-                    <TD className="hidden max-w-[16rem] md:table-cell">
+                    <TD nowrap>
+                      <StatusBadge tone={stateTone(s.state)}>{stateWord(s.state)}</StatusBadge>
+                      {/* The Backoff column needs a 2xl screen; below it the retry sits under the state. */}
+                      {s.backoff_level > 0 && (
+                        <div className="mt-1 text-caption text-warning-subtle-foreground 2xl:hidden">Retry {until(s.next_retry_at)}</div>
+                      )}
+                    </TD>
+                    <TD className="hidden max-w-[14rem] md:table-cell">
                       <div className="flex items-start gap-1.5 text-xs text-muted-foreground" title={s.health_detail}>
                         {s.health_ok === false ? (
                           <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="Check failing" />
@@ -319,17 +325,17 @@ export default function HealthPage() {
                     </TD>
                     <TD numeric className="hidden text-xs lg:table-cell">
                       {s.restart_count}
-                      <span className="text-muted-foreground"> ({s.restarts_in_window} in {s.restart_window_secs}s)</span>
+                      <div className="text-caption text-muted-foreground">{s.restarts_in_window} in {s.restart_window_secs}s</div>
                       {s.consecutive_failures > 0 && (
                         <div className="text-caption text-destructive">{s.consecutive_failures} failures in a row</div>
                       )}
                     </TD>
-                    <TD nowrap className="hidden text-xs lg:table-cell">
+                    <TD nowrap className="hidden text-xs 2xl:table-cell">
                       {s.backoff_level > 0
                         ? <span className="text-warning-subtle-foreground">Level {s.backoff_level} · retry {until(s.next_retry_at)}</span>
                         : <span className="text-muted-foreground">—</span>}
                     </TD>
-                    <TD className="hidden max-w-[14rem] text-xs text-muted-foreground xl:table-cell" title={s.last_failure_reason}>
+                    <TD className="hidden max-w-[14rem] text-xs text-muted-foreground 2xl:table-cell" title={s.last_failure_reason}>
                       {s.last_failure_reason
                         ? <><div className="truncate">{s.last_failure_reason}</div><div className="text-caption">{ago(s.last_failure_at)}</div></>
                         : "—"}

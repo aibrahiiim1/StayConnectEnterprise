@@ -199,7 +199,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                   <TH>State</TH>
                   <TH numeric className="hidden sm:table-cell">Last attempt</TH>
                   <TH className="hidden md:table-cell">PMS answer</TH>
-                  <TH>
+                  <TH pinEnd>
                     <span className="sr-only">Actions</span>
                   </TH>
                 </TR>
@@ -217,7 +217,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
                       {r.latest_attempt_no != null ? `#${r.latest_attempt_no}` : "—"}
                     </TD>
                     <TD muted className="hidden md:table-cell">{r.latest_pa_as_status ?? "no answer"}</TD>
-                    <TD className="w-0 text-end">
+                    <TD pinEnd className="w-0 text-end">
                       <Button
                         size="xs"
                         variant="secondary"

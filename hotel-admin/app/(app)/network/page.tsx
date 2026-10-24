@@ -292,9 +292,8 @@ export default function NetworkPage() {
                 <TH>Name</TH>
                 <TH>Type</TH>
                 <TH className="hidden 2xl:table-cell">Parent interface</TH>
-                <TH className="hidden md:table-cell">Gateway</TH>
-                <TH className="hidden lg:table-cell">Subnet</TH>
-                <TH className="hidden md:table-cell">DHCP</TH>
+                <TH className="hidden md:table-cell">Gateway / subnet</TH>
+                <TH className="hidden 2xl:table-cell">DHCP</TH>
                 <TH className="hidden 2xl:table-cell">Pool</TH>
                 <TH className="hidden sm:table-cell">Portal</TH>
                 <TH>Status</TH>
@@ -305,16 +304,17 @@ export default function NetworkPage() {
             <TBody>
               {rows.map((n) => (
                 <TR key={n.id} onClick={() => router.push(`/network/${n.id}`)}>
-                  <TD className="min-w-44">
+                  <TD className="min-w-44 max-w-[13rem]">
                     <Link
                       href={`/network/${n.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="font-medium text-foreground hover:text-primary hover:underline"
+                      title={n.name}
+                      className="block truncate font-medium text-foreground hover:text-primary hover:underline"
                     >
                       {n.name}
                     </Link>
                     {(n.ssid_label || n.description) && (
-                      <div className="max-w-[18rem] truncate text-xs text-muted-foreground" title={n.description || n.ssid_label}>
+                      <div className="truncate text-xs text-muted-foreground" title={n.description || n.ssid_label}>
                         {n.ssid_label ? `SSID ${n.ssid_label}` : n.description}
                       </div>
                     )}
@@ -323,12 +323,19 @@ export default function NetworkPage() {
                     <Badge tone={n.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(n)}</Badge>
                   </TD>
                   <TD nowrap className="hidden font-mono text-xs 2xl:table-cell">{n.parent_interface}</TD>
-                  <TD nowrap className="hidden font-mono text-xs md:table-cell">{n.gateway_ip}</TD>
-                  <TD nowrap className="hidden font-mono text-xs lg:table-cell">{n.subnet_cidr}</TD>
-                  <TD nowrap className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
+                  <TD nowrap className="hidden font-mono text-xs md:table-cell">
+                    <div>{n.gateway_ip}</div>
+                    <div className="text-muted-foreground">{n.subnet_cidr}</div>
+                  </TD>
+                  <TD nowrap className="hidden 2xl:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
                   <TD nowrap muted className="hidden font-mono text-xs 2xl:table-cell">{poolSummary(n)}</TD>
                   <TD nowrap className="hidden sm:table-cell">
-                    {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="warn">No sign-in page · no internet</Badge>}
+                    {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : (
+                      <>
+                        <Badge tone="warn">No sign-in page</Badge>
+                        <div className="mt-1 text-caption text-warning-subtle-foreground">No internet</div>
+                      </>
+                    )}
                   </TD>
                   <TD nowrap><EnabledBadge enabled={n.enabled} /></TD>
                   <TD numeric muted>{status[n.id]?.active_clients ?? "—"}</TD>

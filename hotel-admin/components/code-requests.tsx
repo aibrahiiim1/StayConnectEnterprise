@@ -68,7 +68,7 @@ export function CodeRequestsCard({ roles }: { roles: string[] }) {
         {data && data.requests.length === 0 && <p className="text-sm text-muted-foreground">No code requests in the last 24 hours.</p>}
         {data && data.requests.length > 0 && (
             <Table label="Code requests">
-              <THead><TR><TH>Requested</TH><TH>Sent to</TH><TH>Code</TH><TH><span className="sr-only">Actions</span></TH></TR></THead>
+              <THead><TR><TH>Requested</TH><TH>Sent to</TH><TH>Code</TH><TH pinEnd><span className="sr-only">Actions</span></TH></TR></THead>
               <TBody>
                 {data.requests.map((r) => (
                   <TR key={r.challenge_id}>
@@ -82,7 +82,7 @@ export function CodeRequestsCard({ roles }: { roles: string[] }) {
                         <div className="text-xs text-muted-foreground">Existing client — the code cannot be shown; they must use the code they received.</div>
                       )}
                     </TD>
-                    <TD className="w-0 whitespace-nowrap text-end">
+                    <TD pinEnd className="w-0 whitespace-nowrap text-end">
                       {mayReveal && r.code_available && (
                         <Button size="xs" variant="ghost" className="text-foreground" onClick={() => setRevealing(r)}><KeyRound aria-hidden /> Show code</Button>
                       )}

@@ -490,7 +490,6 @@ export default function GuestAccountsPage() {
                 <TH>Status</TH>
                 <TH className="hidden md:table-cell">Valid until</TH>
                 <TH className="hidden lg:table-cell">Last sign-in</TH>
-                <TH numeric className="hidden lg:table-cell">Sign-ins</TH>
                 {mayWrite && <TH><span className="sr-only">Actions</span></TH>}
               </TR>
             </THead>
@@ -501,14 +500,14 @@ export default function GuestAccountsPage() {
                 const verification = verificationStatus(a);
                 return (
                   <TR key={a.id} onClick={() => setManaging(a)}>
-                    <TD className="max-w-[18rem]">
+                    <TD className="max-w-[15rem]">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate font-mono text-sm font-medium" title={a.username}>{a.username}</span>
+                        <span className="min-w-0 max-w-full truncate font-mono text-sm font-medium" title={a.username}>{a.username}</span>
                         {a.self_registered && <Badge tone="info">Self-service</Badge>}
                         {isRemovedAccount(a) && <Badge tone="neutral">Removed</Badge>}
                       </div>
                       {a.display_name && (
-                        <div className="truncate text-caption text-muted-foreground">{a.display_name}</div>
+                        <div className="truncate text-caption text-muted-foreground" title={a.display_name}>{a.display_name}</div>
                       )}
                     </TD>
                     <TD numeric className={atCap ? "text-warning-subtle-foreground" : "text-muted-foreground"}>
@@ -521,8 +520,10 @@ export default function GuestAccountsPage() {
                         {a.enabled ? "Can sign in" : "Disabled"}
                       </StatusBadge>
                       {verification && (
-                        <div className="mt-1">
-                          <Badge tone={verification.tone}>{verification.label}</Badge>
+                        <div className="mt-1 max-w-[10rem]">
+                          <Badge tone={verification.tone} title={verification.label}>
+                            <span className="min-w-0 truncate">{verification.label}</span>
+                          </Badge>
                         </div>
                       )}
                     </TD>
@@ -531,8 +532,12 @@ export default function GuestAccountsPage() {
                     </TD>
                     <TD nowrap muted className="hidden lg:table-cell">
                       {a.last_login_at ? formatRelative(a.last_login_at) : "Never"}
+                      {a.login_count > 0 && (
+                        <div className="tabular text-caption">
+                          {a.login_count.toLocaleString()} sign-in{a.login_count === 1 ? "" : "s"}
+                        </div>
+                      )}
                     </TD>
-                    <TD numeric muted className="hidden lg:table-cell">{a.login_count}</TD>
                     {mayWrite && (
                       <TD className="w-0">
                         {/* A self-service account's password is the client's, recovered only by reset email;

@@ -75,10 +75,17 @@ rest into the page help.
   - `TD nowrap` — short values: dates, speeds ("20 / 10 Mbps", not "20 Mbps down / 10 Mbps up"), codes, badges.
   - `TD truncate title={full}` — long names; `TD muted` for secondary columns.
   - A second line under the primary cell (`text-xs text-muted-foreground`) is allowed for the row's type or ID.
-  - Hide secondary columns on small screens with `hidden md:table-cell`.
+  - Hide secondary columns on small screens with `hidden md:table-cell`. The sidebar takes ~240px, so a page
+    at `xl` (1280) has only ~974px for the table: columns that do not fit there move to `2xl:table-cell`, and
+    what they show stays reachable from the row's details (or as a second line below `2xl`).
+  - Never `nowrap` free text (names, emails, holders, reasons, descriptions): it grows to its longest real
+    value. Give it `truncate` with a `max-w-[…]` and a `title`, or let it wrap. Test with long values.
 - **Row actions**: `RowActions subject={rowName} primary={…} items={[…]}` in the last cell (`TD className="w-0"`).
   At most one inline action (the most frequent, never destructive); the rest go in the ⋯ menu, destructive
   ones last and red. Never plain-text action links side by side ("Edit Disable").
+- **Pinned actions**: a last cell holding `RowActions` sticks to the inline end of an overflowing table
+  automatically (opaque over hover/selected fills, an edge shadow only while columns scroll beneath it). Any
+  other actions cell (a "Details" button) opts in with `TD pinEnd` and `TH pinEnd`.
 - **Row click**: `TR onClick` opens the row's details (drawer or page). The row becomes keyboard-reachable;
   RowActions stop propagation.
 - Long tables: `Table stickyHeader maxHeight="32rem"`, `density="compact"` for dense operational queues.

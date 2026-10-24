@@ -131,7 +131,7 @@ export default function AssistedGuestDataPage() {
                     <TH>Status</TH>
                     <TH className="hidden lg:table-cell">Range</TH>
                     <TH className="hidden md:table-cell">Opened</TH>
-                    <TH><span className="sr-only">Actions</span></TH>
+                    <TH pinEnd><span className="sr-only">Actions</span></TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -140,9 +140,15 @@ export default function AssistedGuestDataPage() {
                       <TD nowrap className="font-mono text-xs">{x.ref}</TD>
                       <TD>{PURPOSE_WORDS[x.purpose] ?? x.purpose}</TD>
                       <TD nowrap><StatusBadge tone={toneOf(x.status)}>{statusWord(x.status)}</StatusBadge></TD>
-                      <TD nowrap muted className="hidden lg:table-cell">{formatDate(x.range_from)} – {formatDate(x.range_to)}</TD>
-                      <TD muted className="hidden md:table-cell">{formatDate(x.created_at)} · {x.created_by}</TD>
-                      <TD className="w-0" onClick={(e) => e.stopPropagation()}>
+                      <TD nowrap muted className="hidden lg:table-cell">
+                        <div>{formatDate(x.range_from)} –</div>
+                        <div>{formatDate(x.range_to)}</div>
+                      </TD>
+                      <TD nowrap muted className="hidden max-w-[14rem] md:table-cell">
+                        <div>{formatDate(x.created_at)}</div>
+                        <div className="truncate text-caption" title={x.created_by}>{x.created_by}</div>
+                      </TD>
+                      <TD pinEnd className="w-0" onClick={(e) => e.stopPropagation()}>
                         <Button size="xs" variant="ghost" className="text-foreground" aria-label={`Open request ${x.ref}`} onClick={() => setCaseId(x.id)}>Open</Button>
                       </TD>
                     </TR>

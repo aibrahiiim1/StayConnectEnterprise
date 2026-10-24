@@ -101,3 +101,41 @@
   }
   .select-chevron:disabled { background-color: hsl(var(--surface)); }
 }
+
+@layer components {
+  /* The row actions stay reachable when a table is wider than its card (docs/ui/DESIGN_SYSTEM.md). The last cell
+     holding RowActions, or a TD/TH with `pinEnd`, sticks to the inline end, drawn opaque over the row's own fill
+     (hover, selected), and casts an edge shadow only while columns scroll beneath it (Table sets
+     data-scroll-under). RTL-safe: logical insets, and the shadow gradient flips with the direction. */
+  :is(td.cell-pin-end, td:last-child:has([data-row-actions])) {
+    --pin-tint: transparent;
+    position: sticky;
+    inset-inline-end: 0;
+    z-index: 1;
+    background: linear-gradient(var(--pin-tint), var(--pin-tint)), hsl(var(--card));
+  }
+  tbody > tr:hover > :is(td.cell-pin-end, td:last-child:has([data-row-actions])) { --pin-tint: hsl(var(--accent) / 0.5); }
+  tr[aria-selected="true"] > :is(td.cell-pin-end, td:last-child:has([data-row-actions])) { --pin-tint: hsl(var(--primary-subtle) / 0.5); }
+  tbody > tr[aria-selected="true"]:hover > :is(td.cell-pin-end, td:last-child:has([data-row-actions])) { --pin-tint: hsl(var(--primary-subtle) / 0.6); }
+  :is(th.cell-pin-end, table:has(> tbody > tr > td:last-child [data-row-actions]) > thead > tr > th:last-child) {
+    position: sticky;
+    inset-inline-end: 0;
+    z-index: 11;
+    background-color: hsl(var(--surface));
+  }
+  :is(.cell-pin-end, td:last-child:has([data-row-actions]), table:has(> tbody > tr > td:last-child [data-row-actions]) > thead > tr > th:last-child)::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: -0.75rem;
+    width: 0.75rem;
+    pointer-events: none;
+    background: linear-gradient(to left, hsl(var(--foreground) / 0.08), transparent);
+    opacity: 0;
+    transition: opacity 150ms;
+  }
+  [dir="rtl"] :is(.cell-pin-end, td:last-child:has([data-row-actions]), table:has(> tbody > tr > td:last-child [data-row-actions]) > thead > tr > th:last-child)::before {
+    background: linear-gradient(to right, hsl(var(--foreground) / 0.08), transparent);
+  }
+  [data-scroll-under="true"] :is(.cell-pin-end, td:last-child:has([data-row-actions]), table:has(> tbody > tr > td:last-child [data-row-actions]) > thead > tr > th:last-child)::before { opacity: 1; }
+}

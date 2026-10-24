@@ -399,8 +399,8 @@ export function PackagesTab({
           <Table label="Internet packages">
             <THead><TR>
               <TH>Package</TH><TH>Status</TH><TH numeric>Price</TH><TH>Speed (down / up)</TH>
-              <TH className="hidden md:table-cell">Data</TH><TH className="hidden md:table-cell">Time</TH>
-              <TH className="hidden lg:table-cell">Devices</TH><TH numeric>Still valid</TH>
+              <TH className="hidden md:table-cell">Data</TH><TH className="hidden 2xl:table-cell">Time</TH>
+              <TH className="hidden 2xl:table-cell">Devices</TH><TH numeric>Still valid</TH>
               <TH><span className="sr-only">Actions</span></TH>
             </TR></THead>
             <TBody>
@@ -408,7 +408,7 @@ export function PackagesTab({
                 const name = p.name || p.code;
                 return (
                   <TR key={p.package_id} onClick={() => setSelected(p)}>
-                    <TD truncate title={name} className="max-w-[16rem]">
+                    <TD truncate title={name} className="max-w-[14rem]">
                       <span className="font-medium">{name}</span>
                       {p.name && p.name !== p.code && <div className="truncate text-xs text-muted-foreground">{p.code}</div>}
                       {p.plan_has_newer_revision && (
@@ -421,11 +421,11 @@ export function PackagesTab({
                     <TD numeric>{priceText(p.price_minor, p.currency, p.currency_exponent)}</TD>
                     <TD nowrap>
                       {formatSpeedPair(p.down_kbps, p.up_kbps)}
-                      {p.speed_allocation === "SHARED" && <span className="text-muted-foreground"> · shared</span>}
+                      {p.speed_allocation === "SHARED" && <div className="text-caption text-muted-foreground">Shared</div>}
                     </TD>
                     <TD nowrap className="hidden md:table-cell">{formatData(p.data_quota_bytes)}</TD>
-                    <TD nowrap className="hidden md:table-cell">{formatDuration(p.time_quota_seconds)}</TD>
-                    <TD nowrap className="hidden lg:table-cell">{formatDevices(p.max_concurrent_devices)}</TD>
+                    <TD nowrap className="hidden 2xl:table-cell">{formatDuration(p.time_quota_seconds)}</TD>
+                    <TD nowrap className="hidden 2xl:table-cell">{formatDevices(p.max_concurrent_devices)}</TD>
                     <TD numeric>{activeBy ? (activeBy[p.package_id] ?? 0) : "—"}</TD>
                     <TD className="w-0">
                       {writable && (

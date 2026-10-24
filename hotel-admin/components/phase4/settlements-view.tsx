@@ -226,7 +226,7 @@ export function SettlementsView() {
                   <TH className="hidden sm:table-cell">Paid by</TH>
                   <TH numeric>Amount</TH>
                   <TH>Payment</TH>
-                  <TH><span className="sr-only">Details</span></TH>
+                  <TH pinEnd><span className="sr-only">Details</span></TH>
                 </TR>
               </THead>
               <TBody>
@@ -247,7 +247,7 @@ export function SettlementsView() {
                         {r.amount_minor === 0 ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
                       </TD>
                       <TD nowrap><StatusBadge tone={st.tone}>{st.label}</StatusBadge></TD>
-                      <TD className="w-0 text-end">
+                      <TD pinEnd className="w-0 text-end">
                         <Button size="xs" variant="ghost"
                           onClick={(e) => { e.stopPropagation(); void open(r.settlement_id); }}
                           onKeyDown={(e) => e.stopPropagation()}

@@ -273,12 +273,12 @@ function AccountsCard({
                 const r = results[a.id];
                 return (
                   <TR key={a.id}>
-                    <TD nowrap>
+                    <TD nowrap className="max-w-[16rem]">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-medium">{a.display_name || "—"}</span>
+                        <span className="min-w-0 truncate font-medium" title={a.display_name || undefined}>{a.display_name || "—"}</span>
                         {a.is_default && <Badge tone="accent">Default</Badge>}
                       </div>
-                      <div className="font-mono text-xs text-muted-foreground">{a.merchant_account_ref}</div>
+                      <div className="truncate font-mono text-xs text-muted-foreground" title={a.merchant_account_ref}>{a.merchant_account_ref}</div>
                     </TD>
                     <TD nowrap className="hidden md:table-cell">{providerLabel(a.provider)}</TD>
                     <TD nowrap className="font-mono">{a.currency}</TD>

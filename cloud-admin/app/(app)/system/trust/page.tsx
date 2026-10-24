@@ -155,7 +155,7 @@ export default function TrustPage() {
                   <TBody>
                     {cas.map((ca, i) => (
                       <TR key={ca.id ?? i} onClick={() => setSelected({ kind: "ca", item: ca })}>
-                        <TD truncate title={ca.subject}>
+                        <TD truncate title={ca.subject} className="max-w-[12rem]">
                           <div className="truncate font-medium">{ca.subject ?? `Version ${ca.version ?? "—"}`}</div>
                           {ca.version != null && <div className="text-xs text-muted-foreground">Version {ca.version}</div>}
                         </TD>
@@ -177,14 +177,14 @@ export default function TrustPage() {
                     <TR>
                       <TH>Key</TH>
                       <TH>State</TH>
-                      <TH numeric className="hidden sm:table-cell">Appliances signed</TH>
+                      <TH numeric className="hidden sm:table-cell" title="Appliances signed">Signed</TH>
                       <TH className="hidden md:table-cell">In use since</TH>
                     </TR>
                   </THead>
                   <TBody>
                     {keys.map((k) => (
                       <TR key={k.key_id} onClick={() => setSelected({ kind: "key", item: k })}>
-                        <TD truncate className="max-w-[12rem] font-mono text-xs" title={k.key_id}>{k.key_id}</TD>
+                        <TD truncate className="max-w-[9rem] font-mono text-xs" title={k.key_id}>{k.key_id}</TD>
                         <TD nowrap><StateBadge info={credentialStatusInfo(k.state)} /></TD>
                         <TD numeric className="hidden sm:table-cell">{k.current_assignments ?? "—"}</TD>
                         <TD nowrap muted className="hidden md:table-cell">{formatDay(k.activated_at)}</TD>
@@ -226,9 +226,9 @@ export default function TrustPage() {
                             </Link>
                           ) : <span className="font-mono text-xs">{c.serial ?? "—"}</span>}
                         </TD>
-                        <TD className="hidden md:table-cell">
-                          <div className="truncate">{c.customer_name ?? "—"}</div>
-                          {c.site_name && <div className="truncate text-xs text-muted-foreground">{c.site_name}</div>}
+                        <TD className="hidden max-w-[16rem] md:table-cell">
+                          <div className="truncate" title={c.customer_name ?? undefined}>{c.customer_name ?? "—"}</div>
+                          {c.site_name && <div className="truncate text-xs text-muted-foreground" title={c.site_name}>{c.site_name}</div>}
                         </TD>
                         <TD nowrap><StateBadge info={credentialStatusInfo(c.status)} /></TD>
                         <TD nowrap>

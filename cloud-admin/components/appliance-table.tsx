@@ -52,20 +52,20 @@ export function ApplianceTable({
           const href = `/appliances/${a.id}`;
           return (
             <TR key={a.id} onClick={() => router.push(href)}>
-              <TD>
+              <TD className="max-w-[16rem]">
                 <Link href={href} onClick={(e) => e.stopPropagation()} className={ROW_LINK}>
                   {a.serial}
                 </Link>
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-xs text-muted-foreground" title={[a.hostname, a.model].filter(Boolean).join(" · ") || undefined}>
                   {[a.hostname, a.model].filter(Boolean).join(" · ") || "—"}
                 </div>
               </TD>
               {showCustomer && (
-                <TD className="hidden md:table-cell">
+                <TD className="hidden max-w-[16rem] md:table-cell">
                   {a.customer_name ? (
                     <>
-                      <div className="truncate">{a.customer_name}</div>
-                      <div className="truncate text-xs text-muted-foreground">{a.site_name ?? "—"}</div>
+                      <div className="truncate" title={a.customer_name}>{a.customer_name}</div>
+                      <div className="truncate text-xs text-muted-foreground" title={a.site_name ?? undefined}>{a.site_name ?? "—"}</div>
                     </>
                   ) : (
                     <span className="text-muted-foreground">Not assigned yet</span>

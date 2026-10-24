@@ -303,17 +303,17 @@ export default function StaysPage() {
             <TBody>
               {rows.map((s) => (
                 <TR key={s.id} onClick={() => void open(s.id)}>
-                  <TD nowrap>
+                  <TD nowrap className="max-w-[10rem]">
                     <div className="flex items-center gap-1.5 font-medium">
                       {s.room ?? "—"}
                       {s.vip ? <Badge tone="warn" size="sm">VIP</Badge> : null}
                     </div>
                     {s.external_reservation_id && (
-                      <div className="font-mono text-2xs text-muted-foreground">{s.external_reservation_id}</div>
+                      <div className="truncate font-mono text-2xs text-muted-foreground" title={s.external_reservation_id}>{s.external_reservation_id}</div>
                     )}
                   </TD>
                   <TD className="max-w-[16rem]">
-                    <div className="truncate">{s.identity_hidden
+                    <div className="truncate" title={!s.identity_hidden && s.primary_guest ? s.primary_guest : undefined}>{s.identity_hidden
                       ? <span className="text-muted-foreground">Not shown to your role</span>
                       : s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
                     {(s.occupants > 1 || s.travel_agent) && (

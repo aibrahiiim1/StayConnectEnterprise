@@ -173,9 +173,9 @@ export default function RevisionsPage() {
                   <TH>State</TH>
                   <TH className="hidden sm:table-cell">Summary</TH>
                   <TH className="hidden md:table-cell">Applied</TH>
-                  <TH className="hidden lg:table-cell">Confirmed</TH>
+                  <TH className="hidden 2xl:table-cell">Confirmed</TH>
                   <TH className="hidden lg:table-cell">Failure</TH>
-                  <TH><span className="sr-only">Actions</span></TH>
+                  <TH pinEnd><span className="sr-only">Actions</span></TH>
                 </TR>
               </THead>
               <TBody>
@@ -183,13 +183,13 @@ export default function RevisionsPage() {
                   <TR key={r.id} onClick={() => openDetail(r)} selected={open?.id === r.id}>
                     <TD numeric className="font-mono">#{r.seq}</TD>
                     <TD nowrap><RevisionStateBadge state={r.state} /></TD>
-                    <TD truncate className="hidden sm:table-cell" title={r.summary || undefined}>{r.summary || "—"}</TD>
+                    <TD truncate className="hidden max-w-[14rem] sm:table-cell" title={r.summary || undefined}>{r.summary || "—"}</TD>
                     <TD nowrap muted className="hidden md:table-cell">{r.applied_at ? formatDate(r.applied_at) : "—"}</TD>
-                    <TD nowrap muted className="hidden lg:table-cell">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
-                    <TD truncate className="hidden max-w-xs text-caption text-destructive lg:table-cell" title={r.failure_reason ?? ""}>
+                    <TD nowrap muted className="hidden 2xl:table-cell">{r.confirmed_at ? formatDate(r.confirmed_at) : "—"}</TD>
+                    <TD truncate className="hidden max-w-[12rem] text-caption text-destructive lg:table-cell" title={r.failure_reason ?? ""}>
                       {r.failure_reason || <span className="text-muted-foreground">—</span>}
                     </TD>
-                    <TD className="w-0" onClick={(e) => e.stopPropagation()}>
+                    <TD pinEnd className="w-0" onClick={(e) => e.stopPropagation()}>
                       <Button size="icon-xs" variant="ghost" onClick={() => openDetail(r)} aria-label={`Details for revision ${r.seq}`}>
                         <ChevronRight className="rtl:rotate-180" />
                       </Button>

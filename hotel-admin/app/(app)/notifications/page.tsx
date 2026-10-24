@@ -296,16 +296,16 @@ export default function NotificationsPage() {
                   const h = health(n);
                   return (
                     <TR key={n.id} onClick={writable ? () => openEdit(n) : undefined}>
-                      <TD nowrap>
-                        <div className="font-medium">{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
+                      <TD nowrap className="max-w-[16rem]">
+                        <div className="truncate font-medium" title={n.display_name || undefined}>{n.display_name || CHANNEL_LABELS[n.channel] || n.channel}</div>
                         <div className="text-xs text-muted-foreground">
                           {CHANNEL_LABELS[n.channel] ?? n.channel}
                         </div>
                       </TD>
-                      <TD nowrap className="hidden md:table-cell">
+                      <TD nowrap className="hidden max-w-[16rem] md:table-cell">
                         {KIND_LABELS[n.kind] ?? n.kind}
                         {n.kind === "smtp" && n.extra?.host && (
-                          <div className="font-mono text-xs text-muted-foreground">{n.extra.host}{n.extra.port ? `:${n.extra.port}` : ""}</div>
+                          <div className="truncate font-mono text-xs text-muted-foreground" title={n.extra.host}>{n.extra.host}{n.extra.port ? `:${n.extra.port}` : ""}</div>
                         )}
                       </TD>
                       <TD muted className="hidden max-w-[14rem] truncate text-xs lg:table-cell">

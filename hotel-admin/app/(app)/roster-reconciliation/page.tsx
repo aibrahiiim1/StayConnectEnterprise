@@ -23,6 +23,7 @@ import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer } from "@/components/ui/details-drawer";
 import { Skeleton } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 
@@ -56,6 +57,7 @@ export default function RosterReconciliationPage() {
   const [dry, setDry] = useState<ReconcileRun | null>(null);
   const [dryBusy, setDryBusy] = useState(false);
   const [dryErr, setDryErr] = useState<unknown>(null);
+  const [runOpen, setRunOpen] = useState<ReconcileRunRecord | null>(null);
   const roles = useOperatorRoles();
   const writable = roles ? canWrite("pms-roster-reconciliation", roles) : false;
 
@@ -328,14 +330,14 @@ export default function RosterReconciliationPage() {
                 <TH numeric className="hidden md:table-cell">Rooms</TH>
                 <TH numeric className="hidden md:table-cell">Absent</TH>
                 <TH numeric>Checked out</TH>
-                <TH numeric className="hidden lg:table-cell">Held back</TH>
-                <TH className="hidden lg:table-cell">By</TH>
+                <TH numeric className="hidden 2xl:table-cell">Held back</TH>
+                <TH className="hidden 2xl:table-cell">By</TH>
                 <TH className="hidden xl:table-cell">Reason</TH>
               </TR>
             </THead>
             <TBody>
               {runs.map((r, i) => (
-                <TR key={i}>
+                <TR key={i} onClick={() => setRunOpen(r)} selected={runOpen === r}>
                   <TD nowrap>{formatDate(r.run_at)}</TD>
                   <TD nowrap className="hidden sm:table-cell">{r.mode === "APPLY" ? "Applied" : "Dry run"}</TD>
                   <TD nowrap>
@@ -346,15 +348,40 @@ export default function RosterReconciliationPage() {
                   <TD numeric className="hidden md:table-cell">{r.rooms_enumerated}/{r.rooms_expected}</TD>
                   <TD numeric className="hidden md:table-cell">{r.absent_from_roster}</TD>
                   <TD numeric>{r.stays_closed}</TD>
-                  <TD numeric className="hidden lg:table-cell">{r.protected_by_newer_events}</TD>
-                  <TD muted className="hidden lg:table-cell">{r.run_by}</TD>
-                  <TD muted truncate title={r.reason} className="hidden xl:table-cell">{r.reason}</TD>
+                  <TD numeric className="hidden 2xl:table-cell">{r.protected_by_newer_events}</TD>
+                  <TD muted truncate title={r.run_by} className="hidden max-w-[12rem] 2xl:table-cell">{r.run_by}</TD>
+                  <TD muted truncate title={r.reason} className="hidden max-w-[12rem] xl:table-cell">{r.reason}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
         )}
       </SectionCard>
+
+      {/* A run's every figure, including those whose columns a narrower screen leaves out. */}
+      <DetailsDrawer
+        open={runOpen !== null}
+        onOpenChange={(v) => !v && setRunOpen(null)}
+        eyebrow="Reconciliation run"
+        title={runOpen ? formatDate(runOpen.run_at) : ""}
+        badges={runOpen ? (
+          <StatusBadge tone={runOpen.outcome === "COMPLETED" ? "ok" : "warn"}>{outcomeWords(runOpen.outcome)}</StatusBadge>
+        ) : undefined}
+      >
+        {runOpen && (
+          <DescriptionList
+            items={[
+              { label: "Mode", value: runOpen.mode === "APPLY" ? "Applied" : "Dry run" },
+              { label: "Rooms read", value: `${runOpen.rooms_enumerated} of ${runOpen.rooms_expected}` },
+              { label: "Absent from the roster", value: String(runOpen.absent_from_roster) },
+              { label: "Checked out", value: String(runOpen.stays_closed) },
+              { label: "Held back by newer PMS events", value: String(runOpen.protected_by_newer_events) },
+              { label: "By", value: runOpen.run_by || "—" },
+              { label: "Reason", value: runOpen.reason || "—" },
+            ]}
+          />
+        )}
+      </DetailsDrawer>
       </div>
     </PageShell>
   );

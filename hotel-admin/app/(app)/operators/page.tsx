@@ -263,12 +263,12 @@ export default function OperatorsPage() {
                 const active = op.status === "active";
                 return (
                   <TR key={op.id} onClick={() => setSelectedId(op.id)}>
-                    <TD>
+                    <TD className="max-w-[16rem]">
                       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="truncate font-medium">{nameOf(op)}</span>
+                        <span className="min-w-0 max-w-full truncate font-medium" title={nameOf(op)}>{nameOf(op)}</span>
                         {isMe && <Badge tone="accent" size="sm">You</Badge>}
                       </div>
-                      {op.display_name && <div className="truncate text-xs text-muted-foreground">{op.email}</div>}
+                      {op.display_name && <div className="truncate text-xs text-muted-foreground" title={op.email}>{op.email}</div>}
                       {(!active || op.must_change_password) && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {!active && <StatusBadge className="sm:hidden">Disabled</StatusBadge>}

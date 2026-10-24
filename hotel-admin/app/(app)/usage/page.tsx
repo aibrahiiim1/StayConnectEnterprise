@@ -125,7 +125,7 @@ function AllowanceCell({ consumed, quota }: { consumed?: number | null; quota?: 
   if (pct === null) return <span className="text-sm text-muted-foreground">No limit</span>;
   return (
     <Meter
-      className="min-w-56"
+      className="min-w-40"
       value={Math.min(pct, 100)}
       max={100}
       label={pct >= 100 ? "Allowance used up" : undefined}
@@ -326,27 +326,29 @@ export default function UsageExplorerPage() {
                         <TH>Access source</TH>
                         <TH className="hidden md:table-cell">Details</TH>
                         <TH numeric className="hidden sm:table-cell">Downloaded</TH>
-                        <TH numeric className="hidden sm:table-cell">Uploaded</TH>
+                        <TH numeric className="hidden 2xl:table-cell">Uploaded</TH>
                         <TH numeric>Total</TH>
                         <TH className="hidden lg:table-cell">Allowance</TH>
-                        <TH><span className="sr-only">Open</span></TH>
+                        <TH pinEnd><span className="sr-only">Open</span></TH>
                       </TR>
                     </THead>
                     <TBody>
-                      {rows.map((r) => (
+                      {rows.map((r) => {
+                        const title = sourceTitle(r);
+                        const kind = r.source_type === "stay" ? `${SOURCE_LABEL.stay} · ${r.pms_interface ?? ""}` : SOURCE_LABEL[r.source_type];
+                        const reservation = r.reservation ? `Reservation ${r.reservation}` : "—";
+                        return (
                         <TR key={`${r.source_type}:${r.source_id}`} onClick={() => void openSource(r.source_type, r.source_id)}>
-                          <TD nowrap>
-                            <div className={cn("font-medium", r.source_type === "voucher" && "font-mono text-sm")}>
-                              {sourceTitle(r)}
+                          <TD nowrap className="max-w-[16rem]">
+                            <div className={cn("truncate font-medium", r.source_type === "voucher" && "font-mono text-sm")} title={title}>
+                              {title}
                             </div>
-                            <div className="text-caption text-muted-foreground">
-                              {r.source_type === "stay" ? `${SOURCE_LABEL.stay} · ${r.pms_interface ?? ""}` : SOURCE_LABEL[r.source_type]}
-                            </div>
+                            <div className="truncate text-caption text-muted-foreground" title={kind}>{kind}</div>
                           </TD>
-                          <TD className="hidden text-sm md:table-cell">
+                          <TD className="hidden max-w-[12rem] text-sm md:table-cell">
                             {r.source_type === "stay" ? (
                               <>
-                                <div>{r.reservation ? `Reservation ${r.reservation}` : "—"}</div>
+                                <div className="truncate" title={reservation}>{reservation}</div>
                                 <div className="text-caption text-muted-foreground">
                                   {r.stay_status ? stayWords(r.stay_status) : ""}
                                   {r.arrival ? ` · ${formatDate(r.arrival)}` : ""}
@@ -364,20 +366,21 @@ export default function UsageExplorerPage() {
                             )}
                           </TD>
                           <TD numeric className="hidden sm:table-cell">{formatBytes(r.totals.bytes_down)}</TD>
-                          <TD numeric className="hidden sm:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
+                          <TD numeric className="hidden 2xl:table-cell">{formatBytes(r.totals.bytes_up)}</TD>
                           <TD numeric className="font-medium">{formatBytes(r.totals.bytes_total)}</TD>
                           <TD className="hidden lg:table-cell">
                             <AllowanceCell consumed={r.consumed_bytes} quota={r.quota_bytes} />
                           </TD>
-                          <TD className="w-0 text-end">
+                          <TD pinEnd className="w-0 text-end">
                             <Button size="xs" variant="ghost" className="text-foreground"
                               onClick={(e) => { e.stopPropagation(); void openSource(r.source_type, r.source_id); }}
-                              aria-label={`Details for ${sourceTitle(r)}`}>
+                              aria-label={`Details for ${title}`}>
                               Details <ChevronRight className="rtl:rotate-180" />
                             </Button>
                           </TD>
                         </TR>
-                      ))}
+                        );
+                      })}
                     </TBody>
                   </Table>
                 </div>
@@ -483,7 +486,7 @@ export default function UsageExplorerPage() {
                         <TH numeric className="hidden sm:table-cell">Uploaded</TH>
                         <TH numeric>Total</TH>
                         <TH numeric className="hidden sm:table-cell">Sessions</TH>
-                        <TH><span className="sr-only">Open</span></TH>
+                        <TH pinEnd><span className="sr-only">Open</span></TH>
                       </TR>
                     </THead>
                     <TBody>
@@ -494,7 +497,7 @@ export default function UsageExplorerPage() {
                           <TD numeric className="hidden sm:table-cell">{formatBytes(d.bytes_up)}</TD>
                           <TD numeric className="font-medium">{formatBytes(d.bytes_total)}</TD>
                           <TD numeric className="hidden sm:table-cell">{d.sessions}</TD>
-                          <TD className="w-0 text-end">
+                          <TD pinEnd className="w-0 text-end">
                             {d.mac && (
                               <Button size="xs" variant="ghost" className="text-foreground" onClick={() => lookUpDevice(d.mac)}>
                                 This device <ChevronRight className="rtl:rotate-180" />
@@ -604,7 +607,7 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
               <TH className="hidden md:table-cell">Device</TH>
               <TH numeric>Total</TH>
               <TH className="hidden lg:table-cell">How it ended</TH>
-              <TH><span className="sr-only">Evidence</span></TH>
+              <TH pinEnd><span className="sr-only">Evidence</span></TH>
             </TR>
           </THead>
           <TBody>
@@ -627,7 +630,7 @@ function SessionsCard({ sessions, samples, onOpenSamples }: {
                     )}
                   </TD>
                   <TD className="hidden text-sm lg:table-cell">{endReasonWords(s.end_reason) ?? "—"}</TD>
-                  <TD className="w-0 text-end">
+                  <TD pinEnd className="w-0 text-end">
                     {!sm && (
                       <Button size="xs" variant="ghost" className="text-foreground" onClick={() => onOpenSamples(s.session_id)}>
                         Show evidence

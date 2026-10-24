@@ -81,8 +81,8 @@ export function AccessLogTab({ reveals, error }: { reveals: VoucherReveal[] | nu
                     )}
                   </TD>
                   <TD numeric>{r.voucher_count.toLocaleString()}</TD>
-                  <TD nowrap>{r.operator_label}</TD>
-                  <TD truncate muted title={r.reason} className="max-w-[20rem]">{r.reason}</TD>
+                  <TD truncate title={r.operator_label} className="max-w-[14rem]">{r.operator_label}</TD>
+                  <TD truncate muted title={r.reason} className="max-w-[16rem]">{r.reason}</TD>
                 </TR>
               ))}
             </TBody>
