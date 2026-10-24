@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { fakeAudit } from "./fake-paged";
 
@@ -26,6 +26,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 beforeEach(() => { get.mockReset(); post.mockReset(); put.mockReset(); del.mockReset(); });
+
+// A row's secondary actions live in its "⋯" menu (RowActions); Radix opens it from the keyboard.
+async function openRowMenu(subject: string) {
+  fireEvent.keyDown(await screen.findByRole("button", { name: `Actions for ${subject}` }), { key: "Enter" });
+  return screen.findByRole("menu");
+}
 afterEach(() => { cleanup(); vi.resetModules(); });
 
 function routes(map: Record<string, unknown>, roles: string[]) {
@@ -67,7 +73,8 @@ describe("Diagnostics", () => {
     post.mockResolvedValue({});
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    await userEvent.click(await screen.findByRole("button", { name: "Restart scd" }));
+    await openRowMenu("scd");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart…" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Every client currently online is disconnected/)).toBeTruthy();
@@ -86,16 +93,16 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     await screen.findByText(/can view diagnostics, but not read service logs/i);
-    expect(screen.queryByRole("button", { name: "Logs for scd" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Restart scd" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Recheck scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for scd" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Recheck/ })).toBeNull();
   });
 
   it("offers the IT manager the logs", async () => {
     routes({ "/diagnostics/services": SUMMARY }, ["hotel_it_manager"]);
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
-    expect(await screen.findByRole("button", { name: "Logs for scd" })).toBeTruthy();
+    const menu = await openRowMenu("scd");
+    expect(within(menu).getByRole("menuitem", { name: "Logs" })).toBeTruthy();
   });
 });
 
@@ -129,12 +136,12 @@ describe("Activity", () => {
     expect(security.getAttribute("aria-checked")).toBe("true");
     expect(await screen.findByText("1 entry")).toBeTruthy();
 
-    const row = screen
-      .getAllByRole("button", { expanded: false })
-      .filter((b) => !(b.getAttribute("aria-label") ?? "").startsWith("Tips"))[0];
-    await userEvent.click(row);
-    expect(screen.getByText("backup.downloaded")).toBeTruthy();
-    const disclosure = screen.getByText("Raw payload");
+    // The row opens the exact record in a side drawer.
+    const table = screen.getByRole("table");
+    await userEvent.click(within(table).getAllByRole("row")[1]);
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("backup.downloaded")).toBeTruthy();
+    const disclosure = within(drawer).getByText("Raw payload");
     expect(disclosure.closest("details")).toBeTruthy();
   });
 });
