@@ -60,7 +60,7 @@ func metaPathFor(name string) string {
 	return filepath.Join(scdBackupDir, strings.TrimSuffix(strings.TrimSuffix(name, backupcrypt.Suffix), ".sql.gz")+".meta.json")
 }
 
-var errNoBackupKeyHolder = errors.New("no backup key holder is set up: a backup is always encrypted, so none was taken (Hotel Admin → Backups → Backup keys)")
+var errNoBackupKeyHolder = errors.New("no backup key holder is set up: a backup is always encrypted, so none was taken (Admin Console → Backups → Backup keys)")
 
 var backupMu sync.Mutex
 

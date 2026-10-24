@@ -184,7 +184,7 @@ export default function SocialProvidersPage() {
           <>
             <HelpSection title="What a provider entry is">
               <p>
-                Each entry is an OAuth application your hotel registers and owns with that provider (for example
+                Each entry is an OAuth application you register and own with that provider (for example
                 Google). The values on it come from that registered application.
               </p>
             </HelpSection>
@@ -193,7 +193,7 @@ export default function SocialProvidersPage() {
                 items={[
                   <>Register the <strong>callback URL</strong> shown in the form in your app, then tick it. The portal offers the provider only over HTTPS, at a host name you ticked.</>,
                   <>The <strong>client secret</strong> is stored write-only and is never shown again. When editing, leave it blank to keep the one already stored.</>,
-                  <><strong>Google</strong> needs your hotel portal domain (set it up under Portal HTTPS); it does not accept the OneGate host name.</>,
+                  <><strong>Google</strong> needs your portal domain (set it up under Portal HTTPS); it does not accept the OneGate host name.</>,
                   <><strong>Apple</strong> needs the Services ID, the Team ID, the Key ID and the contents of the .p8 private key; the key is stored write-only.</>,
                   <><strong>Microsoft</strong> accepts a directory (tenant) ID to admit only that organisation, or <code>common</code>, <code>organizations</code> or <code>consumers</code>.</>,
                   <>The provider of an entry cannot be changed; remove it and add it again instead.</>,
@@ -271,7 +271,7 @@ export default function SocialProvidersPage() {
         open={mode !== "closed"}
         onOpenChange={(v) => { if (!v) { setMode("closed"); setEditing(null); } }}
         title={mode === "edit" ? `Edit ${editing?.display_name || PROVIDER_LABELS[editing?.provider ?? ""] || "provider"}` : "Add an identity provider"}
-        description="These values come from the OAuth application your hotel registered with the provider."
+        description="These values come from the OAuth application you registered with the provider."
         size="lg"
         submitLabel={mode === "edit" ? "Save changes" : "Add provider"}
         busy={busy}
@@ -319,7 +319,7 @@ export default function SocialProvidersPage() {
             <Callout tone="warning" title="This asks guests for more than sign-in needs">
               Guests will be asked to share {extraScopes(f.provider, f.scopes).map((x) => `"${x}"`).join(", ")} as
               well as their email. Sign-in keeps only the email and the account id, so this data is not used. Under
-              data-protection law your hotel must have a reason to collect it and tell guests in its privacy notice.
+              data-protection law you must have a reason to collect it and tell clients in your privacy notice.
               You can still save.
             </Callout>
             </div>
@@ -372,7 +372,7 @@ export default function SocialProvidersPage() {
                       I registered this callback URL in my {providerName} app
                     </label>
                     {googleOnOneGate && (
-                      <p className="mt-1 text-xs text-muted-foreground">Google does not accept this host name; use your hotel portal domain.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Google does not accept this host name; use your portal domain.</p>
                     )}
                   </li>
                 );

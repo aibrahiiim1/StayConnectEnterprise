@@ -82,7 +82,7 @@ const WORDS: Record<string, AuditWords> = {
   },
   "guest_data.viewed": {
     title: "Opened a client's record", category: "Client data", severity: "notice",
-    note: "Opening one client's account, device, session, stay, sign-in attempt or usage is recorded, so the hotel can show who looked at whose data. Opening the same record again within 10 minutes is not recorded twice.",
+    note: "Opening one client's account, device, session, stay, sign-in attempt or usage is recorded, so the site can show who looked at whose data. Opening the same record again within 10 minutes is not recorded twice.",
   },
   "guest_data.searched": {
     title: "Searched client data", category: "Client data", severity: "notice",

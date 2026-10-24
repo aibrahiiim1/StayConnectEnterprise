@@ -253,7 +253,7 @@ func (s *server) ledgerReconcileAfterRestore(ctx context.Context) string {
 	case st.State == "ok":
 		return ""
 	case st.State == "not_configured":
-		return "the secondary storage for the erasure ledger is not set up on this appliance: set it up in Hotel Admin (erasure requests are refused until it is)"
+		return "the secondary storage for the erasure ledger is not set up on this appliance: set it up in the Admin Console (erasure requests are refused until it is)"
 	case st.State == "recovery_needed":
 		return st.Message
 	default:

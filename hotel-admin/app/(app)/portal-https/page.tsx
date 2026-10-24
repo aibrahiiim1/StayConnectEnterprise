@@ -31,7 +31,7 @@ type Issue = { code: string; message: string };
 const when = (s?: string | null) => (s ? formatDate(s) : "—");
 const mono = (s?: string | null) => (s ? <span className="break-all font-mono text-xs">{s}</span> : "—");
 
-const FIELD_LABEL: Record<string, string> = { portal_ip: "Portal address", custom_domain: "Hotel portal domain" };
+const FIELD_LABEL: Record<string, string> = { portal_ip: "Portal address", custom_domain: "Portal domain" };
 const HISTORY_PREVIEW = 5;
 
 export default function PortalHTTPSPage() {
@@ -110,7 +110,7 @@ export default function PortalHTTPSPage() {
       setDoc(r.portal);
       setConfirmDomain(false);
       setDomainInput("");
-      toast.success("Hotel portal domain saved", "Publish the DNS records below, then use Check now.");
+      toast.success("Portal domain saved", "Publish the DNS records below, then use Check now.");
     } catch (e) {
       setDialogErr(e instanceof ApiError && e.code === "reauth_required" ? "Password confirmation failed." : e);
     } finally { setBusy(null); }
@@ -122,7 +122,7 @@ export default function PortalHTTPSPage() {
       const r = await api.del<{ portal: PortalHTTPSDoc }>("/portal-https/custom-domain", { password });
       setDoc(r.portal);
       setRemoving(false);
-      toast.success("Hotel portal domain removed");
+      toast.success("Portal domain removed");
     } catch (e) {
       setDialogErr(e instanceof ApiError && e.code === "reauth_required" ? "Password confirmation failed." : e);
     } finally { setBusy(null); }
@@ -173,7 +173,7 @@ export default function PortalHTTPSPage() {
                 ]}
               />
             </HelpSection>
-            <HelpSection title="Your hotel domain">
+            <HelpSection title="Your domain">
               <p>
                 Optional, and required for Google sign-in. Enter a subdomain you own (for example
                 <code> wifi.yourhotel.com</code>), publish the three DNS records shown, then use <strong>Check now</strong>.
@@ -246,7 +246,7 @@ export default function PortalHTTPSPage() {
                     hint: st!.onegate_hostname ? `DNS: ${DNS_STATE_WORDS[st!.dns_state] ?? st!.dns_state}` : undefined,
                   },
                   {
-                    label: "Hotel portal domain",
+                    label: "Portal domain",
                     value: domain ? (
                       <span className="flex flex-wrap items-center gap-2">
                         {mono(domain)}
@@ -313,8 +313,8 @@ export default function PortalHTTPSPage() {
           </SectionCard>
 
           <SectionCard
-            title="Hotel portal domain"
-            description="Optional. Needed for Google sign-in. A subdomain your hotel owns."
+            title="Portal domain"
+            description="Optional. Needed for Google sign-in. A subdomain you own."
             actions={domain && writable && (
               <>
                 <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { setDialogErr(null); setRemoving(true); }}>
@@ -383,7 +383,7 @@ export default function PortalHTTPSPage() {
                 </Button>
               </form>
             ) : (
-              <p className="text-sm text-muted-foreground">No hotel portal domain is set.</p>
+              <p className="text-sm text-muted-foreground">No portal domain is set.</p>
             )}
           </SectionCard>
 
@@ -471,7 +471,7 @@ export default function PortalHTTPSPage() {
       <ConfirmDialog
         open={removing}
         onOpenChange={(v) => { if (!v) setRemoving(false); }}
-        title="Remove the hotel portal domain?"
+        title="Remove the portal domain?"
         consequences={[
           "Its certificate is revoked and the portal goes back to the OneGate host name.",
           "Google sign-in stops being offered.",

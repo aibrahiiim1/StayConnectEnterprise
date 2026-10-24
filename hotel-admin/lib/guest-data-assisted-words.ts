@@ -83,7 +83,7 @@ export const REFUSAL_WORDS: Record<string, string> = {
 export const METHOD_OPTIONS: { value: string; label: string }[] = [
   { value: "ID_CHECKED_IN_PERSON", label: "Identity document checked in person" },
   { value: "ACCOUNT_CONTROL_SHOWN", label: "Requester showed control of the account" },
-  { value: "CALLBACK_TO_KNOWN_CONTACT", label: "Called back on a contact the hotel already holds" },
+  { value: "CALLBACK_TO_KNOWN_CONTACT", label: "Called back on a contact the site already holds" },
   { value: "OTHER_DOCUMENTED", label: "Other — described in the evidence note" },
 ];
 

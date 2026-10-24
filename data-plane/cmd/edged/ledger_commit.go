@@ -64,13 +64,13 @@ func refusalFor(status int, code, msg, state string) *ledgerRefusal {
 		}
 	}
 	text := map[string]string{
-		"ledger_not_configured":       "Set up the secondary storage for the erasure ledger first (Hotel Admin → Backups). Nothing was erased.",
+		"ledger_not_configured":       "Set up the secondary storage for the erasure ledger first (Admin Console → Backups). Nothing was erased.",
 		"ledger_external_unavailable": "The secondary storage for the erasure ledger could not be written, so nothing was erased. Check that it is connected, then try again.",
-		"ledger_recovery_needed":      "The secondary storage holds newer erasures than this appliance has. Recover the ledger first (Hotel Admin → Backups). Nothing was erased.",
+		"ledger_recovery_needed":      "The secondary storage holds newer erasures than this appliance has. Recover the ledger first (Admin Console → Backups). Nothing was erased.",
 		"ledger_local_damaged":        "The erasure ledger on the appliance is being repaired, so nothing was erased. Try again in a moment.",
 		"ledger_local_failed":         "The erasure ledger on the appliance could not be written, so nothing was erased.",
 		"ledger_conflict":             "The erasure ledger changed while this request ran. Nothing was erased; try again.",
-		"ledger_unavailable":          "The erasure ledger is not in step in both places, so nothing was erased. See Hotel Admin → Backups.",
+		"ledger_unavailable":          "The erasure ledger is not in step in both places, so nothing was erased. See Admin Console → Backups.",
 		"ledger_unreachable":          "The appliance's ledger service could not be reached, so nothing was erased.",
 	}[code]
 	if text == "" {

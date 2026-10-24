@@ -40,8 +40,8 @@ type retentionSetting struct {
 var retentionSchema = []retentionSetting{
 	{Key: "KEEP_BINARIES", Label: "Service binaries", Unit: "versions", Default: 5, Min: 2, Max: 30,
 		Explains: "Previous builds of each service, kept so a bad deployment can be rolled back. Below two there is nothing to roll back to."},
-	{Key: "KEEP_RELEASES", Label: "Hotel Admin releases", Unit: "releases", Default: 5, Min: 2, Max: 30,
-		Explains: "Previous Hotel Admin bundles, on top of the current and previous ones, which are never removed."},
+	{Key: "KEEP_RELEASES", Label: "Admin Console releases", Unit: "releases", Default: 5, Min: 2, Max: 30,
+		Explains: "Previous Admin Console bundles, on top of the current and previous ones, which are never removed."},
 	// The schedule is OFF until an administrator switches it on; pre-restore, pre-migration and pre-deployment backups are taken regardless. Counts only, no age rule.
 	{Key: "BACKUP_ENABLED", Label: "Scheduled backups", Unit: "0 = off, 1 = on", Default: 0, Min: 0, Max: 1,
 		Explains: "Off until you switch it on. When on, the appliance takes an encrypted backup on the schedule below. Manual backups, and the backups a restore, a migration or a deployment take first, do not depend on it."},

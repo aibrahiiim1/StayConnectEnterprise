@@ -273,7 +273,7 @@ export default function PortalCertificatesPage() {
             <HelpSection title="Limits">
               <p>
                 The weekly limit caps <strong>new</strong> hostnames under the zone (Let&apos;s Encrypt allows 50 per week). Renewals and
-                hotel domains do not count; orders over the limit wait in the queue.
+                custom domains do not count; orders over the limit wait in the queue.
               </p>
             </HelpSection>
             <HelpSection title="Revoking">
@@ -455,7 +455,7 @@ export default function PortalCertificatesPage() {
                 <TH>Appliance</TH>
                 <TH>Hostname</TH>
                 <TH className="hidden md:table-cell">DNS</TH>
-                <TH className="hidden lg:table-cell">Hotel domain</TH>
+                <TH className="hidden lg:table-cell">Custom domain</TH>
                 <TH>Certificate</TH>
                 <TH className="hidden xl:table-cell">Last error</TH>
                 <TH className="w-0"><span className="sr-only">Actions</span></TH>
@@ -555,7 +555,7 @@ export default function PortalCertificatesPage() {
                   { label: "Portal address", value: selected.portal_ip ? <span className="font-mono text-xs">{selected.portal_ip}</span> : null },
                   { label: "DNS error", value: selected.dns_error ?? null, hidden: !selected.dns_error },
                   {
-                    label: "Hotel domain",
+                    label: "Custom domain",
                     value: selected.custom_domain ? (
                       <span className="inline-flex flex-wrap items-center gap-2">
                         <span className="break-all font-mono text-xs">{selected.custom_domain}</span>
@@ -563,7 +563,7 @@ export default function PortalCertificatesPage() {
                       </span>
                     ) : null,
                   },
-                  { label: "Hotel domain error", value: selected.custom_domain_error ?? null, hidden: !selected.custom_domain_error },
+                  { label: "Custom domain error", value: selected.custom_domain_error ?? null, hidden: !selected.custom_domain_error },
                   { label: "Last error", value: selected.last_error ? <span className="text-destructive">{selected.last_error}</span> : null, hidden: !selected.last_error },
                 ]}
               />
@@ -577,7 +577,7 @@ export default function PortalCertificatesPage() {
                   {selected.certificates.map((c) => (
                     <div key={c.order_id} className="space-y-2 px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-medium">{c.kind === "CUSTOM" ? "Hotel domain" : "OneGate hostname"}</span>
+                        <span className="text-sm font-medium">{c.kind === "CUSTOM" ? "Custom domain" : "OneGate hostname"}</span>
                         <StateBadge info={portalCertInfo(c.status, c.revoked)} />
                         {dirBadge(c)}
                       </div>

@@ -109,7 +109,7 @@ Consequences:
   WhatsApp, social sign-in, payments) do receive the data they need to work;
   see [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
 - Retention: the guest and client records on the site are anonymised after the hotel's own retention
-  settings (Hotel Admin → Data retention), the activity log and staff accounts after theirs, and database
+  settings (Admin Console → Data retention), the activity log and staff accounts after theirs, and database
   backups after the backup settings (`BACKUP_KEEP` and `BACKUP_EVERY_DAYS` for scheduled and manual backups, `SAFETY_BACKUP_KEEP` for the ones taken before a change; counts, no age rule). Financial records are kept for the
   period the law requires and described in the guest-facing explanation below; the detail is in
   [privacy/GDPR_REMEDIATION_PLAN.md](privacy/GDPR_REMEDIATION_PLAN.md).
@@ -139,7 +139,7 @@ migration 0047 (Product-Owner authorized, 2026-09-27).
 A PMS may name only the reservation holder while several people use the same room and its credentials. A room
 number, a reservation credential, a MAC address or a shared internet access identifies nobody, and one PMS guest
 row is never taken to mean one occupant. Guest data on the appliance therefore falls into three classes, and a
-Hotel Admin *Guest data request* (export or erasure) reaches only the class its anchor owns:
+The Admin Console *Guest data request* (export or erasure) reaches only the class its anchor owns:
 
 | Class | What it is | Reached by | Never reached by |
 |---|---|---|---|
@@ -202,7 +202,7 @@ response.
 
 ### The assisted request (migration 0146)
 
-For the part of a shared-access request the product *can* settle safely, Hotel Admin has an **assisted guest data
+For the part of a shared-access request the product *can* settle safely, the Admin Console has an **assisted guest data
 request** (Guest data requests → Assisted request; runbook and design in
 [privacy/ASSISTED_GUEST_DATA_REQUESTS.md](privacy/ASSISTED_GUEST_DATA_REQUESTS.md)). It is never automatic and it does
 not change the rules above: a member of staff verifies the requester, writes down how, names the reservation, guest or
@@ -249,10 +249,10 @@ given exists again. Procedure and checks: [BACKUP_AND_RESTORE.md](BACKUP_AND_RES
 [runbooks/ERASURE_LEDGER_RECOVERY.md](runbooks/ERASURE_LEDGER_RECOVERY.md).
 
 **What a restore leaves aside is bounded.** The database a restore replaces is kept so the restore can be undone; it
-still holds the data erased since, so it is removed after `SET_ASIDE_DAYS` (default 14, Hotel Admin → Backups). An
+still holds the data erased since, so it is removed after `SET_ASIDE_DAYS` (default 14, Admin Console → Backups). An
 interrupted write leaves a `*.partial` file, removed after a day.
 
-**Request register.** Hotel Admin → Guest data requests → Request register records each request, its due date (one
+**Request register.** Admin Console → Guest data requests → Request register records each request, its due date (one
 month; two more once, with a reason), how the requester was verified, and how it was answered or why refused. Who asked
 is removed when the request is answered.
 
