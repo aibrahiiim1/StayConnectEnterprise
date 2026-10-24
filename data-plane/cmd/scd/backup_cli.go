@@ -119,7 +119,7 @@ func backupRestoreMain(args []string) int {
 			continue // an earlier restore's record
 		}
 		if res["ok"] == true {
-			fmt.Printf("backup-restore: done. %v\nMoney movement is HELD until recovery is reconciled in Hotel Admin -> Financial recovery.\n", res["summary"])
+			fmt.Printf("backup-restore: done. %v\nMoney movement is HELD until recovery is reconciled in the Admin Console -> Financial recovery.\n", res["summary"])
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "backup-restore: FAILED: %v\n", res["summary"])

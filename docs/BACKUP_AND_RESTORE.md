@@ -8,7 +8,7 @@
 ## 1. Site DB backup (per appliance): one backup system
 
 An appliance has **one** backup system: the engine in `scd` (`data-plane/cmd/scd/backups.go`), configured and used from
-**Hotel Admin → Backups**. There is one format, one retention policy and one restore. The nightly `stayconnect-site-backup` job
+**Admin Console → Backups**. There is one format, one retention policy and one restore. The nightly `stayconnect-site-backup` job
 and its plain `pg_dump -Fc` sets are **retired** (see *Earlier backups* below); there is no plaintext fallback.
 
 ### What a backup is
@@ -37,12 +37,12 @@ Every backup, whatever its kind, is the same thing:
 | **Before a change** (`pre-change`) | `scd backup-now`, run first by `scripts/edge-migrate.sh` for every live-site migration and rollback, and by deployments | **No -- mandatory** |
 | **Before a restore** (`pre-restore`) | the first step of every restore | **No -- mandatory** |
 
-**Scheduled backups are off until an administrator switches them on** (Hotel Admin → Backups → *Scheduled backups*). The switch controls
+**Scheduled backups are off until an administrator switches them on** (Admin Console → Backups → *Scheduled backups*). The switch controls
 only the schedule. It does **not** disable any protection: a restore always takes its safety backup, a live migration or rollback
 refuses to run without a fresh verified backup (`edge-migrate.sh` exits 4), the financial marker and recovery mode always apply, the
 Erasure Ledger is always kept in two places, and the binary and UI rollback artefacts are always kept by the sweep.
 
-### Settings (Hotel Admin → Backups → Scheduled backups; stored in `/etc/stayconnect/backup-retention.conf`)
+### Settings (Admin Console → Backups → Scheduled backups; stored in `/etc/stayconnect/backup-retention.conf`)
 
 | Setting | Default | Range | Meaning |
 |---|---|---|---|
@@ -63,7 +63,7 @@ releases and config backups, reports the backups, and **never deletes a database
 
 ### Encryption to the hotel's own keys (GDPR plan C5, decision D-C5)
 
-Hotel Admin → Backups → *Backup encryption* registers **backup key holders**. Every backup is encrypted to every active holder's public
+Admin Console → Backups → *Backup encryption* registers **backup key holders**. Every backup is encrypted to every active holder's public
 key as it is written.
 
 - **The appliance holds public keys only.** It can write backups and never read them back. Adding a holder generates the key pair on the
@@ -75,7 +75,7 @@ key as it is written.
   action and never stored or logged. A wrong key is refused before a restore touches anything.
 - **A restore's own safety backup is encrypted to the registered holders and also to the restoring holder's key**, so a replacement
   appliance with no registered holder yet is still protected. There is no plaintext fallback.
-- **Restore test.** Hotel Admin asks every `RESTORE_TEST_MONTHS` (default 6) for a holder to prove their key opens the newest backup.
+- **Restore test.** The Admin Console asks every `RESTORE_TEST_MONTHS` (default 6) for a holder to prove their key opens the newest backup.
 - **Downloads stay encrypted.** The file downloaded is the encrypted file.
 - **An appliance moved to another hotel** encrypts only to the holders of the site it now serves (migration 0144); a previous owner's
   holders are never used.
@@ -91,10 +91,10 @@ To open a backup by hand, a holder supplies their key file (standard age format,
 /opt/stayconnect/bin/scd backup-crypt decrypt -i <key-file> /opt/stayconnect/backups/db/db-<stamp>.sql.gz.age - | gunzip | less
 ```
 
-### Restore (site): Hotel Admin → Backups → Restore
+### Restore (site): Admin Console → Backups → Restore
 
 Only a verified backup can be restored; the restore needs the password, the backup's name typed out, and a holder's key. The same code
-serves `scd backup-restore --name <backup> --identity-file <key-file>` when Hotel Admin itself cannot be used. It runs these steps, each
+serves `scd backup-restore --name <backup> --identity-file <key-file>` when the Admin Console itself cannot be used. It runs these steps, each
 shown in the result (`/run/stayconnect/last-restore.json`), and **nothing is replaced until the data has loaded, been checked and the
 services are proven stopped**:
 
@@ -151,7 +151,7 @@ the sweep never clears -- and only while the live database exists: between the t
 data and nothing is removed.
 
 After a restore, client internet access runs normally and **money movement is held** until an operator reconciles every item that was in
-flight when the backup was taken (Hotel Admin → Financial recovery). Nothing is replayed automatically.
+flight when the backup was taken (Admin Console → Financial recovery). Nothing is replayed automatically.
 
 > **The financial restore marker is deliberately NOT backed up.** It counts how many times THIS appliance has been restored. Its whole
 > purpose is to survive a database restore and keep counting forward, so that a restored database can be recognised as older than the
@@ -324,7 +324,7 @@ Run quarterly, and once as part of pilot acceptance:
 
 | Drill | Steps | Pass criteria |
 |---|---|---|
-| Site restore | Hotel Admin → Backups → *Verify* a recent backup (it is loaded into a throwaway database), spot-check a voucher and a session; `scripts/ledger-restore-drill.sh` for the full restore, including the financial guarantees | verified; counts plausible; every drill scenario passes |
+| Site restore | Admin Console → Backups → *Verify* a recent backup (it is loaded into a throwaway database), spot-check a voucher and a session; `scripts/ledger-restore-drill.sh` for the full restore, including the financial guarantees | verified; counts plausible; every drill scenario passes |
 | Full appliance rebuild | fresh VM → deploy stack → restore the latest backup + its configuration archive → run phase 1 suite | client login green without touching the cloud |
 | Cloud restore | restore cloud dump to scratch; issue a test license against it | envelope signs & verifies |
 | Vendor-key escrow check | decrypt the escrowed key, `LoadSigner` succeeds, key_id matches production | key_id equality |
@@ -361,7 +361,7 @@ What the restore does by itself, each step shown on the restore result:
 requests, because they hold who asked); close it again. Assisted requests expire after 30 days anyway.
 
 **The database set aside.** The database a restore replaces is kept so the restore can be undone. It still holds data erased since, so
-`scd` removes it after `SET_ASIDE_DAYS` (default 14; Hotel Admin → Backups → Retention). Undo a restore within that time or not at all.
+`scd` removes it after `SET_ASIDE_DAYS` (default 14; Admin Console → Backups → Retention). Undo a restore within that time or not at all.
 Interrupted writes leave `*.partial` files, removed after a day.
 
 **Drill (quarterly, and after any change to restore or the ledger):** `scripts/ledger-restore-drill.sh` runs the real restore against a

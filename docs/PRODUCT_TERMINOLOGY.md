@@ -20,6 +20,7 @@ database objects, service names, directories, permission keys, role keys or tran
 |---|---|---|
 | **Client** / **clients** | Guest / guests | The person who connects to the site's Wi-Fi through the portal. |
 | **Admin Console** | Hotel Admin, Hotel Admin Console | The on-appliance administration application (served from the appliance's management address). |
+| **Authenticator label** | OneGate Hotel Admin, StayConnect | What an authenticator app shows for a new two-step enrolment: **OneGate Admin Console** on the appliance and **OneGate Central** on Central (D70). The issuer is display only, so an authenticator enrolled under an earlier label keeps working and nobody re-enrols. |
 | **Client Portal** | Guest Portal, guest portal | The captive portal an end user signs in on. |
 | **Site** | hotel, property (meaning the location) | The location this appliance serves — *this site's data*, *the appliance at the site*. A Central **Site** is still one physical location ([`ownership hierarchy`](CENTRAL_CONTROL_PLANE.md)). |
 | **the site team** | reception, front desk (in generic help) | Whoever helps end users at the site. Portal help reads *"Please contact the site team for assistance."* |

@@ -62,7 +62,7 @@ one.
 
 ## The worked example
 
-Guest sign-in protection (Hotel Admin → **Sign-in methods** → *Guest sign-in protection*) is the reference
+Guest sign-in protection (Admin Console → **Sign-in methods** → *Guest sign-in protection*) is the reference
 implementation of every row in the table above:
 
 * three values — maximum failed attempts, observation window, restriction duration — with defaults 5 / 60s /

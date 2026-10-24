@@ -157,7 +157,7 @@ export default function BackupsPage() {
                   <><strong>Verify</strong> proves a backup can actually be loaded back. Only a verified backup can be restored.</>,
                   <><strong>Download</strong> keeps a copy off the appliance. Only a site admin or the IT manager can download, and it asks for your password every time. Every download is recorded.</>,
                   <><strong>Restore</strong> replaces the current data with the backup. It asks for the backup&rsquo;s name typed out and your password.</>,
-                  <><strong>Encryption</strong>: once a key holder is set up, every backup is encrypted to the hotel&rsquo;s own keys. Verifying or restoring one asks for a key holder&rsquo;s key; downloads stay encrypted.</>,
+                  <><strong>Encryption</strong>: once a key holder is set up, every backup is encrypted to the site&rsquo;s own keys. Verifying or restoring one asks for a key holder&rsquo;s key; downloads stay encrypted.</>,
                 ]}
               />
             </HelpSection>

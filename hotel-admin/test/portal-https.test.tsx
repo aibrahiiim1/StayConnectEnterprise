@@ -81,7 +81,7 @@ describe("the words", () => {
 
   it("explains why a provider is not offered", () => {
     expect(offeredWords("http_fallback", "facebook")).toMatch(/HTTP fallback/);
-    expect(offeredWords("needs_hotel_domain", "google")).toMatch(/Google needs your hotel portal domain/);
+    expect(offeredWords("needs_hotel_domain", "google")).toMatch(/Google needs your portal domain/);
     expect(offeredWords("callback_not_registered", "apple")).toMatch(/not ticked/);
     expect(keepAvailable(["a", "gone"], [{ hostname: "a" }])).toEqual(["a"]);
   });

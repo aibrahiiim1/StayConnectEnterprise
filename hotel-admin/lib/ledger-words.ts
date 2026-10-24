@@ -44,7 +44,7 @@ export const SCHEDULE_SETTING_KEYS = ["BACKUP_ENABLED", "BACKUP_HOUR", "BACKUP_E
 export const STORAGE_KINDS: { value: "dir" | "sftp" | "s3"; label: string; hint: string }[] = [
   { value: "dir", label: "External disk or network share", hint: "A folder on a USB or SATA disk, or on a network share (NAS) that is mounted on the appliance. It must not be on the appliance’s own disk." },
   { value: "sftp", label: "SFTP server", hint: "A NAS or server that offers SFTP. The server’s identity is confirmed once and then checked on every connection." },
-  { value: "s3", label: "Cloud storage (S3-compatible)", hint: "A bucket the hotel owns: Amazon S3, Backblaze B2, Wasabi, MinIO or a NAS that speaks S3. Turn on versioning for it if you can." },
+  { value: "s3", label: "Cloud storage (S3-compatible)", hint: "A bucket the site owns: Amazon S3, Backblaze B2, Wasabi, MinIO or a NAS that speaks S3. Turn on versioning for it if you can." },
 ];
 
 export function kindLabel(kind?: string): string {

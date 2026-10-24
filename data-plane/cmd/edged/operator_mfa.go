@@ -37,7 +37,7 @@ const (
 	// pendingSigninCookie has its own name so the console's middleware (which looks for the session cookie) still shows the sign-in page.
 	pendingSigninCookie = "sc_edge_signin"
 	pendingSigninTTL    = 5 * time.Minute
-	mfaIssuer           = "OneGate Hotel Admin"
+	mfaIssuer           = "OneGate Admin Console"
 	maxMFACodeLen       = 32
 )
 

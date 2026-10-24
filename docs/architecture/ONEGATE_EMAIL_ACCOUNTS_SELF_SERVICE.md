@@ -82,7 +82,7 @@ Reminders: one reminder email `reminder_hours_before` the deadline (0 = off).
 * Throttles: the existing login limiter and durable throttle cover sign-in, registration, grace, resend and
   forgot (per IP, per device, per identity).
 
-## 6. Settings (Hotel Admin → Sign-in methods → Email accounts)
+## 6. Settings (Admin Console → Sign-in methods → Email accounts)
 
 `iam_v2.site_self_service_settings` (one row per site, defaults below), changed only through
 `iam_v2.self_service_settings_set` with an append-only change log and a reason, step-up in the Admin Console.
