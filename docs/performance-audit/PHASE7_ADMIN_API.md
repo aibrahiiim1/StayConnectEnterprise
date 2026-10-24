@@ -35,7 +35,7 @@
 
 | Critical | High | Medium | Low | Clean code |
 |---|---|---|---|---|
-| 0 | 2 | 4 | 2 | 0 |
+| 0 | 2 | 3 | 2 | 0 |
 
 **Main result.** With one year of history, two admin pages already fail and the session pages are slow. All three have the same cause as Phase 5's D5-H1: `iam_v2.sessions` cannot be searched by entitlement or by device (D7-H1).
 

@@ -199,6 +199,8 @@ The netd call uses a 10 s client timeout (`cmd/acctd/phase3.go:302`). A `time.Ti
 
 **Measured.** The one-year generated database dumps to 551 MB. Its SHA-256 costs 0.4–0.5 s of CPU in Go; the cost that matters is the disk read.
 
+Its 9.2 million accounting rows are about a day and a half of accounting at design load (Phase 1 D1-H3), so real backups are larger and this cost with them. Phase 10 D10-M4 sizes them for each accounting grain.
+
 **Impact.**
 - **Disk reads:** with 10 backups, about 5.5 GB every 15 minutes, which is about 530 GB a day.
 - **Memory:** on a 4 GB appliance this data passes through the page cache that Postgres's settings count on (`effective_cache_size` 3.75 GB, Phase 1 D1-M2), four times an hour. After each check, Postgres reads its working set back from disk.

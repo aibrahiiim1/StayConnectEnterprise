@@ -16,13 +16,13 @@ It also takes the items earlier phases handed on (see [Items from earlier phases
 - **Code:** the systemd units in `deploy/systemd` and `deploy/caddy`, `deploy/compose/infra.yml`, the journald, tmpfiles and sysctl files, the install scripts, and scd's backup, restore and log-retention code.
 - **Database:** a throwaway full-schema database (`scripts/lib-fullschema-testdb.sh`, migrations to 0150), limited to 2 CPUs and 4 GB. It used the settings Phase 1 recommends: `shared_buffers` 1 GB, `effective_cache_size` 2 GB, `maintenance_work_mem` 256 MB, `autovacuum_work_mem` 128 MB, `work_mem` 8 MB.
 - **Generated data only:**
-  - 5.8 million accounting rows over a year;
+  - 5.8 million accounting rows, spread over a year. At design load that is about one day of today's accounting (Phase 1 D1-H3), so the database holds a year of everything else and a day of accounting;
   - 732,000 sessions;
   - 400,000 devices with locally administered MAC addresses (`02:…`) and `10.10.x.x` addresses;
   - 1 million audit rows;
   - 370,000 PMS events with placeholder payloads.
 
-  The database is 2.3 GB, close to Phase 5's 2.9 GB one-year database.
+  The database is 2.3 GB. Backup and restore times are also given per GB, so they scale to the sizes in D10-M4.
 - **Backups:** the steps of scd's `takeBackup` were run inside the database container, which shares its 2 CPUs the way scd shares the appliance's: `pg_dump`, then gzip, then a load of the same SQL into a scratch database on the same server. A fixed load of 50 transactions a second ran alongside, to see what guests and staff would feel. Each transaction is a device lookup, a device update and an accounting insert.
 - **Services:** scd, portald, edged, acctd and pmsd were built for Linux and started against that database, in a container limited to 2 CPUs and 4 GB, for 15 minutes.
   - scd had no assignment, so it ran in its "awaiting assignment" mode with its tenant loops off.
@@ -44,7 +44,10 @@ It also takes the items earlier phases handed on (see [Items from earlier phases
 2. **A verified backup loads a whole second copy of the database into the live Postgres (D10-M1).** For the 2.3 GB database that wrote 2.0 GB of WAL, held both CPUs at 100% for about a minute, and stalled the fixed load twice for 10–15 s each. A plain dump took 37 s, and the worst delay during it was 1.2 s.
 3. **System logs are bounded by size, not by the hotel's log period (D10-M2).** Every HTTP request writes a journal entry of about 670 bytes. journald's default cap on a 40 GB disk is 4 GB, which holds 14 days only at about 5 entries a second across all services. The DHCP log rotates by Kea's own default of about 20 MB. A hotel whose law needs a year of connection logs gets days.
 4. **Nothing on the appliance has a memory limit or a kill order, except hotel-admin (D10-M3).** With the fixes from Phases 1, 2 and this one, design load fits 4 GB with about a quarter left. Without them, it does not.
-5. **The disk fits today, but not once accounting is fixed and backups are on (D10-M4).** About 21 GB in normal running and 26 GB during a restore at today's accounting rate. 29 GB, and 41 GB during a restore, once Phase 1's accounting fix lands at 10% of devices moving.
+5. **The disk is set by the accounting grain (D10-M4).** Today the accounting detail fills the 40 GB disk in two to three weeks at design load (Phase 1 D1-H3). Once that is fixed:
+   - hourly totals only fit 40 GB, at 21–26 GB in normal running;
+   - 7 days of per-minute detail needs 80 GB;
+   - Phase 1's recommended 30 days needs over 120 GB with backups on the appliance.
 
 ## Measured
 
@@ -177,7 +180,7 @@ journald 252 stored 100,000 lines of portald's request format (190 bytes of JSON
 **Problem.**
 - **The load writes as much WAL as the database is large.** It forces checkpoints back to back. Every other write on the appliance waits behind them.
 - **The work shares the guest path's server.** It uses the same CPUs, the same WAL and the same shared buffers as guest sign-in, accounting and the Admin Console.
-- **It grows with the data.** On a 6 GB database (D10-M4) it is about three times as long and writes about 6 GB of WAL.
+- **It grows with the data.** On a 10 GB database (D10-M4's middle grain) it is about four times as long and writes about 10 GB of WAL.
 
 **Impact.**
 - **During a daytime backup, a sign-in can wait 10–15 s** for the database. That is far beyond the 2 s goal. The same applies to accounting writes and Admin Console pages.
@@ -282,7 +285,7 @@ This finding carries Phase 1 D1-M2 steps 2–3 and Phase 2 D2-H1 step 4 into one
 
 **Batch:** B4, with Phase 1 B4 and Phase 2 B1. CONTROLLED (appliance deployment).
 
-### D10-M4: The disk fits today, but not once accounting is fixed and backups are on (Medium, Measured parts)
+### D10-M4: The disk budget is set by the accounting grain, and backups nearly double it (Medium, Measured parts)
 
 **Where.**
 - **Backups:** `/opt/stayconnect/backups/db`, on the appliance's only disk. `deploy/scripts/backup-retention.conf` keeps 7 regular and 3 protective backups.
@@ -290,32 +293,38 @@ This finding carries Phase 1 D1-M2 steps 2–3 and Phase 2 D2-H1 step 4 into one
 - **The set-aside database:** after a restore it is kept for `SET_ASIDE_DAYS` (14 by default, `docs/BACKUP_AND_RESTORE.md`).
 - **The rest:** WAL up to `max_wal_size`; the journal up to 4 GB (D10-M2); 5 binary sets and 5 hotel-admin releases.
 
-**The budget on 40 GB.** Backup size is 17–19% of the database, measured here and in Phase 5.
+**Today, nothing fits.** At design load the accounting detail grows by about 1.4 GB a day, and nothing is removed for a year. The 40 GB disk fills in two to three weeks (Phase 1 D1-H3, High). No backup setting changes that. The budget below is therefore for after D1-H3 is fixed, for each grain the Product Owner could choose (Phase 1's decision D1-H3).
 
-| Item | Today's accounting rate, 1 year | Accounting fixed, 10% of devices moving | Same, 30% moving |
+**How it is estimated.**
+- **Row size:** 245 bytes per accounting row with its indexes (Phase 1, measured).
+- **Everything else:** sessions, devices, audit and PMS events, at about 0.9 GB a year. That is this phase's generated database without its accounting rows.
+- **Backups:** each is 17–19% of the database (measured here and in Phase 5). Ten are kept, so backups take about 1.8 × the database.
+- **Per-minute rows:** half to all of the 2,000 devices move in a given minute. That is an assumption, which S1 in Phase 11 replaces with a count.
+
+**The budget,** for one year of history at design load:
+
+| Item | Hourly totals only, 12 months | Per-minute for 7 days, then hourly for 12 months | Per-minute for 30 days, then hourly (Phase 1's recommendation) |
 |---|---|---|---|
-| Operating system, packages, Docker images | 6 GB | 6 GB | 6 GB |
-| Binaries (5 sets) and hotel-admin releases (5 × 64 MB) | 0.9 GB | 0.9 GB | 0.9 GB |
-| Database (accounting kept 1 year) | 2.3–2.9 GB | about 6 GB | about 15 GB |
-| WAL (`max_wal_size` 1 GB) | 1 GB | 1 GB | 1 GB |
-| Backups, 10 kept (when switched on) | 4.0–5.5 GB | about 11 GB | about 28 GB |
-| Journal (default cap) | 4 GB | 4 GB | 4 GB |
-| Container logs, Kea, Caddy | 0.3 GB | 0.3 GB | 0.3 GB |
-| **Normal running** | **about 19–21 GB (48–52%)** | **about 29 GB (73%)** | **about 55 GB: does not fit** |
-| During a backup (+1 × database) | about 21–24 GB | about 35 GB (88%) | |
-| During a restore (+2 × database: staging, and the safety backup's scratch) | about 23–26 GB | **about 41 GB: does not fit** | |
-| For 14 days after a restore (+1 × database set aside) | about 21–24 GB | about 35 GB | |
+| Accounting | 2.1–4.3 GB | 4.6–9.3 GB | 12.7–25.3 GB |
+| Database in total | about 3–5 GB | about 5.5–10 GB | about 14–26 GB |
+| Backups, 10 kept (when switched on) | 5.4–9 GB | 10–18 GB | 25–47 GB |
+| Operating system, images, binaries, releases, WAL, journal, other logs | 12.2 GB | 12.2 GB | 12.2 GB |
+| **Normal running** | **21–26 GB** | **28–40 GB** | **51–85 GB** |
+| During a restore (+2 × database: staging, and the safety backup's scratch) | 27–37 GB | 39–60 GB | 79–137 GB |
+| **Fits 40 GB?** | yes; with 5 backups for margin | no | no |
+| **Fits 80 GB?** | yes | yes (restore at most 75%) | no |
 
-The accounting rates are Phase 1 D1-H3's. `stay_events` also grows without limit: it is never deleted (Phase 1 D1-L5), and every PMS resync adds a whole roster (Phase 6).
+The fixed line is 6 GB of operating system, packages and Docker images; 0.9 GB of 5 binary sets and 5 hotel-admin releases of 64 MB; 1 GB of WAL (`max_wal_size`); the journal's 4 GB cap; and 0.3 GB of container, Kea and Caddy logs. After a restore, the set-aside database adds 1 × the database for 14 days. `stay_events` also grows without limit: it is never deleted (Phase 1 D1-L5), and every PMS resync adds a whole roster (Phase 6).
 
 **Problem.**
+- **The grain decides the disk.** Phase 1's recommended 30 days of per-minute detail is 13–25 GB of accounting alone, more than the rest of the database many times over.
 - **Backups scale with the database.** They are kept on the same disk, and their count does not depend on size.
 - **Every backup and restore makes a temporary full copy** of the database.
-- **The appliance warns too late.** It warns at 80% and 90% (`DISK_WARN`, `DISK_CRIT`), but D10-M1's scratch copy pushes past 80% for the length of each backup once accounting is fixed.
+- **The appliance warns too late.** It warns at 80% and 90% (`DISK_WARN`, `DISK_CRIT`), and D10-M1's scratch copy can push past 80% for the length of each backup.
 
 **Impact.**
-- **At today's accounting rate** the 40 GB disk is enough.
-- **Once Phase 1's accounting fix lands,** a restore cannot complete on 40 GB at 10% of devices moving. Normal running does not fit at 30%. A disk that fills stops Postgres, and guest sign-in with it (Phase 1 D1-H3).
+- **Today:** the disk fills in weeks at design load (D1-H3).
+- **After D1-H3,** a 40 GB disk holds only the hourly-only grain. Per-minute detail for 7 days needs 80 GB. For 30 days it needs over 120 GB, or backups kept off the appliance. A disk that fills stops Postgres, and guest sign-in with it.
 
 **Recommended fix.**
 1. **Size backups by bytes as well as by count.** Keep at most N backups, and never more than a share of the disk. The share is a setting (CLAUDE.md §0C).
@@ -323,7 +332,7 @@ The accounting rates are Phase 1 D1-H3's. `stay_events` also grows without limit
 3. **Off-box copies.** Let the administrator download the encrypted backup (it exists today), and say on the Backups screen that copies kept on the appliance do not survive a disk loss.
 4. **The reference disk** (Decision D10-D1).
 
-**Proof.** A restore on a disk with too little space is refused before maintenance starts. On the reference VM with one year of fixed-rate accounting, normal running stays under 70% of the disk.
+**Proof.** A restore on a disk with too little space is refused before maintenance starts. On the reference VM with a year of history at the chosen grain, normal running stays under 70% of the disk.
 
 **Batch:** B5. FAST for steps 1–3.
 
@@ -374,7 +383,7 @@ The accounting rates are Phase 1 D1-H3's. `stay_events` also grows without limit
 **Measured.** The verified backup took 55–77 s per GB of database with the fixed load running.
 
 **Impact.**
-- **Manual backups:** at about 15–20 GB of database (D10-M4's 30% column), they start failing at the deadline. That is the case most likely to need one, before a change.
+- **Manual backups:** at about 15–20 GB of database (30 days of per-minute accounting, D10-M4), they start failing at the deadline. That is the case most likely to need one, before a change.
 - **Restores:** the 45-minute budget is reached at about 25–30 GB.
 
 **Recommended fix.** Size the deadlines from the database size: for example 2 minutes per GB, with a floor. Show the estimated time before starting. D10-M1 shortens the backup itself.
@@ -430,7 +439,7 @@ The accounting rates are Phase 1 D1-H3's. `stay_events` also grows without limit
 
 | # | Decision | Recommended |
 |---|---|---|
-| D10-D1 | What disk should the reference appliance have once Phase 1's accounting fix lands? | 80 GB. 40 GB stays enough only if accounting detail is rolled up (Phase 1's tick decision) and at most 5 backups are kept. |
+| D10-D1 | What disk should the reference appliance have, given the accounting grain chosen for D1-H3? | Decide the two together. Recommended: per-minute detail for 7 days and hourly totals for 12 months, on 80 GB. 40 GB is enough only with hourly totals alone. Phase 1's 30 days of per-minute detail needs over 120 GB, or backups kept off the appliance. A shorter detail window is also the data-minimal choice (GDPR Art. 5(1)(c), (e); ePrivacy Art. 6). |
 | D10-D2 (answers Phase 0 D2) | Is 4 GB still the minimum? | Yes for the design load, after B1 and B4 and Phase 2 B1. 8 GB for the stress load (5,000 devices), or for sites that use the Admin Console exports heavily. Confirm with Phase 11's reference-VM run. |
 
 ## Compliance
@@ -453,7 +462,7 @@ The accounting rates are Phase 1 D1-H3's. `stay_events` also grows without limit
 
 | Test | Result |
 |---|---|
-| Full-schema database (migrations to 0150), 2 CPUs and 4 GB, Phase 1's settings; one year of generated history, 2.3 GB | Built |
+| Full-schema database (migrations to 0150), 2 CPUs and 4 GB, Phase 1's settings; generated history (a year of sessions, devices, audit and PMS events; a day's worth of accounting at design load), 2.3 GB | Built |
 | Fixed load, 50 transactions a second, 60 s, twice | p95 16 ms; worst 126 ms |
 | scd's verified backup (dump, gzip, scratch load), three times with the fixed load running | 128–178 s; 2.0 GB of WAL; two stalls of 6–14 s p95 per run. The first run's load failed at the end on a foreign key the generated data broke; its numbers are not used. |
 | Dump and gzip alone with the fixed load running | 37 s; worst 1.2 s |

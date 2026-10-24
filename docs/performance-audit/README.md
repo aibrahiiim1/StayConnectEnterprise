@@ -5,7 +5,7 @@ An audit of how the solution performs at the size it is sold for, one area per p
 - the recommended fix and the measurement that proves it;
 - the fixes grouped into small batches.
 
-The audit changes no code. Fixes are made later, one batch at a time, on their own branches.
+The audit changes no code. Fixes are made later, one batch at a time, on their own branches. **Start with the [final report](FINAL_REPORT.md):** totals, what matters most, the order of work and the decisions needed.
 
 It follows the backend audit in [`docs/audit/`](../audit/README.md). Where a performance finding is also a robustness finding there, for example missing request limits, this audit points to it rather than counting it again.
 
@@ -24,7 +24,7 @@ It follows the backend audit in [`docs/audit/`](../audit/README.md). Where a per
 | 8 | Admin front ends (hotel-admin, cloud-admin): bundles, polling, rendering | [PHASE8_FRONT_ENDS.md](PHASE8_FRONT_ENDS.md) | done |
 | 9 | Central (ctrlapi): fleet scale, appliance calls, Redis | [PHASE9_CENTRAL.md](PHASE9_CENTRAL.md) | done |
 | 10 | Appliance resource budget: memory, CPU, disk, startup, backups | [PHASE10_RESOURCE_BUDGET.md](PHASE10_RESOURCE_BUDGET.md) | done |
-| 11 | Load-test plan and final report | PHASE11_LOAD_TEST_PLAN.md, FINAL_REPORT.md | planned |
+| 11 | Load-test plan and final report | [PHASE11_LOAD_TEST_PLAN.md](PHASE11_LOAD_TEST_PLAN.md), [FINAL_REPORT.md](FINAL_REPORT.md) | done |
 
 The packages, tables and loops each phase covers are listed in the Phase 0 phase map.
 
