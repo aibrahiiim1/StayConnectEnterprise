@@ -171,7 +171,13 @@ say "SHA256SUMS: $(wc -l < "$REL/SHA256SUMS") files"
 
 # Root-owned in the archive whatever the build user is: extracted as root on Central it must not carry a
 # workstation uid.
-tar -C "$OUT" --owner=0 --group=0 --numeric-owner -czf "$OUT/$NAME.tar.gz" "$NAME"
+# ctrlapi is archived with an explicit 0755: on a Windows workstation chmod cannot mark an extensionless ELF
+# executable, so it would ship as 0644 and the release would refuse to run it on Central.
+rm -f "$OUT/$NAME.tar" "$OUT/$NAME.tar.gz"
+tar -C "$OUT" --owner=0 --group=0 --numeric-owner --exclude="$NAME/bin/ctrlapi" -cf "$OUT/$NAME.tar" "$NAME"
+tar -C "$OUT" --owner=0 --group=0 --numeric-owner --mode=0755 -rf "$OUT/$NAME.tar" "$NAME/bin/ctrlapi"
+gzip -n "$OUT/$NAME.tar"
+tar -tvzf "$OUT/$NAME.tar.gz" "$NAME/bin/ctrlapi" | grep -q '^-rwxr-xr-x' || die "ctrlapi is not executable in the archive"
 ( cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
 say ""
 say "RELEASE READY: $OUT/$NAME.tar.gz"
