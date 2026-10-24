@@ -48,7 +48,7 @@ Tailwind as `hsl(var(--role) / <alpha>)`. A theme is a set of values; no compone
 | `accent` | `#eceef1` | hover and selection fills |
 | `border` (hairline) | `#dcdfe4` | dividers — **never** a control boundary |
 | `input` (edge) | `#7f8795` | control boundaries — ≥3:1, **never** a divider |
-| `sidebar` (inverse) | `#1e1e21` | the navigation column, in both themes |
+| `sidebar` | `#f3f4f6` light, `#13141a` dark | the navigation column: a quiet tonal layer, not an inverse panel |
 | `success` / `warning` / `destructive` / `info` | owned green, waiting amber, danger red, info blue | state only, each with a `-subtle` fill and a `-subtle-foreground` text |
 
 Central sets `data-product="central"` on `<html>`, which swaps only the accent to **teal** (`#0e7c86`), so
@@ -65,16 +65,16 @@ download before a client is online).
 
 | Tailwind class | Size / weight / line | Use |
 |---|---|---|
-| `text-title` | 1.625rem / 700 / 1.3, −0.025em | page title (one per screen) |
-| `text-metric` | 1.5rem / 700 / 1.2 | numbers in stat cards |
-| `text-subtitle` | 1.25rem / 700 / 1.4 | section headings, mobile page titles |
-| `text-headline` | 1.125rem / 700 / 1.4 | dialog and sheet titles |
-| `text-emphasis` | 0.9375rem / 650 / 1.5 | card titles, row titles |
-| `text-body` / `text-sm` | 0.875rem / 400 / 1.45 | default text |
-| `text-label` | 0.8125rem / 600 | form labels, button text |
+| `text-title` | 1.375rem / 600 / 1.75rem, −0.018em | page title (one per screen) |
+| `text-metric` | 1.5rem / 600 / 1.2 | numbers in stat cards |
+| `text-subtitle` | 1.125rem / 600 / 1.5rem | mobile page titles, large section headings |
+| `text-headline` | 1rem / 600 / 1.5rem | dialog, drawer and sheet titles |
+| `text-emphasis` | 0.875rem / 600 | card titles, row titles |
+| `text-body` / `text-sm` | 0.875rem / 400 | default text |
+| `text-label` | 0.8125rem / 500 | form labels, button text |
 | `text-caption` / `text-xs` | 0.8125rem / 400 | metadata, hints |
-| `text-micro` | 0.75rem / 700 | badges, table headers, eyebrows (uppercase) |
-| `text-nano` | 0.6875rem / 700 | counters, nav group headings |
+| `text-2xs` / `text-micro` | 0.75rem / 400–500 | table headers, badges (sentence case, never uppercase) |
+| `text-nano` | 0.6875rem / 600 | counters |
 
 Numbers that are compared use `tabular` (tabular figures).
 
@@ -104,21 +104,27 @@ surface.
 alone: a status icon always has its word beside it. Directional icons (chevrons, arrows) are mirrored under
 `dir="rtl"`. The Client Portal uses a handful of inline SVG icons (no icon font).
 
-## Components (Admin Console `components/ui/*`, mirrored in Central)
+## Components (identical in both consoles' `components/ui/*`)
+
+**How to use them on a page — page anatomy, tables, forms, help text, history — is in [`docs/ui/DESIGN_SYSTEM.md`](../docs/ui/DESIGN_SYSTEM.md).** The table below is the inventory.
 
 | Component | File | States it covers |
 |---|---|---|
-| `Button` (primary · secondary · outline · ghost/quiet · subtle · danger · link) | `button.tsx` | hover, press, focus, disabled, busy (label) |
-| `Input`, `Textarea`, `Select`, `Field`, `Label`, `Hint` | `input.tsx` | label binding, hint, error (announced via `aria-describedby`), disabled, read-only |
-| `Switch` | `misc.tsx` | on, off, disabled |
-| `Badge`, `StatusDot` | `badge.tsx` | ok, warn, err, info, neutral, accent, live dot |
-| `Card` (+ Header/Title/Body/Footer), `Section` | `card.tsx` | — |
-| `PageShell`, `PageHeader`, `StatCard`, `Toolbar` | `page.tsx` | eyebrow, title, description, actions; stat tone, trend, link, loading |
-| `Table`, `THead`, `TR`, `TH`, `TD` | `table.tsx` | hover, hidden columns on small screens (caller) |
-| `SearchInput`, `FilterChips`, `Pagination`, `KeyValueGrid`, `MetricStrip`, `Timeline`, `Stepper`, `OptionCard` | `data.tsx` | counts, empty/no-match, selected |
-| `Dialog`, `DialogForm`, `ConfirmDialog`, `DetailDialog` | `dialog.tsx` | sizes sm/md/lg/xl, busy, inline error, reason (text or choice, length limit), password confirmation, **typed confirmation**, consequence list |
+| `Button`, `LinkButton` (primary · secondary · outline · ghost · subtle · danger · danger-outline · link; xs–lg, icon sizes) | `button.tsx` | hover, press, focus, disabled, `loading` (spinner) |
+| `Input`, `Textarea`, `Select`, `Checkbox`, `InputGroup`, `Field`, `FieldGrid`, `Label`, `Hint`, `useFieldErrors` | `input.tsx` | label binding, hint, error (announced via `aria-describedby`), required/optional, disabled, read-only |
+| `Switch`, `Skeleton`, `SkeletonRows`, `Spinner`, `Separator`, `Meter`, `MonoId` | `misc.tsx` | on, off, disabled; loading shapes |
+| `Badge`, `StatusBadge`, `StatusDot` | `badge.tsx` | ok, warn, err, info, neutral, accent; sm/md |
+| `Card` (+ Header/Title/Description/Body/Footer), `SectionCard`, `Section` | `card.tsx` | flush body for tables; footer actions |
+| `PageShell`, `PageHeader`, `StatCard`, `StatGrid`, `Toolbar` | `page.tsx` | title, help, one-line description, meta, actions; stat tone, trend, link |
+| `FilterBar` | `toolbar.tsx` | filters + search + actions on one responsive row |
+| `RowActions`, `Menu*` | `row-actions.tsx`, `menu.tsx` | one inline action + a ⋯ menu; destructive items last |
+| `DetailsDrawer`, `DetailsSection` | `details-drawer.tsx` | secondary detail: revisions, versions, history and audit entries |
+| `HistoryList`, `ChangeDiff` | `history.tsx` | who · when · what, click → drawer; before/after per field |
+| `Table`, `THead`, `TBody`, `TR`, `TH`, `TD`, `TableMessage` | `table.tsx` | compact density, sticky header, numeric/nowrap/truncate cells, clickable rows |
+| `SearchInput`, `FilterChips`, `Pagination`, `DescriptionList`, `KeyValueGrid`, `MetricStrip`, `Timeline`, `Stepper`, `OptionCard` | `data.tsx` | counts, empty/no-match, selected |
+| `Dialog`, `DialogForm`, `ConfirmDialog`, `DetailDialog`, `InfoDialog` | `dialog.tsx` | sizes sm/md/lg/xl, busy, inline error, reason (text or choice, length limit), password confirmation, **typed confirmation**, consequence list |
 | `Sheet` (+ Header/Body/Footer/Section) | `sheet.tsx` | full width on mobile |
-| `Tabs`, `Segmented` | `tabs.tsx` | arrow-key navigation, `tabpanel` roles (Radix) |
+| `Tabs`, `TabList`/`TabPanel`, `Segmented` | `tabs.tsx` | arrow-key navigation, `tabpanel` roles (Radix) |
 | `Toast` / `useToast` | `toast.tsx` | success, error |
 | `Tooltip`, `Explain` | `tooltip.tsx` | hover and keyboard focus |
 | `EmptyState` | `empty-state.tsx` | icon, title, hint, first action |
@@ -152,7 +158,7 @@ one-time secret again.
 
 ## Layout and navigation
 
-- **App shell** (both consoles): inverse sidebar (16rem; collapses to a 3.75rem icon rail on desktop,
+- **App shell** (both consoles): tonal sidebar (15rem; collapses to a 3.75rem icon rail on desktop,
   remembered per device; a slide-in drawer below 1024px), a 56px sticky top bar with the breadcrumb
   "Group / Page", status pill and theme switch, and a content pane that owns the page gutter.
 - **Admin Console** navigation: 7 groups — Overview · Internet offering · Clients · Client Portal · Hotel ·

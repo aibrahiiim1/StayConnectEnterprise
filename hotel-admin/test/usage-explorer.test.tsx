@@ -180,7 +180,7 @@ describe("usage explorer by access source", () => {
   it("reads the list and a source's detail over the SAME period, and the search never goes in the URL (C-8)", async () => {
     wire();
     const user = await renderPage();
-    await user.type(await screen.findByRole("textbox", { name: /card reference/i }), "alex");
+    await user.type(await screen.findByRole("searchbox", { name: /card reference/i }), "alex");
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.click(await screen.findByRole("button", { name: "Details for alex.morgan" }));
     await screen.findByText("Devices used under this access");

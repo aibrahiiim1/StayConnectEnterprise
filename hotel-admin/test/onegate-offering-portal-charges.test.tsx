@@ -177,7 +177,6 @@ describe("every Hotel charge screen has its menu label as its title", () => {
     });
     render(el());
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
-    expect(screen.getByText("Hotel")).toBeInTheDocument();
   });
 
   it("Package payments offers no refund button, even with a settled charge on screen", async () => {

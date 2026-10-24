@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  AlertTriangle, Check, Copy, Eye, EyeOff, Lock, RefreshCw, ShieldAlert, Timer, EyeOff as Hidden,
+  AlertTriangle, Check, Copy, Eye, EyeOff, Lock, RefreshCw, ShieldAlert, Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
@@ -263,6 +263,18 @@ export function LiveStatus({
     return () => clearInterval(iv);
   }, []);
   const at = updatedAt instanceof Date ? updatedAt.getTime() : updatedAt ?? null;
+
+  // Announce refresh events, not the ticking clock, so a screen reader is not interrupted every few seconds.
+  const [announcement, setAnnouncement] = React.useState("");
+  const prev = React.useRef({ error, refreshing });
+  React.useEffect(() => {
+    const was = prev.current;
+    if (error && !was.error) setAnnouncement("Could not refresh — showing the last answer");
+    else if (!error && was.error) setAnnouncement("Refreshed");
+    else if (!error && was.refreshing && !refreshing) setAnnouncement("Refreshed");
+    prev.current = { error, refreshing };
+  }, [error, refreshing]);
+
   return (
     <div className={cn("inline-flex items-center gap-2 text-caption text-muted-foreground", className)}>
       <span className="relative inline-flex size-2" aria-hidden>
@@ -271,7 +283,8 @@ export function LiveStatus({
         ) : null}
         <span className={cn("relative inline-flex size-2 rounded-full", error ? "bg-warning" : intervalSeconds ? "bg-success" : "bg-muted-foreground/50")} />
       </span>
-      <span aria-live="polite" className="tabular">
+      <span role="status" aria-live="polite" className="sr-only">{announcement}</span>
+      <span className="tabular">
         {error
           ? "Could not refresh — showing the last answer"
           : refreshing
@@ -304,7 +317,7 @@ export function ReadOnlyNotice({
     <div
       role="note"
       className={cn(
-        "flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted-foreground",
+        "flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-caption text-muted-foreground",
         className,
       )}
     >
@@ -333,7 +346,7 @@ export function NotAvailable({
       )}
     >
       <span className="text-muted-foreground [&_svg]:size-5" aria-hidden>
-        {icon ?? <Hidden />}
+        {icon ?? <EyeOff />}
       </span>
       <div className="text-label">{title}</div>
       <p className="max-w-sm text-caption text-muted-foreground">{reason}</p>
@@ -417,13 +430,13 @@ export function SettingField({
           aria-describedby={`${fid}-hint`}
           onChange={(e) => onChange(e.target.value)}
           className={cn(
-            "h-10 w-28 rounded-s-md border border-input bg-card px-3 text-sm tabular text-foreground",
-            "focus:border-foreground focus:outline-none focus:ring-2 focus:ring-ring/20",
-            "disabled:bg-surface disabled:text-muted-foreground",
+            "h-9 w-28 rounded-s-md border border-input/70 bg-card px-3 text-sm tabular text-foreground shadow-control",
+            "hover:border-input focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/15",
+            "disabled:border-border disabled:bg-surface disabled:text-muted-foreground",
             (out || error) && "border-destructive",
           )}
         />
-        <span className="inline-flex items-center rounded-e-md border border-s-0 border-input bg-surface px-3 text-sm text-muted-foreground">
+        <span className="inline-flex items-center rounded-e-md border border-s-0 border-input/70 bg-surface px-3 text-sm text-muted-foreground">
           {unit}
         </span>
       </div>

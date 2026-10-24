@@ -2,13 +2,15 @@
 
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { ErrorBanner } from "./error-banner";
 import { Field, Input, Select } from "./input";
 
 export const Dialog = DialogPrimitive.Root;
+export const DialogTrigger = DialogPrimitive.Trigger;
+export const DialogClose = DialogPrimitive.Close;
 
 const SIZES = {
   sm: "max-w-md",
@@ -27,7 +29,7 @@ export function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         className={cn(
-          "fixed inset-0 z-50 bg-scrim/55 backdrop-blur-[2px]",
+          "fixed inset-0 z-50 bg-scrim/50 backdrop-blur-[1px]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none",
         )}
@@ -51,7 +53,8 @@ export function DialogContent({
           {children}
           <DialogPrimitive.Close
             className={cn(
-              "absolute end-3.5 top-3.5 rounded-md p-1 text-muted-foreground",
+              "absolute end-3 top-3 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground",
+              "pointer-coarse:end-1.5 pointer-coarse:top-1.5 pointer-coarse:size-11",
               "transition-colors hover:bg-surface hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             )}
@@ -67,7 +70,7 @@ export function DialogContent({
 
 export function DialogHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("shrink-0 space-y-1 border-b border-border px-5 py-4 pe-12", className)} {...p} />
+    <div className={cn("shrink-0 space-y-1 px-5 pb-3 pt-4 pe-12", className)} {...p} />
   );
 }
 
@@ -91,14 +94,14 @@ export function DialogDescription({
 }
 
 export function DialogBody({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-4", className)} {...p} />;
+  return <div className={cn("min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-1", className)} {...p} />;
 }
 
 export function DialogFooter({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "shrink-0 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface/40 px-5 py-3",
+        "flex shrink-0 flex-wrap items-center justify-end gap-2 rounded-b-xl border-t border-border bg-surface/60 px-5 py-3",
         className,
       )}
       {...p}
@@ -200,6 +203,7 @@ export function ConfirmDialog({
   busy = false,
   error,
   requireReason = false,
+  reasonMinLength = 1,
   reasonLabel = "Reason",
   reasonPlaceholder,
   requirePassword = false,
@@ -221,6 +225,8 @@ export function ConfirmDialog({
   busy?: boolean;
   error?: unknown;
   requireReason?: boolean;
+  /** Match the server's minimum reason length. */
+  reasonMinLength?: number;
   reasonLabel?: string;
   reasonPlaceholder?: string;
   requirePassword?: boolean;
@@ -252,11 +258,17 @@ export function ConfirmDialog({
   }, [open]);
 
   const ready =
-    (!requireReason || reason.trim() !== "") &&
+    (!requireReason || reason.trim().length >= Math.max(1, reasonMinLength)) &&
     (!requirePassword || password !== "") &&
     (!confirmText || typed === confirmText);
   const missing = [
-    requireReason && reason.trim() === "" ? (reasonOptions ? "choose a reason" : "enter a reason") : null,
+    requireReason && reason.trim().length < Math.max(1, reasonMinLength)
+      ? reasonOptions
+        ? "choose a reason"
+        : reasonMinLength > 1
+          ? `enter a reason of at least ${reasonMinLength} characters`
+          : "enter a reason"
+      : null,
     confirmText && typed !== confirmText ? `type ${confirmText} exactly` : null,
     requirePassword && password === "" ? "enter your password" : null,
   ].filter(Boolean) as string[];
@@ -291,7 +303,7 @@ export function ConfirmDialog({
       {children}
       {requireReason && (
         <Field label={reasonLabel} htmlFor={reasonId} required
-          hint={reasonOptions ? "Recorded in the audit log." : `Recorded in the audit log. ${reason.length}/${reasonMaxLength}`}
+          hint={reasonOptions ? "Recorded with the change." : `Recorded with the change. ${reason.length}/${reasonMaxLength}`}
         >
           {reasonOptions ? (
             <Select id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} required>
@@ -349,5 +361,96 @@ export function ConfirmDialog({
         </Field>
       )}
     </DialogForm>
+  );
+}
+
+export function DetailDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  size = "lg",
+  footer,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  size?: keyof typeof SIZES;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size={size}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
+        <DialogBody className="space-y-5">{children}</DialogBody>
+        <DialogFooter>
+          {footer ?? (
+            <Button variant="secondary" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * A short read-only message that needs acknowledgement: an explanation, a result, a notice. No form, one button.
+ * Anything that changes state uses ConfirmDialog.
+ */
+export function InfoDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  tone = "info",
+  closeLabel = "OK",
+  size = "sm",
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  tone?: "info" | "success" | "warning" | "danger";
+  closeLabel?: string;
+  size?: keyof typeof SIZES;
+  children?: React.ReactNode;
+}) {
+  const icon = {
+    info: <Info className="size-4 shrink-0 text-info" aria-hidden />,
+    success: <CheckCircle2 className="size-4 shrink-0 text-success" aria-hidden />,
+    warning: <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />,
+    danger: <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden />,
+  }[tone];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size={size} role={tone === "danger" || tone === "warning" ? "alertdialog" : "dialog"}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {icon}
+            {title}
+          </DialogTitle>
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{typeof title === "string" ? title : "Information"}</DialogDescription>
+          )}
+        </DialogHeader>
+        {children && <DialogBody className="space-y-3 text-sm">{children}</DialogBody>}
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="secondary">{closeLabel}</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

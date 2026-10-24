@@ -59,7 +59,6 @@ describe("Diagnostics", () => {
     const Page = (await import("@/app/(app)/health/page")).default;
     render(<Page />);
     expect(screen.getByRole("heading", { level: 1, name: "Diagnostics" })).toBeTruthy();
-    expect(screen.getByText("System")).toBeTruthy();
     expect(await screen.findByText(/still starting after boot/i)).toBeTruthy();
   });
 
