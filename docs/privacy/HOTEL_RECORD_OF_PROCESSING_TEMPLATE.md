@@ -191,7 +191,7 @@ Two more points:
 ### (g) How the data is protected
 
 OneGate's built-in protections are described in **Annex II, Part B** of your Data Processing Agreement with us.
-In short: staff sign in with a password and an authenticator code; each role sees only what it needs; every look
+In short: staff sign in with a password, and with an authenticator code once they turn on two-step sign-in (recommended); each role sees only what it needs; every look
 at guest data is logged; passwords and secrets are stored hashed or sealed; backups are encrypted; and guests
 cannot reach the management network or each other.
 

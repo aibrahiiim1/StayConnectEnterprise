@@ -15,7 +15,7 @@ Nothing else is mounted (`control-plane/internal/http/router.go`):
 | Surface | Routes |
 |---|---|
 | Infra | `GET /healthz`, `GET /readyz`, `GET /metrics` (loopback only) |
-| Operator session | `POST /v1/auth/login`, `POST /v1/auth/login/enrol`, `POST /v1/auth/login/code`, `POST /v1/auth/logout`, `GET /v1/auth/whoami`, `POST /v1/auth/reauth`, `GET /v1/auth/mfa`, `POST /v1/auth/mfa/recovery-codes` |
+| Operator session | `POST /v1/auth/login`, `POST /v1/auth/login/code`, `POST /v1/auth/logout`, `GET /v1/auth/whoami`, `POST /v1/auth/reauth`, `GET /v1/auth/mfa`, `POST /v1/auth/mfa/setup`, `POST /v1/auth/mfa/confirm`, `POST /v1/auth/mfa/disable`, `POST /v1/auth/mfa/recovery-codes` (`/v1/auth/login/enrol` was removed with D68: two-step sign-in is set up from the account, not at sign-in) |
 | Operator console | `/cloud/v1/*` — overview, customers, sites, customer users, appliances (and their lifecycle actions), offline activation, licenses, security alerts, trust, audit, team, backup health |
 | Appliance protocol | `POST /v1/appliances/register`; `GET /v1/appliance/hello`, `/license`, `/certificate`; `POST /v1/appliance/csr`, `/offline-reconcile`; mutual-TLS only: `GET /v1/appliance/assignment`, `/assignment-registry`, `POST /v1/appliance/assignment/ack`, `POST /v1/appliance/portal-tls/sync`, `POST /v1/appliance/portal-tls/orders`, `GET /v1/appliance/portal-tls/orders/{id}` |
 

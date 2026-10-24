@@ -68,7 +68,7 @@ Priority:
 | C7 | P1 | **Built on `delivery/gdpr` (migration 0133).** **Store less from the PMS.** Stop mirroring date of birth, VIP, travel agent and rate plan unless a feature needs them. Clear the existing values. | PMS protocol, schema, historical data | **D-C7:** Does any feature need date of birth (e.g. as a sign-in factor)? If none, drop it. |
 | C8 | P1 | **Built on `delivery/gdpr` (no migration), off by default.** **Encrypt the Protel FIAS link** (`UseTLS` is read but never used). | PMS configuration and traffic | **D-C8:** Does the hotel's Protel interface support TLS? Is turning it on at this hotel authorised? |
 | C9 | P1 | **Built on `delivery/gdpr` (no migration).** **Request fewer profile fields from social providers:** drop `profile`, `public_profile`, `name` and the Facebook `picture` field. Limit the free-text scope field in Hotel Admin to an allow-list. | guest authentication | **D-C9:** Reject or warn when a hotel adds extra scopes? |
-| C10 | P1 | **Built on `delivery/gdpr`: Hotel Admin (migration 0132) and Central (Central migration 0052).** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
+| C10 | P1 | **Built on `delivery/gdpr`: Hotel Admin (migration 0132) and Central (Central migration 0052). Since D68 (2026-10-24) two-step sign-in is optional per account, recommended, and enforced for every account that turns it on.** **Harden operator access:** MFA for Hotel Admin and Central, an absolute session limit plus an idle timeout, `EDGED_COOKIE_SECURE` on by default. | security | **D-C10:** Which MFA method (TOTP recommended)? Mandatory for admin roles only, or for everyone? Idle timeout (recommend 30 min) and absolute limit (recommend 12 h)? |
 | C11 | P2 | **Encryption at rest:** disk encryption (LUKS) for new installs; TLS or Unix sockets for database connections. | appliance deployment, security | **D-C11:** Accept for new installs only (existing appliances need a reinstall)? How is the key unlocked at boot (TPM vs passphrase)? |
 | C12 | P0 (ops) | **Rotate exposed credentials:** the Gmail app password that `SECURITY_HARDENING.md` reports was once committed and never rotated; the default Postgres password fallback. | security | **D-C12:** None for the rotation itself, which the account owner must do. Confirm removing the personal Gmail address from the repository. |
 
@@ -155,25 +155,27 @@ Each value ships as a hotel setting with this default, following `OPERATIONAL_SE
 
 ### How C10 was built for Hotel Admin (migration 0132, on `delivery/gdpr`)
 
-- **Signing in is two steps.** The password no longer opens a session: it opens a five-minute "password accepted" state, and the 6-digit code from an authenticator app (TOTP, RFC 6238) opens the session. The first time, the app is set up there: a QR code drawn in the browser (no outside service), the key to type, a first code, then ten single-use recovery codes shown once.
+> **D68 (2026-10-24): two-step sign-in is optional per account.** An account without a confirmed authenticator signs in with its password alone; one that turned it on needs the code exactly as described below. It is turned on from the account (password, QR code, first code, recovery codes once) and off with the password and a code; the console suggests it, without blocking, to accounts that have not. Setting up at sign-in is gone. This applies to Central too.
+
+- **Signing in is two steps.** The password no longer opens a session: it opens a five-minute "password accepted" state, and the 6-digit code from an authenticator app (TOTP, RFC 6238) opens the session. Since D68 the app is set up from the account page instead (a QR code drawn in the browser, no outside service; the key to type; a first code; then ten single-use recovery codes shown once).
 - **The secret is sealed by scd** with a new appliance key, `operator_totp_dek.key` (keybootstrap creates it), bound to the operator. edged, which serves the console, cannot open it. The routes are edged-only on scd's socket. A code is never accepted twice; recovery codes are stored as an HMAC under the same key.
 - **Wrong codes** are throttled per operator with the sign-in protection's account limits, and per address, and audited (`operator.mfa_failed`, `operator.mfa_locked`).
 - **Password confirmations stay a password.** NIST SP 800-63B allows one factor to re-confirm inside a session opened with two, so no existing screen changed.
 - **Sessions end** after 30 minutes idle and 12 hours at most, a setting under System → Operators → Session limits. The console's background check every 30 seconds does not count as activity, so an open tab does sign out.
 - **Lost phone:** a recovery code; or a site administrator resets a colleague (password, reason, audited, their sessions end; never one's own); or, for the last administrator, `edged reset-mfa --email E --reason R` on the appliance.
-- **Your account → Two-step sign-in** shows the state and makes a new set of recovery codes.
+- **Your account → Two-step sign-in** shows the state, turns it on and off (D68) and makes a new set of recovery codes.
 - **The session cookie is Secure by default** (`EDGED_COOKIE_SECURE=false` is needed to switch it off).
 - **New dependency:** `qrcode` 1.5.4 (MIT) in Hotel Admin, pinned.
 
 ### How C10 was built for Central (Central migration 0052, on `delivery/gdpr`)
 
-- **The same two steps** as Hotel Admin, for every Central account: platform operators and customer users. The pending state between the password and the code is a row in Postgres (a hash of the cookie token, five minutes).
+- **The same two steps** as Hotel Admin, for every Central account that turns it on (D68): platform operators and customer users. The pending state between the password and the code is a row in Postgres (a hash of the cookie token, five minutes).
 - **The secret is sealed by ctrlapi** with AES-256-GCM under a new key file, `/etc/stayconnect/operator-mfa.key` (`CTRLAPI_OPERATOR_MFA_KEY`). `central-install.sh` creates it, and the export bundle carries it, so moving Central keeps everyone's authenticator. Without the key, every sign-in is refused.
 - **Wrong codes** lock the authenticator for 15 minutes after five, audited (`auth.mfa_failed`, `auth.mfa_locked`). A code is never accepted twice.
 - **Sessions end** after 30 minutes idle (`operator_idle_minutes`, 5-240) and 12 hours at most (`operator_session_max_hours`; the old default 24 moved to 12 where nobody had changed it). Both are under System > Team > Sign-in limits. The console's whoami poll does not count as activity.
 - **Lost phone:** a recovery code; an administrator's "Reset two-step" on the Team or a customer's Users (reason, audited, sessions ended, never one's own); or `ctrlapi reset-mfa --email E --reason R` for the last administrator.
-- **The Two-step sign-in page** in the sidebar shows the state and makes new recovery codes (after step-up).
-- **The test tools sign in with both steps.** `cmd/acceptance`, `cmd/pkitest` and the two regression scripts (`scripts/lifecycle-regression.sh`, `scripts/replacement-factoryreset-regression.sh`, through `cmd/regtest -signin`) use `internal/opsignin`: the first sign-in sets the operator's authenticator up and keeps its secret in a 0600 keyring on the machine running the tool (`OPERATOR_TOTP_KEYRING`, default in the user's config directory); later sign-ins compute the code. An operator whose authenticator was set up elsewhere is refused with the `ctrlapi reset-mfa` command that hands it back. The older phase scripts (`scripts/phase*-test.sh`) still sign in with a password alone and are not current coverage.
+- **The Two-step sign-in page** in the sidebar shows the state, turns it on and off (D68) and makes new recovery codes (after step-up).
+- **The test tools sign in with both steps.** `cmd/acceptance`, `cmd/pkitest` and the two regression scripts (`scripts/lifecycle-regression.sh`, `scripts/replacement-factoryreset-regression.sh`, through `cmd/regtest -signin`) use `internal/opsignin`: an operator without two-step sign-in signs in with the password (D68); `Keyring.Enable` turns it on and keeps the secret in a 0600 keyring on the machine running the tool (`OPERATOR_TOTP_KEYRING`, default in the user's config directory); later sign-ins compute the code. An operator whose authenticator was set up elsewhere is refused with the `ctrlapi reset-mfa` command that hands it back. The older phase scripts (`scripts/phase*-test.sh`) still sign in with a password alone and are not current coverage.
 
 ### D-F5, log retention: **14 days, a hotel setting** (Product Owner, 2026-10-19)
 
@@ -342,7 +344,8 @@ The product is still in development: there is no paying customer and no live hot
 - **D-C9: warn, do not refuse.** When a hotel asks a sign-in provider for more than name and email, Hotel Admin warns; the hotel, as controller, decides.
 - **D-C10: follow the industry standard (NIST SP 800-63B, OWASP ASVS), kept simple:**
   - an authenticator app (TOTP) as the second step, for every Hotel Admin and Central account; staff still sign in with their email and password;
-  - setting up the app at the next sign-in, by scanning a QR code;
+    **superseded by D68 (2026-10-24): optional per account, recommended, enforced once turned on;**
+  - setting up the app at the next sign-in, by scanning a QR code; **since D68, from the account page instead;**
   - 10 single-use recovery codes;
   - a site admin can reset a colleague's second step, with the reset audited;
   - idle logout after 30 minutes and a session limit of 12 hours, both hotel settings (§0C).
@@ -429,8 +432,8 @@ The product is still in development: there is no paying customer and no live hot
 - **Room sign-in network pause (A4) follow-up:** a single device changing its address can keep re-arming the pause
   every 15 minutes, and staff confirmations do not carry over to the next pause. Carrying confirmations over, or
   alerting staff to repeated pauses, is a product decision not yet taken; the pause works as decided.
-- **Enrolment at first sign-in** on both consoles needs only the password (inherent to self-enrolment, audited as
-  `operator.mfa_enrolled` / `auth.mfa_enrolled`). An administrator-issued enrolment code, or an email on
+- **Turning two-step sign-in on** (from the account since D68) needs only the password (inherent to self-enrolment,
+  audited as `operator.mfa_enrolled` / `auth.mfa_enrolled`). An administrator-issued enrolment code, or an email on
   enrolment, would close it; not decided.
 
 ## 5. Proposed order
