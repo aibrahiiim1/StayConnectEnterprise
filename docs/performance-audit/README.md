@@ -19,7 +19,7 @@ It follows the backend audit in [`docs/audit/`](../audit/README.md). Where a per
 | 3 | Client Portal (portald) and captive-portal probe traffic | [PHASE3_CLIENT_PORTAL.md](PHASE3_CLIENT_PORTAL.md) | done |
 | 4 | Enforcement path (netd): nftables sets, tc shaping, conntrack, apply time | [PHASE4_ENFORCEMENT.md](PHASE4_ENFORCEMENT.md) | done |
 | 5 | Background jobs and accounting (acctd, scd loops, posting, retention) | [PHASE5_BACKGROUND_JOBS.md](PHASE5_BACKGROUND_JOBS.md) | done |
-| 6 | PMS (pmsd): roster load, resync, FIAS throughput | PHASE6_PMS.md | planned |
+| 6 | PMS (pmsd): roster load, resync, FIAS throughput | [PHASE6_PMS.md](PHASE6_PMS.md) | done |
 | 7 | Admin Console API (edged): lists, reports, exports, dashboards | PHASE7_ADMIN_API.md | planned |
 | 8 | Admin front ends (hotel-admin, cloud-admin): bundles, polling, rendering | PHASE8_FRONT_ENDS.md | planned |
 | 9 | Central (ctrlapi): fleet scale, appliance calls, Redis | PHASE9_CENTRAL.md | planned |
