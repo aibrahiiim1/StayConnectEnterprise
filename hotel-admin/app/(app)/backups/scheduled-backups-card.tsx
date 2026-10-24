@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type BackupSettings } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
@@ -12,7 +12,6 @@ import { Switch } from "@/components/ui/misc";
 import { SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg, formatDate } from "@/lib/utils";
-import { DatabaseBackup } from "lucide-react";
 import { SCHEDULE_SETTING_KEYS, backupHeadline, backupKindLabel, type BackupStatus } from "@/lib/ledger-words";
 
 export const EARLIER_CONFIRMATION = "remove earlier backups";
@@ -102,15 +101,16 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
   const earlier = d?.earlier;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><DatabaseBackup className="size-4" aria-hidden /> Scheduled backups</CardTitle>
-        <CardDescription>
-          One backup system: the database and the configuration and keys, encrypted to the backup key holders and loaded into a scratch
-          database to prove they restore. Scheduled backups are off until you switch them on.
-        </CardDescription>
-      </CardHeader>
-      <CardBody className="space-y-4">
+    <SectionCard
+      title="Scheduled backups"
+      description="Database, configuration and keys, encrypted and proven restorable. Off until you switch them on."
+      actions={writable && (
+        <Button size="sm" variant="secondary" disabled={!!d?.running || d?.state === "needs_key_holder"} onClick={() => { setRunErr(null); setRunOpen(true); }}>
+          {d?.running ? "A backup is running…" : "Take a backup now"}
+        </Button>
+      )}
+      bodyClassName="space-y-4"
+    >
         <ErrorBanner err={err} />
         <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
 
@@ -118,12 +118,12 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
           <p className="text-sm text-muted-foreground">
             {d.schedule.next ? <>Next scheduled backup: <strong>{formatDate(d.schedule.next)}</strong>. </> : null}
             {d.last_error ? <>The last attempt failed: {d.last_error}. </> : null}
-            The backups taken before a restore, a migration or a deployment are always taken, whatever the schedule says.
+            Backups before a restore, a migration or a deployment are always taken.
           </p>
         )}
 
         {settings && fields.length > 0 && (
-          <div className="space-y-4 rounded-md border border-border p-4">
+          <div className="space-y-4 rounded-md border border-border bg-surface/60 p-4">
             <div className="flex items-center gap-3">
               <Switch
                 id="scheduled-backups-enabled"
@@ -162,20 +162,20 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         )}
 
         {d && d.backups.length > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <THead><TR><TH>Taken</TH><TH>Kind</TH><TH>Size</TH><TH>Proven restorable</TH><TH>Ledger entries it holds</TH></TR></THead>
+          <div className="overflow-hidden rounded-md border border-border">
+            <Table label="Backups taken" density="compact">
+              <THead><TR><TH>Taken</TH><TH>Kind</TH><TH numeric>Size</TH><TH>Restorable</TH><TH numeric className="hidden sm:table-cell">Ledger entries</TH></TR></THead>
               <TBody>
                 {d.backups.map((b) => (
                   <TR key={b.name}>
-                    <TD>{formatDate(b.taken_at)}</TD>
+                    <TD nowrap>{formatDate(b.taken_at)}</TD>
                     <TD>
                       <Badge tone={b.kind === "scheduled" || b.kind === "manual" ? "info" : "default"}>{backupKindLabel(b.kind)}</Badge>
                       {(b.reason || b.by) && <div className="text-2xs text-muted-foreground">{[b.reason, b.by && `by ${b.by}`].filter(Boolean).join(" · ")}</div>}
                     </TD>
-                    <TD>{mb(b.size_bytes)}</TD>
-                    <TD><Badge tone={b.restorable ? "ok" : "err"}>{b.restorable ? "yes" : "no"}</Badge></TD>
-                    <TD>{b.ledger_seq}</TD>
+                    <TD numeric>{mb(b.size_bytes)}</TD>
+                    <TD nowrap><StatusBadge tone={b.restorable ? "ok" : "err"}>{b.restorable ? "Yes" : "No"}</StatusBadge></TD>
+                    <TD numeric className="hidden sm:table-cell">{b.ledger_seq}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -187,34 +187,27 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
           <Callout tone="danger" title="A stored backup changed">{d.problems.map((p) => `${p.name}: ${p.detail}`).join("; ")}</Callout>
         )}
 
-        {writable && (
-          <Button variant="outline" disabled={!!d?.running || d?.state === "needs_key_holder"} onClick={() => { setRunErr(null); setRunOpen(true); }}>
-            {d?.running ? "A backup is running…" : "Take a backup now"}
-          </Button>
-        )}
-
         {earlier && earlier.count > 0 && (
-          <div className="space-y-3 rounded-md border border-border p-4">
+          <div className="space-y-3 rounded-md border border-border bg-surface/60 p-4">
             <div>
               <p className="text-emphasis">Earlier backups ({earlier.count}, {mb(earlier.size_bytes)})</p>
               <p className="text-sm text-muted-foreground">
-                These were made before there was one backup system: the nightly sets and older on-demand dumps. They are kept exactly as they
-                were and are never removed automatically. Nightly sets are restored by hand from the support runbook; an earlier dump that was
-                verified can be restored from the list below.
+                Made before the one backup system and never removed automatically. A verified earlier dump can be
+                restored from Available backups.
                 {earlier.unencrypted > 0 ? ` ${earlier.unencrypted} of them are not encrypted.` : ""}
               </p>
             </div>
-            <div className="overflow-x-auto">
-              <Table>
-                <THead><TR><TH>Name</TH><TH>Kind</TH><TH>Taken</TH><TH>Size</TH><TH>Encrypted</TH></TR></THead>
+            <div className="overflow-hidden rounded-md border border-border bg-card">
+              <Table label="Earlier backups" density="compact">
+                <THead><TR><TH>Name</TH><TH>Kind</TH><TH>Taken</TH><TH numeric>Size</TH><TH>Encrypted</TH></TR></THead>
                 <TBody>
                   {earlier.sets.map((s) => (
                     <TR key={s.name}>
-                      <TD className="font-mono text-xs">{s.name}</TD>
-                      <TD>{s.kind}</TD>
-                      <TD>{formatDate(s.taken)}</TD>
-                      <TD>{mb(s.size_bytes)}</TD>
-                      <TD><Badge tone={s.encrypted ? "ok" : "warn"}>{s.encrypted ? "yes" : "no"}</Badge></TD>
+                      <TD truncate className="font-mono text-xs" title={s.name}>{s.name}</TD>
+                      <TD nowrap>{s.kind}</TD>
+                      <TD nowrap>{formatDate(s.taken)}</TD>
+                      <TD numeric>{mb(s.size_bytes)}</TD>
+                      <TD nowrap><StatusBadge tone={s.encrypted ? "ok" : "warn"}>{s.encrypted ? "Yes" : "No"}</StatusBadge></TD>
                     </TR>
                   ))}
                 </TBody>
@@ -230,7 +223,6 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
             )}
           </div>
         )}
-      </CardBody>
 
       <ConfirmDialog
         open={saveOpen}
@@ -266,6 +258,6 @@ export function ScheduledBackupsCard({ writable }: { writable: boolean }) {
         requirePassword
         onConfirm={removeEarlier}
       />
-    </Card>
+    </SectionCard>
   );
 }

@@ -5,9 +5,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
+import { RowActions } from "@/components/ui/row-actions";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { Callout } from "@/components/ui/error-banner";
@@ -92,29 +93,25 @@ export function BackupKeysCard({ writable }: { writable: boolean }) {
   const test = data.restore_test;
 
   return (
-    <Card>
-      <CardBody className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="flex items-center gap-2 text-emphasis">
-              {data.encrypted ? <Lock className="size-4" aria-hidden /> : <LockOpen className="size-4" aria-hidden />}
-              Backup encryption
-              {data.encrypted
-                ? <Badge tone="ok" dot>On · {data.active_holders} key holder{data.active_holders === 1 ? "" : "s"}</Badge>
-                : <Badge tone="warn" dot>Off</Badge>}
-            </div>
-            <p className="text-caption text-muted-foreground">
-              Backups are encrypted to the hotel’s own keys. Any one key holder can restore; nobody else can read them,
-              including the appliance and its supplier. If every key is lost, the backups cannot be read by anyone.
-            </p>
-          </div>
-          {writable && (
-            <div className="flex flex-wrap gap-2">
-              {data.encrypted && <Button size="sm" variant="outline" onClick={() => setTesting(true)}><ShieldCheck /> Test a key</Button>}
-              <Button size="sm" variant={data.encrypted ? "outline" : "primary"} onClick={() => setAdding(true)}><KeyRound /> Add key holder</Button>
-            </div>
-          )}
-        </div>
+    <SectionCard
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          {data.encrypted ? <Lock className="size-4" aria-hidden /> : <LockOpen className="size-4" aria-hidden />}
+          Backup encryption
+          {data.encrypted
+            ? <StatusBadge tone="ok">On · {data.active_holders} key holder{data.active_holders === 1 ? "" : "s"}</StatusBadge>
+            : <StatusBadge tone="warn">Off</StatusBadge>}
+        </span>
+      }
+      description="Any one key holder can restore; nobody else can read them. If every key is lost, the backups cannot be read by anyone."
+      actions={writable && (
+        <>
+          {data.encrypted && <Button size="sm" variant="secondary" onClick={() => setTesting(true)}><ShieldCheck /> Test a key</Button>}
+          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}><KeyRound /> Add key holder</Button>
+        </>
+      )}
+      bodyClassName={!data.encrypted || test || shown.length > 0 ? "space-y-3" : "hidden"}
+    >
 
         {!data.encrypted && (
           <Callout tone="warning" title="Backups are not encrypted">
@@ -136,31 +133,33 @@ export function BackupKeysCard({ writable }: { writable: boolean }) {
         )}
 
         {shown.length > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <THead><TR><TH>Key holder</TH><TH>Status</TH><TH>Added</TH><TH>Last proven</TH><TH><span className="sr-only">Actions</span></TH></TR></THead>
+          <div className="overflow-hidden rounded-md border border-border">
+            <Table label="Backup key holders" density="compact">
+              <THead><TR><TH>Key holder</TH><TH>Status</TH><TH className="hidden sm:table-cell">Added</TH><TH className="hidden md:table-cell">Last proven</TH>{writable && <TH><span className="sr-only">Actions</span></TH>}</TR></THead>
               <TBody>
                 {shown.map((h) => (
                   <TR key={h.id}>
                     <TD>
                       <div>{h.label}</div>
-                      <div className="break-all font-mono text-2xs text-muted-foreground">{h.public_key}</div>
+                      <div className="max-w-[20rem] truncate font-mono text-2xs text-muted-foreground" title={h.public_key}>{h.public_key}</div>
                     </TD>
-                    <TD>{h.status === "ACTIVE" ? <Badge tone="ok">Active</Badge> : <Badge tone="neutral">Removed</Badge>}</TD>
-                    <TD>{formatDate(h.created_at)}</TD>
-                    <TD>{h.last_tested_at ? formatDate(h.last_tested_at) : "—"}</TD>
-                    <TD className="text-end">
-                      {writable && h.status === "ACTIVE" && (
-                        <Button size="sm" variant="ghost" onClick={() => setRemoving(h)} aria-label={`Remove ${h.label}`}>Remove</Button>
-                      )}
-                    </TD>
+                    <TD nowrap>{h.status === "ACTIVE" ? <StatusBadge tone="ok">Active</StatusBadge> : <StatusBadge>Removed</StatusBadge>}</TD>
+                    <TD nowrap muted className="hidden sm:table-cell">{formatDate(h.created_at)}</TD>
+                    <TD nowrap muted className="hidden md:table-cell">{h.last_tested_at ? formatDate(h.last_tested_at) : "—"}</TD>
+                    {writable && (
+                      <TD className="w-0">
+                        <RowActions
+                          subject={h.label}
+                          items={[{ label: "Remove…", danger: true, hidden: h.status !== "ACTIVE", onSelect: () => setRemoving(h) }]}
+                        />
+                      </TD>
+                    )}
                   </TR>
                 ))}
               </TBody>
             </Table>
           </div>
         )}
-      </CardBody>
 
       {adding && <AddHolderDialog onClose={() => setAdding(false)} onDone={async (label) => {
         setAdding(false); toast.success("Key holder added", `New backups are encrypted to ${label}’s key too.`); await load();
@@ -169,7 +168,7 @@ export function BackupKeysCard({ writable }: { writable: boolean }) {
       <RemoveHolderDialog holder={removing} onClose={() => setRemoving(null)} onDone={async () => {
         setRemoving(null); toast.success("Key holder removed", "New backups are no longer encrypted to that key. Older backups still open with it."); await load();
       }} />
-    </Card>
+    </SectionCard>
   );
 }
 

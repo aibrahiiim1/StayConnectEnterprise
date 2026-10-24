@@ -5,15 +5,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
 import { errMsg } from "@/lib/utils";
-import { HardDriveUpload, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { BackupKeyInput } from "./backup-keys-card";
 import {
   STORAGE_KINDS, agoWords, kindLabel, ledgerHeadline, type LedgerStatus,
@@ -119,41 +119,35 @@ export function LedgerCard({ writable }: { writable: boolean }) {
   const sftpUnconfirmed = form.kind === "sftp" && form.fingerprint === "";
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2"><HardDriveUpload className="size-4" aria-hidden /> Erasure ledger</CardTitle>
-            <CardDescription>
-              Every erasure and every answered data request is recorded in two independent places, so a restored backup can never bring an
-              erased guest back.
-            </CardDescription>
-          </div>
-          <Button size="sm" variant="outline" disabled={refreshing} onClick={async () => { setRefreshing(true); await load(true); setRefreshing(false); }}>
-            <RefreshCw className="size-3.5" aria-hidden /> Check now
-          </Button>
-        </div>
-      </CardHeader>
-      <CardBody className="space-y-4">
+    <SectionCard
+      title="Erasure ledger"
+      description="Every erasure is recorded in two places, so a restored backup can never bring an erased guest back."
+      actions={
+        <Button size="sm" variant="secondary" disabled={refreshing} onClick={async () => { setRefreshing(true); await load(true); setRefreshing(false); }}>
+          <RefreshCw aria-hidden /> Check now
+        </Button>
+      }
+      bodyClassName="space-y-4"
+    >
         <ErrorBanner err={err} />
         <Callout tone={head.tone === "ok" ? "success" : head.tone === "err" ? "danger" : "warning"} title={head.title}>{head.detail}</Callout>
 
         {status && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-md border border-border p-3 text-sm">
-              <div className="mb-1 flex items-center gap-2 font-medium">On this appliance <Badge tone={status.primary.present && status.primary.intact ? "ok" : "err"}>{status.primary.present && status.primary.intact ? "intact" : "needs repair"}</Badge></div>
+            <div className="rounded-md border border-border bg-surface/60 p-3 text-sm">
+              <div className="mb-1 flex items-center gap-2 font-medium">On this appliance <StatusBadge tone={status.primary.present && status.primary.intact ? "ok" : "err"}>{status.primary.present && status.primary.intact ? "Intact" : "Needs repair"}</StatusBadge></div>
               <div className="text-muted-foreground">{status.primary.entries} entries</div>
-              {status.primary.error && <div className="text-danger">{status.primary.error}</div>}
+              {status.primary.error && <div className="text-destructive">{status.primary.error}</div>}
             </div>
-            <div className="rounded-md border border-border p-3 text-sm">
+            <div className="rounded-md border border-border bg-surface/60 p-3 text-sm">
               <div className="mb-1 flex items-center gap-2 font-medium">Secondary storage
-                <Badge tone={!status.secondary.configured ? "err" : status.secondary.in_sync ? "ok" : "warn"}>
-                  {!status.secondary.configured ? "not set up" : status.secondary.in_sync ? "in step" : "not in step"}
-                </Badge>
+                <StatusBadge tone={!status.secondary.configured ? "err" : status.secondary.in_sync ? "ok" : "warn"}>
+                  {!status.secondary.configured ? "Not set up" : status.secondary.in_sync ? "In step" : "Not in step"}
+                </StatusBadge>
               </div>
               <div className="text-muted-foreground">{status.secondary.configured ? `${kindLabel(status.secondary.kind)} — ${status.secondary.describe}` : "Required"}</div>
               {status.secondary.configured && <div className="text-muted-foreground">Last confirmed {agoWords(status.secondary.last_ok)}{status.secondary.encrypted ? " · encrypted" : " · not encrypted (add a backup key holder)"}</div>}
-              {status.secondary.error && <div className="text-danger">{status.secondary.error}</div>}
+              {status.secondary.error && <div className="text-destructive">{status.secondary.error}</div>}
             </div>
           </div>
         )}
@@ -166,7 +160,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
         )}
 
         {writable && !showForm && status?.state !== "not_configured" && (
-          <Button variant="outline" onClick={() => setEditing(true)}>Change the secondary storage</Button>
+          <Button variant="secondary" onClick={() => setEditing(true)}>Change the secondary storage</Button>
         )}
 
         {showForm && (
@@ -190,7 +184,7 @@ export function LedgerCard({ writable }: { writable: boolean }) {
                 <Field label="Password"><Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" /></Field>
                 <Field label="…or private key" hint="Paste instead of a password."><Textarea rows={2} className="font-mono text-xs" value={form.private_key} onChange={(e) => set("private_key", e.target.value)} spellCheck={false} /></Field>
                 <div className="sm:col-span-2 space-y-2">
-                  <Button variant="outline" size="sm" disabled={probing || !form.host.trim()} onClick={() => void probe()}>Check the server’s identity</Button>
+                  <Button variant="secondary" size="sm" disabled={probing || !form.host.trim()} onClick={() => void probe()}>Check the server’s identity</Button>
                   {probed && (
                     <label className="flex items-start gap-2 text-sm">
                       <input type="checkbox" className="mt-1" checked={form.fingerprint === probed} onChange={(e) => set("fingerprint", e.target.checked ? probed : "")} />
@@ -212,13 +206,12 @@ export function LedgerCard({ writable }: { writable: boolean }) {
             )}
             {tested && <Callout tone="success">{tested}</Callout>}
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" disabled={sftpUnconfirmed} onClick={() => void test()}>Test</Button>
+              <Button variant="secondary" disabled={sftpUnconfirmed} onClick={() => void test()}>Test</Button>
               <Button variant="primary" disabled={sftpUnconfirmed} onClick={() => { setSaveErr(null); setSaving(false); setSaveOpen(true); }}>Save…</Button>
-              {editing && <Button variant="outline" onClick={() => { setEditing(false); setForm(EMPTY); setProbed(null); setTested(null); }}>Cancel</Button>}
+              {editing && <Button variant="ghost" onClick={() => { setEditing(false); setForm(EMPTY); setProbed(null); setTested(null); }}>Cancel</Button>}
             </div>
           </div>
         )}
-      </CardBody>
 
       <ConfirmDialog
         open={saveOpen}
@@ -243,6 +236,6 @@ export function LedgerCard({ writable }: { writable: boolean }) {
       >
         <BackupKeyInput value={identity} onChange={setIdentity} />
       </ConfirmDialog>
-    </Card>
+    </SectionCard>
   );
 }

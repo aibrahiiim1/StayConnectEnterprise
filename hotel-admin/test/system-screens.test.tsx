@@ -165,8 +165,12 @@ describe("Backups", () => {
     routes(base, ["site_admin"]);
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
-    expect(await screen.findByRole("button", { name: "Restore db-20260921T095526Z.sql.gz" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Restore db-20260920T095526Z.sql.gz" })).toBeNull();
+    let menu = await openRowMenu("db-20260921T095526Z.sql.gz");
+    expect(within(menu).getByRole("menuitem", { name: "Restore…" })).toBeTruthy();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    menu = await openRowMenu("db-20260920T095526Z.sql.gz");
+    expect(within(menu).queryByRole("menuitem", { name: "Restore…" })).toBeNull();
     expect(screen.getByText("This site can be recovered from its latest backup")).toBeTruthy();
   });
 
@@ -176,7 +180,8 @@ describe("Backups", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     const name = "db-20260921T095526Z.sql.gz";
-    await userEvent.click(await screen.findByRole("button", { name: `Restore ${name}` }));
+    await openRowMenu(name);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restore…" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/current data will be replaced/)).toBeTruthy();
     expect(within(dialog).getByText(/Take a fresh safety copy/)).toBeTruthy();
@@ -229,7 +234,8 @@ describe("Backups", () => {
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
     await screen.findByText(/can see and download backups/);
-    await userEvent.click(await screen.findByRole("button", { name: "Download db-20260921T095526Z.sql.gz" }));
+    await openRowMenu("db-20260921T095526Z.sql.gz");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Download…" }));
     const dialog = await screen.findByRole("dialog");
     const go = within(dialog).getByRole("button", { name: "Download" }) as HTMLButtonElement;
     expect(go.disabled, "the password is required").toBe(true);

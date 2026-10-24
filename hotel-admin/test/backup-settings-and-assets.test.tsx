@@ -44,11 +44,19 @@ function mockBackups() {
   });
 }
 
+// Storage & retention sits on its own tab of the Backups page.
+async function openStorageTab() {
+  const tab = await screen.findByRole("tab", { name: /Schedule & storage/ });
+  fireEvent.mouseDown(tab, { button: 0 });
+  fireEvent.click(tab);
+}
+
 describe("backup retention is editable, not just visible", () => {
   it("shows every knob with its unit, bounds and default", async () => {
     mockBackups();
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
+    await openStorageTab();
 
     const field = await screen.findByLabelText(/Service binaries/i);
     expect((field as HTMLInputElement).value).toBe("5");
@@ -62,6 +70,7 @@ describe("backup retention is editable, not just visible", () => {
     mockBackups();
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
+    await openStorageTab();
     expect(await screen.findByText(/built-in defaults below are in force/i)).toBeTruthy();
   });
 
@@ -70,6 +79,7 @@ describe("backup retention is editable, not just visible", () => {
     put.mockResolvedValue({ ...SETTINGS, config_present: true, schedule: "02:15" });
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
+    await openStorageTab();
 
     fireEvent.change(await screen.findByLabelText(/Service binaries/i), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText(/Nightly sweep runs at/i), { target: { value: "02:15" } });
@@ -90,6 +100,7 @@ describe("backup retention is editable, not just visible", () => {
     mockBackups();
     const Page = (await import("@/app/(app)/backups/page")).default;
     render(<Page />);
+    await openStorageTab();
     await screen.findByLabelText(/Service binaries/i);
     expect(screen.queryByRole("button", { name: /Save retention policy/i })).toBeNull();
   });
