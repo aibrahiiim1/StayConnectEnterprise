@@ -22,8 +22,8 @@ describe("Overview", () => {
     expect(screen.getByRole("link", { name: /^Never connected\s*1/ })).toHaveAttribute("href", "/appliances?connection=never");
     expect(screen.getByRole("link", { name: /^Expired\s*0/ })).toHaveAttribute("href", "/licenses?state=expired");
     expect(screen.getByRole("link", { name: /^No license\s*1/ })).toHaveAttribute("href", "/appliances?license=none");
-    expect(screen.getByRole("link", { name: /1\s*customer/ })).toHaveAttribute("href", "/customers");
-    expect(screen.getByRole("link", { name: /2\s*appliances/ })).toHaveAttribute("href", "/appliances");
+    expect(screen.getByRole("link", { name: /^Customers\s*1/ })).toHaveAttribute("href", "/customers");
+    expect(screen.getByRole("link", { name: /^Appliances\s*2/ })).toHaveAttribute("href", "/appliances");
   });
 
   it("lists what needs attention with a direct action", async () => {

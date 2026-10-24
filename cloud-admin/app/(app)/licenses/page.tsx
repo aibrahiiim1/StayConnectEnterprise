@@ -7,11 +7,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageHeader, PageShell, Toolbar } from "@/components/ui/page";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { FilterBar } from "@/components/ui/toolbar";
 import { FilterChips, SearchInput } from "@/components/ui/data";
-import { SkeletonRows } from "@/components/ui/misc";
 import { HelpList, HelpSection } from "@/components/help";
 import { LicenseTable } from "@/components/license-table";
+import { ListState } from "@/components/record-view";
 import { useQueryState } from "@/lib/use-query-state";
 import { LICENSE, LICENSE_ORDER } from "@/lib/status";
 
@@ -54,50 +55,63 @@ function Licenses() {
     <PageShell width="wide">
       <PageHeader
         title="Licenses"
-        description="Every appliance's current license. Select one to renew, change, suspend or revoke it on its appliance."
+        description="Every appliance's current license. Open one to renew, change, suspend or revoke it."
         help={
-          <HelpSection title="License states">
-            <HelpList items={STATES.map((s) => <><strong>{LICENSE[s].label}</strong>: {LICENSE[s].explain}</>)} />
-          </HelpSection>
+          <>
+            <HelpSection title="License states">
+              <HelpList items={STATES.map((s) => <><strong>{LICENSE[s].label}</strong>: {LICENSE[s].explain}</>)} />
+            </HelpSection>
+            <HelpSection title="Changing a license">
+              <p>
+                Licenses are changed on their appliance&apos;s page. Each change issues a new version; the appliance picks
+                it up on its next contact. The appliance page lists every earlier version.
+              </p>
+            </HelpSection>
+          </>
         }
       />
 
-      <Card>
-        <Toolbar className="border-b border-border px-4 py-3">
-          <FilterChips
-            label="License state"
-            value={f.state}
-            onChange={(v) => setF({ state: v })}
-            options={[
-              { value: "", label: "All", count: total },
-              ...STATES.map((s) => ({
-                value: s,
-                label: LICENSE[s].label,
-                count: counts?.[s],
-                tone: LICENSE[s].tone === "default" ? undefined : (LICENSE[s].tone as "ok" | "warn" | "err" | "info"),
-              })),
-            ]}
-          />
-          <SearchInput value={f.q} onChange={(v) => setF({ q: v })} delay={300} placeholder="Search serial or customer" label="Search licenses" />
-        </Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          filters={
+            <FilterChips
+              label="License state"
+              value={f.state}
+              onChange={(v) => setF({ state: v })}
+              options={[
+                { value: "", label: "All", count: total },
+                ...STATES.map((s) => ({
+                  value: s,
+                  label: LICENSE[s].label,
+                  count: counts?.[s],
+                  tone: LICENSE[s].tone === "default" ? undefined : (LICENSE[s].tone as "ok" | "warn" | "err" | "info"),
+                })),
+              ]}
+            />
+          }
+          search={
+            <SearchInput value={f.q} onChange={(v) => setF({ q: v })} delay={300} placeholder="Search serial or customer" label="Search licenses" />
+          }
+        />
 
         <ErrorBanner err={err} className="m-4" />
 
-        {rows === null ? (
-          <SkeletonRows rows={6} cols={5} />
-        ) : rows.length === 0 ? (
-          f.state || f.q ? (
+        <ListState
+          rows={rows}
+          cols={5}
+          filtered={!!(f.state || f.q)}
+          noMatch={
             <EmptyState
               title="No licenses match"
               hint="Nothing matches these filters."
-              action={<Button variant="secondary" onClick={() => setF({ state: "", q: "" })}>Clear filters</Button>}
+              action={<Button variant="secondary" size="sm" onClick={() => setF({ state: "", q: "" })}>Clear filters</Button>}
             />
-          ) : (
-            <EmptyState icon={<BadgeCheck />} title="No licenses yet" hint="A license is issued when an appliance is activated." />
-          )
-        ) : (
-          <LicenseTable rows={rows} />
-        )}
+          }
+          empty={<EmptyState icon={<BadgeCheck />} title="No licenses yet" hint="A license is issued when an appliance is activated." />}
+        >
+          <LicenseTable rows={rows ?? []} />
+        </ListState>
       </Card>
     </PageShell>
   );

@@ -16,20 +16,38 @@ export default function TeamPage() {
     <PageShell>
       <PageHeader
         title="Team"
-        description="The people who run Central. A customer's own users are managed on that customer's page."
+        description="The people who run Central, and the sign-in and retention rules that apply to them."
         help={
-          <HelpSection title="Roles">
-            <HelpList
-              items={[
-                <><strong>{roleLabel("platform_admin")}</strong>: everything, including activation and licenses.</>,
-                <><strong>{roleLabel("platform_support")}</strong>: can see everything and change nothing.</>,
-                <>A role change, disabling a person or resetting their password takes effect at once: their open sign-ins end.</>,
-              ]}
-            />
-          </HelpSection>
+          <>
+            <HelpSection title="Roles">
+              <HelpList
+                items={[
+                  <><strong>{roleLabel("platform_admin")}</strong>: everything, including activation and licenses.</>,
+                  <><strong>{roleLabel("platform_support")}</strong>: can see everything and change nothing.</>,
+                  <>A customer&apos;s own users are managed on that customer&apos;s page.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Sign-in limits">
+              <HelpList
+                items={[
+                  <>A sign-in ends after the set minutes without activity, and after the set hours however active the person is. A tab that is only open counts as inactive.</>,
+                  <>A role change, disabling a person or resetting their password or two-step sign-in takes effect at once: their open sign-ins end.</>,
+                  <>Repeated wrong passwords or authenticator codes lock the account for the lock time; the lock ends by itself.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Data retention">
+              <p>
+                Every hour, records older than the retention periods are deleted, or have the people in them removed.
+                A shorter period removes older records at the next run. Every change needs a reason and is recorded in the
+                audit log.
+              </p>
+            </HelpSection>
+          </>
         }
       />
-      <Card>
+      <Card className="overflow-hidden">
         <UsersManager
           base="/cloud/v1/team"
           roles={TEAM_ROLES}
@@ -40,8 +58,10 @@ export default function TeamPage() {
           noun="team member"
         />
       </Card>
-      <SessionLifetimeSetting canManage={can["team.manage"]} />
-      <DataRetentionSetting canManage={can["team.manage"]} />
+      <div className="grid gap-5 xl:grid-cols-2">
+        <SessionLifetimeSetting canManage={can["team.manage"]} />
+        <DataRetentionSetting canManage={can["team.manage"]} />
+      </div>
     </PageShell>
   );
 }

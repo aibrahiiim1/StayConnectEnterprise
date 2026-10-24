@@ -19,9 +19,9 @@ import { useModuleCatalog } from "@/lib/modules";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <fieldset className="space-y-3">
-      <legend className="mb-3 text-emphasis">{title}</legend>
-      {children}
+    <fieldset className="space-y-3 border-t border-border pt-4 first-of-type:border-t-0 first-of-type:pt-0">
+      <legend className="float-left mb-3 w-full text-emphasis">{title}</legend>
+      <div className="clear-both">{children}</div>
     </fieldset>
   );
 }
@@ -341,10 +341,10 @@ export function MoveDialog({
           ))}
         </Select>
       </Field>
-      <Callout tone="info">Its license is re-issued for the new site with the same terms.</Callout>
-      <p className="text-caption text-muted-foreground">
-        To give it to another customer, retire it, factory-reset it and activate it for that customer.
-      </p>
+      <Callout tone="info">
+        Its license is re-issued for the new site with the same terms. To give it to another customer, retire it,
+        factory-reset it and activate it for that customer.
+      </Callout>
       <Field label="Reason" required hint="Recorded in the audit log." error={fields.error("reason")}>
         <Input id={fields.id("reason")} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
       </Field>

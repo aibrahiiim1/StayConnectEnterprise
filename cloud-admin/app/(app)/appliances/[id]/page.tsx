@@ -9,25 +9,29 @@ import {
 import {
   api, ApiError, withStepUp, type ActivityEvent, type ApplianceDetail, type LicenseRow, type RequestOptions,
 } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { EmptyState } from "@/components/ui/empty-state";
+import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { DescriptionList } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { HistoryList, type HistoryItem } from "@/components/ui/history";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { Skeleton, Switch } from "@/components/ui/misc";
 import { LiveStatus, NotAvailable } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
+import { HelpList, HelpSection } from "@/components/help";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { ActivateDialog, MoveDialog, SetLicenseDialog } from "@/components/appliance-dialogs";
-import { ActivationBadge, ConnectionBadge, Fact, LicenseBadge } from "@/components/status-badge";
+import { ActivationBadge, ConnectionBadge, LicenseBadge } from "@/components/status-badge";
+import { PayloadView, hasPayload } from "@/components/record-view";
 import { usePermissions } from "@/lib/permissions";
 import { usePoll } from "@/lib/use-poll";
 import { saveFile } from "@/lib/download";
 import {
   actionTone, actionWords, activationInfo, ago, connectionSentence, daysUntil, formatDateTime, formatDay, formatLicenseDay,
-  licenseInfo,
+  licenseInfo, type Tone,
 } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { siteTypeLabel } from "@/lib/site-types";
@@ -45,6 +49,8 @@ type ReasonAction = {
 };
 
 const OFFLINE_VALID_HOURS = 168;
+const DANGER_GHOST = "text-destructive hover:bg-destructive-subtle hover:text-destructive";
+const LINK = "font-medium text-primary underline-offset-2 hover:underline";
 
 export default function AppliancePage({ params }: { params: { id: string } }) {
   const id = params.id;
@@ -63,6 +69,8 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [emergency, setEmergency] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
+  const [version, setVersion] = useState<LicenseRow | null>(null);
+  const [event, setEvent] = useState<GroupedEvent | null>(null);
 
   const load = useCallback(async (opts?: RequestOptions) => {
     setRefreshing(true);
@@ -98,11 +106,13 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
     return (
       <PageShell>
         <ErrorBanner err={err} />
-        <div className="space-y-4" aria-busy="true">
+        <div className="space-y-5" aria-busy="true">
           <span className="sr-only">Loading</span>
-          <Skeleton className="h-10 w-64" />
-          <Skeleton className="h-40" />
-          <Skeleton className="h-64" />
+          <Skeleton className="h-9 w-64" />
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Skeleton className="h-64 lg:col-span-2" />
+            <Skeleton className="h-64" />
+          </div>
         </div>
       </PageShell>
     );
@@ -203,6 +213,9 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
     },
   })[verb];
 
+  const openReason = (r: ReasonAction) => { setActionErr(null); setReasonAction(r); };
+  const openRetire = (now: boolean) => { setEmergency(now); setActionErr(null); setDialog("retire"); };
+
   const activationText = activationInfo(a.activation);
   // Missing acknowledgement or a passed deadline both mean retirement remains unconfirmed.
   const unconfirmed =
@@ -210,11 +223,47 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
     (a.retirement?.state === "terminal_delivery_failed" ||
       (!!a.retirement?.deadline && Date.parse(a.retirement.deadline) < Date.now()));
 
+  const versions = a.licenses ?? [];
+  const events = groupRepeats(a.events ?? []);
+
   return (
     <PageShell>
       <PageHeader
         title={<span className="font-mono">{a.serial}</span>}
+        helpTitle="Appliance"
+        meta={
+          <div className="flex flex-wrap items-center gap-1.5" aria-label="Status">
+            <ActivationBadge value={a.activation} />
+            <ConnectionBadge value={a.connection} />
+            <LicenseBadge value={lic.state} />
+          </div>
+        }
         description={[a.hostname, a.model, a.version ? `version ${a.version}` : null].filter(Boolean).join(" · ") || undefined}
+        help={
+          <>
+            <HelpSection title="Lifecycle">
+              <HelpList
+                items={[
+                  <><strong>Waiting for activation</strong>: registered itself; activate it to choose its customer, site and license.</>,
+                  <><strong>Activating</strong>: activated here; it picks up its certificate and license on its next contact.</>,
+                  <><strong>Retiring</strong> then <strong>Retired</strong>: taken out of service once the appliance confirms, or at once in an emergency.</>,
+                ]}
+              />
+            </HelpSection>
+            <HelpSection title="Without internet at the site">
+              <p>
+                Download the activation request from the appliance&apos;s Admin Console and import it on the Appliances page.
+                The activation package and an offline license file can then be downloaded here.
+              </p>
+            </HelpSection>
+            <HelpSection title="Repair">
+              <p>
+                <strong>Advanced</strong> reissues the certificate, rebinds the license to a new WAN MAC after a network card
+                change, or marks the appliance for replacement by new hardware.
+              </p>
+            </HelpSection>
+          </>
+        }
         actions={
           <LiveStatus
             updatedAt={updatedAt}
@@ -224,97 +273,82 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             error={!!err}
           />
         }
-      >
-        <div className="flex flex-wrap items-center gap-2" aria-label="Status">
-          <ActivationBadge value={a.activation} />
-          <ConnectionBadge value={a.connection} />
-          <LicenseBadge value={lic.state} />
-          {a.open_alerts ? (
-            <Link href="/system/security-alerts" className="text-caption font-medium text-destructive underline-offset-2 hover:underline">
-              {a.open_alerts} open security {a.open_alerts === 1 ? "alert" : "alerts"}
-            </Link>
-          ) : null}
-        </div>
-      </PageHeader>
+      />
 
       <ErrorBanner err={err} />
 
+      {a.open_alerts ? (
+        <Callout tone="danger" title={`${a.open_alerts} open security ${a.open_alerts === 1 ? "alert" : "alerts"}`}>
+          <Link href="/system/security-alerts" className="underline underline-offset-2">Review in Security alerts</Link>
+        </Callout>
+      ) : null}
+
       {a.activation === "waiting" && (
-        <Card className="border-info/40">
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle>Waiting for activation</CardTitle>
-              <CardDescription>
-                Registered {ago(a.registered_at)}. Activate it to choose its customer, site and license.
-              </CardDescription>
-            </div>
-            {can["appliances.activate"] && (
-              <Button onClick={() => setDialog("activate")}>Activate</Button>
-            )}
-          </CardHeader>
-          {a.holds_customer_id && (
-            <CardBody className="text-sm">
-              {a.holds_customer_name ? (
-                <>
-                  It still holds the data of <strong>{a.holds_customer_name}</strong> and can be activated only for
-                  that customer. For another customer, factory-reset it first.
-                </>
-              ) : (
-                <>
-                  It still holds the data of a customer that is no longer in Central. Factory-reset it before
-                  activating it.
-                </>
-              )}
-            </CardBody>
-          )}
-          {!can["appliances.activate"] && (
-            <CardBody className="text-sm text-muted-foreground">A platform admin can activate it.</CardBody>
-          )}
-        </Card>
+        <StateCard
+          tone="info"
+          title="Waiting for activation"
+          description={<>Registered {ago(a.registered_at)}. Activate it to choose its customer, site and license.</>}
+          action={can["appliances.activate"] ? <Button onClick={() => setDialog("activate")}>Activate</Button> : undefined}
+        >
+          {a.holds_customer_id ? (
+            a.holds_customer_name ? (
+              <>
+                It still holds the data of <strong>{a.holds_customer_name}</strong> and can be activated only for
+                that customer. For another customer, factory-reset it first.
+              </>
+            ) : (
+              <>
+                It still holds the data of a customer that is no longer in Central. Factory-reset it before
+                activating it.
+              </>
+            )
+          ) : !can["appliances.activate"] ? (
+            <span className="text-muted-foreground">A platform admin can activate it.</span>
+          ) : null}
+        </StateCard>
       )}
 
       {a.activation === "activating" && (
-        <Card className="border-info/40">
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle>{a.activating_on === "certificate_reissue" ? "Waiting for a new certificate" : "Activating"}</CardTitle>
-              <CardDescription>
-                {a.activating_on === "certificate_reissue" ? (
-                  <>
-                    Its certificate was revoked for reissue. The appliance requests a new one by itself the next time it
-                    contacts OneGate Central, and it is signed at once because the appliance is activated.
-                  </>
-                ) : a.activating_on === "license" ? (
-                  <>It holds its certificate and is waiting for a license.</>
-                ) : (
-                  activationText.explain
-                )}{" "}
-                This page checks every 5 seconds.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          {/* Offline activation requires an imported request; otherwise the package download will fail. */}
-          {canManage && a.activating_on !== "certificate_reissue" && (
-            <CardFooter>
-              {a.offline_request_pending ? (
+        <StateCard
+          tone="info"
+          title={a.activating_on === "certificate_reissue" ? "Waiting for a new certificate" : "Activating"}
+          description={
+            <>
+              {a.activating_on === "certificate_reissue" ? (
                 <>
-                  <span className="me-auto text-caption text-muted-foreground">
+                  Its certificate was revoked for reissue. The appliance requests a new one by itself the next time it
+                  contacts OneGate Central, and it is signed at once because the appliance is activated.
+                </>
+              ) : a.activating_on === "license" ? (
+                <>It holds its certificate and is waiting for a license.</>
+              ) : (
+                activationText.explain
+              )}{" "}
+              This page checks every 5 seconds.
+            </>
+          }
+          footer={
+            // Offline activation requires an imported request; otherwise the package download would only fail.
+            canManage && a.activating_on !== "certificate_reissue" ? (
+              a.offline_request_pending ? (
+                <>
+                  <span className="me-auto text-xs text-muted-foreground">
                     An offline activation request is on file. Download the package and upload it in the appliance&apos;s
                     Admin Console.
                   </span>
-                  <Button variant="secondary" size="sm" disabled={fileBusy} onClick={() => download("package")}>
-                    <Download /> Activation package
+                  <Button variant="secondary" size="sm" loading={fileBusy} onClick={() => download("package")}>
+                    {!fileBusy && <Download />} Activation package
                   </Button>
                 </>
               ) : (
-                <span className="text-caption text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   No internet at the site? Download the activation request from the appliance&apos;s Admin Console and
                   import it on the Appliances page; the activation package can then be downloaded here.
                 </span>
-              )}
-            </CardFooter>
-          )}
-        </Card>
+              )
+            ) : undefined
+          }
+        />
       )}
 
       {a.activation === "retiring" && (
@@ -331,11 +365,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           {canManage && (
             <>
               If it is lost, dead or cannot reach Central,{" "}
-              <Button
-                variant="link"
-                className="h-auto p-0 align-baseline"
-                onClick={() => { setEmergency(true); setActionErr(null); setDialog("retire"); }}
-              >
+              <Button variant="link" className="h-auto p-0 align-baseline" onClick={() => openRetire(true)}>
                 retire it now without waiting
               </Button>
               .
@@ -345,19 +375,17 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
       )}
 
       {a.activation === "retired" && (
-        <Card>
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle>Retired</CardTitle>
-              <CardDescription>{activationText.explain} Its history stays in the audit log.</CardDescription>
-            </div>
-            {canManage && (
+        <StateCard
+          title="Retired"
+          description={<>{activationText.explain} Its history stays in the audit log.</>}
+          action={
+            canManage ? (
               <Button variant="secondary" onClick={() => setDialog("delete")}>
                 <Trash2 /> Delete record
               </Button>
-            )}
-          </CardHeader>
-        </Card>
+            ) : undefined
+          }
+        />
       )}
 
       {a.replacement?.pending && (
@@ -367,22 +395,14 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           starts retiring: it shows <strong>Retiring</strong> until it confirms, then <strong>Retired</strong>.
         </Callout>
       )}
-      {a.replacement?.replaced_by && (
+      {(a.replacement?.replaced_by || a.replacement?.replaces) && (
         <p className="text-sm text-muted-foreground">
-          Replaced by{" "}
-          <Link href={`/appliances/${a.replacement.replaced_by}`} className="font-medium text-primary underline-offset-2 hover:underline">
-            its new appliance
-          </Link>
-          .
-        </p>
-      )}
-      {a.replacement?.replaces && (
-        <p className="text-sm text-muted-foreground">
-          Replaces{" "}
-          <Link href={`/appliances/${a.replacement.replaces}`} className="font-medium text-primary underline-offset-2 hover:underline">
-            the appliance previously at this site
-          </Link>
-          .
+          {a.replacement.replaced_by && (
+            <>Replaced by <Link href={`/appliances/${a.replacement.replaced_by}`} className={LINK}>its new appliance</Link>. </>
+          )}
+          {a.replacement.replaces && (
+            <>Replaces <Link href={`/appliances/${a.replacement.replaces}`} className={LINK}>the appliance previously at this site</Link>.</>
+          )}
         </p>
       )}
 
@@ -391,34 +411,39 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
           {a.activation !== "waiting" && (
             <Card>
               <CardHeader>
-                <div className="flex items-center gap-2.5">
-                  <CardTitle>License</CardTitle>
+                <CardTitle>License</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
                   <LicenseBadge value={lic.state} />
+                  {canLicense && (
+                    <Button variant={needsLicense ? "primary" : "secondary"} size="sm" onClick={() => setDialog("license")}>
+                      {hasLicense ? "Renew or change" : "Issue license"}
+                    </Button>
+                  )}
                 </div>
-                {canLicense && (
-                  <Button variant={needsLicense ? "primary" : "secondary"} size="sm" onClick={() => setDialog("license")}>
-                    {hasLicense ? "Renew or change" : "Issue license"}
-                  </Button>
-                )}
               </CardHeader>
               <CardBody>
                 {hasLicense ? (
-                  <dl className="grid gap-4 sm:grid-cols-3">
-                    <Fact label="Clients online at once">
-                      <span className="tabular">{(lic.max_concurrent_online_guests ?? current?.max_concurrent_online_guests)?.toLocaleString() ?? "—"}</span>
-                    </Fact>
-                    <Fact label="Valid until">
-                      {formatLicenseDay(lic.valid_until)}
-                      {lic.valid_until && <div className="text-caption text-muted-foreground">{daysLeftWords(lic.valid_until)}</div>}
-                    </Fact>
-                    <Fact label="Grace period">
-                      {current?.grace_period_days != null ? `${current.grace_period_days} days` : "—"}
-                      {lic.grace_ends_at && (
-                        <div className="text-caption text-muted-foreground">ends {formatLicenseDay(lic.grace_ends_at)}</div>
-                      )}
-                    </Fact>
-                    <Fact label="Modules">{modulesSummary(lic.modules ?? current?.modules)}</Fact>
-                  </dl>
+                  <DescriptionList
+                    layout="stacked"
+                    columns={2}
+                    items={[
+                      {
+                        label: "Clients online at once",
+                        value: <span className="tabular">{(lic.max_concurrent_online_guests ?? current?.max_concurrent_online_guests)?.toLocaleString() ?? "—"}</span>,
+                      },
+                      {
+                        label: "Valid until",
+                        value: formatLicenseDay(lic.valid_until),
+                        hint: lic.valid_until ? daysLeftWords(lic.valid_until) : undefined,
+                      },
+                      {
+                        label: "Grace period",
+                        value: current?.grace_period_days != null ? `${current.grace_period_days} days` : "—",
+                        hint: lic.grace_ends_at ? `ends ${formatLicenseDay(lic.grace_ends_at)}` : undefined,
+                      },
+                      { label: "Modules", value: modulesSummary(lic.modules ?? current?.modules) },
+                    ]}
+                  />
                 ) : (
                   <p className="text-sm text-muted-foreground">
                     {licenseInfo("none").explain}
@@ -429,23 +454,23 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
               {canLicense && hasLicense && lic.id && (
                 <CardFooter>
                   {(lic.state === "active" || lic.state === "expiring") && (
-                    <Button variant="ghost" size="sm" onClick={() => { setActionErr(null); setReasonAction(licenseAction("suspend")); }}>
+                    <Button variant="ghost" size="sm" onClick={() => openReason(licenseAction("suspend"))}>
                       <Pause /> Suspend
                     </Button>
                   )}
                   {lic.state === "suspended" && (
-                    <Button variant="secondary" size="sm" onClick={() => { setActionErr(null); setReasonAction(licenseAction("resume")); }}>
+                    <Button variant="secondary" size="sm" onClick={() => openReason(licenseAction("resume"))}>
                       <Play /> Resume
                     </Button>
                   )}
                   {lic.state !== "revoked" && (
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => { setActionErr(null); setReasonAction(licenseAction("revoke")); }}>
+                    <Button variant="ghost" size="sm" className={DANGER_GHOST} onClick={() => openReason(licenseAction("revoke"))}>
                       <Ban /> Revoke
                     </Button>
                   )}
                   {lic.state !== "revoked" && (
-                    <Button variant="ghost" size="sm" className="ms-auto" disabled={fileBusy} onClick={() => download("license")}>
-                      <Download /> Offline license file
+                    <Button variant="ghost" size="sm" className="ms-auto" loading={fileBusy} onClick={() => download("license")}>
+                      {!fileBusy && <Download />} Offline license file
                     </Button>
                   )}
                 </CardFooter>
@@ -453,95 +478,109 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             </Card>
           )}
 
-          {(a.licenses?.length ?? 0) > 0 && (
-            <Card>
-              <CardHeader><CardTitle>License history</CardTitle></CardHeader>
-              <Table aria-label="License history">
-                <THead>
-                  <TR>
-                    <TH>Version</TH><TH>State</TH><TH className="hidden sm:table-cell">Clients</TH>
-                    <TH>Valid until</TH><TH className="hidden md:table-cell">Issued</TH>
-                  </TR>
-                </THead>
-                <tbody>
-                  {a.licenses!.map((l) => (
-                    <TR key={l.id}>
-                      <TD className="tabular">v{l.license_version ?? "—"}</TD>
-                      <TD><LicenseBadge value={l.state} /></TD>
-                      <TD className="hidden tabular sm:table-cell">{l.max_concurrent_online_guests?.toLocaleString() ?? "—"}</TD>
-                      <TD>{formatLicenseDay(l.valid_until)}</TD>
-                      <TD className="hidden text-muted-foreground md:table-cell">{formatDay(l.issued_at)}</TD>
-                    </TR>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
+          {versions.length > 0 && (
+            <SectionCard
+              title="License versions"
+              description="Every license issued to this appliance, newest first."
+              flush
+            >
+              <HistoryList
+                label="License versions"
+                items={versions.map((l): HistoryItem => ({
+                  id: l.id,
+                  title: `Version ${l.license_version ?? "—"}`,
+                  badge: <LicenseBadge value={l.state} />,
+                  summary: [
+                    l.max_concurrent_online_guests != null ? `${l.max_concurrent_online_guests.toLocaleString()} clients` : null,
+                    `until ${formatLicenseDay(l.valid_until)}`,
+                    modulesSummary(l.modules),
+                  ].filter(Boolean).join(" · "),
+                  at: l.issued_at ? `Issued ${formatDay(l.issued_at)}` : undefined,
+                  tone: licenseTone(l.state),
+                }))}
+                selectedId={version?.id}
+                onSelect={(it) => setVersion(versions.find((l) => l.id === it.id) ?? null)}
+              />
+            </SectionCard>
           )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Activity</CardTitle>
-              {can["system.read"] && (
-                <Link href={`/system/audit?appliance_id=${a.id}`} className="text-sm text-primary underline-offset-2 hover:underline">
+          <SectionCard
+            title="Activity"
+            flush
+            actions={
+              can["system.read"] ? (
+                <Link href={`/system/audit?appliance_id=${a.id}`} className={cn("text-sm", LINK)}>
                   Full audit log
                 </Link>
-              )}
-            </CardHeader>
-            <ActivityList events={a.events ?? []} />
-          </Card>
+              ) : undefined
+            }
+          >
+            <HistoryList
+              label="Recent activity"
+              emptyLabel="No activity yet."
+              items={events.map((e, i): HistoryItem => ({
+                id: String(i),
+                title: (
+                  <>
+                    {actionWords(e.action)}
+                    {e.count > 1 && <span className="ms-1.5 font-normal text-muted-foreground">×{e.count}</span>}
+                  </>
+                ),
+                actor: e.actor_email ?? e.actor ?? undefined,
+                at: <time dateTime={e.ts ?? e.at} title={formatDateTime(e.ts ?? e.at)}>{ago(e.ts ?? e.at)}</time>,
+                summary: e.reason ?? e.detail ?? undefined,
+                tone: historyTone(actionTone(e.action)),
+              }))}
+              onSelect={(it) => setEvent(events[Number(it.id)] ?? null)}
+            />
+          </SectionCard>
         </div>
 
         <div className="min-w-0 space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle>Installed at</CardTitle>
-              {canManage && a.activation === "activated" && (
+          <SectionCard
+            title="Installed at"
+            actions={
+              canManage && a.activation === "activated" ? (
                 <Button variant="ghost" size="sm" onClick={() => setDialog("move")}>
                   <ArrowRightLeft /> Move
                 </Button>
-              )}
-            </CardHeader>
-            <CardBody>
-              <dl className="space-y-3">
-                <Fact label="Customer">
-                  {a.customer_id ? (
-                    <Link href={`/customers/${a.customer_id}`} className="font-medium text-primary underline-offset-2 hover:underline">
-                      {a.customer_name ?? "Customer"}
-                    </Link>
-                  ) : "Not assigned yet"}
-                </Fact>
-                <Fact label="Site">
-                  {a.site_name ?? "—"}
-                  {a.site_name && <div className="text-caption text-muted-foreground">{siteTypeLabel(a.site_type)}</div>}
-                </Fact>
-              </dl>
-            </CardBody>
-          </Card>
+              ) : undefined
+            }
+          >
+            <DescriptionList
+              items={[
+                {
+                  label: "Customer",
+                  value: a.customer_id ? (
+                    <Link href={`/customers/${a.customer_id}`} className={LINK}>{a.customer_name ?? "Customer"}</Link>
+                  ) : "Not assigned yet",
+                },
+                { label: "Site", value: a.site_name ?? null, hint: a.site_name ? siteTypeLabel(a.site_type) : undefined },
+              ]}
+            />
+          </SectionCard>
 
           <Card>
             <CardHeader><CardTitle>Appliance</CardTitle></CardHeader>
-            <CardBody>
-              <dl className="space-y-3">
-                <Fact label="Connection">{connectionSentence(a)}</Fact>
-                <Fact label="Registered">{formatDateTime(a.registered_at)}</Fact>
-                {a.activated_at && <Fact label="Activated">{formatDateTime(a.activated_at)}</Fact>}
-                {a.last_public_ip && <Fact label="Last address"><span className="font-mono text-xs">{a.last_public_ip}</span></Fact>}
-                {a.version && <Fact label="Software version">{a.version}</Fact>}
-              </dl>
+            <CardBody className="py-2">
+              <DescriptionList
+                items={[
+                  { label: "Connection", value: connectionSentence(a) },
+                  { label: "Registered", value: formatDateTime(a.registered_at) },
+                  { label: "Activated", value: formatDateTime(a.activated_at), hidden: !a.activated_at },
+                  { label: "Last address", value: <span className="font-mono text-xs">{a.last_public_ip}</span>, hidden: !a.last_public_ip },
+                  { label: "Software version", value: a.version, hidden: !a.version },
+                ]}
+              />
             </CardBody>
             {canManage && (a.activation === "activated" || a.activation === "activating" || a.activation === "waiting") && (
               <CardFooter>
                 {a.activation === "activated" || a.activation === "activating" ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => { setEmergency(false); setActionErr(null); setDialog("retire"); }}
-                  >
+                  <Button variant="ghost" size="sm" className={DANGER_GHOST} onClick={() => openRetire(false)}>
                     <Power /> Retire appliance
                   </Button>
                 ) : (
-                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDialog("delete")}>
+                  <Button variant="ghost" size="sm" className={DANGER_GHOST} onClick={() => setDialog("delete")}>
                     <Trash2 /> Delete record
                   </Button>
                 )}
@@ -554,10 +593,70 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             canManage={canManage}
             fileBusy={fileBusy}
             onPackage={() => download("package")}
-            onAction={(r) => { setActionErr(null); setReasonAction(r); }}
+            onAction={openReason}
           />
         </div>
       </div>
+
+      <DetailsDrawer
+        open={!!version}
+        onOpenChange={(v) => { if (!v) setVersion(null); }}
+        eyebrow="License version"
+        title={`Version ${version?.license_version ?? "—"}`}
+        description={a.serial}
+        badges={version ? (
+          <>
+            <LicenseBadge value={version.state} />
+            {version.id === lic.id && <Badge tone="accent">Current</Badge>}
+          </>
+        ) : undefined}
+      >
+        {version && (
+          <DetailsSection title="Terms">
+            <DescriptionList
+              items={[
+                { label: "Clients online at once", value: version.max_concurrent_online_guests?.toLocaleString() ?? null },
+                { label: "Valid from", value: formatLicenseDay(version.valid_from), hidden: !version.valid_from },
+                { label: "Valid until", value: formatLicenseDay(version.valid_until) },
+                { label: "Grace period", value: version.grace_period_days != null ? `${version.grace_period_days} days` : null },
+                { label: "Grace ends", value: formatLicenseDay(version.grace_ends_at), hidden: !version.grace_ends_at },
+                { label: "Modules", value: modulesSummary(version.modules) },
+                { label: "Issued", value: formatDateTime(version.issued_at) },
+              ]}
+            />
+          </DetailsSection>
+        )}
+      </DetailsDrawer>
+
+      <DetailsDrawer
+        open={!!event}
+        onOpenChange={(v) => { if (!v) setEvent(null); }}
+        eyebrow="Activity"
+        title={event ? actionWords(event.action) : ""}
+        description={a.serial}
+      >
+        {event && (
+          <>
+            <DetailsSection title="Event">
+              <DescriptionList
+                items={[
+                  { label: "When", value: formatDateTime(event.ts ?? event.at) },
+                  { label: "Repeated", value: `${event.count} times, first ${formatDateTime(event.first_at)}`, hidden: event.count < 2 },
+                  { label: "By", value: event.actor_email ?? event.actor ?? null },
+                  { label: "Reason", value: event.reason ?? null, hidden: !event.reason },
+                  { label: "Detail", value: event.detail ?? null, hidden: !event.detail },
+                  { label: "Action", value: <span className="font-mono text-xs">{event.action}</span> },
+                ]}
+              />
+            </DetailsSection>
+            {hasPayload(event.payload) && (
+              <DetailsSection title="Recorded details">
+                <PayloadView payload={event.payload} />
+              </DetailsSection>
+            )}
+          </>
+        )}
+      </DetailsDrawer>
 
       {dialog === "activate" && (
         <ActivateDialog appliance={a} open onOpenChange={(v) => { if (!v) setDialog(null); }} onDone={load} />
@@ -595,7 +694,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
             <Switch checked={emergency} onCheckedChange={setEmergency} label="Emergency retire" />
             <span>
               <span className="font-medium">Emergency: don&apos;t wait for the appliance</span>
-              <span className="block text-caption text-muted-foreground">For a lost, stolen or dead appliance.</span>
+              <span className="block text-xs text-muted-foreground">For a lost, stolen or dead appliance.</span>
             </span>
           </label>
         )}
@@ -638,6 +737,40 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
   );
 }
 
+/** The lifecycle notice at the top of the page: a titled card, tinted for a state in progress. */
+function StateCard({
+  title, description, action, tone, footer, children,
+}: {
+  title: string;
+  description: React.ReactNode;
+  action?: React.ReactNode;
+  tone?: "info";
+  footer?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Card className={cn(tone === "info" && "border-info/40")}>
+      <CardHeader className={cn(!children && !footer && "border-b-0")}>
+        <div className="min-w-0">
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+        {action}
+      </CardHeader>
+      {children && <CardBody className="text-sm">{children}</CardBody>}
+      {footer && <CardFooter>{footer}</CardFooter>}
+    </Card>
+  );
+}
+
+function historyTone(t: Tone): HistoryItem["tone"] {
+  return t === "default" ? "neutral" : t;
+}
+
+function licenseTone(state: string): HistoryItem["tone"] {
+  return historyTone(licenseInfo(state).tone);
+}
+
 function daysLeftWords(until: string): string {
   const days = Math.ceil((Date.parse(until) - Date.now()) / 86_400_000);
   if (Number.isNaN(days)) return "";
@@ -662,47 +795,6 @@ function groupRepeats(events: ActivityEvent[]): GroupedEvent[] {
   return out;
 }
 
-function ActivityList({ events }: { events: ActivityEvent[] }) {
-  if (events.length === 0) return <EmptyState title="No activity yet" className="py-8" />;
-  return (
-    <ol className="divide-y divide-border" aria-label="Recent activity">
-      {groupRepeats(events).map((e, i) => {
-        const at = e.ts ?? e.at;
-        const tone = actionTone(e.action);
-        return (
-          <li key={i} className="flex gap-3 px-5 py-3">
-            <span
-              className={cn(
-                "mt-1.5 size-2 shrink-0 rounded-full",
-                tone === "ok" ? "bg-success" : tone === "warn" ? "bg-warning" : tone === "err" ? "bg-destructive" : "bg-muted-foreground/50",
-              )}
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-sm font-medium">
-                  {actionWords(e.action)}
-                  {e.count > 1 && (
-                    <span className="ml-1.5 font-normal text-muted-foreground" title={`${e.count} times, first ${formatDateTime(e.first_at)}`}>
-                      ×{e.count}
-                    </span>
-                  )}
-                </span>
-                <time className="text-caption text-muted-foreground" dateTime={at} title={formatDateTime(at)}>{ago(at)}</time>
-              </div>
-              {(e.actor_email || e.actor || e.reason || e.detail) && (
-                <div className="text-caption text-muted-foreground">
-                  {[e.actor_email ?? e.actor, e.reason ?? e.detail].filter(Boolean).join(" · ")}
-                </div>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
 function Advanced({
   a, canManage, fileBusy, onPackage, onAction,
 }: {
@@ -714,12 +806,13 @@ function Advanced({
 }) {
   const live = a.activation === "activated" || a.activation === "activating";
   const certDays = daysUntil(a.identity?.cert_not_after);
+  const mono = (v?: string | null) => (v ? <span className="break-all font-mono text-xs">{v}</span> : null);
   return (
     <details className="group rounded-lg border border-border bg-card shadow-card">
       <summary
         className={cn(
-          "flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-5 py-4 text-emphasis",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden",
+          "flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-5 py-3.5 text-emphasis",
+          "hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden",
         )}
       >
         Advanced
@@ -727,9 +820,9 @@ function Advanced({
       </summary>
       <div className="space-y-5 border-t border-border px-5 py-4">
         {canManage && live && (
-          <div className="space-y-2">
-            <div className="text-label">Repair</div>
-            <div className="flex flex-col items-start gap-1">
+          <section className="space-y-1.5">
+            <h3 className="text-label">Repair</h3>
+            <div className="-mx-2 flex flex-col items-start">
               <Button variant="ghost" size="sm" onClick={() => onAction({
                 title: "Reissue certificate",
                 description: "Issues the appliance a fresh certificate. Use it when the appliance reports a certificate problem.",
@@ -765,44 +858,47 @@ function Advanced({
                 </Button>
               )}
             </div>
-          </div>
+          </section>
         )}
 
-        <div className="space-y-2">
-          <div className="text-label">Technical details</div>
-          <dl className="grid gap-3 text-xs">
-            <Tech label="Appliance ID" value={a.id} />
-            <Tech label="WAN MAC" value={a.identity?.wan_mac} />
-            <Tech label="LAN MAC" value={a.identity?.lan_mac} />
-            <Tech label="Hardware fingerprint" value={a.identity?.hardware_fingerprint} />
-            <Tech label="Identity key fingerprint" value={a.identity?.identity_key_fingerprint} />
-            <Tech label="Certificate fingerprint" value={a.identity?.cert_fingerprint} />
-            <Tech
-              label="Certificate expires"
-              value={a.identity?.cert_not_after ? `${formatDay(a.identity.cert_not_after)}${certDays !== null ? ` (${certDays} days)` : ""}` : null}
-              plain
-            />
-            <Tech
-              label="Assignment version"
-              value={a.assignment?.version != null
-                ? `v${a.assignment.version}${a.assignment.acked_version != null ? ` · appliance confirmed v${a.assignment.acked_version}` : ""}`
-                : null}
-              plain
-            />
-            <Tech label="Assignment signing key" value={a.assignment?.signer_key_id} />
-            <Tech label="License version" value={a.license?.license_version != null ? `v${a.license.license_version}` : null} plain />
-          </dl>
-        </div>
+        <section className="space-y-1.5">
+          <h3 className="text-label">Identity and certificate</h3>
+          <DescriptionList
+            className="text-xs"
+            items={[
+              { label: "Appliance ID", value: mono(a.id) },
+              { label: "WAN MAC", value: mono(a.identity?.wan_mac) },
+              { label: "LAN MAC", value: mono(a.identity?.lan_mac) },
+              { label: "Hardware fingerprint", value: mono(a.identity?.hardware_fingerprint) },
+              { label: "Identity key fingerprint", value: mono(a.identity?.identity_key_fingerprint) },
+              { label: "Certificate fingerprint", value: mono(a.identity?.cert_fingerprint) },
+              {
+                label: "Certificate expires",
+                value: a.identity?.cert_not_after
+                  ? `${formatDay(a.identity.cert_not_after)}${certDays !== null ? ` (${certDays} days)` : ""}`
+                  : null,
+              },
+            ]}
+          />
+        </section>
+
+        <section className="space-y-1.5">
+          <h3 className="text-label">Assignment and license</h3>
+          <DescriptionList
+            className="text-xs"
+            items={[
+              {
+                label: "Assignment version",
+                value: a.assignment?.version != null
+                  ? `v${a.assignment.version}${a.assignment.acked_version != null ? ` · appliance confirmed v${a.assignment.acked_version}` : ""}`
+                  : null,
+              },
+              { label: "Assignment signing key", value: mono(a.assignment?.signer_key_id) },
+              { label: "License version", value: a.license?.license_version != null ? `v${a.license.license_version}` : null },
+            ]}
+          />
+        </section>
       </div>
     </details>
-  );
-}
-
-function Tech({ label, value, plain }: { label: string; value?: string | null; plain?: boolean }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("break-all", !plain && "font-mono")}>{value || "—"}</dd>
-    </div>
   );
 }
