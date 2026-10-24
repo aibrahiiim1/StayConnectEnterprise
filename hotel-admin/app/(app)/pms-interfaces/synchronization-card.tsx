@@ -230,7 +230,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4 border-b border-border py-1.5 last:border-0">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right font-medium tabular">{value}</dd>
+      <dd className="text-end font-medium tabular">{value}</dd>
     </div>
   );
 }

@@ -4,7 +4,7 @@
 // the authority; this only catches what is certainly wrong before Create.
 
 import { useState } from "react";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, FieldGrid, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
 import { KeyValueGrid } from "@/components/ui/data";
 import type { FormValues, PmsProvider, PmsProviderField } from "@/lib/api/pms-connections";
@@ -30,11 +30,11 @@ export function ProviderFieldsForm({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <FieldGrid cols={2}>
         {main.map((f) => (
           <FieldInput key={f.key} f={f} value={values[f.key]} error={errors[f.key]} onChange={onChange} disabled={disabled} />
         ))}
-      </div>
+      </FieldGrid>
       {folded.length > 0 && (
         <div>
           <button

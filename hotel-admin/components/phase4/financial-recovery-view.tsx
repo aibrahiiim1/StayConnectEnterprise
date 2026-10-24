@@ -4,7 +4,7 @@
 // Each decision requires a password and written evidence; read-only roles cannot submit one.
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleCheck, LifeBuoy, ShieldAlert } from "lucide-react";
+import { CircleCheck, ShieldAlert } from "lucide-react";
 import {
   api,
   RECOVERY_RESOLUTIONS,
@@ -16,7 +16,7 @@ import {
   surfaceUnavailableMessage,
 } from "@/lib/api";
 import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
@@ -149,8 +149,6 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
 
   const header = (
     <PageHeader
-      icon={<LifeBuoy />}
-      eyebrow="Hotel"
       title="Recovery"
       description="After a restore, settle in-flight payments before charging resumes. Nothing is re-sent."
       help={
@@ -200,10 +198,10 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
         <ErrorBanner err={err} className="mb-0" />
         {note && <Callout tone="success">{note}</Callout>}
         <Card>
-          <CardBody className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
-            <CircleCheck className="size-6 shrink-0 text-success" aria-hidden />
+          <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <CircleCheck className="size-5 shrink-0 text-success" aria-hidden />
             <div className="min-w-0 space-y-1">
-              <Badge tone="ok" dot>Not in recovery</Badge>
+              <StatusBadge tone="ok">Not in recovery</StatusBadge>
               <p className="text-sm text-muted-foreground">
                 Financial execution is running normally.
               </p>
@@ -228,9 +226,9 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       {/* The recovery banner is standing state, so it does not trigger an alert announcement. */}
       <section className="overflow-hidden rounded-lg border border-destructive/40 bg-card shadow-card">
         <div className="flex flex-col gap-3 bg-destructive-subtle px-5 py-4 sm:flex-row sm:items-start">
-          <ShieldAlert className="size-6 shrink-0 text-destructive-subtle-foreground" aria-hidden />
+          <ShieldAlert className="size-5 shrink-0 text-destructive-subtle-foreground" aria-hidden />
           <div className="min-w-0 space-y-2 text-sm text-foreground">
-            <Badge tone="err" dot>Financial recovery</Badge>
+            <StatusBadge tone="err">Financial recovery</StatusBadge>
             <p>
               Money movement is held for this site. Nothing has been replayed and nothing will be: after a
               restore, a correct retry is how a guest gets charged twice.
@@ -267,7 +265,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
 
       {zq.length > 0 ? (
         <Card>
-          <CardHeader className="block space-y-1">
+          <CardHeader className="block space-y-0.5">
             <CardTitle>Never transmitted ({zq.length})</CardTitle>
             <CardDescription className="max-w-3xl">
               These charges were held before anything was sent to the PMS, so there is no attempt to review
@@ -281,7 +279,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                   <span className="text-emphasis tabular">{money(z.amount_minor, z.currency, z.currency_exponent)}</span>
                   <MonoId value={z.posting_id} title="Posting reference" />
                   {z.retry_authorized_attempt_no !== null ? (
-                    <Badge tone="ok" dot>Attempt {z.retry_authorized_attempt_no} authorized</Badge>
+                    <StatusBadge tone="ok">Attempt {z.retry_authorized_attempt_no} authorized</StatusBadge>
                   ) : z.hold_resolution ? (
                     <Badge tone={z.eligible_for_retry_authorization ? "warn" : "default"}>
                       {humanize(z.hold_resolution)}
@@ -325,7 +323,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                         />
                       </Field>
                       <Button
-                        className="h-10"
+                        className="h-9"
                         disabled={busy === z.posting_id}
                         onClick={() => void authorizeZeroAttempt(z)}
                       >
@@ -377,7 +375,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
         </Card>
       ) : (
         <Card>
-          <CardHeader className="block space-y-1">
+          <CardHeader className="block space-y-0.5">
             <CardTitle>Held work ({open.length})</CardTitle>
             <CardDescription>
               For each item, record what you established and how. Recording a decision never re-sends anything.
@@ -395,7 +393,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                 {canAct && (
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
                     <Field
-                      label={`Conclusion for this ${KIND_TEXT[h.work_kind].toLowerCase()}`}
+                      label={`Conclusion for this ${h.work_kind === "POSTING_OUTBOX" ? "PMS posting" : KIND_TEXT[h.work_kind].toLowerCase()}`}
                       htmlFor={`res-${h.hold_id}`}
                     >
                       <Select
@@ -419,7 +417,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
                         onChange={(e) => setEvidence({ ...evidence, [h.hold_id]: e.target.value })}
                       />
                     </Field>
-                    <Button className="h-10" disabled={busy === h.hold_id} onClick={() => void resolve(h)}>
+                    <Button className="h-9" variant="secondary" disabled={busy === h.hold_id} onClick={() => void resolve(h)}>
                       {busy === h.hold_id ? "Recording…" : "Record"}
                     </Button>
                   </div>

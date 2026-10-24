@@ -5,10 +5,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { StayEvent } from "@/lib/api";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -16,17 +16,18 @@ import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Explain } from "@/components/ui/tooltip";
 import { HelpList, HelpSection } from "@/components/help";
 import { MonoId, SkeletonRows } from "@/components/ui/misc";
-import { DetailDialog } from "@/components/ui/dialog";
-import { DList } from "@/components/ui/misc";
-import { Pagination, SearchInput } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { DescriptionList, Pagination, SearchInput } from "@/components/ui/data";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatRelative, formatDate } from "@/lib/utils";
-import { Inbox, Send, AlertTriangle, CheckCircle2, Unlink } from "lucide-react";
+import { Send } from "lucide-react";
 import { useOperatorRoles } from "@/lib/whoami-context";
 import { canWrite } from "@/lib/roles";
 import { DECISION_WORDS, ReviewDecisionActions, ReviewExpirySettingCard } from "@/components/phase3/review-decisions";
 
-const STATUS_WORDS: Record<string, { label: string; tone: "ok" | "warn" | "err" | "default" | "info"; meaning: string }> = {
+const STATUS_WORDS: Record<string, { label: string; tone: Tone; meaning: string }> = {
   APPLIED: {
     label: "Applied", tone: "ok",
     meaning: "The guest list was updated from this message.",
@@ -101,6 +102,17 @@ type StayEventsResp = PagedFields & {
   };
 };
 
+function statusOf(e: StayEvent) {
+  const base = STATUS_WORDS[e.processing_status] ?? {
+    label: e.processing_status.replace(/_/g, " ").toLowerCase(),
+    tone: "default" as const,
+    meaning: "",
+  };
+  return e.processing_status === "MANUAL_REVIEW" && e.decided
+    ? { ...base, label: DECISION_WORDS[e.decision ?? ""] ?? "Decided", tone: "default" as const }
+    : base;
+}
+
 export default function StayEventsPage() {
   // Defaults to everything, not the review queue: an empty "Nothing to review" table reads as a dead feed.
   const [status, setStatus] = useState("");
@@ -135,13 +147,12 @@ export default function StayEventsPage() {
     unmatched: sum?.unmatched ?? 0,
   };
   const newest = sum?.newest_received_at;
+  const detailStatus = detail ? STATUS_WORDS[detail.processing_status] : undefined;
 
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Hotel"
         title="PMS activity"
-        icon={<Inbox />}
         description="Messages from the PMS and whether the guest list was updated from them."
         help={
           <>
@@ -173,30 +184,21 @@ export default function StayEventsPage() {
         }
       />
 
-      <ErrorBanner err={err} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid cols={4}>
         <StatCard
           label="Last message"
-          value={<span className="text-lg">{newest ? formatRelative(newest) : "—"}</span>}
-          icon={<Send />}
+          value={newest ? formatRelative(newest) : "—"}
           tone={!sum ? "default" : newest ? "ok" : "warn"}
-          hint={
-            !sum
-              ? undefined
-              : newest
-                ? "The connection is carrying traffic."
-                : "Nothing has arrived. Check the PMS connection."
-          }
+          hint={!sum ? undefined : newest ? "The connection is carrying traffic" : "Nothing has arrived yet"}
         />
-        <StatCard icon={<CheckCircle2 />} label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} tone="ok" hint="Guest list updated" />
-        <StatCard icon={<AlertTriangle />}
+        <StatCard label="Applied" value={sum ? counts.applied.toLocaleString() : "—"} hint="Guest list updated" />
+        <StatCard
           label="Needs a decision"
           value={sum ? counts.review.toLocaleString() : "—"}
           tone={counts.review > 0 ? "warn" : "default"}
           hint="Stopped rather than guessed"
         />
-        <StatCard icon={<Unlink />}
+        <StatCard
           label="Not matched to a stay"
           value={sum ? counts.unmatched.toLocaleString() : "—"}
           tone={counts.unmatched > 0 ? "warn" : "default"}
@@ -207,14 +209,11 @@ export default function StayEventsPage() {
             </Explain>
           }
         />
-      </div>
-
-      {canDecide && <ReviewExpirySettingCard />}
+      </StatGrid>
 
       {counts.review > 0 && status !== "UNDECIDED" && (
         <Callout tone="warning" title={`${counts.review} message${counts.review === 1 ? "" : "s"} need a decision`}>
-          These could not be applied without guessing, so the appliance stopped. Until they are resolved the guest
-          list may not reflect what the front desk has done.
+          Until they are resolved the guest list may not reflect what the front desk has done.
           {canDecide ? " Open one to acknowledge it or link it to a stay." : " The site admin or IT manager decides them."}{" "}
           <Button variant="link" size="xs" className="h-auto p-0 font-medium" onClick={() => setStatus("UNDECIDED")}>
             Show only those
@@ -222,34 +221,38 @@ export default function StayEventsPage() {
         </Callout>
       )}
 
-      <Card>
-        <CardBody className="border-b border-border py-3">
-          <Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          search={
             <SearchInput
               value={query}
               onChange={setQuery}
               placeholder="Room, guest or reservation…"
               label="Search PMS activity"
-              className="sm:max-w-xs"
               delay={300}
             />
+          }
+          filters={
             <Select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               aria-label="Filter by what happened to the message"
-              className="w-full sm:w-64"
+              className="h-9 w-full sm:w-64"
             >
               {FILTERS.map((f) => (
                 <option key={f.value || "all"} value={f.value}>{f.label}</option>
               ))}
             </Select>
-          </Toolbar>
-        </CardBody>
-        <CardBody className={cn("p-0", refreshing && refreshingClass)}>
+          }
+        />
+        {err !== null && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
+        <div className={cn(refreshing && refreshingClass)}>
           {rows === null ? (
             <SkeletonRows rows={6} cols={5} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Send />}
               title={
                 needle
@@ -258,14 +261,10 @@ export default function StayEventsPage() {
                     ? "No messages in this state"
                     : "The PMS has not sent anything"
               }
-              hint={
-                !needle && !status
-                  ? "If the front desk has checked guests in since the connection came up, this is worth investigating on the PMS connection screen."
-                  : undefined
-              }
+              hint={!needle && !status ? "If guests have checked in since the connection came up, check the PMS connection." : undefined}
             />
           ) : (
-            <Table>
+            <Table label="PMS messages">
               <THead>
                 <TR>
                   <TH>About</TH>
@@ -278,17 +277,11 @@ export default function StayEventsPage() {
               </THead>
               <TBody>
                 {rows.map((e) => {
-                  const base = STATUS_WORDS[e.processing_status] ?? {
-                    label: e.processing_status.replace(/_/g, " ").toLowerCase(),
-                    tone: "default" as const,
-                    meaning: "",
-                  };
-                  const st = e.processing_status === "MANUAL_REVIEW" && e.decided
-                    ? { ...base, label: DECISION_WORDS[e.decision ?? ""] ?? "Decided", tone: "default" as const }
-                    : base;
+                  const st = statusOf(e);
+                  const subject = e.room ? `room ${e.room}` : "unmatched message";
                   return (
-                    <TR key={e.id}>
-                      <TD>
+                    <TR key={e.id} onClick={() => setDetail(e)}>
+                      <TD className="max-w-[16rem]">
                         {e.room ? (
                           <>
                             <div className="font-medium">Room {e.room}</div>
@@ -299,7 +292,7 @@ export default function StayEventsPage() {
                         ) : (
                           <>
                             <div className="text-sm text-muted-foreground">Not matched to a stay</div>
-                            <div className="text-2xs text-muted-foreground">
+                            <div className="truncate text-2xs text-muted-foreground">
                               {e.external_reservation_id ?? e.message_reservation
                                 ? `Reservation ${e.external_reservation_id ?? e.message_reservation}`
                                 : e.message_room
@@ -309,26 +302,24 @@ export default function StayEventsPage() {
                           </>
                         )}
                       </TD>
-                      <TD>
+                      <TD nowrap>
                         <div className="text-sm">{typeWords(e.event_type)}</div>
                         {e.pms_interface_label && (
                           <div className="text-2xs text-muted-foreground">{e.pms_interface_label}</div>
                         )}
                       </TD>
-                      <TD>
-                        <Badge tone={st.tone}>{st.label}</Badge>
+                      <TD nowrap>
+                        <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
                         {e.review_code && (
-                          <div className="mt-0.5 text-2xs text-muted-foreground">
-                            {reviewCodeWords(e.review_code)}
-                          </div>
+                          <div className="mt-0.5 text-2xs text-muted-foreground">{reviewCodeWords(e.review_code)}</div>
                         )}
                       </TD>
-                      <TD className="hidden text-sm text-muted-foreground lg:table-cell" title={e.pms_timestamp_utc ? formatDate(e.pms_timestamp_utc) : undefined}>
+                      <TD nowrap muted className="hidden lg:table-cell" title={e.pms_timestamp_utc ? formatDate(e.pms_timestamp_utc) : undefined}>
                         {e.pms_timestamp_utc ? formatRelative(e.pms_timestamp_utc) : "—"}
                       </TD>
-                      <TD className="hidden text-sm text-muted-foreground md:table-cell" title={formatDate(e.received_at)}>{formatRelative(e.received_at)}</TD>
-                      <TD className="text-end">
-                        <Button size="sm" variant="ghost" onClick={() => setDetail(e)}>Details</Button>
+                      <TD nowrap muted className="hidden md:table-cell" title={formatDate(e.received_at)}>{formatRelative(e.received_at)}</TD>
+                      <TD className="w-0">
+                        <RowActions subject={subject} primary={{ label: "Details", onSelect: () => setDetail(e) }} />
                       </TD>
                     </TR>
                   );
@@ -336,10 +327,11 @@ export default function StayEventsPage() {
               </TBody>
             </Table>
           )}
-        </CardBody>
+        </div>
         {rows && rows.length > 0 && (
-          <CardBody className="border-t border-border py-3">
+          <CardFooter>
             <Pagination
+              className="w-full"
               offset={list.offset}
               limit={list.pageSize}
               shown={rows.length}
@@ -347,16 +339,19 @@ export default function StayEventsPage() {
               hasMore={list.hasMore}
               onChange={list.setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
 
-      <DetailDialog
+      {canDecide && <ReviewExpirySettingCard />}
+
+      <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
+        eyebrow="PMS message"
         title={detail?.room ? `Room ${detail.room}` : "PMS message"}
         description={detail ? typeWords(detail.event_type) : undefined}
-        size="md"
+        badges={detail ? <StatusBadge tone={statusOf(detail).tone}>{statusOf(detail).label}</StatusBadge> : undefined}
       >
         {detail && (
           <>
@@ -366,43 +361,46 @@ export default function StayEventsPage() {
                   : detail.processing_status === "REJECTED" ? "danger"
                     : detail.processing_status === "SKIPPED_DUPLICATE" ? "neutral" : "warning"
               }
-              title={(STATUS_WORDS[detail.processing_status] ?? { label: detail.processing_status }).label}
+              title={(detailStatus ?? { label: detail.processing_status }).label}
             >
-              {(STATUS_WORDS[detail.processing_status] ?? { meaning: "" }).meaning}
+              {detailStatus?.meaning}
               {detail.processing_status === "MANUAL_REVIEW" && detail.decided && (
                 <> Decided: {DECISION_WORDS[detail.decision ?? ""] ?? detail.decision}.</>
               )}
             </Callout>
             {detail.processing_status === "MANUAL_REVIEW" && !detail.decided && canDecide && (
-              <ReviewDecisionActions
-                eventId={detail.id}
-                onDecided={() => { setDetail(null); void list.reload(); }}
-              />
+              <DetailsSection title="Decide">
+                <ReviewDecisionActions
+                  eventId={detail.id}
+                  onDecided={() => { setDetail(null); void list.reload(); }}
+                />
+              </DetailsSection>
             )}
-            <DList
-              items={[
-                { label: "Room", value: detail.room ?? "Not matched" },
-                { label: "Guest", value: detail.identity_hidden ? "Not shown to your role" : detail.primary_guest ?? "—" },
-                { label: "Reservation", value: detail.identity_hidden ? "Not shown to your role" : detail.external_reservation_id ?? detail.message_reservation ?? "—" },
-                { label: "Stay status", value: detail.stay_status?.replace(/_/g, " ").toLowerCase() ?? "—" },
-                { label: "PMS connection", value: detail.pms_interface_label || "—" },
-                { label: "Message type", value: `${typeWords(detail.event_type)} (${detail.event_type})` },
-                { label: "Reason code", value: detail.review_code ? `${reviewCodeWords(detail.review_code)} (${detail.review_code})` : "—" },
-                { label: "Time at the PMS", value: detail.pms_timestamp_utc ? formatDate(detail.pms_timestamp_utc) : "—" },
-                { label: "Received here", value: formatDate(detail.received_at) },
-                {
-                  label: "PMS message id",
-                  span: true,
-                  value: detail.external_event_identity
-                    ? <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />
-                    : "Not shown to your role",
-                },
-                { label: "Event id", value: <MonoId value={detail.id} title="Event" /> },
-              ]}
-            />
+            <DetailsSection title="Message">
+              <DescriptionList
+                items={[
+                  { label: "Room", value: detail.room ?? "Not matched" },
+                  { label: "Guest", value: detail.identity_hidden ? "Not shown to your role" : detail.primary_guest ?? "—" },
+                  { label: "Reservation", value: detail.identity_hidden ? "Not shown to your role" : detail.external_reservation_id ?? detail.message_reservation ?? "—" },
+                  { label: "Stay status", value: detail.stay_status?.replace(/_/g, " ").toLowerCase() ?? "—" },
+                  { label: "PMS connection", value: detail.pms_interface_label || "—" },
+                  { label: "Message type", value: `${typeWords(detail.event_type)} (${detail.event_type})` },
+                  { label: "Reason code", value: detail.review_code ? `${reviewCodeWords(detail.review_code)} (${detail.review_code})` : "—" },
+                  { label: "Time at the PMS", value: detail.pms_timestamp_utc ? formatDate(detail.pms_timestamp_utc) : "—" },
+                  { label: "Received here", value: formatDate(detail.received_at) },
+                  {
+                    label: "PMS message id",
+                    value: detail.external_event_identity
+                      ? <MonoId value={detail.external_event_identity} head={24} title="PMS message id" />
+                      : "Not shown to your role",
+                  },
+                  { label: "Event id", value: <MonoId value={detail.id} title="Event" /> },
+                ]}
+              />
+            </DetailsSection>
           </>
         )}
-      </DetailDialog>
+      </DetailsDrawer>
     </PageShell>
   );
 }

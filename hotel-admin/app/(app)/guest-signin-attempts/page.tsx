@@ -5,7 +5,7 @@
 // With no stay in the local mirror nothing would have been accepted, and the panel says so.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyRound, ShieldAlert, UserX } from "lucide-react";
+import { KeyRound, ShieldAlert } from "lucide-react";
 import {
   api, SignInAttempt, SignInAttemptDetail, SignInAttemptCredentials, Whoami,
 } from "@/lib/api";
@@ -13,18 +13,20 @@ import { canRead, canWrite } from "@/lib/roles";
 import { ActiveRestrictions } from "@/components/guest-signin-restrictions";
 import { NetworkPausesNotice } from "@/components/guest-signin-network-pause";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardFooter } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { HelpList, HelpSection } from "@/components/help";
 import { SkeletonRows, DList, MonoId } from "@/components/ui/misc";
-import { DetailDialog } from "@/components/ui/dialog";
-import { Pagination, SearchInput } from "@/components/ui/data";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
+import { DescriptionList, Pagination, SearchInput } from "@/components/ui/data";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LiveStatus, NotAvailable, refreshingClass } from "@/components/ui/patterns";
@@ -238,111 +240,114 @@ export default function GuestSignInAttemptsPage() {
     />
   );
 
+  const filtered = needle !== "" || room.trim() !== "" || result !== "" || kind !== "";
+
   const attemptsView = (
-      <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <LiveStatus updatedAt={updatedAt} refreshing={refreshing} onRefresh={() => void load(true)} />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Attempts" value={rows === null ? "—" : counts.total} hint="in the selected period" />
+    <div className="space-y-5">
+      <StatGrid cols={4}>
+        <StatCard label="Attempts" value={rows === null ? "—" : counts.total} hint="In the selected period" />
         <StatCard label="Did not connect" value={rows === null ? "—" : counts.failed} tone={counts.failed ? "warn" : "default"} />
         <StatCard label="Details did not match" value={rows === null ? "—" : counts.mismatch}
-          hint="wrong value, or a room the guest list does not hold" />
+          hint="Wrong value, or room not in the guest list" />
         <StatCard label="System-side failures" value={rows === null ? "—" : counts.systemic}
-          tone={counts.systemic ? "err" : "default"} hint="nothing the guest typed could have helped" />
-      </div>
+          tone={counts.systemic ? "err" : "default"} hint="Nothing the guest typed could help" />
+      </StatGrid>
 
       {counts.systemic > 0 && (
         <Callout tone="warning" title={`${counts.systemic} attempt${counts.systemic === 1 ? "" : "s"} failed for reasons no guest could fix`}>
-          These were refused because the guest list was out of date, the PMS routing, or an internal fault. Guests saw &ldquo;we are unable to verify your
-          stay right now&rdquo;, not a request to re-check their details.
+          Refused because the guest list was out of date, the PMS routing, or an internal fault. Guests saw &ldquo;we
+          are unable to verify your stay right now&rdquo;, not a request to re-check their details.
         </Callout>
       )}
 
       <Card className="overflow-hidden">
-        <CardBody className="border-b border-border py-3">
-          <Toolbar className="justify-start">
+        <FilterBar
+          inset
+          search={
             <SearchInput value={query} onChange={setQuery}
               placeholder="Room, network, device or ID…"
-              label="Search the attempts" className="sm:w-80" delay={300} />
-            <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room"
-              aria-label="Filter by room number" className="h-9 w-28" inputMode="numeric" />
-            <Select value={result} onChange={(e) => setResult(e.target.value)}
-              aria-label="Filter by result" className="h-9 w-full sm:w-60">
-              {RESULT_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
-            </Select>
-            <Select value={kind} onChange={(e) => setKind(e.target.value)}
-              aria-label="Filter by credential type" className="h-9 w-full sm:w-52">
-              {KIND_FILTERS.map((f) => <option key={f.value || "any"} value={f.value}>{f.label}</option>)}
-            </Select>
-            <Select value={range} onChange={(e) => { setRange(e.target.value); setAnchor(Date.now()); }}
-              aria-label="Filter by time range" className="h-9 w-full sm:w-64">
-              {RANGES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-            </Select>
-            <span className="text-xs text-muted-foreground">Newest first</span>
-          </Toolbar>
-        </CardBody>
+              label="Search the attempts" delay={300} />
+          }
+          filters={
+            <>
+              <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room"
+                aria-label="Filter by room number" className="h-9 w-24" inputMode="numeric" />
+              <Select value={result} onChange={(e) => setResult(e.target.value)}
+                aria-label="Filter by result" className="h-9 w-full sm:w-56">
+                {RESULT_FILTERS.map((f) => <option key={f.value || "all"} value={f.value}>{f.label}</option>)}
+              </Select>
+              <Select value={kind} onChange={(e) => setKind(e.target.value)}
+                aria-label="Filter by credential type" className="h-9 w-full sm:w-48">
+                {KIND_FILTERS.map((f) => <option key={f.value || "any"} value={f.value}>{f.label}</option>)}
+              </Select>
+              <Select value={range} onChange={(e) => { setRange(e.target.value); setAnchor(Date.now()); }}
+                aria-label="Filter by time range" className="h-9 w-full sm:w-60">
+                {RANGES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </Select>
+            </>
+          }
+        />
 
         <div className={cn(refreshing && rows !== null && refreshingClass)}>
-        {rows === null ? (
-          <SkeletonRows rows={8} cols={7} />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<KeyRound />}
-            title={needle ? "Nothing matches this search" : "No sign-in attempts in this period"}
-            hint={needle
-              ? "Clear the search box, or widen the filters above."
-              : "Every deliberate Connect submission is recorded here, including the ones that fail."}
-          />
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>When</TH>
-                <TH>Room</TH>
-                <TH className="hidden md:table-cell">Network</TH>
-                <TH>Result</TH>
-                <TH className="hidden lg:table-cell">Why</TH>
-                <TH className="hidden xl:table-cell">Entered as</TH>
-                <TH className="hidden xl:table-cell">Guest-list age</TH>
-                <TH className="hidden lg:table-cell">Device</TH>
-                <TH><span className="sr-only">Details</span></TH>
-              </TR>
-            </THead>
-            <TBody>
-              {rows.map((a) => (
-                <TR key={a.id}>
-                  <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(a.occurred_at)}>
-                    {formatRelative(a.occurred_at)}
-                  </TD>
-                  <TD className="font-medium">{a.room || "—"}</TD>
-                  <TD className="hidden text-sm text-muted-foreground md:table-cell">{a.guest_network || "—"}</TD>
-                  <TD>
-                    <Badge tone={tone(a.result)} dot>{a.succeeded ? "Connected" : "Refused"}</Badge>
-                  </TD>
-                  <TD className="hidden text-sm lg:table-cell">{a.result_label}</TD>
-                  <TD className="hidden text-sm text-muted-foreground xl:table-cell">
-                    {a.verifier_kind === "FULL_NAME" ? "Name"
-                      : a.verifier_kind === "RESERVATION_NUMBER_LIKE" ? "Reservation number"
-                        : "—"}
-                  </TD>
-                  <TD className="hidden whitespace-nowrap text-sm text-muted-foreground xl:table-cell">{mirrorAge(a.mirror_age_seconds)}</TD>
-                  <TD className="hidden text-xs text-muted-foreground lg:table-cell">
-                    {a.device_ip || "—"}
-                    {a.device_mac ? <span className="block">{a.device_mac}</span> : null}
-                  </TD>
-                  <TD className="text-end">
-                    <Button size="sm" variant="ghost" onClick={() => void open(a)}>Details</Button>
-                  </TD>
+          {rows === null ? (
+            <SkeletonRows rows={8} cols={7} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              size="sm"
+              icon={<KeyRound />}
+              title={needle ? "Nothing matches this search" : "No sign-in attempts in this period"}
+              hint={filtered
+                ? "Clear the search box, or widen the filters above."
+                : "Every Connect submission is recorded here, including the ones that fail."}
+            />
+          ) : (
+            <Table label="Sign-in attempts">
+              <THead>
+                <TR>
+                  <TH>When</TH>
+                  <TH>Room</TH>
+                  <TH className="hidden md:table-cell">Network</TH>
+                  <TH>Result</TH>
+                  <TH className="hidden lg:table-cell">Why</TH>
+                  <TH className="hidden xl:table-cell">Entered as</TH>
+                  <TH className="hidden xl:table-cell" numeric>Guest-list age</TH>
+                  <TH className="hidden lg:table-cell">Device</TH>
+                  <TH><span className="sr-only">Details</span></TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
+              </THead>
+              <TBody>
+                {rows.map((a) => (
+                  <TR key={a.id} onClick={() => void open(a)}>
+                    <TD nowrap muted title={formatDate(a.occurred_at)}>{formatRelative(a.occurred_at)}</TD>
+                    <TD nowrap className="font-medium">{a.room || "—"}</TD>
+                    <TD nowrap muted className="hidden md:table-cell">{a.guest_network || "—"}</TD>
+                    <TD nowrap>
+                      <StatusBadge tone={tone(a.result)}>{a.succeeded ? "Connected" : "Refused"}</StatusBadge>
+                    </TD>
+                    <TD className="hidden lg:table-cell">{a.result_label}</TD>
+                    <TD nowrap muted className="hidden xl:table-cell">
+                      {a.verifier_kind === "FULL_NAME" ? "Name"
+                        : a.verifier_kind === "RESERVATION_NUMBER_LIKE" ? "Reservation number"
+                          : "—"}
+                    </TD>
+                    <TD numeric muted className="hidden xl:table-cell">{mirrorAge(a.mirror_age_seconds)}</TD>
+                    <TD className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
+                      {a.device_ip || "—"}
+                      {a.device_mac ? <span className="block font-mono">{a.device_mac}</span> : null}
+                    </TD>
+                    <TD className="w-0">
+                      <RowActions subject={a.room ? `room ${a.room}` : "attempt"} primary={{ label: "Details", onSelect: () => void open(a) }} />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          )}
         </div>
         {rows && rows.length > 0 && (
-          <CardBody className="border-t border-border py-3">
+          <CardFooter>
             <Pagination
+              className="w-full"
               offset={list.offset}
               limit={list.pageSize}
               shown={rows.length}
@@ -350,19 +355,18 @@ export default function GuestSignInAttemptsPage() {
               hasMore={list.hasMore}
               onChange={list.setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
-      </div>
+    </div>
   );
 
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Hotel"
         title="Guest sign-in attempts"
-        icon={<UserX />}
         description="Every Connect submission and why it succeeded or failed."
+        actions={tab === "attempts" ? <LiveStatus updatedAt={updatedAt} refreshing={refreshing} onRefresh={() => void load(true)} /> : undefined}
         help={
           <>
             <HelpSection title="What this page is for">
@@ -410,12 +414,14 @@ export default function GuestSignInAttemptsPage() {
         attemptsView
       )}
 
-      <DetailDialog
+      <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => { if (!v) { setDetail(null); setCreds(null); setCredsErr(null); setCredsPw(""); } }}
+        width="lg"
+        eyebrow="Sign-in attempt"
         title={detail?.room ? `Room ${detail.room}` : "Sign-in attempt"}
         description={detail ? detail.result_label : undefined}
-        size="lg"
+        badges={detail ? <StatusBadge tone={tone(detail.result)}>{detail.succeeded ? "Connected" : "Refused"}</StatusBadge> : undefined}
       >
         {detail && (
           <>
@@ -424,7 +430,7 @@ export default function GuestSignInAttemptsPage() {
               {RESULT_WORDS[detail.result]?.meaning ?? "No further explanation is recorded for this result."}
             </Callout>
 
-            <h3 className="text-emphasis">What was entered, and what would have been accepted</h3>
+            <DetailsSection title="What was entered, and what would have been accepted">
             {!maySeeCredentials ? (
               <NotAvailable
                 icon={<ShieldAlert />}
@@ -453,12 +459,11 @@ export default function GuestSignInAttemptsPage() {
                 </p>
                 {credsErr ? <ErrorBanner err={credsErr} className="mb-0" /> : null}
                 <div className="flex flex-wrap items-end gap-2">
-                  <label htmlFor="signin-attempt-creds-password" className="grid gap-1 text-sm">
-                    <span>Your password</span>
+                  <Field label="Your password" htmlFor="signin-attempt-creds-password">
                     <Input id="signin-attempt-creds-password" type="password" autoComplete="current-password" value={credsPw}
                       onChange={(e) => setCredsPw(e.target.value)} className="w-60" />
-                  </label>
-                  <Button type="submit" disabled={credsPw === "" || revealing}>
+                  </Field>
+                  <Button type="submit" loading={revealing} disabled={credsPw === ""}>
                     <KeyRound /> Show what was entered
                   </Button>
                 </div>
@@ -484,8 +489,7 @@ export default function GuestSignInAttemptsPage() {
                 </p>
               </Callout>
             ) : (
-              <DList
-                columns={2}
+              <DescriptionList
                 items={[
                   { label: "Room entered", value: <span className="font-medium">{detail.room || "—"}</span> },
                   { label: "Verification value entered", value: <span className="font-medium">{creds.submitted_verifier || "—"}</span> },
@@ -508,10 +512,10 @@ export default function GuestSignInAttemptsPage() {
                 ]}
               />
             )}
+            </DetailsSection>
 
-            <h3 className="text-emphasis">Diagnostics</h3>
-            <DList
-              columns={2}
+            <DetailsSection title="Diagnostics">
+            <DescriptionList
               items={[
                 { label: "Local date and time", value: formatDate(detail.occurred_at) },
                 { label: "Client network", value: detail.guest_network || "—" },
@@ -537,12 +541,13 @@ export default function GuestSignInAttemptsPage() {
                     ? <MonoId value={detail.session_id} title="Session" />
                     : detail.succeeded ? "identity proved, no session recorded" : "none",
                 },
-                { label: "Attempt id", value: <MonoId value={detail.id} title="Attempt" />, span: true },
+                { label: "Attempt id", value: <MonoId value={detail.id} title="Attempt" /> },
               ]}
             />
+            </DetailsSection>
           </>
         )}
-      </DetailDialog>
+      </DetailsDrawer>
     </PageShell>
   );
 }

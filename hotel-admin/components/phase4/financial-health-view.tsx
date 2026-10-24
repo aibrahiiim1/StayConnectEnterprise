@@ -3,12 +3,13 @@
 // This diagnostic omits guest and transaction identifiers; details stay behind audited Manual review.
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CircleCheck, HeartPulse, Hourglass, RefreshCw, Settings2, Wallet, ClipboardCheck, Clock, FilePlus, HelpCircle, ListOrdered, PauseCircle, Send, XCircle } from "lucide-react";
+import { AlertTriangle, CircleCheck, RefreshCw } from "lucide-react";
 import { api, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
-import { Card, CardBody } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardBody, SectionCard } from "@/components/ui/card";
+import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { DescriptionList } from "@/components/ui/data";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { Skeleton } from "@/components/ui/misc";
@@ -86,8 +87,6 @@ export function FinancialHealthView() {
   return (
     <PageShell>
       <PageHeader
-        icon={<HeartPulse />}
-        eyebrow="Hotel"
         title="Charge health"
         description="Whether money is moving, and if not, why."
         help={
@@ -125,7 +124,7 @@ export function FinancialHealthView() {
         actions={
           <>
             {health && <LiveStatus updatedAt={updatedAt} refreshing={loading} error={!!err} />}
-            <Button variant="secondary" onClick={() => void load()} disabled={loading} aria-label="Refresh financial health">
+            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading} aria-label="Refresh financial health">
               <RefreshCw /> Refresh
             </Button>
           </>
@@ -138,21 +137,19 @@ export function FinancialHealthView() {
         <div className="space-y-5" aria-busy="true">
           <span className="sr-only">Loading charge health</span>
           <Skeleton className="h-36 w-full" />
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatGrid cols={4}>
             {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
-          </div>
+          </StatGrid>
         </div>
       )}
 
       {health && (
         <div className={cn("space-y-5", loading && refreshingClass)}>
           <Card>
-            <CardBody className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:gap-6">
-              <div className="shrink-0 space-y-1">
-                <div className="text-micro uppercase tracking-[0.08em] text-muted-foreground">Charges status</div>
-                <Badge tone={STATUS_TONE[health.status]} dot className="px-3.5 py-1 text-sm">
-                  {STATUS_LABEL[health.status]}
-                </Badge>
+            <CardBody className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+              <div className="shrink-0 space-y-1.5">
+                <div className="text-xs text-muted-foreground">Charges status</div>
+                <StatusBadge tone={STATUS_TONE[health.status]}>{STATUS_LABEL[health.status]}</StatusBadge>
               </div>
               <div className="min-w-0 space-y-2">
                 <p className="text-emphasis">{STATUS_SUMMARY[health.status]}</p>
@@ -177,88 +174,81 @@ export function FinancialHealthView() {
 
           <Rail
             title="PMS posting"
-            description="Internet charges posted to a guest's room bill in the property management system."
+            description="Internet charges posted to a guest's room bill in the PMS."
           >
-            <StatCard icon={<ListOrdered />} label="Queued" value={health.outbox_queued} />
-            <StatCard icon={<Send />} label="In flight" value={health.outbox_in_flight} />
-            <StatCard icon={<PauseCircle />} label="Held (recovery)" value={health.outbox_held_recovery} tone={flag(health.outbox_held_recovery, "warn")} />
-            <StatCard label="Oldest waiting" value={ageText(health.outbox_oldest_age_seconds)} icon={<Hourglass />} />
-            <StatCard icon={<HelpCircle />}
+            <StatCard label="Queued" value={health.outbox_queued} />
+            <StatCard label="In flight" value={health.outbox_in_flight} />
+            <StatCard label="Held (recovery)" value={health.outbox_held_recovery} tone={flag(health.outbox_held_recovery, "warn")} />
+            <StatCard label="Oldest waiting" value={ageText(health.outbox_oldest_age_seconds)} />
+            <StatCard
               label="Unknown outcomes"
               value={health.postings_unknown}
               hint="Never retried automatically"
               tone={flag(health.postings_unknown, "err")}
             />
-            <StatCard icon={<ClipboardCheck />}
+            <StatCard
               label="Review queue"
               value={health.review_queue_open}
               tone={flag(health.review_queue_open, "warn")}
               href="/financial-review"
               hint="Open Manual review"
             />
-            <StatCard label="Oldest unreviewed" value={ageText(health.review_oldest_age_seconds)} icon={<Hourglass />} />
+            <StatCard label="Oldest unreviewed" value={ageText(health.review_oldest_age_seconds)} />
           </Rail>
 
           <Rail title="Online payment" description="Payments a guest makes on the portal, and how each one settled.">
-            <StatCard icon={<FilePlus />} label="Created" value={health.payments_created} />
-            <StatCard icon={<Clock />} label="Pending" value={health.payments_pending} />
-            <StatCard icon={<HelpCircle />}
+            <StatCard label="Created" value={health.payments_created} />
+            <StatCard label="Pending" value={health.payments_pending} />
+            <StatCard
               label="Unknown outcomes"
               value={health.payments_unknown}
               hint="Never retried automatically"
               tone={flag(health.payments_unknown, "err")}
             />
-            <StatCard label="Oldest in flight" value={ageText(health.payments_oldest_age_seconds)} icon={<Hourglass />} />
-            <StatCard icon={<Clock />} label="Payments waiting" value={health.settlements_required} href="/financial-settlements" />
-            <StatCard icon={<RefreshCw />} label="Payments in progress" value={health.settlements_in_progress} />
-            <StatCard icon={<ClipboardCheck />}
+            <StatCard label="Oldest in flight" value={ageText(health.payments_oldest_age_seconds)} />
+            <StatCard label="Payments waiting" value={health.settlements_required} href="/financial-settlements" hint="Open Package payments" />
+            <StatCard label="Payments in progress" value={health.settlements_in_progress} />
+            <StatCard
               label="Payments to review"
               value={health.settlements_manual_review}
               tone={flag(health.settlements_manual_review, "warn")}
             />
-            <StatCard icon={<XCircle />} label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
+            <StatCard label="Payments failed" value={health.settlements_failed} tone={flag(health.settlements_failed, "err")} />
           </Rail>
 
-          <Rail title="Configuration" columns={2}>
-            <StatCard
-              label="Payment account"
-              icon={<Wallet />}
-              value={health.payment_account_configured ? "Configured" : "Not configured"}
-              tone={health.payment_account_configured ? "ok" : "warn"}
+          <SectionCard title="Configuration">
+            <DescriptionList
+              items={[
+                {
+                  label: "Payment account",
+                  value: (
+                    <StatusBadge tone={health.payment_account_configured ? "ok" : "warn"}>
+                      {health.payment_account_configured ? "Configured" : "Not configured"}
+                    </StatusBadge>
+                  ),
+                },
+                {
+                  label: "Provider egress",
+                  value: <StatusBadge tone="default">{health.provider_egress_enabled ? "Enabled" : "Disabled"}</StatusBadge>,
+                  hint: "No payment provider has been integrated or verified. No provider is contacted while egress is disabled.",
+                },
+              ]}
             />
-            <StatCard
-              label="Provider egress"
-              icon={<Settings2 />}
-              value={health.provider_egress_enabled ? "Enabled" : "Disabled"}
-              hint="No payment provider has been integrated or verified. No provider is contacted while egress is disabled."
-            />
-          </Rail>
+          </SectionCard>
         </div>
       )}
     </PageShell>
   );
 }
 
-function Rail({
-  title,
-  description,
-  columns = 4,
-  children,
-}: {
-  title: string;
-  description?: string;
-  columns?: 2 | 4;
-  children: React.ReactNode;
-}) {
+function Rail({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3" aria-label={title}>
       <div className="space-y-0.5">
         <h2 className="text-emphasis">{title}</h2>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
       </div>
-      <div className={cn("grid grid-cols-1 gap-3 min-[420px]:grid-cols-2", columns === 4 && "lg:grid-cols-4")}>
-        {children}
-      </div>
+      <StatGrid cols={4}>{children}</StatGrid>
     </section>
   );
 }

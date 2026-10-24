@@ -6,8 +6,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type Whoami } from "@/lib/api";
-import { PageHeader, PageShell, StatCard, Toolbar } from "@/components/ui/page";
-import { Card, CardBody } from "@/components/ui/card";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardBody, SectionCard } from "@/components/ui/card";
+import { FilterBar } from "@/components/ui/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,7 +26,7 @@ import { ConnectionCard, ProviderTile, providerLabel } from "./connection-card";
 import { ConnectionSheet, type SheetTab } from "./connection-sheet";
 import { AddConnectionWizard } from "./add-connection-wizard";
 import { HelpList, HelpSection } from "@/components/help";
-import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw, BedDouble, Clock } from "lucide-react";
+import { ChevronDown, ChevronRight, Hotel, Plus, RefreshCw } from "lucide-react";
 import { usePoll } from "@/lib/use-poll";
 
 type Filter = "all" | "attention" | "working";
@@ -128,8 +129,6 @@ export default function PMSInterfacesPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Hotel />}
-        eyebrow="Hotel"
         title="PMS connection"
         description="Links to the site's property management systems."
         help={
@@ -181,38 +180,36 @@ export default function PMSInterfacesPage() {
       <ErrorBanner err={pmsErrorText(err)} />
 
       {rows !== null && list.length > 0 && !healthLoaded && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatGrid cols={4}>
           {["Connections", "Room sign-in", "Guests in house", "Last heard from a PMS"].map((label) => (
-            <StatCard key={label} label={label} value={<Skeleton className="h-6 w-24" />} hint="Checking the connections…" />
+            <StatCard key={label} label={label} value={<Skeleton className="h-6 w-24" />} hint="Checking…" />
           ))}
-        </div>
+        </StatGrid>
       )}
 
       {rows !== null && list.length > 0 && healthLoaded && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatGrid cols={4}>
           <StatCard
             label="Connections"
-            icon={<Hotel />}
-            value={<span>{active.length}<span className="text-base font-normal text-muted-foreground"> active</span></span>}
-            hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive or not configured` : ""}`}
+            value={<span>{active.length}<span className="text-sm font-normal text-muted-foreground"> active</span></span>}
+            hint={`${live.length} set up${inactive.length ? ` · ${inactive.length} inactive` : ""}`}
           />
           <RoomSignInStat signIn={signIn} activeCount={active.length} ready={ready} />
-          <StatCard icon={<BedDouble />}
+          <StatCard
             label="Guests in house"
             value={inHouse.toLocaleString()}
             hint={anySyncing ? "A guest list is loading now" : "Mirrored from the PMS"}
-            tone={anySyncing ? "info" : "default"}
           />
-          <StatCard icon={<Clock />}
+          <StatCard
             label="Last heard from a PMS"
             value={
               heard
-                ? <time className="text-lg" dateTime={heard} title={formatDate(heard)}>{formatRelative(heard)}</time>
-                : <span className="text-lg text-muted-foreground">Never</span>
+                ? <time dateTime={heard} title={formatDate(heard)}>{formatRelative(heard)}</time>
+                : <span className="text-muted-foreground">Never</span>
             }
-            hint={heard ? formatDate(heard) : "No PMS has been heard from yet"}
+            hint={heard ? formatDate(heard) : "No PMS heard from yet"}
           />
-        </div>
+        </StatGrid>
       )}
 
       {rows === null ? (
@@ -225,15 +222,24 @@ export default function PMSInterfacesPage() {
             <EmptyState
               icon={<Hotel />}
               title="No PMS connection yet"
-              hint="Without one, guests cannot sign in with a room number. Vouchers and client accounts still work. Add a connection to link the appliance to the site's property management system."
+              hint="Without one, guests cannot sign in with a room number. Vouchers and client accounts still work."
               action={writable ? <Button onClick={() => setAdding(true)}><Plus /> Add connection</Button> : undefined}
             />
           </CardBody>
         </Card>
       ) : (
         <>
+          {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
+            <Callout tone={signIn.state === "down" ? "danger" : "warning"}
+              title={signIn.state === "down" ? "Guests cannot sign in with a room number" : "Room sign-in is not working on every client network"}>
+              {signIn.state === "down"
+                ? `${signIn.reason[0]?.toUpperCase() ?? ""}${signIn.reason.slice(1)}.`
+                : `Not working on: ${signIn.affected.map((a) => a.guestNetwork).join(", ")}.`}
+            </Callout>
+          ) : null}
+
           {live.length > 1 && (
-            <Toolbar>
+            <FilterBar>
               <FilterChips<Filter>
                 label="Show connections"
                 value={filter}
@@ -244,7 +250,7 @@ export default function PMSInterfacesPage() {
                   { value: "working", label: "Working", count: live.filter(working).length, tone: "ok" },
                 ]}
               />
-            </Toolbar>
+            </FilterBar>
           )}
 
           {live.length === 0 ? (
@@ -254,7 +260,10 @@ export default function PMSInterfacesPage() {
                 : "The connections below were started but never configured."}
             </Callout>
           ) : shown.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No connection matches this filter.</p>
+            <Card>
+              <EmptyState size="sm" title="No connection matches this filter"
+                action={<Button size="sm" variant="secondary" onClick={() => setFilter("all")}>Show all</Button>} />
+            </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
               {shown.map((i) => (
@@ -272,18 +281,20 @@ export default function PMSInterfacesPage() {
           )}
 
           {inactive.length > 0 && (
-            <Card>
+            <Card className="overflow-hidden">
               <button
                 type="button"
                 aria-expanded={showInactive}
                 onClick={() => setShowInactive((v) => !v)}
-                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium"
+                className="flex w-full items-center gap-2 px-4 py-3 text-start text-sm font-medium hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                {showInactive ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4" aria-hidden />}
+                {showInactive
+                  ? <ChevronDown className="size-4 text-muted-foreground" aria-hidden />
+                  : <ChevronRight className="size-4 text-muted-foreground rtl:rotate-180" aria-hidden />}
                 Inactive / not configured
-                <Badge tone="neutral">{inactive.length}</Badge>
-                <span className="ml-auto hidden text-xs font-normal text-muted-foreground sm:inline">
-                  Not connected to any PMS — kept apart from the live connections
+                <Badge tone="neutral" size="sm">{inactive.length}</Badge>
+                <span className="ms-auto hidden text-xs font-normal text-muted-foreground sm:inline">
+                  Not connected to any PMS
                 </span>
               </button>
               {showInactive && (
@@ -292,7 +303,7 @@ export default function PMSInterfacesPage() {
                     const retired = i.lifecycle_state === "DECOMMISSIONED";
                     const p = providerFor(i.connector_kind, providers);
                     return (
-                      <li key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <li key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
                         <ProviderTile label={providerLabel(i, p)} className="size-8 text-sm" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{i.display_label || "Unnamed connection"}</div>
@@ -301,7 +312,7 @@ export default function PMSInterfacesPage() {
                             {retired ? "Retired — no longer used" : "Never configured — not connected to any PMS"}
                           </div>
                         </div>
-                        <Button size="sm" variant={retired ? "ghost" : "secondary"}
+                        <Button size="sm" variant={retired || !writable ? "ghost" : "secondary"}
                           onClick={() => open(i.id, retired ? "overview" : "configuration")}>
                           {retired ? "View" : writable ? "Continue setup" : "View"}
                         </Button>
@@ -344,35 +355,29 @@ export default function PMSInterfacesPage() {
 // Diagnostics stay reachable from here rather than the sidebar; the operator is told here when one has something to show.
 function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
   return (
-    <Card>
-      <CardBody className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold">Advanced diagnostics</h2>
-          <p className="text-sm text-muted-foreground">For investigating the PMS integration.</p>
-        </div>
-        {reviewEvents > 0 && (
-          <Callout tone="warning" title="Reconciliation needs investigation">
-            {reviewEvents.toLocaleString()} PMS message{reviewEvents === 1 ? "" : "s"} could not be matched to a
-            stay. Sign-in continues from the guest list already in use.{" "}
-            <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Open the diagnostic</Link>
-          </Callout>
-        )}
-        <ul className="grid gap-3 sm:grid-cols-2">
-          <li>
-            <Link href="/roster-reconciliation" className="text-sm font-medium underline underline-offset-2">
-              Roster reconciliation
-            </Link>
-            <p className="text-xs text-muted-foreground">How the guest list is kept identical to the PMS&rsquo;s.</p>
-          </li>
-          <li>
-            <Link href="/pms-reconciliation" className="text-sm font-medium underline underline-offset-2">
-              Unresolved departures
-            </Link>
-            <p className="text-xs text-muted-foreground">PMS messages that could not be matched to a stay.</p>
-          </li>
-        </ul>
-      </CardBody>
-    </Card>
+    <SectionCard title="Advanced diagnostics" description="For investigating the PMS integration.">
+      {reviewEvents > 0 && (
+        <Callout tone="warning" title="Reconciliation needs investigation" className="mb-3">
+          {reviewEvents.toLocaleString()} PMS message{reviewEvents === 1 ? "" : "s"} could not be matched to a
+          stay. Sign-in continues from the guest list already in use.{" "}
+          <Link href="/pms-reconciliation" className="font-medium underline underline-offset-2">Open the diagnostic</Link>
+        </Callout>
+      )}
+      <ul className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        <li>
+          <Link href="/roster-reconciliation" className="text-sm font-medium text-primary hover:underline">
+            Roster reconciliation
+          </Link>
+          <p className="text-xs text-muted-foreground">How the guest list is kept identical to the PMS&rsquo;s.</p>
+        </li>
+        <li>
+          <Link href="/pms-reconciliation" className="text-sm font-medium text-primary hover:underline">
+            Unresolved departures
+          </Link>
+          <p className="text-xs text-muted-foreground">PMS messages that could not be matched to a stay.</p>
+        </li>
+      </ul>
+    </SectionCard>
   );
 }
 
@@ -385,37 +390,24 @@ function RoomSignInStat({
 }) {
   // Per guest network when routing is known; otherwise the per-connection count.
   if (activeCount === 0) {
-    return (
-      <StatCard
-        label="Room sign-in"
-        value={<Badge tone="default" className="text-sm">Not in use</Badge>}
-        hint="No connection is active, so nobody can sign in with a room number."
-        icon={<Hotel />}
-      />
-    );
+    return <StatCard label="Room sign-in" value={<span className="text-muted-foreground">Not in use</span>} hint="No connection is active" />;
   }
   if (signIn.state === "ready") {
     return (
-      <StatCard label="Room sign-in" tone="ok" icon={<Hotel />}
-        value={<Badge tone="ok" className="text-sm" dot>Working</Badge>}
-        hint={`Every client network using a PMS can sign guests in${signIn.unchecked.length ? ` (${signIn.unchecked.length} not yet checked)` : ""}.`} />
+      <StatCard label="Room sign-in" tone="ok" value="Working"
+        hint={signIn.unchecked.length ? `${signIn.unchecked.length} network${signIn.unchecked.length === 1 ? "" : "s"} not yet checked` : "On every client network using a PMS"} />
     );
   }
   if (signIn.state === "partial" || signIn.state === "down") {
-    const names = signIn.affected.map((a) => a.guestNetwork).join(", ");
     return (
-      <StatCard label="Room sign-in" tone={signIn.state === "down" ? "err" : "warn"} icon={<Hotel />}
-        value={<Badge tone={signIn.state === "down" ? "err" : "warn"} className="text-sm" dot>
-          {signIn.state === "down" ? "Not working" : "Partly working"}
-        </Badge>}
-        hint={signIn.state === "down" ? `Guests cannot sign in with a room number: ${signIn.reason}.` : `Not working on: ${names}.`} />
+      <StatCard label="Room sign-in" tone={signIn.state === "down" ? "err" : "warn"}
+        value={signIn.state === "down" ? "Not working" : "Partly working"}
+        hint={`${signIn.affected.length} client network${signIn.affected.length === 1 ? "" : "s"} affected`} />
     );
   }
   return (
-    <StatCard label="Room sign-in" tone={ready === activeCount ? "ok" : "warn"} icon={<Hotel />}
-      value={<Badge tone={ready === activeCount ? "ok" : ready > 0 ? "warn" : "err"} className="text-sm" dot>
-        {ready === activeCount ? "Working" : ready > 0 ? "Partly working" : "Not working"}
-      </Badge>}
-      hint={`${ready} of ${activeCount} active connection${activeCount === 1 ? "" : "s"} can verify guests right now.`} />
+    <StatCard label="Room sign-in" tone={ready === activeCount ? "ok" : ready > 0 ? "warn" : "err"}
+      value={ready === activeCount ? "Working" : ready > 0 ? "Partly working" : "Not working"}
+      hint={`${ready} of ${activeCount} active connection${activeCount === 1 ? "" : "s"} ready`} />
   );
 }

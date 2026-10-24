@@ -319,12 +319,17 @@ describe("an operator authors the hotel's checkout grace policy", () => {
     expect(within(list).getByText(/Guest feedback/)).toBeTruthy();
     expect(within(list).getByText(/Shorter grace/)).toBeTruthy();
 
-    const changes = within(list).getByLabelText("Changes in version 2");
-    expect(changes.textContent).toMatch(/Grace time: 1 h → 30 min/);
-    expect(changes.textContent).toMatch(/Data allowance: 500 MB → 1 GB/);
+    // The list carries a one-line summary; the full before/after opens in the version's drawer.
+    expect(within(list).getByText(/Grace time 1 h → 30 min, Data allowance 500 MB → 1 GB/)).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: /^Version 2/ }));
+    const changes = await screen.findByLabelText("Changes in version 2");
+    expect(changes.textContent).toMatch(/Grace time\s*1 h\s*30 min/);
+    expect(changes.textContent).toMatch(/Data allowance\s*500 MB\s*1 GB/);
     expect(changes.textContent).not.toMatch(/Download speed/);
 
-    fireEvent.click(within(list).getByRole("button", { name: "View terms of version 1" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Close/ }));
+    await waitFor(() => expect(screen.queryByLabelText("Changes in version 2")).toBeNull());
+    fireEvent.click(within(list).getByRole("button", { name: /^Version 1/ }));
     const terms = await screen.findByLabelText("Version 1 terms");
     expect(within(terms).getByText("1 h")).toBeTruthy();
     expect(within(terms).getByText("500 MB")).toBeTruthy();

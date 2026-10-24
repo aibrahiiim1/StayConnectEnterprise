@@ -8,10 +8,11 @@ import Link from "next/link";
 import type { PmsResolution } from "@/lib/api";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
 import { Pagination } from "@/components/ui/data";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
+import { Card, CardBody, CardFooter, CardHeader, CardTitle, SectionCard } from "@/components/ui/card";
 import { Table, TBody, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Explain } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { HelpSection } from "@/components/help";
@@ -19,7 +20,7 @@ import { SplitBar } from "@/components/ui/chart";
 import { MonoId, SkeletonRows, Meter } from "@/components/ui/misc";
 import { LiveStatus, refreshingClass } from "@/components/ui/patterns";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
-import { ShieldCheck, CheckCircle2, Network, XCircle } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 // An unknown code falls through to a de-underscored label rather than being hidden, so it is still countable.
 const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; tone: "ok" | "warn" | "err" }> = {
@@ -144,9 +145,7 @@ export default function PMSResolutionsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Hotel"
         title="Guest sign-in checks"
-        icon={<ShieldCheck />}
         description="Recent room sign-in checks against the PMS and why they were refused."
         help={
           <>
@@ -180,34 +179,33 @@ export default function PMSResolutionsPage() {
       <ErrorBanner err={err} />
 
       {summary && summary.total > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatGrid cols={4}>
           <StatCard
             label="Checks recorded"
             value={(list.total ?? summary.total).toLocaleString()}
-            icon={<ShieldCheck />}
-            hint={[
-              summary.newest ? `Most recent ${formatRelative(summary.newest)}` : "",
-              list.total !== null && list.total > summary.total ? `figures below cover the latest ${summary.total.toLocaleString()}` : "",
-            ].filter(Boolean).join(" · ") || undefined}
+            hint={summary.newest ? `Most recent ${formatRelative(summary.newest)}` : undefined}
+            explain={list.total !== null && list.total > summary.total ? (
+              <Explain>The figures below cover the latest {summary.total.toLocaleString()} checks.</Explain>
+            ) : undefined}
           />
-          <StatCard icon={<CheckCircle2 />}
+          <StatCard
             label="Let online"
             value={summary.verified.toLocaleString()}
             tone="ok"
             hint={`${Math.round((summary.verified / summary.total) * 100)}% of attempts`}
           />
-          <StatCard icon={<XCircle />}
+          <StatCard
             label="Refused"
             value={failed.toLocaleString()}
             tone={failed > 0 ? "warn" : "default"}
             hint={failed > 0 ? "See why below" : "Everyone who tried got in"}
           />
-          <StatCard icon={<Network />}
+          <StatCard
             label="Networks involved"
             value={summary.networks.length.toLocaleString()}
-            hint="Wi-Fi networks these attempts came from"
+            hint="Where the attempts came from"
           />
-        </div>
+        </StatGrid>
       )}
 
       {suspectNetwork && (
@@ -229,66 +227,54 @@ export default function PMSResolutionsPage() {
       )}
 
       {summary && summary.total > 0 && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader><CardTitle>Why guests were refused</CardTitle></CardHeader>
-            <CardBody className="space-y-4">
-              <SplitBar
-                total={summary.total}
-                parts={[
-                  { name: "Let online", value: summary.verified, tone: "ok" },
-                  { name: "Refused", value: failed, tone: failed > 0 ? "err" : "neutral" },
-                ]}
-              />
-              <ul className="space-y-3">
-                {summary.outcomes.map(([code, n]) => {
-                  const o = outcome(code);
-                  return (
-                    <li key={code} className="flex gap-3">
-                      <Badge tone={o.tone} className="mt-0.5 shrink-0">{n}</Badge>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium">{o.label}</div>
-                        <p className="text-xs text-muted-foreground">{o.meaning}</p>
-                        {o.fix && <p className="mt-0.5 text-xs text-muted-foreground">{o.fix}</p>}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </CardBody>
-          </Card>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SectionCard title="Why guests were refused" bodyClassName="space-y-4">
+            <SplitBar
+              total={summary.total}
+              parts={[
+                { name: "Let online", value: summary.verified, tone: "ok" },
+                { name: "Refused", value: failed, tone: failed > 0 ? "err" : "neutral" },
+              ]}
+            />
+            <ul className="divide-y divide-border">
+              {summary.outcomes.map(([code, n]) => {
+                const o = outcome(code);
+                return (
+                  <li key={code} className="flex gap-3 py-2.5 first:pt-0 last:pb-0">
+                    <Badge tone={o.tone} className="mt-0.5 shrink-0 tabular">{n}</Badge>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{o.label}</div>
+                      <p className="text-xs text-muted-foreground">{o.meaning}{o.fix ? ` ${o.fix}` : ""}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </SectionCard>
 
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>By Wi-Fi network</CardTitle>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Where the attempts came from, and how many got in.
-                </p>
-              </div>
-              <Link href="/pms-routing" className="text-xs text-muted-foreground hover:text-foreground">
-                PMS routing →
-              </Link>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              {summary.networks.map(([id, n]) => (
-                <div key={id}>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-sm font-medium">{n.name}</span>
-                    <span className="shrink-0 text-xs tabular text-muted-foreground">
-                      {n.verified} of {n.total} let online
-                    </span>
-                  </div>
-                  <Meter
-                    className="mt-1.5"
-                    value={n.verified}
-                    max={n.total}
-                    tone={n.verified === 0 ? "err" : n.verified === n.total ? "ok" : "warn"}
-                  />
+          <SectionCard
+            title="By Wi-Fi network"
+            description="Where the attempts came from, and how many got in."
+            actions={<Link href="/pms-routing" className="text-xs font-medium text-primary hover:underline">PMS routing</Link>}
+            bodyClassName="space-y-4"
+          >
+            {summary.networks.map(([id, n]) => (
+              <div key={id}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="truncate text-sm font-medium">{n.name}</span>
+                  <span className="shrink-0 text-xs tabular text-muted-foreground">
+                    {n.verified} of {n.total} let online
+                  </span>
                 </div>
-              ))}
-            </CardBody>
-          </Card>
+                <Meter
+                  className="mt-1.5"
+                  value={n.verified}
+                  max={n.total}
+                  tone={n.verified === 0 ? "err" : n.verified === n.total ? "ok" : "warn"}
+                />
+              </div>
+            ))}
+          </SectionCard>
         </div>
       )}
 
@@ -302,12 +288,13 @@ export default function PMSResolutionsPage() {
             <SkeletonRows rows={6} cols={4} />
           ) : rows.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<ShieldCheck />}
               title="No guest has tried to sign in with a room number"
-              hint="Either nobody has tried yet, or no client network is set up to offer room sign-in."
+              hint="Either nobody has tried yet, or no client network offers room sign-in."
             />
           ) : (
-            <Table>
+            <Table label="Recent attempts">
               {/* No prose here: a test asserts the table contains no "room", "reservation", "stay" or "folio" text. */}
               <THead>
                 <TR>
@@ -321,7 +308,7 @@ export default function PMSResolutionsPage() {
                   const o = outcome(r.outcome_code);
                   return (
                     <TR key={r.id}>
-                      <TD className="whitespace-nowrap text-sm text-muted-foreground" title={formatDate(r.resolved_at)}>
+                      <TD nowrap muted title={formatDate(r.resolved_at)}>
                         {formatRelative(r.resolved_at)}
                       </TD>
                       <TD>
@@ -334,8 +321,8 @@ export default function PMSResolutionsPage() {
                           </span>
                         )}
                       </TD>
-                      <TD>
-                        <Badge tone={r.resolved ? "ok" : o.tone}>{o.label}</Badge>
+                      <TD nowrap>
+                        <StatusBadge tone={r.resolved ? "ok" : o.tone}>{o.label}</StatusBadge>
                       </TD>
                     </TR>
                   );
@@ -345,8 +332,8 @@ export default function PMSResolutionsPage() {
           )}
         </CardBody>
         {rows && rows.length > 0 && (
-          <CardBody className="border-t border-border py-3">
-            <Pagination
+          <CardFooter>
+            <Pagination className="w-full"
               offset={list.offset}
               limit={list.pageSize}
               shown={rows.length}
@@ -354,7 +341,7 @@ export default function PMSResolutionsPage() {
               hasMore={list.hasMore}
               onChange={list.setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
     </PageShell>

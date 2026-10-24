@@ -128,7 +128,8 @@ describe("PMS interfaces page", () => {
     await openSheet("History");
 
     await screen.findByText("Configuration history");
-    await userEvent.click(screen.getByRole("button", { name: "Put version 2 live" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Version 2/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Put version 2 live" }));
     const dialog = await screen.findByRole("dialog", { name: /Put version 2 live/ });
     await userEvent.selectOptions(within(dialog).getByLabelText(/Reason/), "ENDPOINT_CHANGE");
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
@@ -155,6 +156,7 @@ describe("PMS interfaces page", () => {
     render(<Page />);
     await openSheet("History");
 
+    await userEvent.click(await screen.findByRole("button", { name: /^Version 1/ }));
     await userEvent.click(await screen.findByRole("button", { name: /Put this version back in use/ }));
     const dialog = await screen.findByRole("dialog", { name: /Put version 1 live/ });
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
@@ -175,6 +177,7 @@ describe("PMS interfaces page", () => {
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     render(<Page />);
     await openSheet("History");
+    await userEvent.click(await screen.findByRole("button", { name: /^Version 2/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Put version 2 live" }));
     const dialog = await screen.findByRole("dialog", { name: /Put version 2 live/ });
     await userEvent.type(within(dialog).getByLabelText(/Confirm your password/), "pw");
@@ -331,7 +334,7 @@ describe("Source conflicts page", () => {
 
     expect(await screen.findByText("Main PMS")).toBeTruthy();
     expect(screen.getByText("Spa PMS")).toBeTruthy();
-    expect(screen.getByText("high")).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
     expect(screen.queryByText("i1")).toBeNull();
     expect(screen.queryByText("i2")).toBeNull();
   });
