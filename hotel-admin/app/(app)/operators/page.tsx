@@ -26,6 +26,7 @@ import { OperatorSessionLimits } from "@/components/operator-session-limits";
 import { OperatorAccountRetention } from "@/components/operator-account-retention";
 
 const MIN_PASSWORD = 10;
+const INLINE_FROM_SM = "max-sm:[&>a]:hidden max-sm:[&>button:not([aria-haspopup])]:hidden";
 
 export default function OperatorsPage() {
   const toast = useToast();
@@ -294,9 +295,11 @@ export default function OperatorsPage() {
                     </TD>
                     <TD nowrap muted className="hidden lg:table-cell">{formatRelative(op.created_at)}</TD>
                     {writable && (
-                      <TD className="w-0">
+                      <TD nowrap className="w-0">
                         <RowActions
                           subject={op.email}
+                          // On a phone the inline action moves to the row's details, so the menu stays on screen.
+                          className={INLINE_FROM_SM}
                           primary={isMe
                             ? { label: "Change my password", href: "/account/password" }
                             : { label: "Reset password", onSelect: () => openReset(op) }}

@@ -65,7 +65,7 @@ export function SigninSecondStep({ onDone, onRestart }: {
     );
   }
 
-  const why = busy ? null : code.trim() === "" ? "Enter your code to continue." : null;
+  const why = busy || codeErr ? null : code.trim() === "" ? "Enter your code to continue." : null;
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
       <ErrorBanner err={err} className="mb-0" />
@@ -99,7 +99,7 @@ export function SigninSecondStep({ onDone, onRestart }: {
       <Button
         type="submit"
         loading={busy}
-        disabled={why !== null}
+        disabled={code.trim() === ""}
         aria-describedby={why ? hintId : undefined}
         className="w-full"
         size="lg"

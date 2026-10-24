@@ -20,6 +20,8 @@ import { roleLabel } from "@/lib/permissions";
 import { ago, formatDateTime, userStatusInfo } from "@/lib/status";
 
 const MIN_PASSWORD = 10;
+// On a phone the inline row action moves to the details drawer, so the menu stays on screen.
+const INLINE_FROM_SM = "max-sm:[&>a]:hidden max-sm:[&>button:not([aria-haspopup])]:hidden";
 
 type UserField = "email" | "password" | "reason";
 
@@ -174,7 +176,7 @@ export function UsersManager({
               <TH>Email</TH>
               <TH className="hidden sm:table-cell">Role</TH>
               <TH className="hidden md:table-cell">Two-step</TH>
-              <TH>Status</TH>
+              <TH className="hidden sm:table-cell">Status</TH>
               <TH className="hidden lg:table-cell">Last sign-in</TH>
               {canManage && <TH className="w-0"><span className="sr-only">Actions</span></TH>}
             </TR>
@@ -191,6 +193,7 @@ export function UsersManager({
                       {self && <Badge tone="accent" size="sm">You</Badge>}
                     </div>
                     {u.display_name && <div className="truncate text-xs text-muted-foreground">{u.display_name}</div>}
+                    {u.status !== "active" && <StateBadge info={userStatusInfo(u.status)} className="mt-1 sm:hidden" />}
                   </TD>
                   <TD className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1">
@@ -202,13 +205,14 @@ export function UsersManager({
                       ? <TwoStepBadge on={u.two_step_enrolled} />
                       : <span className="text-muted-foreground">—</span>}
                   </TD>
-                  <TD nowrap><StateBadge info={userStatusInfo(u.status)} /></TD>
+                  <TD nowrap className="hidden sm:table-cell"><StateBadge info={userStatusInfo(u.status)} /></TD>
                   <TD nowrap muted className="hidden lg:table-cell">{u.last_login_at ? ago(u.last_login_at) : "Never"}</TD>
                   {canManage && (
-                    <TD className="w-0">
+                    <TD nowrap className="w-0">
                       {!self && (
                         <RowActions
                           subject={u.email}
+                          className={INLINE_FROM_SM}
                           primary={{ label: "Change role", onSelect: () => open({ kind: "role", u }) }}
                           items={actionsFor(u)}
                         />
