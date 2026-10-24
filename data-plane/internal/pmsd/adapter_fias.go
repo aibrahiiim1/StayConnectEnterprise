@@ -20,6 +20,7 @@ type Dialer func(ctx context.Context, network, address string) (net.Conn, error)
 type guardedConn struct {
 	c            net.Conn
 	writeTimeout time.Duration
+	st           *linkStats
 }
 
 func (g *guardedConn) writeFrame(body string) error {
@@ -29,7 +30,15 @@ func (g *guardedConn) writeFrame(body string) error {
 	if g.writeTimeout > 0 {
 		_ = g.c.SetWriteDeadline(time.Now().Add(g.writeTimeout))
 	}
-	return pms.WriteFramedRecord(g.c, body)
+	return g.write(body)
+}
+
+func (g *guardedConn) write(body string) error {
+	if err := pms.WriteFramedRecord(g.c, body); err != nil {
+		return wrapTransport(transportOpWrite, err)
+	}
+	g.st.outbound(pms.RecordID(body))
+	return nil
 }
 
 // writeFinancialFrame is the only path by which a PS reaches the wire: it accepts a PS record only (never PA, control
@@ -42,7 +51,7 @@ func (g *guardedConn) writeFinancialFrame(body string) error {
 	if g.writeTimeout > 0 {
 		_ = g.c.SetWriteDeadline(time.Now().Add(g.writeTimeout))
 	}
-	return pms.WriteFramedRecord(g.c, body)
+	return g.write(body)
 }
 
 // fiasAdapter reuses internal/pms framing and parsing (no second parser) and drives interface axes and the typed
@@ -98,13 +107,15 @@ func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time,
 		if err != nil {
 			return nil, coded(CodeDialFailed, err)
 		}
+		st := newLinkStats(conn)
+		conn = &countingConn{Conn: conn, st: st}
 		if p.Rev.TLS {
 			if conn, err = fiasTLS(ctx, conn, p.Rev); err != nil {
 				return nil, coded(CodeDialFailed, err)
 			}
 		}
 		return &fiasAdapter{
-			g:     &guardedConn{c: conn, writeTimeout: p.Rev.WriteTimeout},
+			g:     &guardedConn{c: conn, writeTimeout: p.Rev.WriteTimeout, st: st},
 			br:    bufio.NewReader(conn),
 			iface: p.Iface, rev: p.Rev,
 			evKey: keys.EvidenceKey, evKeyNo: keys.EvidenceKeyVersion,
@@ -113,6 +124,8 @@ func NewFIASDialWithRelay(dialer Dialer, keys AdapterKeys, now func() time.Time,
 		}, nil
 	}
 }
+
+func (a *fiasAdapter) linkDiagnostics() LinkDiagnostics { return a.g.st.snapshot() }
 
 func (a *fiasAdapter) Close() error {
 	if a.g != nil && a.g.c != nil {
@@ -130,16 +143,17 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	w := newSerialWriter(a.g, a.rev.HeartbeatInterval)
 	go w.run(wctx)
 	defer func() { wcancel(); <-w.done }()
+	defer a.g.st.freeze() // runs before the writer is stopped
 
 	t := a.now()
 	da, ti := t.Format("060102"), t.Format("150405")
 	for _, body := range append([]string{pms.BuildLS(da, ti), pms.VerifiedLD(da, ti)}, pms.BuildLRs()...) {
 		if err := w.SubmitSync(ctx, body); err != nil {
-			return err
+			return failedAt(stepHandshake, err)
 		}
 	}
 	if err := sink.OnConnected(a.now()); err != nil {
-		return err
+		return failedAt(stepOnConnected, err)
 	}
 	// The link is offered to the financial relay only after the handshake and withdrawn when the cycle ends; a command
 	// waiting then resolves UNKNOWN because its PS may already be with the PMS. The port starts NOT steady: nothing is
@@ -153,10 +167,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	// occurs until a complete DS->DE generation is published. A DR write failure closes the transport and ends the
 	// cycle.
 	if err := sink.RequireInitialResync(a.now()); err != nil {
-		return err
+		return failedAt(stepRequireResync, err)
 	}
 	if err := w.Submit(ctx, pms.BuildDR()); err != nil {
-		return err
+		return failedAt(stepWriteResyncReq, err)
 	}
 	// Say the automatic sync is waiting on the PMS, so an operator who re-plugged the socket doesn't see
 	// REQUESTING_FULL_SYNC forever.
@@ -179,6 +193,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// A posting command is carried only between resyncs, never inside a DS..DE window.
 			port.setSteady(!resyncing)
 		}
+		a.g.st.setResyncing(resyncing)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -193,11 +208,21 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			// a writer failure closes the transport to unblock this read; surface the writer's cause if any
 			select {
 			case <-w.done:
-				return w.stoppedErr()
+				return failedAt(stepRead, w.stoppedErr())
 			default:
 			}
-			return coded(CodeProtocolLinkEnded, err)
+			if errors.Is(err, net.ErrClosed) {
+				// Only the writer closes the socket while ctx is live, and it records its cause just before; wait
+				// for it so a write failure is not reported as a local close.
+				select {
+				case <-w.done:
+					return failedAt(stepRead, w.stoppedErr())
+				case <-time.After(time.Second):
+				}
+			}
+			return failedAt(stepRead, wrapTransport(transportOpRead, err))
 		}
+		a.g.st.inbound(body)
 
 		// Strict-parse every inbound frame before any action.
 		pr, perr := parseStrictRecord(body)
@@ -210,11 +235,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 						"interface", a.iface.ID, "reason", "strict_parse")
 				}
 				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
-					return ferr
+					return failedAt(stepContinuityFault, ferr)
 				}
 				if !resyncing {
 					if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
-						return werr
+						return failedAt(stepWriteResyncReq, werr)
 					}
 					resyncing = true
 				}
@@ -222,7 +247,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 			// A malformed or unknown control record is a protocol fault: don't reset idle, record a heartbeat or ack;
 			// terminate the cycle with a bounded typed code. No raw payload is logged.
-			return coded(CodeProtocolFraming, nil)
+			return failedAt(stepParseControl, coded(CodeProtocolFraming, nil))
 		}
 
 		w.activity()
@@ -238,7 +263,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 						"interface", a.iface.ID, "command", cmd.ID, "reason", cmd.Reason)
 				}
 				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
-					return werr
+					return failedAt(stepWriteResyncReq, werr)
 				}
 				sink.OnFullSyncRequested()
 				resyncing = true
@@ -258,7 +283,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 			if fin.shouldRequest(now, resyncing, asker.FinancialResyncDue) {
 				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
-					return werr
+					return failedAt(stepWriteResyncReq, werr)
 				}
 				sink.OnFullSyncRequested()
 				resyncing = true
@@ -272,13 +297,13 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 		case RecLS, RecLA:
 			// Record the heartbeat evidence first; recording must not depend on our ack succeeding.
 			if err := sink.OnHeartbeat(a.now()); err != nil {
-				return err
+				return failedAt(stepHeartbeat, err)
 			}
 			if err := w.SubmitSync(ctx, pms.BuildLA()); err != nil {
-				return err
+				return failedAt(stepWriteAck, err)
 			}
 		case RecLE:
-			return coded(CodeProtocolLinkEnded, nil)
+			return failedAt(stepInboundLinkEnd, coded(CodeProtocolLinkEnded, nil))
 		case RecPA:
 			// A posting answer goes verbatim to the command waiting for this P#, never interpreted here; an unawaited
 			// PA is reported without content and dropped.
@@ -301,7 +326,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			skippedNoIdentity = 0
 			lastReportedSkipped = 0
 			if err := sink.OnResyncStart(a.now()); err != nil {
-				return err
+				return failedAt(stepResyncStart, err)
 			}
 		case RecDE:
 			// Record the observation before the publish: a generation without one could never be judged complete and
@@ -337,7 +362,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			resyncing = false
 			fin.completed()
 			if err := sink.OnResyncComplete(a.now(), ""); err != nil {
-				return err
+				return failedAt(stepPublishResync, err)
 			}
 		case RecGI, RecGC, RecGO:
 			// A roster snapshot is not a departure announcement: a GO inside a DS..DE window with no reservation number
@@ -406,11 +431,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				// persist failure closes the transport), then request a verified full resync. No partial value reaches
 				// the queue.
 				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
-					return ferr
+					return failedAt(stepContinuityFault, ferr)
 				}
 				if !resyncing {
 					if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
-						return werr
+						return failedAt(stepWriteResyncReq, werr)
 					}
 					resyncing = true
 				}
@@ -427,7 +452,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				}
 			}
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
-				return derr // ErrStaleGeneration or any persist error terminates the ownership cycle
+				return failedAt(stepDomainRecord, derr) // ErrStaleGeneration or any persist error terminates the ownership cycle
 			}
 		}
 	}

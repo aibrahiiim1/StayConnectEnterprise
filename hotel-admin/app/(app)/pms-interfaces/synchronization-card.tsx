@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, inBackground, type PmsInterfaceHealth } from "@/lib/api";
+import { connectionEndWords } from "@/lib/api/pms-connections";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, Field } from "@/components/ui/input";
@@ -157,7 +158,7 @@ export function SynchronizationCard({
         {stage === "FAILED" && (
           <Callout tone="danger" title="The refresh failed">
             The previous guest list is still in use.
-            {health?.sync_failure_code ? ` Reason reported: ${health.sync_failure_code}.` : ""}
+            {health?.sync_failure_code ? ` Reason reported: ${connectionEndWords(health.sync_failure_code)}.` : ""}
           </Callout>
         )}
 
@@ -176,7 +177,7 @@ export function SynchronizationCard({
             }
           />
           <Row label="Guests in house" value={(health?.in_house_stays ?? 0).toLocaleString()} />
-          {health?.sync_failure_code && <Row label="Reason it stopped" value={health.sync_failure_code} />}
+          {health?.sync_failure_code && <Row label="Reason it stopped" value={connectionEndWords(health.sync_failure_code)} />}
         </dl>
 
         <Separator />

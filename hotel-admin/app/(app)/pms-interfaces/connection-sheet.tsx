@@ -25,7 +25,7 @@ import {
   type FormValues, type PmsConnection, type PmsProvider, type TestConnectionResult,
   CONTINUITY_WORDS, LIFECYCLE_REASONS, LIFECYCLE_WORDS, PUBLISH_REASONS, REASON_WORDS, ROOM_AUTH_WORDS,
   SECRET_REASONS, SYNC_WORDS, TRANSPORT_KIND_WORDS, TRANSPORT_WORDS,
-  canFullResync, canTestConnection, credentialSecret, fieldsFor, isNeverConfigured, lastCommunication, needsCredential,
+  canFullResync, canTestConnection, connectionEndWords, credentialSecret, fieldsFor, isNeverConfigured, lastCommunication, needsCredential,
   pmsErrorText, providerRevisionBody, safeHost, validateAll, valuesFromRevision, verificationWords, wordsFor,
 } from "@/lib/api/pms-connections";
 import { ChecksRow, ProviderTile, When, lifecycleTone, providerLabel } from "./connection-card";
@@ -215,7 +215,12 @@ function OverviewTab({
               value: wordsFor(TRANSPORT_WORDS, health.transport_status),
               hint: health.transport_status === "CONNECTED"
                 ? health.last_connected_at ? <>Connected <When at={health.last_connected_at} /></> : undefined
-                : health.disconnected_since ? <>Down since <When at={health.disconnected_since} /></> : undefined,
+                : health.disconnected_since
+                  ? <>
+                      Down since <When at={health.disconnected_since} />
+                      {health.transport_error_code ? <> · {connectionEndWords(health.transport_error_code)}</> : null}
+                    </>
+                  : undefined,
             },
             {
               label: "Live updates",

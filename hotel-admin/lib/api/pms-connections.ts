@@ -522,3 +522,26 @@ export function pmsErrorText(e: unknown): string | null {
   if (x.status === 404) return say("This action is not available on this appliance.");
   return msg ? say(msg) : "Something went wrong.";
 }
+
+// pmsd's closed set of reasons a connection or refresh ended. Named by what the appliance observed: a reset
+// can come from the PMS or from any device in between, so it is never blamed on either.
+const CONNECTION_END_WORDS: Record<string, string> = {
+  TRANSPORT_REMOTE_CLOSED: "The PMS closed the connection",
+  TRANSPORT_RESET: "The connection was reset",
+  TRANSPORT_TIMEOUT: "No reply within the time limit",
+  TRANSPORT_CLOSED_LOCALLY: "The appliance closed the connection",
+  PROTOCOL_LINK_ENDED: "The PMS ended the link",
+  PROTOCOL_FRAMING_ERROR: "The PMS sent a message the appliance could not read",
+  DIAL_FAILED: "The PMS could not be reached",
+  DIAL_TIMEOUT: "The PMS did not answer the connection attempt",
+  DB_STATEMENT_FAILED: "The appliance could not save what the PMS sent",
+  DB_UNAVAILABLE: "The appliance's database was unavailable",
+  CONTEXT_CANCELED: "The appliance stopped the connection",
+  UNCLASSIFIED: "The connection ended for an unrecognised reason",
+};
+
+/** Plain words for a transport or sync failure code; an unknown code is shown as sent. */
+export function connectionEndWords(code?: string | null): string {
+  if (!code) return "";
+  return CONNECTION_END_WORDS[code] ?? code;
+}
