@@ -10,7 +10,7 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api";
 import { safeNextPath } from "@/lib/safe-next";
-import { SigninSecondStep, type SecondStep } from "@/components/signin-second-step";
+import { SigninSecondStep } from "@/components/signin-second-step";
 
 export default function LoginPage() {
   // useSearchParams must live inside a Suspense boundary for production build.
@@ -32,17 +32,18 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
-  // The password is step one: it answers which second step comes and opens no session.
-  const [second, setSecond] = useState<SecondStep | null>(null);
+  // An account with two-step sign-in on gets no session from the password: the code step opens it.
+  const [codeStep, setCodeStep] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setLoading(true);
     try {
-      const r = await api.post<{ second_step?: SecondStep }>("/auth/login", { email, password });
+      const r = await api.post<{ second_step?: "none" | "code" }>("/auth/login", { email, password });
       setPassword("");
-      setSecond(r.second_step === "enrol" ? "enrol" : "code");
+      if (r.second_step === "none") finish();
+      else setCodeStep(true);
     } catch (e) {
       setErr(e);
     } finally {
@@ -56,7 +57,7 @@ function LoginInner() {
     router.refresh();
   }, [router, next]);
   const restart = useCallback((why: string) => {
-    setSecond(null);
+    setCodeStep(false);
     setErr(why ? new Error(why) : null);
   }, []);
 
@@ -109,8 +110,8 @@ function LoginInner() {
               {expired ? "Your session ended because there was no activity for a while. Sign in again to continue where you left off." : ""}
             </p>
 
-            {second ? (
-              <SigninSecondStep step={second} onDone={finish} onRestart={restart} />
+            {codeStep ? (
+              <SigninSecondStep onDone={finish} onRestart={restart} />
             ) : (
             <form onSubmit={onSubmit} className="space-y-4" noValidate={false}>
               {/* The banner is role="alert"; an aria-live wrapper would make screen readers read it twice. */}

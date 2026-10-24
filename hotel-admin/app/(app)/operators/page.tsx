@@ -118,7 +118,7 @@ export default function OperatorsPage() {
     setBusy(true); setFormErr(null);
     try {
       await api.post(`/operators/${mfaFor.id}/reset-mfa`, { reason: mfaReason.trim(), password: mfaPassword });
-      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and sets up a new app at the next sign-in.`);
+      toast.success("Two-step sign-in reset", `${mfaFor.email} has been signed out and now signs in with the password alone until they turn two-step sign-in on again.`);
       setMfaFor(null); setMfaReason(""); setMfaPassword("");
       await load();
     } catch (e) { setFormErr(e); }
@@ -204,9 +204,9 @@ export default function OperatorsPage() {
             <HelpSection title="Two-step sign-in">
               <HelpList
                 items={[
-                  "Signing in asks for the password and the 6-digit code from an authenticator app on the operator's phone.",
-                  "The app is set up at the first sign-in, which also gives ten single-use recovery codes.",
-                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and set up a new app at their next sign-in.",
+                  "Optional for each operator and recommended: each turns it on under Your account > Two-step sign-in, which also gives ten single-use recovery codes.",
+                  "Once on, signing in asks for the password and the 6-digit code from the authenticator app on the operator's phone.",
+                  "Someone who lost their phone signs in with a recovery code, or you reset their two-step sign-in: they are signed out and sign in with the password alone until they turn it on again.",
                   "You cannot reset your own; another site administrator must.",
                 ]}
               />
@@ -253,8 +253,10 @@ export default function OperatorsPage() {
                         {op.status === "active" && op.must_change_password && (
                           <Badge tone="warn" className="mt-1">Must set a new password</Badge>
                         )}
-                        {op.status === "active" && op.two_step_enrolled === false && (
-                          <Badge tone="neutral" className="mt-1">Sets up two-step at next sign-in</Badge>
+                        {op.status === "active" && typeof op.two_step_enrolled === "boolean" && (
+                          <Badge tone={op.two_step_enrolled ? "ok" : "neutral"} className="mt-1">
+                            {op.two_step_enrolled ? "Two-step on" : "Two-step off"}
+                          </Badge>
                         )}
                       </TD>
                       <TD>
@@ -359,7 +361,7 @@ export default function OperatorsPage() {
         onOpenChange={(v) => !v && setMfaFor(null)}
         size="sm"
         title={mfaFor ? `Reset two-step sign-in for ${mfaFor.display_name || mfaFor.email}` : "Reset two-step sign-in"}
-        description="Their authenticator app and recovery codes stop working, they are signed out everywhere, and they set up a new app at their next sign-in."
+        description="Their authenticator app and recovery codes stop working and they are signed out everywhere. They then sign in with the password alone until they turn two-step sign-in on again."
         submitLabel="Reset two-step sign-in"
         busy={busy}
         error={formErr}

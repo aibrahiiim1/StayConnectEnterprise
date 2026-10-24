@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
+import { MfaRecommendation } from "@/components/mfa-recommendation";
 
 // Build-time flags can hide mounted routes; use edged capabilities and role permissions for navigation.
 // edged enforces authorization even when a route is opened directly.
@@ -512,6 +513,7 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
         })()}
+        <MfaRecommendation email={email} collapsed={collapsed} onNavigate={onNavigate} />
 
         {(() => {
           const signOut = (

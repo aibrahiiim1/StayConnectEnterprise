@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { BySemantics, OneGateLockup } from "@/components/brand";
 import { Tooltip } from "@/components/ui/tooltip";
+import { MfaRecommendation } from "@/components/mfa-recommendation";
 import { usePermissions, type Capability } from "@/lib/permissions";
 
 export type NavItem = {
@@ -208,6 +209,7 @@ export function Nav({
           );
           return collapsed ? <Tooltip content="Two-step sign-in" side="right">{twoStep}</Tooltip> : twoStep;
         })()}
+        <MfaRecommendation email={email} collapsed={collapsed} onNavigate={onNavigate} />
         {(() => {
           const signOut = (
             <button

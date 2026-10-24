@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Browser E2E for the Hotel Admin using a local Chrome; edged is mocked per-test via page.route, so no real backend or
 // data.
-const PORT = 3123;
+// E2E_PORT lets parallel runs use separate dev servers; specs that set cookies by URL assume the default.
+const PORT = Number(process.env.E2E_PORT) || 3123;
 
 export default defineConfig({
   testDir: "./e2e",
