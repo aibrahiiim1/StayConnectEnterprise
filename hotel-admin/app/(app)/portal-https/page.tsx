@@ -9,20 +9,22 @@ import {
   DNS_STATE_WORDS, PortalHTTPSDoc, domainStatus, fallbackWords, looksLikePortalDomain, portalHeadline,
 } from "@/lib/portal-https";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { Field, Input } from "@/components/ui/input";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
+import { DetailsDrawer } from "@/components/ui/details-drawer";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CopyButton, ReadOnlyNotice } from "@/components/ui/patterns";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { HelpList, HelpSection } from "@/components/help";
-import { ShieldCheck, RefreshCw, RotateCw, Search, Globe, History } from "lucide-react";
+import { ShieldCheck, RefreshCw, RotateCw, Search, Globe } from "lucide-react";
 
 type Issue = { code: string; message: string };
 
@@ -30,6 +32,7 @@ const when = (s?: string | null) => (s ? formatDate(s) : "—");
 const mono = (s?: string | null) => (s ? <span className="break-all font-mono text-xs">{s}</span> : "—");
 
 const FIELD_LABEL: Record<string, string> = { portal_ip: "Portal address", custom_domain: "Hotel portal domain" };
+const HISTORY_PREVIEW = 5;
 
 export default function PortalHTTPSPage() {
   const toast = useToast();
@@ -50,6 +53,8 @@ export default function PortalHTTPSPage() {
   const [removing, setRemoving] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const [dialogErr, setDialogErr] = useState<unknown>(null);
+  const [allHistory, setAllHistory] = useState(false);
+  const [openChange, setOpenChange] = useState<string | null>(null);
 
   const writable = roles !== null && canWrite("portal-https", roles);
 
@@ -141,12 +146,12 @@ export default function PortalHTTPSPage() {
   const dStatus = domainStatus(st && st.custom_domain === domain ? st.custom_domain_status : "");
   const records = st && st.custom_domain === domain ? st.custom_domain_records ?? [] : [];
   const domainProblem = domainInput.trim() ? looksLikePortalDomain(domainInput) : null;
+  const historyRows = doc ? (allHistory ? doc.history : doc.history.slice(0, HISTORY_PREVIEW)) : [];
+  const change = doc?.history.find((h) => String(h.id) === openChange) ?? null;
 
   return (
     <PageShell>
       <PageHeader
-        icon={<ShieldCheck />}
-        eyebrow="Networking"
         title="Portal HTTPS"
         description="The Client Portal's own address, its host names and its certificates."
         help={
@@ -226,22 +231,16 @@ export default function PortalHTTPSPage() {
             {st!.https_active && doc.health.level !== "ok" && doc.health.message}
           </Callout>
 
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>Host names</CardTitle>
-                <CardDescription>The names clients reach the portal by. The canonical one is used in links and redirects.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardBody>
-              <KeyValueGrid
+          <div className="grid gap-5 lg:grid-cols-2">
+            <SectionCard title="Host names" description="The canonical name is used in links and redirects.">
+              <DescriptionList
                 items={[
                   {
                     label: "OneGate host name",
                     value: st!.onegate_hostname ? (
                       <span className="flex flex-wrap items-center gap-2">
                         {mono(st!.onegate_hostname)}
-                        {st!.https_active && st!.canonical_hostname === st!.onegate_hostname && <Badge tone="ok">Canonical</Badge>}
+                        {st!.https_active && st!.canonical_hostname === st!.onegate_hostname && <Badge tone="accent">Canonical</Badge>}
                       </span>
                     ) : "Not assigned yet",
                     hint: st!.onegate_hostname ? `DNS: ${DNS_STATE_WORDS[st!.dns_state] ?? st!.dns_state}` : undefined,
@@ -252,68 +251,28 @@ export default function PortalHTTPSPage() {
                       <span className="flex flex-wrap items-center gap-2">
                         {mono(domain)}
                         <Badge tone={dStatus.tone}>{dStatus.label}</Badge>
-                        {st!.https_active && st!.canonical_hostname === domain && <Badge tone="ok">Canonical</Badge>}
+                        {st!.https_active && st!.canonical_hostname === domain && <Badge tone="accent">Canonical</Badge>}
                       </span>
                     ) : "None",
                   },
-                  { label: "Last checked with OneGate Central", value: st!.last_sync_at ? formatRelative(st!.last_sync_at) : "Never" },
+                  { label: "Last checked with Central", value: st!.last_sync_at ? formatRelative(st!.last_sync_at) : "Never" },
                   { label: "Last check error", value: st!.last_sync_error || "—" },
                 ]}
               />
-            </CardBody>
-          </Card>
+            </SectionCard>
 
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>Certificates</CardTitle>
-                <CardDescription>Renewed automatically, each time with a new key.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardBody className="p-0">
-              {doc.certificates.length === 0 ? (
-                <EmptyState icon={<ShieldCheck />} title="No certificate yet" hint="One is requested as soon as this appliance has a host name." />
-              ) : (
-                <Table>
-                  <THead>
-                    <TR><TH>Host name</TH><TH>Expires</TH><TH>Renews after</TH><TH>Last error</TH></TR>
-                  </THead>
-                  <TBody>
-                    {doc.certificates.map((c) => (
-                      <TR key={c.hostname}>
-                        <TD className="font-mono text-xs">
-                          {c.hostname}
-                          {c.pending_since && <div className="font-sans text-xs text-muted-foreground">Order in progress since {when(c.pending_since)}</div>}
-                        </TD>
-                        <TD className="text-sm">{c.installed_at ? when(c.not_after) : "Not installed yet"}</TD>
-                        <TD className="text-sm">{when(c.renew_after)}</TD>
-                        <TD className="max-w-xs text-sm text-muted-foreground">{c.last_error || "—"}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>Portal address</CardTitle>
-                <CardDescription>
-                  A private address that exists only inside the appliance and is answered on client networks only.
-                </CardDescription>
-              </div>
-              {writable && (
+            <SectionCard
+              title="Portal address"
+              description="A private address inside the appliance, answered on client networks only."
+              actions={writable && (
                 <Button size="sm" variant="secondary" disabled={busy !== null}
                   onClick={() => { setAddressInput(doc.settings.portal_ip); setAddressErr(null); setAddressIssues([]); setEditingAddress(true); }}>
                   Change…
                 </Button>
               )}
-            </CardHeader>
-            <CardBody>
+            >
               {doc.settings.configured ? (
-                <KeyValueGrid
+                <DescriptionList
                   items={[
                     { label: "Address", value: mono(doc.settings.portal_ip) },
                     { label: "Last changed", value: `${when(doc.settings.updated_at)}${doc.settings.updated_by ? ` by ${doc.settings.updated_by}` : ""}` },
@@ -325,44 +284,77 @@ export default function PortalHTTPSPage() {
                   network here uses.
                 </Callout>
               )}
-            </CardBody>
-          </Card>
+            </SectionCard>
+          </div>
 
-          <Card>
-            <CardHeader>
-              <div className="space-y-1">
-                <CardTitle>Hotel portal domain</CardTitle>
-                <CardDescription>Optional. Needed for Google sign-in. A subdomain your hotel owns.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              {domain ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {mono(domain)} <Badge tone={dStatus.tone} dot={dStatus.tone === "warn"}>{dStatus.label}</Badge>
-                  </div>
-                  {st!.custom_domain_error && st!.custom_domain === domain && (
-                    <Callout tone="danger" title="Verification problem">{st!.custom_domain_error}</Callout>
-                  )}
-                  {records.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-sm">Publish these three records at your DNS provider:</p>
-                      <Table>
+          <SectionCard flush title="Certificates" description="Renewed automatically, each time with a new key.">
+            {doc.certificates.length === 0 ? (
+              <EmptyState size="sm" icon={<ShieldCheck />} title="No certificate yet" hint="One is requested as soon as this appliance has a host name." />
+            ) : (
+              <Table label="Portal certificates">
+                <THead>
+                  <TR><TH>Host name</TH><TH>Expires</TH><TH className="hidden sm:table-cell">Renews after</TH><TH className="hidden md:table-cell">Last error</TH></TR>
+                </THead>
+                <TBody>
+                  {doc.certificates.map((c) => (
+                    <TR key={c.hostname}>
+                      <TD className="font-mono text-xs">
+                        <span className="break-all">{c.hostname}</span>
+                        {c.pending_since && <div className="font-sans text-xs text-muted-foreground">Order in progress since {when(c.pending_since)}</div>}
+                      </TD>
+                      <TD nowrap>{c.installed_at ? when(c.not_after) : "Not installed yet"}</TD>
+                      <TD nowrap muted className="hidden sm:table-cell">{when(c.renew_after)}</TD>
+                      <TD truncate muted className="hidden md:table-cell" title={c.last_error || undefined}>{c.last_error || "—"}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Hotel portal domain"
+            description="Optional. Needed for Google sign-in. A subdomain your hotel owns."
+            actions={domain && writable && (
+              <>
+                <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { setDialogErr(null); setRemoving(true); }}>
+                  Remove…
+                </Button>
+                <Button size="sm" variant="secondary" disabled={busy !== null} onClick={checkNow}>
+                  <Search /> {busy === "check" ? "Checking…" : "Check now"}
+                </Button>
+              </>
+            )}
+            bodyClassName="space-y-4"
+          >
+            {domain ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  {mono(domain)} <StatusBadge tone={dStatus.tone}>{dStatus.label}</StatusBadge>
+                </div>
+                {st!.custom_domain_error && st!.custom_domain === domain && (
+                  <Callout tone="danger" title="Verification problem">{st!.custom_domain_error}</Callout>
+                )}
+                {records.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm">Publish these three records at your DNS provider:</p>
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <Table label="DNS records to publish" density="compact">
                         <THead><TR><TH>Type</TH><TH>Name</TH><TH>Value</TH></TR></THead>
                         <TBody>
                           {records.map((rec, i) => (
                             <TR key={i}>
-                              <TD className="font-mono text-xs">{rec.type}</TD>
+                              <TD nowrap className="font-mono text-xs">{rec.type}</TD>
                               <TD>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
                                   <span className="break-all font-mono text-xs">{rec.name}</span>
-                                  <CopyButton value={rec.name} variant="ghost" label="Copy" />
+                                  <CopyButton value={rec.name} variant="ghost" size="xs" label="Copy" />
                                 </div>
                               </TD>
                               <TD>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
                                   <span className="break-all font-mono text-xs">{rec.value}</span>
-                                  <CopyButton value={rec.value} variant="ghost" label="Copy" />
+                                  <CopyButton value={rec.value} variant="ghost" size="xs" label="Copy" />
                                 </div>
                               </TD>
                             </TR>
@@ -370,64 +362,71 @@ export default function PortalHTTPSPage() {
                         </TBody>
                       </Table>
                     </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      The DNS records to publish appear here once OneGate Central has registered the domain. Use Check now.
-                    </p>
-                  )}
-                  {writable && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" disabled={busy !== null} onClick={checkNow}>
-                        <Search /> {busy === "check" ? "Checking…" : "Check now"}
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { setDialogErr(null); setRemoving(true); }}>
-                        Remove…
-                      </Button>
-                    </div>
-                  )}
-                </>
-              ) : writable ? (
-                <form
-                  className="flex flex-col gap-2 sm:flex-row sm:items-end"
-                  onSubmit={(e) => { e.preventDefault(); if (!domainProblem && domainInput.trim()) { setDialogErr(null); setConfirmDomain(true); } }}
-                >
-                  <Field label="Domain" hint="For example wifi.yourhotel.com" error={domainProblem ?? undefined} className="flex-1">
-                    <Input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="wifi.yourhotel.com"
-                      autoComplete="off" spellCheck={false} />
-                  </Field>
-                  <Button type="submit" disabled={busy !== null || !domainInput.trim() || domainProblem !== null}>
-                    <Globe /> Use this domain…
-                  </Button>
-                </form>
-              ) : (
-                <p className="text-sm text-muted-foreground">No hotel portal domain is set.</p>
-              )}
-            </CardBody>
-          </Card>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    The DNS records to publish appear here once OneGate Central has registered the domain. Use Check now.
+                  </p>
+                )}
+              </>
+            ) : writable ? (
+              <form
+                className="flex flex-col gap-2 sm:flex-row sm:items-end"
+                onSubmit={(e) => { e.preventDefault(); if (!domainProblem && domainInput.trim()) { setDialogErr(null); setConfirmDomain(true); } }}
+              >
+                <Field label="Domain" hint="For example wifi.yourhotel.com" error={domainProblem ?? undefined} className="flex-1">
+                  <Input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="wifi.yourhotel.com"
+                    autoComplete="off" spellCheck={false} />
+                </Field>
+                <Button type="submit" variant="secondary" disabled={busy !== null || !domainInput.trim() || domainProblem !== null}>
+                  <Globe /> Use this domain…
+                </Button>
+              </form>
+            ) : (
+              <p className="text-sm text-muted-foreground">No hotel portal domain is set.</p>
+            )}
+          </SectionCard>
 
-          <Card>
-            <CardHeader><CardTitle>History</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              {doc.history.length === 0 ? (
-                <EmptyState icon={<History />} title="No changes yet" />
-              ) : (
-                <Table>
-                  <THead><TR><TH>When</TH><TH>Setting</TH><TH>From</TH><TH>To</TH><TH>By</TH></TR></THead>
-                  <TBody>
-                    {doc.history.map((h) => (
-                      <TR key={h.id}>
-                        <TD className="whitespace-nowrap text-sm">{when(h.changed_at)}</TD>
-                        <TD className="text-sm">{FIELD_LABEL[h.field] ?? h.field}</TD>
-                        <TD className="font-mono text-xs">{h.old_value ?? "—"}</TD>
-                        <TD className="font-mono text-xs">{h.new_value ?? "—"}</TD>
-                        <TD className="text-sm">{h.changed_by}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </CardBody>
-          </Card>
+          <SectionCard flush title="Change history" description="Portal address and domain changes, newest first.">
+            <HistoryList
+              label="Portal HTTPS change history"
+              emptyLabel="No changes yet."
+              items={historyRows.map((h) => ({
+                id: String(h.id),
+                title: `${FIELD_LABEL[h.field] ?? h.field} changed`,
+                actor: h.changed_by,
+                at: when(h.changed_at),
+                summary: `${h.old_value ?? "—"} → ${h.new_value ?? "—"}`,
+              }))}
+              selectedId={openChange}
+              onSelect={(it) => setOpenChange(it.id)}
+            />
+            {doc.history.length > HISTORY_PREVIEW && (
+              <div className="border-t border-border px-4 py-2.5">
+                <Button size="sm" variant="ghost" onClick={() => setAllHistory((v) => !v)}>
+                  {allHistory ? "Show fewer" : `View all ${doc.history.length}`}
+                </Button>
+              </div>
+            )}
+          </SectionCard>
+
+          <DetailsDrawer
+            open={change !== null}
+            onOpenChange={(v) => !v && setOpenChange(null)}
+            eyebrow="Portal HTTPS change"
+            title={change ? `${FIELD_LABEL[change.field] ?? change.field} changed` : ""}
+            description={change ? `${when(change.changed_at)} · ${change.changed_by}` : undefined}
+          >
+            {change && (
+              <ChangeDiff
+                changes={[{
+                  field: FIELD_LABEL[change.field] ?? change.field,
+                  before: change.old_value ? <span className="font-mono text-xs">{change.old_value}</span> : undefined,
+                  after: change.new_value ? <span className="font-mono text-xs">{change.new_value}</span> : undefined,
+                }]}
+              />
+            )}
+          </DetailsDrawer>
         </>
       )}
 

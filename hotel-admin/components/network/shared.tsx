@@ -4,10 +4,12 @@ import * as React from "react";
 import { api, Whoami, ValidationIssue, HealthCheck, Reservation, GuestNetwork } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { errMsg } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog, DialogForm } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
+import { RowActions } from "@/components/ui/row-actions";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 /** Wait for whoami before offering writes or declaring the operator read-only. */
@@ -29,10 +31,17 @@ export const REVISION_STATE: Record<string, { label: string; tone: "ok" | "warn"
   validated: { label: "Validated", tone: "default" },
 };
 
-export function RevisionStateBadge({ state }: { state: string }) {
+export function revisionStateLabel(state: string): string {
   const words = state.replace(/_/g, " ");
-  const s = REVISION_STATE[state] ?? { label: words.charAt(0).toUpperCase() + words.slice(1), tone: "default" as const };
-  return <Badge tone={s.tone} dot={state === "pending_confirmation"}>{s.label}</Badge>;
+  return REVISION_STATE[state]?.label ?? words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export function RevisionStateBadge({ state }: { state: string }) {
+  return <StatusBadge tone={REVISION_STATE[state]?.tone ?? "default"}>{revisionStateLabel(state)}</StatusBadge>;
+}
+
+export function EnabledBadge({ enabled }: { enabled: boolean | undefined }) {
+  return enabled ? <StatusBadge tone="ok">Enabled</StatusBadge> : <StatusBadge>Disabled</StatusBadge>;
 }
 
 export const DHCP_MODE: Record<string, { label: string; tone: "ok" | "warn" | "err" | "info" | "default" }> = {
@@ -79,7 +88,7 @@ export function HealthCheckList({
     <ul className={cn("divide-y divide-border rounded-md border border-border", className)}>
       {checks.map((h, k) => (
         <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
-          <Badge tone={h.ok ? "ok" : "err"}>{h.ok ? "Passed" : "Failed"}</Badge>
+          <StatusBadge tone={h.ok ? "ok" : "err"}>{h.ok ? "Passed" : "Failed"}</StatusBadge>
           <span className="font-mono text-xs">{h.name}</span>
           {h.detail && <span className="min-w-0 break-words text-caption text-muted-foreground">{h.detail}</span>}
           {h.at && <span className="ms-auto text-caption tabular text-muted-foreground">{h.at}</span>}
@@ -103,7 +112,7 @@ export function ApplyResults({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-label">Validation</span>
-            <Badge tone={validation.ok ? "ok" : "err"}>{validation.ok ? "Passed" : "Issues found"}</Badge>
+            <StatusBadge tone={validation.ok ? "ok" : "err"}>{validation.ok ? "Passed" : "Issues found"}</StatusBadge>
           </div>
           {validation.issues && validation.issues.length > 0 && <ValidationIssueList issues={validation.issues} />}
         </div>
@@ -115,6 +124,60 @@ export function ApplyResults({
         </div>
       )}
     </div>
+  );
+}
+
+/** Reservations as a table, for the DHCP page (all networks) and a client network's own page. */
+export function ReservationTable({
+  reservations,
+  writable,
+  networkName,
+  onEdit,
+  onRemove,
+}: {
+  reservations: Reservation[];
+  writable: boolean;
+  /** Shows the client-network column when given. */
+  networkName?: (guestNetworkId: string) => string;
+  onEdit: (r: Reservation) => void;
+  onRemove: (r: Reservation) => void;
+}) {
+  return (
+    <Table label="DHCP reservations">
+      <THead>
+        <TR>
+          {networkName && <TH>Client network</TH>}
+          <TH>Reserved IP</TH>
+          <TH className="hidden sm:table-cell">MAC address</TH>
+          <TH className="hidden md:table-cell">Hostname</TH>
+          <TH className="hidden sm:table-cell">Status</TH>
+          {writable && <TH><span className="sr-only">Actions</span></TH>}
+        </TR>
+      </THead>
+      <TBody>
+        {reservations.map((r) => (
+          <TR key={r.id} onClick={writable ? () => onEdit(r) : undefined}>
+            {networkName && <TD truncate title={networkName(r.guest_network_id)}>{networkName(r.guest_network_id)}</TD>}
+            <TD nowrap className="font-mono text-xs">
+              {r.reserved_ip}
+              <div className="font-mono text-caption text-muted-foreground sm:hidden">{r.mac}</div>
+            </TD>
+            <TD nowrap className="hidden font-mono text-xs sm:table-cell">{r.mac}</TD>
+            <TD truncate muted className="hidden md:table-cell" title={r.hostname || undefined}>{r.hostname || "—"}</TD>
+            <TD nowrap className="hidden sm:table-cell"><EnabledBadge enabled={r.enabled} /></TD>
+            {writable && (
+              <TD className="w-0">
+                <RowActions
+                  subject={`reservation ${r.reserved_ip}`}
+                  primary={{ label: "Edit", onSelect: () => onEdit(r) }}
+                  items={[{ label: "Remove", danger: true, onSelect: () => onRemove(r) }]}
+                />
+              </TD>
+            )}
+          </TR>
+        ))}
+      </TBody>
+    </Table>
   );
 }
 
@@ -166,7 +229,7 @@ export function AddReservationDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="New reservation"
-      description="Pin a device to a fixed address. The reservation is staged: it reaches the DHCP server when you next apply the client-network changes, and the device gets the address the next time it asks for one after that."
+      description="Staged: it reaches the DHCP server when you next apply the client-network changes."
       submitLabel="Add reservation"
       busyLabel="Adding…"
       busy={busy}
@@ -187,7 +250,7 @@ export function AddReservationDialog({
       <Field label="Reserved IP address" required hint="Must be inside the client network's subnet.">
         <Input value={f.reserved_ip} onChange={(e) => setF({ ...f, reserved_ip: e.target.value })} placeholder="10.20.0.50" className="font-mono" autoComplete="off" />
       </Field>
-      <Field label="Hostname" hint="Optional. A name that helps you recognise the device.">
+      <Field label="Hostname" optional hint="A name that helps you recognise the device.">
         <Input value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} placeholder="office-printer" />
       </Field>
       <SwitchRow label="Enabled" checked={f.enabled} onChange={(v) => setF({ ...f, enabled: v })} />
@@ -246,7 +309,7 @@ export function EditReservationDialog({
           <Field label="Reserved IP address" required>
             <Input value={r.reserved_ip} onChange={(e) => setR({ ...r, reserved_ip: e.target.value })} className="font-mono" autoComplete="off" />
           </Field>
-          <Field label="Hostname">
+          <Field label="Hostname" optional>
             <Input value={r.hostname ?? ""} onChange={(e) => setR({ ...r, hostname: e.target.value })} />
           </Field>
           <SwitchRow label="Enabled" checked={r.enabled} onChange={(v) => setR({ ...r, enabled: v })} />

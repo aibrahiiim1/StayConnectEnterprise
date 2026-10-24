@@ -67,6 +67,13 @@ beforeEach(() => {
   get.mockReset(); post.mockReset(); del.mockReset();
 });
 
+// A row's secondary actions live in its "⋯" menu (RowActions); Radix opens it from the keyboard.
+async function rowAction(subject: string, item: string) {
+  const trigger = await screen.findByRole("button", { name: `Actions for ${subject}` });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 describe("no native browser dialog remains on a Networking screen", () => {
   const ROOT = join(__dirname, "..");
   function walk(dir: string, out: string[] = []) {
@@ -96,7 +103,7 @@ describe("no native browser dialog remains on a Networking screen", () => {
     for (const [file, title] of Object.entries(titles)) {
       const src = readFileSync(join(ROOT, "app/(app)/network", file), "utf8");
       expect(src, file).toContain(title);
-      expect(src, file).toContain('eyebrow="Networking"');
+      expect(src, file).not.toMatch(/eyebrow="Networking/);
     }
     for (const f of FILES) expect(readFileSync(f, "utf8"), f).not.toMatch(/stayconnect/i);
   });
@@ -160,7 +167,7 @@ describe("Client networks", () => {
     post.mockResolvedValue({});
     render(<GuestNetworksPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Disable Guest WiFi" }));
+    await rowAction("Guest WiFi", "Disable");
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Take Guest WiFi offline?")).toBeTruthy();
     expect(within(dialog).getByText(/Nothing happens to clients until you apply/)).toBeTruthy();
@@ -177,9 +184,9 @@ describe("Client networks", () => {
     });
     post.mockResolvedValue({});
     render(<GuestNetworksPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Enable Guest WiFi" }));
+    await rowAction("Guest WiFi", "Enable");
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/guest-networks/net-1/enable"));
-    expect(screen.queryByRole("button", { name: "Disable Guest WiFi" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Disable" })).toBeNull();
   });
 
   it("a read-only role sees the list but no write action", async () => {
@@ -193,7 +200,7 @@ describe("Client networks", () => {
     await screen.findByText(/Your role can view client networks but not change them/);
     expect(screen.queryByText("New client network")).toBeNull();
     expect(screen.queryByRole("button", { name: /Apply changes/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Disable/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Disable|Actions for/ })).toBeNull();
     expect(await screen.findByText(/Revision #9/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Keep this change" })).toBeNull();
   });
@@ -240,7 +247,7 @@ describe("DHCP & leases", () => {
     const tab = await screen.findByRole("tab", { name: /Reservations/ });
     fireEvent.mouseDown(tab, { button: 0 });
     fireEvent.click(tab);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove reservation 10.20.0.50" }));
+    await rowAction("reservation 10.20.0.50", "Remove");
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Remove the reserved address 10.20.0.50?")).toBeTruthy();
     expect(within(dialog).getByText(/any free address next time it connects/)).toBeTruthy();
@@ -262,7 +269,7 @@ describe("Client network detail", () => {
     render(<GuestNetworkDetailPage />);
     expect(await screen.findByText("Status & topology")).toBeTruthy();
     expect(screen.getByText("br-g20")).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Remove reservation 10.20.0.50" }));
+    await rowAction("reservation 10.20.0.50", "Remove");
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove reservation" }));
     await waitFor(() => expect(del).toHaveBeenCalledWith("/network/dhcp/reservations/res-1"));

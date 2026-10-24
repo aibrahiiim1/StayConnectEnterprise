@@ -2,27 +2,29 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   api, inBackground, ListResp,
   GuestNetwork, GuestNetworkStatus, NetRevision,
   ValidateResult, ApplyResult, ValidationIssue, HealthCheck,
 } from "@/lib/api";
-import { Card, CardBody, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, SectionCard } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Button, LinkButton } from "@/components/ui/button";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageShell, PageHeader, StatCard } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { SkeletonRows } from "@/components/ui/misc";
+import { RowActions } from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
 import { PendingChangeBanner, ReadOnlyNotice, useSecondsLeft } from "@/components/ui/patterns";
-import { CheckCircle2, Network, Pencil, Plus, Power, Trash2, Users, Wifi } from "lucide-react";
+import { CheckCircle2, Network, Plus, Power, Users, Wifi } from "lucide-react";
 import { errMsg } from "@/lib/utils";
 import { HelpList, HelpSection } from "@/components/help";
 import {
-  ApplyResults, DhcpModeBadge, networkTypeLabel, useNetworkAccess,
+  ApplyResults, DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 
@@ -41,6 +43,7 @@ export default function NetworkPage() {
   const [validation, setValidation] = useState<{ ok: boolean; issues?: ValidationIssue[] } | null>(null);
   const [health, setHealth] = useState<HealthCheck[] | null>(null);
   const toast = useToast();
+  const router = useRouter();
 
   const { known, writable } = useNetworkAccess();
 
@@ -90,8 +93,8 @@ export default function NetworkPage() {
 
   // Taking a network offline or deleting it is staged until configuration is applied.
   const [confirming, setConfirming] = useState<{ kind: "disable" | "delete"; net: GuestNetwork } | null>(null);
+  const [confirmErr, setConfirmErr] = useState<string | null>(null);
 
-  // Re-enabling is staged and preserves all other network settings.
   async function enableNetwork(net: GuestNetwork) {
     setActing(net.id);
     try {
@@ -101,7 +104,6 @@ export default function NetworkPage() {
     } catch (e) { toast.error("Could not enable the network", errMsg(e)); }
     finally { setActing(null); }
   }
-  const [confirmErr, setConfirmErr] = useState<string | null>(null);
 
   async function applyStagedRemoval() {
     if (!confirming) return;
@@ -181,16 +183,14 @@ export default function NetworkPage() {
   const hasResults = !!validation || !!(health && health.length);
 
   const newButton = (
-    <Link href="/network/new" className={buttonVariants({ variant: "primary" })}>
+    <LinkButton href="/network/new" variant="primary">
       <Plus /> New client network
-    </Link>
+    </LinkButton>
   );
 
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<Network />}
-        eyebrow="Networking"
         title="Client networks"
         description="The Wi-Fi networks clients join."
         help={
@@ -251,53 +251,45 @@ export default function NetworkPage() {
       )}
 
       {!pending && hasResults && (
-        <Card>
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle>Validation &amp; health</CardTitle>
-              <CardDescription>The result of the last Validate or Apply on this screen.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody><ApplyResults validation={validation} health={health} /></CardBody>
-        </Card>
+        <SectionCard title="Validation & health" description="The result of the last Validate or Apply on this screen.">
+          <ApplyResults validation={validation} health={health} />
+        </SectionCard>
       )}
 
       {rows !== null && rows.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatGrid cols={3}>
           <StatCard label="Client networks" value={rows.length} icon={<Network />} />
           <StatCard
             label="Enabled"
             value={enabledCount}
             hint={rows.length - enabledCount > 0 ? `${rows.length - enabledCount} disabled` : "All enabled"}
             icon={<Wifi />}
-            tone={enabledCount === 0 ? "warn" : "ok"}
+            tone={enabledCount === 0 ? "warn" : "default"}
           />
           <StatCard
             label="Devices connected"
             value={knownClients.length ? clientTotal : "—"}
             hint="Across all client networks, now"
             icon={<Users />}
-            tone="info"
           />
-        </div>
+        </StatGrid>
       )}
 
-      <Card>
+      <Card className="overflow-hidden">
         {rows === null ? (
           <SkeletonRows rows={4} cols={6} />
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Network />}
             title="No client networks yet"
-            hint="Create a client network to give clients Wi-Fi with a sign-in page, addresses and internet access."
+            hint="Create one to give clients Wi-Fi with a sign-in page, addresses and internet access."
             action={writable ? newButton : undefined}
           />
         ) : (
-          <Table>
+          <Table label="Client networks">
             <THead>
               <TR>
                 <TH>Name</TH>
-                <TH className="hidden 2xl:table-cell">SSID label</TH>
                 <TH>Type</TH>
                 <TH className="hidden 2xl:table-cell">Parent interface</TH>
                 <TH className="hidden md:table-cell">Gateway</TH>
@@ -306,70 +298,66 @@ export default function NetworkPage() {
                 <TH className="hidden 2xl:table-cell">Pool</TH>
                 <TH className="hidden sm:table-cell">Portal</TH>
                 <TH>Status</TH>
-                <TH className="text-end">Clients</TH>
+                <TH numeric>Clients</TH>
                 <TH><span className="sr-only">Actions</span></TH>
               </TR>
             </THead>
             <TBody>
               {rows.map((n) => (
-                <TR key={n.id}>
-                  <TD className="min-w-48">
-                    <Link href={`/network/${n.id}`} className="font-medium text-foreground hover:text-primary hover:underline">
+                <TR key={n.id} onClick={() => router.push(`/network/${n.id}`)}>
+                  <TD className="min-w-44">
+                    <Link
+                      href={`/network/${n.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-medium text-foreground hover:text-primary hover:underline"
+                    >
                       {n.name}
                     </Link>
-                    {n.description && <div className="text-caption text-muted-foreground">{n.description}</div>}
+                    {(n.ssid_label || n.description) && (
+                      <div className="max-w-[18rem] truncate text-xs text-muted-foreground" title={n.description || n.ssid_label}>
+                        {n.ssid_label ? `SSID ${n.ssid_label}` : n.description}
+                      </div>
+                    )}
                   </TD>
-                  <TD className="hidden text-muted-foreground 2xl:table-cell">{n.ssid_label || "—"}</TD>
-                  <TD>
+                  <TD nowrap>
                     <Badge tone={n.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(n)}</Badge>
                   </TD>
-                  <TD className="hidden font-mono text-xs 2xl:table-cell">{n.parent_interface}</TD>
-                  <TD className="hidden font-mono text-xs md:table-cell">{n.gateway_ip}</TD>
-                  <TD className="hidden font-mono text-xs lg:table-cell">{n.subnet_cidr}</TD>
-                  <TD className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
-                  <TD className="hidden font-mono text-xs text-muted-foreground 2xl:table-cell">{poolSummary(n)}</TD>
-                  <TD className="hidden sm:table-cell">
+                  <TD nowrap className="hidden font-mono text-xs 2xl:table-cell">{n.parent_interface}</TD>
+                  <TD nowrap className="hidden font-mono text-xs md:table-cell">{n.gateway_ip}</TD>
+                  <TD nowrap className="hidden font-mono text-xs lg:table-cell">{n.subnet_cidr}</TD>
+                  <TD nowrap className="hidden md:table-cell"><DhcpModeBadge mode={n.dhcp_mode} /></TD>
+                  <TD nowrap muted className="hidden font-mono text-xs 2xl:table-cell">{poolSummary(n)}</TD>
+                  <TD nowrap className="hidden sm:table-cell">
                     {n.captive_portal_enabled ? <Badge tone="info">Sign-in page</Badge> : <Badge tone="warn">No sign-in page · no internet</Badge>}
                   </TD>
-                  <TD>{n.enabled ? <Badge tone="ok" dot>Enabled</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
-                  <TD className="text-end tabular text-muted-foreground">{status[n.id]?.active_clients ?? "—"}</TD>
-                  <TD className="whitespace-nowrap text-end">
-                    <div className="inline-flex items-center gap-1">
-                      <Link
-                        href={`/network/${n.id}`}
-                        className={buttonVariants({ variant: "ghost", size: "sm" })}
-                        aria-label={writable ? `Edit ${n.name}` : `View ${n.name}`}
-                      >
-                        <Pencil /> <span className="hidden sm:inline">{writable ? "Edit" : "View"}</span>
-                      </Link>
-                      {writable && n.enabled && (
-                        <Button
-                          size="sm" variant="ghost" disabled={acting === n.id}
-                          aria-label={`Disable ${n.name}`}
-                          onClick={() => { setConfirmErr(null); setConfirming({ kind: "disable", net: n }); }}
-                        >
-                          <Power /> <span className="hidden sm:inline">Disable</span>
-                        </Button>
-                      )}
-                      {writable && !n.enabled && (
-                        <Button
-                          size="sm" variant="ghost" disabled={acting === n.id}
-                          aria-label={`Enable ${n.name}`}
-                          onClick={() => enableNetwork(n)}
-                        >
-                          <Power /> <span className="hidden sm:inline">Enable</span>
-                        </Button>
-                      )}
-                      {writable && !n.enabled && (
-                        <Button
-                          size="sm" variant="ghost" disabled={acting === n.id}
-                          aria-label={`Delete ${n.name}`}
-                          onClick={() => { setConfirmErr(null); setConfirming({ kind: "delete", net: n }); }}
-                        >
-                          <Trash2 /> <span className="hidden sm:inline">Delete</span>
-                        </Button>
-                      )}
-                    </div>
+                  <TD nowrap><EnabledBadge enabled={n.enabled} /></TD>
+                  <TD numeric muted>{status[n.id]?.active_clients ?? "—"}</TD>
+                  <TD className="w-0">
+                    <RowActions
+                      subject={n.name}
+                      primary={{ label: writable ? "Edit" : "View", href: `/network/${n.id}` }}
+                      items={[
+                        {
+                          label: "Disable",
+                          hidden: !writable || !n.enabled,
+                          disabled: acting === n.id,
+                          onSelect: () => { setConfirmErr(null); setConfirming({ kind: "disable", net: n }); },
+                        },
+                        {
+                          label: "Enable",
+                          hidden: !writable || n.enabled,
+                          disabled: acting === n.id,
+                          onSelect: () => void enableNetwork(n),
+                        },
+                        {
+                          label: "Delete",
+                          danger: true,
+                          hidden: !writable || n.enabled,
+                          disabled: acting === n.id,
+                          onSelect: () => { setConfirmErr(null); setConfirming({ kind: "delete", net: n }); },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               ))}

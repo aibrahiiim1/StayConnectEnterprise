@@ -6,37 +6,37 @@ import {
   api, inBackground, SysNetState, SysNetProposal, SysNetValidateResp,
   SysNetApplyResp, SysNetAudit,
 } from "@/lib/api";
-import { Card, CardBody, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { Field, FieldGrid, Input } from "@/components/ui/input";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner, Callout } from "@/components/ui/error-banner";
 import { PageShell, PageHeader } from "@/components/ui/page";
-import { KeyValueGrid } from "@/components/ui/data";
+import { DescriptionList } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
-import { EmptyState } from "@/components/ui/empty-state";
+import { ChangeDiff, HistoryList } from "@/components/ui/history";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { PendingChangeBanner, ReadOnlyNotice } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { errMsg } from "@/lib/utils";
 import { ValidationIssueList, useNetworkAccess } from "@/components/network/shared";
 import { HelpList, HelpSection } from "@/components/help";
-import {
-  Router, Download, RefreshCw, Archive, Network, ArrowRight, Stethoscope, ChevronDown, History, CheckCircle2,
-} from "lucide-react";
+import { Download, RefreshCw, ChevronDown, CheckCircle2 } from "lucide-react";
 
 function Conn({ ok, label }: { ok: boolean; label: string }) {
-  return <Badge tone={ok ? "ok" : "err"} dot>{label}: {ok ? "OK" : "Failing"}</Badge>;
+  return <StatusBadge tone={ok ? "ok" : "err"}>{label}: {ok ? "OK" : "Failing"}</StatusBadge>;
 }
 function LinkBadge({ up }: { up: boolean }) {
-  return <Badge tone={up ? "ok" : "err"}>{up ? "Link up" : "Link down"}</Badge>;
+  return <StatusBadge tone={up ? "ok" : "err"}>{up ? "Link up" : "Link down"}</StatusBadge>;
 }
 function when(s: string): string {
   const t = Date.parse(/[+-]\d{2}$/.test(s) ? `${s}:00` : s);
   return Number.isFinite(t) ? new Date(t).toLocaleString() : s;
 }
 const mono = (v: React.ReactNode) => <span className="font-mono text-xs">{v}</span>;
+const auditResult = (h: SysNetAudit) => h.apply_result || h.confirm_result || h.rollback_result || h.failure_reason || "";
+const HISTORY_PREVIEW = 8;
 
 export default function NetworkSettingsPage() {
   const { known, writable } = useNetworkAccess();
@@ -60,6 +60,8 @@ export default function NetworkSettingsPage() {
   const [applyResp, setApplyResp] = useState<SysNetApplyResp | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
   const [history, setHistory] = useState<SysNetAudit[] | null>(null);
+  const [allHistory, setAllHistory] = useState(false);
+  const [entry, setEntry] = useState<SysNetAudit | null>(null);
   const [diag, setDiag] = useState<Record<string, string> | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -182,10 +184,13 @@ export default function NetworkSettingsPage() {
 
   const header = (
     <PageHeader
-      icon={<Router />}
-      eyebrow="Networking"
       title="WAN / LAN settings"
-      description="The appliance's own internet uplink and management address."
+      description={
+        <>
+          The appliance&rsquo;s own internet uplink and management address. Client Wi-Fi is under{" "}
+          <Link href="/network" className="font-medium text-foreground underline underline-offset-2">Client networks</Link>.
+        </>
+      }
       help={
         <>
           <HelpSection title="What this page covers">
@@ -231,7 +236,7 @@ export default function NetworkSettingsPage() {
       <PageShell>
         {header}
         <ErrorBanner err={err} className="mb-0" />
-        <div className="grid gap-4 md:grid-cols-2" aria-busy={!err}>
+        <div className="grid gap-5 md:grid-cols-2" aria-busy={!err}>
           <span className="sr-only">{err ? "" : "Loading network settings"}</span>
           <Skeleton className="h-72 w-full" />
           <Skeleton className="h-72 w-full" />
@@ -243,6 +248,7 @@ export default function NetworkSettingsPage() {
   const mgmtWillChange = wanIp !== state.wan.ip;
   const pendingNow = !!state.pending || applyResp?.state === "pending_confirmation";
   const reconnectUrl = applyResp?.management_url || state.pending?.management_url;
+  const shownHistory = history ? (allHistory ? history : history.slice(0, HISTORY_PREVIEW)) : [];
 
   return (
     <PageShell>
@@ -277,7 +283,7 @@ export default function NetworkSettingsPage() {
               <div className="text-label">Checks after applying</div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(applyResp.verify).map(([k, ok]) => (
-                  <Badge key={k} tone={ok ? "ok" : "err"}>{k}: {ok ? "passed" : "failed"}</Badge>
+                  <StatusBadge key={k} tone={ok ? "ok" : "err"}>{k}: {ok ? "passed" : "failed"}</StatusBadge>
                 ))}
               </div>
             </div>
@@ -285,82 +291,53 @@ export default function NetworkSettingsPage() {
         </PendingChangeBanner>
       )}
 
-      <div className="grid gap-5 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2"><Router className="size-4" aria-hidden /> WAN / Management</CardTitle>
-              <CardDescription>The uplink to the internet, and the address you reach this admin on.</CardDescription>
-            </div>
-            <LinkBadge up={state.wan.link_up} />
-          </CardHeader>
-          <CardBody className="space-y-4">
-            <div className="flex flex-wrap gap-2" aria-label="Connectivity">
-              <Conn ok={state.wan.connectivity.gateway_reachable} label="Gateway" />
-              <Conn ok={state.wan.connectivity.internet_ok} label="Internet" />
-              <Conn ok={state.wan.connectivity.dns_ok} label="DNS" />
-            </div>
-            {state.wan.drift && (
-              <Callout tone="warning" title="Running address differs from the saved one">
-                The saved configuration says {mono(state.wan.persistent_ip)}. The appliance may return to it after a restart.
-              </Callout>
-            )}
-            <KeyValueGrid
-              items={[
-                { label: "IP address", value: mono(`${state.wan.ip}/${state.wan.prefix_len}`) },
-                { label: "IP mode", value: state.wan.mode === "static" ? "Static" : state.wan.mode === "dhcp" ? "DHCP" : state.wan.mode },
-                { label: "Default gateway", value: mono(state.wan.gateway) },
-                { label: "DNS", value: mono(state.wan.dns.join(", ") || "—") },
-                { label: "Subnet mask", value: mono(state.wan.netmask) },
-                { label: "Physical interface", value: mono(state.wan.interface) },
-                { label: "MAC address", value: mono(state.wan.mac) },
-                { label: "Outbound interface", value: mono(state.wan.outbound_interface) },
-                {
-                  label: "Management URL",
-                  value: <a className="break-all font-mono text-xs text-primary underline" href={state.wan.management_url}>{state.wan.management_url}</a>,
-                  wide: true,
-                },
-              ]}
-            />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2"><Network className="size-4" aria-hidden /> Client Wi-Fi is configured elsewhere</CardTitle>
-              <CardDescription>This page covers only the uplink and the legacy base bridge.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody className="space-y-3 text-sm">
-            <div className="grid gap-2">
-              <Link href="/network" className="group flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 hover:border-border-strong hover:bg-accent/50">
-                <span><span className="font-medium">Client networks</span><span className="block text-caption text-muted-foreground">Create and edit client networks, gateways and portal</span></span>
-                <ArrowRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180" aria-hidden />
-              </Link>
-              <Link href="/network/dhcp" className="group flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 hover:border-border-strong hover:bg-accent/50">
-                <span><span className="font-medium">DHCP &amp; leases</span><span className="block text-caption text-muted-foreground">Address pools, reservations and active leases</span></span>
-                <ArrowRight className="size-4 shrink-0 text-muted-foreground rtl:rotate-180" aria-hidden />
-              </Link>
-            </div>
-          </CardBody>
-        </Card>
-      </div>
+      <SectionCard
+        title="WAN / management"
+        description="The uplink to the internet, and the address you reach this admin on."
+        actions={<LinkBadge up={state.wan.link_up} />}
+        bodyClassName="space-y-4"
+      >
+        <div className="flex flex-wrap gap-2" aria-label="Connectivity">
+          <Conn ok={state.wan.connectivity.gateway_reachable} label="Gateway" />
+          <Conn ok={state.wan.connectivity.internet_ok} label="Internet" />
+          <Conn ok={state.wan.connectivity.dns_ok} label="DNS" />
+        </div>
+        {state.wan.drift && (
+          <Callout tone="warning" title="Running address differs from the saved one">
+            The saved configuration says {mono(state.wan.persistent_ip)}. The appliance may return to it after a restart.
+          </Callout>
+        )}
+        <DescriptionList
+          columns={2}
+          items={[
+            { label: "IP address", value: mono(`${state.wan.ip}/${state.wan.prefix_len}`) },
+            { label: "IP mode", value: state.wan.mode === "static" ? "Static" : state.wan.mode === "dhcp" ? "DHCP" : state.wan.mode },
+            { label: "Default gateway", value: mono(state.wan.gateway) },
+            { label: "DNS", value: mono(state.wan.dns.join(", ") || "—") },
+            { label: "Subnet mask", value: mono(state.wan.netmask) },
+            { label: "Physical interface", value: mono(state.wan.interface) },
+            { label: "MAC address", value: mono(state.wan.mac) },
+            { label: "Outbound interface", value: mono(state.wan.outbound_interface) },
+            {
+              label: "Management URL",
+              value: <a className="break-all font-mono text-xs text-primary underline" href={state.wan.management_url}>{state.wan.management_url}</a>,
+              wide: true,
+            },
+          ]}
+        />
+      </SectionCard>
 
       <details className="group rounded-lg border border-border bg-card shadow-card">
-        <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 px-5 py-4 text-emphasis [&::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 rounded-lg px-5 py-3.5 text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
           <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
-          <Archive className="size-4 text-muted-foreground" aria-hidden /> Advanced · Base LAN / Legacy bridge
+          Base LAN / legacy bridge
           <span className="font-mono text-xs font-normal text-muted-foreground">{state.lan.bridge}</span>
           <Badge tone="default">Legacy{state.lan.dhcp_enabled ? "" : " · unused"}</Badge>
         </summary>
-        <div className="space-y-4 border-t border-border px-5 py-4">
-          <p className="text-sm text-muted-foreground">
-            Not a client network — clients are managed under{" "}
-            <Link href="/network" className="text-primary underline">Client networks</Link>.
-          </p>
-          <KeyValueGrid
-            columns={3}
+        <div className="space-y-3 border-t border-border px-5 py-4">
+          <p className="text-sm text-muted-foreground">Not a client network; clients do not use it.</p>
+          <DescriptionList
+            columns={2}
             items={[
               { label: "Base gateway IP", value: mono(`${state.lan.ip}/${state.lan.prefix_len}`) },
               { label: "Subnet mask", value: mono(state.lan.netmask) },
@@ -368,11 +345,9 @@ export default function NetworkSettingsPage() {
               { label: "Physical interface", value: mono(state.lan.physical_interface) },
               { label: "Bridge", value: mono(state.lan.bridge) },
               { label: "MAC address", value: mono(state.lan.mac) },
-              { label: "DHCP (this bridge)", value: <Badge tone="default">{state.lan.dhcp_enabled ? "Enabled" : "Off — clients use client networks"}</Badge> },
-              ...(state.lan.dhcp_enabled ? [
-                { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`) },
-                { label: "Lease time", value: `${state.lan.dhcp_lease_seconds}s` },
-              ] : []),
+              { label: "DHCP (this bridge)", value: state.lan.dhcp_enabled ? "Enabled" : "Off — clients use client networks" },
+              { label: "DHCP range", value: mono(`${state.lan.dhcp_start} – ${state.lan.dhcp_end}`), hidden: !state.lan.dhcp_enabled },
+              { label: "Lease time", value: `${state.lan.dhcp_lease_seconds}s`, hidden: !state.lan.dhcp_enabled },
               { label: "DNS to clients", value: mono(state.lan.dns.join(", ") || "—") },
               { label: "Bridge members", value: mono((state.lan.members ?? []).join(", ") || "—") },
             ]}
@@ -381,147 +356,166 @@ export default function NetworkSettingsPage() {
       </details>
 
       {writable && (
-        <Card>
-          <CardHeader>
-            <div className="space-y-1">
-              <CardTitle>Change configuration</CardTitle>
-              <CardDescription>Validate &amp; preview first. Applying asks for your password and rolls back on its own unless you keep it.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody className="space-y-5">
-            <div className="grid gap-5 md:grid-cols-2">
-              <fieldset className="space-y-3 rounded-md border border-border p-4">
-                <legend className="px-1 text-micro uppercase tracking-[0.06em] text-muted-foreground">
-                  WAN / Management · <span className="font-mono normal-case">{state.wan.interface}</span>
-                </legend>
-                <Field label="IP address"><Input value={wanIp} onChange={(e) => { setWanIp(e.target.value);}} className="font-mono" /></Field>
-                <Field label="Prefix length"><Input type="number" value={wanPrefix} onChange={(e) => { setWanPrefix(Number(e.target.value));}} /></Field>
-                <Field label="Default gateway"><Input value={wanGw} onChange={(e) => { setWanGw(e.target.value);}} className="font-mono" /></Field>
-                <Field label="DNS servers" hint="Separate several with commas."><Input value={wanDns} onChange={(e) => { setWanDns(e.target.value);}} className="font-mono" /></Field>
-              </fieldset>
-              <fieldset className="space-y-3 rounded-md border border-border p-4">
-                <legend className="px-1 text-micro uppercase tracking-[0.06em] text-muted-foreground">
-                  Base LAN / Legacy bridge · <span className="font-mono normal-case">{state.lan.bridge}</span>
-                </legend>
-                <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => { setLanIp(e.target.value);}} className="font-mono" /></Field>
-                <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => { setLanPrefix(Number(e.target.value));}} /></Field>
-                <p className="text-caption text-muted-foreground">
-                  DHCP is not edited here; see{" "}
-                  <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link>.
-                </p>
-              </fieldset>
-            </div>
-
-            {mgmtWillChange && (
-              <Callout tone="warning" title="Changing the WAN IP changes the admin address">
-                After applying you must reconnect at <strong className="font-mono">https://{wanIp}</strong> and keep the
-                change there, or it rolls back automatically.
-              </Callout>
-            )}
-
-            {validation && (
-              <div className="space-y-4">
-                {validation.validation.ok ? (
-                  <Callout tone="success" title="Configuration is valid">Review the change below, then apply it.</Callout>
-                ) : (
-                  <Callout tone="danger" title="Validation failed">
-                    <ValidationIssueList issues={validation.validation.issues ?? []} className="mt-1" />
-                  </Callout>
-                )}
-                <div className="overflow-hidden rounded-md border border-border">
-                  <Table>
-                    <THead><TR><TH>Setting</TH><TH>Before</TH><TH>After</TH></TR></THead>
-                    <TBody>
-                      <TR>
-                        <TD className="font-medium">WAN</TD>
-                        <TD className="font-mono text-xs text-muted-foreground">{`${state.wan.ip}/${state.wan.prefix_len} gw ${state.wan.gateway} dns ${state.wan.dns.join(",")}`}</TD>
-                        <TD className="font-mono text-xs">{`${wanIp}/${wanPrefix} gw ${wanGw} dns ${wanDns}`}</TD>
-                      </TR>
-                      <TR>
-                        <TD className="font-medium">LAN</TD>
-                        <TD className="font-mono text-xs text-muted-foreground">{`${state.lan.ip}/${state.lan.prefix_len} dhcp ${state.lan.dhcp_start}-${state.lan.dhcp_end}`}</TD>
-                        <TD className="font-mono text-xs">{`${lanIp}/${lanPrefix} dhcp ${dhcpEnabled ? `${dhcpStart}-${dhcpEnd}` : "off"}`}</TD>
-                      </TR>
-                      <TR>
-                        <TD className="font-medium">Management URL</TD>
-                        <TD className="font-mono text-xs text-muted-foreground">{state.wan.management_url}</TD>
-                        <TD className="font-mono text-xs font-semibold">{validation.management_url}</TD>
-                      </TR>
-                    </TBody>
-                  </Table>
-                </div>
-              </div>
-            )}
-          </CardBody>
-          <CardFooter className="justify-end">
-            <Button variant="secondary" onClick={doValidate} disabled={busy}>
-              <CheckCircle2 /> {busy && !applying ? "Validating…" : "Validate & preview"}
-            </Button>
-            {validation?.validation.ok && (
-              <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy}>
-                Apply change…
+        <SectionCard
+          title="Change configuration"
+          description="Validate & preview first. Applying asks for your password and rolls back on its own unless you keep it."
+          bodyClassName="space-y-5"
+          footer={
+            <>
+              <Button variant="secondary" onClick={doValidate} disabled={busy}>
+                <CheckCircle2 /> {busy && !applying ? "Validating…" : "Validate & preview"}
               </Button>
-            )}
-          </CardFooter>
-        </Card>
+              {validation?.validation.ok && (
+                <Button onClick={() => { setApplyErr(null); setApplying(true); }} disabled={busy}>
+                  Apply change…
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div className="grid gap-5 md:grid-cols-2">
+            <fieldset className="min-w-0 space-y-3">
+              <legend className="mb-3 text-label">
+                WAN / management <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.wan.interface}</span>
+              </legend>
+              <FieldGrid cols={2}>
+                <Field label="IP address"><Input value={wanIp} onChange={(e) => setWanIp(e.target.value)} className="font-mono" /></Field>
+                <Field label="Prefix length"><Input type="number" value={wanPrefix} onChange={(e) => setWanPrefix(Number(e.target.value))} /></Field>
+              </FieldGrid>
+              <Field label="Default gateway"><Input value={wanGw} onChange={(e) => setWanGw(e.target.value)} className="font-mono" /></Field>
+              <Field label="DNS servers" hint="Separate several with commas."><Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} className="font-mono" /></Field>
+            </fieldset>
+            <fieldset className="min-w-0 space-y-3">
+              <legend className="mb-3 text-label">
+                Base LAN / legacy bridge <span className="ms-1 font-mono text-xs font-normal text-muted-foreground">{state.lan.bridge}</span>
+              </legend>
+              <FieldGrid cols={2}>
+                <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} className="font-mono" /></Field>
+                <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} /></Field>
+              </FieldGrid>
+              <p className="text-caption text-muted-foreground">
+                DHCP is not edited here; see{" "}
+                <Link href="/network/dhcp" className="text-primary underline">DHCP &amp; leases</Link>.
+              </p>
+            </fieldset>
+          </div>
+
+          {mgmtWillChange && (
+            <Callout tone="warning" title="Changing the WAN IP changes the admin address">
+              After applying you must reconnect at <strong className="font-mono">https://{wanIp}</strong> and keep the
+              change there, or it rolls back automatically.
+            </Callout>
+          )}
+
+          {validation && (
+            <div className="space-y-3">
+              {validation.validation.ok ? (
+                <Callout tone="success" title="Configuration is valid">Review the change below, then apply it.</Callout>
+              ) : (
+                <Callout tone="danger" title="Validation failed">
+                  <ValidationIssueList issues={validation.validation.issues ?? []} className="mt-1" />
+                </Callout>
+              )}
+              <ChangeDiff
+                changes={[
+                  {
+                    field: "WAN",
+                    before: mono(`${state.wan.ip}/${state.wan.prefix_len} gw ${state.wan.gateway} dns ${state.wan.dns.join(",")}`),
+                    after: mono(`${wanIp}/${wanPrefix} gw ${wanGw} dns ${wanDns}`),
+                  },
+                  {
+                    field: "LAN",
+                    before: mono(`${state.lan.ip}/${state.lan.prefix_len} dhcp ${state.lan.dhcp_start}-${state.lan.dhcp_end}`),
+                    after: mono(`${lanIp}/${lanPrefix} dhcp ${dhcpEnabled ? `${dhcpStart}-${dhcpEnd}` : "off"}`),
+                  },
+                  {
+                    field: "Management URL",
+                    before: mono(state.wan.management_url),
+                    after: <span className="font-mono text-xs font-semibold">{validation.management_url}</span>,
+                  },
+                ]}
+              />
+            </div>
+          )}
+        </SectionCard>
       )}
 
-      <Card>
-        <CardHeader>
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2"><Stethoscope className="size-4" aria-hidden /> Diagnostics</CardTitle>
-            <CardDescription>A read-only snapshot of addresses, routes and reachability.</CardDescription>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={loadDiag} disabled={diagBusy}>
-              {diagBusy ? "Running…" : diag ? "Run again" : "Run diagnostics"}
-            </Button>
-            {diag && <Button variant="secondary" size="sm" onClick={downloadDiag}><Download /> Download report</Button>}
-          </div>
-        </CardHeader>
-        {diag && (
-          <CardBody className="space-y-3">
-            {Object.entries(diag).map(([k, v]) => (
-              <div key={k} className="space-y-1">
-                <div className="text-micro uppercase tracking-[0.06em] text-muted-foreground">{k}</div>
-                <pre className="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs text-foreground">{v}</pre>
-              </div>
-            ))}
-          </CardBody>
-        )}
-      </Card>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <SectionCard
+          title="Diagnostics"
+          description="A read-only snapshot of addresses, routes and reachability."
+          actions={
+            <>
+              <Button variant="secondary" size="sm" onClick={loadDiag} disabled={diagBusy}>
+                {diagBusy ? "Running…" : diag ? "Run again" : "Run diagnostics"}
+              </Button>
+              {diag && <Button variant="secondary" size="sm" onClick={downloadDiag}><Download /> Download report</Button>}
+            </>
+          }
+          bodyClassName={diag ? "space-y-3" : "hidden"}
+        >
+          {diag && Object.entries(diag).map(([k, v]) => (
+            <div key={k} className="space-y-1">
+              <div className="text-label text-muted-foreground">{k}</div>
+              <pre className="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs text-foreground">{v}</pre>
+            </div>
+          ))}
+        </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><History className="size-4" aria-hidden /> Change history</CardTitle>
-        </CardHeader>
-        {history === null ? (
-          <CardBody><Skeleton className="h-20 w-full" /></CardBody>
-        ) : history.length === 0 ? (
-          <EmptyState icon={<History />} title="No changes recorded yet" hint="Every apply, keep and roll back of these settings is listed here." />
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>When</TH><TH>Operator</TH><TH className="hidden md:table-cell">Source</TH>
-                <TH>Action</TH><TH className="hidden lg:table-cell">Target</TH><TH className="hidden sm:table-cell">Result</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {history.map((h, n) => (
-                <TR key={n}>
-                  <TD className="whitespace-nowrap text-muted-foreground">{when(h.at)}</TD>
-                  <TD>{h.actor}</TD>
-                  <TD className="hidden font-mono text-xs md:table-cell">{h.source_ip}</TD>
-                  <TD>{h.action}</TD>
-                  <TD className="hidden font-mono text-xs lg:table-cell">{h.target}</TD>
-                  <TD className="hidden sm:table-cell">{h.apply_result || h.confirm_result || h.rollback_result || h.failure_reason || "—"}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+        <SectionCard flush title="Change history" description="Every apply, keep and roll back of these settings.">
+          {history === null ? (
+            <div className="px-5 py-4"><Skeleton className="h-20 w-full" /></div>
+          ) : (
+            <>
+              <HistoryList
+                label="WAN / LAN change history"
+                emptyLabel="No changes recorded yet."
+                items={shownHistory.map((h, n) => ({
+                  id: String(n),
+                  title: h.action,
+                  actor: h.actor,
+                  at: when(h.at),
+                  summary: [h.target, auditResult(h)].filter(Boolean).join(" · ") || undefined,
+                  tone: h.failure_reason || h.rollback_result ? "warn" : "neutral",
+                }))}
+                onSelect={(it) => setEntry(shownHistory[Number(it.id)] ?? null)}
+              />
+              {history.length > HISTORY_PREVIEW && (
+                <div className="border-t border-border px-4 py-2.5">
+                  <Button size="sm" variant="ghost" onClick={() => setAllHistory((v) => !v)}>
+                    {allHistory ? "Show fewer" : `View all ${history.length}`}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </SectionCard>
+      </div>
+
+      <DetailsDrawer
+        open={entry !== null}
+        onOpenChange={(v) => !v && setEntry(null)}
+        eyebrow="WAN / LAN change"
+        title={entry?.action ?? ""}
+        description={entry ? when(entry.at) : undefined}
+      >
+        {entry && (
+          <DetailsSection title="Record">
+            <DescriptionList
+              items={[
+                { label: "Operator", value: entry.actor || "—" },
+                { label: "Source", value: mono(entry.source_ip || "—") },
+                { label: "Target", value: mono(entry.target || "—") },
+                { label: "Apply result", value: entry.apply_result, hidden: !entry.apply_result },
+                { label: "Keep result", value: entry.confirm_result, hidden: !entry.confirm_result },
+                { label: "Roll back result", value: entry.rollback_result, hidden: !entry.rollback_result },
+                { label: "Failure", value: <span className="text-destructive">{entry.failure_reason}</span>, hidden: !entry.failure_reason },
+                { label: "Backup", value: mono(entry.backup_path), hidden: !entry.backup_path },
+              ]}
+            />
+          </DetailsSection>
         )}
-      </Card>
+      </DetailsDrawer>
 
       <ConfirmDialog
         open={applying}
