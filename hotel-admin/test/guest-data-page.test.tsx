@@ -63,7 +63,8 @@ describe("Guest data requests", () => {
     const { ApiError } = await import("@/lib/api");
     post.mockRejectedValue(new ApiError(409, { error: "guest_data_live", live: ["pms_open", "online"], message: "x" }));
     await renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /^erase /i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Actions for Client account/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Erase/ }));
     const dialog = await screen.findByRole("dialog");
     const go = within(dialog).getByRole("button", { name: /erase guest/i }) as HTMLButtonElement;
     fillDialog(dialog);
@@ -77,7 +78,8 @@ describe("Guest data requests", () => {
   it("shows the erasure reference to give the guest", async () => {
     post.mockResolvedValue({ erasure_ref: "ER-0A1B2C3D4E5F", counts: { client_accounts: 1, devices: 2 } });
     await renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /^erase /i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Actions for Client account/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Erase/ }));
     const dialog = await screen.findByRole("dialog");
     fillDialog(dialog, "ERASE");
     fireEvent.click(within(dialog).getByRole("button", { name: /erase guest/i }));

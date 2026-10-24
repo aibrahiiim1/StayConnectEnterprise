@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { dueWords } from "@/lib/guest-data-register-words";
 
 const get = vi.fn();
@@ -38,8 +38,10 @@ describe("Request register", () => {
   it("records a request with the day it was received", async () => {
     post.mockResolvedValue({ ref: "RQ-BBBBBBBB" });
     await renderPage();
-    fireEvent.change(screen.getByLabelText(/who is asking/i), { target: { value: "Bo Peep" } });
-    fireEvent.click(screen.getByRole("button", { name: /record request/i }));
+    fireEvent.click(screen.getByRole("button", { name: /new request/i }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/who is asking/i), { target: { value: "Bo Peep" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /record request/i }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post.mock.calls[0][0]).toBe("/guest-data-rights/register");
     expect(post.mock.calls[0][1]).toMatchObject({ kind: "ACCESS", requester: "Bo Peep" });
@@ -47,7 +49,8 @@ describe("Request register", () => {
 
   it("will not close a refusal without its ground", async () => {
     await renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /close request RQ-AAAAAAAA/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^close: RQ-AAAAAAAA/i }));
+    await screen.findByRole("dialog");
     fireEvent.change(screen.getByLabelText(/^result/i), { target: { value: "REFUSED" } });
     const submit = screen.getByRole("button", { name: /^close request$/i }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
