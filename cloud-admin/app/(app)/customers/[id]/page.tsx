@@ -121,7 +121,6 @@ function CustomerView({ id }: { id: string }) {
     <PageShell width="wide">
       <PageHeader
         title={c.name}
-        description={c.created_at ? `Customer since ${formatDay(c.created_at)}` : undefined}
         meta={archived ? <StateBadge info={recordStatusInfo(c.status)} /> : undefined}
         actions={
           can["customers.edit"] ? (

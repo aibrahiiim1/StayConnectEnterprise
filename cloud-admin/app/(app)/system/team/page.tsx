@@ -58,10 +58,8 @@ export default function TeamPage() {
           noun="team member"
         />
       </Card>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <SessionLifetimeSetting canManage={can["team.manage"]} />
-        <DataRetentionSetting canManage={can["team.manage"]} />
-      </div>
+      <SessionLifetimeSetting canManage={can["team.manage"]} />
+      <DataRetentionSetting canManage={can["team.manage"]} />
     </PageShell>
   );
 }

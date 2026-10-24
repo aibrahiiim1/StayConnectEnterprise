@@ -495,7 +495,7 @@ export default function AppliancePage({ params }: { params: { id: string } }) {
                     `until ${formatLicenseDay(l.valid_until)}`,
                     modulesSummary(l.modules),
                   ].filter(Boolean).join(" · "),
-                  at: l.issued_at ? `Issued ${formatDay(l.issued_at)}` : undefined,
+                  at: l.issued_at ? <span title={formatDateTime(l.issued_at)}>Issued {formatDay(l.issued_at)}</span> : undefined,
                   tone: licenseTone(l.state),
                 }))}
                 selectedId={version?.id}

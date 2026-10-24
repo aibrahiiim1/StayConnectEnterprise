@@ -6,7 +6,13 @@ import type { ApplianceRow } from "@/lib/api";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { RowActions } from "@/components/ui/row-actions";
 import { ActivationBadge, ConnectionBadge, LicenseBadge } from "@/components/status-badge";
-import { connectionSentence, licenseSentence } from "@/lib/status";
+import { connectionInfo, connectionSentence, licenseInfo, licenseSentence } from "@/lib/status";
+
+/** The detail under a state badge, omitted when it would only repeat the badge. */
+function SecondLine({ text, unless }: { text: string; unless: string }) {
+  if (!text || text === unless) return null;
+  return <div className="mt-0.5 text-xs text-muted-foreground">{text}</div>;
+}
 
 export function sortAppliances(rows: ApplianceRow[]): ApplianceRow[] {
   return [...rows].sort((a, b) => {
@@ -67,16 +73,14 @@ export function ApplianceTable({
                 </TD>
               )}
               <TD nowrap><ActivationBadge value={a.activation} /></TD>
-              <TD nowrap className="hidden sm:table-cell">
+              <TD className="hidden sm:table-cell">
                 <ConnectionBadge value={a.connection} />
-                {a.connection !== "connected" && (
-                  <div className="mt-0.5 text-xs text-muted-foreground">{connectionSentence(a)}</div>
-                )}
+                <SecondLine text={connectionSentence(a)} unless={connectionInfo(a.connection).label} />
               </TD>
-              <TD nowrap className="hidden lg:table-cell">
+              <TD className="hidden lg:table-cell">
                 <LicenseBadge value={a.license?.state} />
                 {a.license && a.license.state !== "none" && (
-                  <div className="mt-0.5 text-xs text-muted-foreground">{licenseSentence(a.license)}</div>
+                  <SecondLine text={licenseSentence(a.license)} unless={licenseInfo(a.license.state).label} />
                 )}
               </TD>
               <TD className="w-0">

@@ -26,7 +26,7 @@ import { useQueryState } from "@/lib/use-query-state";
 import { ACTIVATION, ACTIVATION_ORDER, CONNECTION, CONNECTION_ORDER, LICENSE, LICENSE_ORDER } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-const FILTER_SELECT = "w-auto min-w-36";
+const FILTER_SELECT = "w-auto min-w-36 max-w-56";
 
 const FILTERS = ["activation", "connection", "license", "customer_id", "site_id", "q"] as const;
 
