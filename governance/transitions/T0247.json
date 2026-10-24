@@ -1,0 +1,36 @@
+{
+  "transition_id": "T0247",
+  "seq": 247,
+  "timestamp": "2026-10-24T20:25:00+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after both PRE-LIVE hosts were deployed, read back and verified in real browsers, and before the commit that introduces this receipt.",
+  "record_type": "MULTI_INDUSTRY_TERMINOLOGY_PRIVACY_NOTICE_AND_PORTAL_DOMAIN_TEXT",
+  "authorisation": "D71 (2026-10-24) under the Product Owner's mission 'Complete the remaining multi-industry terminology corrections from PR #230', authorised by D67 for implementation, PRE-LIVE deployment and the protected merge. It does NOT authorise Go-Live.",
+  "deployment_provenance": {
+    "appliance": "PRE-LIVE 172.21.60.25: edged (sha256 7a0c12c6abdd), scd (29eb9945de3d) and portald (09fb58a8ee1a) built from a clean clone of b5775652 with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false); pmsd ae4f85d2 and netd, acctd 9394eb5f unchanged (netd was not restarted: the only changed text it carries is a message only edged and scd can show); DEPLOYED_BINARIES 6/6 OK. Admin Console release 20261024-170919 (source_commit b5775652f8b6, BUILD_ID By4rgUIy2vdIy51ARwcZB), previous 20261024-153930. Schema 0150 unchanged.",
+    "central": "Central 172.21.96.196: release onegate-central-b5775652f8b6 deployed with central-deploy.sh (pre-deploy dump, migrations 56/0/0 unchanged, ctrlapi sha256 1bbe9fc6b2da, console BUILD_ID 27FSW7HOEo9169qlvTvkV, smoke 9/9)."
+  },
+  "verification": "Go: portald (including the new test that fails in any of the six languages when a string outside the Room, PMS and post-stay features speaks of hotels, reception or rooms, shown to fail on the old wording in all six, and the regenerated e2e fixture); edged and portald integration against a private database; portaltls; all data-plane unit suites; gofmt and vet clean. Consoles: tsc clean; vitest hotel-admin 996/996, cloud-admin 244/244 with the naming guards extended to the portal-domain phrases; Playwright 174/174. Live on PRE-LIVE: a before/after diff of the portal's own API showed privacy.default as the only changed key among 243 in each of the six languages and the branding data byte-identical (the site's own name, logo and layout untouched); the portal in a real browser, desktop and a 390 px phone, opened the notice in English, Arabic (right-to-left, no overflow), German, French, Italian and Russian and each read the new wording without any hotel or reception word; the Portal settings editor offers the new default; Portal HTTPS shows wifi.example.com; invalid domains sent through a signed-in session came back 422 with the new messages and nothing was saved; both consoles' two-step cycle and every page (44 and 11) passed with none of the retired phrases.",
+  "rollback": "Appliance: edged.bak-pre-b5775652-*, scd.bak-pre-b5775652-*, portald.bak-pre-b5775652-*; hotel-admin.previous -> 20261024-153930. Central: central-deploy.sh rollback; database dump central-20261024T170939Z-pre-b5775652f8b6.dump (no migration in this delivery).",
+  "follow_up": "Left on purpose: the Room, PMS, post-stay and stay-related portal strings and the Hotel section, which are genuine hospitality features, and PMS vendor help text (a PMS is a hospitality system). The text of the privacy notice an operator writes themselves is theirs and was not touched; a site that relies on the built-in notice now shows the neutral wording, and the Product Owner or the site's data-protection adviser should confirm it suits each site type before Go-Live.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0246."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "b00410b5966cfeea586775a60eb8a513dd608925",
+  "base_note": "Master after the merge of PR #230; this delivery's lineage is built on it.",
+  "head": "b5775652",
+  "head_note": "The last content commit of branch delivery/multi-industry-terminology. Governance commits follow it.",
+  "previous_delivery": "T0246",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

@@ -1,0 +1,4 @@
+commit 0184f34152d3dab781a8ef40bc1c879ac0333fa0
+Date:   Sat Oct 24 20:22:28 2026 +0300
+
+    The change manifest records the terminology delivery

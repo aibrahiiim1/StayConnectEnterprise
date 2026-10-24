@@ -1,4 +1,0 @@
-commit 12795be65f9e6165f0b40e14050eb25bf0ab4f73
-Date:   Sat Oct 24 18:45:22 2026 +0300
-
-    The change manifest records the authenticator branding delivery

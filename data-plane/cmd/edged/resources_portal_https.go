@@ -166,13 +166,13 @@ func normalisePortalDomain(raw string) string {
 // validatePortalDomain mirrors the DB CHECK and requires a subdomain (three or more labels); Central rejects apex names via the public suffix list.
 func validatePortalDomain(fqdn string) string {
 	if fqdn == "" {
-		return "enter the hotel portal domain, for example wifi.yourhotel.com"
+		return "enter the portal domain, for example wifi.example.com"
 	}
 	if len(fqdn) < 4 || len(fqdn) > 253 || !portalDomainRe.MatchString(fqdn) {
-		return "the domain must be a host name such as wifi.yourhotel.com (letters, digits and hyphens only)"
+		return "the domain must be a host name such as wifi.example.com (letters, digits and hyphens only)"
 	}
 	if fqdn == "onegate.work" || strings.HasSuffix(fqdn, ".onegate.work") {
-		return "the hotel portal domain must be a domain your hotel owns, not one under onegate.work"
+		return "the portal domain must be a domain you own, not one under onegate.work"
 	}
 	if strings.Count(fqdn, ".") < 2 {
 		return "use a subdomain such as wifi." + fqdn + ", not the domain itself"
@@ -462,12 +462,12 @@ func (s *server) portalDomainChange(w http.ResponseWriter, r *http.Request, acto
 	old, changed, err := s.savePortalSetting(ctx, r, actor, "custom_domain", fqdn)
 	if errors.Is(err, errPortalNotConfigured) {
 		jsonErr(w, http.StatusConflict, "portal_address_required",
-			"choose a portal address first; the hotel domain points at it")
+			"choose a portal address first; the portal domain points at it")
 		return
 	}
 	if err != nil {
 		slog.Warn("portal domain save failed", "err", err)
-		jsonErr(w, http.StatusInternalServerError, "internal", "the hotel portal domain could not be saved")
+		jsonErr(w, http.StatusInternalServerError, "internal", "the portal domain could not be saved")
 		return
 	}
 	action := "portal_https.custom_domain_set"

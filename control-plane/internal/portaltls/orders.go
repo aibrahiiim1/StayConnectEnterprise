@@ -61,14 +61,14 @@ func (s *Service) CreateOrder(ctx context.Context, applianceID string, in OrderR
 			return nil, err
 		}
 		if d == nil || d.FQDN != hostname {
-			return nil, refuse(http.StatusUnprocessableEntity, "unknown_hostname", "%s is neither this appliance's OneGate hostname nor its hotel domain", hostname)
+			return nil, refuse(http.StatusUnprocessableEntity, "unknown_hostname", "%s is neither this appliance's OneGate hostname nor its custom domain", hostname)
 		}
 		if d.Status != "VERIFIED" {
-			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the hotel domain %s is not verified", hostname)
+			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the custom domain %s is not verified", hostname)
 		}
 		// Re-verify before every order: a delegation that broke since the last check must not yield a certificate.
 		if !s.checkAndRecordDomain(ctx, d, h.FQDN, st) {
-			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the hotel domain no longer verifies: %s", d.LastError)
+			return nil, refuse(http.StatusUnprocessableEntity, "domain_not_verified", "the custom domain no longer verifies: %s", d.LastError)
 		}
 		kind = KindCustom
 	}

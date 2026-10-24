@@ -66,7 +66,7 @@ commercial remnant columns were dropped by migration 0047.
 | Signed hello (detects a deleted record) | `GET /v1/appliance/hello` |
 | Assignment acknowledgement (adopted version; a terminal ack is retried until confirmed) | `POST /v1/appliance/assignment/ack` |
 | Offline-activation reconciliation (the consumed package id; retried until confirmed) | `POST /v1/appliance/offline-reconcile` |
-| Client Portal hostname and certificate (portal address, hotel domain; CSR) | `POST /v1/appliance/portal-tls/sync`, `POST /v1/appliance/portal-tls/orders` |
+| Client Portal hostname and certificate (portal address, custom domain; CSR) | `POST /v1/appliance/portal-tls/sync`, `POST /v1/appliance/portal-tls/orders` |
 
 **No telemetry.** The appliance has no telemetry outbox, producer or message-bus
 client (CLAUDE.md §0E); the subsystem and its tables (`sync_outbox`,

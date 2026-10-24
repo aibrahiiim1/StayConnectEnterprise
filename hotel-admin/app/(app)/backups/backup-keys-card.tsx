@@ -63,7 +63,7 @@ function printSheet(k: NewKey) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Backup key: ${esc(k.label)}</title>
 <style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px}code{font:15px/1.6 ui-monospace,monospace;word-break:break-all}
 .box{border:2px solid #111;padding:16px;margin:16px 0}.check{font:24px ui-monospace,monospace;letter-spacing:2px}</style></head><body>
-<h1>StayConnect backup key — ${esc(k.label)}</h1>
+<h1>OneGate backup key — ${esc(k.label)}</h1>
 <p>Created ${esc(new Date(k.created_at).toLocaleString())}. Keep this sheet somewhere only authorised people can reach, such as a safe.
 Anyone with this key can read this hotel’s backups. Without it, or another key holder’s key, nobody can — not the appliance and not its supplier.</p>
 <div class="box"><div>Private key</div><code>${esc(k.private_key)}</code></div>
