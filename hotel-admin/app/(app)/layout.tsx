@@ -105,7 +105,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-screen overflow-hidden">
         {/* The width token, so the placeholder matches the real column. */}
-        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-sidebar-border bg-sidebar lg:block" />
+        <div className="hidden w-[var(--sidebar-width)] shrink-0 border-e border-sidebar-border bg-sidebar lg:block" />
         <div className="flex-1 space-y-4 p-6">
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-4 w-72" />
@@ -171,7 +171,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim/45 backdrop-blur-[2px] lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none" />
           <DialogPrimitive.Content
-            className="fixed inset-y-0 left-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
+            className="fixed inset-y-0 start-0 z-50 h-full w-64 outline-none lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left motion-reduce:animate-none"
             aria-label="Navigation"
             // Radix would focus the nav filter and raise the phone keyboard over the menu; focus the panel instead.
             onOpenAutoFocus={(e) => {
@@ -188,7 +188,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Solid, not translucent: content scrolls in its own pane, so nothing passes under this bar. */}
           <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
             <DialogPrimitive.Trigger
-              className="-ml-1.5 inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 pointer-coarse:size-11 lg:hidden"
+              className="-ms-1.5 inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:size-11 lg:hidden"
               aria-label="Open navigation"
             >
               <Menu className="size-5" />

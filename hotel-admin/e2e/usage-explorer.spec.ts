@@ -70,3 +70,27 @@ test("the /usage?stay=<id> deep link still opens the stay", async ({ page, baseU
   expect(q.get("from")).toBeTruthy();
   expect(q.get("to")).toBeTruthy();
 });
+
+test("the search box is not focused on open and gives the browser nothing to autofill", async ({ page, baseURL }) => {
+  const requested: string[] = [];
+  await installBackend(page, requested, baseURL);
+  await page.goto("/usage");
+  await expect(page.getByText("alex.morgan")).toBeVisible();
+
+  const focused = await page.evaluate(() => document.activeElement?.tagName ?? "");
+  expect(["INPUT", "TEXTAREA"]).not.toContain(focused);
+
+  const search = page.getByRole("searchbox", { name: /card reference/i });
+  await expect(search).toHaveAttribute("type", "search");
+  await expect(search).toHaveAttribute("autocomplete", "off");
+  await expect(search).toHaveAttribute("data-lpignore", "true");
+  await expect(search).toHaveAttribute("data-form-type", "other");
+  expect(await search.evaluate((el) => el.closest("form") === null)).toBe(true);
+  expect(await page.locator("main input[type=password]").count()).toBe(0);
+
+  const before = requested.filter((r) => r.startsWith("/usage/sources?")).length;
+  await search.fill("alex");
+  await search.press("Enter");
+  await expect.poll(() => requested.filter((r) => r.startsWith("/usage/sources?")).length).toBeGreaterThan(before);
+  expect(requested.some((r) => r.includes("alex")), "the search text never goes in the URL").toBe(false);
+});

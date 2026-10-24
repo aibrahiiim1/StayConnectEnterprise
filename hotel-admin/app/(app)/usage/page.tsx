@@ -6,7 +6,7 @@
 // Room words appear only on a Hotel room/stay source, always with its PMS connection.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Search, Smartphone } from "lucide-react";
+import { Activity, ArrowLeft, ChevronRight, FileSearch, KeyRound, Smartphone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
@@ -19,7 +19,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Meter, MonoId, SkeletonRows } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { FilterChips, MetricStrip, Pagination } from "@/components/ui/data";
+import { FilterChips, MetricStrip, Pagination, SearchInput } from "@/components/ui/data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { refreshingClass } from "@/components/ui/patterns";
 import { formatBytes, quotaPercent, endReasonWords } from "@/lib/bytes";
@@ -307,14 +307,14 @@ export default function UsageExplorerPage() {
                     { value: "open", label: SOURCE_LABEL.open },
                   ]}
                 />
-                <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); search(); }}>
-                  <div className="relative min-w-0 flex-1">
-                    <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <Input value={q} onChange={(e) => setQ(e.target.value)} className="ps-8"
-                      aria-label={hint.label} placeholder={hint.placeholder} />
-                  </div>
-                  <Button type="submit" disabled={busy}>{busy ? "Searching…" : "Search"}</Button>
-                </form>
+                {/* A search region, not a <form>: a lone text box labelled "Username…" inside a form is what makes a
+                    browser offer saved sign-in credentials. SearchInput also opts out of every password manager. */}
+                <div role="search" className="flex flex-wrap gap-2">
+                  <SearchInput value={q} onChange={setQ} onSearch={() => void search()} name="usage-source-filter"
+                    id="usage-source-filter" className="min-w-0 flex-1 sm:w-auto"
+                    label={hint.label} placeholder={hint.placeholder} />
+                  <Button disabled={busy} onClick={() => void search()}>{busy ? "Searching…" : "Search"}</Button>
+                </div>
               </CardBody>
 
               {rows === null ? <SkeletonRows rows={4} cols={5} /> : rows.length === 0 ? (
@@ -518,14 +518,12 @@ export default function UsageExplorerPage() {
           <Card>
             <CardHeader><CardTitle>Look up a device</CardTitle></CardHeader>
             <CardBody className="space-y-3">
-              <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); lookUpDevice(q); }}>
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                  <Input value={q} onChange={(e) => setQ(e.target.value)} className="ps-8 font-mono"
-                    aria-label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff" />
-                </div>
-                <Button type="submit" disabled={busy || !q.trim()}>{busy ? "Looking…" : "Look up"}</Button>
-              </form>
+              <div role="search" className="flex flex-wrap gap-2">
+                <SearchInput value={q} onChange={setQ} onSearch={(v) => { if (v.trim()) void lookUpDevice(v); }}
+                  name="usage-device-lookup" id="usage-device-lookup" className="min-w-0 flex-1 font-mono sm:w-auto"
+                  label="Device MAC address" placeholder="aa:bb:cc:dd:ee:ff" />
+                <Button disabled={busy || !q.trim()} onClick={() => void lookUpDevice(q)}>{busy ? "Looking…" : "Look up"}</Button>
+              </div>
             </CardBody>
           </Card>
 

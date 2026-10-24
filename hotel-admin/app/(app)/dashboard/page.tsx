@@ -22,7 +22,7 @@ import { Segmented } from "@/components/ui/tabs";
 import { moduleLicensed, useCapabilities, surfaceAvailable } from "@/lib/capabilities";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { describeDatabase, describeSessionController, describeLicense } from "@/lib/health-words";
-import { ArrowDownUp, CheckCircle2, Hotel, LayoutDashboard, LogIn, RefreshCw, Users } from "lucide-react";
+import { ArrowDownUp, CheckCircle2, Hotel, LogIn, RefreshCw, Users } from "lucide-react";
 import {
   ApplianceCard, ConcurrencyCard, DhcpDnsCard, NetworksCard, PackagesCard, PmsCard, ServicesGrid, SignInOutcomesCard,
   SignInPatternCard, TrafficCard,
@@ -128,9 +128,8 @@ export default function DashboardPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        icon={<LayoutDashboard />}
-        eyebrow={context ?? "Overview"}
         title="Overview"
+        meta={context ? <span className="text-sm text-muted-foreground">{context}</span> : undefined}
         description={`Clients, traffic, sign-ins and the health of this appliance over ${rangeLong}${snap?.timezone ? `, in the appliance's local time (${snap.timezone})` : ""}.`}
         help={
           <>
