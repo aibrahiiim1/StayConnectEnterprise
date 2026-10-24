@@ -4,12 +4,12 @@
 // A full provider refund ends the paid access automatically; OneGate never initiates refunds.
 
 import { useCallback, useEffect, useState } from "react";
-import { Scale } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TBody, TD, TH, THead, TR, TableWrap } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { SectionCard } from "@/components/ui/card";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { StatusBadge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -47,74 +47,62 @@ export function CardCasesCard({ canAct }: { canAct: boolean }) {
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <Card>
-      <CardHeader className="items-start">
-        <div className="min-w-0 space-y-1">
-          <CardTitle className="flex items-center gap-2 [&_svg]:size-4"><Scale aria-hidden /> Card disputes and chargebacks</CardTitle>
-          <CardDescription>
-            A dispute or chargeback never ends a client&apos;s access by itself. Decide each case once: keep the access, or end
-            the access that payment paid for. A full refund from the provider ends that access automatically and is listed
-            below. OneGate never starts a refund.
-          </CardDescription>
+    <SectionCard
+      flush
+      title="Card disputes and chargebacks"
+      description="A dispute or chargeback never ends a client's access by itself. Decide each case once. A full provider refund ends that access automatically; OneGate never starts a refund."
+    >
+      {error ? <div className="px-5 pt-4"><ErrorBanner err={error} /></div> : null}
+      {!data && !error && <SkeletonRows rows={2} />}
+      {data && data.cases.length === 0 && <EmptyState size="sm" title="No disputes or chargebacks" />}
+      {data && data.cases.length > 0 && (
+        <Table label="Card disputes and chargebacks">
+          <THead><TR><TH>Opened</TH><TH>Case</TH><TH numeric>Payment</TH><TH>Access</TH><TH>Decision</TH></TR></THead>
+          <TBody>
+            {data.cases.map((c) => (
+              <TR key={c.id}>
+                <TD nowrap muted>{formatDate(c.opened_at)}</TD>
+                <TD>{KIND[c.kind]}<div className="break-all text-xs text-muted-foreground">{c.provider_ref}</div></TD>
+                <TD numeric>{money(c.amount_minor, c.currency, 2)}</TD>
+                <TD nowrap>{c.entitlement_status ? <StatusBadge tone={c.entitlement_status === "ACTIVE" ? "ok" : "default"}>{c.entitlement_status === "ACTIVE" ? "Active" : "Ended"}</StatusBadge> : "—"}</TD>
+                <TD>
+                  {c.resolution ? (
+                    <div className="text-sm">
+                      {c.resolution === "KEEP_ACCESS" ? "Access kept" : "Access ended"}
+                      <div className="text-xs text-muted-foreground">{c.resolved_by} · {c.resolved_at ? formatDate(c.resolved_at) : ""} · {c.resolution_reason}</div>
+                    </div>
+                  ) : canAct ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="xs" variant="secondary" onClick={() => setActing({ c, resolution: "KEEP_ACCESS" })}>Keep access</Button>
+                      <Button size="xs" variant="danger-outline" onClick={() => setActing({ c, resolution: "END_ACCESS" })}>End access</Button>
+                    </div>
+                  ) : <StatusBadge tone="warn">Waiting for a decision</StatusBadge>}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
+      {data && data.refund_terminations.length > 0 && (
+        <div className="border-t border-border">
+          <p className="px-5 pb-1 pt-3 text-label">Access ended by a full provider refund</p>
+          <Table label="Access ended by a full provider refund">
+            <THead><TR><TH>When</TH><TH numeric>Charged</TH><TH numeric>Refunded</TH><TH>Entitlement</TH></TR></THead>
+            <TBody>
+              {data.refund_terminations.map((x) => (
+                <TR key={x.entitlement_id}>
+                  <TD nowrap muted>{formatDate(x.terminated_at)}</TD>
+                  <TD numeric>{money(x.captured_minor, x.currency, 2)}</TD>
+                  <TD numeric>{money(x.refunded_minor, x.currency, 2)}</TD>
+                  <TD className="font-mono text-xs">{x.entitlement_id.slice(0, 8)}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
         </div>
-      </CardHeader>
-      <CardBody className="space-y-4">
-        {error ? <ErrorBanner err={error} /> : null}
-        {!data && !error && <SkeletonRows rows={2} />}
-        {data && data.cases.length === 0 && <p className="text-sm text-muted-foreground">No disputes or chargebacks.</p>}
-        {data && data.cases.length > 0 && (
-          <TableWrap>
-            <Table>
-              <THead><TR><TH>Opened</TH><TH>Case</TH><TH>Payment</TH><TH>Access</TH><TH>Decision</TH></TR></THead>
-              <TBody>
-                {data.cases.map((c) => (
-                  <TR key={c.id}>
-                    <TD className="whitespace-nowrap">{formatDate(c.opened_at)}</TD>
-                    <TD>{KIND[c.kind]}<div className="text-xs text-muted-foreground break-all">{c.provider_ref}</div></TD>
-                    <TD className="whitespace-nowrap">{money(c.amount_minor, c.currency, 2)}</TD>
-                    <TD>{c.entitlement_status ? <Badge tone={c.entitlement_status === "ACTIVE" ? "ok" : "default"}>{c.entitlement_status === "ACTIVE" ? "Active" : "Ended"}</Badge> : "—"}</TD>
-                    <TD>
-                      {c.resolution ? (
-                        <div className="text-sm">
-                          {c.resolution === "KEEP_ACCESS" ? "Access kept" : "Access ended"}
-                          <div className="text-xs text-muted-foreground">{c.resolved_by} · {c.resolved_at ? formatDate(c.resolved_at) : ""} · {c.resolution_reason}</div>
-                        </div>
-                      ) : canAct ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button size="sm" variant="outline" onClick={() => setActing({ c, resolution: "KEEP_ACCESS" })}>Keep access</Button>
-                          <Button size="sm" variant="outline" onClick={() => setActing({ c, resolution: "END_ACCESS" })}>End access</Button>
-                        </div>
-                      ) : <Badge tone="warn">Waiting for a decision</Badge>}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </TableWrap>
-        )}
-        {data && data.refund_terminations.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Access ended by a full provider refund</p>
-            <TableWrap>
-              <Table>
-                <THead><TR><TH>When</TH><TH>Charged</TH><TH>Refunded</TH><TH>Entitlement</TH></TR></THead>
-                <TBody>
-                  {data.refund_terminations.map((x) => (
-                    <TR key={x.entitlement_id}>
-                      <TD className="whitespace-nowrap">{formatDate(x.terminated_at)}</TD>
-                      <TD>{money(x.captured_minor, x.currency, 2)}</TD>
-                      <TD>{money(x.refunded_minor, x.currency, 2)}</TD>
-                      <TD className="font-mono text-xs">{x.entitlement_id.slice(0, 8)}</TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </TableWrap>
-          </div>
-        )}
-      </CardBody>
+      )}
       <ResolveDialog acting={acting} onClose={() => setActing(null)} onDone={async () => { setActing(null); await load(); }} />
-    </Card>
+    </SectionCard>
   );
 }
 

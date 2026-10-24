@@ -9,7 +9,8 @@ import { api, ApiError } from "@/lib/api";
 import { canWrite } from "@/lib/roles";
 import { ManualReviewView } from "@/components/phase4/manual-review-view";
 import { CardCasesCard } from "@/components/phase4/card-cases";
-import { PageShell } from "@/components/ui/page";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { Callout } from "@/components/ui/error-banner";
 
 export default function FinancialReviewPage() {
   const [roles, setRoles] = useState<string[] | null>(null);
@@ -28,11 +29,16 @@ export default function FinancialReviewPage() {
   return (
     <>
       {reviewMounted !== false && <ManualReviewView canAct={canAct} />}
-      <PageShell className="mt-5">
+      <PageShell className={reviewMounted === false ? undefined : "mt-5"}>
         {reviewMounted === false && (
-          <p className="text-sm text-muted-foreground" data-testid="review-not-mounted">
-            Room-charge review is not switched on at this appliance. Card disputes and chargebacks are decided below.
-          </p>
+          <>
+            <PageHeader title="Manual review" description="Decide card disputes and chargebacks." />
+            <Callout tone="neutral">
+              <span data-testid="review-not-mounted">
+                Room-charge review is not switched on at this appliance. Card disputes and chargebacks are decided below.
+              </span>
+            </Callout>
+          </>
         )}
         <CardCasesCard canAct={canAct} />
       </PageShell>

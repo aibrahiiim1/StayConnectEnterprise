@@ -4,16 +4,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUpRight, BedDouble, CreditCard, Gift, Receipt, Ticket } from "lucide-react";
+import { ArrowUpRight, BedDouble, Receipt } from "lucide-react";
 import { api, FinancialPayment, FinancialSettlement, surfaceUnavailableMessage } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardFooter } from "@/components/ui/card";
+import { FilterBar } from "@/components/ui/toolbar";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { PageHeader, PageShell, StatCard } from "@/components/ui/page";
+import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpList, HelpSection } from "@/components/help";
 import { FilterChips, KeyValueGrid, Pagination } from "@/components/ui/data";
 import { useServerPage, type PagedFields } from "@/lib/use-server-page";
@@ -142,8 +143,6 @@ export function SettlementsView() {
   return (
     <PageShell>
       <PageHeader
-        icon={<Receipt />}
-        eyebrow="Hotel"
         title="Package payments"
         description="Every Internet package given out, how it was paid for, and what needs your attention."
         help={
@@ -173,26 +172,24 @@ export function SettlementsView() {
 
       <ErrorBanner err={err} className="mb-0" />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid cols={4}>
         <StatCard
           label="Needs your attention"
           value={haveSummary ? counts.attention.toLocaleString() : "—"}
-          icon={<AlertTriangle />}
           tone={counts.attention > 0 ? "err" : "ok"}
-          hint={counts.attention > 0 ? "Payments waiting, in progress, failed or to review" : "Nothing to do"}
+          hint={counts.attention > 0 ? "Waiting, in progress, failed or to review" : "Nothing to do"}
         />
         <StatCard
           label="Collected (card and room charge)"
           value={haveSummary ? collected : "—"}
-          icon={<CreditCard />}
           hint={`${counts.paid.toLocaleString()} paid package${counts.paid === 1 ? "" : "s"}`}
         />
-        <StatCard label="Vouchers used" value={haveSummary ? counts.voucher.toLocaleString() : "—"} icon={<Ticket />} />
-        <StatCard label="Free packages" value={haveSummary ? counts.free.toLocaleString() : "—"} icon={<Gift />} />
-      </div>
+        <StatCard label="Vouchers used" value={haveSummary ? counts.voucher.toLocaleString() : "—"}  />
+        <StatCard label="Free packages" value={haveSummary ? counts.free.toLocaleString() : "—"}  />
+      </StatGrid>
 
-      <Card>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <Card className="overflow-hidden">
+        <FilterBar inset filters={
           <FilterChips<View>
             label="Show"
             value={view}
@@ -205,13 +202,13 @@ export function SettlementsView() {
               { value: "free", label: "Free", count: counts.free },
             ]}
           />
-          {rows && <p className="text-xs text-muted-foreground tabular">Newest first</p>}
-        </div>
-        <CardBody className="p-0">
+        } actions={rows ? <span className="text-xs text-muted-foreground">Newest first</span> : undefined} />
+        <div>
           {!rows ? (
             err ? null : <SkeletonRows rows={4} cols={6} />
           ) : visible.length === 0 ? (
             <EmptyState
+              size="sm"
               icon={<Receipt />}
               title={counts.all === 0 ? "No package has been given yet" : "Nothing here"}
               hint={counts.all === 0
@@ -227,7 +224,7 @@ export function SettlementsView() {
                   <TH>Package</TH>
                   <TH className="hidden md:table-cell">Client</TH>
                   <TH className="hidden sm:table-cell">Paid by</TH>
-                  <TH className="text-right">Amount</TH>
+                  <TH numeric>Amount</TH>
                   <TH>Payment</TH>
                   <TH><span className="sr-only">Details</span></TH>
                 </TR>
@@ -236,8 +233,8 @@ export function SettlementsView() {
                 {visible.map((r) => {
                   const st = paymentState(r.method, r.status);
                   return (
-                    <TR key={r.settlement_id}>
-                      <TD className="whitespace-nowrap text-xs text-muted-foreground">{r.at ? formatDate(r.at) : "—"}</TD>
+                    <TR key={r.settlement_id} onClick={() => void open(r.settlement_id)}>
+                      <TD nowrap muted className="text-xs">{r.at ? formatDate(r.at) : "—"}</TD>
                       <TD className="font-medium">{r.package_name || "—"}</TD>
                       <TD className="hidden md:table-cell">
                         <span className="inline-flex items-center gap-1.5">
@@ -246,12 +243,14 @@ export function SettlementsView() {
                         </span>
                       </TD>
                       <TD className="hidden sm:table-cell">{PAID_BY[r.method] ?? humanize(r.method)}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">
+                      <TD numeric>
                         {r.amount_minor === 0 ? "—" : money(r.amount_minor, r.currency, r.currency_exponent)}
                       </TD>
-                      <TD><Badge tone={st.tone} dot>{st.label}</Badge></TD>
-                      <TD className="text-right">
-                        <Button size="sm" variant="ghost" onClick={() => void open(r.settlement_id)}
+                      <TD nowrap><StatusBadge tone={st.tone}>{st.label}</StatusBadge></TD>
+                      <TD className="w-0 text-end">
+                        <Button size="xs" variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); void open(r.settlement_id); }}
+                          onKeyDown={(e) => e.stopPropagation()}
                           aria-label={`Details of ${r.package_name || "this payment"}`}>
                           Details
                         </Button>
@@ -262,10 +261,10 @@ export function SettlementsView() {
               </TBody>
             </Table>
           )}
-        </CardBody>
+        </div>
         {rows && rows.length > 0 && (list.offset > 0 || list.hasMore) && (
-          <CardBody className="border-t border-border py-3">
-            <Pagination
+          <CardFooter>
+            <Pagination className="w-full"
               offset={list.offset}
               limit={list.pageSize}
               shown={rows.length}
@@ -273,18 +272,17 @@ export function SettlementsView() {
               hasMore={list.hasMore}
               onChange={list.setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
 
       <Sheet open={selected !== null} onOpenChange={(v) => { if (!v) { setSelected(null); setDetail(null); } }}>
         <SheetContent width="md">
           <SheetHeader
-            icon={<Receipt />}
             eyebrow="Package payment"
             title={s ? (s.package_name || "Package") : "Package payment"}
             description={s ? `${PAID_BY[s.method] ?? humanize(s.method)}${s.at ? ` · ${formatDate(s.at)}` : ""}` : undefined}
-            badges={state ? <Badge tone={state.tone} dot>{state.label}</Badge> : undefined}
+            badges={state ? <StatusBadge tone={state.tone}>{state.label}</StatusBadge> : undefined}
           />
           <SheetBody>
             <ErrorBanner err={detailErr} className="mb-0" />
