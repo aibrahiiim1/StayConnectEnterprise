@@ -14,22 +14,24 @@ import {
 } from "@/lib/payment-admin";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { PageShell, PageHeader, StatCard, Toolbar } from "@/components/ui/page";
+import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { HelpSection } from "@/components/help";
-import { Card, CardBody } from "@/components/ui/card";
-import { Table, THead, TR, TH, TD } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardFooter } from "@/components/ui/card";
+import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { Badge, StatusBadge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Checkbox, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
-import { DetailDialog } from "@/components/ui/dialog";
+import { DetailsDrawer, DetailsSection } from "@/components/ui/details-drawer";
 import { Explain } from "@/components/ui/tooltip";
-import { DList, Metric, SkeletonRows } from "@/components/ui/misc";
-import { Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { SkeletonRows } from "@/components/ui/misc";
+import { DescriptionList, MetricStrip, Pagination, ResultsCount, SearchInput } from "@/components/ui/data";
+import { FilterBar } from "@/components/ui/toolbar";
+import { RowActions } from "@/components/ui/row-actions";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
-import { Hotel, Wifi, LogIn, LogOut, Ban, Undo2, Star, BedDouble, Monitor } from "lucide-react";
+import { Hotel, Ban, Undo2 } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   IN_HOUSE: "In house",
@@ -41,8 +43,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 const STATUSES = ["", "IN_HOUSE", "RESERVED", "CHECKED_OUT", "POST_STAY_ACTIVE", "CANCELLED", "NO_SHOW"];
 
-const toneFor = (status: string) =>
-  status === "IN_HOUSE" ? "info" : status === "CHECKED_OUT" ? "default" : "warn";
+const toneFor = (status: string): Tone =>
+  status === "IN_HOUSE" ? "ok" : status === "CHECKED_OUT" ? "default" : status === "RESERVED" ? "info" : "warn";
 
 const PAGE_SIZES = [25, 50, 100, 200];
 
@@ -100,11 +102,11 @@ export default function StaysPage() {
         // Percent-encoded: browsers refuse non-Latin-1 text in a header.
         needle ? { "X-Stay-Search": encodeURIComponent(needle) } : undefined,
       );
-      if (mine !== latest.current) return; // superseded
+      if (mine !== latest.current) return;
       setResp(r);
       setRows(r.data ?? []);
     } catch (e) {
-      if (mine !== latest.current) return; // superseded
+      if (mine !== latest.current) return;
       setErr(e);
       setResp(null);
       setRows([]);
@@ -112,8 +114,6 @@ export default function StaysPage() {
   }, [status, vipOnly, offset, pageSize, q]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const filtered = rows;
 
   // Server totals over every matching stay, not just the page on screen.
   const summary = useMemo(() => {
@@ -129,6 +129,7 @@ export default function StaysPage() {
   }, [resp, rows]);
 
   async function open(id: string) {
+    if (detailBusy) return;
     setErr(null); setDetailBusy(true);
     try { setDetail(await api.get<StayDetail>("/pms-stays/" + id)); }
     catch (e) { setErr(e); }
@@ -160,13 +161,12 @@ export default function StaysPage() {
 
   const inHouseNoInternet =
     status === "IN_HOUSE" && rows !== null && rows.length > 0 && summary.withInternet === 0;
+  const filtering = q.trim() !== "" || vipOnly;
 
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Hotel"
         title="Stays"
-        icon={<BedDouble />}
         description="Who the PMS reports in the building, and the internet each room has."
         help={
           <>
@@ -201,19 +201,14 @@ export default function StaysPage() {
         }
       />
 
-      <ErrorBanner err={err} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid cols={4}>
         <StatCard
           label={status ? `${label(status)} stays` : "Stays listed"}
           value={rows ? summary.total.toLocaleString() : "—"}
-          icon={<Hotel />}
-          tone="primary"
         />
         <StatCard
           label="With an internet package"
           value={rows ? summary.withInternet.toLocaleString() : "—"}
-          icon={<Wifi />}
           tone={inHouseNoInternet ? "warn" : "default"}
           explain={
             <Explain>
@@ -222,277 +217,259 @@ export default function StaysPage() {
             </Explain>
           }
         />
-        <StatCard icon={<Monitor />}
+        <StatCard
           label="Devices online"
           value={rows ? summary.online.toLocaleString() : "—"}
           href="/sessions"
           hint="Across every matching stay"
         />
-        <StatCard
-          label="VIP guests"
-          value={rows ? summary.vip.toLocaleString() : "—"}
-          icon={<Star />}
-          hint="Marked VIP by the PMS"
-        />
-      </div>
+        <StatCard label="VIP guests" value={rows ? summary.vip.toLocaleString() : "—"} hint="Marked VIP by the PMS" />
+      </StatGrid>
 
       {inHouseNoInternet && (
         <Callout tone="warning" title="No in-house room has an internet package">
-          The guest list has arrived, but nobody has been given internet. If guests are reporting that they cannot
-          get online, check that a package applies to these stays on{" "}
+          If guests cannot get online, check that a package applies to these stays on{" "}
           <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>, and
           that their Wi-Fi network is pointed at this PMS on{" "}
           <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link>.
         </Callout>
       )}
 
-      <Card>
-        <CardBody className="border-b border-border py-3">
-          <Toolbar>
+      <Card className="overflow-hidden">
+        <FilterBar
+          inset
+          search={
             <SearchInput
               label="Search stays"
               placeholder="Room, guest, reservation, agent or package…"
-              className="w-full sm:w-96"
               value={q}
               onChange={setQ}
               delay={300}
             />
-            <Select
-              aria-label="Filter by status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-48"
-            >
-              {STATUSES.map((s) => (
-                <option key={s || "all"} value={s}>{s === "" ? "All stays" : label(s)}</option>
-              ))}
-            </Select>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={vipOnly}
-                onChange={(e) => setVipOnly(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              VIP only
-            </label>
+          }
+          filters={
+            <>
+              <Select
+                aria-label="Filter by status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="h-9 w-44"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s || "all"} value={s}>{s === "" ? "All stays" : label(s)}</option>
+                ))}
+              </Select>
+              <Checkbox label="VIP only" checked={vipOnly} onChange={(e) => setVipOnly(e.target.checked)} className="items-center" />
+            </>
+          }
+          actions={
             <Select
               aria-label="Stays per page"
               value={String(pageSize)}
               onChange={(e) => setPageSize(Number(e.target.value))}
-              className="w-32"
+              className="h-9 w-32"
             >
               {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
             </Select>
-          </Toolbar>
-          <ResultsCount count={filtered?.length} noun="stay" />
-        </CardBody>
+          }
+        />
+        <ResultsCount count={rows?.length} noun="stay" />
+        {err !== null && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
 
-        <CardBody className="p-0">
-          {filtered === null ? (
-            <SkeletonRows rows={6} cols={6} />
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon={<Hotel />}
-              title={q ? "No stays match that search" : "No stays to show"}
-              hint={q || vipOnly
-                ? "Nothing matches across all stays for the selected status."
-                : "Nothing has arrived from the property management system for this filter yet. If you expect guests here, check the PMS connection."}
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Room</TH>
-                  <TH>Guest</TH>
-                  <TH>Stay</TH>
-                  <TH>Status</TH>
-                  <TH>Internet package</TH>
-                  <TH>Room charge</TH>
-                  <TH><span className="sr-only">Actions</span></TH>
-                </TR>
-              </THead>
-              <tbody>
-                {filtered.map((s) => (
-                  <TR key={s.id}>
-                    <TD>
-                      <div className="flex items-center gap-1.5 font-medium">
-                        {s.room ?? "—"}
-                        {s.vip ? <Badge tone="warn">VIP</Badge> : null}
+        {rows === null ? (
+          <SkeletonRows rows={6} cols={6} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            size="sm"
+            icon={<Hotel />}
+            title={q ? "No stays match that search" : "No stays to show"}
+            hint={filtering
+              ? "Nothing matches across all stays for the selected status."
+              : "Nothing has arrived from the PMS for this filter yet."}
+          />
+        ) : (
+          <Table label="Stays">
+            <THead>
+              <TR>
+                <TH>Room</TH>
+                <TH>Guest</TH>
+                <TH>Stay</TH>
+                <TH>Status</TH>
+                <TH className="hidden md:table-cell">Internet package</TH>
+                <TH className="hidden lg:table-cell">Room charge</TH>
+                <TH><span className="sr-only">Actions</span></TH>
+              </TR>
+            </THead>
+            <TBody>
+              {rows.map((s) => (
+                <TR key={s.id} onClick={() => void open(s.id)}>
+                  <TD nowrap>
+                    <div className="flex items-center gap-1.5 font-medium">
+                      {s.room ?? "—"}
+                      {s.vip ? <Badge tone="warn" size="sm">VIP</Badge> : null}
+                    </div>
+                    {s.external_reservation_id && (
+                      <div className="font-mono text-2xs text-muted-foreground">{s.external_reservation_id}</div>
+                    )}
+                  </TD>
+                  <TD className="max-w-[16rem]">
+                    <div className="truncate">{s.identity_hidden
+                      ? <span className="text-muted-foreground">Not shown to your role</span>
+                      : s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
+                    {(s.occupants > 1 || s.travel_agent) && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {s.occupants > 1 && <span>+{s.occupants - 1} sharing</span>}
+                        {s.occupants > 1 && s.travel_agent && " · "}
+                        {s.travel_agent && <span>Agent: {s.travel_agent}</span>}
                       </div>
-                      {s.external_reservation_id && (
-                        <div className="font-mono text-2xs text-muted-foreground">
-                          {s.external_reservation_id}
-                        </div>
-                      )}
-                    </TD>
-                    <TD>
-                      <div>{s.identity_hidden
-                        ? <span className="text-muted-foreground">Not shown to your role</span>
-                        : s.primary_guest ?? <span className="text-muted-foreground">Not provided</span>}</div>
-                      {s.occupants > 1 && (
-                        <div className="text-xs text-muted-foreground">+{s.occupants - 1} sharing</div>
-                      )}
-                      {s.travel_agent && (
-                        <div className="text-xs text-muted-foreground">Agent: {s.travel_agent}</div>
-                      )}
-                    </TD>
-                    <TD className="whitespace-nowrap text-sm">
-                      {shortDate(s.arrival)} → {shortDate(s.departure)}
-                    </TD>
-                    <TD>
-                      <Badge tone={toneFor(s.status) as any}>{label(s.status)}</Badge>
-                      {s.effective_checkout_at && (
-                        <div className="text-2xs text-muted-foreground">
-                          left {formatRelative(s.effective_checkout_at)}
-                        </div>
-                      )}
-                    </TD>
-                    <TD>
-                      <AccessCell stay={s} />
-                    </TD>
-                    <TD>
-                      {s.posting_allowed ? (
-                        <Badge tone="ok">Allowed</Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          Not allowed
-                          {s.posting_block_reason && (
-                            <span className="block text-2xs">{postingBlockWords(s.posting_block_reason)}</span>
-                          )}
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="text-right">
-                      <Button size="sm" variant="ghost" disabled={detailBusy} aria-label={`View stay, room ${s.room ?? "unknown"}`} onClick={() => void open(s.id)}>
-                        View
-                      </Button>
-                    </TD>
-                  </TR>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
-        {filtered && filtered.length > 0 && (
-          <CardBody className="border-t border-border py-3">
+                    )}
+                  </TD>
+                  <TD nowrap className="tabular">{shortDate(s.arrival)} → {shortDate(s.departure)}</TD>
+                  <TD nowrap>
+                    <StatusBadge tone={toneFor(s.status)}>{label(s.status)}</StatusBadge>
+                    {s.effective_checkout_at && (
+                      <div className="text-2xs text-muted-foreground">left {formatRelative(s.effective_checkout_at)}</div>
+                    )}
+                  </TD>
+                  <TD className="hidden md:table-cell"><AccessCell stay={s} /></TD>
+                  <TD className="hidden lg:table-cell">
+                    {s.posting_allowed ? (
+                      <Badge tone="ok">Allowed</Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Not allowed
+                        {s.posting_block_reason && (
+                          <span className="block text-2xs">{postingBlockWords(s.posting_block_reason)}</span>
+                        )}
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="w-0">
+                    <RowActions
+                      subject={`stay, room ${s.room ?? "unknown"}`}
+                      primary={{ label: "View", onSelect: () => void open(s.id), disabled: detailBusy }}
+                    />
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
+        {rows && rows.length > 0 && (
+          <CardFooter>
             <Pagination
+              className="w-full"
               offset={offset}
               limit={pageSize}
-              shown={filtered.length}
+              shown={rows.length}
               total={resp?.summary?.total ?? null}
               onChange={setOffset}
             />
-          </CardBody>
+          </CardFooter>
         )}
       </Card>
 
-      <DetailDialog
+      <DetailsDrawer
         open={detail !== null}
         onOpenChange={(v) => !v && setDetail(null)}
+        width="lg"
+        eyebrow="Stay"
         title={detail ? `Room ${detail.room ?? "—"}${detail.primary_guest ? ` · ${detail.primary_guest}` : ""}` : ""}
         description={
           detail
             ? `${detail.identity_hidden ? "Reservation not shown to your role" : `Reservation ${detail.external_reservation_id}`}${detail.pms_interface_label ? ` · from ${detail.pms_interface_label}` : ""}`
             : undefined
         }
+        badges={detail && (
+          <>
+            <StatusBadge tone={toneFor(detail.status)}>{label(detail.status)}</StatusBadge>
+            {detail.vip && <Badge tone="warn">VIP</Badge>}
+            {detail.posting_allowed
+              ? <Badge tone="ok">Room charge allowed</Badge>
+              : <Badge tone="default">Room charge not allowed</Badge>}
+          </>
+        )}
       >
         {detail && (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={toneFor(detail.status) as any}>{label(detail.status)}</Badge>
-              {detail.vip && <Badge tone="warn">VIP</Badge>}
-              {detail.posting_allowed
-                ? <Badge tone="ok">Room charge allowed</Badge>
-                : <Badge tone="default">Room charge not allowed</Badge>}
-            </div>
-
-            <section className="rounded-md border border-border bg-surface/40 p-4">
-              <h3 className="mb-3 text-sm font-semibold">Internet for this room</h3>
+            <DetailsSection title="Internet for this room">
               {detail.access_status ? (
                 <>
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                    <Metric label="Package" value={<span className="text-sm">{detail.access_package_name || detail.access_package_code || "—"}</span>} />
-                    <Metric label="Service plan" value={<span className="text-sm">{detail.access_plan_code ?? "—"}</span>} />
-                    <Metric
-                      label="Speed"
-                      value={<span className="text-sm">{speedPair(detail.access_down_kbps, detail.access_up_kbps) ?? "—"}</span>}
-                    />
-                    <Metric
-                      label="Devices with a place"
-                      value={
-                        <span className="text-sm">
-                          {placesHeld(detail)}
-                          {typeof detail.access_max_devices === "number" && detail.access_max_devices > 0
-                            ? ` of ${detail.access_max_devices}`
-                            : ""}
-                          <span className="block text-2xs text-muted-foreground">
-                            {detail.access_active_devices ?? 0} online now
+                  <MetricStrip
+                    items={[
+                      { label: "Package", value: <span className="text-sm">{detail.access_package_name || detail.access_package_code || "—"}</span> },
+                      { label: "Service plan", value: <span className="text-sm">{detail.access_plan_code ?? "—"}</span> },
+                      { label: "Speed", value: <span className="text-sm">{speedPair(detail.access_down_kbps, detail.access_up_kbps) ?? "—"}</span> },
+                      {
+                        label: "Devices with a place",
+                        tone: atDeviceLimit(detail) ? "warn" : undefined,
+                        value: (
+                          <span className="text-sm">
+                            {placesHeld(detail)}
+                            {typeof detail.access_max_devices === "number" && detail.access_max_devices > 0
+                              ? ` of ${detail.access_max_devices}`
+                              : ""}
+                            <span className="block text-2xs font-normal text-muted-foreground">
+                              {detail.access_active_devices ?? 0} online now
+                            </span>
                           </span>
-                        </span>
-                      }
-                      tone={atDeviceLimit(detail) ? "warn" : "default"}
-                    />
-                  </div>
+                        ),
+                      },
+                    ]}
+                  />
                   {detail.access_status !== "ACTIVE" && (
-                    <p className="mt-3 text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       The access record is <strong>{detail.access_status.toLowerCase()}</strong> rather than active —
                       granted but not yet in force, or suspended.
                     </p>
                   )}
-                  <Link
-                    href="/sessions"
-                    className="mt-3 inline-block text-xs text-primary underline underline-offset-2 hover:decoration-2"
-                  >
+                  <Link href="/sessions" className="inline-block text-xs font-medium text-primary hover:underline">
                     See this room&rsquo;s devices →
                   </Link>
                 </>
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  No internet package has been given to this stay yet.
-                </p>
+                <p className="text-sm text-muted-foreground">No internet package has been given to this stay yet.</p>
               )}
-            </section>
+            </DetailsSection>
 
-            <DList
-              items={[
-                { label: "Arrival", value: shortDate(detail.arrival) },
-                { label: "Departure", value: shortDate(detail.departure) },
-                {
-                  label: "Left the site",
-                  value: detail.effective_checkout_at ? formatRelative(detail.effective_checkout_at) : "Still in house",
-                },
-                { label: "Occupants", value: String(detail.occupants) },
-                {
-                  label: "PMS last confirmed this stay",
-                  value: detail.occupancy_evidence_at
-                    ? formatRelative(detail.occupancy_evidence_at)
-                    : "No confirmation recorded",
-                },
-                // Only when the connector supplied them; dashes would suggest the PMS failed to send them.
-                ...(detail.room_type ? [{ label: "Room type", value: detail.room_type }] : []),
-                ...(detail.rate_plan ? [{ label: "Rate plan", value: detail.rate_plan }] : []),
-                ...(detail.travel_agent ? [{ label: "Travel agent", value: detail.travel_agent }] : []),
-              ]}
-            />
+            <DetailsSection title="Stay">
+              <DescriptionList
+                items={[
+                  { label: "Arrival", value: shortDate(detail.arrival) },
+                  { label: "Departure", value: shortDate(detail.departure) },
+                  {
+                    label: "Left the site",
+                    value: detail.effective_checkout_at ? formatRelative(detail.effective_checkout_at) : "Still in house",
+                  },
+                  { label: "Occupants", value: String(detail.occupants) },
+                  {
+                    label: "PMS last confirmed this stay",
+                    value: detail.occupancy_evidence_at
+                      ? formatRelative(detail.occupancy_evidence_at)
+                      : "No confirmation recorded",
+                  },
+                  // Only when the connector supplied them; dashes would suggest the PMS failed to send them.
+                  { label: "Room type", value: detail.room_type, hidden: !detail.room_type },
+                  { label: "Rate plan", value: detail.rate_plan, hidden: !detail.rate_plan },
+                  { label: "Travel agent", value: detail.travel_agent, hidden: !detail.travel_agent },
+                ]}
+              />
+            </DetailsSection>
 
-            <div>
-              <h3 className="mb-1.5 text-sm font-semibold">Guests on this stay</h3>
+            <DetailsSection title="Guests on this stay">
               {detail.occupant_list.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  The PMS did not send guest names for this stay.
-                </p>
+                <p className="text-sm text-muted-foreground">The PMS did not send guest names for this stay.</p>
               ) : (
-                <ul className="space-y-1 text-sm">
+                <ul className="divide-y divide-border rounded-md border border-border text-sm">
                   {detail.occupant_list.map((o, i) => (
-                    <li key={i} className="flex items-center gap-2">
+                    <li key={i} className="flex items-center gap-2 px-3 py-2">
                       {o.display_name ?? <span className="text-muted-foreground">{detail.identity_hidden ? "Name not shown to your role" : "Name not provided"}</span>}
-                      {o.is_primary && <Badge tone="info">Main guest</Badge>}
+                      {o.is_primary && <Badge tone="info" size="sm">Main guest</Badge>}
                     </li>
                   ))}
                 </ul>
               )}
-            </div>
+            </DetailsSection>
 
             <RoomChargeSection
               stay={detail}
@@ -502,7 +479,7 @@ export default function StaysPage() {
             />
           </>
         )}
-      </DetailDialog>
+      </DetailsDrawer>
 
       {canManageRoomCharge && (
         <ConfirmDialog
@@ -530,9 +507,9 @@ export default function StaysPage() {
 function BlockLine({ b }: { b: StayPostingBlock }) {
   const active = !b.cleared_at;
   return (
-    <li className="space-y-0.5 text-sm">
+    <li className="space-y-0.5 px-3 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={active ? "warn" : "default"}>{active ? "Active" : "Cleared"}</Badge>
+        <StatusBadge tone={active ? "warn" : "default"}>{active ? "Active" : "Cleared"}</StatusBadge>
         <span className="font-medium">{postingBlockWords(b.reason)}</span>
         {b.pa_as_status && <span className="font-mono text-xs text-muted-foreground">PMS answer {b.pa_as_status}</span>}
       </div>
@@ -567,66 +544,63 @@ function RoomChargeSection({
   const reason = stay.posting_block_reason ?? null;
   const reasonHasBlock = reason !== null && active.some((b) => b.reason === reason);
   return (
-    <section className="space-y-3 rounded-md border border-border p-4" aria-label="Room charge">
+    <section className="space-y-3" aria-label="Room charge">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-semibold">Room charge</h3>
-          {stay.room_charge_open && (
-            <p className="text-sm" data-testid="room-charge-open">
-              <Badge tone="info">In progress</Badge>{" "}
-              <span className="text-muted-foreground">
-                A room charge for this stay is pending, being sent or under review. No other is accepted until it
-                concludes.
-              </span>
-            </p>
-          )}
-          {stay.posting_allowed ? (
-            <p className="text-sm">
-              <Badge tone="ok">Allowed</Badge>{" "}
-              <span className="text-muted-foreground">
-                A charge goes to this guest&rsquo;s reservation (room and reservation number together).
-              </span>
-            </p>
-          ) : (
-            <div className="space-y-0.5 text-sm">
-              <div>
-                <Badge tone="default">Not allowed</Badge>{" "}
-                <span>{postingBlockWords(reason)}</span>
-              </div>
-              {stay.posting_permission_source && (
-                <div className="text-xs text-muted-foreground">
-                  Decided by: {postingSourceWords(stay.posting_permission_source)}
-                </div>
-              )}
-              {reason && !reasonHasBlock && POSTING_BLOCK_CLEARED_BY[reason] && (
-                <div className="text-xs">{POSTING_BLOCK_CLEARED_BY[reason]}</div>
-              )}
-            </div>
-          )}
-        </div>
+        <h3 className="text-label text-foreground">Room charge</h3>
         {canManage && (
           adminBlocked ? (
             <Button size="sm" variant="secondary" onClick={onUnblock}>
               <Undo2 /> Remove administrative block
             </Button>
           ) : (
-            <Button size="sm" variant="secondary" onClick={onBlock}>
+            <Button size="sm" variant="danger-outline" onClick={onBlock}>
               <Ban /> Block room charge
             </Button>
           )
         )}
       </div>
+      {stay.room_charge_open && (
+        <Callout tone="info" title="In progress">
+          <span data-testid="room-charge-open">
+            A room charge for this stay is pending, being sent or under review. No other is accepted until it
+            concludes.
+          </span>
+        </Callout>
+      )}
+      {stay.posting_allowed ? (
+        <p className="text-sm">
+          <Badge tone="ok">Allowed</Badge>{" "}
+          <span className="text-muted-foreground">
+            A charge goes to this guest&rsquo;s reservation (room and reservation number together).
+          </span>
+        </p>
+      ) : (
+        <div className="space-y-0.5 text-sm">
+          <div>
+            <Badge tone="default">Not allowed</Badge>{" "}
+            <span>{postingBlockWords(reason)}</span>
+          </div>
+          {stay.posting_permission_source && (
+            <div className="text-xs text-muted-foreground">
+              Decided by: {postingSourceWords(stay.posting_permission_source)}
+            </div>
+          )}
+          {reason && !reasonHasBlock && POSTING_BLOCK_CLEARED_BY[reason] && (
+            <div className="text-xs">{POSTING_BLOCK_CLEARED_BY[reason]}</div>
+          )}
+        </div>
+      )}
 
       {active.length > 0 && (
         <div>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Active blocks</h4>
-          <ul className="space-y-2">{active.map((b, i) => <BlockLine key={`a${i}`} b={b} />)}</ul>
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">Active blocks</h4>
+          <ul className="divide-y divide-border rounded-md border border-border">{active.map((b, i) => <BlockLine key={`a${i}`} b={b} />)}</ul>
         </div>
       )}
       {cleared.length > 0 && (
         <div>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Earlier blocks</h4>
-          <ul className="space-y-2">{cleared.map((b, i) => <BlockLine key={`c${i}`} b={b} />)}</ul>
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">Earlier blocks</h4>
+          <ul className="divide-y divide-border rounded-md border border-border">{cleared.map((b, i) => <BlockLine key={`c${i}`} b={b} />)}</ul>
         </div>
       )}
       {blocks.length === 0 && (
@@ -652,13 +626,12 @@ function AccessCell({ stay }: { stay: Stay }) {
     );
   }
   const atLimit = atDeviceLimit(stay);
+  const speed = speedPair(stay.access_down_kbps, stay.access_up_kbps) ?? stay.access_plan_code ?? "";
   return (
     <>
-      <div className="text-sm">{stay.access_package_name || stay.access_package_code || "Package"}</div>
-      <div className="text-2xs text-muted-foreground">
-        {speedPair(stay.access_down_kbps, stay.access_up_kbps) ?? stay.access_plan_code ?? ""}
-      </div>
+      <div className="whitespace-nowrap text-sm">{stay.access_package_name || stay.access_package_code || "Package"}</div>
       <div className={atLimit ? "text-2xs text-warning-subtle-foreground" : "text-2xs text-muted-foreground"}>
+        {speed ? `${speed} · ` : ""}
         {placesHeld(stay)}
         {typeof stay.access_max_devices === "number" && stay.access_max_devices > 0
           ? ` / ${stay.access_max_devices} devices`

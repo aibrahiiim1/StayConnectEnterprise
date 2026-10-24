@@ -11,7 +11,7 @@ import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, FieldGrid, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { KeyValueGrid, OptionCard, Stepper } from "@/components/ui/data";
@@ -161,7 +161,7 @@ export function AddConnectionWizard({
           <DialogDescription>
             {done
               ? "One more step before guests can use it: publish its configuration and activate it."
-              : "Connect the appliance to the site's property management system so guests can sign in with their room number."}
+              : "Link the appliance to the site's PMS so guests can sign in with their room number."}
           </DialogDescription>
           {!done && <Stepper className="pt-3" steps={steps} current={step} onStep={progress.revisionId ? undefined : (i) => !busy && setStep(i)} />}
         </DialogHeader>
@@ -198,7 +198,7 @@ export function AddConnectionWizard({
                             .filter(Boolean).join(" · ")}
                         >
                           {p.verification_note && (
-                            <p className="pl-12 text-xs text-muted-foreground">{p.verification_note}</p>
+                            <p className="ps-12 text-xs text-muted-foreground">{p.verification_note}</p>
                           )}
                         </OptionCard>
                       );
@@ -212,7 +212,7 @@ export function AddConnectionWizard({
                 <div className="space-y-4">
                   {(provider.setup_steps?.length ?? 0) > 0 && (
                     <Callout tone="info" title={`Before you start at ${provider.vendor || "the PMS"}`}>
-                      <ol className="list-decimal space-y-0.5 pl-4">
+                      <ol className="list-decimal space-y-0.5 ps-4">
                         {provider.setup_steps!.map((s, i) => <li key={i}>{s}</li>)}
                       </ol>
                       {provider.docs_url && (
@@ -223,7 +223,7 @@ export function AddConnectionWizard({
                       )}
                     </Callout>
                   )}
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldGrid cols={2}>
                     <Field label="Name" required hint="How this connection appears throughout the admin."
                       error={showErrors ? nameError : undefined}>
                       <Input value={name} maxLength={120} placeholder="Front office PMS"
@@ -234,7 +234,7 @@ export function AddConnectionWizard({
                       <Input value={timezone} placeholder="Africa/Cairo" spellCheck={false}
                         onChange={(e) => setTimezone(e.target.value)} />
                     </Field>
-                  </div>
+                  </FieldGrid>
                   <ProviderFieldsForm
                     fields={fields}
                     values={values}
@@ -243,7 +243,7 @@ export function AddConnectionWizard({
                   />
                   {provider.kind === PROTEL_KIND && (
                     <Callout tone="neutral" title="Fixed for this connection">
-                      <ul className="list-disc space-y-0.5 pl-4 text-xs">
+                      <ul className="list-disc space-y-0.5 ps-4 text-xs">
                         <li>OneGate reads the guest list from the PMS. The only thing it ever sends is a room charge, and only once room charge is approved for this connection.</li>
                         <li>No credential required — the link needs none.</li>
                         <li>
@@ -262,7 +262,7 @@ export function AddConnectionWizard({
                     Stored encrypted on the appliance and never shown again — not here, not to any other operator.
                     You can replace it later; you cannot read it back.
                   </Callout>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <FieldGrid cols={2}>
                     {(provider.credential?.fields ?? []).map((f) => (
                       <Field key={f.key} label={f.label} required={f.required} hint={f.help}
                         error={showErrors ? credErrors[f.key] : undefined}>
@@ -275,7 +275,7 @@ export function AddConnectionWizard({
                         />
                       </Field>
                     ))}
-                  </div>
+                  </FieldGrid>
                 </div>
               )}
 
@@ -305,7 +305,7 @@ export function AddConnectionWizard({
                     ]}
                   />
                   <Callout tone="info" title="What happens when you press Create">
-                    <ol className="list-decimal space-y-0.5 pl-4">
+                    <ol className="list-decimal space-y-0.5 ps-4">
                       <li>The connection is added with room sign-in paused. It does not contact the PMS yet.</li>
                       <li>These settings are saved as a draft configuration.</li>
                       {withCreds && <li>The credential is stored, encrypted.</li>}
@@ -340,7 +340,7 @@ export function AddConnectionWizard({
           ) : (
             <>
               {step > 0 && !progress.id && (
-                <Button variant="ghost" className="mr-auto" disabled={busy} onClick={() => setStep((s) => s - 1)}>
+                <Button variant="ghost" className="me-auto" disabled={busy} onClick={() => setStep((s) => s - 1)}>
                   Back
                 </Button>
               )}
@@ -372,7 +372,7 @@ function DoneView({
       </Callout>
       <div className="space-y-2 text-sm">
         <p className="font-medium">Next: publish and activate</p>
-        <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+        <ol className="list-decimal space-y-1 ps-5 text-muted-foreground">
           <li>Publish the draft configuration — this makes it the one the connection uses.</li>
           <li>Activate the connection — the appliance connects to {provider.label} and loads the guest list.</li>
           <li>Point at least one client network at it on the PMS routing screen — a site administrator does this; it decides which property&rsquo;s guests are checked on which network.</li>
