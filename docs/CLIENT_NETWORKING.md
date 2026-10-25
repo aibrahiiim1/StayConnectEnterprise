@@ -66,12 +66,14 @@ layered review, the outside-the-appliance checklist, what is not touched), then 
 | Operation | What it does |
 |---|---|
 | **Restore last working** | Source: the intent of the last *active* (confirmed) revision. Settings that drifted are put back, networks created or switched on since are switched off. A network moved to another port/VLAN since, or deleted, is reported and left to a replacement. |
-| **Restore factory defaults** | The prepared network (`10.20.0.0/20`) is put back and switched on; every other network is switched off. Requires the prepared network to have been activated before. Refused, with the reason, if the WAN overlaps its subnet — the factory address is never forced. |
+| **Restore factory defaults** | Brings the LAN back to the approved Access/untagged `10.20.0.0/20` network with local DHCP and switches every other client network off. If the prepared network is still the untagged network on the client port it is put back in place (name, addresses, pool, DHCP). If it was turned into a VLAN, moved, deleted, or never activated, a **new** one with the prepared settings is created and switched on in the same change; the old row stays, switched off, with its settings and history. A trunk becomes Access because every tagged network is switched off. Refused, with the reason, if the WAN overlaps `10.20.0.0/20`, if the client port is the WAN/management port, or if a recovery is already staged. |
 | **Full client networking reset** | As factory defaults, plus which portal design each network shows and each network's sign-in options go back to the site's. Requires typing the site name. |
 
-**All or nothing.** A preview says whether the recovery is *stageable*. If any part of it cannot be done — a network that was deleted or moved to another
-port or VLAN since the last confirmation, a prepared network that is no longer the untagged one on the client port, a conflict — **nothing is staged**
-(`409 cannot_restore`); the preview still shows what could have been restored. A partial restore would be a configuration nobody confirmed.
+**All or nothing.** A preview says whether the recovery is *stageable*. If any part of it cannot be done — for Restore last working, a network that was
+deleted or moved to another port or VLAN since the last confirmation; for either factory operation, a conflict — **nothing is staged**
+(`409 cannot_restore` or `conflict`); the preview still shows what could have been restored. A partial restore would be a configuration nobody confirmed.
+Cancelling a staged reset removes the prepared network it created (it was never applied); everything else stays. Switching the external switch, virtual
+switch or access point is never done implicitly: the preview lists what must be checked there.
 
 **Never touched by any of them:** the networks themselves (nothing is deleted: identity and history stay, switched-off networks remain listed), guest
 records, sessions, devices, packages, licensing and the signed assignment, the WAN/management port, the PMS configuration and its routing, and the portal
@@ -155,7 +157,7 @@ Recovery, profiles and per-network sign-in use the existing `network` and `porta
 
 ## 12. What has and has not been verified
 
-Verified in isolation: unit tests; integration tests against a full-schema PostgreSQL with a fake network service; real-kernel container tests for bridge
+Verified in isolation (including the journey from a heavily reconfigured trunk with a converted prepared network back to the approved Access network, and an apply that lapses or whose service stops before it is recorded): unit tests; integration tests against a full-schema PostgreSQL with a fake network service; real-kernel container tests for bridge
 ownership, adoption, a hostile network name against the real nft parser and the **real `netd` binary starting with the database refusing connections**
 (`scripts/ci/netd-integrity-kernel.sh`); browser tests at desktop and 390 px. Each correction has a test that fails without it.
 

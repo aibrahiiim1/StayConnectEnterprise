@@ -224,10 +224,10 @@ func TestIntegration_Recovery_FactoryResetKeepsEveryNetworkAndNeedsTheSiteName(t
 	f.retireRevisions(t)
 	ctx := context.Background()
 
-	// Without the prepared network ever having been activated there is nothing to return to.
+	// A site whose prepared network was never activated can still be returned to it: the network is made and switched on in the same change.
 	_, plan := f.do(t, "POST", "/network/recovery/preview", map[string]any{"op": "factory_defaults"})
-	if len(plan["cannot_restore"].([]any)) == 0 {
-		t.Fatalf("a factory restore was offered before activation: %v", plan)
+	if plan["stageable"] != true || len(plan["cannot_restore"].([]any)) != 0 || actionOf(plan, "") != "create_and_switch_on" {
+		t.Fatalf("a factory restore before any activation: %v", plan)
 	}
 
 	if st, b := f.do(t, "POST", "/network/factory/activate", map[string]any{"no_other_dhcp_server": true}); st != 201 {
@@ -352,36 +352,5 @@ func TestIntegration_Recovery_ARestoreThatCannotBeCompleteStagesNothing(t *testi
 	}
 	if f.nameOf(t, a) != "Drifted" {
 		t.Fatal("a refused restore changed a network")
-	}
-}
-
-func TestIntegration_Recovery_AFactoryResetThatCannotBeCompleteStagesNothing(t *testing.T) {
-	f := newAPI(t)
-	fn := startFakeNetd(t, f)
-	fn.lan = uniqueParent()
-	f.retireRevisions(t)
-	ctx := context.Background()
-	if st, _ := f.do(t, "POST", "/network/factory/activate", map[string]any{"no_other_dhcp_server": true}); st != 201 {
-		t.Fatal("activate")
-	}
-	f.applyAndKeep(t, fn)
-	other := f.mkNet(t, "Conference", 194, "194.0")
-	f.applyAndKeep(t, fn)
-	// The prepared network no longer sits on the untagged client port.
-	if _, err := f.pool.Exec(ctx, `UPDATE guest_networks SET network_type='vlan', vlan_id=88 WHERE tenant_id=$1 AND name='Client Wi-Fi'`, f.tenant); err != nil {
-		t.Fatal(err)
-	}
-	var siteName string
-	_ = f.pool.QueryRow(ctx, `SELECT name FROM sites WHERE id=$1`, f.site).Scan(&siteName)
-	for _, req := range []map[string]any{{"op": "factory_defaults"}, {"op": "full_reset", "confirm_site_name": siteName}} {
-		if st, b := f.do(t, "POST", "/network/recovery/stage", req); st != 409 || b["error"] != "cannot_restore" {
-			t.Fatalf("%v = %d %v", req["op"], st, b)
-		}
-	}
-	if !f.enabledOf(t, other) {
-		t.Fatal("a refused reset switched a network off")
-	}
-	if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE state='PENDING' AND tenant_id=$1::uuid`, f.tenant) != 0 {
-		t.Fatal("a refused reset left staged changes behind")
 	}
 }

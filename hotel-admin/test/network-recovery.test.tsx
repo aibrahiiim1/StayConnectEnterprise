@@ -62,6 +62,17 @@ describe("recovery page", () => {
     expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("shows a prepared network that would be created when the old one was changed beyond restoring", async () => {
+    post.mockResolvedValueOnce({ ...plan, op: "factory_defaults", networks: [
+      { id: "", name: "Client Wi-Fi", action: "create_and_switch_on", changes: ["untagged on ens192, 10.20.0.0/20, local DHCP"], active_clients: 0 },
+      { id: "n2", name: "Old guests", action: "switch_off", active_clients: 5 }] });
+    render(<RecoveryPage />);
+    await screen.findByText(/Last confirmed working/);
+    fireEvent.click(screen.getAllByText(/Review…/)[1]);
+    await screen.findByText(/Client Wi-Fi: Prepared network created and switched on/);
+    expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("needs the site name typed for a full reset", async () => {
     post.mockResolvedValueOnce({ ...plan, op: "full_reset", confirm_site_name: "Coral Resort" }).mockResolvedValueOnce({});
     render(<RecoveryPage />);

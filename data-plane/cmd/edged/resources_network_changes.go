@@ -342,6 +342,13 @@ func (s *server) cancelStagedGroup(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "not_pending", "this change has been applied and is awaiting confirmation: confirm or roll it back instead")
 		return
 	}
+	// A network the operation itself created, never applied, goes away with it; everything else stays.
+	if _, err := s.db.Exec(ctx, `DELETE FROM guest_networks g USING iam_v2.guest_network_changes c
+		 WHERE c.network_id = g.id AND c.group_id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3 AND c.state='PENDING' AND c.target->>'created' = 'true' AND NOT g.enabled`,
+		group, s.tenantID, s.siteID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
+		return
+	}
 	tag, err := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_changes SET state='CANCELLED', settled_at=now()
 		 WHERE group_id=$1::uuid AND tenant_id=$2 AND site_id=$3 AND state='PENDING'`, group, s.tenantID, s.siteID)
 	if err != nil {

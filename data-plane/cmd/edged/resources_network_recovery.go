@@ -59,6 +59,9 @@ type layerTarget struct {
 type recoveryTarget struct {
 	Row    *netcfg.GuestNetwork `json:"row,omitempty"`
 	Layers *layerTarget         `json:"layers,omitempty"`
+	// Factory marks the prepared network a reset put in place; Created marks a network that reset itself inserted, so cancelling it before any apply removes it again.
+	Factory bool `json:"factory,omitempty"`
+	Created bool `json:"created,omitempty"`
 }
 
 type recoveryBefore struct {
@@ -446,6 +449,7 @@ type stagedItem struct {
 	NetworkID string
 	Kind      string
 	Target    recoveryTarget
+	Create    *netcfg.GuestNetwork
 }
 
 var protectedData = []string{
@@ -488,7 +492,8 @@ func (s *server) activeIntent(ctx context.Context) ([]netcfg.GuestNetwork, bool)
 func (s *server) factoryNetworkID(ctx context.Context) string {
 	var id string
 	if s.db.QueryRow(ctx, `SELECT c.network_id::text FROM iam_v2.guest_network_changes c JOIN guest_networks g ON g.id=c.network_id
-		 WHERE c.tenant_id=$1::uuid AND c.site_id=$2::uuid AND c.group_kind='FACTORY_ACTIVATE' AND c.state <> 'CANCELLED' ORDER BY c.created_at LIMIT 1`,
+		 WHERE c.tenant_id=$1::uuid AND c.site_id=$2::uuid AND c.state <> 'CANCELLED'
+		   AND (c.group_kind='FACTORY_ACTIVATE' OR c.target->>'factory' = 'true') ORDER BY c.created_at DESC LIMIT 1`,
 		s.tenantID, s.siteID).Scan(&id) == nil {
 		return id
 	}
@@ -605,41 +610,56 @@ func (s *server) planRecovery(ctx context.Context, op string) (*recoveryPlan, er
 			plan.Summary += " Which portal design each network shows and each network's sign-in options are also reset to the site's."
 			plan.TypedName = "site"
 		}
-		fid := s.factoryNetworkID(ctx)
-		if fid == "" {
-			plan.Cannot = append(plan.Cannot, "The prepared network was never activated on this appliance, so there is nothing to return to. Activate it from Client networks first.")
-			return plan, nil
-		}
 		facts, ferr := s.systemFacts(ctx)
 		if ferr != nil || facts.LAN.PhysicalInterface == "" {
 			plan.Conflicts = append(plan.Conflicts, "The appliance could not say which port serves clients, so the prepared network cannot be put back safely right now.")
 			return plan, nil
 		}
+		lan := facts.LAN.PhysicalInterface
+		if lan == facts.WAN.Interface {
+			plan.Conflicts = append(plan.Conflicts, "The client port is the WAN/management port. Client networks are never placed on it.")
+		}
 		if wan := facts.wanCIDR(); wan != "" && cidrsOverlap(netcfg.FactorySubnet, wan) {
 			plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("The WAN/management network %s overlaps %s. The factory address is never forced onto a conflicting network.", wan, netcfg.FactorySubnet))
 		}
-		have := cur[fid]
-		if have.ParentInterface != facts.LAN.PhysicalInterface || have.NetworkType != netcfg.FactoryNetworkTyp {
-			plan.Cannot = append(plan.Cannot, fmt.Sprintf("%s is not the untagged network on the client port any more. Change that with a replacement first.", have.Name))
+		want := netcfg.Factory(lan)
+		fid := s.factoryNetworkID(ctx)
+		// The prepared network is put back in place when it is still the untagged network on the client port. When it was converted to a VLAN, moved, or is
+		// gone, a new one is made with the prepared settings and switched on as part of the same change: the old row stays, switched off, with its history.
+		usable := false
+		if have, ok := cur[fid]; ok && have.ParentInterface == lan && have.NetworkType == netcfg.FactoryNetworkTyp {
+			usable = true
 		}
-		want := netcfg.Factory(have.ParentInterface)
-		want.ID, want.BridgeName = fid, have.BridgeName
-		diffs := settingsDiffer(have, want)
-		var tgt recoveryTarget
-		if len(diffs) > 0 {
-			tgt.Row = &want
-		}
-		tgt.Layers = &layerTarget{SetPortal: true, SetSignin: true}
-		switch {
-		case !have.Enabled:
-			plan.items = append(plan.items, stagedItem{NetworkID: fid, Kind: "ENABLE", Target: tgt})
-			add(have, "switch_on", diffs)
-		case len(diffs) > 0 || layers[fid].PortalProfile != nil || layers[fid].Signin != nil:
-			plan.items = append(plan.items, stagedItem{NetworkID: fid, Kind: "SETTINGS", Target: tgt})
-			add(have, "restore_settings", diffs)
+		var factoryID string
+		if usable {
+			have := cur[fid]
+			factoryID = fid
+			want.ID, want.BridgeName = fid, have.BridgeName
+			diffs := settingsDiffer(have, want)
+			tgt := recoveryTarget{Factory: true, Layers: &layerTarget{SetPortal: true, SetSignin: true}}
+			if len(diffs) > 0 {
+				tgt.Row = &want
+			}
+			switch {
+			case !have.Enabled:
+				plan.items = append(plan.items, stagedItem{NetworkID: fid, Kind: "ENABLE", Target: tgt})
+				add(have, "switch_on", diffs)
+			case len(diffs) > 0 || layers[fid].PortalProfile != nil || layers[fid].Signin != nil:
+				plan.items = append(plan.items, stagedItem{NetworkID: fid, Kind: "SETTINGS", Target: tgt})
+				add(have, "restore_settings", diffs)
+			}
+		} else {
+			w := want
+			plan.items = append(plan.items, stagedItem{Kind: "ENABLE", Create: &w, Target: recoveryTarget{Factory: true, Created: true, Row: &w}})
+			plan.Networks = append(plan.Networks, planNetwork{Name: want.Name, Action: "create_and_switch_on",
+				Changes: []string{"untagged on " + lan + ", " + netcfg.FactorySubnet + ", local DHCP"}})
+			if fid != "" {
+				plan.Review = append(plan.Review, reviewLine{NetworkID: fid, Network: cur[fid].Name, Layer: "all", State: "CHANGED",
+					Detail: "The prepared network was changed so it is no longer the untagged network on the client port. It stays, switched off, with its history; a new one with the prepared settings takes its place."})
+			}
 		}
 		for _, id := range ids {
-			if id == fid {
+			if id == factoryID {
 				continue
 			}
 			n := cur[id]
@@ -794,6 +814,16 @@ func (s *server) stageRecovery(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "lock")
 		return
 	}
+	var live int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND state IN ('PENDING','APPLIED')
+		AND group_kind IN ('RESTORE','FACTORY_RESET','FULL_RESET')`, s.tenantID, s.siteID).Scan(&live); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if live > 0 {
+		jsonErr(w, http.StatusConflict, "recovery_in_progress", "A recovery is already staged or waiting to be confirmed. Apply or cancel it first.")
+		return
+	}
 	plan, err := s.planRecovery(ctx, in.Op)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the recovery plan could not be built")
@@ -817,7 +847,26 @@ func (s *server) stageRecovery(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "id")
 		return
 	}
-	for _, it := range plan.items {
+	for i := range plan.items {
+		it := &plan.items[i]
+		if it.Create != nil {
+			off := false
+			c := it.Create
+			inp := guestNetworkInput{
+				Name: c.Name, NetworkType: c.NetworkType, ParentInterface: c.ParentInterface, GatewayIP: c.GatewayIP, SubnetCIDR: c.SubnetCIDR,
+				DHCPMode: string(c.DHCPMode), DNSMode: c.DNSMode, DomainName: c.DomainName,
+				LeaseDefault: c.LeaseDefault, LeaseMin: c.LeaseMin, LeaseMax: c.LeaseMax, Enabled: &off, Pools: c.Pools,
+			}
+			t, iso := true, c.ClientIsolation
+			inp.CaptiveEnabled, inp.InternetEnabled, inp.NATEnabled, inp.ClientIsolation = &t, &t, &t, &iso
+			created, ierr := s.insertGuestNetwork(ctx, tx, inp, nil)
+			if ierr != nil {
+				writeNetworkInsertErr(w, ierr)
+				return
+			}
+			it.NetworkID = created.ID
+			it.Target.Row.ID = created.ID
+		}
 		raw, _ := json.Marshal(it.Target)
 		var target any
 		if string(raw) != "{}" {

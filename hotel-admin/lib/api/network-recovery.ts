@@ -1,6 +1,6 @@
 export type RecoveryOp = "restore_last_working" | "factory_defaults" | "full_reset";
 
-export type PlanNetwork = { id: string; name: string; action: "switch_on" | "switch_off" | "restore_settings"; changes?: string[]; active_clients: number };
+export type PlanNetwork = { id: string; name: string; action: "switch_on" | "switch_off" | "restore_settings" | "create_and_switch_on"; changes?: string[]; active_clients: number };
 
 export type ReviewLine = { network_id: string; network: string; layer: string; state: "UNCHANGED" | "CHANGED" | "MISSING" | "NO_RECORD"; detail: string };
 
@@ -33,6 +33,7 @@ export const OP_TITLE: Record<RecoveryOp, string> = {
 
 export const ACTION_LABEL: Record<PlanNetwork["action"], string> = {
   switch_on: "Switched on",
+  create_and_switch_on: "Prepared network created and switched on",
   switch_off: "Switched off",
   restore_settings: "Settings put back",
 };

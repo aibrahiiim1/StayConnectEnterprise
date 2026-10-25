@@ -122,7 +122,7 @@ export default function RecoveryPage() {
               {plan.networks.length === 0 ? <p className="text-muted-foreground">Nothing would change.</p> : (
                 <ul className="mt-1 space-y-1">
                   {plan.networks.map((n) => (
-                    <li key={n.id}>
+                    <li key={n.id || n.name}>
                       {n.name}: {ACTION_LABEL[n.action]}{n.changes?.length ? ` (${n.changes.join(", ")})` : ""}
                       {n.action === "switch_off" && n.active_clients > 0 && <span className="text-warning"> — {n.active_clients} connected device(s) lose access when it is applied</span>}
                     </li>
