@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -69,15 +70,27 @@ func (f *apiFixture) preview(t *testing.T, network, mode string, ifaces ...strin
 	return f.do(t, "POST", "/pms-routing/"+network+"/preview", map[string]any{"mode": mode, "pms_interface_ids": ifaces})
 }
 
+func (f *apiFixture) proposal(t *testing.T, network, mode string, ifaces ...string) string {
+	t.Helper()
+	_, pv := f.preview(t, network, mode, ifaces...)
+	id, _ := pv["proposal_id"].(string)
+	return id
+}
+
 func (f *apiFixture) setRouting(t *testing.T, network, mode string, ifaces ...string) (int, map[string]any) {
 	t.Helper()
-	f.preview(t, network, mode, ifaces...)
-	return f.do(t, "PUT", "/pms-routing/"+network, map[string]any{"mode": mode, "pms_interface_ids": ifaces, "based_on": f.routing(t, network)["fingerprint"]})
+	return f.do(t, "PUT", "/pms-routing/"+network, map[string]any{"mode": mode, "pms_interface_ids": ifaces, "proposal_id": f.proposal(t, network, mode, ifaces...)})
 }
 
 func (f *apiFixture) clearRouting(t *testing.T, network string) (int, map[string]any) {
 	t.Helper()
-	return f.do(t, "DELETE", "/pms-routing/"+network+"?based_on="+f.routing(t, network)["fingerprint"].(string), nil)
+	return f.do(t, "DELETE", "/pms-routing/"+network+"?proposal="+f.proposal(t, network, "UNDECIDED"), nil)
+}
+
+func (f *apiFixture) routingJSON(t *testing.T, network string) string {
+	t.Helper()
+	b, _ := json.Marshal(f.routing(t, network))
+	return string(b)
 }
 
 func codes(b map[string]any, key string) []string {
@@ -123,9 +136,8 @@ func TestIntegration_Routing_ADedicatedChoiceNeedsItsPreviewAndWritesPolicyAndIn
 	if st, _ := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}}); st != 400 {
 		t.Fatalf("a change without its preview = %d, want 400", st)
 	}
-	// a stale fingerprint: refused, nothing written
-	if st, b := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": "deadbeefdeadbeef"}); st != 409 || b["error"] != "routing_changed" {
-		t.Fatalf("a stale preview = %d %v", st, b)
+	if st, b := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": "deadbeefdeadbeefdeadbeefdeadbeef"}); st != 400 || b["error"] != "preview_required" {
+		t.Fatalf("an invented proposal = %d %v", st, b)
 	}
 	if f.mapRows(t, net) != 0 {
 		t.Fatal("a refused change wrote routing")
@@ -173,7 +185,7 @@ func TestIntegration_Routing_ASharedStrictSetIsExplicitBoundedAndPreviewed(t *te
 			t.Errorf("%s was accepted as a shared set", name)
 		}
 	}
-	if st, _ := f.setRouting(t, net, "SHARED_STRICT", a, b, c, d); st != 409 {
+	if st, _ := f.setRouting(t, net, "SHARED_STRICT", a, b, c, d); st == 200 {
 		t.Fatalf("four interfaces applied = %d", st)
 	}
 	if f.mapRows(t, net) != 0 {
@@ -607,7 +619,7 @@ func TestIntegration_Routing_ADetectedDuplicateSourceCannotBeSharedOnOneNetwork(
 	if !has(codes(pv, "blockers"), "DUPLICATE_SOURCE") {
 		t.Fatalf("a detected duplicate source was approved for sharing: %v", pv["blockers"])
 	}
-	if st, _ := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 409 {
+	if st, _ := f.setRouting(t, net, "SHARED_STRICT", a, b); st == 200 {
 		t.Fatalf("applied = %d", st)
 	}
 	if f.mapRows(t, net) != 0 {
@@ -647,7 +659,7 @@ func TestIntegration_Routing_EveryVLANNetworkOwnsItsOwnPolicy(t *testing.T) {
 	if st, r := f.setRouting(t, nets[2], "NONE"); st != 200 {
 		t.Fatalf("%d %v", st, r)
 	}
-	before := []string{f.routing(t, nets[0])["fingerprint"].(string), f.routing(t, nets[2])["fingerprint"].(string)}
+	before := []string{f.routingJSON(t, nets[0]), f.routingJSON(t, nets[2])}
 
 	// change the middle VLAN twice, to a different PMS and then to none
 	if st, r := f.setRouting(t, nets[1], "DEDICATED", b); st != 200 {
@@ -656,7 +668,7 @@ func TestIntegration_Routing_EveryVLANNetworkOwnsItsOwnPolicy(t *testing.T) {
 	if st, r := f.setRouting(t, nets[1], "NONE"); st != 200 {
 		t.Fatalf("%d %v", st, r)
 	}
-	after := []string{f.routing(t, nets[0])["fingerprint"].(string), f.routing(t, nets[2])["fingerprint"].(string)}
+	after := []string{f.routingJSON(t, nets[0]), f.routingJSON(t, nets[2])}
 	if before[0] != after[0] || before[1] != after[1] {
 		t.Fatalf("changing one VLAN's room sign-in changed another's: %v -> %v", before, after)
 	}
@@ -670,7 +682,7 @@ func TestIntegration_Routing_EveryVLANNetworkOwnsItsOwnPolicy(t *testing.T) {
 	}
 }
 
-func TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutItsPreview(t *testing.T) {
+func TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutItsOwnReviewedProposal(t *testing.T) {
 	f := newAPI(t)
 	net := f.mkNet(t, "Resort", 3110, "180.0")
 	a, _, _ := f.seedInterface(t)
@@ -678,52 +690,142 @@ func TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutIt
 	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
 		t.Fatalf("%d %v", st, r)
 	}
-	want := f.routing(t, net)["fingerprint"]
+	want := f.routingJSON(t, net)
 	intact := func(what string) {
 		t.Helper()
-		got := f.routing(t, net)
-		if got["mode"] != "SHARED_STRICT" || got["fingerprint"] != want || f.mapRows(t, net) != 2 {
-			t.Fatalf("%s changed the shared set: mode=%v rows=%d", what, got["mode"], f.mapRows(t, net))
+		if f.routingJSON(t, net) != want || f.mapRows(t, net) != 2 {
+			t.Fatalf("%s changed the shared set", what)
 		}
+	}
+	put := func(body map[string]any) (int, map[string]any) { return f.do(t, "PUT", "/pms-routing/"+net, body) }
+
+	raw, _ := json.Marshal(f.routing(t, net))
+	if strings.Contains(string(raw), "fingerprint") || strings.Contains(string(raw), "proposal") {
+		t.Fatalf("an ordinary routing read exposes what authorises a change: %s", raw)
 	}
 
 	for name, body := range map[string]map[string]any{
-		"the earlier single-interface request":              {"pms_interface_id": a},
-		"the earlier request with its routing_mode":         {"pms_interface_id": a, "routing_mode": "MAPPED"},
-		"a dedicated replacement with no preview":           {"mode": "DEDICATED", "pms_interface_ids": []string{a}},
-		"a dedicated replacement with an empty fingerprint": {"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": ""},
-		"a request with no mode":                            {"pms_interface_ids": []string{a}, "based_on": want},
+		"the earlier single-interface request": {"pms_interface_id": a},
+		"a replacement with no proposal":       {"mode": "DEDICATED", "pms_interface_ids": []string{a}},
+		"a replacement with an empty proposal": {"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": ""},
+		"an invented proposal":                 {"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": "00000000000000000000000000000000"},
+		"the old state fingerprint":            {"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": "0000000000000000"},
 	} {
-		st, r := f.do(t, "PUT", "/pms-routing/"+net, body)
-		if st != 400 || (r["error"] != "preview_required" && r["error"] != "bad_request") {
+		if st, r := put(body); st != 400 {
 			t.Fatalf("%s = %d %v, want 400", name, st, r)
 		}
 		intact(name)
 	}
-	if st, r := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": "0000000000000000"}); st != 409 || r["error"] != "routing_changed" {
-		t.Fatalf("a replacement against a stale fingerprint = %d %v", st, r)
+	if st, r := put(map[string]any{"mode": "UNDECIDED", "pms_interface_ids": []string{}, "proposal_id": f.proposal(t, net, "UNDECIDED")}); st != 400 {
+		t.Fatalf("a removal through PUT = %d %v", st, r)
 	}
-	intact("a stale replacement")
-
+	intact("a removal through PUT")
 	if st, r := f.do(t, "DELETE", "/pms-routing/"+net, nil); st != 400 || r["error"] != "preview_required" {
-		t.Fatalf("a removal with no fingerprint = %d %v", st, r)
+		t.Fatalf("a removal with no proposal = %d %v", st, r)
 	}
-	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?based_on=0000000000000000", nil); st != 409 || r["error"] != "routing_changed" {
-		t.Fatalf("a removal against a stale fingerprint = %d %v", st, r)
-	}
-	intact("an unprotected or stale removal")
+	intact("a removal with no proposal")
 
-	// a fingerprint taken from a preview of ANOTHER state does not authorise this change after the set changed underneath it
-	_, pv := f.preview(t, net, "DEDICATED", a)
-	stale := pv["network"].(map[string]any)["fingerprint"]
-	if st, r := f.setRouting(t, net, "SHARED_STRICT", b, a); st != 200 {
+	dedicated := f.proposal(t, net, "DEDICATED", a)
+	if dedicated == "" {
+		t.Fatal("no proposal was minted for a valid preview")
+	}
+	if st, r := put(map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{b}, "proposal_id": dedicated}); st != 409 || r["error"] != "proposal_mismatch" {
+		t.Fatalf("confirming other interfaces than the ones previewed = %d %v", st, r)
+	}
+	if st, r := put(map[string]any{"mode": "NONE", "pms_interface_ids": []string{}, "proposal_id": dedicated}); st != 409 || r["error"] != "proposal_mismatch" {
+		t.Fatalf("confirming another policy than the one previewed = %d %v", st, r)
+	}
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?proposal="+dedicated, nil); st != 409 || r["error"] != "proposal_mismatch" {
+		t.Fatalf("using a replacement proposal to remove the routing = %d %v", st, r)
+	}
+	intact("a proposal confirmed for something else")
+
+	removal := f.proposal(t, net, "UNDECIDED")
+	if st, r := put(map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": removal}); st != 409 || r["error"] != "proposal_mismatch" {
+		t.Fatalf("using a removal proposal to replace the routing = %d %v", st, r)
+	}
+	intact("a removal proposal used for a replacement")
+
+	// an approval is single-use: once the change it reviewed is applied it cannot be replayed
+	if st, r := put(map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": dedicated}); st != 200 {
+		t.Fatalf("the reviewed proposal was refused: %d %v", st, r)
+	}
+	if st, r := put(map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "proposal_id": dedicated}); st != 400 {
+		t.Fatalf("a used proposal was accepted again: %d %v", st, r)
+	}
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?proposal="+removal, nil); st != 400 && st != 409 {
+		t.Fatalf("a removal proposal from before the intervening change = %d %v", st, r)
+	}
+	if f.routing(t, net)["mode"] != "DEDICATED" || f.mapRows(t, net) != 1 {
+		t.Fatal("an obsolete removal approval removed the routing")
+	}
+}
+
+func TestIntegration_Routing_AnApprovalCannotBeRevivedByRestoringTheOldState(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3112, "182.0")
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
 		t.Fatalf("%d %v", st, r)
 	}
+	toNone := f.proposal(t, net, "NONE")
+	if st, r := f.setRouting(t, net, "DEDICATED", a); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "NONE", "pms_interface_ids": []string{}, "proposal_id": toNone}); st != 400 && st != 409 {
+		t.Fatalf("a preview made before two intervening changes that restored the same state was accepted: %d %v", st, r)
+	}
+	if f.routing(t, net)["mode"] != "SHARED_STRICT" || f.mapRows(t, net) != 2 {
+		t.Fatal("the obsolete approval changed the shared set")
+	}
+	toUndecided := f.proposal(t, net, "UNDECIDED")
 	if st, r := f.setRouting(t, net, "NONE"); st != 200 {
 		t.Fatalf("%d %v", st, r)
 	}
-	if st, r := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": stale}); st != 409 {
-		t.Fatalf("an old preview authorised a later change: %d %v", st, r)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?proposal="+toUndecided, nil); st != 400 && st != 409 {
+		t.Fatalf("an obsolete removal approval = %d %v", st, r)
+	}
+	if f.routing(t, net)["mode"] != "SHARED_STRICT" {
+		t.Fatal("the obsolete removal approval removed the routing")
+	}
+}
+
+func TestIntegration_Routing_ARemovalIsPreviewedAuditedAndLeavesTheNetworkUndecided(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3113, "183.0")
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	_, pv := f.preview(t, net, "UNDECIDED")
+	if has(codes(pv, "blockers"), "ALREADY_UNDECIDED") || pv["proposal_id"] == nil || len(pv["removed"].([]any)) != 2 {
+		t.Fatalf("the removal preview does not list what is removed: %v", pv)
+	}
+	if f.mapRows(t, net) != 2 {
+		t.Fatal("previewing a removal removed routing")
+	}
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?proposal="+pv["proposal_id"].(string), nil); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if f.mapRows(t, net) != 0 || f.routing(t, net)["mode"] != "" {
+		t.Fatal("the removal did not leave the network undecided")
+	}
+	for _, action := range []string{"pms_routing.previewed", "pms_routing.cleared"} {
+		if f.count(t, `SELECT count(*) FROM public.audit_log WHERE action=$1 AND target_id=$2 AND payload->>'proposal_id' = $3`, action, net, pv["proposal_id"]) != 1 {
+			t.Fatalf("%s is not audited with the proposal it carried out", action)
+		}
+	}
+	_, again := f.preview(t, net, "UNDECIDED")
+	if !has(codes(again, "blockers"), "ALREADY_UNDECIDED") || again["proposal_id"] != nil {
+		t.Fatalf("a network that is already not decided got a removal proposal: %v", again)
 	}
 }
 
@@ -753,5 +855,51 @@ func TestIntegration_Routing_ARoutingFromAnOlderRelease_CannotDowngradeASharedSe
 	}
 	if f.routing(t, net)["mode"] != "SHARED_STRICT" || f.mapRows(t, net) != 2 {
 		t.Fatal("the shared set did not survive the refused downgrade")
+	}
+}
+
+func TestIntegration_Routing_TheDownMigrationRefusesWhileASharedSetIsInUse(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3114, "184.0")
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	raw, err := os.ReadFile("../../migrations/0155_a_room_sign_in_routing_is_an_explicit_policy_per_client_network.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	i, j := strings.Index(text, "-- GUARD BEGIN"), strings.Index(text, "-- GUARD END")
+	if i < 0 || j < i {
+		t.Fatal("the down migration has no guard")
+	}
+	guard := text[i:j]
+	ctx := context.Background()
+
+	err = func() error {
+		tx, err := f.pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, guard)
+		return err
+	}()
+	if err == nil || !strings.Contains(err.Error(), "Shared STRICT") {
+		t.Fatalf("the down migration did not refuse while a shared set exists: %v", err)
+	}
+
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_policy WHERE mode='SHARED_STRICT'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, guard); err != nil {
+		t.Fatalf("the guard refused although no shared set remains: %v", err)
 	}
 }

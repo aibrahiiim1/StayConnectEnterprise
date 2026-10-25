@@ -163,7 +163,51 @@ check_build_profile() { # $1 = binary name, $2 = source path
          that has a Go toolchain), or rebuild the wanted commit with scripts/build-appliance-binaries.sh."
 }
 
+# ---- THE SHARED STRICT BOUNDARY -------------------------------------------------------------------------------
+#
+# A release that predates the room sign-in policy (migration 0155) does not know a network may be served by a strict SET of PMS interfaces. Given one it still
+# asks every mapped interface, but it drops an interface that is out of service from the vector, has no cap, and has no per-candidate feed check: a guest can be
+# let in that the missing PMS would have contradicted. Rolling scd or edged back to such a build while any SHARED_STRICT policy exists would weaken the protection
+# silently, so the artifact is asked (does it carry the policy table name?) and so is the live database; "cannot read it" is a refusal, never a pass.
+#
+# There is deliberately NO override flag. The operator action is to change each shared network to a dedicated or no-room-sign-in policy, which is previewed and
+# audited, and then to run this again.
+policy_aware() {
+  grep -qa 'guest_network_pms_policy' "$1" 2>/dev/null
+}
+
+shared_set_count() {
+  if [ -n "${SC_ROLLBACK_SHARED_SETS_CMD:-}" ]; then $SC_ROLLBACK_SHARED_SETS_CMD; return $?; fi
+  docker exec -i stayconnect-pg psql -X -At -U stayconnect -d stayconnect_site -c \
+    "SELECT CASE WHEN to_regclass('iam_v2.guest_network_pms_policy') IS NULL THEN 0 ELSE (SELECT count(*) FROM iam_v2.guest_network_pms_policy WHERE mode='SHARED_STRICT') END" 2>/dev/null
+}
+
+check_shared_boundary() { # $1 = binary name, $2 = source path
+  if policy_aware "$2"; then
+    printf '  %-18s rollback target knows the room sign-in policy; no shared-set boundary applies\n' "$1"
+    return 0
+  fi
+  printf '  %-18s rollback target PREDATES the room sign-in policy\n' "$1"
+  local n
+  n="$(shared_set_count)" || n=""
+  case "$n" in
+    ''|*[!0-9]*) die "the number of Shared STRICT networks could not be read, so it cannot be shown to be zero. A release that predates the room sign-in policy resolves a shared set without its cap, its out-of-service guard and its per-candidate feed check. NOTHING HAS BEEN CHANGED. Operator action: make the database readable and run this again.";;
+  esac
+  if [ "$n" -eq 0 ]; then
+    printf '  %-18s there is no Shared STRICT network; rollback may proceed\n' "$1"
+    return 0
+  fi
+  die "$1: the rollback target predates the room sign-in policy and $n network(s) are served by a Shared STRICT set of PMS interfaces.
+         That release would resolve them without the cap of three, without the guard that fails the network closed when a selected
+         interface is out of service, and without the per-candidate feed check, so a guest could be admitted that a missing or silent
+         PMS would have contradicted. That weakening will not be performed as part of an ordinary rollback.
+         NOTHING HAS BEEN CHANGED.
+         Operator action: under Hotel > PMS routing change each shared network to one dedicated PMS or to no room sign-in (each change is
+         previewed and audited), then run this command again; or roll back to a release that carries the policy."
+}
+
 check_compat_boundary() { # $1 = binary name, $2 = source path
+  if [ "$1" = "scd" ] || [ "$1" = "edged" ]; then check_shared_boundary "$1" "$2"; return $?; fi
   [ "$1" = "netd" ] || return 0
   if converges "$2"; then
     printf '  %-18s rollback target is convergence-capable; no compatibility boundary applies\n' "$1"

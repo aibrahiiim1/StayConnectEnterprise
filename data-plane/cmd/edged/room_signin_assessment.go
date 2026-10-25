@@ -15,6 +15,7 @@ const (
 	policyDedicated = "DEDICATED"
 	policyShared    = "SHARED_STRICT"
 	policyUndecided = ""
+	modeUndecided   = "UNDECIDED"
 )
 
 const (

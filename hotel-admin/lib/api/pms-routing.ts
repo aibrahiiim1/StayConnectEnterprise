@@ -19,8 +19,6 @@ export type RoutingState = {
   interfaces: RoutingInterface[];
   configured_at?: string;
   configured_by?: string;
-  /** Sent back with a change so only the previewed state can be replaced. */
-  fingerprint: string;
 };
 
 export type RoutingNote = { code: string; text: string; pms_interface_id?: string };
@@ -35,6 +33,8 @@ export type RoutingImpactInterface = RoutingInterface & {
 };
 
 export type RoutingPlan = {
+  proposal_id?: string;
+  expires_at?: string;
   network: RoutingState;
   proposed: { mode: string; interfaces: RoutingImpactInterface[] };
   added: RoutingInterface[];

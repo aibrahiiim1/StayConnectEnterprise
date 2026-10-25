@@ -306,7 +306,7 @@ describe("Guest network routing page", () => {
   it("lets a site admin choose a dedicated PMS, previews it, and applies it against that preview", async () => {
     routingMock({ policies: [net("gn2", "Conference VLAN 20", "")] });
     post.mockResolvedValue({
-      network: { ...net("gn2", "Conference VLAN 20", ""), fingerprint: "fp-gn2" },
+      proposal_id: "pr-gn2", network: net("gn2", "Conference VLAN 20", ""),
       proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true, in_house_stays: 12, room_auth_ready: true, health_known: true, also_used_by: [], live_sessions_on_this_network: 0 }] },
       added: [], removed: [], blockers: [], warnings: [{ code: "INTERFACE_ALSO_USED", text: "Main PMS is also used by Rooms." }],
       impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
@@ -330,7 +330,7 @@ describe("Guest network routing page", () => {
     await userEvent.click(screen.getByRole("button", { name: /confirm and apply/i }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][0]).toBe("/pms-routing/gn2");
-    expect(put.mock.calls[0][1]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["i1"], based_on: "fp-gn2" });
+    expect(put.mock.calls[0][1]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["i1"], proposal_id: "pr-gn2" });
   });
 
   it("does not let a shared set exceed three, or be applied with a blocker", async () => {

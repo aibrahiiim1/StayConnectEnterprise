@@ -130,7 +130,7 @@ describe("PMS routing (H-16)", () => {
       return Promise.resolve({});
     });
     post.mockResolvedValue({
-      network: { network_id: "g1", name: "Guest", mode: "DEDICATED", fingerprint: "fp1", interfaces: [] },
+      proposal_id: "pr1", network: { network_id: "g1", name: "Guest", mode: "DEDICATED", interfaces: [] },
       proposed: { mode: "DEDICATED", interfaces: [] }, added: [], removed: [], blockers: [], warnings: [],
       impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
       guarantees: [],
@@ -142,7 +142,7 @@ describe("PMS routing (H-16)", () => {
     await userEvent.click(screen.getByRole("button", { name: /preview the change/i }));
     await userEvent.click(await screen.findByRole("button", { name: /confirm and apply/i }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-routing/g1",
-      { mode: "DEDICATED", pms_interface_ids: ["i1"], based_on: "fp1" }));
+      { mode: "DEDICATED", pms_interface_ids: ["i1"], proposal_id: "pr1" }));
     expect(JSON.stringify(put.mock.calls)).not.toContain("ALL_ACTIVE");
   });
 });

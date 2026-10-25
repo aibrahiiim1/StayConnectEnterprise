@@ -6,7 +6,7 @@ import { installCapabilities } from "./capabilities";
 
 const iface = (id: string, label: string) => ({ id, display_label: label, connector_kind: "protel-fias", lifecycle_state: "ACTIVE", published: true });
 const policy = (id: string, name: string, mode: string, labels: string[] = [], extra: Record<string, unknown> = {}) => ({
-  network_id: id, name, enabled: true, archived: false, is_default: false, mode, fingerprint: `fp-${id}`,
+  network_id: id, name, enabled: true, archived: false, is_default: false, mode,
   interfaces: labels.map((l, i) => ({ pms_interface_id: `i${i + 1}`, label: l, lifecycle_state: "ACTIVE", published: true })), ...extra,
 });
 
@@ -29,6 +29,7 @@ const ASSESSMENT = {
 };
 
 const PREVIEW = (blockers: unknown[] = []) => ({
+  proposal_id: "pr-n4",
   network: NETWORKS[3],
   proposed: { mode: "SHARED_STRICT", interfaces: [
     { pms_interface_id: "i1", label: "Protel A", lifecycle_state: "ACTIVE", published: true, in_house_stays: 120, room_auth_ready: true, health_known: true, also_used_by: ["Rooms"], live_sessions_on_this_network: 0 },
@@ -107,7 +108,7 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
       expect(calls.find((c) => c.path.endsWith("/preview"))?.body).toEqual({ mode: "SHARED_STRICT", pms_interface_ids: ["i1", "i2", "i3"] });
     });
 
-    test("applying sends the preview's fingerprint and the explicit set, never 'every active PMS'", async ({ page }) => {
+    test("applying sends the reviewed proposal and the explicit set, never 'every active PMS'", async ({ page }) => {
       const calls: { method: string; path: string; body?: unknown }[] = [];
       await install(page, calls);
       await page.goto("/pms-routing");
@@ -120,7 +121,7 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
       await expect.poll(() => calls.filter((c) => c.method === "PUT").length).toBe(1);
       const put = calls.find((c) => c.method === "PUT")!;
       expect(put.path).toBe("/pms-routing/n4");
-      expect(put.body).toEqual({ mode: "SHARED_STRICT", pms_interface_ids: ["i1", "i2"], based_on: "fp-n4" });
+      expect(put.body).toEqual({ mode: "SHARED_STRICT", pms_interface_ids: ["i1", "i2"], proposal_id: "pr-n4" });
     });
 
     test("after a CONFIRMED reset the optional room sign-in step is offered; it changes nothing until confirmed", async ({ page }) => {

@@ -12,9 +12,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { HelpList, HelpSection } from "@/components/help";
-import { ConfirmDialog } from "@/components/ui/dialog";
 import { SkeletonRows } from "@/components/ui/misc";
-import { RoutingEditor, type ChoosableInterface } from "@/components/pms/routing-editor";
+import { ClearRoutingDialog, RoutingEditor, type ChoosableInterface } from "@/components/pms/routing-editor";
 import { RoomSignInReadinessCallout, useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
 import { canWrite } from "@/lib/roles";
 import { POLICY_WORDS, STATE_WORDS, type RoutingState } from "@/lib/api/pms-routing";
@@ -29,8 +28,6 @@ export default function PMSRoutingPage() {
 
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const [clearing, setClearing] = useState<RoutingState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [formErr, setFormErr] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -58,21 +55,6 @@ export default function PMSRoutingPage() {
     [interfaces],
   );
   const stateOf = useMemo(() => new Map((assessment?.networks ?? []).map((n) => [n.network_id, n])), [assessment]);
-
-  async function clear() {
-    if (!clearing) return;
-    setBusy(true); setFormErr(null);
-    try {
-      await api.del(`/pms-routing/${clearing.network_id}?based_on=${encodeURIComponent(clearing.fingerprint)}`);
-      setClearing(null);
-      await Promise.all([load(), reloadReadiness()]);
-    } catch (e) {
-      setFormErr(e);
-      void load();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <PageShell>
@@ -161,8 +143,8 @@ export default function PMSRoutingPage() {
                       {writable && (
                         <RowActions
                           subject={p.name || "Unnamed network"}
-                          primary={{ label: p.mode === "" ? "Decide" : "Change", onSelect: () => { setFormErr(null); setEditing({ id: p.network_id, name: p.name }); } }}
-                          items={p.mode === "" ? [] : [{ label: "Back to not decided", danger: true, onSelect: () => { setFormErr(null); setClearing(p); } }]}
+                          primary={{ label: p.mode === "" ? "Decide" : "Change", onSelect: () => setEditing({ id: p.network_id, name: p.name }) }}
+                          items={p.mode === "" ? [] : [{ label: "Back to not decided", danger: true, onSelect: () => setClearing(p) }]}
                         />
                       )}
                     </TD>
@@ -182,20 +164,11 @@ export default function PMSRoutingPage() {
         onDone={async () => { await Promise.all([load(), reloadReadiness()]); }}
       />
 
-      <ConfirmDialog
+      <ClearRoutingDialog
         open={clearing !== null}
-        onOpenChange={(v) => !v && setClearing(null)}
-        title="Return this network to not decided?"
-        description={
-          clearing
-            ? `${clearing.name || "This network"} will offer room sign-in to nobody until a choice is made again. Vouchers and client accounts are unaffected, and nothing already online is disconnected. To say a network is deliberately PMS-free, choose “No room sign-in” instead.`
-            : undefined
-        }
-        confirmLabel="Return to not decided"
-        confirmVariant="danger"
-        busy={busy}
-        error={formErr}
-        onConfirm={() => { void clear(); }}
+        network={clearing ? { id: clearing.network_id, name: clearing.name || "this network" } : null}
+        onClose={() => setClearing(null)}
+        onDone={async () => { await Promise.all([load(), reloadReadiness()]); }}
       />
     </PageShell>
   );

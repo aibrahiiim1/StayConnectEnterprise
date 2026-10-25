@@ -21,6 +21,8 @@ newworld() {
   printf 'CURRENT-BUILD stayconnect_production' > "$W/stage/scd"
   cp "$W/bin/scd" "$W/run/scd.exe"   # the running process is backed by the current build
   export SC_ROLLBACK_RESTART_CMD="$W/restart.sh"
+  export SC_ROLLBACK_SHARED_SETS_CMD="$W/shared.sh"
+  printf '#!/usr/bin/env bash\necho 0\n' > "$W/shared.sh"
   export SC_ROLLBACK_RUNNING_EXE="$W/runexe.sh"
   export SC_ROLLBACK_UNIT_STATE="$W/state.sh"
   unset SC_ROLLBACK_INSTALL_CMD
@@ -223,6 +225,43 @@ newworld
 printf 'OLD-BUILD-without-the-tag' > "$W/bin/scd.bak-inc9"
 out="$(run_tool --source-suffix .bak-inc9 --allow-unprofiled 2>&1)"; rc=$?
 if [ $rc -ne 0 ]; then ok "there is no override flag for the profile refusal either"; else bad "an override flag bypassed the profile check"; fi
+rm -rf "$W"
+
+echo "== 7d. THE SHARED STRICT BOUNDARY: a release without the room sign-in policy must not be installed while a shared set is in use =="
+for svc in scd edged; do
+  newworld
+  printf 'CURRENT-BUILD guest_network_pms_policy stayconnect_production' > "$W/bin/$svc"
+  printf 'OLD-BUILD stayconnect_production' > "$W/bin/$svc.bak-inc9"
+  printf '#!/usr/bin/env bash\necho 3\n' > "$W/shared.sh"
+  before="$(cat "$W/bin/$svc")"
+  out="$(bash "$TOOL" --bin-dir "$W/bin" --unit "$svc=stayconnect-$svc" --source-suffix .bak-inc9 2>&1)"; rc=$?
+  if [ $rc -ne 0 ] && echo "$out" | grep -q "Shared STRICT"; then ok "$svc: rollback to a build without the policy is refused while 3 shared networks exist"; else bad "$svc: shared-set rollback not refused: $out"; fi
+  if [ "$(cat "$W/bin/$svc")" = "$before" ]; then ok "$svc: nothing was replaced"; else bad "$svc: the binary changed despite the refusal"; fi
+  if ! echo "$out" | grep -q "== replace =="; then ok "$svc: it stopped before the replace step"; else bad "$svc: it went on to replace"; fi
+  if echo "$out" | grep -q "BINARY_ROLLBACK = PASS"; then bad "$svc: printed PASS"; else ok "$svc: no PASS verdict"; fi
+  rm -rf "$W"
+done
+
+newworld
+printf '#!/usr/bin/env bash\nexit 1\n' > "$W/shared.sh"
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -ne 0 ] && echo "$out" | grep -q "could not be read"; then ok "an unreadable shared-set count is a refusal, not a pass"; else bad "unreadable count was not refused: $out"; fi
+printf '#!/usr/bin/env bash\necho not-a-number\n' > "$W/shared.sh"
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -ne 0 ]; then ok "a non-numeric count is a refusal"; else bad "garbage count was accepted"; fi
+rm -rf "$W"
+
+newworld
+printf 'OLD-BUILD guest_network_pms_policy stayconnect_production' > "$W/bin/scd.bak-inc9"
+printf '#!/usr/bin/env bash\necho 5\n' > "$W/shared.sh"
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -eq 0 ] && echo "$out" | grep -q "knows the room sign-in policy"; then ok "a rollback target that carries the policy is allowed with shared sets in use"; else bad "a policy-aware target was refused: $out"; fi
+rm -rf "$W"
+
+newworld
+printf '#!/usr/bin/env bash\necho 0\n' > "$W/shared.sh"
+out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -eq 0 ] && echo "$out" | grep -q "no Shared STRICT network"; then ok "with no shared network the rollback proceeds and says why"; else bad "zero shared networks was refused: $out"; fi
 rm -rf "$W"
 
 echo "== 8. the tool never uses cp to replace a binary =="

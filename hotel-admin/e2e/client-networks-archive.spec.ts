@@ -51,7 +51,7 @@ async function install(page: Page, posts: { path: string }[]) {
     }
     if (path === "/pms-routing/d1/preview") {
       return route.fulfill(json(200, {
-        network: { network_id: "d1", name: "Client Wi-Fi", mode: "", fingerprint: "fp-d1", interfaces: [] },
+        proposal_id: "pr-d1", network: { network_id: "d1", name: "Client Wi-Fi", mode: "", interfaces: [] },
         proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "p1", label: "Protel", lifecycle_state: "ACTIVE", published: true, in_house_stays: 3, room_auth_ready: true, health_known: true, also_used_by: ["PRELIVE Test Guest"], live_sessions_on_this_network: 0 }] },
         added: [], removed: [], blockers: [], warnings: [{ code: "INTERFACE_ALSO_USED", text: "Protel is also used by PRELIVE Test Guest." }],
         impact: { active_sessions: 4, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
@@ -118,6 +118,6 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
     expect(puts).toHaveLength(0);
     await dialog.getByRole("button", { name: "Confirm and apply" }).click();
     await expect.poll(() => puts.length).toBe(1);
-    expect(puts[0]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["p1"], based_on: "fp-d1" });
+    expect(puts[0]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["p1"], proposal_id: "pr-d1" });
   });
 }

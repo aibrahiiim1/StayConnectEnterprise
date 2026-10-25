@@ -26,7 +26,7 @@ const state = (mode: string, labels: string[] = []) => ({
     interfaces: labels.map((l, i) => ({ pms_interface_id: `i${i + 1}`, label: l, lifecycle_state: "ACTIVE", published: true })) }],
 });
 const plan = {
-  network: { network_id: "n1", name: "Rooms", mode: "", fingerprint: "fp1", interfaces: [] },
+  proposal_id: "pr1", network: { network_id: "n1", name: "Rooms", mode: "", interfaces: [] },
   proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "i1", label: "Protel A", lifecycle_state: "ACTIVE", published: true, in_house_stays: 3, room_auth_ready: true, health_known: true, also_used_by: [], live_sessions_on_this_network: 0 }] },
   added: [], removed: [], blockers: [], warnings: [],
   impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
@@ -79,25 +79,52 @@ describe("the room sign-in editor guides the choice", () => {
     await screen.findByTestId("routing-preview");
     expect(screen.getByText(/Step 2 of 2/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Confirm and apply" }));
-    await waitFor(() => expect(screen.getByText(/changed after your preview/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/can no longer be confirmed/)).toBeTruthy());
     expect(screen.getByText(/Step 1 of 2/)).toBeTruthy();
     await waitFor(() => expect(screen.getByText(/Now: One dedicated PMS — Protel A/)).toBeTruthy());
   });
 });
 
-describe("returning a network to not decided is protected like every other routing change", () => {
-  it("sends the fingerprint of the routing the operator is looking at", async () => {
-    const policies = { policies: [{ network_id: "n1", name: "Rooms", enabled: true, archived: false, is_default: false, mode: "SHARED_STRICT", fingerprint: "fp-shared",
-      interfaces: [{ pms_interface_id: "i1", label: "Protel A", lifecycle_state: "ACTIVE", published: true }, { pms_interface_id: "i2", label: "Protel B", lifecycle_state: "ACTIVE", published: true }] }], routes: [], unmapped_guest_networks: [] };
-    get.mockImplementation((p: string) => Promise.resolve(p === "/auth/whoami" ? { roles: ["site_admin"] } : p === "/pms-interfaces" ? { interfaces: [] }
-      : p === "/pms-routing/readiness" ? { overall: "READY", networks: [], interfaces: [], issues: [] } : policies));
+describe("returning a network to not decided is previewed and confirmed like every other routing change", () => {
+  const shared = { policies: [{ network_id: "n1", name: "Rooms", enabled: true, archived: false, is_default: false, mode: "SHARED_STRICT",
+    interfaces: [{ pms_interface_id: "i1", label: "Protel A", lifecycle_state: "ACTIVE", published: true }, { pms_interface_id: "i2", label: "Protel B", lifecycle_state: "ACTIVE", published: true }] }], routes: [], unmapped_guest_networks: [] };
+  const clearPlan = {
+    proposal_id: "pr-clear", network: shared.policies[0], proposed: { mode: "UNDECIDED", interfaces: [] }, added: [], removed: [], blockers: [],
+    warnings: [{ code: "UNDECIDED_OFFERS_NOTHING", text: "Room sign-in will not be offered on this network until someone chooses how it works again." }],
+    impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
+    guarantees: ["No PMS traffic is started or stopped, and nothing is posted to any PMS."],
+  };
+  const serve = () => get.mockImplementation((p: string) => Promise.resolve(p === "/auth/whoami" ? { roles: ["site_admin"] } : p === "/pms-interfaces" ? { interfaces: [] }
+    : p === "/pms-routing/readiness" ? { overall: "READY", networks: [], interfaces: [], issues: [] } : shared));
+
+  it("previews the removal and sends the proposal it reviewed", async () => {
+    serve();
+    post.mockResolvedValue(clearPlan);
     del.mockResolvedValue({});
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
     await userEvent.click(await screen.findByRole("button", { name: /more actions|actions/i }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Back to not decided" }));
-    const dialog = await screen.findByRole("alertdialog").catch(() => screen.findByRole("dialog"));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Return to not decided" }));
-    await waitFor(() => expect(del).toHaveBeenCalledWith("/pms-routing/n1?based_on=fp-shared"));
+    await screen.findByTestId("routing-clear-preview");
+    expect(post).toHaveBeenCalledWith("/pms-routing/n1/preview", { mode: "UNDECIDED", pms_interface_ids: [] });
+    expect(within(screen.getByTestId("routing-clear-preview")).getByText(/Protel A, Protel B/)).toBeTruthy();
+    expect(del).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Return to not decided" }));
+    await waitFor(() => expect(del).toHaveBeenCalledWith("/pms-routing/n1?proposal=pr-clear"));
+  });
+
+  it("a preview that can no longer be confirmed is replaced by a fresh one, not retried", async () => {
+    serve();
+    post.mockResolvedValueOnce(clearPlan).mockResolvedValueOnce({ ...clearPlan, proposal_id: "pr-clear-2" });
+    del.mockRejectedValueOnce(new (ApiError as unknown as new (c: string, m: string) => Error)("routing_changed", "stale"));
+    const Page = (await import("@/app/(app)/pms-routing/page")).default;
+    render(<Page />);
+    await userEvent.click(await screen.findByRole("button", { name: /more actions|actions/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Back to not decided" }));
+    await screen.findByTestId("routing-clear-preview");
+    await userEvent.click(screen.getByRole("button", { name: "Return to not decided" }));
+    await waitFor(() => expect(screen.getByText(/can no longer be confirmed/)).toBeTruthy());
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(del).toHaveBeenCalledTimes(1);
   });
 });

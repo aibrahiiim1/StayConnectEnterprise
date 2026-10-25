@@ -338,11 +338,16 @@ network fail closed, because "no PMS has this guest" can no longer be proven. Al
   house, other networks that use the same interface, room numbers present in more than one selected PMS, clients and room-based entitlements online on the network, and
   blockers (cap, wrong count for the policy, an interface that does not exist, is out of service or has no published configuration, an archived network, a critical
   duplicate-source conflict between two selected interfaces) and warnings.
-* The apply (`PUT /pms-routing/{network}`) carries the preview's fingerprint and is refused (`routing_changed`) if the network's routing changed since. The policy and
-  the interfaces are written in one transaction and audited (`pms_routing.policy_set`, with the previous policy and interfaces). **There is no other way to change
-  routing.** The earlier single-interface request (`{pms_interface_id}`) and any request without a mode and a fingerprint are refused (`preview_required`, nothing written), so a
-  shared set can never be replaced by a dedicated route silently; returning a network to *not decided* (`DELETE /pms-routing/{network}?based_on=<fingerprint>`) needs the same
-  fingerprint and is audited with the previous policy and interfaces.
+* A preview that can be applied mints a **proposal**: an unguessable, single-use, 15-minute approval held by the server and bound to the network, to the operator who
+  previewed it, to the exact mode and interfaces previewed, and to the network's change counter and routing at that moment. Ordinary reads never carry it. The apply
+  (`PUT /pms-routing/{network}` with `proposal_id`, and the mode and interfaces) is refused unless every one of those still holds: another operator (`proposal_other_operator`),
+  other content (`proposal_mismatch`), a network changed or previewed-again since, or an expired or used proposal (`routing_changed` / `preview_required`). Any applied change
+  to a network retires every outstanding proposal of that network, so changing a network away and back cannot revive an old approval. The policy and the interfaces are written
+  in one transaction. Both the preview (`pms_routing.previewed`) and the apply (`pms_routing.policy_set`) are audited with the proposal id and the previous and new policy and
+  interfaces, and a refused confirmation is audited (`pms_routing.proposal_refused`, with the reason). **There is no other way to change routing.** The earlier
+  single-interface request and any request without a mode and a proposal are refused (`preview_required`, nothing written). Returning a network to *not decided* is previewed the
+  same way (mode `UNDECIDED`) and confirmed with `DELETE /pms-routing/{network}?proposal=<id>`. Proposals live in the server's memory: a restart of edged invalidates them all,
+  which fails closed.
 * It starts and stops no PMS traffic, posts nothing, changes no package eligibility, copies nothing from another network and leaves online guests with their access
   (their entitlements belong to the stay that earned them).
 
@@ -368,7 +373,13 @@ policy and the mapped interfaces consistent whenever either is written, and `iam
 inferred, mapped or merged. Grants are in `deploy/gatep` (`svc_edged` on the table; `svc_scd` select and execute). `.down` removes the objects and leaves every mapping.
 
 **Rollback after a shared policy exists** (drilled on a disposable database as `iam_v2_owner`, 34 shared, 179 dedicated and 12 none networks).
-* Roll the **software back first** (scd, edged, console), then the schema. If the schema goes first, scd treats a missing policy table as no policy: a network with one mapped
+* **The safe boundary.** While any Shared STRICT policy exists, nothing may be rolled back to a release that predates the policy: `scripts/binary-rollback.sh` refuses to install
+  such an scd or edged (it asks the artifact for the policy table name and the database for the number of shared networks; an unreadable count is a refusal; there is no override
+  flag) and `0155.down.sql` refuses to run (a guard at its top). Both leave everything unchanged and say the operator action: change each shared network to one dedicated PMS or
+  to no room sign-in (previewed, audited), then roll back. Tested: `scripts/ci/binary-rollback-tests.sh` (47 cases) and
+  `TestIntegration_Routing_TheDownMigrationRefusesWhileASharedSetIsInUse`; on a disposable database the down migration was refused with 26 shared networks (nothing changed),
+  and after they were converted it ran, saved all 68 policies and the re-apply restored them. Only a hand-run `install` or `psql` can bypass it, and that is outside the tool.
+* Roll the software back first (scd, edged, console), then the schema. If the schema goes first, scd treats a missing policy table as no policy: a network with one mapped
   interface keeps working, a network with several refuses room sign-in (fail closed), and every other sign-in method is unaffected.
 * `0155.down.sql` keeps every mapped interface (269 of 269 rows) and copies the policies to `iam_v2.guest_network_pms_policy_rolled_back` before dropping the table. Applying
   0155 again restores each policy that still agrees with the mapping (34, 179 and 12 came back exactly) and drops the copy; one whose mapping changed meanwhile stays undecided,
@@ -434,8 +445,9 @@ hypervisor configuration.
 
 ## 18. Follow-up under the same mission (2026-10-26): closed write path, rollback drill, reconciliation after revisions 99 and 100
 
-**Closed write path.** Every routing mutation needs its preview. A routing request without a mode, the interfaces and the preview's fingerprint is refused (`preview_required`),
-the earlier single-interface request included; removing a network's routing (`DELETE ?based_on=`) needs the fingerprint too and records the previous policy. Regression evidence
+**Closed write path.** Every routing mutation needs its preview. (Superseded in 2026-10-26's second follow-up, section 19: the state fingerprint was replaced by server-held,
+single-use proposals.) A routing request without a mode, the interfaces and the preview's reference is refused (`preview_required`),
+the earlier single-interface request included; removing a network's routing needs it too and records the previous policy. Regression evidence
 (`TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutItsPreview`): a shared set survives, unchanged, the legacy request, the legacy request with a routing mode,
 a dedicated replacement with no, empty or stale fingerprint, a removal with none or a stale one, and a fingerprint taken from an earlier preview. Live (deployment, against a
 network id that does not exist, so nothing could change): all refused, and every network's policy and fingerprint identical before and after.
@@ -468,4 +480,24 @@ identical apart from one `backup.created` by `admin`).
 Admin Console release `20261025-215640` built from `1500865c` (BUILD_ID `lshkkUlm4k3eLnLbQnfjd`). Backups `edged.bak-pre-1500865c-20261025T215629Z` and
 `scd.bak-pre-1500865c-20261025T215634Z`; console `hotel-admin.previous` -> `20261025-201251`. `DEPLOYED_BINARIES` rewritten from the installed bytes (7 of 7), every unit active, no
 error logged. A real browser check at 1280 px and 390 px found no overflow and the guided editor behaving as described (previewed, not confirmed).
+
+## 19. Second follow-up (2026-10-26): the approval is a proposal, not a state; the rollback boundary is enforced
+
+**Why the fingerprint was not enough.** The previous check compared a fingerprint of the *current* routing, which ordinary reads returned. It proved the state had not moved, not that
+*this exact change* had been previewed and accepted by *this operator*, and a change away and back (shared, dedicated, shared) restored the same fingerprint, so an approval
+older than both changes would have been accepted again.
+
+**What replaced it** (details in section 16). A preview mints a server-held, single-use, 15-minute proposal bound to the network, the previewing operator, the exact mode and
+interfaces, and the network's change counter. Reads never expose it; every applied change to a network retires all of that network's proposals; removal is previewed (mode
+`UNDECIDED`) and confirmed the same way (`DELETE ?proposal=`). Authorisation (`pms-routing` write), the server-side validation (cap, service state, duplicate source, archived
+network) and the audit run on the apply exactly as before, and every doubt refuses.
+
+Regression evidence (integration, full-schema PostgreSQL; unit tests on the store): an ordinary read exposes nothing that authorises a change; an invented, empty or old-style
+reference changes nothing; a proposal confirmed for other interfaces, another policy, or as a removal (and the reverse) is refused; a proposal works once; an approval made before
+two intervening changes that restored the identical state is refused; a removal approval from before an intervening change removes nothing; the removal preview lists what goes
+and is audited with its proposal; another operator, another network, an expired proposal and a bounded store are covered at the unit level.
+
+**Rollback boundary** (section 16): `scripts/binary-rollback.sh` and `0155.down.sql` both refuse while a Shared STRICT policy exists.
+
+No schema change: the proposals are not stored. Deployed to PRE-LIVE as software only (edged and the Admin Console).
 

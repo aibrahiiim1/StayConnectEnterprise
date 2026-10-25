@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -33,7 +34,7 @@ type routingState struct {
 	Interfaces   []routingIface `json:"interfaces"`
 	ConfiguredAt string         `json:"configured_at,omitempty"`
 	ConfiguredBy string         `json:"configured_by,omitempty"`
-	Fingerprint  string         `json:"fingerprint"`
+	Fingerprint  string         `json:"-"`
 }
 
 func routingFingerprint(mode string, ids []string) string {
@@ -90,7 +91,7 @@ func (s *server) loadRouting(ctx context.Context, q queryer, networkID string) (
 type routingChoice struct {
 	Mode         string   `json:"mode"`
 	InterfaceIDs []string `json:"pms_interface_ids"`
-	BasedOn      string   `json:"based_on"`
+	ProposalID   string   `json:"proposal_id"`
 }
 
 func (c routingChoice) normalised() (mode string, ids []string) {
@@ -125,14 +126,16 @@ type routingImpactInterface struct {
 }
 
 type routingPlan struct {
-	Network   routingState    `json:"network"`
-	Proposed  routingProposed `json:"proposed"`
-	Added     []routingIface  `json:"added"`
-	Removed   []routingIface  `json:"removed"`
-	Blockers  []routingNote   `json:"blockers"`
-	Warnings  []routingNote   `json:"warnings"`
-	Impact    routingImpact   `json:"impact"`
-	Guarantee []string        `json:"guarantees"`
+	ProposalID string          `json:"proposal_id,omitempty"`
+	ExpiresAt  string          `json:"expires_at,omitempty"`
+	Network    routingState    `json:"network"`
+	Proposed   routingProposed `json:"proposed"`
+	Added      []routingIface  `json:"added"`
+	Removed    []routingIface  `json:"removed"`
+	Blockers   []routingNote   `json:"blockers"`
+	Warnings   []routingNote   `json:"warnings"`
+	Impact     routingImpact   `json:"impact"`
+	Guarantee  []string        `json:"guarantees"`
 }
 
 type routingProposed struct {
@@ -163,6 +166,14 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 	}
 
 	switch mode {
+	case modeUndecided:
+		if len(ids) != 0 {
+			block("UNDECIDED_TAKES_NO_INTERFACES", "Returning a network to not decided takes no PMS interface.")
+		}
+		if cur.Mode == "" && len(cur.Interfaces) == 0 {
+			block("ALREADY_UNDECIDED", "This network is already not decided.")
+		}
+		warn("UNDECIDED_OFFERS_NOTHING", "Room sign-in will not be offered on this network until someone chooses how it works again.", "")
 	case policyNone:
 		if len(ids) != 0 {
 			block("NONE_TAKES_NO_INTERFACES", "No PMS interface can be selected when room sign-in is switched off for this network.")
@@ -398,12 +409,42 @@ func (s *server) pmsRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode, ids := in.normalised()
+	operator := s.actor(r)
+	unlock := s.proposals().lock(gnID)
+	defer unlock()
 	plan, err := s.planRouting(ctx, cur, mode, ids)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
+	if len(plan.Blockers) == 0 && operator != "" {
+		if pr := s.proposals().mint(gnID, operator, mode, ids, routingFingerprint(cur.Mode, ifaceIDs(cur.Interfaces)), time.Now()); pr != nil {
+			plan.ProposalID, plan.ExpiresAt = pr.ID, pr.Expires.UTC().Format(time.RFC3339)
+			s.audit(r, "pms_routing.previewed", "guest_network", gnID, map[string]any{
+				"proposal_id": pr.ID, "guest_network_name": cur.Name, "mode": mode, "pms_interface_ids": ids, "previous_mode": cur.Mode, "previous_pms_interface_ids": ifaceIDs(cur.Interfaces),
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func (s *server) refuseProposal(w http.ResponseWriter, r *http.Request, gnID, proposalID, mode string, ids []string, cur routingState) bool {
+	reason := s.proposals().check(proposalID, gnID, s.actor(r), mode, ids, routingFingerprint(cur.Mode, ifaceIDs(cur.Interfaces)), time.Now())
+	if reason == propOK {
+		return false
+	}
+	s.audit(r, "pms_routing.proposal_refused", "guest_network", gnID, map[string]any{"reason": reason, "proposal_id": proposalID, "mode": mode})
+	switch reason {
+	case propUnknown:
+		jsonErr(w, http.StatusBadRequest, "preview_required", "This change was not previewed, or its preview has been used or has expired. Preview the change and confirm that preview.")
+	case propOperator:
+		jsonErr(w, http.StatusForbidden, "proposal_other_operator", "That preview was made by a different operator. Preview the change yourself before confirming it.")
+	case propMismatch:
+		jsonErr(w, http.StatusConflict, "proposal_mismatch", "What you are confirming is not what was previewed. Preview the change again.")
+	default:
+		jsonErr(w, http.StatusConflict, "routing_changed", "This network's room sign-in changed, or the preview expired, after the preview was made. Preview it again before confirming.")
+	}
+	return true
 }
 
 func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
@@ -418,10 +459,12 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode, ids := in.normalised()
-	if mode == "" || strings.TrimSpace(in.BasedOn) == "" {
-		jsonErr(w, http.StatusBadRequest, "preview_required", "A routing change needs mode, pms_interface_ids and the based_on fingerprint of its preview. Preview the change first and confirm that preview.")
+	if mode == "" || mode == modeUndecided || strings.TrimSpace(in.ProposalID) == "" {
+		jsonErr(w, http.StatusBadRequest, "preview_required", "A routing change needs its mode, pms_interface_ids and the proposal_id of the preview you are confirming. Preview the change first.")
 		return
 	}
+	unlock := s.proposals().lock(gnID)
+	defer unlock()
 
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -444,8 +487,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	if in.BasedOn != cur.Fingerprint {
-		jsonErr(w, http.StatusConflict, "routing_changed", "This network's room sign-in changed after the preview was made. Preview it again before confirming.")
+	if s.refuseProposal(w, r, gnID, in.ProposalID, mode, ids, cur) {
 		return
 	}
 	plan, err := s.planRouting(ctx, cur, mode, ids)
@@ -499,8 +541,9 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
 		return
 	}
+	s.proposals().applied(gnID)
 	s.audit(r, "pms_routing.policy_set", "guest_network", gnID, map[string]any{
-		"guest_network_name": cur.Name, "mode": mode, "pms_interface_ids": ids,
+		"proposal_id": in.ProposalID, "guest_network_name": cur.Name, "mode": mode, "pms_interface_ids": ids,
 		"previous_mode": cur.Mode, "previous_pms_interface_ids": ifaceIDs(cur.Interfaces),
 	})
 	updated, err := s.loadRouting(ctx, s.db, gnID)
@@ -532,11 +575,13 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
 		return
 	}
-	basedOn := strings.TrimSpace(r.URL.Query().Get("based_on"))
-	if basedOn == "" {
-		jsonErr(w, http.StatusBadRequest, "preview_required", "Returning a network to not decided needs the based_on fingerprint of the routing you are looking at.")
+	proposalID := strings.TrimSpace(r.URL.Query().Get("proposal"))
+	if proposalID == "" {
+		jsonErr(w, http.StatusBadRequest, "preview_required", "Returning a network to not decided needs the proposal_id of its preview. Preview it first (mode UNDECIDED).")
 		return
 	}
+	unlock := s.proposals().lock(gnID)
+	defer unlock()
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tx, err := s.db.Begin(ctx)
@@ -558,8 +603,7 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	if basedOn != cur.Fingerprint {
-		jsonErr(w, http.StatusConflict, "routing_changed", "This network's room sign-in changed after you opened it. Reload it before returning it to not decided.")
+	if s.refuseProposal(w, r, gnID, proposalID, modeUndecided, nil, cur) {
 		return
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, s.tenantID, s.siteID, gnID)
@@ -575,8 +619,9 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
 		return
 	}
+	s.proposals().applied(gnID)
 	s.audit(r, "pms_routing.cleared", "guest_network", gnID, map[string]any{
-		"guest_network_name": cur.Name, "previous_mode": cur.Mode, "previous_pms_interface_ids": ifaceIDs(cur.Interfaces), "removed": tag.RowsAffected(),
+		"proposal_id": proposalID, "guest_network_name": cur.Name, "previous_mode": cur.Mode, "previous_pms_interface_ids": ifaceIDs(cur.Interfaces), "removed": tag.RowsAffected(),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
 }

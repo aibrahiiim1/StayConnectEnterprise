@@ -1,10 +1,25 @@
 -- Down for 0155. Every mapped interface stays as it is. The explicit policies are copied to iam_v2.guest_network_pms_policy_rolled_back before the table goes, so
--- applying 0155 again restores the ones that still agree with the mapping instead of leaving shared and none networks undecided.
+-- applying 0155 again restores the ones that still agree with the mapping.
 --
--- Roll the SOFTWARE back first (scd, edged, console), then this: a release that does not know the policy treats a network with several mapped interfaces as the
--- strict set it always resolved, but without the cap, the per-candidate freshness check or the out-of-service guard.
+-- It REFUSES while any Shared STRICT policy exists (the guard below): no release that predates the policy protects a shared set, and scripts/binary-rollback.sh refuses
+-- the same rollback of scd and edged. Roll the software back first (scd, edged, console), then run this.
 
 BEGIN;
+
+-- GUARD BEGIN
+DO $guard$
+DECLARE n int;
+BEGIN
+  IF to_regclass('iam_v2.guest_network_pms_policy') IS NOT NULL THEN
+    SELECT count(*) INTO n FROM iam_v2.guest_network_pms_policy WHERE mode = 'SHARED_STRICT';
+    IF n > 0 THEN
+      RAISE EXCEPTION 'refusing to roll back 0155: % network(s) are served by a Shared STRICT set. Without the policy a release resolves them without the cap, the out-of-service guard and the per-candidate feed check. Change each to a dedicated or no-room-sign-in policy under PMS routing first.', n
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+END
+$guard$;
+-- GUARD END
 
 DROP TABLE IF EXISTS iam_v2.guest_network_pms_policy_rolled_back;
 CREATE TABLE iam_v2.guest_network_pms_policy_rolled_back AS SELECT p.*, now() AS rolled_back_at FROM iam_v2.guest_network_pms_policy p;

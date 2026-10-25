@@ -318,7 +318,7 @@ func TestIntegration_API_RoutingRefusesAnotherSitesInterface(t *testing.T) {
 	gn := a.seedNet(t, "Guest VLAN cross-site")
 
 	code, body := a.do(t, http.MethodPut, "/pms-routing/"+gn,
-		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{foreign}, "based_on": a.routing(t, gn)["fingerprint"]})
+		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{foreign}, "proposal_id": "x"})
 	if code == http.StatusOK {
 		t.Fatalf("a guest network was mapped to another site's PMS interface: %v", body)
 	}
@@ -338,7 +338,7 @@ func TestIntegration_API_RoutingRefusesAnotherSitesGuestNetwork(t *testing.T) {
 	foreignNet := b.seedNet(t, "Guest VLAN other-site")
 
 	code, body := a.do(t, http.MethodPut, "/pms-routing/"+foreignNet,
-		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{iface}, "based_on": "x"})
+		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{iface}, "proposal_id": "x"})
 	if code == http.StatusOK {
 		t.Fatalf("another site's guest network was mapped: %v", body)
 	}

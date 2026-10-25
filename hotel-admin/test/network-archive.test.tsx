@@ -79,7 +79,7 @@ describe("Default Network checks", () => {
   it("names what is unresolved and routes PMS only after the operator previews and confirms their choice", async () => {
     get.mockImplementation((path: string) => route(path));
     post.mockResolvedValue({
-      network: { network_id: "d1", name: "Client Wi-Fi", mode: "", fingerprint: "fp-d1", interfaces: [] },
+      proposal_id: "pr-d1", network: { network_id: "d1", name: "Client Wi-Fi", mode: "", interfaces: [] },
       proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "p1", label: "Protel", lifecycle_state: "ACTIVE", published: true, in_house_stays: 3, room_auth_ready: true, health_known: true, also_used_by: [], live_sessions_on_this_network: 0 }] },
       added: [], removed: [], blockers: [], warnings: [],
       impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
@@ -101,7 +101,7 @@ describe("Default Network checks", () => {
     expect(screen.getByText(/nothing is posted to any PMS/)).toBeTruthy();
     expect(put).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /confirm and apply/i }));
-    await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-routing/d1", { mode: "DEDICATED", pms_interface_ids: ["p1"], based_on: "fp-d1" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-routing/d1", { mode: "DEDICATED", pms_interface_ids: ["p1"], proposal_id: "pr-d1" }));
   });
 
   it("offers no routing action to a role that cannot route, and shows nothing without a Default Network", async () => {

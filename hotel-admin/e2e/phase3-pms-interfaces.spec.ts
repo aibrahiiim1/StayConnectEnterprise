@@ -273,9 +273,9 @@ test("routing shows each network's choice, and names the networks nobody has dec
   await installBackend(page, {
     mutations,
     policies: [
-      { network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED", fingerprint: "a",
+      { network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED",
         interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true }] },
-      { network_id: "gn2", name: "Conference VLAN 20", enabled: true, archived: false, is_default: false, mode: "", fingerprint: "b", interfaces: [] },
+      { network_id: "gn2", name: "Conference VLAN 20", enabled: true, archived: false, is_default: false, mode: "", interfaces: [] },
     ],
     assessmentNetworks: [
       { network_id: "gn2", name: "Conference VLAN 20", state: "UNDECIDED", summary: "No one has decided how room sign-in works on this network, so it is not offered.", interfaces: [], reasons: [] },
@@ -335,7 +335,7 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
   const mutations: Mutations = [];
   await installBackend(page, {
     mutations,
-    policies: [{ network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED", fingerprint: "a",
+    policies: [{ network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED",
       interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true }] }],
     conflicts: [{ id: "c1", interface_a: "i1", interface_a_label: "Main PMS", interface_b: "i2",
       interface_b_label: "Spa PMS", severity: "HIGH", resolution: "UNRESOLVED" }],

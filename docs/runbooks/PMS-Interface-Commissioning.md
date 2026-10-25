@@ -236,12 +236,13 @@ Room sign-in is an **explicit policy of each client network** (Phase-0 Amendment
 independent interfaces). Normally this is done in **Hotel → PMS routing**, which previews every change. The API is two steps:
 
 ```
-POST /edge/v1/pms-routing/{guest_network_id}/preview   {mode, pms_interface_ids: [...]}      → the effect, blockers, warnings, fingerprint
-PUT  /edge/v1/pms-routing/{guest_network_id}           {mode, pms_interface_ids: [...], based_on: <fingerprint of that preview>}
+POST /edge/v1/pms-routing/{guest_network_id}/preview   {mode, pms_interface_ids: [...]}      → the effect, blockers, warnings, proposal_id
+PUT  /edge/v1/pms-routing/{guest_network_id}           {mode, pms_interface_ids: [...], proposal_id: <the proposal that preview returned>}
 ```
 
-The apply is refused if the network's routing changed after the preview, and a request without the mode and the fingerprint is refused (`preview_required`). Returning a
-network to not decided is `DELETE /edge/v1/pms-routing/{guest_network_id}?based_on=<fingerprint>`. It **replaces** the network's routing as a whole and never copies a route from another network.
+The proposal is single-use, expires after 15 minutes, belongs to the operator who previewed it, and is void after any change to that network; the apply is refused otherwise,
+and a request without the mode and a proposal is refused (`preview_required`). Returning a network to not decided is previewed with `mode: UNDECIDED` and confirmed with
+`DELETE /edge/v1/pms-routing/{guest_network_id}?proposal=<id>`. It **replaces** the network's routing as a whole and never copies a route from another network.
 A network nobody has decided about offers room sign-in to nobody (it appears under `unmapped_guest_networks`); a deliberately PMS-free network (a staff VLAN, a
 voucher network) is `NONE`, which is a decision and not a hole. A shared set resolves strictly: if any selected interface cannot answer, no guest on that network is
 admitted — check `GET /edge/v1/pms-routing/readiness`, which says which interface and why.

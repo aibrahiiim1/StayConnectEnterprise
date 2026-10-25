@@ -51,9 +51,10 @@ interface) is read as `DEDICATED`; more than one mapped interface without a poli
 
 ## A2.2 Changing a policy
 
-There is **no other write path**: a request without a mode, the interfaces and the fingerprint of its preview is refused, and so is the earlier single-interface request;
-returning a network to *not decided* needs the fingerprint too. No administrative call can replace a shared set with a dedicated route, or remove it, without the preview and
-the stale-state check.
+There is **no other write path**: a request without a mode, the interfaces and the proposal of its preview is refused, and so is the earlier single-interface request;
+returning a network to *not decided* is previewed and confirmed with its proposal too. A proposal is server-held, single-use and short-lived, bound to the network, the previewing
+operator, the exact content and the network's change counter, and never exposed by a read, so an approval cannot be reused by another operator, for other content, or after any
+intervening change (including a change away and back). No administrative call can replace a shared set with a dedicated route, or remove it, without it.
 
 A change is **previewed, then confirmed against that preview**. The preview names the interfaces added and removed, whether each can answer now, how many room numbers
 exist in more than one selected PMS (a guest in one is asked for the reservation number, never matched by room alone), the clients and room-based entitlements online on
@@ -78,7 +79,8 @@ stays unknown. A warning names the network and interface, links to the page that
 
 ## A2.5 Rollback
 
-Software first, then schema. Rolling the schema back keeps every mapped interface and saves the policies so that applying it again restores those that still agree with the
+Nothing may be rolled back to a release that predates the policy while a Shared STRICT policy exists: the binary rollback tool and the down migration both refuse (section 16 of
+docs/CLIENT_NETWORKING.md). Otherwise, software first, then schema. Rolling the schema back keeps every mapped interface and saves the policies so that applying it again restores those that still agree with the
 mapping; the rest fail closed until chosen. A release that predates the policy cannot downgrade a shared set (the database refuses its replace) but resolves it without the cap,
 the per-candidate freshness check or the out-of-service guard. Detail and the drill: docs/CLIENT_NETWORKING.md section 16.
 

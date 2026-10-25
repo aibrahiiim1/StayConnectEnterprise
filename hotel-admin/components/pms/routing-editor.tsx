@@ -14,6 +14,7 @@ import { POLICY_WORDS, type RoutingMode, type RoutingPlan, type RoutingState } f
 export type ChoosableInterface = { id: string; label: string; lifecycle: string; published: boolean };
 
 const MAX_SHARED = 3;
+const STALE = new Set(["routing_changed", "preview_required", "proposal_mismatch"]);
 
 export function usePmsRouting(): { canRoute: boolean; interfaces: ChoosableInterface[] } {
   const [roles, setRoles] = useState<string[]>([]);
@@ -127,15 +128,15 @@ export function RoutingEditor({
     if (!network || !plan || !mode) return;
     setBusy(true); setErr(null);
     try {
-      await api.put(`/pms-routing/${network.id}`, { mode, pms_interface_ids: chosen, based_on: plan.network.fingerprint });
+      await api.put(`/pms-routing/${network.id}`, { mode, pms_interface_ids: chosen, proposal_id: plan.proposal_id });
       await onDone();
       toast.success(`Room sign-in on ${network.name} is saved`, sentence(mode, chosen.map(label), network.name));
       onClose();
     } catch (e) {
-      if (e instanceof ApiError && e.code === "routing_changed") {
+      if (e instanceof ApiError && STALE.has(e.code)) {
         setPlan(null);
         setReload((n) => n + 1);
-        setErr(new Error("This network's room sign-in changed after your preview. It is reloaded here; choose again and preview the new state."));
+        setErr(new Error("That preview can no longer be confirmed: the network's room sign-in changed, or the preview was used or expired. It is reloaded here; choose again and preview the new state."));
       } else {
         setErr(e);
       }
@@ -161,7 +162,7 @@ export function RoutingEditor({
       submitLabel={reviewing ? "Confirm and apply" : "Preview the change"}
       busy={busy}
       error={err}
-      disabled={reviewing ? blocked : !ready}
+      disabled={reviewing ? blocked || !plan?.proposal_id : !ready}
       disabledReason={reviewing ? "Resolve the problems above first." : !mode ? "Choose how room sign-in works." : "Choose the PMS connection(s) this option needs."}
       extraFooter={reviewing ? <Button type="button" variant="ghost" onClick={() => setPlan(null)} disabled={busy}>Back</Button> : undefined}
       onSubmit={() => (reviewing ? confirm() : review())}
@@ -272,6 +273,91 @@ export function RoutingEditor({
             </ul>
           )}
 
+          <ul className="list-disc space-y-1 ps-4 text-muted-foreground" aria-label="What this does not do">
+            {plan.guarantees.map((g) => <li key={g}>{g}</li>)}
+          </ul>
+        </div>
+      )}
+    </DialogForm>
+  );
+}
+
+export function ClearRoutingDialog({
+  open, network, onClose, onDone,
+}: {
+  open: boolean;
+  network: { id: string; name: string } | null;
+  onClose: () => void;
+  onDone: () => void | Promise<void>;
+}) {
+  const toast = useToast();
+  const [plan, setPlan] = useState<RoutingPlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  const [again, setAgain] = useState(0);
+
+  useEffect(() => {
+    if (!open || !network) return;
+    setPlan(null);
+    let live = true;
+    api.post<RoutingPlan>(`/pms-routing/${network.id}/preview`, { mode: "UNDECIDED", pms_interface_ids: [] })
+      .then((p) => live && setPlan(p)).catch((e) => live && setErr(e));
+    return () => { live = false; };
+  }, [open, network, again]);
+  useEffect(() => { if (open) setErr(null); }, [open, network]);
+
+  async function confirm() {
+    if (!network || !plan?.proposal_id) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.del(`/pms-routing/${network.id}?proposal=${encodeURIComponent(plan.proposal_id)}`);
+      await onDone();
+      toast.success(`${network.name} is back to not decided`, "Room sign-in is not offered there until someone chooses how it works.");
+      onClose();
+    } catch (e) {
+      if (e instanceof ApiError && STALE.has(e.code)) {
+        setAgain((n) => n + 1);
+        setErr(new Error("That preview can no longer be confirmed: the network's room sign-in changed, or the preview was used or expired. It is reloaded here."));
+      } else {
+        setErr(e);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const blocked = !plan || plan.blockers.length > 0 || !plan.proposal_id;
+  return (
+    <DialogForm
+      open={open}
+      onOpenChange={(v) => !v && onClose()}
+      title={`Return ${network?.name ?? "this network"} to not decided?`}
+      description="Review what is removed. Nothing changes until you confirm."
+      submitLabel="Return to not decided"
+      submitVariant="danger"
+      busy={busy}
+      error={err}
+      disabled={blocked}
+      disabledReason={plan ? "There is nothing to return." : "Working out what would change…"}
+      onSubmit={confirm}
+    >
+      {plan && (
+        <div className="space-y-3 text-sm" data-testid="routing-clear-preview">
+          <p>
+            <strong>{POLICY_WORDS[plan.network.mode] ?? "Not decided"}</strong>
+            {plan.network.interfaces.length > 0 && <> — {plan.network.interfaces.map((i) => i.label).join(", ")}</>} → <strong>Not decided</strong>
+          </p>
+          {plan.blockers.length > 0 && (
+            <Callout tone="danger" title="This cannot be applied">
+              <ul className="list-disc ps-4">{plan.blockers.map((b) => <li key={b.code}>{b.text}</li>)}</ul>
+            </Callout>
+          )}
+          {plan.warnings.length > 0 && (
+            <Callout tone="warning" title="Check these first">
+              <ul className="list-disc ps-4">{plan.warnings.map((w) => <li key={w.code}>{w.text}</li>)}</ul>
+            </Callout>
+          )}
+          <p className="text-muted-foreground">To say a network is deliberately PMS-free, choose “No room sign-in” instead: that is a decision, not a gap.</p>
           <ul className="list-disc space-y-1 ps-4 text-muted-foreground" aria-label="What this does not do">
             {plan.guarantees.map((g) => <li key={g}>{g}</li>)}
           </ul>
