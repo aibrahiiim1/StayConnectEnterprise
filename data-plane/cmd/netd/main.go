@@ -66,9 +66,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	dbUp := true
 	if err := pool.Ping(rootCtx); err != nil {
-		slog.Error("site db unreachable", "err", err)
-		os.Exit(1)
+		// The network must come back from its last-confirmed snapshot without the database (last_confirmed.go), so this is not a reason to exit.
+		dbUp = false
+		slog.Error("site db unreachable; starting from the last-confirmed snapshot, changes stay refused until the database answers", "err", err)
 	}
 
 	st := &store{db: pool}
@@ -150,8 +152,13 @@ func main() {
 	if p3mode.Active {
 		// Allocating generations and registering class origins is only meaningful if the writer-guard boundary is installed.
 		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
-			slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
-			os.Exit(1)
+			if dbUp {
+				slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
+				os.Exit(1)
+			}
+			// Dark until the scope watch can verify the boundary against a database that answers.
+			slog.Error("netd: the writer boundary cannot be verified without the database; Phase-3 shaping stays dark", "err", err)
+			p3mode.Active = false
 		}
 	}
 	p3shaping := &phase3Shaping{

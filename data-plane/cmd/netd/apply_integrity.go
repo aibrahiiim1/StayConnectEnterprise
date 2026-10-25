@@ -398,6 +398,7 @@ func (a *applier) blockedRecoveryLoop(ctx context.Context, base, ceiling time.Du
 			wait = base
 			continue
 		}
+		a.ReclaimInterruptedOnBoot(ctx)
 		if a.ReconcileActiveOnBoot(ctx) {
 			wait = base
 		} else if wait *= 2; wait > ceiling {
