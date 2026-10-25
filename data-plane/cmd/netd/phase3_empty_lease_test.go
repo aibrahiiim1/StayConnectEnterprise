@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 	"io"
 	"net"
 	"path/filepath"
@@ -25,6 +26,13 @@ func provenWriter(src leaseSource) (*fakeGate, *fakeEnforcement, *phase3Shaping)
 	return g, enf, p
 }
 
+// planAt is a plan generated and valid at the given instant, since the pass is judged against the time it is submitted at.
+func planAt(gen int64, at time.Time, sessions ...shapeplan.Session) shapeplan.Envelope {
+	env := envelope(gen, sessions...)
+	env.GeneratedAt, env.ExpiresAt = at.UTC(), at.UTC().Add(90*time.Second)
+	return env
+}
+
 type stabilityLeases struct {
 	rows    []KeaLease
 	err     error
@@ -38,34 +46,110 @@ func (s *stabilityLeases) EmptyAnswerTrusted(net.IP) (bool, string) {
 	return s.trusted, "Kea started 3 s ago (less than 300 s)"
 }
 
-func TestEmptyLeaseTableFromAnUntrustedKeaEndsNothing(t *testing.T) {
+// A lease verified earlier stays valid on the client's side until it lapses, whatever Kea now remembers: the client renews at half its lease time,
+// which can be long after a restart. The address therefore stays authorized for exactly the rest of that lease and no longer.
+func TestRememberedLeaseBridgesALostLeaseTable(t *testing.T) {
 	src := &stabilityLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
 	g, enf, p := provenWriter(src)
 	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
-
-	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
+	base := time.Now()
+	if res, err := p.submit(context.Background(), envelope(1, s), base); err != nil || res.Shaped != 1 {
 		t.Fatalf("setup: %+v %v", res, err)
 	}
-	before := g.leaseOf("br-guest", "10.0.0.5")
 
-	// Kea restarts onto an empty lease file: it answers "no leases" and has only just started.
-	src.rows, src.trusted = nil, false
+	src.rows = nil // Kea restarted onto an empty lease file
+	for i, at := range []time.Duration{30 * time.Second, 5 * time.Minute, 9 * time.Minute} {
+		g.advance(30 * time.Second)
+		res, err := p.submit(context.Background(), planAt(int64(2+i), base.Add(at), s), base.Add(at))
+		if err != nil || res.Shaped != 1 {
+			t.Fatalf("at +%s the valid session was not kept: %+v %v", at, res, err)
+		}
+	}
+	if len(enf.ended) != 0 || !g.isAuthorized("br-guest", "10.0.0.5") {
+		t.Fatalf("a valid session was ended or cut off: ended=%v", enf.ended)
+	}
+	if p.unverifiedCount() != 0 {
+		t.Fatal("a session bridged by its remembered lease is reported unverified")
+	}
+}
+
+func TestRememberedLeaseNeverOutlivesTheLease(t *testing.T) {
+	for _, trusted := range []bool{false, true} {
+		src := &stabilityLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
+		g, enf, p := provenWriter(src)
+		s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
+		base := time.Now()
+		if _, err := p.submit(context.Background(), envelope(1, s), base); err != nil {
+			t.Fatal(err)
+		}
+		src.rows, src.trusted = nil, trusted
+		asked := len(g.requestedTTLs("br-guest", "10.0.0.5"))
+
+		// 595 s into a 600 s lease, with the installed element about to lapse: a renewal may grant no more than the 5 s that remain.
+		g.advance(88 * time.Second)
+		if _, err := p.submit(context.Background(), planAt(2, base.Add(595*time.Second), s), base.Add(595*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		ttls := g.requestedTTLs("br-guest", "10.0.0.5")
+		if len(ttls) <= asked {
+			t.Fatalf("trusted=%v: no renewal was requested", trusted)
+		}
+		if last := ttls[len(ttls)-1]; last > 5*time.Second {
+			t.Fatalf("trusted=%v: %s was granted with 5 s of lease left", trusted, last)
+		}
+
+		// Past the lease the memory is gone and the table's own verdict applies.
+		g.advance(30 * time.Second)
+		res, err := p.submit(context.Background(), planAt(3, base.Add(11*time.Minute), s), base.Add(11*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trusted {
+			if len(enf.ended) != 1 || g.isAuthorized("br-guest", "10.0.0.5") {
+				t.Fatalf("a lapsed lease on a trusted empty table was not withdrawn: ended=%v", enf.ended)
+			}
+		} else if res.Shaped != 0 || len(enf.ended) != 0 || p.unverifiedCount() != 1 {
+			t.Fatalf("a lapsed lease on an untrusted table must withhold renewal and end nothing: %+v ended=%v", res, enf.ended)
+		}
+	}
+}
+
+// Even a very long lease is only bridged for leaseMemoryCap: Kea having lost its table is no licence to keep an address for days.
+func TestRememberedLeaseIsCapped(t *testing.T) {
+	long := KeaLease{IPAddress: "10.0.0.5", HWAddr: "96:48:f9:7a:9b:09", ValidLft: 86400, CLTT: time.Now().Unix()}
+	src := &stabilityLeases{rows: []KeaLease{long}}
+	g, enf, p := provenWriter(src)
+	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
+	base := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, s), base); err != nil {
+		t.Fatal(err)
+	}
+	src.rows = nil
 	g.advance(30 * time.Second)
-	res, err := p.submit(context.Background(), envelope(2, s), time.Now())
+	if res, _ := p.submit(context.Background(), planAt(2, base.Add(3*time.Hour), s), base.Add(3*time.Hour)); res.Shaped != 1 {
+		t.Fatalf("inside the cap the session should be kept: %+v", res)
+	}
+	g.advance(30 * time.Second)
+	res, _ := p.submit(context.Background(), planAt(3, base.Add(leaseMemoryCap+time.Minute), s), base.Add(leaseMemoryCap+time.Minute))
+	if res.Shaped != 0 || len(enf.ended) != 0 {
+		t.Fatalf("beyond the cap the address must stop being renewed (and not be ended on an untrusted table): %+v ended=%v", res, enf.ended)
+	}
+}
+
+// After a restart of netd itself nothing is remembered: an untrusted empty table then withholds renewal and ends nothing.
+func TestEmptyUntrustedTableWithNothingRememberedEndsNothingAndRenewsNothing(t *testing.T) {
+	src := &stabilityLeases{trusted: false}
+	g, enf, p := provenWriter(src)
+	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
+	res, err := p.submit(context.Background(), envelope(1, s), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(enf.ended) != 0 {
-		t.Fatalf("a Kea that has only just started ended %d session(s): %v", len(enf.ended), enf.ended)
+	if res.Shaped != 0 || len(enf.ended) != 0 || p.unverifiedCount() != 1 {
+		t.Fatalf("%+v ended=%v unverified=%d", res, enf.ended, p.unverifiedCount())
 	}
-	if !g.isAuthorized("br-guest", "10.0.0.5") {
-		t.Fatal("the guest was cut off by an empty table the appliance does not yet believe")
-	}
-	if after := g.leaseOf("br-guest", "10.0.0.5"); after >= before {
-		t.Fatalf("access was RENEWED on unverified evidence (%s -> %s)", before, after)
-	}
-	if res.Shaped != 0 || p.unverifiedCount() != 1 {
-		t.Fatalf("the unverified session is not visible: shaped=%d unverified=%d", res.Shaped, p.unverifiedCount())
+	if g.isAuthorized("br-guest", "10.0.0.5") {
+		t.Fatal("an address nobody verified was authorized")
 	}
 	noted := false
 	for _, m := range res.Problems {
@@ -78,76 +162,33 @@ func TestEmptyLeaseTableFromAnUntrustedKeaEndsNothing(t *testing.T) {
 	}
 }
 
-// The lease returning (the client renewed into the restarted Kea) resumes normal renewal with no re-authentication.
-func TestOwnershipReturningAfterAnUntrustedEmptyTableResumesRenewal(t *testing.T) {
-	src := &stabilityLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
+func TestEmptyTrustedTableWithNothingRememberedWithdrawsTheAddress(t *testing.T) {
+	src := &stabilityLeases{trusted: true}
 	g, enf, p := provenWriter(src)
 	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
 	if _, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	src.rows = nil
-	g.advance(30 * time.Second)
-	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if p.unverifiedCount() != 1 {
-		t.Fatal("setup: the session should be unverified")
-	}
-
-	src.rows = []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}
-	g.advance(10 * time.Second)
-	res, err := p.submit(context.Background(), envelope(3, s), time.Now())
-	if err != nil || res.Shaped != 1 {
-		t.Fatalf("renewal did not resume: %+v %v", res, err)
-	}
-	if p.unverifiedCount() != 0 {
-		t.Fatalf("the session is still reported unverified")
-	}
-	if len(enf.ended) != 0 {
-		t.Fatalf("a session was ended along the way: %v", enf.ended)
+	if len(enf.ended) != 1 || g.isAuthorized("br-guest", "10.0.0.5") {
+		t.Fatalf("ended=%v", enf.ended)
 	}
 }
 
-// Once Kea is stable and serves the subnet, an empty table is believed: the address has been given up.
-func TestEmptyLeaseTableFromAStableKeaStillWithdrawsTheAddress(t *testing.T) {
+// A table that names OTHER holders is real evidence that this address was given up; a remembered lease does not override it.
+func TestTableNamingOtherHoldersIsBelievedDespiteARememberedLease(t *testing.T) {
 	src := &stabilityLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
-	g, enf, p := provenWriter(src)
+	_, enf, p := provenWriter(src)
 	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
-	if _, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil {
+	base := time.Now()
+	if _, err := p.submit(context.Background(), envelope(1, s), base); err != nil {
 		t.Fatal(err)
 	}
-	src.rows, src.trusted = nil, true
-	g.advance(30 * time.Second)
-	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
+	src.rows = []KeaLease{lease("10.0.0.5", "aa:bb:cc:dd:ee:ff")}
+	if _, err := p.submit(context.Background(), planAt(2, base.Add(time.Minute), s), base.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if g.isAuthorized("br-guest", "10.0.0.5") {
-		t.Fatal("a trusted empty table left the address authorized")
-	}
-	if len(enf.ended) != 1 {
-		t.Fatalf("the session was not ended: %v", enf.ended)
-	}
-}
-
-// A table that names OTHER holders is real evidence that this address was given up; it is not second-guessed.
-func TestTableNamingOtherHoldersIsStillBelievedFromAnUnsettledKea(t *testing.T) {
-	src := &stabilityLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
-	g, enf, p := provenWriter(src)
-	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
-	if _, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	src.rows, src.trusted = []KeaLease{lease("10.0.0.9", "aa:bb:cc:dd:ee:ff")}, false
-	g.advance(30 * time.Second)
-	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if src.asked != 0 {
-		t.Fatalf("the stability probe was consulted for a non-empty table (%d times)", src.asked)
-	}
-	if len(enf.ended) != 1 {
-		t.Fatalf("an address missing from a populated table was not withdrawn: %v", enf.ended)
+	if src.asked != 0 || len(enf.ended) != 1 {
+		t.Fatalf("asked=%d ended=%v", src.asked, enf.ended)
 	}
 }
 

@@ -61,27 +61,42 @@ func (a addressOwner) current(l KeaLease, at time.Time) bool {
 // keaLeaseStateExpired is Kea's state for a released or expired lease, which is history, not ownership.
 const keaLeaseStateExpired = 2
 
+// ownershipEvidence is what the lease table says about one address.
+type ownershipEvidence struct {
+	State addressOwnership
+	// Empty: the table held no lease at all (as opposed to naming other holders).
+	Empty bool
+	// Until is when the matching lease lapses, set only when State is addressOwned.
+	Until time.Time
+}
+
 // Owns reports whether ip is currently leased to mac. A missing lease is foreign, not unknown (nobody holds the
 // address, and an authorization for it would serve whoever picks it up next). Only "we could not ask" is unknown,
 // and only unknown may leave a guest online on the producer's word.
 func (a addressOwner) Owns(ctx context.Context, ip net.IP, mac string) addressOwnership {
+	return a.Evidence(ctx, ip, mac).State
+}
+
+// Evidence is Owns with what the caller needs to bridge a lease table that has been lost: whether the table was empty, and when the owned lease lapses.
+func (a addressOwner) Evidence(ctx context.Context, ip net.IP, mac string) ownershipEvidence {
 	if a.src == nil || ip == nil || strings.TrimSpace(mac) == "" {
-		return addressUnknown
+		return ownershipEvidence{State: addressUnknown}
 	}
 	leases, err := a.src.Leases()
 	if err != nil {
 		// Kea unreachable: unknown, since tearing every guest down on a control-socket hiccup would manufacture an outage.
-		return addressUnknown
+		return ownershipEvidence{State: addressUnknown}
 	}
 	// An empty table is the one answer that can mean "Kea lost its leases" as easily as "nobody holds one". Unless the source vouches that it is
 	// stable and serves this address's subnet, it is UNKNOWN: access is not renewed (it lapses with its current bounded lease) but no session
 	// is ended, so the evidence returning restores service with no re-authentication, and nothing about the Entitlement or its quota is touched.
-	if len(leases) == 0 {
+	empty := len(leases) == 0
+	if empty {
 		if st, ok := a.src.(leaseStability); ok {
 			if trusted, why := st.EmptyAnswerTrusted(ip); !trusted {
 				slog.Warn("netd: DHCP reports no leases at all, but that answer is not trusted yet; address ownership is treated as unknown, not as lost",
 					"ip", ip.String(), "why", why)
-				return addressUnknown
+				return ownershipEvidence{State: addressUnknown, Empty: true}
 			}
 		}
 	}
@@ -94,12 +109,36 @@ func (a addressOwner) Owns(ctx context.Context, ip net.IP, mac string) addressOw
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(l.HWAddr), strings.TrimSpace(mac)) {
-			return addressOwned
+			return ownershipEvidence{State: addressOwned, Until: time.Unix(l.CLTT+int64(l.ValidLft), 0)}
 		}
 		// A live lease naming a different device.
-		return addressForeign
+		return ownershipEvidence{State: addressForeign}
 	}
-	return addressForeign
+	return ownershipEvidence{State: addressForeign, Empty: empty}
+}
+
+// leaseMemoryCap bounds how long a lease verified earlier keeps an address authorized when the lease table is later found empty.
+const leaseMemoryCap = 4 * time.Hour
+
+// rememberLease records the lease just verified, so that a lease table lost later (Kea restarted onto an empty file) does not cut off a client
+// whose lease is still valid on its own side and who has simply not reached its renewal time yet. The memory never outlives the lease itself.
+func (p *phase3Shaping) rememberLease(key string, until, now time.Time) {
+	if p.leaseUntil == nil {
+		p.leaseUntil = map[string]time.Time{}
+	}
+	if capAt := now.Add(leaseMemoryCap); until.After(capAt) {
+		until = capAt
+	}
+	p.leaseUntil[key] = until
+}
+
+// rememberedLeaseLeft is how much longer the lease last verified for key is still valid; zero when none is remembered or it has lapsed.
+func (p *phase3Shaping) rememberedLeaseLeft(key string, now time.Time) time.Duration {
+	left := p.leaseUntil[key].Sub(now)
+	if left < time.Second {
+		return 0
+	}
+	return left.Truncate(time.Second)
 }
 
 // noteUnverified records that a pass declined to renew a session because ownership could not be checked, so the

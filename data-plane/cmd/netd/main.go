@@ -110,7 +110,7 @@ func main() {
 	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
 	// A previous run that stopped mid-apply left its revision in 'applying', which holds the single in-flight slot against every later change and which
 	// nothing else would ever move. It is rolled back first, then the confirmed configuration is re-asserted over whatever that left.
-	ap.loadIncompleteMarker()
+	ap.loadIncompleteMarker(rootCtx)
 	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)
 
@@ -428,7 +428,7 @@ func (s *server) confirm(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	if err := s.ap.Confirm(changeCtx(r), req.RevisionID, actor); err != nil {
 		code := 500
-		if errors.Is(err, errNotPending) {
+		if errors.Is(err, errNotPending) || errors.Is(err, errNotApplied) || errors.Is(err, errApplyBusy) {
 			code = 409
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})

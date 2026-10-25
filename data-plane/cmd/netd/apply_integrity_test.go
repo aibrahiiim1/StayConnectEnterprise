@@ -42,6 +42,8 @@ type fakeStore struct {
 	markApplyingErr error
 	markPendingErr  error
 	stateReadErr    error
+	resolveErr      error
+	intents         map[string][]netcfg.GuestNetwork // the intent each revision was created with
 }
 
 func newFakeStore(intent []netcfg.GuestNetwork) *fakeStore {
@@ -59,12 +61,16 @@ func (f *fakeStore) Health(_ context.Context, revID, name string, ok bool, detai
 	f.healthLog = append(f.healthLog, fmt.Sprintf("%s/%s=%v", revID, name, ok))
 }
 func (f *fakeStore) LoadIntent(context.Context) ([]netcfg.GuestNetwork, error) { return f.intent, nil }
-func (f *fakeStore) CreateRevision(_ context.Context, _ string, _ []netcfg.GuestNetwork, _ string) (string, int64, error) {
+func (f *fakeStore) CreateRevision(_ context.Context, _ string, intent []netcfg.GuestNetwork, _ string) (string, int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seq++
 	id := fmt.Sprintf("rev-%d", f.seq)
 	f.state[id] = "draft"
+	if f.intents == nil {
+		f.intents = map[string][]netcfg.GuestNetwork{}
+	}
+	f.intents[id] = intent
 	return id, f.seq, nil
 }
 func (f *fakeStore) SetRevisionValidation(_ context.Context, id string, _ netcfg.ValidationResult) error {
@@ -130,6 +136,11 @@ func (f *fakeStore) RevisionState(_ context.Context, id string) (string, error) 
 	}
 	return f.state[id], nil
 }
+func (f *fakeStore) RevisionIntent(_ context.Context, id string) ([]netcfg.GuestNetwork, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.intents[id], nil
+}
 func (f *fakeStore) CurrentActiveIntent(context.Context) (string, string, []netcfg.GuestNetwork, error) {
 	if f.activeID == "" {
 		return "", "", nil, ErrNoConfirmedActiveRevision
@@ -144,6 +155,27 @@ func (f *fakeStore) ActiveIntent(context.Context, string) ([]netcfg.GuestNetwork
 }
 func (f *fakeStore) InFlightRevision(context.Context) (string, string, error) {
 	return f.inFlightID, f.inFlightState, nil
+}
+func (f *fakeStore) IncompleteRollback(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, r := range f.reasons {
+		if f.state[id] == "rolled_back" && strings.Contains(r, "ROLLBACK INCOMPLETE") {
+			return id, nil
+		}
+	}
+	return "", nil
+}
+func (f *fakeStore) ResolveIncompleteRollbacks(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.resolveErr != nil {
+		return f.resolveErr
+	}
+	for id, r := range f.reasons {
+		f.reasons[id] = strings.ReplaceAll(r, "ROLLBACK INCOMPLETE", "rollback incomplete, since resolved")
+	}
+	return nil
 }
 func (f *fakeStore) ApplyingRevisions(context.Context) ([]string, error) { return f.applying, nil }
 func (f *fakeStore) RecordedBridges(context.Context) (map[string]recordedBridge, error) {
@@ -505,7 +537,7 @@ func TestAnIncompleteRollbackBlocksFurtherAppliesUntilBootConverges(t *testing.T
 	// A restart: a fresh process reads the marker from disk and still refuses.
 	b := applyFixture(t, newFakeKernel(t), st)
 	b.generatedDir = a.generatedDir
-	b.loadIncompleteMarker()
+	b.loadIncompleteMarker(context.Background())
 	if _, err := b.Apply(context.Background(), "after restart", "tester"); !errors.Is(err, errRollbackIncomplete) {
 		t.Fatalf("a restart forgot the unfinished rollback: %v", err)
 	}

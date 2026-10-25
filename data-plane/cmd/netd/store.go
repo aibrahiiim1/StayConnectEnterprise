@@ -456,13 +456,11 @@ func (s *store) ApplyingRevisions(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-// RecordedBridges returns the bridges named by revisions netd actually applied (active, superseded, applying, awaiting confirmation, rolled
-// back), with the member interface each was built on. A bridge in this record is one netd created, which is how a bridge made before the
-// ownership mark existed is recognised. A name recorded with two different members is returned with no member, so nothing is deleted
-// on the strength of an ambiguous record.
+// RecordedBridges returns, per bridge name, the networks and member interface of the revisions netd actually applied (active, superseded, applying,
+// awaiting confirmation, rolled back). A name recorded on two different members is returned with no member, so nothing is deleted on its strength.
 func (s *store) RecordedBridges(ctx context.Context) (map[string]recordedBridge, error) {
 	rows, err := s.db.Query(ctx, `
-        SELECT DISTINCT e->>'bridge_name', COALESCE(e->>'network_type',''), COALESCE(e->>'parent_interface',''),
+        SELECT DISTINCT e->>'bridge_name', COALESCE(e->>'id',''), COALESCE(e->>'network_type',''), COALESCE(e->>'parent_interface',''),
                         COALESCE(NULLIF(e->>'vlan_id','')::int, 0)
           FROM network_config_revisions r, jsonb_array_elements(r.intent) e
          WHERE r.state IN ('active','superseded','pending_confirmation','applying','rolled_back')
@@ -473,19 +471,63 @@ func (s *store) RecordedBridges(ctx context.Context) (map[string]recordedBridge,
 	defer rows.Close()
 	out := map[string]recordedBridge{}
 	for rows.Next() {
-		var br, typ, parent string
+		var br, id, typ, parent string
 		var vid int
-		if err := rows.Scan(&br, &typ, &parent, &vid); err != nil {
+		if err := rows.Scan(&br, &id, &typ, &parent, &vid); err != nil {
 			return nil, err
 		}
 		member := parent
 		if typ == "vlan" {
 			member = netcfg.VLANIfaceName(parent, vid)
 		}
-		if prev, seen := out[br]; seen && prev.Member != member {
-			member = ""
+		rec, seen := out[br]
+		if !seen {
+			rec = recordedBridge{Member: member, IDs: map[string]bool{}}
+		} else if rec.Member != member {
+			rec.Member = ""
 		}
-		out[br] = recordedBridge{Member: member}
+		if id != "" {
+			rec.IDs[id] = true
+		}
+		out[br] = rec
 	}
 	return out, rows.Err()
+}
+
+// RevisionIntent returns the immutable intent a revision was created with.
+func (s *store) RevisionIntent(ctx context.Context, id string) ([]netcfg.GuestNetwork, error) {
+	var raw []byte
+	if err := s.db.QueryRow(ctx, `SELECT intent FROM network_config_revisions WHERE id=$1`, id).Scan(&raw); err != nil {
+		return nil, err
+	}
+	var nets []netcfg.GuestNetwork
+	if err := json.Unmarshal(raw, &nets); err != nil {
+		return nil, err
+	}
+	return nets, nil
+}
+
+// IncompleteRollback returns the newest revision whose rollback was recorded as incomplete and has not since been resolved, unless a later
+// revision has been applied or confirmed (applies are refused while one is unresolved, so a later revision means it was dealt with).
+func (s *store) IncompleteRollback(ctx context.Context) (string, error) {
+	var id string
+	err := s.db.QueryRow(ctx, `
+        SELECT r.id::text FROM network_config_revisions r
+         WHERE r.state='rolled_back' AND r.failure_reason LIKE '%ROLLBACK INCOMPLETE%'
+           AND NOT EXISTS (SELECT 1 FROM network_config_revisions n
+                            WHERE n.seq > r.seq AND n.state IN ('active','pending_confirmation','applying'))
+         ORDER BY r.seq DESC LIMIT 1`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+// ResolveIncompleteRollbacks marks every recorded incomplete rollback as since resolved, so the record stops blocking applies.
+func (s *store) ResolveIncompleteRollbacks(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+        UPDATE network_config_revisions
+           SET failure_reason = replace(failure_reason, 'ROLLBACK INCOMPLETE', 'rollback incomplete, since resolved')
+         WHERE state='rolled_back' AND failure_reason LIKE '%ROLLBACK INCOMPLETE%'`)
+	return err
 }

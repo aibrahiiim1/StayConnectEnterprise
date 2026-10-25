@@ -31,7 +31,12 @@ var (
 	errChangeInFlight = errors.New("a network change is still awaiting confirmation")
 	// errRollbackIncomplete: an earlier rollback did not restore everything.
 	errRollbackIncomplete = errors.New("an earlier rollback did not finish")
+	// errNotApplied: the network that is running is not the revision being confirmed.
+	errNotApplied = errors.New("the running network is not this revision")
 )
+
+// confirmWait is how long a confirm waits for an apply or rollback in progress before reporting busy.
+const confirmWait = 30 * time.Second
 
 // opWait is how long Apply waits for a periodic re-assertion tick (milliseconds long) before saying it is busy.
 const opWait = 3 * time.Second
@@ -50,11 +55,14 @@ type revisionStore interface {
 	MarkFailed(ctx context.Context, id, reason string) error
 	MarkRolledBack(ctx context.Context, id, reason string) error
 	RevisionState(ctx context.Context, id string) (string, error)
+	RevisionIntent(ctx context.Context, id string) ([]netcfg.GuestNetwork, error)
 	CurrentActiveIntent(ctx context.Context) (id, bundlePath string, intent []netcfg.GuestNetwork, err error)
 	ActiveBundlePath(ctx context.Context, exceptID string) (string, error)
 	ActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error)
 	InFlightRevision(ctx context.Context) (id, state string, err error)
 	ApplyingRevisions(ctx context.Context) ([]string, error)
+	IncompleteRollback(ctx context.Context) (string, error)
+	ResolveIncompleteRollbacks(ctx context.Context) error
 	RecordedBridges(ctx context.Context) (map[string]recordedBridge, error)
 	LoadPortalIP(ctx context.Context) (string, error)
 	LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error)
@@ -144,18 +152,19 @@ func (a *applier) incompleteMarkerPath() string {
 	return filepath.Join(a.generatedDir, "rollback-incomplete.json")
 }
 
-// markRollbackIncomplete records, in memory and durably, that a rollback left the appliance in a state that is not the confirmed
-// configuration. A failure to write the file is logged by the caller's event; the in-memory flag still blocks this process.
-func (a *applier) markRollbackIncomplete(id string, steps []string) {
+// markRollbackIncomplete records, in memory and durably, that a rollback left the appliance off its confirmed configuration. The memory flag blocks
+// this process regardless; the returned error says the file could not be written, so a crash would forget it (the revision's recorded reason, which
+// names the incomplete rollback, is the second durable record: see loadIncompleteMarker).
+func (a *applier) markRollbackIncomplete(id string, steps []string) error {
 	m := incompleteMarker{Revision: id, Steps: steps, At: time.Now().UTC().Format(time.RFC3339)}
 	a.incMu.Lock()
 	a.incomplete = &m
 	a.incMu.Unlock()
 	if a.generatedDir == "" || a.dryRun {
-		return
+		return nil
 	}
 	raw, _ := json.MarshalIndent(m, "", "  ")
-	_ = writeFileAtomic(a.incompleteMarkerPath(), raw, 0o640)
+	return writeFileAtomic(a.incompleteMarkerPath(), raw, 0o640)
 }
 
 // rollbackIncomplete returns the marker when a rollback did not finish.
@@ -168,37 +177,57 @@ func (a *applier) rollbackIncomplete() (incompleteMarker, bool) {
 	return *a.incomplete, true
 }
 
-// loadIncompleteMarker restores the marker at start, so a restart does not forget an unfinished rollback. An unreadable file is
-// treated as present: not knowing is not permission to apply.
-func (a *applier) loadIncompleteMarker() {
+// loadIncompleteMarker restores the marker at start. An unreadable file counts as present. A missing file is not proof there was none: the marker
+// may never have been written, so the revision history is asked too, and a rollback recorded there as incomplete and not since resolved blocks applies.
+func (a *applier) loadIncompleteMarker(ctx context.Context) {
 	if a.generatedDir == "" {
 		return
 	}
 	raw, err := os.ReadFile(a.incompleteMarkerPath())
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	m := incompleteMarker{Revision: "unknown", Steps: []string{"the marker file could not be read"}}
-	if err == nil {
+	var m incompleteMarker
+	switch {
+	case err == nil:
 		if jerr := json.Unmarshal(raw, &m); jerr != nil {
 			m = incompleteMarker{Revision: "unknown", Steps: []string{"the marker file is unreadable: " + jerr.Error()}}
 		}
-	} else {
-		m.Steps = []string{"the marker file could not be read: " + err.Error()}
+	case errors.Is(err, os.ErrNotExist):
+		if a.st == nil {
+			return
+		}
+		id, qerr := a.st.IncompleteRollback(ctx)
+		if qerr != nil {
+			slog.Error("netd could not check the revision history for an unfinished rollback", "err", qerr)
+			return
+		}
+		if id == "" {
+			return
+		}
+		m = incompleteMarker{Revision: id, Steps: []string{"the revision history records its rollback as incomplete and the marker file is missing"}}
+	default:
+		m = incompleteMarker{Revision: "unknown", Steps: []string{"the marker file could not be read: " + err.Error()}}
 	}
 	a.incMu.Lock()
 	a.incomplete = &m
 	a.incMu.Unlock()
 }
 
-// clearRollbackIncomplete removes the marker; only a fully converged boot reconcile calls it.
-func (a *applier) clearRollbackIncomplete() {
+// clearRollbackIncomplete lifts the block, durably: the history record is resolved and the file removed before the memory flag is dropped, so a
+// failure at any step leaves the block in place instead of a marker that a crash could resurrect or lose.
+func (a *applier) clearRollbackIncomplete(ctx context.Context) error {
+	if a.st != nil {
+		if err := a.st.ResolveIncompleteRollbacks(ctx); err != nil {
+			return fmt.Errorf("resolve the recorded incomplete rollback: %w", err)
+		}
+	}
+	if a.generatedDir != "" {
+		if err := os.Remove(a.incompleteMarkerPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove the marker file: %w", err)
+		}
+	}
 	a.incMu.Lock()
 	a.incomplete = nil
 	a.incMu.Unlock()
-	if a.generatedDir != "" {
-		_ = os.Remove(a.incompleteMarkerPath())
-	}
+	return nil
 }
 
 func (m incompleteMarker) describe() string {
@@ -237,6 +266,13 @@ func (r *rollbackReport) fail(kind, step string, err error, extra map[string]any
 }
 
 func (r *rollbackReport) incomplete() bool { return len(r.failed) > 0 }
+
+// persistMarker blocks further applies and saves the block; a save that fails is one more step the rollback did not complete.
+func (r *rollbackReport) persistMarker() {
+	if err := r.a.markRollbackIncomplete(r.revID, r.failed); err != nil {
+		r.fail("rollback_marker", "the incomplete-rollback marker could not be saved", err, nil)
+	}
+}
 
 // writeFileAtomic writes data to path so a reader (or a crash) sees the old file or the new one, never a partial one: a temp file in
 // the same directory, fsync, rename, fsync of the directory.
@@ -320,4 +356,30 @@ func (a *applier) rollbackIncompleteStatus() map[string]any {
 func (a *applier) keaDiskStatus() map[string]any {
 	ok, detail := a.keaDiskState()
 	return map[string]any{"holds_confirmed_configuration": ok, "detail": detail}
+}
+
+// runningIs reports whether the intent in force is the intent of revision id.
+func (a *applier) runningIs(ctx context.Context, id string) error {
+	want, err := a.st.RevisionIntent(ctx, id)
+	if err != nil {
+		return fmt.Errorf("cannot read revision %s to check that it is what is running: %w", id, err)
+	}
+	have, _, known := a.inForce()
+	if !known || !sameIntent(want, have) {
+		return fmt.Errorf("%w: it was applied by a service run that has since restarted and the previous configuration was restored. "+
+			"Roll it back and apply again", errNotApplied)
+	}
+	return nil
+}
+
+// sameIntent compares two intents as stored: both are normalised through JSON, so an empty list and a missing one are the same.
+func sameIntent(x, y []netcfg.GuestNetwork) bool {
+	norm := func(in []netcfg.GuestNetwork) string {
+		raw, _ := json.Marshal(in)
+		var round []netcfg.GuestNetwork
+		_ = json.Unmarshal(raw, &round)
+		out, _ := json.Marshal(round)
+		return string(out)
+	}
+	return norm(x) == norm(y)
 }

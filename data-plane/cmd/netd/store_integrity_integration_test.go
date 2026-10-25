@@ -93,7 +93,7 @@ func TestIntegration_RecordedBridgesComeOnlyFromRevisionsNetdApplied(t *testing.
 	st := &store{db: db}
 	ctx := context.Background()
 	mk := func(br, typ, parent string, vlan int) string {
-		return `{"bridge_name":"` + br + `","network_type":"` + typ + `","parent_interface":"` + parent + `","vlan_id":` + itoa(vlan) + `}`
+		return `{"id":"id-` + br + `","bridge_name":"` + br + `","network_type":"` + typ + `","parent_interface":"` + parent + `","vlan_id":` + itoa(vlan) + `}`
 	}
 	newRev(t, db, "superseded", `[`+mk("br-g20", "vlan", "ens192", 20)+`,`+mk("br-g-aaaa0001", "untagged", "ens192", 0)+`]`)
 	newRev(t, db, "active", `[`+mk("br-g30", "vlan", "ens192", 30)+`]`)
@@ -115,6 +115,9 @@ func TestIntegration_RecordedBridgesComeOnlyFromRevisionsNetdApplied(t *testing.
 		if !ok || rec.Member != member {
 			t.Errorf("%s: recorded=%v member=%q, want member %q", br, ok, rec.Member, member)
 		}
+	}
+	if !got["br-g20"].IDs["id-br-g20"] || len(got["br-g20"].IDs) != 1 {
+		t.Errorf("br-g20 networks = %v, want only id-br-g20", got["br-g20"].IDs)
 	}
 	for _, br := range []string{"br-g50", "br-g60"} {
 		if _, ok := got[br]; ok {
@@ -152,4 +155,62 @@ func TestIntegration_RemovalUsesTheRecordFromTheRealStore(t *testing.T) {
 		t.Fatalf("deleted %v, want the recorded bridge and its recorded VLAN interface", members)
 	}
 	_ = netcfg.DefaultTopology
+}
+
+func TestIntegration_AnIncompleteRollbackIsFoundUntilResolvedOrSuperseded(t *testing.T) {
+	db := integrityPool(t)
+	st := &store{db: db}
+	ctx := context.Background()
+	failed := newRev(t, db, "rolled_back", `[]`)
+	if _, err := db.Exec(ctx, `UPDATE network_config_revisions SET failure_reason='health check failed -- ROLLBACK INCOMPLETE, the appliance may not be on its confirmed configuration: x' WHERE id=$1`, failed); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := st.IncompleteRollback(ctx); err != nil || id != failed {
+		t.Fatalf("IncompleteRollback = %q (%v), want %q", id, err, failed)
+	}
+
+	// A revision applied after it means the block was dealt with.
+	later := newRev(t, db, "active", `[]`)
+	if id, _ := st.IncompleteRollback(ctx); id != "" {
+		t.Fatalf("a later confirmed revision %s still leaves %q blocking", later, id)
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM network_config_revisions WHERE id=$1`, later); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.ResolveIncompleteRollbacks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := st.IncompleteRollback(ctx); id != "" {
+		t.Fatalf("a resolved rollback still blocks: %q", id)
+	}
+	var reason string
+	_ = db.QueryRow(ctx, `SELECT failure_reason FROM network_config_revisions WHERE id=$1`, failed).Scan(&reason)
+	if !strings.Contains(reason, "since resolved") || !strings.Contains(reason, "health check failed") {
+		t.Fatalf("the original reason was lost: %q", reason)
+	}
+}
+
+// What the database returns for a revision is comparable to what Apply put in force, so a revision that IS running can be confirmed.
+func TestIntegration_ARevisionIntentRoundTripsAndIsRecognisedAsRunning(t *testing.T) {
+	db := integrityPool(t)
+	st := &store{db: db}
+	ctx := context.Background()
+	intent := []netcfg.GuestNetwork{{
+		ID: "11111111-1111-1111-1111-111111111111", Name: "Guests", Enabled: true, NetworkType: "vlan", ParentInterface: "ens192", VLANID: 20,
+		BridgeName: "br-g20", GatewayIP: "10.20.0.1", SubnetCIDR: "10.20.0.0/22", PrefixLen: 22, DHCPMode: netcfg.DHCPLocal,
+		Pools:        []netcfg.Pool{{StartIP: "10.20.0.100", EndIP: "10.20.3.200"}},
+		Reservations: []netcfg.Reservation{}, DNSServers: nil,
+	}}
+	id, _, err := st.CreateRevision(ctx, "netinteg: roundtrip", intent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.RevisionIntent(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameIntent(intent, got) {
+		t.Fatalf("the stored intent differs from the one applied: %+v vs %+v", intent, got)
+	}
 }

@@ -69,7 +69,7 @@ func TestKernel_OwnershipMarkingAndOwnedOnlyRemoval(t *testing.T) {
 	sh(t, "ip", "link", "add", "dumk0", "type", "dummy")
 	sh(t, "ip", "link", "set", "dumk0", "up")
 	t.Cleanup(func() {
-		for _, n := range []string{"br-g71", "br-g72", "br-gstranger", "dumk0.71", "dumk0.72", "dumk0"} {
+		for _, n := range []string{"br-g71", "br-g72", "br-g75", "br-gstranger", "dumk0.71", "dumk0.72", "dumk0"} {
 			_ = exec.Command("ip", "link", "del", n).Run()
 		}
 	})
@@ -83,6 +83,15 @@ func TestKernel_OwnershipMarkingAndOwnedOnlyRemoval(t *testing.T) {
 		}
 	}
 	sh(t, "ip", "link", "add", "name", "br-gstranger", "type", "bridge") // not netd's
+	// A bridge whose NAME appears in history but which is not on the interface the record says: someone else's now.
+	sh(t, "ip", "link", "add", "name", "br-g75", "type", "bridge")
+	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
+		return map[string]recordedBridge{
+			"br-g71": {Member: "dumk0.71", IDs: map[string]bool{wanted.ID: true}},
+			"br-g72": {Member: "dumk0.72", IDs: map[string]bool{orphan.ID: true}},
+			"br-g75": {Member: "dumk0.75", IDs: map[string]bool{"old-net": true}},
+		}, nil
+	}
 
 	for br, id := range map[string]string{"br-g71": wanted.ID, "br-g72": orphan.ID, "dumk0.71": wanted.ID, "dumk0.72": orphan.ID} {
 		if got := ifaceAlias(br); got != ownerMarkPrefix+id {
@@ -97,13 +106,13 @@ func TestKernel_OwnershipMarkingAndOwnedOnlyRemoval(t *testing.T) {
 	if err != nil || len(failed) != 0 {
 		t.Fatalf("err=%v failed=%v", err, failed)
 	}
-	if strings.Join(removed, ",") != "br-g72" || strings.Join(unmanaged, ",") != "br-gstranger" {
+	if strings.Join(removed, ",") != "br-g72" || strings.Join(unmanaged, ",") != "br-g75,br-gstranger" {
 		t.Fatalf("removed=%v unmanaged=%v", removed, unmanaged)
 	}
 	if ifaceExists("br-g72") || ifaceExists("dumk0.72") {
 		t.Fatal("the orphan and its VLAN interface should be gone")
 	}
-	for _, keep := range []string{"br-g71", "dumk0.71", "br-gstranger"} {
+	for _, keep := range []string{"br-g71", "dumk0.71", "br-g75", "br-gstranger"} {
 		if !ifaceExists(keep) {
 			t.Fatalf("%s was destroyed", keep)
 		}

@@ -143,6 +143,7 @@ func TestUnchangedFileIsNotRewritten(t *testing.T) {
 func TestConfirmSavesTheConfirmedConfigurationButAFailedWriteDoesNotUnconfirm(t *testing.T) {
 	a, st := keaFixture(t)
 	st.state["rev-new"] = "pending_confirmation"
+	st.intents = map[string][]netcfg.GuestNetwork{"rev-new": newIntent(), "rev-3": newIntent()}
 	st.activeID, st.activeIntent = "rev-new", newIntent() // MarkActive makes this the confirmed one
 	a.setInForce(newIntent(), "")
 	if err := a.Confirm(context.Background(), "rev-new", "tester"); err != nil {

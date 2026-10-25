@@ -337,6 +337,22 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 
 // Confirm commits a pending revision (cancels the watchdog rollback).
 func (a *applier) Confirm(ctx context.Context, id, actor string) error {
+	// Confirm and rollback exclude each other: whichever holds the lock first decides, and the other then sees the settled state. Without this a
+	// rollback restoring the previous network could race a confirm into the database, leaving the database and the wire disagreeing.
+	if !a.acquireOp(ctx, confirmWait) {
+		return errApplyBusy
+	}
+	defer a.releaseOp()
+	if state, err := a.revisionState(ctx, id); err != nil {
+		return fmt.Errorf("cannot read the state of revision %s: %w", id, err)
+	} else if state != "pending_confirmation" {
+		return errNotPending
+	}
+	// A revision is confirmed only if it is what the network is running now. After a restart inside the confirm window the boot reconcile has put
+	// the previous configuration back, and confirming then would record as active a configuration that is not running.
+	if err := a.runningIs(ctx, id); err != nil {
+		return err
+	}
 	if err := a.st.MarkActive(ctx, id, actor); err != nil {
 		return err
 	}

@@ -46,25 +46,38 @@ func deleted(k *fakeKernel) []string {
 	return out
 }
 
+func rec(member string, ids ...string) recordedBridge {
+	r := recordedBridge{Member: member, IDs: map[string]bool{}}
+	for _, id := range ids {
+		r.IDs[id] = true
+	}
+	return r
+}
+
+// members sets what the live bridges are attached to.
+func members(a *applier, m map[string]string) {
+	a.memberFn = func(br string) string { return m[br] }
+}
+
 func TestOnlyBridgesNetdCanProveItCreatedAreRemoved(t *testing.T) {
 	live := map[string]bool{"br-g20": true, "br-g30": true, "br-g40": true, "br-g90": true}
 	a, k, marks := ownershipFixture(t, live)
-	marks["br-g20"] = "net-20" // marked by netd
-	// br-g30 is unmarked but a revision netd applied names it (created before the mark existed)
+	marks["br-g20"] = "net-20" // marked, and the record ties net-20 to this bridge
+	members(a, map[string]string{"br-g30": "ens192.30", "br-g20": "ens192.20"})
 	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
-		return map[string]recordedBridge{"br-g30": {}, "br-g90": {}}, nil
+		return map[string]recordedBridge{
+			"br-g20": rec("ens192.20", "net-20"),
+			"br-g30": rec("ens192.30", "net-30"), // unmarked: created before the mark, and still on the interface the record says
+			"br-g90": rec("ens192.90", "net-90"),
+		}, nil
 	}
-	// br-g40: neither marked nor recorded: someone else's. br-g90: wanted.
 
 	removed, failed, unmanaged, err := a.removeStrayBridges(context.Background(), func(b string) bool { return b == "br-g90" })
 	if err != nil || len(failed) != 0 {
 		t.Fatalf("err=%v failed=%v", err, failed)
 	}
-	if strings.Join(removed, ",") != "br-g20,br-g30" {
-		t.Fatalf("removed %v, want the marked and the recorded bridge", removed)
-	}
-	if strings.Join(unmanaged, ",") != "br-g40" {
-		t.Fatalf("unmanaged %v, want br-g40 reported and left alone", unmanaged)
+	if strings.Join(removed, ",") != "br-g20,br-g30" || strings.Join(unmanaged, ",") != "br-g40" {
+		t.Fatalf("removed=%v unmanaged=%v", removed, unmanaged)
 	}
 	for _, d := range deleted(k) {
 		if strings.Contains(d, "br-g40") || strings.Contains(d, "br-g90") {
@@ -73,8 +86,64 @@ func TestOnlyBridgesNetdCanProveItCreatedAreRemoved(t *testing.T) {
 	}
 }
 
-// A bridge nobody can vouch for is left alone even when the record cannot be read at all.
-func TestNothingUnprovableIsRemovedWhenTheRecordIsUnreadable(t *testing.T) {
+// A name that appears in history is not proof that the bridge now holding it is netd's.
+func TestAHistoricalNameAloneProvesNothing(t *testing.T) {
+	cases := []struct {
+		name   string
+		member string
+		rec    recordedBridge
+	}{
+		{"the interface is a different one now", "eth7.50", rec("ens192.50", "net-50")},
+		{"the interface cannot be read", "", rec("ens192.50", "net-50")},
+		{"the record is ambiguous about the interface", "ens192.50", rec("", "net-50")},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			a, k, _ := ownershipFixture(t, map[string]bool{"br-g50": true})
+			members(a, map[string]string{"br-g50": tc.member})
+			a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
+				return map[string]recordedBridge{"br-g50": tc.rec}, nil
+			}
+			removed, _, unmanaged, err := a.removeStrayBridges(context.Background(), nil)
+			if err != nil || len(removed) != 0 || strings.Join(unmanaged, ",") != "br-g50" {
+				t.Fatalf("err=%v removed=%v unmanaged=%v", err, removed, unmanaged)
+			}
+			if got := deleted(k); len(got) != 0 {
+				t.Fatalf("deleted %v on the strength of a name", got)
+			}
+		})
+	}
+}
+
+// A mark that names a network the record does not tie to this bridge is not ownership: it could have been copied, or left by another bridge.
+func TestAMarkMustNameANetworkTheRecordTiesToThatBridge(t *testing.T) {
+	cases := []struct {
+		name string
+		mark string
+		recs map[string]recordedBridge
+	}{
+		{"an unknown network id", "net-unknown", map[string]recordedBridge{"br-g20": rec("ens192.20", "net-20")}},
+		{"a network the record ties to another bridge", "net-21", map[string]recordedBridge{"br-g20": rec("ens192.20", "net-20"), "br-g21": rec("ens192.21", "net-21")}},
+		{"a bridge the record has never heard of", "net-20", map[string]recordedBridge{"br-g21": rec("ens192.21", "net-20")}},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			a, k, marks := ownershipFixture(t, map[string]bool{"br-g20": true})
+			marks["br-g20"] = tc.mark
+			a.recordedFn = func(context.Context) (map[string]recordedBridge, error) { return tc.recs, nil }
+			removed, _, unmanaged, err := a.removeStrayBridges(context.Background(), nil)
+			if err != nil || len(removed) != 0 || strings.Join(unmanaged, ",") != "br-g20" {
+				t.Fatalf("err=%v removed=%v unmanaged=%v", err, removed, unmanaged)
+			}
+			if got := deleted(k); len(got) != 0 {
+				t.Fatalf("deleted %v on the strength of a mark the record does not support", got)
+			}
+		})
+	}
+}
+
+// With the record unreadable nothing is provable, not even a marked bridge, and the rollback that needed the cleanup is reported incomplete.
+func TestNothingIsRemovedWhenTheRecordIsUnreadable(t *testing.T) {
 	a, k, marks := ownershipFixture(t, map[string]bool{"br-g20": true, "br-g30": true})
 	marks["br-g20"] = "net-20"
 	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) { return nil, os.ErrInvalid }
@@ -82,53 +151,49 @@ func TestNothingUnprovableIsRemovedWhenTheRecordIsUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(removed, ",") != "br-g20" || strings.Join(unmanaged, ",") != "br-g30" {
-		t.Fatalf("removed=%v unmanaged=%v", removed, unmanaged)
+	if len(removed) != 0 || strings.Join(unmanaged, ",") != "br-g20,br-g30" || len(failed) == 0 {
+		t.Fatalf("removed=%v unmanaged=%v failed=%v", removed, unmanaged, failed)
 	}
-	if len(failed) == 0 {
-		t.Fatal("the unreadable record was not reported")
-	}
-	if got := deleted(k); len(got) != 1 {
-		t.Fatalf("deleted %v", got)
+	if got := deleted(k); len(got) != 0 {
+		t.Fatalf("deleted %v without a record", got)
 	}
 }
 
 func TestOnlyAVlanInterfaceNetdCreatedIsDeletedWithItsBridge(t *testing.T) {
 	cases := []struct {
-		name     string
-		memberOf string
-		marked   bool
-		recorded recordedBridge
-		wantDel  bool
+		name       string
+		memberMark string
+		rec        recordedBridge
+		wantDel    bool
 	}{
-		{"marked member", "ens192.20", true, recordedBridge{Member: "ens192.20"}, true},
-		{"unmarked member the record names", "ens192.20", false, recordedBridge{Member: "ens192.20"}, true},
-		{"unmarked member the record does not name", "ens192.20", false, recordedBridge{Member: "ens192.99"}, false},
-		{"member with an ambiguous record", "ens192.20", false, recordedBridge{Member: ""}, false},
-		{"a physical port is never deleted", "ens192", true, recordedBridge{Member: "ens192"}, false},
+		{"a member marked with a network of this bridge", "net-20", rec("ens192.20", "net-20"), true},
+		{"an unmarked member the record names", "", rec("ens192.20", "net-20"), true},
+		{"an unmarked member the record does not name", "", rec("ens192.99", "net-20"), false},
+		{"a member with an ambiguous record", "", rec("", "net-20"), false},
+		{"a member marked with someone else's network", "net-other", rec("ens192.20", "net-20"), false},
 	}
 	for _, tc := range cases {
 		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
 			a, k, marks := ownershipFixture(t, map[string]bool{"br-g20": true})
 			marks["br-g20"] = "net-20"
-			if tc.marked {
-				marks[tc.memberOf] = "net-20"
+			if tc.memberMark != "" {
+				marks["ens192.20"] = tc.memberMark
 			}
-			a.memberFn = func(string) string { return tc.memberOf }
+			members(a, map[string]string{"br-g20": "ens192.20"})
 			a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
-				return map[string]recordedBridge{"br-g20": tc.recorded}, nil
+				return map[string]recordedBridge{"br-g20": tc.rec}, nil
 			}
-			if _, failed, _, err := a.removeStrayBridges(context.Background(), nil); err != nil || len(failed) != 0 {
-				t.Fatalf("err=%v failed=%v", err, failed)
+			if removed, _, _, err := a.removeStrayBridges(context.Background(), nil); err != nil || (tc.rec.Member != "" && len(removed) != 1) {
+				t.Fatalf("err=%v removed=%v", err, removed)
 			}
 			got := false
 			for _, d := range deleted(k) {
-				if d == tc.memberOf {
+				if d == "ens192.20" {
 					got = true
 				}
 			}
 			if got != tc.wantDel {
-				t.Fatalf("member %s deleted=%v, want %v (commands %v)", tc.memberOf, got, tc.wantDel, k.cmds)
+				t.Fatalf("member deleted=%v, want %v (commands %v)", got, tc.wantDel, k.cmds)
 			}
 		})
 	}
@@ -211,6 +276,9 @@ func TestRollbackRemovesAMarkedBridgeTheFailedApplyCreated(t *testing.T) {
 		}
 		return ""
 	}
+	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
+		return map[string]recordedBridge{"br-g91": rec("ens192.91", "net-91")}, nil
+	}
 	a.rollback(context.Background(), "rev-failed", "x")
 	found := false
 	for _, d := range deleted(k) {
@@ -237,6 +305,9 @@ func TestFactoryCleanRollbackKeepsAnUnprovenBridge(t *testing.T) {
 			return "net-90"
 		}
 		return ""
+	}
+	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
+		return map[string]recordedBridge{"br-g90": rec("ens192.90", "net-90")}, nil
 	}
 	st.state["rev-first"] = "pending_confirmation"
 	a.rollback(context.Background(), "rev-first", "expired")
@@ -266,6 +337,9 @@ func TestBootReconcileRemovesOnlyWhatNetdProvablyCreated(t *testing.T) {
 			return "net-gone"
 		}
 		return ""
+	}
+	a.recordedFn = func(context.Context) (map[string]recordedBridge, error) {
+		return map[string]recordedBridge{"br-gorphan": rec("ens192.99", "net-gone")}, nil
 	}
 	a.ReconcileActiveOnBoot(context.Background())
 	got := deleted(k)
@@ -306,4 +380,16 @@ func TestApplyValidatesWithADisabledNetworkOnARemovedInterface(t *testing.T) {
 		t.Fatalf("a disabled network on a removed NIC blocked validation: %+v", res.Validation.Issues)
 	}
 	_ = filepath.Join
+}
+
+// A member that cannot be read is not evidence that a bridge is the configured network.
+func TestABridgeWhoseMemberCannotBeReadIsNotAdopted(t *testing.T) {
+	a, k, marks := ownershipFixture(t, map[string]bool{"br-g90": true})
+	n := oldIntent()[0]
+	n.ID = "net-90"
+	members(a, map[string]string{})
+	a.adoptWantedBridges(context.Background(), map[string]netcfg.GuestNetwork{"br-g90": n}, map[string]bool{"br-g90": true})
+	if _, marked := marks["br-g90"]; marked || len(k.cmds) != 0 {
+		t.Fatalf("an unreadable member was taken as proof: marks=%v commands=%v", marks, k.cmds)
+	}
 }

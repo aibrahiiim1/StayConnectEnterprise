@@ -140,6 +140,16 @@ See [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §"apply rolled bac
   (`rollback-incomplete.json` beside the bundles) refuses further applies (409) until a boot reconcile converges completely, which is what a restart of the
   network service does. `/v1/health` shows the marker.
 * **An interrupted apply is reclaimed.** A revision a previous run left `applying` is rolled back at netd start, freeing the single in-flight slot.
-* **Only netd's own bridges are deleted.** Every bridge and VLAN interface netd creates carries the alias `onegate:<network id>`; a bridge is removed only if it
-  carries it or an applied revision names it. Any other `br-g*` interface is reported (`bridges_left_alone`) and left alone; a healthy wanted bridge without the
-  mark is verified against the configuration and marked.
+* **Confirm and rollback exclude each other.** Both hold the operation lock, so the database cannot say "active" while a rollback restores the previous
+  network. A revision is confirmed only if it is what is running: after a service restart inside the window the previous configuration was restored and
+  the pending revision is refused (409) until rolled back and applied again.
+* **The incomplete-rollback block is durable.** It is the marker file and the rollback's recorded reason in the revision history; either one blocks
+  applies after a crash. It is lifted only when the history record is resolved and the file removed, and a step that fails leaves it in place.
+* **An empty lease table is not "every address was given up".** A lease verified earlier keeps its address authorized until that lease lapses (never
+  more than four hours), so clients that have not yet reached their renewal time stay online. With nothing remembered, an empty table is believed only
+  from a Kea that has run and stayed configured for five minutes and serves the subnet; otherwise renewal is withheld and no session is ended.
+* **Only netd's own bridges are deleted, and only on agreeing evidence.** Every bridge and VLAN interface netd creates carries the alias
+  `onegate:<network id>`. A bridge is removed only if an applied revision names it and either its mark names a network that revision ties to that bridge,
+  or (created before the mark) its member interface is exactly the one the revision recorded. A name in history alone, an unreadable member, a mark that
+  names another network, or an unreadable record proves nothing: the bridge is reported (`bridges_left_alone`) and left in place. A healthy wanted bridge
+  without the mark is marked only when its single member is exactly the configured interface.

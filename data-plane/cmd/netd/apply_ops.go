@@ -470,7 +470,11 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 	}
 	// A complete convergence to the confirmed configuration is what an unfinished rollback was waiting for.
 	if _, was := a.rollbackIncomplete(); was {
-		a.clearRollbackIncomplete()
+		if err := a.clearRollbackIncomplete(ctx); err != nil {
+			slog.Error("netd converged but could not lift the incomplete-rollback block; further changes stay refused", "err", err)
+			a.event(ctx, id, "rollback_incomplete_clear_failed", false, map[string]any{"error": err.Error()})
+			return false
+		}
 		a.event(ctx, id, "rollback_incomplete_cleared", true, map[string]any{"by": "boot_reconcile"})
 	}
 	return true
@@ -494,7 +498,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 		// the change may still be on the wire, so further changes are refused until it is dealt with.
 		rb.fail("rollback", "the revision state could not be re-read before rolling back", err, map[string]any{
 			"refused": "the revision state could not be re-read before rolling back"})
-		a.markRollbackIncomplete(failedID, rb.failed)
+		rb.persistMarker()
 		return rb.failed
 	case state == "active":
 		a.event(ctx, failedID, "rollback", false, map[string]any{
@@ -520,7 +524,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 			if lerr != nil {
 				// Not knowing what exists is not permission to declare the appliance clean.
 				rb.fail("rollback", "the live bridges could not be listed", lerr, nil)
-				a.markRollbackIncomplete(failedID, rb.failed)
+				rb.persistMarker()
 				return rb.failed
 			}
 			if len(failed) > 0 {
@@ -564,7 +568,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 		_, failed, unmanaged, lerr := a.removeStrayBridges(ctx, func(br string) bool { return prevBridges[br] })
 		if lerr != nil {
 			rb.fail("rollback", "the live bridges could not be listed", lerr, nil)
-			a.markRollbackIncomplete(failedID, rb.failed)
+			rb.persistMarker()
 			return rb.failed
 		}
 		if len(failed) > 0 {
@@ -690,13 +694,17 @@ func (a *applier) finishRollback(ctx context.Context, failedID, reason string, r
 	a.clearApplyInflight()
 	if !rb.incomplete() {
 		if m, ok := a.rollbackIncomplete(); ok && m.Revision == failedID {
-			a.clearRollbackIncomplete() // a retry of the same rollback finished the job
+			// A retry of the same rollback finished the job. If the block cannot be lifted it stays: applies remain refused.
+			if err := a.clearRollbackIncomplete(ctx); err != nil {
+				slog.Error("netd rolled back but could not lift the incomplete-rollback block; further changes stay refused", "err", err)
+				a.event(ctx, failedID, "rollback_incomplete_clear_failed", false, map[string]any{"error": err.Error()})
+			}
 		}
 		a.event(ctx, failedID, "rollback_complete", true, nil)
 		a.recordRolledBack(ctx, failedID, reason)
 		return nil
 	}
-	a.markRollbackIncomplete(failedID, rb.failed)
+	rb.persistMarker()
 	a.event(ctx, failedID, "rollback_incomplete", false, map[string]any{"steps": rb.failed})
 	slog.Error("netd rollback did not restore everything; further changes are refused until the appliance converges to its confirmed configuration",
 		"revision", failedID, "steps", rb.failed)

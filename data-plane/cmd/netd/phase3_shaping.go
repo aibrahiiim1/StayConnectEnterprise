@@ -68,6 +68,8 @@ type phase3Shaping struct {
 	owner       addressOwner
 	// unverified: sessions not renewed because ownership could not be checked; their bounded leases run down.
 	unverified map[string]bool
+	// leaseUntil is when the lease last verified for each session lapses (see rememberLease).
+	leaseUntil map[string]time.Time
 	// leaseFiles is optional; nil means health reports the symptom without the on-disk cause.
 	leaseFiles leaseFileInspector
 
@@ -141,6 +143,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.classes, classKey(bridge, sessionID))
 	// A half-allocated generation is void once the series ends; a returning session is a new class.
 	delete(p.pending, classKey(bridge, sessionID))
+	delete(p.leaseUntil, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
