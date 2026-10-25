@@ -237,6 +237,13 @@ func (s *server) createGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalizeGuestNetworkInput(&in)
+	if in.Name == "" {
+		jsonErr(w, http.StatusBadRequest, "invalid_name", "network name is required")
+		return
+	}
+	if writeNetworkTextRefusal(w, in.Name, in.DomainName) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
@@ -264,6 +271,9 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	var in guestNetworkInput
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if writeNetworkTextRefusal(w, in.Name, in.DomainName) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -566,13 +576,18 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	{
 		detail := map[string]any{"summary": in.Summary, "replacements": staged, "status": st}
 		var out struct {
-			RevisionID string `json:"revision_id"`
-			State      string `json:"state"`
+			RevisionID         string   `json:"revision_id"`
+			State              string   `json:"state"`
+			RollbackIncomplete []string `json:"rollback_incomplete"`
 		}
 		if err != nil {
 			detail["error"] = err.Error()
 		} else if json.Unmarshal(raw, &out) == nil {
 			detail["revision_id"], detail["state"] = out.RevisionID, out.State
+			if len(out.RollbackIncomplete) > 0 {
+				// The rollback ran but did not restore everything: the audit trail must not read as a clean rollback.
+				detail["rollback_incomplete"] = out.RollbackIncomplete
+			}
 		}
 		action := "network.apply"
 		if err != nil || st >= 300 || out.State == "failed" || out.State == "rolled_back" {
@@ -760,6 +775,9 @@ func (s *server) createReservation(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "guest_network_id, mac and reserved_ip required")
 		return
 	}
+	if writeHostnameRefusal(w, in.Hostname) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var id string
@@ -784,6 +802,9 @@ func (s *server) updateReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if writeHostnameRefusal(w, in.Hostname) {
 		return
 	}
 	ctx, cancel := dbCtx(r)

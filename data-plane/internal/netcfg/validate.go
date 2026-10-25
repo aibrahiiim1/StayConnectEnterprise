@@ -39,12 +39,41 @@ func ValidateOne(n GuestNetwork, topo Topology, availIfaces, knownIfaces map[str
 	if strings.TrimSpace(n.Name) == "" {
 		r.add(f("name"), "required", "network name is required")
 	}
+	// The text and name fields below reach the generated nftables, netplan, Kea and Unbound files. Only an enabled network is ever
+	// rendered, so a disabled one that has not been cleaned up yet cannot reach a file and must not block every other change;
+	// enabling it applies these checks.
+	if n.Enabled {
+		if n.Name != "" && strings.TrimSpace(n.Name) != "" {
+			if why := CheckNetworkName(n.Name); why != "" {
+				r.add(f("name"), "invalid_name", why)
+			}
+		}
+		if n.BridgeName != "" {
+			if why := CheckIfaceName(n.BridgeName); why != "" {
+				r.add(f("bridge_name"), "invalid_bridge_name", why)
+			}
+		}
+		if n.ParentInterface != "" {
+			if why := CheckIfaceName(n.ParentInterface); why != "" {
+				r.add(f("parent_interface"), "invalid_interface_name", why)
+			}
+		}
+		if why := CheckDomainName(n.DomainName); why != "" {
+			r.add(f("domain_name"), "invalid_domain", why)
+		}
+		for i, res := range n.Reservations {
+			if why := CheckDomainName(res.Hostname); why != "" {
+				r.add(fmt.Sprintf("%sreservations[%d].hostname", prefix, i), "invalid_hostname", why)
+			}
+		}
+	}
 	if n.ParentInterface == "" {
 		r.add(f("parent_interface"), "required", "a parent interface is required")
-	} else if availIfaces != nil && !availIfaces[n.ParentInterface] {
-		// availIfaces is the set of interfaces the appliance has right now: a network on a vanished interface cannot come
-		// up, so it is refused here rather than at netplan/Kea time. KnownIfaces lets the message tell a never-had typo from
-		// a lost interface.
+	} else if n.Enabled && availIfaces != nil && !availIfaces[n.ParentInterface] {
+		// availIfaces is the set of interfaces the appliance has right now: an ENABLED network on a vanished interface cannot come
+		// up, so it is refused here rather than at netplan/Kea time. A disabled network is not brought up, so its absent parent
+		// is not a reason to refuse every other change (it is checked when the network is enabled). KnownIfaces lets the message
+		// tell a never-had typo from a lost interface.
 		if knownIfaces != nil && knownIfaces[n.ParentInterface] {
 			r.add(f("parent_interface"), "interface_not_present",
 				fmt.Sprintf("interface %q is recorded on this appliance but is NOT PRESENT now — it was not "+
