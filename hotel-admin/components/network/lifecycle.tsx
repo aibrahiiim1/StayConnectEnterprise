@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Layers, Rocket, X } from "lucide-react";
 import { api } from "@/lib/api";
 import {
-  FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, StagedGroup,
+  CHANGE_VERB, FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, StagedGroup,
 } from "@/lib/api/network-lifecycle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,7 +125,7 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
           <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>
               <strong>{GROUP_LABEL[g.group_kind]}</strong>:{" "}
-              {g.changes.map((c) => `${c.kind === "ENABLE" ? "switch on" : "switch off"} ${c.network || c.network_id}`).join("; ")}
+              {g.changes.map((c) => `${CHANGE_VERB[c.kind]} ${c.network || c.network_id}`).join("; ")}
             </span>
             {writable && g.state === "PENDING" && (
               <Button variant="ghost" size="sm" onClick={() => void cancel(g)} aria-label={`Cancel ${GROUP_LABEL[g.group_kind]}`}>

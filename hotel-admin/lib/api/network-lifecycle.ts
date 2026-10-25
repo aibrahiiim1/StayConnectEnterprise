@@ -21,7 +21,9 @@ export type FactoryInfo = {
   checklist: string[];
 };
 
-export type StagedChange = { id: string; network_id: string; network: string; kind: "ENABLE" | "DISABLE"; state: string };
+export type StagedChange = { id: string; network_id: string; network: string; kind: "ENABLE" | "DISABLE" | "SETTINGS"; state: string };
+
+export const CHANGE_VERB: Record<StagedChange["kind"], string> = { ENABLE: "switch on", DISABLE: "switch off", SETTINGS: "restore the settings of" };
 
 export type StagedGroup = {
   group_id: string;

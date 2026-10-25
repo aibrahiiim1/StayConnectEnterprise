@@ -38,6 +38,7 @@ func (s *server) networkRoutes() http.Handler {
 	r.Get("/guest-network-replacements", s.listGuestNetworkReplacements)
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
+	s.mountRecovery(r)
 	r.Get("/guest-networks/{id}/sign-in", s.getNetworkSignin)
 	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
 	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)

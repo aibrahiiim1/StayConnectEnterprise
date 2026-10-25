@@ -30,7 +30,9 @@ type lastConfirmed struct {
 	Digest    string                `json:"digest"`
 }
 
-func (a *applier) lastConfirmedPath() string { return filepath.Join(a.generatedDir, "last-confirmed.json") }
+func (a *applier) lastConfirmedPath() string {
+	return filepath.Join(a.generatedDir, "last-confirmed.json")
+}
 
 func lastConfirmedDigest(id, vip string, intent []netcfg.GuestNetwork) string {
 	raw, _ := json.Marshal(struct {

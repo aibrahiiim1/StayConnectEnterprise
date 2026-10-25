@@ -235,6 +235,7 @@ export default function NetworkPage() {
             <Button variant="secondary" disabled={busy !== null} onClick={onApply}>
               <Power /> {busy === "apply" ? "Applying…" : "Apply changes"}
             </Button>
+            <LinkButton variant="secondary" href="/network/recovery">Recovery</LinkButton>
             {newButton}
           </>
         )}

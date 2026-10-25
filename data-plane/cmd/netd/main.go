@@ -42,6 +42,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "flows-end" {
 		os.Exit(runFlowsEndCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "recover" {
+		os.Exit(runRecoverCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	// Exponential crash-loop backoff (internal/startupbackoff).
@@ -278,6 +281,7 @@ func (s *server) routes() http.Handler {
 	r.Get("/v1/interfaces", admin(s.interfaces))
 	r.Post("/v1/validate", admin(s.validate))
 	r.Post("/v1/apply", admin(s.apply))
+	r.Post("/v1/reassert-confirmed", admin(s.reassertConfirmed))
 	r.Post("/v1/confirm", admin(s.confirm))
 	r.Post("/v1/rollback", admin(s.rollback))
 	r.Get("/v1/leases", admin(s.leases))

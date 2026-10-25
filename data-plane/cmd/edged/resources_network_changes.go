@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,8 +20,9 @@ import (
 type changeKind string
 
 const (
-	changeEnable  changeKind = "ENABLE"
-	changeDisable changeKind = "DISABLE"
+	changeEnable   changeKind = "ENABLE"
+	changeDisable  changeKind = "DISABLE"
+	changeSettings changeKind = "SETTINGS"
 )
 
 type changeItem struct {
@@ -55,17 +57,20 @@ func (s *server) stageChanges(ctx context.Context, tx pgx.Tx, groupKind string, 
 // materialisePendingChanges runs inside the apply transaction. Switch-offs go first so the slot, subnet or name a switch-on needs is free; a switch-on that
 // collides with an enabled network refuses the whole apply (the transaction rolls back and nothing was touched).
 func (s *server) materialisePendingChanges(ctx context.Context, tx pgx.Tx) ([]string, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text, network_id::text, kind FROM iam_v2.guest_network_changes
+	rows, err := tx.Query(ctx, `SELECT id::text, network_id::text, kind, target FROM iam_v2.guest_network_changes
 		 WHERE tenant_id=$1 AND site_id=$2 AND state='PENDING'
 		 ORDER BY (kind = 'DISABLE') DESC, created_at, id FOR UPDATE`, s.tenantID, s.siteID)
 	if err != nil {
 		return nil, err
 	}
-	type pending struct{ id, network, kind string }
+	type pending struct {
+		id, network, kind string
+		target            []byte
+	}
 	var todo []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.network, &p.kind); err != nil {
+		if err := rows.Scan(&p.id, &p.network, &p.kind, &p.target); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -89,16 +94,33 @@ func (s *server) materialisePendingChanges(ctx context.Context, tx pgx.Tx) ([]st
 			}
 			return nil, err
 		}
-		want := p.kind == string(changeEnable)
-		if _, err := tx.Exec(ctx, `UPDATE guest_networks SET enabled=$2, updated_at=now() WHERE id=$1`, p.network, want); err != nil {
-			return nil, err
+		want := cur
+		if p.kind != string(changeSettings) {
+			want = p.kind == string(changeEnable)
 		}
-		if want {
+		if want != cur {
+			if _, err := tx.Exec(ctx, `UPDATE guest_networks SET enabled=$2, updated_at=now() WHERE id=$1`, p.network, want); err != nil {
+				return nil, err
+			}
+		}
+		var before []byte
+		if len(p.target) > 0 {
+			var t recoveryTarget
+			if err := json.Unmarshal(p.target, &t); err != nil {
+				return nil, fmt.Errorf("staged settings of %s are unreadable: %w", p.network, err)
+			}
+			b, err := s.applyRecoveryTarget(ctx, tx, p.id, p.network, t)
+			if err != nil {
+				return nil, err
+			}
+			before, _ = json.Marshal(b)
+		}
+		if want && (want != cur || p.kind == string(changeSettings)) {
 			if err := s.enabledConflict(ctx, tx, p.network); err != nil {
 				return nil, err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_changes SET state='APPLIED', prior_enabled=$2, applied_at=now() WHERE id=$1`, p.id, cur); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_changes SET state='APPLIED', prior_enabled=$2, applied_at=now(), before=$3::jsonb WHERE id=$1`, p.id, cur, nullJSON(before)); err != nil {
 			return nil, err
 		}
 		ids = append(ids, p.id)
@@ -131,8 +153,9 @@ func (s *server) revertChange(ctx context.Context, id string) error {
 	defer tx.Rollback(ctx)
 	var network string
 	var prior *bool
-	if err := tx.QueryRow(ctx, `SELECT network_id::text, prior_enabled FROM iam_v2.guest_network_changes
-		 WHERE id=$1 AND state='APPLIED' FOR UPDATE`, id).Scan(&network, &prior); err != nil {
+	var beforeRaw []byte
+	if err := tx.QueryRow(ctx, `SELECT network_id::text, prior_enabled, before FROM iam_v2.guest_network_changes
+		 WHERE id=$1 AND state='APPLIED' FOR UPDATE`, id).Scan(&network, &prior, &beforeRaw); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already settled or reverted
 		}
@@ -143,8 +166,17 @@ func (s *server) revertChange(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	if len(beforeRaw) > 0 {
+		var b recoveryBefore
+		if err := json.Unmarshal(beforeRaw, &b); err != nil {
+			return fmt.Errorf("the settings this change replaced are unreadable: %w", err)
+		}
+		if err := s.revertRecoveryTarget(ctx, tx, network, b); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_changes
-		   SET state='PENDING', prior_enabled=NULL, applied_at=NULL, revision_id=NULL WHERE id=$1`, id); err != nil {
+		   SET state='PENDING', prior_enabled=NULL, applied_at=NULL, revision_id=NULL, before=NULL WHERE id=$1`, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -167,7 +199,20 @@ func (s *server) settleConfirmedChanges(ctx context.Context, revisionID string) 
 		   AND (g.revision_id = NULLIF($3,'')::uuid
 		        OR EXISTS (SELECT 1 FROM network_config_revisions v WHERE v.id = g.revision_id AND v.state IN ('active','superseded')))`,
 		s.tenantID, s.siteID, revisionID)
-	return err
+	if err != nil {
+		return err
+	}
+	if cerr := s.captureLayers(ctx, revisionID); cerr != nil {
+		slog.Warn("the layers of the confirmed configuration could not be recorded; a later restore will not compare them", "revision", revisionID, "err", cerr)
+	}
+	return nil
+}
+
+func nullJSON(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
 }
 
 // reconcileStaleChanges settles the changes of a kept apply and reverts those of an apply that did not hold, by the same rules as replacements.
