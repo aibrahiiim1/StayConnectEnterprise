@@ -390,6 +390,21 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A network no PMS interface is mapped to (a staff or conference network) offers no room sign-in at all. That is a fact about the network, not a stale feed,
+	// and it is refused as such before anything else is consulted.
+	var mapped int
+	if err := p.srv.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_pms_map
+		 WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, p.srv.tenID, p.srv.siteID, dev.GuestNetwork).Scan(&mapped); err != nil {
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "mapping: "+err.Error())
+		return
+	}
+	if mapped == 0 {
+		at.Result = signinattempt.RoutingOrInterfaceFailure
+		notVerified(w, at.Result, "network_has_no_pms_mapping")
+		return
+	}
+
 	// Ask whether the mirror can answer before looking at the room or evaluating evidence: the ordering is a
 	// security property (see mirrorStateFor) and keeps "cannot check right now" truthful.
 	mirror := p.mirrorStateFor(ctx, dev.GuestNetwork)
@@ -867,12 +882,27 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A device that signs in again while online keeps its open session.
+	// A device that signs in again while online keeps its open session, but only at the same address on the same bridge: the firewall authorizes an address, so
+	// a session left at the old address would be reported as verified while the new one is not admitted. At a new address the old session is ended through the
+	// controlled writer (as activation does) and a fresh one is opened on the same entitlement.
 	var sessionID string
 	if granted.Joined {
-		_ = tx.QueryRow(ctx, `SELECT id::text FROM iam_v2.sessions
-			WHERE entitlement_id=$1 AND device_id=$2 AND ended IS NULL AND state IN ('active','PENDING_ENFORCEMENT')
-			LIMIT 1`, granted.EntitlementID, dev.DeviceID).Scan(&sessionID)
+		live, lerr := p.srv.liveSessionsOfDevice(ctx, tx, granted.EntitlementID, dev.DeviceID)
+		if lerr != nil {
+			notVerified(w, signinattempt.ServiceUnavailable, "sessions: "+lerr.Error())
+			return
+		}
+		bridge := p.bridgeFor(ctx, dev.IP)
+		for _, ls := range live {
+			if sessionID == "" && ls.ip == dev.IP.String() && ls.iface == bridge {
+				sessionID = ls.id
+				continue
+			}
+			if _, eerr := p.srv.endSessionControlled(ctx, tx, ls.id, endReasonAddressChanged); eerr != nil {
+				notVerified(w, signinattempt.ServiceUnavailable, "end old session: "+eerr.Error())
+				return
+			}
+		}
 	}
 	if sessionID == "" {
 		// Every new session takes a licensed concurrent-guest slot, the same reservation vouchers and accounts
@@ -937,10 +967,11 @@ func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, d
 		 WHERE c.id = $1::uuid AND c.tenant_id = $2 AND c.site_id = $3
 		   AND c.consumed_at IS NOT NULL
 		   AND c.device_id = $4 AND s.device_id = $4
+		   AND host(s.ip) = $5 AND COALESCE(s.ingress_interface, '') = $6
 		   AND s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL
 		 ORDER BY s.started DESC
 		 LIMIT 1`,
-		authContextID, p.srv.tenID, p.srv.siteID, dev.DeviceID).Scan(&sid, &ent)
+		authContextID, p.srv.tenID, p.srv.siteID, dev.DeviceID, dev.IP.String(), p.bridgeFor(ctx, dev.IP)).Scan(&sid, &ent)
 	if err != nil {
 		return "", "", false
 	}
