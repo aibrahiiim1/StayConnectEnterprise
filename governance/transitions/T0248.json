@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0248",
+  "seq": 248,
+  "timestamp": "2026-10-25T15:32:18+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after both the PRE-LIVE deployment and the read-only investigation of the Product Owner's first Full Reset, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_MERGED_AND_DEPLOYED_PRE_LIVE_WITH_RECONCILIATION",
+  "authorisation": "D72 (2026-10-25) under the Product Owner's mission 'ONEGATE - APPROVED MERGE & PRE-LIVE DEPLOYMENT', which authorised the protected merge of PR #242 at the reviewed head c568373446c82082b0bd2d191db15ee2957f5c0b, the deployment to PRE-LIVE 172.21.60.25, migrations 0151-0153, the restarts of netd, edged, scd and portald, and routine related fixes. PR #242 was merged at head 090f92c9734b30598aad8c580e3d15769fbca967 after two Codex review findings were fixed; the Product Owner did not separately approve that head and this receipt does not claim they did. It does NOT authorise Go-Live, and it authorised no activation, port conversion, VLAN change, reset or external switch/ESXi change.",
+  "deployment_provenance": {
+    "appliance": "PRE-LIVE 172.21.60.25: netd, scd and portald built from a clean clone of 4a1922685531 and edged from a clean clone of 82faee4f5080 with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false); sha256 verified on the appliance before install; each installed with backup <svc>.bak-pre-<sha>-<time>. pmsd ae4f85d2 and acctd 9394eb5f unchanged.",
+    "admin_console": "Release 20261025-115528 built from a clean clone of 82faee4f (BUILD_ID Q27aWLigjKkPI_ZwTfKvk, artifact sha256 6c9f62d53d1a34f862b7f758fd7c5d83ec73fc230ef17e22b5236e4713e3d72c); previous 20261025-113332.",
+    "database": "Schema 0150 -> 0153 on stayconnect_site with scripts/edge-migrate.sh as iam_v2_owner, each preceded by an encrypted, proven-restorable backup. 0152's first attempt was refused and changed nothing; 0152 was corrected to change nothing in public (PR #243) and applied. GRANT SELECT, INSERT ON public.privacy_notice_versions TO iam_v2_owner applied once by hand (it is in gatep-grants.sql).",
+    "merges": "PR #242 head 090f92c9 -> fa24a913 (the mission named c568373); #243 -> 4a192268; #244 -> 82faee4f; #245 -> d870bf80. #234-#241 closed as superseded.",
+    "preserved": "Kea was not restarted (live configuration hash 75dc2ea6 unchanged); the Kea file on disk, stale since 21 Aug, now holds the confirmed configuration; Unbound fragments, interfaces, default route and the management address unchanged; nftables unchanged except the walled-garden's DNS-resolved address sets; 0 guest sessions before and after; PMS, licensing, signed assignment and entitlements untouched."
+  },
+  "verification": "Before deployment: go build/vet, unit tests and integration tests for every Go package against a database built through the real migration chain, the kernel-container script (including the real netd binary starting with the database refusing connections), hotel-admin typecheck, vitest 1023 and 183 Playwright tests. After: every new read endpoint 200 as the verification operator; the new pages render with no overflow at 1280 px and 390 px; recovery previews correct and read-only; no API error in the browser run; check-appliance-units.sh PASS; portald answers on 8380 and 8343 with the site's design and methods; sha256sum -c DEPLOYED_BINARIES.sha256 all OK. NOT verified: a real client lease on the prepared 10.20.0.0/20 network, the live result of an applied Full Reset, an Access/Trunk conversion on the real port, a real client reaching the portal over a guest network, and any switch or ESXi configuration.",
+  "product_owner_full_reset_observation": "2026-10-25: the Product Owner staged a Full Client Networking Reset at 12:11:56 UTC (audit network.recovery.staged). At 12:26 UTC the appliance recorded three PENDING changes, active revision 97 unchanged, no apply or confirmation, bridges br-g60 and br-g90 up and Kea unchanged: the reset was staged, not applied. The staged plan created the network 'Client Wi-Fi' switched off with the approved prepared settings (untagged on ens192, 10.20.0.0/20, gateway 10.20.0.1, local DHCP pool 10.20.0.10-10.20.15.254). Two of the three old networks carry sign-in history that foreign keys reference, so they stay. The Product Owner reported the test as successful; if an apply was done after 12:26 UTC it is not covered by this receipt. DHCP on the prepared network is unverified.",
+  "defects_found_by_deploying": [
+    "Migration 0152 replaced a function in public, which a live site (iam_v2_owner) cannot do: fixed by moving the per-profile privacy-notice stamp into an iam_v2 trigger (PR #243).",
+    "The Full Reset confirmation name was read from public.sites, which the Admin Console role cannot read, so the field never appeared: now read from tenants, RESET where the site has no readable name, with a test pinning the role's privileges (PR #244).",
+    "After staging a recovery nothing on the Recovery page showed that it was still waiting, so a staged reset could be taken for a finished one: staging now returns to Client networks, the Recovery page warns that a recovery is staged and not applied, and the staged list marks it 'Not applied yet' (this reconciliation)."
+  ],
+  "rollback": "Appliance: netd.bak-pre-4a192268-*, scd.bak-pre-4a192268-*, portald.bak-pre-4a192268-*, edged.bak-pre-82faee4f-* (and edged.bak-pre-4a192268-*); hotel-admin.previous -> 20261025-113332. Database: three encrypted backups taken immediately before the migrations; 0151-0153 each have a .down.sql (scripts/edge-migrate.sh --down, newest first). Central: no change.",
+  "follow_up": "OPEN Product-Owner decision: whether switched-off networks should be archived and hidden by default after a reset (docs/CLIENT_NETWORKING.md section 15; recommended: archive as a presentation state, not delete). Left open on purpose: real-client DHCP and portal acceptance on the prepared network, an Access/Trunk conversion on the real port, the switch/ESXi side, the cause of the earlier zero-receive reading on ens192.60 (an observation, not a located fault), and the erasure-ledger secondary storage.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "As left by T0246."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "6f11f534322f1def8b0253aabf7f2fc329fa8716",
+  "base_note": "Master after the merge of PR #233, the base of PR #242.",
+  "head": "7a55079f",
+  "head_note": "The last content commit of the reconciliation branch, on top of master 82faee4f (the last commit deployed). Governance commits follow it.",
+  "previous_delivery": "T0247",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

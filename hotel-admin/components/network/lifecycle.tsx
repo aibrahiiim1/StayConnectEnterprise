@@ -118,7 +118,7 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
   }
 
   return (
-    <SectionCard title="Staged changes" description="Waiting to be applied. Nothing here is live yet.">
+    <SectionCard title="Staged changes" description="Waiting to be applied. Nothing here is live yet: the networks stay as they are until you press Apply changes and keep the change.">
       <ErrorBanner err={err} className="mb-3" />
       <ul className="space-y-2">
         {groups.map((g) => (
@@ -132,6 +132,7 @@ export function StagedChangesList({ writable, reloadKey, onCancelled }: { writab
                 <X /> Cancel
               </Button>
             )}
+            {g.state === "PENDING" && <Badge tone="warn">Not applied yet</Badge>}
             {g.state === "APPLIED" && <Badge tone="info">Awaiting confirmation</Badge>}
           </li>
         ))}
