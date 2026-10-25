@@ -85,10 +85,16 @@ export default function RecoveryPage() {
     <PageShell width="wide">
       <PageHeader title="Recovery" description="Return the client networks to a known state. Each is staged, applied and kept or rolled back like any other network change." />
 
-      {staged.length > 0 && (
+      {staged.some((g) => g.state === "PENDING") && (
         <Callout tone="warning" title="A recovery is staged and has not been applied">
-          {staged.map((g) => GROUP_LABEL[g.group_kind]).join(", ")}: the client networks are exactly as they were. It takes effect only when you press <strong>Apply
+          {staged.filter((g) => g.state === "PENDING").map((g) => GROUP_LABEL[g.group_kind]).join(", ")}: the client networks are exactly as they were. It takes effect only when you press <strong>Apply
           changes</strong> on <Link className="underline" href="/network">Client networks</Link> and then keep the change.
+        </Callout>
+      )}
+      {staged.some((g) => g.state === "APPLIED") && (
+        <Callout tone="warning" title="A recovery is applied and waiting for you to keep it">
+          {staged.filter((g) => g.state === "APPLIED").map((g) => GROUP_LABEL[g.group_kind]).join(", ")}: it is already affecting clients. Keep it or roll it back on{" "}
+          <Link className="underline" href="/network">Client networks</Link> before the confirmation window ends, or the appliance puts the previous configuration back by itself.
         </Callout>
       )}
 

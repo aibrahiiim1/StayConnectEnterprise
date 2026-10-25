@@ -73,6 +73,15 @@ describe("recovery page", () => {
     expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("tells an applied recovery apart from a staged one", async () => {
+    get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes"
+      ? { groups: [{ group_id: "g1", group_kind: "FULL_RESET", state: "APPLIED", created_at: "", changes: [] }] } : items));
+    render(<RecoveryPage />);
+    await screen.findByText("A recovery is applied and waiting for you to keep it");
+    expect(screen.queryByText("A recovery is staged and has not been applied")).toBeNull();
+    expect(screen.queryByText(/exactly as they were/)).toBeNull();
+  });
+
   it("shows a prepared network that would be created when the old one was changed beyond restoring", async () => {
     post.mockResolvedValueOnce({ ...plan, op: "factory_defaults", networks: [
       { id: "", name: "Client Wi-Fi", action: "create_and_switch_on", changes: ["untagged on ens192, 10.20.0.0/20, local DHCP"], active_clients: 0 },
