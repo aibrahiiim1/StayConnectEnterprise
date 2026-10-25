@@ -357,6 +357,18 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 func (a *applier) reconcileConfirmed(ctx context.Context) (string, []string) {
 	// The confirmed active revision's own intent snapshot, never the live guest_networks rows, which the UI edits directly and may hold an unapplied draft (see store.CurrentActiveIntent).
 	id, bundle, intent, err := a.currentActiveIntent(ctx)
+	snapshotVIP, provisional := "", ""
+	if err != nil && databaseUnreachable(err) {
+		// The database is not answering. The last snapshot written after a confirmation stands in so the network comes up; the appliance stays
+		// blocked (the problem below) until the database answers and decides, and the snapshot holds no sign-in state to reinstate.
+		snap, serr := a.readLastConfirmed()
+		if serr != nil {
+			a.event(ctx, "", "boot_reconcile", false, map[string]any{"database": err.Error(), "snapshot": serr.Error()})
+			return "", []string{"the database is unreachable (" + err.Error() + ") and there is no usable last-confirmed snapshot: " + serr.Error()}
+		}
+		id, bundle, intent, snapshotVIP, err = snap.Revision, snap.Bundle, snap.Intent, snap.PortalVIP, nil
+		provisional = "the database is unreachable, so the network was restored from the last-confirmed snapshot (revision " + snap.Revision + "); changes stay refused until the database answers"
+	}
 	if err != nil {
 		if !errors.Is(err, ErrNoConfirmedActiveRevision) {
 			// An active revision exists but its intent could not be read. Reconstructing from anything else
@@ -378,8 +390,14 @@ func (a *applier) reconcileConfirmed(ctx context.Context) (string, []string) {
 	// The portal address of the confirmed revision comes from its own bundle, never the live setting: a saved-but-unapplied address must not take effect at restart.
 	// Only a revision applied before the portal address existed records none; that one upgrade step adopts the configured address, validated as an apply would.
 	vip, recorded := readPortalBundle(bundle)
-	if !recorded {
+	switch {
+	case provisional != "":
+		vip = snapshotVIP
+	case !recorded:
 		vip = a.adoptPortalIP(ctx, bundle, intent)
+	}
+	if provisional == "" {
+		a.keepLastConfirmedCurrent(id, bundle, vip, intent)
 	}
 	a.setInForce(intent, vip)
 	a.setActiveVIP(vip)
@@ -502,6 +520,9 @@ func (a *applier) reconcileConfirmed(ctx context.Context) (string, []string) {
 	})
 	if len(bootProblems) > 0 {
 		slog.Error("netd boot reconcile did not fully converge", "revision", id, "problems", bootProblems)
+	}
+	if provisional != "" {
+		bootProblems = append(bootProblems, provisional)
 	}
 	return id, bootProblems
 }

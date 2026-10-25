@@ -365,8 +365,10 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 	}
 	// The address now in force is the confirmed one: it is what a later rollback returns to when the previous
 	// bundle records none.
-	_, vip, _ := a.inForce()
+	confirmedIntent, vip, _ := a.inForce()
 	a.setActiveVIP(vip)
+	_, bundle, _, _ := a.currentActiveIntent(ctx)
+	a.keepLastConfirmedCurrent(id, bundle, vip, confirmedIntent)
 	a.clearApplyInflight()
 	// The configuration just confirmed is now the one a cold Kea start must come up with. The confirmation itself stands either way; a failed
 	// write is reported through /v1/health and retried by the portal refresh, never silently dropped.
