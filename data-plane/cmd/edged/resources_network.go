@@ -38,6 +38,8 @@ func (s *server) networkRoutes() http.Handler {
 	r.Get("/guest-network-replacements", s.listGuestNetworkReplacements)
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
+	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
+	r.Get("/overview", s.networkOverview)
 
 	// There is no "adopt": declaring the editable rows ACTIVE without validating or applying them is retired. A
 	// client network configuration becomes active only by being applied, health-checked and confirmed.

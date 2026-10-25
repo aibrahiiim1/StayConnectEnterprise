@@ -195,6 +195,33 @@ func (k *keaClient) AbsenceTrusted(ip net.IP) (bool, string) {
 	return false, "Kea's running configuration has no subnet that contains " + ip.String()
 }
 
+// Counters returns Kea's server-wide DHCP packet counters. Per-subnet counters are deliberately not read.
+func (k *keaClient) Counters() (map[string]int, error) {
+	resp, err := k.cmd("statistic-get-all", nil)
+	if err != nil {
+		return nil, err
+	}
+	if code, text := resultOK(resp); code != 0 {
+		return nil, fmt.Errorf("statistic-get-all: %s", text)
+	}
+	args, _ := resp["arguments"].(map[string]any)
+	out := map[string]int{}
+	for _, name := range []string{"pkt4-received", "pkt4-discover-received", "pkt4-offer-sent", "pkt4-request-received", "pkt4-ack-sent", "pkt4-nak-sent"} {
+		series, _ := args[name].([]any)
+		if len(series) == 0 {
+			continue
+		}
+		point, _ := series[0].([]any)
+		if len(point) == 0 {
+			continue
+		}
+		if v, ok := point[0].(float64); ok {
+			out[name] = int(v)
+		}
+	}
+	return out, nil
+}
+
 // KeaEpoch is when the running Kea instance started, derived from its reported uptime.
 func (k *keaClient) KeaEpoch() (time.Time, bool) {
 	k.evMu.Lock()

@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 )
 
 // persistConfirmedKea writes the confirmed active revision's DHCP configuration to the file Kea starts from. eventRev names the revision
@@ -38,9 +40,9 @@ func (a *applier) persistConfirmedKeaOnce(ctx context.Context, eventRev string) 
 	if id == "" {
 		return nil
 	}
-	full, err := json.MarshalIndent(map[string]any{"Dhcp4": a.renderKea(intent)}, "", "  ")
+	full, err := a.confirmedKeaFile(intent)
 	if err != nil {
-		return fmt.Errorf("render the DHCP configuration: %w", err)
+		return err
 	}
 	path := a.keaConfPath()
 	if cur, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(cur, full) {
@@ -52,6 +54,15 @@ func (a *applier) persistConfirmedKeaOnce(ctx context.Context, eventRev string) 
 	}
 	a.event(ctx, eventRev, "kea_disk", true, map[string]any{"path": path, "confirmed_revision": id})
 	return nil
+}
+
+// confirmedKeaFile is the exact content of the file Kea starts from for a confirmed intent.
+func (a *applier) confirmedKeaFile(intent []netcfg.GuestNetwork) ([]byte, error) {
+	full, err := json.MarshalIndent(map[string]any{"Dhcp4": a.renderKea(intent)}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("render the DHCP configuration: %w", err)
+	}
+	return full, nil
 }
 
 // setKeaDisk remembers whether the last attempt to persist the confirmed configuration failed, for /v1/health and the retry.

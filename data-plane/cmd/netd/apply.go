@@ -87,6 +87,8 @@ type applier struct {
 	keaDiskErr    string
 	keaDiskMu     sync.Mutex
 	ifaceExistsFn func(name string) bool
+	// diag replaces the machine reads that diagnostics make.
+	diag *diagSources
 	// healthFn replaces the post-reconcile health checks.
 	healthFn func(ctx context.Context, revID string, intent []netcfg.GuestNetwork) []healthResult
 	// procNetUDPFn replaces /proc/net/udp when deciding whether Kea holds a DHCP socket.

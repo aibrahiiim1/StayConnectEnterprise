@@ -274,6 +274,7 @@ func (s *server) routes() http.Handler {
 	r.Post("/v1/confirm", admin(s.confirm))
 	r.Post("/v1/rollback", admin(s.rollback))
 	r.Get("/v1/leases", admin(s.leases))
+	r.Get("/v1/diagnostics", admin(s.diagnostics))
 	r.Get("/v1/pending", admin(s.pending))
 	r.Post("/v1/portal-ip/validate", admin(s.portalIPValidate))
 	// The only Phase-3 tc mutation entry point (ADR-0002), authenticated in the handler against the producer uid.
@@ -452,6 +453,20 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"state": "rolled_back"})
+}
+
+// diagnostics serves GET /v1/diagnostics[?sample_ms=N]: read-only observations of the confirmed client networks.
+func (s *server) diagnostics(w http.ResponseWriter, r *http.Request) {
+	sample := time.Duration(0)
+	if v := r.URL.Query().Get("sample_ms"); v != "" {
+		ms, err := strconv.Atoi(v)
+		if err != nil || ms < 0 || ms > 5000 {
+			writeJSON(w, 400, map[string]string{"error": "sample_ms must be between 0 and 5000"})
+			return
+		}
+		sample = time.Duration(ms) * time.Millisecond
+	}
+	writeJSON(w, 200, s.ap.diagnose(r.Context(), sample))
 }
 
 func (s *server) leases(w http.ResponseWriter, r *http.Request) {
