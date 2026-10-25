@@ -358,7 +358,7 @@ func (h *handler) renderPackages(w http.ResponseWriter, r *http.Request, pkgs []
 	v := packagesView{guestPage: p, Packages: packageRows(p.T, pkgs), ReturnCode: returnCode,
 		Identity: identity, FreeUsed: freeUsed, Error: localise(p.T, errMsg).Text}
 	// A voucher is entered as a code, never chosen from the list; with nothing to choose, the code field is the way forward, otherwise the page stays a choice.
-	v.VoucherCTA = len(pkgs) == 0 && h.voucherOffered(r.Context())
+	v.VoucherCTA = len(pkgs) == 0 && h.voucherOffered(r.Context(), clientIPString(r))
 	_ = packagesTmpl.Execute(w, v)
 }
 
@@ -460,11 +460,11 @@ func portalOrigin(r *http.Request) string {
 }
 
 // voucherOffered answers false on any failure: the field is a convenience and sign-in still offers vouchers.
-func (h *handler) voucherOffered(ctx context.Context) bool {
+func (h *handler) voucherOffered(ctx context.Context, ip string) bool {
 	if h.scd == nil {
 		return false
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/tenant/auth-methods", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/tenant/auth-methods?ip="+url.QueryEscape(ip), nil)
 	if err != nil {
 		return false
 	}

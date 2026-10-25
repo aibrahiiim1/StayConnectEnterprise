@@ -220,7 +220,7 @@ func (s *server) accountRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.kickSelfServiceOutbox()
 	// Signed in at once through the one ACCOUNT authority (same auth context, device and network pinning as a returning client).
-	s.authorizeViaIAMv2(w, r, iamv2.MethodAccount, iamv2.Request{Username: email, Secret: req.Password,
+	s.authorizeViaIAMv2(w, withMethodKey(r, keyEmailAccount), iamv2.MethodAccount, iamv2.Request{Username: email, Secret: req.Password,
 		Credential: iamv2.CredentialEmailAccount, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
@@ -466,7 +466,7 @@ func (s *server) accountGrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("email accounts: grace granted", "minutes", set.GraceMinutes)
-	s.authorizeViaIAMv2(w, r, iamv2.MethodAccount, iamv2.Request{Username: email, Secret: req.Password,
+	s.authorizeViaIAMv2(w, withMethodKey(r, keyEmailAccount), iamv2.MethodAccount, iamv2.Request{Username: email, Secret: req.Password,
 		Credential: iamv2.CredentialEmailAccount, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 

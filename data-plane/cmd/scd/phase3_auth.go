@@ -321,6 +321,11 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		notVerified(w, at.Result, "pms_method_disabled")
 		return
 	}
+	if !p.srv.networkOffers(ctx, dev.GuestNetwork, keyPMS) {
+		at.Result = signinattempt.ServiceUnavailable
+		notVerified(w, at.Result, "pms_method_not_offered_on_network")
+		return
+	}
 
 	room := normalizeRoom(req.Room)
 	// The site's mode decides which fields may be compared; a field it does not accept is refused below, after the protection gate.

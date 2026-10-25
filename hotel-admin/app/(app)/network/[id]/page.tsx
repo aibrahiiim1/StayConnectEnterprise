@@ -23,6 +23,7 @@ import { HelpList, HelpSection } from "@/components/help";
 import { errMsg } from "@/lib/utils";
 import { ReplaceTopologyDialog, type ReplaceResult } from "@/components/network/replace-topology-dialog";
 import { DiagnosticsPanel } from "@/components/network/status";
+import { SignInCard } from "@/components/network/signin-card";
 import {
   AddReservationDialog, EditReservationDialog, RemoveReservationDialog, ReservationTable, SwitchRow,
   DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
@@ -262,6 +263,8 @@ export default function EditGuestNetworkPage() {
           </SectionCard>
 
           <DiagnosticsPanel networkId={net.id} />
+
+          <SignInCard networkId={net.id} writable={writable} />
 
           {replacing && (
             <ReplaceTopologyDialog

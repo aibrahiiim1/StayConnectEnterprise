@@ -5,6 +5,7 @@
 // lib/package-save. Plan fields are read-only context here and edited on Service Plans, since other packages
 // share the plan.
 
+import { NetworkPicker } from "@/components/network/network-picker";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -592,7 +593,7 @@ export function PackageForm({
                 <option value="requires_prior">Only clients who already had a package here</option>
               </Select>
             )}
-            {r.type === "SITE_NETWORK" && <Input data-testid={`rule-networks-${vi}`} aria-label={`${n}: client networks`} placeholder="uuid,uuid" value={r.guest_network_ids} onChange={(e) => setRule(i, { guest_network_ids: e.target.value })} />}
+            {r.type === "SITE_NETWORK" && <NetworkPicker testId={`rule-networks-${vi}`} label={`${n}: client networks`} value={r.guest_network_ids} onChange={(v) => setRule(i, { guest_network_ids: v })} />}
             {/* Either bound may be empty; an empty one is omitted rather than sent as 0. */}
             {r.type === "STAY_LENGTH" && <>
               <Input data-testid={`rule-min-nights-${vi}`} aria-label={`${n}: from nights`} type="number" min={0} placeholder="from (nights)"

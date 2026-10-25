@@ -85,6 +85,15 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 		})
 		return true
 	}
+	keys := methodKeys(method)
+	if k, ok := r.Context().Value(methodKeyCtxKey{}).(string); ok {
+		keys = []string{k}
+	}
+	if !s.networkOffers(r.Context(), nc.NetworkID, keys...) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK", "authority": "iam_v2"})
+		return true
+	}
+	r = r.WithContext(withNetwork(r.Context(), nc.NetworkID))
 	req.Method = method
 	req.TenantID = s.tenID
 	req.SiteID = s.siteID

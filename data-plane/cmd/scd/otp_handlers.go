@@ -39,6 +39,18 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	s.applyProviderReadiness(r.Context(), cfg)
 	// A social provider is listed only while it can be started: HTTPS active and the canonical hostname registered in the hotel's app. Under the HTTP fallback the buttons go.
 	s.applySocialOffering(cfg)
+	// A client on a network that narrows the site's sign-in sees only what that network offers.
+	if ip := net.ParseIP(r.URL.Query().Get("ip")); ip != nil {
+		if nc := s.resolveNetwork(r.Context(), ip); nc.NetworkID != "" {
+			ov, oerr := s.networkSigninFor(r.Context(), nc.NetworkID)
+			if oerr != nil {
+				slog.Error("auth-methods: network sign-in settings unreadable", "err", oerr)
+				httpErr(w, http.StatusInternalServerError, "network sign-in settings unavailable")
+				return
+			}
+			ov.apply(cfg)
+		}
+	}
 
 	// Can this site give a guest anything at all? A site can authenticate guests while having no package to give, and the portal
 	// would tell them to check their details. This is a site-level fact, computed independent of any identity, so it is safe to
@@ -122,8 +134,16 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		if !s.licenseGate(w, licstate.FeatSMSOTP) {
 			return
 		}
+		if ip := net.ParseIP(req.IP); ip != nil && !s.networkOffersIP(r.Context(), ip, keySMS) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK"})
+			return
+		}
 	case "whatsapp":
 		if !s.licenseGate(w, licstate.FeatWhatsAppOTP) {
+			return
+		}
+		if ip := net.ParseIP(req.IP); ip != nil && !s.networkOffersIP(r.Context(), ip, keyWhatsApp) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK"})
 			return
 		}
 	}
