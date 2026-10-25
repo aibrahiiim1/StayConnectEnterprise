@@ -497,7 +497,16 @@ reference changes nothing; a proposal confirmed for other interfaces, another po
 two intervening changes that restored the identical state is refused; a removal approval from before an intervening change removes nothing; the removal preview lists what goes
 and is audited with its proposal; another operator, another network, an expired proposal and a bounded store are covered at the unit level.
 
-**Rollback boundary** (section 16): `scripts/binary-rollback.sh` and `0155.down.sql` both refuse while a Shared STRICT policy exists.
+**Rollback boundary** (section 16): `scripts/binary-rollback.sh` and `0155.down.sql` both refuse while a Shared STRICT policy exists. Review found the tool's count query failed on a
+database without the policy table (PostgreSQL resolves the table before the `CASE` runs), which would have refused a harmless rollback; the existence check is now a separate query,
+tested through a stand-in `docker` (50 cases) including an absent table.
+
+**A candidate's negative answer is only as fresh as its roster (migration 0156).** Review also found that the per-candidate feed check passed `now()` as the evidence time, which makes
+the revision's `max_auth_cache_age` ceiling trivially true. A shared network could therefore take a disconnected PMS's expired roster as a trustworthy "no such guest" and admit another
+interface's guest. `p3_interface_can_authorise` now uses the roster's own age as the evidence (`now()` while the feed is live and in sync, the last complete synchronisation otherwise), so an
+expired candidate is STALE and the network fails closed; the health the console shows applies the same ceiling (`ROSTER_EXPIRED`), so the readiness assessment and the resolver agree.
+Tests: scd (a candidate disconnected for an hour still answers; at ten days it cannot clear another interface's guest; a dedicated network is unaffected) and edged (readiness is READY
+at one hour and BLOCKED with `ROSTER_EXPIRED` at ten days); confirmed to fail against the 0155 function.
 
 No schema change: the proposals are not stored. Deployed to PRE-LIVE as software only (edged and the Admin Console).
 

@@ -105,6 +105,7 @@ var roomAuthWords = map[string]string{
 	roomAuthFeedSilent:     "the PMS has stopped responding",
 	roomAuthRevisionUnpin:  "the PMS interface is being reconfigured",
 	roomAuthNeverSynced:    "the guest list has not been received from the PMS yet",
+	roomAuthRosterExpired:  "the PMS has been unreachable for longer than its guest list may be trusted",
 	roomAuthResyncInFlight: "the guest list is being refreshed",
 	roomAuthMaterializing:  "the guest list is being applied",
 }

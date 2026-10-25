@@ -733,6 +733,8 @@ const (
 	// The mirror has never been filled: no complete sync ever finished, so there is nothing local to fall back to while the transport is down.
 	roomAuthNeverSynced = "MIRROR_NEVER_SYNCHRONIZED"
 
+	roomAuthRosterExpired = "ROSTER_EXPIRED"
+
 	// Kept as a known code for older consoles; no longer a readiness reason, since a resync builds an unpublished
 	// generation while the published roster keeps answering (p3_feed_authorizes).
 	roomAuthResyncInFlight = "RESYNC_IN_FLIGHT"
@@ -875,7 +877,16 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED'
 		           OR COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC' THEN
 		           CASE
-		             WHEN rt.last_complete_sync_at IS NOT NULL THEN ''
+		             WHEN rt.last_complete_sync_at IS NOT NULL
+		              AND rt.last_complete_sync_at > now() - make_interval(secs =>
+		                    CASE
+		                      WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+		                       AND (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+		                        THEN (pr.config->>'max_auth_cache_age_seconds')::int
+		                      ELSE iam_v2.p3_cfg_secs(pr.config, 'complete_sync_ms', 86400)
+		                         + iam_v2.p3_cfg_secs(pr.config, 'heartbeat_timeout_ms', 300)
+		                    END) THEN ''
+		             WHEN rt.last_complete_sync_at IS NOT NULL THEN '`+roomAuthRosterExpired+`'
 		             -- No roster has ever been published: the first one is still loading, or cannot load.
 		             WHEN COALESCE(rt.transport_status,'UNKNOWN') = 'CONNECTED'
 		                                                       THEN '`+roomAuthNotInSync+`'

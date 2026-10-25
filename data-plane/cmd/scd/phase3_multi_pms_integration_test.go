@@ -346,3 +346,35 @@ func TestIntegration_MultiPMS_ASchemaRolledBackUnderARunningSessionControllerFai
 		t.Fatalf("sign-in methods must stay readable without the policy table: %+v %v", ov, err)
 	}
 }
+
+func (f *authFixture) goOffline(t *testing.T, iface string, syncedAgo string) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime SET transport_status='DISCONNECTED', last_complete_sync_at = now() - $2::interval WHERE pms_interface_id=$1::uuid`, iface, syncedAgo); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A disconnected candidate answers from its last published roster only while that roster is within the revision's age ceiling; past it, its "no such guest" is STALE and
+// cannot admit another interface's guest.
+func TestIntegration_MultiPMS_ADisconnectedCandidateWithAnExpiredRosterCannotClearAnotherInterfacesGuest(t *testing.T) {
+	f := newAuthFixture(t)
+	b := f.addPMS(t, "700", "Delacroix", "RES-B1", true, "ACTIVE")
+	f.route(t, policyShared, f.iface, b.iface)
+
+	f.goOffline(t, b.iface, "1 hour")
+	if res := f.resolveAs(t, "412", "Okonkwo", ""); res.Outcome != outcomeVerified {
+		t.Fatalf("a candidate disconnected for an hour, still within its roster's age, must still be able to answer: %+v", res)
+	}
+	f.goOffline(t, b.iface, "10 days")
+	res := f.resolveAs(t, "412", "Okonkwo", "")
+	if res.Outcome != outcomeNotVerified || res.AuthContextID != "" {
+		t.Fatalf("a candidate whose roster has aged out cleared another interface's guest: %+v", res)
+	}
+	if n := f.entitlementsFor(t, f.stay); n != 0 {
+		t.Fatalf("%d entitlements", n)
+	}
+	f.route(t, policyDedicated, f.iface)
+	if res := f.resolveAs(t, "412", "Okonkwo", ""); res.Outcome != outcomeVerified {
+		t.Fatalf("a dedicated network was affected by an interface it does not use: %+v", res)
+	}
+}

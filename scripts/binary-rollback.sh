@@ -178,8 +178,13 @@ policy_aware() {
 
 shared_set_count() {
   if [ -n "${SC_ROLLBACK_SHARED_SETS_CMD:-}" ]; then $SC_ROLLBACK_SHARED_SETS_CMD; return $?; fi
-  docker exec -i stayconnect-pg psql -X -At -U stayconnect -d stayconnect_site -c \
-    "SELECT CASE WHEN to_regclass('iam_v2.guest_network_pms_policy') IS NULL THEN 0 ELSE (SELECT count(*) FROM iam_v2.guest_network_pms_policy WHERE mode='SHARED_STRICT') END" 2>/dev/null
+  local psql="docker exec -i stayconnect-pg psql -X -At -U stayconnect -d stayconnect_site -c" has
+  has="$($psql "SELECT to_regclass('iam_v2.guest_network_pms_policy') IS NOT NULL" 2>/dev/null)" || return 1
+  case "$has" in
+    f) echo 0; return 0;;
+    t) $psql "SELECT count(*) FROM iam_v2.guest_network_pms_policy WHERE mode='SHARED_STRICT'" 2>/dev/null;;
+    *) return 1;;
+  esac
 }
 
 check_shared_boundary() { # $1 = binary name, $2 = source path

@@ -42,8 +42,8 @@ interface) is read as `DEDICATED`; more than one mapped interface without a poli
   UNAVAILABLE and is never probed. Dropping it would let a strict resolution quietly ask one PMS fewer than the operator chose and admit a guest the missing PMS
   might have contradicted. The result is INDETERMINATE (`CANDIDATE_NOT_ACTIVE`), reported to the operator as a routing fact and to the guest as the usual uniform
   non-success.
-- **Each candidate answers for its own mirror.** A candidate whose feed cannot authorise (`iam_v2.p3_interface_can_authorise`, the feed half of the same predicate as
-  `p3_feed_authorizes`) is STALE, never NO_MATCH. "This PMS has no such guest" is only worth something from a PMS that was in a position to say so.
+- **Each candidate answers for its own mirror.** A candidate whose feed cannot authorise (`iam_v2.p3_interface_can_authorise`, the same predicate as `p3_feed_authorizes`, evaluated at the
+  age of the candidate's roster so that the revision's age ceiling applies to a negative answer too) is STALE, never NO_MATCH. "This PMS has no such guest" is only worth something from a PMS that was in a position to say so.
 - **No selector, no inference.** The guest is never shown which PMS they belong to; an interface is never inferred from a room number alone; independent PMS
   namespaces are never merged (a room number is only ever looked up inside one interface's Stay table); the first responding PMS is never chosen.
 - **A policy that disagrees with its mapping is refused**, not guessed at, at the moment a guest tries (`NONE` with mapped interfaces, `DEDICATED` with other than one,

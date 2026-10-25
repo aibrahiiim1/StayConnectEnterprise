@@ -264,6 +264,41 @@ out="$(run_tool --source-suffix .bak-inc9)"; rc=$?
 if [ $rc -eq 0 ] && echo "$out" | grep -q "no Shared STRICT network"; then ok "with no shared network the rollback proceeds and says why"; else bad "zero shared networks was refused: $out"; fi
 rm -rf "$W"
 
+echo "== 7e. THE SHARED STRICT BOUNDARY AGAINST THE REAL QUERIES (a stand-in docker/psql), including a database where the policy table does not exist =="
+fakedocker() { # $1 = absent|present   $2 = shared count
+  mkdir -p "$W/fakebin"
+  cat > "$W/fakebin/docker" <<EOF
+#!/usr/bin/env bash
+sql="\${@: -1}"
+case "\$sql" in
+  *to_regclass*) [ "$1" = present ] && echo t || echo f; exit 0;;
+  *"FROM iam_v2.guest_network_pms_policy"*)
+    if [ "$1" = absent ]; then echo 'ERROR:  relation "iam_v2.guest_network_pms_policy" does not exist' >&2; exit 1; fi
+    echo $2; exit 0;;
+esac
+exit 1
+EOF
+  chmod +x "$W/fakebin/docker"
+}
+
+newworld; unset SC_ROLLBACK_SHARED_SETS_CMD
+fakedocker absent 0
+out="$(PATH="$W/fakebin:$PATH" run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -eq 0 ] && echo "$out" | grep -q "no Shared STRICT network"; then ok "a database without the policy table (never migrated, or rolled back) has no shared network: the rollback proceeds"; else bad "an absent policy table blocked the rollback: $out"; fi
+rm -rf "$W"
+
+newworld; unset SC_ROLLBACK_SHARED_SETS_CMD
+fakedocker present 4
+out="$(PATH="$W/fakebin:$PATH" run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -ne 0 ] && echo "$out" | grep -q "4 network(s)"; then ok "four shared networks in the real query path refuse the rollback and are counted"; else bad "shared networks not refused through the real query: $out"; fi
+rm -rf "$W"
+
+newworld; unset SC_ROLLBACK_SHARED_SETS_CMD
+fakedocker present 0
+out="$(PATH="$W/fakebin:$PATH" run_tool --source-suffix .bak-inc9)"; rc=$?
+if [ $rc -eq 0 ]; then ok "a policy table with no shared network lets the rollback proceed"; else bad "zero shared through the real query was refused: $out"; fi
+rm -rf "$W"
+
 echo "== 8. the tool never uses cp to replace a binary =="
 if grep -nE '^\s*cp\s' "$TOOL" | grep -v '^\s*#' | grep -q .; then
   bad "binary-rollback.sh contains a cp-based replacement"

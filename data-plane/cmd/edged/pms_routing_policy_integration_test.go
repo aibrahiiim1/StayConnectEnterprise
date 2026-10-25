@@ -903,3 +903,41 @@ func TestIntegration_Routing_TheDownMigrationRefusesWhileASharedSetIsInUse(t *te
 		t.Fatalf("the guard refused although no shared set remains: %v", err)
 	}
 }
+
+func (f *apiFixture) disconnectedSince(t *testing.T, iface, syncedAgo string) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime SET transport_status='DISCONNECTED', last_complete_sync_at = now() - $2::interval WHERE pms_interface_id=$1::uuid`, iface, syncedAgo); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIntegration_Readiness_ADisconnectedPmsIsReadyOnlyWhileItsRosterMayBeTrusted(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Rooms", 3115, "185.0")
+	a, _, _ := f.seedInterface(t)
+	f.feed(t, a, true)
+	if st, r := f.setRouting(t, net, "DEDICATED", a); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	state := func() (string, string) {
+		_, r := f.do(t, "GET", "/pms-routing/readiness", nil)
+		for _, n := range r["networks"].([]any) {
+			if m := n.(map[string]any); m["network_id"] == net {
+				reason := ""
+				if rs := m["reasons"].([]any); len(rs) > 0 {
+					reason, _ = rs[0].(map[string]any)["code"].(string)
+				}
+				return m["state"].(string), reason
+			}
+		}
+		return "", ""
+	}
+	f.disconnectedSince(t, a, "1 hour")
+	if s, _ := state(); s != "READY" {
+		t.Fatalf("a PMS disconnected for an hour, answering from its published roster, is %s", s)
+	}
+	f.disconnectedSince(t, a, "10 days")
+	if s, reason := state(); s != "BLOCKED" || reason != "ROSTER_EXPIRED" {
+		t.Fatalf("a PMS whose roster has aged out is %s (%s); the assessment must agree with what the resolver will do", s, reason)
+	}
+}
