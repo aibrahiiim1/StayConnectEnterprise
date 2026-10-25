@@ -515,3 +515,9 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_set(uuid,uuid,integer,text,text) TO svc_edged;
   GRANT SELECT  ON iam_v2.walled_garden_settings_changes                                  TO svc_edged;
 END $g0125$;
+
+-- 0151 — staged switch-on/off of client networks (activation, port mode, recovery operations).
+--
+-- edged is the only service that stages, materialises at apply, settles at confirm and reverts at rollback a change; netd renders what the rows say and
+-- is granted nothing in iam_v2; scd, acctd and pmsd have no business with a staged request.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_changes TO svc_edged;

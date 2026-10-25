@@ -140,6 +140,32 @@ func TestAnOlderFailureOfDifferentSettingsIsNotBlamed(t *testing.T) {
 	}
 }
 
+func TestAStagedActivationIsAPendingChangeUntilItRuns(t *testing.T) {
+	r := Derive(Input{Saved: net90(false), Staged: &Staged{Kind: "ENABLE"}})
+	if r.Status != ChangePending || !strings.Contains(r.Reason, "Activation is staged") || r.Changes[0].Saved != "on" {
+		t.Fatalf("%+v", r)
+	}
+	r = Derive(Input{Saved: net90(false), EverActivated: true, Staged: &Staged{Kind: "ENABLE"}})
+	if !strings.Contains(r.Reason, "back on") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAStagedSwitchOffOfARunningNetworkLeavesClientsConnected(t *testing.T) {
+	r := Derive(Input{Saved: net90(true), Running: ptr(net90(true)), Staged: &Staged{Kind: "DISABLE"}})
+	if r.Status != ChangePending || !strings.Contains(r.Reason, "stay connected") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// A staged change that cannot happen (switching on what already runs) says nothing.
+func TestAStagedChangeThatChangesNothingIsIgnored(t *testing.T) {
+	r := Derive(Input{Saved: net90(true), Running: ptr(net90(true)), Staged: &Staged{Kind: "ENABLE"}, Health: Health{Known: true}})
+	if r.Status != Active {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestAFailureWithNoRecordedReasonSaysSo(t *testing.T) {
 	r := Derive(Input{Saved: net90(true), LastFailed: &Revision{Intent: []netcfg.GuestNetwork{net90(true)}}})
 	if r.Status != Failed || !strings.Contains(r.Reason, "no reason was recorded") {

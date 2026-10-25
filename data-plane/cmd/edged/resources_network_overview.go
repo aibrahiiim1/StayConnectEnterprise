@@ -188,6 +188,18 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 		prows.Close()
 	}
 
+	stagedBy := map[string]string{}
+	if srows, serr := s.db.Query(ctx, `SELECT network_id::text, kind FROM iam_v2.guest_network_changes
+		 WHERE tenant_id=$1 AND site_id=$2 AND state='PENDING'`, s.tenantID, s.siteID); serr == nil {
+		for srows.Next() {
+			var n, k string
+			if srows.Scan(&n, &k) == nil {
+				stagedBy[n] = k
+			}
+		}
+		srows.Close()
+	}
+
 	diagBy := map[string]netdNetworkDiag{}
 	for _, d := range diag.Networks {
 		diagBy[d.NetworkID] = d
@@ -220,7 +232,11 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 			}
 			attention = d.Findings
 		}
-		res := netstatus.Derive(netstatus.Input{Saved: n, Running: running, EverActivated: ever[n.ID], InFlight: inflightRev, LastFailed: failed, Health: health})
+		var staged *netstatus.Staged
+		if k, ok := stagedBy[n.ID]; ok {
+			staged = &netstatus.Staged{Kind: k}
+		}
+		res := netstatus.Derive(netstatus.Input{Staged: staged, Saved: n, Running: running, EverActivated: ever[n.ID], InFlight: inflightRev, LastFailed: failed, Health: health})
 		item := overviewNetwork{
 			ID: n.ID, Name: n.Name, NetworkType: n.NetworkType, VLANID: n.VLANID, ParentInterface: n.ParentInterface, BridgeName: n.BridgeName,
 			SubnetCIDR: n.SubnetCIDR, GatewayIP: n.GatewayIP, DHCPMode: string(n.DHCPMode), SavedEnabled: n.Enabled,

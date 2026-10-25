@@ -43,7 +43,11 @@ type Health struct {
 	Failing []string
 }
 
+// Staged is a switch-on or switch-off the operator asked for that has not been applied yet.
+type Staged struct{ Kind string } // "ENABLE" or "DISABLE"
+
 type Input struct {
+	Staged        *Staged
 	Saved         netcfg.GuestNetwork
 	Running       *netcfg.GuestNetwork // this network's entry in the active revision's intent; nil when absent
 	EverActivated bool
@@ -77,6 +81,19 @@ func Derive(in Input) Result {
 			case running != fl.Enabled || len(Diff(runningOrEmpty(in.Running), *fl)) > 0:
 				return Result{ChangePending, "A change to it is being applied and waits for confirmation.", changes}
 			}
+		}
+	}
+
+	if in.Staged != nil {
+		switch {
+		case in.Staged.Kind == "ENABLE" && !running:
+			what := "Activation is staged. Review and apply to start it; it serves clients only once confirmed."
+			if in.EverActivated {
+				what = "Switching it back on is staged. Review and apply to start it; it serves clients only once confirmed."
+			}
+			return Result{ChangePending, what, []Change{{Field: "enabled", Running: "off", Saved: "on"}}}
+		case in.Staged.Kind == "DISABLE" && running:
+			return Result{ChangePending, "Switching it off is staged. Clients stay connected until it is applied.", []Change{{Field: "enabled", Running: "on", Saved: "off"}}}
 		}
 	}
 
