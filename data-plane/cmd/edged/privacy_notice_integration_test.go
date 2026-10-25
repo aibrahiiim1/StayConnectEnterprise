@@ -180,6 +180,7 @@ func TestIntegration_PrivacyNotice_ASignInOnAProfileNetworkIsRecordedUnderThePro
 		t.Fatalf("assign = %d", st)
 	}
 
+	var lastVersion string
 	noticeOf := func(network string) string {
 		t.Helper()
 		var version *string
@@ -192,6 +193,7 @@ func TestIntegration_PrivacyNotice_ASignInOnAProfileNetworkIsRecordedUnderThePro
 		}
 		var text string
 		_ = f.pool.QueryRow(ctx, `SELECT COALESCE(privacy_text,'<none>') FROM public.privacy_notice_versions WHERE id=$1::uuid`, *version).Scan(&text)
+		lastVersion = *version
 		return text
 	}
 	if got := noticeOf(plain); got != "Site notice "+sfx {
@@ -199,5 +201,22 @@ func TestIntegration_PrivacyNotice_ASignInOnAProfileNetworkIsRecordedUnderThePro
 	}
 	if got := noticeOf(special); got != "Profile notice "+sfx {
 		t.Fatalf("a network with a profile was recorded under %q", got)
+	}
+	// The profile's stamp must be the version the site-wide function would record for the same design, or the two would drift apart.
+	profileVersion := lastVersion
+	if _, err := f.pool.Exec(ctx, `UPDATE tenants SET branding=$2::jsonb WHERE id=$1`, f.tenant, string(doc)); err != nil {
+		t.Fatal(err)
+	}
+	var viaSite string
+	if err := f.pool.QueryRow(ctx, `SELECT public.privacy_notice_in_force($1::uuid)::text`, f.tenant).Scan(&viaSite); err != nil || viaSite != profileVersion {
+		t.Fatalf("the profile stamp %s differs from the site function's %s (%v)", profileVersion, viaSite, err)
+	}
+	// And a profile with no notice of its own records the built-in one, as the site does.
+	bare, _ := json.Marshal(map[string]any{"design": map[string]any{"hotel_name": "Hotel"}})
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.portal_profiles SET doc=$2::jsonb WHERE id=$1::uuid`, prof, string(bare)); err != nil {
+		t.Fatal(err)
+	}
+	if got := noticeOf(special); !strings.HasPrefix(got, "[built-in notice]") {
+		t.Fatalf("a profile with no notice was recorded under %q", got)
 	}
 }

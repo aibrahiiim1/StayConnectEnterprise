@@ -121,7 +121,7 @@ packages a network has.
   by a header, cookie or parameter the client controls. The administrator preview of a profile is honoured only from the appliance itself, with no
   forwarding header. `portald` caches designs per client address, bounded (512 entries, 3 s).
 * The **privacy notice** is part of the design, so a sign-in on a profile network is recorded under that profile's notice
-  (`public.privacy_notice_in_force(tenant, network)`, stamped by the trigger of 0130).
+  (`iam_v2.profile_privacy_notice_stamp`, a trigger that runs after the 0130 stamp and replaces the version for a profile network; it changes nothing in `public`, because a live site applies migrations as `iam_v2_owner`, which owns no public function. Gate-P grants `iam_v2_owner` SELECT and INSERT on `public.privacy_notice_versions`. A failure leaves the site notice stamp and logs a warning; it never stops a sign-in).
 * An uploaded image used by **any** design (default or profile) cannot be deleted; an unreadable scan refuses the deletion.
 * Deleting a profile returns its networks to the default.
 
