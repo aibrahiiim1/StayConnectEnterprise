@@ -48,7 +48,7 @@ func heavilyReconfigured(t *testing.T, f *apiFixture, fn *fakeNetd) heavySite {
 	h.profile = f.newProfile(t, "Conference", "default")
 	f.do(t, "PUT", "/portal-branding/profiles/assignments/"+h.conference, map[string]any{"profile_id": h.profile})
 	f.do(t, "PUT", "/network/guest-networks/"+h.conference+"/sign-in", map[string]any{"disabled_methods": []string{"voucher"}})
-	_ = f.pool.QueryRow(ctx, `SELECT name FROM sites WHERE id=$1`, f.site).Scan(&h.siteName)
+	h.siteName = f.app.siteDisplayName(ctx)
 	h.networkCount = f.networkCount(t)
 	return h
 }

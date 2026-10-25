@@ -71,7 +71,7 @@ export default function RecoveryPage() {
     : plan.conflicts.length ? "Resolve the conflict first."
     : plan.cannot_restore.length ? "Part of this cannot be restored, so none of it is staged."
     : plan.networks.length === 0 ? "Nothing would change."
-    : "Type the site name to confirm.";
+    : "Type the confirmation to continue.";
 
   return (
     <PageShell width="wide">
@@ -150,7 +150,7 @@ export default function RecoveryPage() {
               <ul className="mt-1 list-disc pl-5 text-muted-foreground">{plan.protected.map((p) => <li key={p}>{p}</li>)}</ul>
             </div>
             {needsName && (
-              <Field label={`Type the site name (${plan.confirm_site_name}) to confirm`}>
+              <Field label={`Type ${plan.confirm_site_name} to confirm a full reset`}>
                 <Input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
               </Field>
             )}
