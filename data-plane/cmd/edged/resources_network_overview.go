@@ -216,6 +216,7 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 	if inflight != nil {
 		inflightRev = &netstatus.Revision{Intent: inflightIntent}
 	}
+	_ = s.archiveRetired(ctx, s.db)
 	archivedIDs, defaultID := s.archivedSet(ctx), s.defaultNetworkID(ctx)
 	for _, n := range saved {
 		var running *netcfg.GuestNetwork

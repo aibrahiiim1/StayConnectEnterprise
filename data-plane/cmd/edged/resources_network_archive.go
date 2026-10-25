@@ -73,6 +73,7 @@ func (s *server) mountArchive(r chi.Router) {
 func (s *server) listArchive(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	_ = s.archiveRetired(ctx, s.db)
 	rows, err := s.db.Query(ctx, `SELECT g.id::text, g.name, to_char(a.archived_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'), a.group_kind,
 		   EXISTS (SELECT 1 FROM iam_v2.auth_resolutions x WHERE x.guest_network_id = g.id)
 		   OR EXISTS (SELECT 1 FROM iam_v2.device_network_appearances x WHERE x.guest_network_id = g.id),
@@ -108,6 +109,10 @@ func (s *server) unarchiveNetwork(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	tag, err := s.db.Exec(ctx, `DELETE FROM iam_v2.network_archive WHERE network_id=$1::uuid AND tenant_id=$2::uuid AND site_id=$3::uuid`, id, s.tenantID, s.siteID)
+	if err == nil && tag.RowsAffected() > 0 {
+		// Touching the row is what stops the catch-up from putting it straight back: it only archives networks untouched since the reset.
+		_, err = s.db.Exec(ctx, `UPDATE guest_networks SET updated_at = now() WHERE id=$1::uuid`, id)
+	}
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "restore failed")
 		return
@@ -348,4 +353,26 @@ func (s *server) packagesPinnedElsewhere(ctx context.Context, defaultID string) 
 		out = append(out, pinnedPackage{Code: cur.Code, Revision: cur.RevisionNo, Networks: named})
 	}
 	return out, nil
+}
+
+// archiveRetired archives every network that is switched off and was left behind by the latest confirmed Restore Factory Defaults or Full Reset: the networks it
+// switched off and those already switched off before it, and nothing the operator has touched since (a network edited, switched on and off again, or taken
+// out of the archive after that reset is not archived again). Idempotent, and cheap enough to run on the reads that show the archive, which is also how a reset
+// confirmed before this existed is caught up. The Default Network is serving, so it is never in it.
+func (s *server) archiveRetired(ctx context.Context, q queryer) error {
+	if s.tenantID == "" || s.siteID == "" {
+		return nil
+	}
+	_, err := q.Exec(ctx, `
+		WITH last AS (
+		  SELECT c.group_id, c.group_kind, max(c.settled_at) AS at FROM iam_v2.guest_network_changes c
+		   WHERE c.tenant_id=$1::uuid AND c.site_id=$2::uuid AND c.state='CONFIRMED' AND c.group_kind IN ('FACTORY_RESET','FULL_RESET') AND c.settled_at IS NOT NULL
+		   GROUP BY c.group_id, c.group_kind ORDER BY max(c.settled_at) DESC LIMIT 1)
+		INSERT INTO iam_v2.network_archive (network_id, tenant_id, site_id, group_id, group_kind, archived_at)
+		SELECT g.id, g.tenant_id, g.site_id, l.group_id, l.group_kind, l.at
+		  FROM last l JOIN guest_networks g ON g.tenant_id=$1::uuid AND g.site_id=$2::uuid
+		 WHERE NOT g.enabled AND g.updated_at <= l.at AND g.created_at < l.at
+		   AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_network_changes later WHERE later.network_id = g.id AND later.created_at > l.at AND later.state <> 'CANCELLED')
+		ON CONFLICT (network_id) DO NOTHING`, s.tenantID, s.siteID)
+	return err
 }

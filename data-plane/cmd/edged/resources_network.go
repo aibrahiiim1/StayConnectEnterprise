@@ -196,6 +196,7 @@ func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, g)
 	}
+	_ = s.archiveRetired(ctx, s.db)
 	archived, def := s.archivedSet(ctx), s.defaultNetworkID(ctx)
 	for i := range out {
 		out[i].Pools = s.loadPoolsFor(ctx, out[i].ID)
