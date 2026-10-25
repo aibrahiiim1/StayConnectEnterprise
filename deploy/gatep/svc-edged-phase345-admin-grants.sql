@@ -524,3 +524,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_changes TO svc_edge
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_edged;
 GRANT SELECT ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_scd;
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_layer_snapshots, iam_v2.network_review_items TO svc_edged;
+--   0154 the archive of networks a confirmed reset retired: edged only.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_archive TO svc_edged;

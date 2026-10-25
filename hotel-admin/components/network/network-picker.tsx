@@ -30,7 +30,7 @@ export function NetworkPicker({ value, onChange, label, testId }: {
   const chosen = split(value);
   const known = new Set(networks.map((n) => n.id));
   const rows = [
-    ...networks.map((n) => ({ id: n.id, name: n.name })),
+    ...networks.map((n) => ({ id: n.id, name: n.archived ? `${n.name} (archived)` : n.name })),
     ...chosen.filter((id) => !known.has(id)).map((id) => ({ id, name: "A network that no longer exists" })),
   ];
   const toggle = (id: string, on: boolean) => onChange((on ? Array.from(new Set([...chosen, id])) : chosen.filter((x) => x !== id)).join(","));

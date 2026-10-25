@@ -423,6 +423,8 @@ func TestIntegration_Recovery_TheAdminConsoleRoleHoldsEveryPrivilegeTheRecoveryU
 		"iam_v2.guest_network_changes": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "iam_v2.portal_profiles": {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"iam_v2.portal_profile_assignments": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "iam_v2.network_signin_overrides": {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"iam_v2.network_layer_snapshots": {"SELECT", "INSERT", "UPDATE"}, "iam_v2.network_review_items": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+		"iam_v2.network_archive": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "iam_v2.internet_packages": {"SELECT"},
+		"iam_v2.pms_interfaces": {"SELECT"}, "iam_v2.auth_resolutions": {"SELECT"}, "iam_v2.device_network_appearances": {"SELECT"},
 	}
 	for table, privs := range need {
 		for _, p := range privs {

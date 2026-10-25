@@ -85,6 +85,8 @@ export default function RecoveryPage() {
     <PageShell width="wide">
       <PageHeader title="Recovery" description="Return the client networks to a known state. Each is staged, applied and kept or rolled back like any other network change." />
 
+      {status?.latest && <RecoveryProgress latest={status.latest} />}
+
       {staged.some((g) => g.state === "PENDING") && (
         <Callout tone="warning" title="A recovery is staged and has not been applied">
           {staged.filter((g) => g.state === "PENDING").map((g) => GROUP_LABEL[g.group_kind]).join(", ")}: the client networks are exactly as they were. It takes effect only when you press <strong>Apply
@@ -179,5 +181,33 @@ export default function RecoveryPage() {
         )}
       </DialogForm>
     </PageShell>
+  );
+}
+
+const STEPS = [
+  { key: "STAGED", label: "Staged", text: "Nothing has changed yet. Press Apply changes on Client networks to start it." },
+  { key: "APPLIED", label: "Applied", text: "It is live and affecting clients. Keep it or roll it back before the confirmation window ends; otherwise the appliance puts the previous configuration back by itself." },
+  { key: "CONFIRMED", label: "Confirmed", text: "It was kept." },
+] as const;
+
+/** Where the latest recovery stands: staged, applied or confirmed are three different things and are never shown as one. */
+function RecoveryProgress({ latest }: { latest: NonNullable<RecoveryStatus["latest"]> }) {
+  const title = latest.kind === "FULL_RESET" ? OP_TITLE.full_reset : latest.kind === "FACTORY_RESET" ? OP_TITLE.factory_defaults : OP_TITLE.restore_last_working;
+  if (latest.state === "CANCELLED") {
+    return <SectionCard title={`Latest recovery: ${title}`}><p className="text-sm text-muted-foreground">Cancelled before it was applied. Nothing was changed.</p></SectionCard>;
+  }
+  const at = STEPS.findIndex((x) => x.key === latest.state);
+  const retired = latest.state === "CONFIRMED" && latest.kind !== "RESTORE";
+  return (
+    <SectionCard title={`Latest recovery: ${title}`} description={new Date(latest.at).toLocaleString()}>
+      <ol className="flex flex-wrap gap-2" aria-label="Progress">
+        {STEPS.map((x, i) => (
+          <li key={x.key} aria-current={i === at ? "step" : undefined}>
+            <Badge tone={i < at ? "ok" : i === at ? (latest.state === "CONFIRMED" ? "ok" : "warn") : "default"}>{i + 1}. {x.label}</Badge>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-2 text-sm">{STEPS[at].text}{retired ? " The networks it switched off are archived and the Default Network serves clients." : ""}</p>
+    </SectionCard>
   );
 }

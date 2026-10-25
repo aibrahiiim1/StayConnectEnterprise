@@ -748,6 +748,7 @@ func (s *server) getRecovery(w http.ResponseWriter, r *http.Request) {
 	var open int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.network_review_items WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND resolved_at IS NULL`, s.tenantID, s.siteID).Scan(&open)
 	out["review_open"] = open
+	out["latest"] = s.latestRecovery(ctx)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -984,4 +985,39 @@ func gatewayCIDR(n netcfg.GuestNetwork) string {
 		return fmt.Sprintf("%s/%d", n.GatewayIP, ones)
 	}
 	return n.GatewayIP
+}
+
+type latestRecovery struct {
+	GroupID string `json:"group_id"`
+	Kind    string `json:"kind"`
+	// State is STAGED (nothing has changed), APPLIED (live, awaiting confirmation, rolls back by itself), CONFIRMED (kept), or CANCELLED.
+	State string `json:"state"`
+	At    string `json:"at"`
+}
+
+func (s *server) latestRecovery(ctx context.Context) *latestRecovery {
+	var l latestRecovery
+	var pending, applied, confirmed int
+	err := s.db.QueryRow(ctx, `
+		WITH last AS (SELECT group_id, group_kind, created_at FROM iam_v2.guest_network_changes
+		               WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND group_kind IN ('RESTORE','FACTORY_RESET','FULL_RESET')
+		               ORDER BY created_at DESC LIMIT 1)
+		SELECT l.group_id::text, l.group_kind, to_char(l.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		       count(*) FILTER (WHERE c.state='PENDING'), count(*) FILTER (WHERE c.state='APPLIED'), count(*) FILTER (WHERE c.state='CONFIRMED')
+		  FROM last l JOIN iam_v2.guest_network_changes c ON c.group_id = l.group_id GROUP BY l.group_id, l.group_kind, l.created_at`,
+		s.tenantID, s.siteID).Scan(&l.GroupID, &l.Kind, &l.At, &pending, &applied, &confirmed)
+	if err != nil {
+		return nil
+	}
+	switch {
+	case applied > 0:
+		l.State = "APPLIED"
+	case pending > 0:
+		l.State = "STAGED"
+	case confirmed > 0:
+		l.State = "CONFIRMED"
+	default:
+		l.State = "CANCELLED"
+	}
+	return &l
 }

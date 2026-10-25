@@ -21,6 +21,7 @@ export type RecoveryStatus = {
   last_working: { revision: number | null; confirmed_at: string | null; available: boolean };
   factory: { available: boolean; subnet: string };
   review_open: number;
+  latest?: { group_id: string; kind: "RESTORE" | "FACTORY_RESET" | "FULL_RESET"; state: "STAGED" | "APPLIED" | "CONFIRMED" | "CANCELLED"; at: string } | null;
 };
 
 export type ReviewItem = { id: string; network_id: string; network: string; layer: string; detail: string; room_sign_in_paused: boolean; created_at: string };

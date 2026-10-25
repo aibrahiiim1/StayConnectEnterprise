@@ -209,14 +209,52 @@ func (s *server) recordChangesRevision(ctx context.Context, ids []string, revisi
 }
 
 // settleConfirmedChanges closes the changes whose apply was kept: the revision being confirmed now, or one that is active or has since been superseded.
+// When the kept change was a factory reset, the networks it switched off are archived in the same transaction, so "confirmed" and "archived" are one fact: a
+// failed apply, a rollback, a lapsed window or a cancelled staging never gets here and never leaves a network archived.
 func (s *server) settleConfirmedChanges(ctx context.Context, revisionID string) error {
-	_, err := s.db.Exec(ctx, `
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
 		UPDATE iam_v2.guest_network_changes g SET state='CONFIRMED', settled_at=now()
 		 WHERE g.tenant_id=$1 AND g.site_id=$2 AND g.state='APPLIED'
 		   AND (g.revision_id = NULLIF($3,'')::uuid
-		        OR EXISTS (SELECT 1 FROM network_config_revisions v WHERE v.id = g.revision_id AND v.state IN ('active','superseded')))`,
-		s.tenantID, s.siteID, revisionID)
+		        OR EXISTS (SELECT 1 FROM network_config_revisions v WHERE v.id = g.revision_id AND v.state IN ('active','superseded')))
+		RETURNING g.network_id::text, g.group_id::text, g.group_kind, g.kind`, s.tenantID, s.siteID, revisionID)
 	if err != nil {
+		return err
+	}
+	type settled struct{ network, group, groupKind, kind string }
+	var done []settled
+	for rows.Next() {
+		var x settled
+		if err := rows.Scan(&x.network, &x.group, &x.groupKind, &x.kind); err != nil {
+			rows.Close()
+			return err
+		}
+		done = append(done, x)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, x := range done {
+		if x.kind != string(changeDisable) || (x.groupKind != "FACTORY_RESET" && x.groupKind != "FULL_RESET") {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.network_archive (network_id, tenant_id, site_id, group_id, group_kind)
+			SELECT g.id, g.tenant_id, g.site_id, $2::uuid, $3 FROM guest_networks g WHERE g.id=$1::uuid AND g.tenant_id=$4::uuid AND g.site_id=$5::uuid AND NOT g.enabled
+			ON CONFLICT (network_id) DO NOTHING`, x.network, x.group, x.groupKind, s.tenantID, s.siteID); err != nil {
+			return err
+		}
+	}
+	// A network that is serving again is not archived, whatever switched it back on.
+	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.network_archive a USING guest_networks g WHERE g.id = a.network_id AND g.enabled AND a.tenant_id=$1::uuid AND a.site_id=$2::uuid`, s.tenantID, s.siteID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
 	if cerr := s.captureLayers(ctx, revisionID); cerr != nil {
