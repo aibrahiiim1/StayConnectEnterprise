@@ -255,7 +255,7 @@ func TestIntegration_Recovery_FactoryResetKeepsEveryNetworkAndNeedsTheSiteName(t
 		t.Fatalf("a full reset with the wrong name = %d %v", st, b)
 	}
 	var siteName string
-	_ = f.pool.QueryRow(ctx, `SELECT name FROM sites WHERE id=$1`, f.site).Scan(&siteName)
+	siteName = f.app.siteDisplayName(ctx)
 	_, pv := f.do(t, "POST", "/network/recovery/preview", map[string]any{"op": "full_reset"})
 	if pv["confirm_site_name"] != siteName || len(pv["protected"].([]any)) == 0 {
 		t.Fatalf("preview: %v", pv)
@@ -410,5 +410,26 @@ func TestIntegration_Recovery_BackingOutASwapOfTwoUntaggedNetworksRestoresTheOri
 	}
 	if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE tenant_id=$1::uuid AND state='PENDING'`, f.tenant) != 2 {
 		t.Fatal("the swap is not staged again, in full")
+	}
+}
+
+// What the recovery code reads and writes must be granted to the Admin Console's own database role: the integration database is usually reached as a superuser,
+// which hides a missing grant until the appliance is used (the site name was once read from a table that role cannot see).
+func TestIntegration_Recovery_TheAdminConsoleRoleHoldsEveryPrivilegeTheRecoveryUses(t *testing.T) {
+	f := newAPI(t)
+	need := map[string][]string{
+		"public.guest_networks": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "public.dhcp_pools": {"SELECT", "INSERT", "DELETE"},
+		"public.network_config_revisions": {"SELECT"}, "public.tenants": {"SELECT"}, "iam_v2.sessions": {"SELECT"}, "iam_v2.guest_network_pms_map": {"SELECT"},
+		"iam_v2.guest_network_changes": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "iam_v2.portal_profiles": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+		"iam_v2.portal_profile_assignments": {"SELECT", "INSERT", "UPDATE", "DELETE"}, "iam_v2.network_signin_overrides": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+		"iam_v2.network_layer_snapshots": {"SELECT", "INSERT", "UPDATE"}, "iam_v2.network_review_items": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+	}
+	for table, privs := range need {
+		for _, p := range privs {
+			var ok bool
+			if err := f.pool.QueryRow(context.Background(), `SELECT has_table_privilege('svc_edged', $1, $2)`, table, p).Scan(&ok); err != nil || !ok {
+				t.Errorf("svc_edged lacks %s on %s (%v)", p, table, err)
+			}
+		}
 	}
 }

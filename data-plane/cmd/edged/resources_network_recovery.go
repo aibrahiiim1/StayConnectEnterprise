@@ -780,9 +780,16 @@ func (s *server) previewRecovery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, plan)
 }
 
+// siteDisplayName is the name the operator types to confirm a full reset: the hotel's name. A site whose name is empty or is just its identifier (a freshly
+// assigned appliance) is confirmed with the word RESET instead, so the confirmation is always something a person can read and type.
+// The name comes from tenants: the Admin Console's database role cannot read public.sites.
 func (s *server) siteDisplayName(ctx context.Context) string {
 	var name string
-	_ = s.db.QueryRow(ctx, `SELECT name FROM sites WHERE id=$1::uuid`, s.siteID).Scan(&name)
+	_ = s.db.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1::uuid`, s.tenantID).Scan(&name)
+	name = strings.TrimSpace(name)
+	if name == "" || strings.EqualFold(name, s.tenantID) || strings.EqualFold(name, s.siteID) || uuidPattern.MatchString(strings.ToLower(name)) {
+		return "RESET"
+	}
 	return name
 }
 

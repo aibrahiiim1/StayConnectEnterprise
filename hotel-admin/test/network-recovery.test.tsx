@@ -80,7 +80,7 @@ describe("recovery page", () => {
     fireEvent.click(screen.getAllByText(/Review…/)[2]);
     const stage = await screen.findByRole("button", { name: "Stage this recovery" });
     expect((stage as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(/Type the site name/), { target: { value: "Coral Resort" } });
+    fireEvent.change(screen.getByLabelText(/to confirm a full reset/), { target: { value: "Coral Resort" } });
     expect((stage as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(stage);
     await waitFor(() => expect(post).toHaveBeenLastCalledWith("/network/recovery/stage", { op: "full_reset", confirm_site_name: "Coral Resort" }));
