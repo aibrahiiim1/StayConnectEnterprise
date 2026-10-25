@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { canWrite } from "@/lib/roles";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
-import type { RoomSignInReadiness } from "@/lib/pms-availability";
+import { onlyUndecided, type RoomSignInReadiness } from "@/lib/pms-availability";
 import type { AssessmentInterfaceSummary } from "@/lib/api/pms-routing";
 import {
   type PmsConnection, type PmsProvider,
@@ -218,7 +218,12 @@ export default function PMSInterfacesPage() {
         </Card>
       ) : (
         <>
-          {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
+          {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") && onlyUndecided(signIn) ? (
+            <Callout tone="warning" title="Room sign-in needs a decision">
+              {`Nobody has chosen how room sign-in works on ${signIn.affected.map((a) => a.guestNetwork).join(", ")}. `}
+              <Link href="/pms-routing" className="underline underline-offset-2">Choose under PMS routing</Link>
+            </Callout>
+          ) : healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
             <Callout tone={signIn.state === "down" ? "danger" : "warning"}
               title={signIn.state === "down" ? "Guests cannot sign in with a room number" : "Room sign-in is not working on every client network"}>
               {signIn.state === "down"
@@ -393,6 +398,12 @@ function RoomSignInStat({
     return (
       <StatCard label="Room sign-in" tone="ok" value="Working"
         hint={signIn.unchecked.length ? `${signIn.unchecked.length} network${signIn.unchecked.length === 1 ? "" : "s"} not yet checked` : "On every client network using a PMS"} />
+    );
+  }
+  if ((signIn.state === "partial" || signIn.state === "down") && onlyUndecided(signIn)) {
+    return (
+      <StatCard label="Room sign-in" tone="warn" value="Needs a decision"
+        hint={`${signIn.affected.length} client network${signIn.affected.length === 1 ? "" : "s"} not set up`} />
     );
   }
   if (signIn.state === "partial" || signIn.state === "down") {

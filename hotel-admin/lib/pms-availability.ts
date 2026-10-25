@@ -9,6 +9,8 @@ export type AffectedRoute = {
   pmsInterface: string;
   reason: string;
   networkId?: string;
+  /** Nobody has chosen how room sign-in works here: a decision to make, not a fault. */
+  undecided?: boolean;
 };
 
 export type RoomSignInReadiness =
@@ -31,7 +33,13 @@ function affected(n: AssessmentNetwork): AffectedRoute {
     pmsInterface: names.length === 0 ? "no PMS chosen" : names.join(", "),
     reason: lc(reason).replace(/\.$/, ""),
     networkId: n.network_id,
+    undecided: n.state === "UNDECIDED",
   };
+}
+
+/** True when every affected network is only waiting for someone to decide how room sign-in works. */
+export function onlyUndecided(r: RoomSignInReadiness): boolean {
+  return (r.state === "down" || r.state === "partial") && r.affected.length > 0 && r.affected.every((a) => a.undecided);
 }
 
 /** null = the assessment could not be read: unknown, never an outage. */

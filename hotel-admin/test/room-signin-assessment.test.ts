@@ -41,6 +41,15 @@ describe("the view of the shared room sign-in assessment", () => {
     if (r.state === "down") expect(r.affected[0].pmsInterface).toBe("no PMS chosen");
   });
 
+  it("marks a network that is only waiting for a decision, so the screens do not call it a fault", async () => {
+    const { onlyUndecided } = await import("@/lib/pms-availability");
+    const r = readinessFromAssessment(a("BLOCKED", [net("1", "UNDECIDED", { policy: "", interfaces: [] })]));
+    expect(onlyUndecided(r)).toBe(true);
+    const mixed = readinessFromAssessment(a("PARTIAL", [net("1", "UNDECIDED", { policy: "", interfaces: [] }), net("2", "BLOCKED"), net("3", "READY")]));
+    expect(onlyUndecided(mixed)).toBe(false);
+    expect(onlyUndecided(readinessFromAssessment(a("READY", [net("1", "READY")])))).toBe(false);
+  });
+
   it("names unchecked networks without calling them failed", () => {
     const r = readinessFromAssessment(a("READY", [net("1", "READY"), net("2", "UNKNOWN")]));
     expect(r.state).toBe("ready");

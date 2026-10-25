@@ -174,4 +174,12 @@ describe("Room sign-in readiness reads the shared assessment", () => {
     await screen.findByRole("heading", { name: "Room sign-in" });
     expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
   });
+
+  it("a network that is only waiting for a decision is asked for one, not reported as not working", async () => {
+    assessed("BLOCKED", { ...net("UNDECIDED", "No one has decided how room sign-in works on this network, so it is not offered."), policy: "", interfaces: [] } as ReturnType<typeof net>);
+    render(<RoomSignInPage />);
+    expect(await screen.findByText("Room sign-in needs a decision")).toBeInTheDocument();
+    expect(screen.getByText(/Nobody has chosen how room sign-in works on Lobby/)).toBeInTheDocument();
+    expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
+  });
 });
