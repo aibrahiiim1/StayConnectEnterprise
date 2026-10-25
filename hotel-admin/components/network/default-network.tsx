@@ -50,7 +50,7 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
   return (
     <SectionCard title={`Default Network: ${info.name}`} description="The entry point guests meet. Each check says what was found; nothing here is changed for you.">
       <ul className="space-y-2 text-sm">
-        {info.items.map((i) => (
+        {(info.items ?? []).map((i) => (
           <li key={i.id} className="flex flex-wrap items-baseline gap-2">
             <Badge tone={STATE_TONE[i.state]}>{STATE_LABEL[i.state]}</Badge>
             <strong>{i.label}</strong>
@@ -59,11 +59,11 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
         ))}
       </ul>
 
-      {info.pms_candidates.length > 0 && (
+      {(info.pms_candidates ?? []).length > 0 && (
         <Callout tone="warning" title="Room sign-in needs a decision">
           <p className="mb-2">A PMS interface keeps its routes to the archived networks. None was copied here. Choosing one routes room sign-in on this network to that interface only.</p>
           <ul className="space-y-2">
-            {info.pms_candidates.map((c) => (
+            {(info.pms_candidates ?? []).map((c) => (
               <li key={c.pms_interface_id} className="flex flex-wrap items-center justify-between gap-2">
                 <span><strong>{c.label}</strong> — routed to {c.routed_from.join(", ")}</span>
                 {writable && <Button size="sm" variant="secondary" onClick={() => { setErr(null); setChoose(c); }}>Route to this network…</Button>}
@@ -73,10 +73,10 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
         </Callout>
       )}
 
-      {info.packages_pinned_to_other_networks.length > 0 && (
+      {(info.packages_pinned_to_other_networks ?? []).length > 0 && (
         <Callout tone="warning" title="Packages limited to other networks">
           <ul className="list-disc pl-5">
-            {info.packages_pinned_to_other_networks.map((p) => (
+            {(info.packages_pinned_to_other_networks ?? []).map((p) => (
               <li key={p.code}>{p.code} (revision {p.revision}) is limited to {p.networks.join(", ")}.</li>
             ))}
           </ul>

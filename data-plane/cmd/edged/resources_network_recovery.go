@@ -740,6 +740,8 @@ func (s *server) getRecovery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	out := map[string]any{"operations": []map[string]any{}}
+	// An apply whose confirmation window has lapsed is put back before its state is reported, so a lapsed recovery never reads as applied.
+	_ = s.reconcileStaleChanges(ctx)
 	var revSeq *int64
 	var at *string
 	_ = s.db.QueryRow(ctx, `SELECT seq, to_char(COALESCE(confirmed_at, created_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM network_config_revisions WHERE state='active' ORDER BY seq DESC LIMIT 1`).Scan(&revSeq, &at)

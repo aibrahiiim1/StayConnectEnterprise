@@ -71,7 +71,10 @@ func TestIntegration_Archive_OnlyAConfirmedResetArchivesAndEveryOtherEndLeavesNo
 		t.Fatalf("applied: archived=%d state=%s", f.archivedCount(t), f.latestRecoveryState(t))
 	}
 	fn.timeOut(t)
-	f.do(t, "GET", "/network/changes", nil)
+	// Reading the recovery status alone reconciles a lapsed apply: it must not report APPLIED.
+	if f.latestRecoveryState(t) != "STAGED" {
+		t.Fatalf("a lapsed recovery is reported as %s", f.latestRecoveryState(t))
+	}
 	if f.archivedCount(t) != 0 || f.latestRecoveryState(t) != "STAGED" {
 		t.Fatalf("lapsed: archived=%d state=%s", f.archivedCount(t), f.latestRecoveryState(t))
 	}
@@ -359,5 +362,28 @@ func TestIntegration_Archive_TheWholeJourneyRunsAsTheAdminConsoleRole(t *testing
 	}
 	if st, b := f.do(t, "POST", "/network/guest-networks/"+h.vlans[0]+"/unarchive", nil); st != 200 {
 		t.Fatalf("unarchive as svc_edged = %d %v", st, b)
+	}
+}
+
+// A check that cannot read its data still answers with lists, never null: the page that shows it must not fail on the very case it is reporting.
+func TestIntegration_Default_ReadinessKeepsListsWhenChecksCannotRead(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	h := heavilyReconfigured(t, f, fn)
+	if st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName}); st != 201 {
+		t.Fatalf("stage = %d %v", st, b)
+	}
+	f.applyAndKeep(t, fn)
+	f.app.commerce = nil
+	_, r := f.do(t, "GET", "/network/default", nil)
+	for _, k := range []string{"items", "pms_candidates", "packages_pinned_to_other_networks"} {
+		if _, ok := r[k].([]any); !ok {
+			t.Fatalf("%s is %v, want a list", k, r[k])
+		}
+	}
+	for _, it := range r["items"].([]any) {
+		if m := it.(map[string]any); m["id"] == "packages" && m["state"] != "attention" {
+			t.Fatalf("packages that cannot be read must say so, got %v", m)
+		}
 	}
 }

@@ -206,7 +206,9 @@ func (s *server) getDefaultReadiness(w http.ResponseWriter, r *http.Request) {
 	var cerr error
 	if routed == 0 {
 		cands, cerr = s.pmsCandidatesFor(ctx, id)
-		out.PMSCandidates = cands
+		if cands != nil {
+			out.PMSCandidates = cands
+		}
 	}
 	switch {
 	case routed > 0:
@@ -225,7 +227,9 @@ func (s *server) getDefaultReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pinned, perr := s.packagesPinnedElsewhere(ctx, id)
-	out.PinnedOnOld = pinned
+	if pinned != nil {
+		out.PinnedOnOld = pinned
+	}
 	switch {
 	case perr != nil:
 		add("packages", "Package eligibility", "attention", "Package rules could not be read, so nothing is claimed about them.")
