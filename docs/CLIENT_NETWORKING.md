@@ -432,3 +432,40 @@ now tied to its radio by id.
 one PMS Interface exists on PRE-LIVE, so a shared set cannot be exercised live); the effect of the Product Owner's trunk conversions on real clients; any switch, access-point or
 hypervisor configuration.
 
+## 18. Follow-up under the same mission (2026-10-26): closed write path, rollback drill, reconciliation after revisions 99 and 100
+
+**Closed write path.** Every routing mutation needs its preview. A routing request without a mode, the interfaces and the preview's fingerprint is refused (`preview_required`),
+the earlier single-interface request included; removing a network's routing (`DELETE ?based_on=`) needs the fingerprint too and records the previous policy. Regression evidence
+(`TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutItsPreview`): a shared set survives, unchanged, the legacy request, the legacy request with a routing mode,
+a dedicated replacement with no, empty or stale fingerprint, a removal with none or a stale one, and a fingerprint taken from an earlier preview. Live (deployment, against a
+network id that does not exist, so nothing could change): all refused, and every network's policy and fingerprint identical before and after.
+
+**Rollback.** Drilled on a disposable database as `iam_v2_owner` with 34 shared, 179 dedicated and 12 none networks: the down migration keeps all 269 mapped rows and saves the
+policies; applying 0155 again restored 34, 179 and 12 exactly (the four over-cap fixtures stay undecided, fail closed). Software-first order, the older-release behaviour and
+the amendment of 0155 (a save-and-restore added after its live application; the live database is unaffected) are in §16. scd now treats an absent policy table as no policy
+(one mapped interface keeps working, several refuse), tested by renaming the table under a running resolver.
+
+**Guided editor.** The room sign-in editor shows its step (choose, then review and confirm), marks the fitting option as recommended, disables an option with the reason
+(for example a shared set when only one PMS is in service), counts the shared selection, states in a sentence what the choice means for guests, returns to step 1 with a clear
+message and the reloaded state when the routing changed after the preview, and confirms with a message that repeats the effect.
+
+**Read-only reconciliation of PRE-LIVE after revisions 99 and 100** (21:34 UTC, 2026-10-25; no network or PMS change was made by the agent, and re-read after the deployment below:
+identical apart from one `backup.created` by `admin`).
+* Revisions: 100 active (applied 20:17:07, confirmed 20:17:15 by `admin`), 99 and 98 superseded (98 is your Full Reset, 14:58:53 / 14:59:06). Nothing staged or in flight.
+* Client port `ens192` is a trunk: *Client Wi-Fi* untagged (native, `10.20.0.0/20`), *VLAN 60* (`10.60.0.0/24`) and *VLAN 90* (`10.90.0.0/24`) tagged, all enabled and
+  confirmed running; the VLAN devices and bridges are up with their gateway addresses and routes; Kea's file lists exactly those three subnets, written at the revision-100
+  confirmation; the management address `172.21.60.25/24` and the default route are unchanged; no service is in error.
+* Archive: two (*PRELIVE Test Guest* untagged and the earlier *VLAN 60*); the other *PRELIVE Test Guest* (VLAN 90) was restored from the archive by you and is switched off. Nothing
+  archived is enabled. VLAN 60 and VLAN 90 were created by the Access-to-Trunk changes.
+* Room sign-in: *VLAN 90* is dedicated to Protel and ready (set at 20:18:25); *VLAN 60* (set, then returned to not decided) and *Client Wi-Fi* are undecided and each raises one
+  decision warning; the two restored/archived test networks keep their migrated dedicated routes; no mapping without a policy, no policy without a network.
+* Diagnostics: no failing check on any of the three running networks. **`ens192.60` has received 0 frames (17 sent) and `ens192.90` 0 (14 sent)** while `ens192` itself carries
+  traffic: the same signature as the earlier VLAN 60 observation, now on both VLANs. It shows that no tagged frame has reached this appliance's network stack on those VLANs; it
+  does not show where they are lost. The switch trunk, the ESXi port group (VLAN ID 4095 is needed to receive tagged frames), the access-point mapping and the virtual NIC are
+  unexamined. Active guest sessions: 0.
+
+**Deployment of this follow-up (software only; no schema change).** edged and scd `1500865c` (sha256 `852373f7...` and `ce292ebd...`, `vcs.modified=false`, production tag),
+Admin Console release `20261025-215640` built from `1500865c` (BUILD_ID `lshkkUlm4k3eLnLbQnfjd`). Backups `edged.bak-pre-1500865c-20261025T215629Z` and
+`scd.bak-pre-1500865c-20261025T215634Z`; console `hotel-admin.previous` -> `20261025-201251`. `DEPLOYED_BINARIES` rewritten from the installed bytes (7 of 7), every unit active, no
+error logged. A real browser check at 1280 px and 390 px found no overflow and the guided editor behaving as described (previewed, not confirmed).
+
