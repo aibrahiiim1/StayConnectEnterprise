@@ -88,6 +88,7 @@ iam_v2.pms_room_inventory_changes.rooms_before
 iam_v2.pms_roster_reconciliation_runs.reason
 iam_v2.pms_roster_reconciliation_runs.rooms_enumerated
 iam_v2.pms_roster_reconciliation_runs.rooms_expected
+iam_v2.portal_profiles.name
 iam_v2.post_stay_profiles.revoke_reason
 iam_v2.posting_attempts.g_number
 iam_v2.posting_presend_aborts.reason
