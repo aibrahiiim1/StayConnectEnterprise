@@ -164,3 +164,28 @@ ownership, adoption, a hostile network name against the real nft parser and the 
 **Not verified:** a real Kea, a real switch or hypervisor trunk, PRE-LIVE. Nothing here was deployed. On PRE-LIVE, VLAN 60 showed zero frames received on
 its VLAN device, which locates the loss outside the appliance; the switch port and the virtual-switch port group still need checking. PRE-LIVE's on-disk Kea
 file stays stale until netd is deployed.
+
+## 13. PRE-LIVE deployment record (2026-10-25, appliance `172.21.60.25`)
+
+Measured, not claimed. The appliance was inspected first and re-inspected after every step.
+
+| | Before | After |
+|---|---|---|
+| Schema | 0150 | 0153 (0151, 0152, 0153 applied by `scripts/edge-migrate.sh` as `iam_v2_owner`, each after a mandatory encrypted, proven-restorable backup) |
+| netd, scd, portald | `9394eb5f` (netd), `b5775652` (scd, portald) | `4a192268` (master after #243) |
+| edged | `b5775652` | `82faee4f` (master after #244) |
+| Admin Console | release `20261024-170919` | release `20261025-115528`, built from `82faee4f` |
+| acctd, pmsd | `9394eb5f`, `ae4f85d2` | unchanged |
+| Kea live configuration | subnets 192.168.77.0/24 (br-g90) and 10.60.0.0/24 (br-g60); hash `75dc2ea6` | identical hash: Kea was never restarted |
+| Kea file on disk | stale since 21 Aug (one subnet, a bridge that no longer exists) | holds the confirmed configuration (both subnets) |
+| nftables | structure as running | no change except the walled-garden's DNS-resolved address sets |
+| Unbound fragments, interfaces, default route, management address | as running | identical |
+| Guest sessions at the time | 0 | 0 |
+
+**Two defects found only by deploying, both fixed through the protected path before the final state:**
+1. Migration 0152 replaced a function in `public`. A live site applies migrations as `iam_v2_owner`, which owns nothing in `public`, so the apply was refused (`permission denied for schema public`) and nothing changed. 0152 now touches nothing in `public` (§7); Gate-P's grant of `SELECT, INSERT` on `public.privacy_notice_versions` to `iam_v2_owner` was applied once, by hand, as the platform owner (it is in `gatep-grants.sql`). (#243)
+2. The Full Reset confirmation name was read from `public.sites`, which the Admin Console's database role cannot read, so the field never appeared. It is now read from `tenants`, `RESET` when the site has no readable name, and an integration test pins the privileges the recovery code uses. (#244)
+
+**Live checks that passed:** every new read endpoint answers 200 as the verification operator; `/network`, `/network/recovery`, the network page and Portal settings render with no horizontal overflow at 1280 px and 390 px; the Restore Last Working and Full Reset previews (read-only) show the right plan, the "check outside the appliance" list and what is not touched, and the Stage button stays disabled until the confirmation is typed; no 4xx/5xx from the Admin Console API during the browser run; `check-appliance-units.sh` passes; the Client Portal answers on 8380 and 8343 with the site's design and sign-in methods; `sha256sum -c DEPLOYED_BINARIES.sha256` is all OK.
+
+**Not done, deliberately:** the prepared network was not activated, no port was converted, no VLAN was changed, no Full Reset was run, and nothing external (switch, ESXi) was touched. Those are the Product Owner's manual tests. Rollback: previous binaries are kept as `*.bak-pre-<sha>-<time>` in `/opt/stayconnect/bin`, the previous Admin Console release is `hotel-admin.previous`, and migrations 0151–0153 each have a `.down.sql` (run with `scripts/edge-migrate.sh --down`, newest first).
