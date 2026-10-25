@@ -147,7 +147,7 @@ sign-in is not available there. Routing itself is configured only under PMS rout
 
 Migrations 0151 (staged changes), 0152 (profiles, assignments, sign-in overrides, the notice stamp) and 0153 (recovery snapshots and review items) create
 `iam_v2` tables owned by `iam_v2_owner`. `svc_edged` writes them and `svc_scd` reads the profile and sign-in tables; the grants are plain statements in
-`deploy/gatep/svc-edged-phase345-admin-grants.sql`, so a Gate-P reconcile after a factory-clean install reproduces them (the grant test replays that file).
+`deploy/gatep/svc-edged-phase345-admin-grants.sql` (0154 adds `iam_v2.network_archive`), so a Gate-P reconcile after a factory-clean install reproduces them (the grant test replays that file).
 No table holds guest data. `iam_v2.portal_profiles.name` is recorded in the personal-column list as staff configuration.
 
 ## 11. Permissions and audit
@@ -234,26 +234,45 @@ network with history cannot be removed (the existing delete answers `kept_as_his
 showed that it was still waiting, so a staged reset could be taken for a finished one. Staging now sends the operator to Client networks, the Recovery page
 carries a warning that a recovery is staged and not applied, and the staged-changes list marks it *Not applied yet*.
 
-## 15. Switched-off networks, archiving, and a factory-clean reset
+## 15. Archived networks and the Default Network
 
-**Intended behaviour.** A network is never deleted by a recovery. Its row is its identity: sign-ins, devices, resolutions, the PMS mapping, package rules that
-name it, the audit trail, the last-confirmed snapshot and a rollback all refer to it. Switching it off removes it from service and frees its VLAN, interface
-and name (§2).
+**Decision (Product Owner, 2026-10-25).** Non-destructive archiving: after a successful Full Reset the main screen shows one functional Default Network, the old
+networks are disabled and hidden in an optional archive, and nothing is deleted. A truly factory-clean reset that removes history is not part of this and would
+need its own, explicitly authorised operation.
 
-**Not a defect, but a product question.** After a successful reset the list of Client networks would show the prepared network *and* every old one, switched
-off. That is accurate and not a clean factory presentation.
+**Why a retired network keeps its row.** Its identity is referenced by sign-ins, device appearances, resolutions, verification grants, the PMS routing, package
+rules, sign-in restrictions and pauses, the audit trail, the last-confirmed snapshot and a rollback. Deleting is refused for any network with history
+(`kept_as_history`); the existing delete is for a network never used.
 
-**Options for the Product Owner**
+**What archived means.** A marker in `iam_v2.network_archive` (migration 0154, additive; nothing in `public`). It is a presentation state: the network is still
+switched off, still has its history, settings, PMS routing and audit trail, and nothing a guest, an entitlement, a package rule or the PMS sees changes.
 
-1. *Leave as is.* Honest, no new behaviour; clutter grows with each reset.
-2. *Archive as a presentation state (recommended).* Add an `archived_at` marker on a network. A recovery archives the networks it switched off (an operator can
-   also archive or restore one by hand). Archived networks are hidden from Client networks by default behind *Switched off and archived (n)*, still appear in
-   history, reports, package-rule pickers (marked archived) and audit, keep their identity and can be restored. Nothing is deleted, rollback still works, and a
-   successful reset *looks* factory-clean. Cost: one additive column and UI filtering; no data removal.
-3. *A separate, explicit factory-clean operation.* Removes networks that have no history with the existing delete, and for those that do keeps the row, archived.
-   Removing history itself (sign-ins, devices, evidence) is a destructive, irreversible act on records that GDPR, audit and financial retention rules govern; it
-   must be a distinct operation with its own authorization, typed confirmation, backup and audit, and is **not recommended** as part of Full Reset.
+* **When it is written.** Only when a Restore Factory Defaults or Full Client Networking Reset is **confirmed**, in the same transaction that settles the change
+  (`settleConfirmedChanges`), and only for the networks that reset switched off. Staged, applied, cancelled, rolled back and lapsed resets never archive anything,
+  so a failed change cannot leave an incorrect archive. Restore Last Working archives nothing.
+* **Staged, applied, confirmed.** The Recovery page shows the latest recovery as three different states: *Staged* (nothing has changed), *Applied* (live, affecting
+  clients, rolls back by itself unless kept) and *Confirmed* (kept; the retired networks are archived). Client networks lists a staged or applied recovery with
+  *Not applied yet* or *Awaiting confirmation*.
+* **Where it shows.** Client networks lists the Default Network (badged *Default*) and every other network that is not archived. **Archived networks (n)** sits
+  below, collapsed, with its count; expanding it lists each network with when and by which operation it was retired, whether it has client history and whether it
+  keeps a PMS route, and **Restore from archive** (which only removes the marker; the network stays switched off). Switching an archived network on also removes the
+  marker. Package-rule pickers mark archived networks; PMS routing keeps showing their routes and does not list them as unrouted networks.
+* **Audit.** `network.unarchived`; the reset itself is audited as before.
 
-**Recommendation.** Option 2 now; keep option 3 limited to what the existing delete already does (a never-used network can be deleted); treat any removal of
-history as a separate Product-Owner decision. Option 2 needs the Product Owner's approval before it is built: it adds a stored marker and changes what the
-list shows by default. Nothing in it is implemented in this change.
+**The Default Network** is the prepared network a reset put in place (or activation created) while it is switched on. `GET /network/default` and the card on Client
+networks say what is ready and what needs the operator, and change nothing:
+
+| Check | Meaning |
+|---|---|
+| DHCP, DNS | The prepared settings: local DHCP and its pool, appliance DNS. |
+| Client Portal | The portal design the network shows (the site's default unless a profile is assigned). |
+| Sign-in | The site's methods, narrowed by the network if it has an override. |
+| PMS routing | A route is made only by the operator. The routes of the retired networks stay on them. If a PMS interface is routed only to archived or switched-off networks it is offered as a **candidate**, one interface at a time, with a preview; routing it uses the existing, explicit PMS-routing call. Two independent interfaces are two candidates, never merged; none is chosen for the operator. No PMS traffic or posting is started. |
+| Package eligibility | A package whose current revision limits it to named networks, none of them the Default Network, is listed as *not offered here*. Revisions are immutable and were not widened; offering one here is a new revision of the package. |
+
+**Dependencies on retired network ids, investigated** (PRE-LIVE, 2026-10-25): two of the three old networks carry sign-in history (419 and 251 sign-ins; 139 and 174
+device appearances; 187 and 23 resolutions); both old PRELIVE test networks are routed to the one PMS interface (Protel); no package rule names a network
+(`SITE_NETWORK` rules: none); entitlements are not tied to a network (no entitlement column references one); sign-in restrictions and pauses are by network id and stay with their networks. A
+replacement creates lineage so pinned package rules keep matching; a reset creates a new network without lineage, so nothing is widened.
+
+**Still a Product-Owner matter.** Removing history, or a network that has any, is not offered anywhere and would need its own authorisation.

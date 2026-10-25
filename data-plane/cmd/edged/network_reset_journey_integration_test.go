@@ -33,7 +33,7 @@ func heavilyReconfigured(t *testing.T, f *apiFixture, fn *fakeNetd) heavySite {
 	f.applyAndKeep(t, fn)
 	_ = f.pool.QueryRow(ctx, `SELECT id::text FROM guest_networks WHERE tenant_id=$1 AND name='Client Wi-Fi'`, f.tenant).Scan(&h.oldFactory)
 
-	st, body := f.do(t, "POST", "/network/ports/"+h.lan+"/mode", map[string]any{"mode": "trunk", "vlans": []map[string]any{{"vlan_id": 60, "name": "Rooms"}, {"vlan_id": 90, "name": "Conference"}}})
+	st, body := f.do(t, "POST", "/network/ports/"+h.lan+"/mode", map[string]any{"mode": "trunk", "vlans": []map[string]any{{"vlan_id": 3060, "name": "Rooms"}, {"vlan_id": 3090, "name": "Conference"}}})
 	if st != 201 {
 		t.Fatalf("trunk = %d %v", st, body)
 	}
