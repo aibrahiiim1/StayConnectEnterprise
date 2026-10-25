@@ -354,3 +354,61 @@ func TestIntegration_Recovery_ARestoreThatCannotBeCompleteStagesNothing(t *testi
 		t.Fatal("a refused restore changed a network")
 	}
 }
+
+// Two untagged networks cannot be enabled on one port at once, so backing out a swap has to switch the new one off before the old one comes back.
+func TestIntegration_Recovery_BackingOutASwapOfTwoUntaggedNetworksRestoresTheOriginal(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	fn.lan = uniqueParent()
+	f.retireRevisions(t)
+	ctx := context.Background()
+	port := uniqueParent()
+	mk := func(name, third string) string {
+		parent := port
+		if name != "Original" {
+			parent = uniqueParent() + "r"
+		}
+		st, body := f.do(t, "POST", "/network/guest-networks", netBody(name, "untagged", parent, 0, "10."+third+".0/24", "10."+third+".1", "10."+third+".100", "10."+third+".200"))
+		if st != 201 {
+			t.Fatalf("create %s = %d %v", name, st, body)
+		}
+		return body["id"].(string)
+	}
+	x := mk("Original", "201.0")
+	y := mk("Replacement", "202.0")
+	if st, _ := f.do(t, "POST", "/network/guest-networks/"+y+"/disable", nil); st != 200 {
+		t.Fatal("disable")
+	}
+	// Both sit on one port; only one of them may be enabled at a time.
+	if _, err := f.pool.Exec(ctx, `UPDATE guest_networks SET parent_interface=$2 WHERE id=$1::uuid`, y, port); err != nil {
+		t.Fatal(err)
+	}
+	f.applyAndKeep(t, fn)
+
+	tx, err := f.app.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.stageChanges(ctx, tx, "RESTORE", []changeItem{{x, changeDisable}, {y, changeEnable}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st, b := f.apply(t); st != 200 {
+		t.Fatalf("apply = %d %v", st, b)
+	}
+	if f.enabledOf(t, x) || !f.enabledOf(t, y) {
+		t.Fatal("the swap did not apply")
+	}
+	if st, b := f.rollbackRev(t, fn.revision); st != 200 {
+		t.Fatalf("rollback = %d %v", st, b)
+	}
+	f.do(t, "GET", "/network/changes", nil)
+	if !f.enabledOf(t, x) || f.enabledOf(t, y) {
+		t.Fatalf("after backing out, original enabled=%v replacement enabled=%v", f.enabledOf(t, x), f.enabledOf(t, y))
+	}
+	if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE tenant_id=$1::uuid AND state='PENDING'`, f.tenant) != 2 {
+		t.Fatal("the swap is not staged again, in full")
+	}
+}

@@ -68,6 +68,7 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 
 	// A switched-off account kind is answered as a wrong password after the same argon2 work: saying "Email accounts are off" would be an enumeration oracle.
 	credential := iamv2.CredentialAccount
+	kindKnown := false
 	if s.db != nil {
 		var selfRegistered bool
 		err := s.db.QueryRow(r.Context(), `SELECT self_registered FROM iam_v2.guest_access_accounts
@@ -84,9 +85,26 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		case selfRegistered:
 			credential = iamv2.CredentialEmailAccount
+			kindKnown = true
+		default:
+			kindKnown = true
 		}
 	}
-	s.authorizeViaIAMv2(w, withMethodKey(r, keyGuestAccount), iamv2.MethodAccount,
+	// The account kind decides which network setting applies. A network that does not offer this kind answers exactly as a wrong password does, so it cannot be
+	// used to learn which kind a username is; a username that exists nowhere is judged by either kind and fails on its credentials.
+	if kindKnown {
+		key := keyGuestAccount
+		if credential == iamv2.CredentialEmailAccount {
+			key = keyEmailAccount
+		}
+		if !s.networkOffersIP(r.Context(), ip, key) {
+			passwordhash.BurnVerify(req.Password)
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "AUTH_DENIED", "reason": "invalid_credentials", "authority": "iam_v2"})
+			return
+		}
+		r = withMethodKey(r, key)
+	}
+	s.authorizeViaIAMv2(w, r, iamv2.MethodAccount,
 		iamv2.Request{Username: username, Secret: req.Password, Credential: credential,
 			Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }

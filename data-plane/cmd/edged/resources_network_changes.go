@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -131,6 +132,22 @@ func (s *server) materialisePendingChanges(ctx context.Context, tx pgx.Tx) ([]st
 // revertChanges puts every flag back and returns each change to PENDING. One change per transaction, so a stuck row cannot block the rest.
 func (s *server) revertChanges(ctx context.Context, ids []string, reason string) error {
 	var errs []error
+	// Back out in the reverse of the order the apply went in (switch-offs were written first): networks the apply switched ON go off before the ones it switched
+	// off come back, or two untagged networks on one port would collide.
+	if len(ids) > 1 {
+		order := map[string]int{}
+		if rows, qerr := s.db.Query(ctx, `SELECT id::text, CASE kind WHEN 'ENABLE' THEN 0 WHEN 'SETTINGS' THEN 1 ELSE 2 END FROM iam_v2.guest_network_changes WHERE id = ANY($1::uuid[])`, ids); qerr == nil {
+			for rows.Next() {
+				var id string
+				var rank int
+				if rows.Scan(&id, &rank) == nil {
+					order[id] = rank
+				}
+			}
+			rows.Close()
+		}
+		sort.SliceStable(ids, func(i, j int) bool { return order[ids[i]] < order[ids[j]] })
+	}
 	for _, id := range ids {
 		if err := s.revertChange(ctx, id); err != nil {
 			errs = append(errs, fmt.Errorf("change %s: %w", id, err))

@@ -216,3 +216,50 @@ func TestIntegration_NetworkSignin_EveryEntryPointHonoursTheNetworkItIsReachedFr
 	}
 	_ = otherID
 }
+
+// The shared account route judges the network setting by the kind of account that signed in, and answers a refusal as a wrong password.
+func TestIntegration_NetworkSignin_TheAccountRouteUsesTheKindOfTheAccount(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+	f.srv.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
+		return &tenantcfg.AuthMethods{GuestAccount: &tenantcfg.AuthMethod{Enabled: true}, EmailAccount: &tenantcfg.AuthMethod{Enabled: true}}, nil
+	}
+	mk := func(name string, self bool) {
+		if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.guest_access_accounts (tenant_id, site_id, username, password_hash, self_registered) VALUES ($1,$2,$3,'x',$4)`,
+			f.tenant, f.site, name, self); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	mk("front.desk", false)
+	mk("guest@example.com", true)
+
+	try := func(user string) (reachedAuthority bool, body string) {
+		raw, _ := json.Marshal(map[string]any{"username": user, "password": "wrong", "ip": f.net.guestIP, "mac": f.net.mac})
+		rec := httptest.NewRecorder()
+		func() {
+			defer func() {
+				if recover() != nil {
+					reachedAuthority = true // past every network check, into the authenticator this fixture does not carry
+				}
+			}()
+			f.srv.authorizeGuestAccount(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(raw))))
+		}()
+		return reachedAuthority, rec.Body.String()
+	}
+	denied := func(reached bool, body string) bool { return !reached && strings.Contains(body, "invalid_credentials") }
+
+	f.setOverride(t, f.network, []string{"guest_account"}, "", nil)
+	if r, b := try("front.desk"); !denied(r, b) {
+		t.Fatalf("a staff account on a network that switched staff accounts off: reached=%v %s", r, b)
+	}
+	if r, b := try("guest@example.com"); r == false && denied(r, b) {
+		t.Fatalf("an email account was refused because only staff accounts were switched off: %s", b)
+	}
+	f.setOverride(t, f.network, []string{"email_account"}, "", nil)
+	if r, b := try("guest@example.com"); !denied(r, b) {
+		t.Fatalf("an email account on a network that switched email accounts off: reached=%v %s", r, b)
+	}
+	if r, b := try("front.desk"); r == false && denied(r, b) {
+		t.Fatalf("a staff account was refused because only email accounts were switched off: %s", b)
+	}
+}
