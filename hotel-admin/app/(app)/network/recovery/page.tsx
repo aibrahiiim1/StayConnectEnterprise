@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import {
   ACTION_LABEL, LAYER_LABEL, OP_TITLE, STATE_LABEL, type RecoveryOp, type RecoveryPlan, type RecoveryStatus, type ReviewItem,
 } from "@/lib/api/network-recovery";
 import { errMsg } from "@/lib/utils";
+import { GROUP_LABEL, type StagedGroup } from "@/lib/api/network-lifecycle";
 
 const OPS: { op: RecoveryOp; text: string }[] = [
   { op: "restore_last_working", text: "Put every client network back to the configuration the appliance last confirmed working. Edits made since, and networks created since, are not kept live." },
@@ -26,7 +28,9 @@ const OPS: { op: RecoveryOp; text: string }[] = [
 
 export default function RecoveryPage() {
   const toast = useToast();
+  const router = useRouter();
   const { writable } = useNetworkAccess();
+  const [staged, setStaged] = useState<StagedGroup[]>([]);
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [op, setOp] = useState<RecoveryOp | null>(null);
@@ -38,6 +42,10 @@ export default function RecoveryPage() {
   const load = useCallback(async () => {
     try { setStatus(await api.get<RecoveryStatus>("/network/recovery")); } catch { setStatus(null); }
     try { setItems((await api.get<{ data: ReviewItem[] }>("/network/recovery/review")).data ?? []); } catch { setItems([]); }
+    try {
+      const g = (await api.get<{ groups: StagedGroup[] }>("/network/changes")).groups ?? [];
+      setStaged(g.filter((x) => ["RESTORE", "FACTORY_RESET", "FULL_RESET"].includes(x.group_kind)));
+    } catch { setStaged([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -53,9 +61,9 @@ export default function RecoveryPage() {
     setBusy(true); setErr(null);
     try {
       await api.post("/network/recovery/stage", { op, confirm_site_name: typed });
-      toast.success(`${OP_TITLE[op]} is staged`, "Nothing has changed yet. Apply it from Client networks, then keep it before the confirmation window ends.");
+      toast.success(`${OP_TITLE[op]} is staged, not applied`, "Nothing has changed yet. Press Apply changes on Client networks, then keep the change before the confirmation window ends.");
       setOp(null);
-      await load();
+      router.push("/network");
     } catch (e) { setErr(e); }
     finally { setBusy(false); }
   }
@@ -76,6 +84,13 @@ export default function RecoveryPage() {
   return (
     <PageShell width="wide">
       <PageHeader title="Recovery" description="Return the client networks to a known state. Each is staged, applied and kept or rolled back like any other network change." />
+
+      {staged.length > 0 && (
+        <Callout tone="warning" title="A recovery is staged and has not been applied">
+          {staged.map((g) => GROUP_LABEL[g.group_kind]).join(", ")}: the client networks are exactly as they were. It takes effect only when you press <strong>Apply
+          changes</strong> on <Link className="underline" href="/network">Client networks</Link> and then keep the change.
+        </Callout>
+      )}
 
       {items.length > 0 && (
         <SectionCard title="Needs your review" description="Put back by a restore. Look at each and acknowledge it when you are happy.">

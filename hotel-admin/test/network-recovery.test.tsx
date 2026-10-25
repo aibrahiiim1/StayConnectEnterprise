@@ -10,6 +10,8 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("@/components/ui/toast", () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }));
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/components/network/shared", () => ({ useNetworkAccess: () => ({ known: true, writable: true }) }));
 
 import RecoveryPage from "@/app/(app)/network/recovery/page";
@@ -24,8 +26,8 @@ const plan = {
 };
 
 beforeEach(() => {
-  get.mockReset(); post.mockReset();
-  get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : items));
+  get.mockReset(); post.mockReset(); push.mockReset();
+  get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes" ? { groups: [] } : items));
 });
 
 describe("recovery page", () => {
@@ -42,6 +44,15 @@ describe("recovery page", () => {
     expect(screen.getByText("Check outside the appliance")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stage this recovery" }));
     await waitFor(() => expect(post).toHaveBeenLastCalledWith("/network/recovery/stage", { op: "restore_last_working", confirm_site_name: "" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/network"));
+  });
+
+  it("says plainly that a staged recovery has not been applied", async () => {
+    get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes"
+      ? { groups: [{ group_id: "g1", group_kind: "FULL_RESET", state: "PENDING", created_at: "", changes: [] }] } : items));
+    render(<RecoveryPage />);
+    await screen.findByText("A recovery is staged and has not been applied");
+    expect(screen.getByText(/the client networks are exactly as they were/)).toBeTruthy();
   });
 
   it("will not stage a plan with a conflict or one that changes nothing", async () => {
