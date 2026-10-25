@@ -211,6 +211,18 @@ Measured, not claimed. The appliance was inspected first and re-inspected after 
 | Follow-ups merged the same way | #243 (migration 0152 changes nothing in `public`, master `4a192268`), #244 (Full Reset confirmation name readable by the Admin Console role, `82faee4f`), #245 (this record, `d870bf80`). Each was reviewed by Codex with no findings before the label was applied. |
 | Superseded | #234–#241 were closed with a comment pointing at #242. |
 
+### Second deployment record (2026-10-25: archive and Default Network)
+
+* **Deployed.** edged `40621f8e` (master after PR #249) and the Admin Console release `20261025-160357` (`f524dc70`, BUILD_ID `zwvpA0D2wcjcKkF-TSldy`), which carries the Recovery-page fix.
+  netd, scd, portald, pmsd and acctd were not changed. Kea was not restarted. Installed bytes read back: edged sha256 `d10ce4ec...d9c9`, `vcs.modified=false`; `sha256sum -c DEPLOYED_BINARIES.sha256` 7 of 7 OK.
+* **Migration.** 0154 applied to `stayconnect_site` with `scripts/edge-migrate.sh --apply-role iam_v2_owner` after an encrypted, proven-restorable backup. It creates `iam_v2.network_archive` and backfills it from
+  confirmed reset changes only. Result: three rows.
+* **Measured on PRE-LIVE (read-only).** `/network/archive` counts 3; `/network/default` reports Client Wi-Fi ready for DHCP, DNS, Portal, sign-in and packages, and PMS routing unresolved;
+  `/network/recovery` reports the latest recovery as the Full Reset, Confirmed, revision 98. In a real browser the main list shows only the Default Network, "Archived networks (3)" is collapsed and expands,
+  and the Recovery page, Client networks and Portal settings show no overflow at 1280 px and 390 px. The PMS routing preview was opened and not confirmed.
+* **Rollback.** `edged.bak-pre-40621f8e-20261025T163027Z`; `hotel-admin.previous` -> `20261025-115528`; `0154.down.sql`.
+* **Not verified.** A real client signing in through the portal on `10.20.0.0/20`, the switch and ESXi side, and a confirmed PMS route.
+
 ## 14. The Product Owner's first Full Reset on PRE-LIVE (observed 2026-10-25)
 
 **Timeline recorded by the appliance (UTC).** 12:11:56 the Product Owner staged a Full Client Networking Reset (`network.recovery.staged`). At 12:26 it was still

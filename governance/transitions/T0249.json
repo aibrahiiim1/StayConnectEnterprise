@@ -1,0 +1,76 @@
+{
+  "transition_id": "T0249",
+  "seq": 249,
+  "timestamp": "2026-10-25T19:42:55+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_ARCHIVE_AND_DEFAULT_NETWORK_DEPLOYED_PRE_LIVE",
+  "authorisation": "D73 (2026-10-25) under the Product Owner's mission 'ONEGATE - CLIENT NETWORKING FACTORY EXPERIENCE'. It does NOT authorise Go-Live, any network reconfiguration, routing of PMS to the Default Network, or widening package eligibility.",
+  "deployment_provenance": {
+    "appliance": "edged built from a clean clone of 40621f8e with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false), sha256 d10ce4ec9e45c6829fd782a63607b9c797a3f21b996c7cb14cabab0b98d7d9c9 verified before install; backup edged.bak-pre-40621f8e-20261025T163027Z (and edged.bak-pre-f524dc70-20261025T160351Z for the earlier step). All other services unchanged; Kea not restarted.",
+    "admin_console": "Release 20261025-160357 built from a clean clone of f524dc70 (BUILD_ID zwvpA0D2wcjcKkF-TSldy, artifact sha256 2ad335f1f7de9a88bbe979a796a195516b07c9af02c70d1aedcc9a178b86f581); previous 20261025-115528.",
+    "database": "Schema 0153 -> 0154 on stayconnect_site with scripts/edge-migrate.sh as iam_v2_owner after an encrypted, proven-restorable backup (db-20261025T160226Z / T160308Z). Result: network_archive holds 3 rows, all confirmed-reset retirements.",
+    "merges": "#247 -> c5eb3021; #248 -> f524dc70; #249 -> 40621f8e.",
+    "preserved": "WAN/management, signed assignment, IAM, licensing, PMS, quotas and the Product Owner's confirmed reset (revision 98) were not touched. No live network operation was performed by the deployment."
+  },
+  "verification": "Before: Go unit and integration tests against a database built through the real migration chain, including a svc_edged-role journey and the privilege list; hotel-admin typecheck, vitest and Playwright. After: /network/archive count 3; /network/default Client Wi-Fi with DHCP, DNS, Portal, sign-in and packages ready and PMS routing unresolved; /network/recovery latest FULL_RESET CONFIRMED (revision 98); real-Chrome run at 1280 and 390 px with no overflow and no API error; sha256sum -c DEPLOYED_BINARIES.sha256 7 of 7 OK; all stayconnect services active; no edged error in the last 20 minutes. NOT verified: a real client signing in through the portal on 10.20.0.0/20, the switch and ESXi side, and a confirmed PMS routing.",
+  "product_owner_full_reset_observation": "The Product Owner applied (14:58:53 UTC) and confirmed (14:59:06 UTC) the Full Reset themselves before the archive existed. The delivery agent did not apply, confirm, cancel or modify it. The archive was applied to the already-confirmed reset by migration 0154 and read-time catch-up.",
+  "pms_and_package_findings": "Protel stays routed only to archived networks; the Default Network reports PMS routing unresolved and offers one previewed, explicit route per interface. No package is pinned to a retired network on PRE-LIVE; pinned packages would be listed, never widened.",
+  "timestamp_corrections": [
+    {
+      "transition_id": "T0244",
+      "recorded_timestamp": "2026-10-24T14:30:00+03:00",
+      "introducing_commit": "1acc4f1609a248a89f9d0265c645df73769d81fd",
+      "introducing_commit_time": "2026-10-24T14:28:23+03:00",
+      "late_by_seconds": 97,
+      "what_is_true": "The state T0244 records held no later than 2026-10-24T14:28:23+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 97s too late. The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0245",
+      "recorded_timestamp": "2026-10-24T17:15:00+03:00",
+      "introducing_commit": "54ca38fc84e7b283c5176d57e9180df61be350e5",
+      "introducing_commit_time": "2026-10-24T17:06:01+03:00",
+      "late_by_seconds": 539,
+      "what_is_true": "The state T0245 records held no later than 2026-10-24T17:06:01+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 539s too late. The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0246",
+      "recorded_timestamp": "2026-10-24T18:50:00+03:00",
+      "introducing_commit": "c0d55880b326d7c3e1669a5e8778c122c8404024",
+      "introducing_commit_time": "2026-10-24T18:45:15+03:00",
+      "late_by_seconds": 285,
+      "what_is_true": "The state T0246 records held no later than 2026-10-24T18:45:15+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 285s too late. The receipt is left exactly as written."
+    },
+    {
+      "transition_id": "T0247",
+      "recorded_timestamp": "2026-10-24T20:25:00+03:00",
+      "introducing_commit": "12a1c96cf5472049d164be5b02c7ebc6428271e5",
+      "introducing_commit_time": "2026-10-24T20:22:23+03:00",
+      "late_by_seconds": 157,
+      "what_is_true": "The state T0247 records held no later than 2026-10-24T20:22:23+03:00, when the commit that introduced its receipt was made; the receipt's hand-typed time is 157s too late. The receipt is left exactly as written."
+    }
+  ],
+  "timestamp_findings": "The pre-existing validator failures were late hand-typed receipts T0244-T0247 (97, 539, 285 and 157 seconds after the commits that introduced them). They are left exactly as written and corrected forward here; the validator is not weakened.",
+  "rollback": "edged.bak-pre-40621f8e-20261025T163027Z; hotel-admin.previous -> 20261025-115528; database: 0154.down.sql via scripts/edge-migrate.sh --down after the recorded backup. Central: no change.",
+  "follow_up": "OPEN: real-client portal sign-in on 10.20.0.0/20; switch/ESXi untagged VLAN delivery; the operator's PMS routing decision for the Default Network; the erasure-ledger secondary storage.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "fa24a91348f3139aecd6450a5761bb5329f7b052",
+  "base_note": "Master after the merge of PR #242.",
+  "head": "40621f8e",
+  "head_note": "Master after PR #249, the last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0248",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
