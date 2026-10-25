@@ -1076,6 +1076,20 @@
       "does_not_authorize": "Go-Live; any new legal privacy statement (the notice keeps its earlier claim and wording of what is recorded); changing authentication, PMS or financial behaviour; renaming internal identifiers or API fields; rewriting a site's own notice or any stored configuration or history.",
       "implementation": "Branch delivery/multi-industry-terminology, PR #231, recorded by T0247. portald languages_privacy.go and templates.go; edged resources_portal_https.go; control-plane portaltls orders.go and worker.go; nft garden.go; backupcrypt.go; hotel-admin portal-branding strings, portal-https page and lib, data-request register, backup key sheet; docs/PRODUCT_TERMINOLOGY.md and the HTTPS portal contract's terminology note; portal_multi_industry_test.go and the console naming guards.",
       "supersedes_in_part": "D70 (it left the guest portal's own wording and the portal-domain text for a later pass)"
+    },
+    {
+      "id": "D72",
+      "decided_on": "2026-10-25",
+      "phase": "7",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED",
+      "accepted_on": "2026-10-25",
+      "status": "ACTIVE",
+      "title": "CLIENT NETWORKING IS MERGED AND DEPLOYED TO PRE-LIVE FOR PRODUCT-OWNER TESTING (2026-10-25). The complete Client Networking delivery (the prepared Access/untagged 10.20.0.0/20 network and its activation, staged Access/Trunk conversion, derived status and diagnostics, the last-confirmed snapshot and database-down start, portal profiles, per-network sign-in, Restore Last Working, Restore Factory Defaults and Full Client Networking Reset, all staged and undone by a rollback) was merged through PR #242 and deployed to the named PRE-LIVE appliance with migrations 0151-0153. The prepared network was not activated, no port was converted, no VLAN was changed and no reset was applied by the deployment.",
+      "authorization_evidence": "The Product Owner's mission of 2026-10-25 'ONEGATE - APPROVED MERGE & PRE-LIVE DEPLOYMENT', which authorised the protected merge of PR #242 at the reviewed head c568373446c82082b0bd2d191db15ee2957f5c0b, deployment of the verified merged source to PRE-LIVE 172.21.60.25, controlled application of migrations 0151-0153, the necessary restarts of netd, edged, scd and portald, preflight, backups, verification, 'routine related fixes', rollback and retry, and documentation. It stated that no automatic factory activation, port conversion, VLAN change, Full Reset, PMS or financial change or Go-Live was authorised.",
+      "provenance_note": "PR #242 was NOT merged at the head the mission named. Two unresolved Codex review threads blocked the protected merge; they were fixed, answered and resolved, and the merged head is 090f92c9734b30598aad8c580e3d15769fbca967 (merge commit fa24a91348f3139aecd6450a5761bb5329f7b052). The delivery agent applied the po-merge-approved label to that head under the mission's 'routine related fixes' clause. The Product Owner did not separately approve head 090f92c9 and this record does not say they did. The same applies to the follow-up PRs #243 (4a192268), #244 (82faee4f) and #245 (d870bf80), which were merged by the delivery agent under the same mission after Codex reported no findings.",
+      "does_not_authorize": "Go-Live; activating the prepared network, converting a port, changing a VLAN or running a reset (the Product Owner's own tests); any change to the external switch or ESXi; any deletion of a network, sign-in, device or evidence; archiving networks (an open Product-Owner decision, see open_product_owner_decisions).",
+      "implementation": "PR #242 (fa24a913) and #243 (4a192268), #244 (82faee4f), #245 (d870bf80); recorded by T0248. docs/CLIENT_NETWORKING.md sections 12-15 are the measured record."
     }
   ]
 }
