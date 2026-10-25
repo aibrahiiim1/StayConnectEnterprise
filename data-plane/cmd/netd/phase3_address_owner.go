@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -25,6 +26,14 @@ const (
 
 type leaseSource interface {
 	Leases() ([]KeaLease, error)
+}
+
+// leaseStability is implemented by a lease source that can say whether an EMPTY answer is believable. Kea answers "no leases" in the same words whether
+// nobody holds one or it has just been started, reconfigured or pointed at a fresh lease file; reading that as "every address has been given up"
+// would end every session at once, and ending a session is not undone by the evidence coming back.
+type leaseStability interface {
+	// EmptyAnswerTrusted reports whether "no leases" can be taken at face value for ip, and why not when it cannot.
+	EmptyAnswerTrusted(ip net.IP) (trusted bool, why string)
 }
 
 // addressOwner answers the ownership question from DHCP leases; now is injectable so lease currency is testable.
@@ -63,6 +72,18 @@ func (a addressOwner) Owns(ctx context.Context, ip net.IP, mac string) addressOw
 	if err != nil {
 		// Kea unreachable: unknown, since tearing every guest down on a control-socket hiccup would manufacture an outage.
 		return addressUnknown
+	}
+	// An empty table is the one answer that can mean "Kea lost its leases" as easily as "nobody holds one". Unless the source vouches that it is
+	// stable and serves this address's subnet, it is UNKNOWN: access is not renewed (it lapses with its current bounded lease) but no session
+	// is ended, so the evidence returning restores service with no re-authentication, and nothing about the Entitlement or its quota is touched.
+	if len(leases) == 0 {
+		if st, ok := a.src.(leaseStability); ok {
+			if trusted, why := st.EmptyAnswerTrusted(ip); !trusted {
+				slog.Warn("netd: DHCP reports no leases at all, but that answer is not trusted yet; address ownership is treated as unknown, not as lost",
+					"ip", ip.String(), "why", why)
+				return addressUnknown
+			}
+		}
 	}
 	want, at := ip.String(), a.clock()
 	for _, l := range leases {

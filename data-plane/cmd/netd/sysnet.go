@@ -58,6 +58,8 @@ type sysNetMgr struct {
 	runFn        func(name string, args ...string) error
 	currentFn    func(ctx context.Context) (sysnet.WANConfig, sysnet.LANConfig)
 	verifyFn     func(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool
+	// auditFn observes every audit event (a test seam; the database write is unchanged).
+	auditFn func(action, reason string)
 }
 
 type ifaceRuntime struct {
@@ -281,19 +283,19 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 
 	if p.WAN != nil {
 		if err := os.WriteFile(ps.wan, []byte(sysnet.RenderWANNetplan(w)), 0o600); err != nil {
-			m.restoreFiles(bk)
+			_ = m.restoreFiles(bk) // nothing was applied yet; the live files are put back as they were
 			return nil, err
 		}
 	}
 	if p.LAN != nil {
 		if err := os.WriteFile(ps.lan, []byte(sysnet.RenderLANNetplan(l)), 0o600); err != nil {
-			m.restoreFiles(bk)
+			_ = m.restoreFiles(bk) // nothing was applied yet; the live files are put back as they were
 			return nil, err
 		}
 	}
 
 	if err := m.netplan("generate"); err != nil {
-		m.restoreFiles(bk)
+		_ = m.restoreFiles(bk)
 		out.State = "failed"
 		out.Message = "netplan generate failed: " + err.Error()
 		m.auditEvent(ctx, revID, "network.apply.rejected", pc, "generate_failed: "+err.Error(), bk)
@@ -308,11 +310,11 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	m.auditEvent(ctx, revID, "network.apply.started", pc, "", bk)
 
 	if err := m.netplan("apply"); err != nil {
-		m.restore(ctx, bk)
+		rerr := m.restore(ctx, bk)
 		m.clearPendingFiles()
 		out.State = "failed"
-		out.Message = "netplan apply failed: " + err.Error()
-		m.auditEvent(ctx, revID, "network.apply.failed", pc, "netplan_apply: "+err.Error(), bk)
+		out.Message = "netplan apply failed: " + err.Error() + restoreSuffix(rerr)
+		m.auditEvent(ctx, revID, "network.apply.failed", pc, "netplan_apply: "+err.Error()+restoreSuffix(rerr), bk)
 		return out, nil
 	}
 	// The firewall follows the new address before reachability is checked (NETD_MGMT_ADDR=auto).
@@ -329,11 +331,16 @@ func (m *sysNetMgr) apply(ctx context.Context, p sysnet.Proposal, actor, actorID
 	if !critical {
 		m.auditEvent(ctx, revID, "network.apply.verify_failed", pc, fmt.Sprintf("%v", v), bk)
 		m.auditEvent(ctx, revID, "network.rollback.automatic.started", pc, "verify_failed", bk)
-		m.restore(ctx, bk)
+		rerr := m.restore(ctx, bk)
 		m.clearPendingFiles()
-		m.auditEvent(ctx, revID, "network.rollback.automatic.succeeded", pc, "verify_failed", bk)
 		out.State = "rolled_back"
 		out.Message = "post-apply verification failed; restored last-known-good"
+		if rerr != nil {
+			m.auditEvent(ctx, revID, "network.rollback.automatic.failed", pc, "verify_failed"+restoreSuffix(rerr), bk)
+			out.Message = "post-apply verification failed and the last-known-good configuration was NOT fully restored" + restoreSuffix(rerr)
+			return out, nil
+		}
+		m.auditEvent(ctx, revID, "network.rollback.automatic.succeeded", pc, "verify_failed", bk)
 		return out, nil
 	}
 
@@ -379,8 +386,12 @@ func (m *sysNetMgr) rollback(ctx context.Context, actor, actorID, srcIP string) 
 	}
 	pc.Actor, pc.ActorID, pc.SourceIP = actor, actorID, srcIP
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.started", pc, "operator requested", bk)
-	m.restore(ctx, bk)
+	rerr := m.restore(ctx, bk)
 	m.clearPendingFiles()
+	if rerr != nil {
+		m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.failed", pc, "operator requested"+restoreSuffix(rerr), bk)
+		return fmt.Errorf("the rollback ran but did not fully restore the previous network configuration: %w", rerr)
+	}
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.manual.succeeded", pc, "operator requested", bk)
 	return nil
 }
@@ -423,8 +434,12 @@ func (m *sysNetMgr) maybeAutoRollback(ctx context.Context) {
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "no backup recorded", "")
 		return
 	}
-	m.restore(ctx, pc.Backup)
+	rerr := m.restore(ctx, pc.Backup)
 	m.clearPendingFiles()
+	if rerr != nil {
+		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "confirmation_timeout"+restoreSuffix(rerr), pc.Backup)
+		return
+	}
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "confirmation_timeout", pc.Backup)
 }
 
@@ -449,10 +464,15 @@ func (m *sysNetMgr) ReconcileStalePendingOnBoot(ctx context.Context) {
 		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "no backup recorded", "")
 		return
 	}
+	var rerr error
 	if !m.dryRun {
-		m.restore(ctx, pc.Backup)
+		rerr = m.restore(ctx, pc.Backup)
 	}
 	m.clearPendingFiles()
+	if rerr != nil {
+		m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.failed", pc, "boot_reconcile"+restoreSuffix(rerr), pc.Backup)
+		return
+	}
 	m.auditEvent(ctx, pc.RevisionID, "network.rollback.automatic.succeeded", pc, "boot_reconcile", pc.Backup)
 }
 
@@ -466,28 +486,50 @@ func backupFile(src, dst string) {
 const absentSuffix = ".absent"
 
 // restoreFiles also removes files the backup records as absent; otherwise a file this change created would survive rollback and take effect at the next apply or reboot.
-func (m *sysNetMgr) restoreFiles(bk string) {
+// It returns every file it could not put back: a rollback that leaves a changed file behind has not rolled back.
+func (m *sysNetMgr) restoreFiles(bk string) error {
 	ps := m.paths()
+	var errs []error
 	for name, live := range map[string]string{"01-static.yaml": ps.wan, "02-lan-bridge.yaml": ps.lan} {
 		saved := filepath.Join(bk, name)
 		if _, err := os.Stat(saved); err == nil {
-			_ = copyFile(saved, live)
+			if cerr := copyFile(saved, live); cerr != nil {
+				errs = append(errs, fmt.Errorf("restore %s: %w", name, cerr))
+			}
 			continue
 		}
 		if _, err := os.Stat(saved + absentSuffix); err == nil {
-			_ = os.Remove(live)
+			if rerr := os.Remove(live); rerr != nil && !os.IsNotExist(rerr) {
+				errs = append(errs, fmt.Errorf("remove %s: %w", name, rerr))
+			}
 		}
 	}
+	return errors.Join(errs...)
 }
 
-func (m *sysNetMgr) restore(ctx context.Context, bk string) {
-	m.restoreFiles(bk)
+// restore puts the backed-up configuration back and re-applies it, returning what did not succeed.
+func (m *sysNetMgr) restore(ctx context.Context, bk string) error {
+	var errs []error
+	if err := m.restoreFiles(bk); err != nil {
+		errs = append(errs, err)
+	}
 	if !m.dryRun {
-		_ = m.netplan("apply")
+		if err := m.netplan("apply"); err != nil {
+			errs = append(errs, fmt.Errorf("netplan apply: %w", err))
+		}
 		if m.afterNetplan != nil {
 			m.afterNetplan(ctx)
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// restoreSuffix words an unfinished restore for an operator-facing message or audit detail.
+func restoreSuffix(err error) string {
+	if err == nil {
+		return ""
+	}
+	return " -- ROLLBACK INCOMPLETE: " + err.Error()
 }
 
 func (m *sysNetMgr) verifyNow(w sysnet.WANConfig, l sysnet.LANConfig) map[string]bool {
@@ -875,6 +917,9 @@ func genUUID() string {
 
 // auditEvent writes one row of the change lifecycle; rows sharing revisionID form the sequence.
 func (m *sysNetMgr) auditEvent(ctx context.Context, revID, action string, pc pendingChange, reason, backup string) {
+	if m.auditFn != nil {
+		m.auditFn(action, reason)
+	}
 	if m.st == nil {
 		return
 	}

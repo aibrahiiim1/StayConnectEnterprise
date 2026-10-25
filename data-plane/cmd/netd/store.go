@@ -425,3 +425,67 @@ func (s *store) Health(ctx context.Context, revID, name string, ok bool, detail 
 		`INSERT INTO network_health_checks (revision_id, check_name, ok, detail) VALUES ($1,$2,$3,$4)`,
 		revID, name, ok, detail)
 }
+
+// InFlightRevision returns the revision that holds the single in-flight slot (applying or awaiting confirmation), or "" when none does.
+func (s *store) InFlightRevision(ctx context.Context) (id, state string, err error) {
+	err = s.db.QueryRow(ctx, `
+        SELECT id::text, state FROM network_config_revisions
+         WHERE state IN ('applying','pending_confirmation') ORDER BY seq DESC LIMIT 1`).Scan(&id, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	return id, state, err
+}
+
+// ApplyingRevisions lists revisions stuck in 'applying'. Called at netd start, when no apply of this process can be running, so any
+// such row was interrupted: nothing else would ever move it, and it holds the unique in-flight slot against every later apply.
+func (s *store) ApplyingRevisions(ctx context.Context) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT id::text FROM network_config_revisions WHERE state='applying' ORDER BY seq`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// RecordedBridges returns the bridges named by revisions netd actually applied (active, superseded, applying, awaiting confirmation, rolled
+// back), with the member interface each was built on. A bridge in this record is one netd created, which is how a bridge made before the
+// ownership mark existed is recognised. A name recorded with two different members is returned with no member, so nothing is deleted
+// on the strength of an ambiguous record.
+func (s *store) RecordedBridges(ctx context.Context) (map[string]recordedBridge, error) {
+	rows, err := s.db.Query(ctx, `
+        SELECT DISTINCT e->>'bridge_name', COALESCE(e->>'network_type',''), COALESCE(e->>'parent_interface',''),
+                        COALESCE(NULLIF(e->>'vlan_id','')::int, 0)
+          FROM network_config_revisions r, jsonb_array_elements(r.intent) e
+         WHERE r.state IN ('active','superseded','pending_confirmation','applying','rolled_back')
+           AND jsonb_typeof(r.intent) = 'array' AND COALESCE(e->>'bridge_name','') <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]recordedBridge{}
+	for rows.Next() {
+		var br, typ, parent string
+		var vid int
+		if err := rows.Scan(&br, &typ, &parent, &vid); err != nil {
+			return nil, err
+		}
+		member := parent
+		if typ == "vlan" {
+			member = netcfg.VLANIfaceName(parent, vid)
+		}
+		if prev, seen := out[br]; seen && prev.Member != member {
+			member = ""
+		}
+		out[br] = recordedBridge{Member: member}
+	}
+	return out, rows.Err()
+}

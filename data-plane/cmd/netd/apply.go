@@ -20,7 +20,7 @@ import (
 // never touching management/WAN/legacy interfaces), netplan written only for reboot persistence, nftables + Kea + Unbound rendered
 // from the DB and swapped atomically; a watchdog rolls back if not confirmed within confirmWindow.
 type applier struct {
-	st            *store
+	st            revisionStore
 	kea           *keaClient
 	topo          netcfg.Topology
 	generatedDir  string // /etc/stayconnect/generated/network
@@ -71,6 +71,26 @@ type applier struct {
 	keaMu sync.Mutex
 	// busy counts apply / rollback / boot reconcile in progress; the runtime refresh stands aside while > 0.
 	busy atomic.Int32
+	// opMu serialises every operation that changes what is in force (apply, rollback, boot reconcile); the periodic loops that render the
+	// in-force configuration run only while they can take it (apply_integrity.go).
+	opMu sync.Mutex
+	// inflight / inflightMu: what was in force before the apply running in this process.
+	inflight   *applyInflight
+	inflightMu sync.Mutex
+	// incomplete / incMu: set when a rollback did not restore everything; Apply refuses while it is set.
+	incomplete *incompleteMarker
+	incMu      sync.Mutex
+	// inFlightFn is the seam for "which revision is applying or awaiting confirmation".
+	inFlightFn func(ctx context.Context) (id, state string, err error)
+	// ownerMarkFn / recordedFn are the seams for bridge ownership: the interface alias netd set, and the bridges applied revisions describe.
+	// keaDiskErr is why the file Kea starts from could not be written from the confirmed configuration ("" = it holds it).
+	keaDiskErr    string
+	keaDiskMu     sync.Mutex
+	ifaceExistsFn func(name string) bool
+	// procNetUDPFn replaces /proc/net/udp when deciding whether Kea holds a DHCP socket.
+	procNetUDPFn func() string
+	ownerMarkFn  func(name string) string
+	recordedFn   func(ctx context.Context) (map[string]recordedBridge, error)
 	// nftMu serialises every structural converge (apply, rollback, boot, the periodic re-assertion in
 	// nft_watch.go), so two of them can never interleave their atomic table replacements.
 	nftMu sync.Mutex
@@ -151,6 +171,8 @@ type applyResult struct {
 	Validation netcfg.ValidationResult `json:"validation"`
 	Health     []healthResult          `json:"health"`
 	Message    string                  `json:"message,omitempty"`
+	// RollbackIncomplete lists the rollback steps that did not succeed; empty when the rollback restored everything.
+	RollbackIncomplete []string `json:"rollback_incomplete,omitempty"`
 }
 
 type healthResult struct {
@@ -192,9 +214,28 @@ func (a *applier) Validate(ctx context.Context, summary, actor string) (*applyRe
 // health checks, and enters pending_confirmation with a watchdog. On any
 // pre-commit failure it rolls back to the previous active revision.
 func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResult, error) {
+	// One operation at a time. The periodic loops that render the in-force configuration take the same lock, so none of them can read an
+	// intent this apply has published but not yet proven.
+	if !a.acquireOp(ctx, opWait) {
+		return nil, errApplyBusy
+	}
+	defer a.releaseOp()
 	// The runtime portal refresh stands aside for the whole apply, including any rollback it ends in.
 	a.busy.Add(1)
 	defer a.busy.Add(-1)
+	// An earlier rollback that did not finish left the appliance in a state that is not its confirmed configuration; a new change on
+	// top of it would be applied against an unknown base.
+	if m, ok := a.rollbackIncomplete(); ok {
+		return nil, fmt.Errorf("%w: %s. Nothing was changed. Restart the network service so it restores the confirmed configuration, "+
+			"then apply again", errRollbackIncomplete, m.describe())
+	}
+	// Refused BEFORE anything is published: a second change must not become what the firewall renders while another is awaiting
+	// confirmation.
+	if id, state, ierr := a.inFlight(ctx); ierr != nil {
+		return nil, fmt.Errorf("cannot tell whether another network change is in flight, so none was started: %w", ierr)
+	} else if id != "" {
+		return nil, fmt.Errorf("%w: revision %s is %s. Confirm it or roll it back first", errChangeInFlight, id, state)
+	}
 	intent, err := a.st.LoadIntent(ctx)
 	if err != nil {
 		return nil, err
@@ -225,10 +266,12 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	// restored if nothing reaches the wire.
 	before := a.snapshotInForce()
 	a.setInForce(intent, vip)
+	a.beginApplyInflight(id, before)
 
 	bundle := filepath.Join(a.generatedDir, fmt.Sprintf("revision-%06d", seq))
 	if err := a.generate(bundle, intent); err != nil {
 		a.restoreInForce(before)
+		a.clearApplyInflight()
 		a.fail(ctx, id, out, "generate: "+err.Error())
 		return out, nil
 	}
@@ -239,6 +282,7 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	if !a.dryRun {
 		if err := a.run(ctx, "nft", "-c", "-f", filepath.Join(bundle, "stayconnect.nft")); err != nil {
 			a.restoreInForce(before)
+			a.clearApplyInflight()
 			a.fail(ctx, id, out, "nft syntax: "+err.Error())
 			return out, nil
 		}
@@ -248,6 +292,11 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	// and a deadline computed up front could already be past when MarkPending wrote it.
 	// MarkApplying still gets a deadline so the watchdog can reclaim an apply that died mid-flight.
 	if err := a.st.MarkApplying(ctx, id, bundle, actor, time.Now().Add(a.confirmWindow)); err != nil {
+		// Nothing has reached the wire yet. The intent published above was never proven, so the previous one goes back in force before
+		// returning; otherwise the next firewall tick would install a configuration the database refused to record.
+		a.restoreInForce(before)
+		a.clearApplyInflight()
+		_ = a.st.MarkFailed(ctx, id, "could not take the in-flight slot: "+err.Error())
 		return nil, err
 	}
 	a.st.Event(ctx, id, "apply", true, map[string]any{"started": true})
@@ -255,9 +304,9 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	// Compute the live bridge set to diff against target.
 	if err := a.applyBundle(ctx, id, intent, bundle); err != nil {
 		a.st.Event(ctx, id, "apply", false, map[string]any{"error": err.Error()})
-		a.rollback(ctx, id, "apply failed: "+err.Error())
+		out.RollbackIncomplete = a.rollback(ctx, id, "apply failed: "+err.Error())
 		out.State = "rolled_back"
-		out.Message = err.Error()
+		out.Message = rollbackMessage(err.Error(), out.RollbackIncomplete)
 		return out, nil
 	}
 
@@ -266,16 +315,20 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 	out.Health = health
 	for _, h := range health {
 		if !h.OK {
-			a.rollback(ctx, id, "health check failed: "+h.Name+": "+h.Detail)
+			out.RollbackIncomplete = a.rollback(ctx, id, "health check failed: "+h.Name+": "+h.Detail)
 			out.State = "rolled_back"
-			out.Message = "health check failed: " + h.Name
+			out.Message = rollbackMessage("health check failed: "+h.Name, out.RollbackIncomplete)
 			return out, nil
 		}
 	}
 
 	// Enter pending_confirmation; the watchdog will roll back if unconfirmed.
 	if err := a.st.MarkPending(ctx, id, time.Now().Add(a.confirmWindow)); err != nil {
-		return nil, err
+		// The new configuration IS on the wire but cannot be recorded as awaiting confirmation, so nothing could ever confirm or time it
+		// out. It is rolled back rather than left running unrecorded.
+		incomplete := a.rollback(ctx, id, "could not record the change as awaiting confirmation: "+err.Error())
+		return nil, fmt.Errorf("the change was applied but could not be recorded as awaiting confirmation, so it was rolled back%s: %w",
+			rollbackSuffix(incomplete), err)
 	}
 	out.State = "pending_confirmation"
 	out.Message = fmt.Sprintf("applied; confirm within %s or it rolls back automatically", a.confirmWindow)
@@ -291,6 +344,12 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 	// bundle records none.
 	_, vip, _ := a.inForce()
 	a.setActiveVIP(vip)
+	a.clearApplyInflight()
+	// The configuration just confirmed is now the one a cold Kea start must come up with. The confirmation itself stands either way; a failed
+	// write is reported through /v1/health and retried by the portal refresh, never silently dropped.
+	if perr := a.persistConfirmedKea(ctx, id); perr != nil {
+		slog.Error("netd confirmed the revision but could not save its DHCP configuration to disk; Kea would start from an older file", "revision", id, "err", perr)
+	}
 	// Confirming is the operator saying to keep it, so the pre-bootstrap Kea snapshot is discarded: a later
 	// rollback to a DIFFERENT revision must not put a confirmed appliance back to stopped-and-disabled.
 	a.clearKeaSnapshot()
@@ -316,7 +375,13 @@ func (a *applier) Rollback(ctx context.Context, id, actor string) error {
 	case "applying", "pending_confirmation":
 		// The real rollback window. The previous revision is still active and is a genuine target; if there
 		// is none, this is the first apply and coming back factory-clean is correct.
-		a.rollback(ctx, id, "operator requested rollback")
+		if !a.acquireOp(ctx, opWait) {
+			return errApplyBusy
+		}
+		defer a.releaseOp()
+		if steps := a.rollback(ctx, id, "operator requested rollback"); len(steps) > 0 {
+			return fmt.Errorf("%w: the rollback ran but did not restore everything: %s", errRollbackIncomplete, strings.Join(steps, "; "))
+		}
 		return nil
 	case "":
 		return fmt.Errorf("%w: revision %s does not exist", errRollbackRefused, id)
@@ -488,4 +553,16 @@ func (a *applier) discover(ctx context.Context) ([]Interface, error) {
 		return a.discoverFn(ctx)
 	}
 	return Discover(ctx)
+}
+
+// rollbackMessage is the operator-facing outcome: the cause, and the unfinished steps when the rollback did not restore everything.
+func rollbackMessage(cause string, incomplete []string) string {
+	return cause + rollbackSuffix(incomplete)
+}
+
+func rollbackSuffix(incomplete []string) string {
+	if len(incomplete) == 0 {
+		return ""
+	}
+	return " -- ROLLBACK INCOMPLETE, the appliance may not be on its confirmed configuration: " + strings.Join(incomplete, "; ")
 }

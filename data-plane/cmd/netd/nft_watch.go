@@ -41,6 +41,13 @@ func (a *applier) reassertNftStructure(ctx context.Context, trigger string) {
 	if a.dryRun || a.busy.Load() > 0 {
 		return
 	}
+	// The operation lock closes the window between the check above and the read below: an apply publishes its intent while holding it, so
+	// this tick either renders the intent in force BEFORE the apply, or waits for the next tick. It can never install an intent that an apply has
+	// published but not yet proven, or one that a failed apply has not yet put back.
+	if !a.opMu.TryLock() {
+		return
+	}
+	defer a.opMu.Unlock()
 	a.busy.Add(1)
 	defer a.busy.Add(-1)
 	// Read the intent under the converge lock so a concurrent apply (which publishes its intent first) is never overwritten with the old one.

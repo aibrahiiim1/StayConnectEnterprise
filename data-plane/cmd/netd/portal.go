@@ -477,6 +477,20 @@ func (a *applier) syncKeaCaptive(ctx context.Context) (bool, error) {
 	if a.dryRun {
 		return false, nil
 	}
+	// Only while no apply, rollback or boot reconcile is running: the in-force intent is read under the operation lock, so it can never be one an
+	// apply has published but not yet proven.
+	if !a.opMu.TryLock() {
+		return false, nil
+	}
+	defer a.opMu.Unlock()
+	return a.syncKeaCaptiveLocked(ctx)
+}
+
+// syncKeaCaptiveLocked is syncKeaCaptive for a caller that already holds the operation lock.
+func (a *applier) syncKeaCaptiveLocked(ctx context.Context) (bool, error) {
+	if a.dryRun {
+		return false, nil
+	}
 	a.keaMu.Lock()
 	defer a.keaMu.Unlock()
 	if a.busy.Load() > 0 {
@@ -530,6 +544,14 @@ func (a *applier) portalRefresh(ctx context.Context) {
 	if a.dryRun || a.busy.Load() > 0 {
 		return
 	}
+	if !a.opMu.TryLock() {
+		return
+	}
+	defer a.opMu.Unlock()
+	// Retry saving the confirmed DHCP configuration to disk if the last attempt failed (read-only filesystem, full disk, wrong owner).
+	if ok, _ := a.keaDiskState(); !ok {
+		_ = a.persistConfirmedKea(ctx, "")
+	}
 	a.refreshPortalTLS(ctx)
 	_, vip, known := a.inForce()
 	if !known {
@@ -555,7 +577,7 @@ func (a *applier) portalRefresh(ctx context.Context) {
 			slog.Info("netd: portal hostnames resolver fragment updated", "names", netcfg.PortalHostnames(tls), "address", vip)
 		}
 	}
-	if _, err := a.syncKeaCaptive(ctx); err != nil {
+	if _, err := a.syncKeaCaptiveLocked(ctx); err != nil {
 		a.logOnce("kea_option114", err.Error())
 	} else {
 		a.logOnce("kea_option114", "")

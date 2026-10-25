@@ -427,6 +427,7 @@ type fakeKea struct {
 	failTest bool
 	failRead bool
 	lastSet  map[string]any
+	setErr   error // makes ConfigSet fail
 }
 
 func (f *fakeKea) RunningDhcp4() (map[string]any, error) {
@@ -449,6 +450,9 @@ func (f *fakeKea) ConfigTest(map[string]any) error {
 }
 
 func (f *fakeKea) ConfigSet(d map[string]any) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
 	f.set++
 	f.lastSet = d
 	f.running = d

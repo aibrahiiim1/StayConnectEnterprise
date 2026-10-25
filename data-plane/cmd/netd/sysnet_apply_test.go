@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,5 +186,62 @@ func TestManagementPinAutoFollowsTheInterface(t *testing.T) {
 	}
 	if got := a.resolveMgmtAddr("203.0.113.9"); got != "203.0.113.9" {
 		t.Fatalf("a literal pin was changed: %q", got)
+	}
+}
+
+// A system-network rollback that could not put the files back or re-apply them is not a rollback that succeeded (audit Phase 8, M7).
+func TestSysnetRollbackThatFailsToReapplyIsNotReportedAsSucceeded(t *testing.T) {
+	m, ps, _ := testSysnet(t)
+	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
+	var audit []string
+	m.auditFn = func(action, reason string) { audit = append(audit, action+": "+reason) }
+	if res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", ""); err != nil || !res.OK {
+		t.Fatalf("apply: %+v %v", res, err)
+	}
+	// Re-applying the restored configuration now fails.
+	m.runFn = func(name string, args ...string) error {
+		if len(args) > 0 && args[0] == "apply" {
+			return errors.New("netplan: cannot bring up ens160")
+		}
+		return nil
+	}
+	audit = nil
+	err := m.rollback(context.Background(), "op", "", "")
+	if err == nil {
+		t.Fatal("a manual rollback whose netplan apply failed was reported as success")
+	}
+	joined := strings.Join(audit, " | ")
+	if strings.Contains(joined, "rollback.manual.succeeded") || !strings.Contains(joined, "rollback.manual.failed") {
+		t.Fatalf("audit does not tell the truth: %s", joined)
+	}
+	if !strings.Contains(joined, "ROLLBACK INCOMPLETE") {
+		t.Fatalf("the failed step is not in the audit: %s", joined)
+	}
+}
+
+func TestSysnetAutomaticRollbackThatFailsIsAuditedAsFailed(t *testing.T) {
+	m, ps, _ := testSysnet(t)
+	_ = os.WriteFile(ps.wan, []byte("previous"), 0o600)
+	var audit []string
+	m.auditFn = func(action, reason string) { audit = append(audit, action+": "+reason) }
+	m.verifyFn = func(sysnet.WANConfig, sysnet.LANConfig) map[string]bool {
+		return map[string]bool{"wan_ip": true, "gateway": true, "management_reachable": false}
+	}
+	m.runFn = func(name string, args ...string) error {
+		if len(args) > 0 && args[0] == "apply" && len(audit) > 0 && strings.Contains(strings.Join(audit, " "), "verify_failed") {
+			return errors.New("netplan: busy") // the restore's apply fails; the first (change) apply succeeded
+		}
+		return nil
+	}
+	res, err := m.apply(context.Background(), wanTo("192.0.2.20"), "op", "", "")
+	if err != nil || res.State != "rolled_back" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	joined := strings.Join(audit, " | ")
+	if strings.Contains(joined, "rollback.automatic.succeeded") || !strings.Contains(joined, "rollback.automatic.failed") {
+		t.Fatalf("audit does not tell the truth: %s", joined)
+	}
+	if !strings.Contains(res.Message, "NOT fully restored") {
+		t.Fatalf("the operator is told the rollback finished: %q", res.Message)
 	}
 }

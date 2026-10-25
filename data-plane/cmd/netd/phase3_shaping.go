@@ -111,6 +111,15 @@ type passLeases struct {
 	err    error
 }
 
+// EmptyAnswerTrusted forwards the stability question to the real source: this wrapper only caches one lease list per pass, and hiding the
+// source's judgement behind it would make every empty table read as trustworthy. A source that cannot judge keeps the established meaning.
+func (l *passLeases) EmptyAnswerTrusted(ip net.IP) (bool, string) {
+	if st, ok := l.src.(leaseStability); ok {
+		return st.EmptyAnswerTrusted(ip)
+	}
+	return true, ""
+}
+
 func (l *passLeases) Leases() ([]KeaLease, error) {
 	if !l.done {
 		l.leases, l.err = l.src.Leases()

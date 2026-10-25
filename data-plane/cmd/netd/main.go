@@ -108,6 +108,10 @@ func main() {
 
 	// Boot reconciliation re-asserts the active revision onto the live OS: nftables loads only its static
 	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
+	// A previous run that stopped mid-apply left its revision in 'applying', which holds the single in-flight slot against every later change and which
+	// nothing else would ever move. It is rolled back first, then the confirmed configuration is re-asserted over whatever that left.
+	ap.loadIncompleteMarker()
+	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)
 
 	// Portal runtime state (interface, DHCP option 114, resolver fragment follow scd's HTTPS verdict, which
@@ -320,6 +324,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		"kea_healthy":    healthy,
 		"kea_detail":     detail,
 		"phase3_shaping": s.phase3.statusWithEvidence(ev, true),
+		// Whether an earlier rollback left the appliance off its confirmed configuration (further changes are refused), and whether the
+		// file Kea starts from holds the confirmed configuration.
+		"rollback_incomplete": s.ap.rollbackIncompleteStatus(),
+		"kea_disk":            s.ap.keaDiskStatus(),
 	})
 }
 
@@ -394,7 +402,12 @@ func (s *server) apply(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	res, err := s.ap.Apply(changeCtx(r), req.Summary, actor)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		// A refusal that changed nothing (another change is running or awaiting confirmation, or an earlier rollback did not finish) is a 409.
+		code := 500
+		if errors.Is(err, errApplyBusy) || errors.Is(err, errChangeInFlight) || errors.Is(err, errRollbackIncomplete) {
+			code = 409
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	code := 200
@@ -430,7 +443,7 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	if err := s.ap.Rollback(changeCtx(r), req.RevisionID, actor); err != nil {
 		// A deliberate refusal (for example the confirmed active revision, which would tear down every guest network) is a 409, not a 500.
-		if errors.Is(err, errRollbackRefused) {
+		if errors.Is(err, errRollbackRefused) || errors.Is(err, errApplyBusy) {
 			writeJSON(w, 409, map[string]string{"error": err.Error()})
 			return
 		}
@@ -469,7 +482,7 @@ func (s *server) watchdogLoop(ctx context.Context) {
 			id, _, overdue, err := s.st.PendingRevision(ctx)
 			if err == nil && id != "" && overdue {
 				slog.Warn("watchdog: rolling back unconfirmed revision", "revision", id)
-				s.ap.rollback(ctx, id, "confirmation window elapsed")
+				s.ap.rollbackExclusive(ctx, id, "confirmation window elapsed")
 			}
 		}
 	}
