@@ -9,9 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
@@ -380,8 +383,9 @@ func otpFactorType(channel string) string {
 	return ""
 }
 
-// tenantBranding serves the hotel's published portal design to the captive portal: the published design only, never the draft
-// or revision history. Failure is an empty object, not an error, because a guest must never be unable to sign in over branding.
+// tenantBranding serves the portal design to the captive portal: the published design only, never the draft or revision history. Which design is decided
+// by the network the client is on (the portal passes the connection's source address; a client cannot name its own network), falling back to the site's default design.
+// Failure is an empty object, not an error, because a guest must never be unable to sign in over branding.
 func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -390,9 +394,8 @@ func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 		empty()
 		return
 	}
-	var raw []byte
-	if err := s.db.QueryRow(r.Context(),
-		`SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenID).Scan(&raw); err != nil {
+	raw, err := s.portalDesignDoc(r)
+	if err != nil {
 		slog.Warn("portal branding unavailable; serving defaults", "err", err)
 		empty()
 		return
@@ -418,4 +421,34 @@ func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(b)
+}
+
+var profileUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// portalDesignDoc returns the stored design document for the profile that applies: the one named for a preview (only the local portal can ask for it), else the
+// profile assigned to the network that owns the client's address, else the site default.
+func (s *server) portalDesignDoc(r *http.Request) ([]byte, error) {
+	var raw []byte
+	if id := r.URL.Query().Get("profile"); id != "" {
+		if !profileUUID.MatchString(id) {
+			return nil, errors.New("not a profile id")
+		}
+		err := s.db.QueryRow(r.Context(), `SELECT doc FROM iam_v2.portal_profiles WHERE id=$1::uuid AND tenant_id=$2::uuid`, id, s.tenID).Scan(&raw)
+		return raw, err
+	}
+	if ip := net.ParseIP(r.URL.Query().Get("ip")); ip != nil {
+		if nc := s.resolveNetwork(r.Context(), ip); nc.NetworkID != "" {
+			err := s.db.QueryRow(r.Context(), `
+				SELECT p.doc FROM iam_v2.portal_profile_assignments a JOIN iam_v2.portal_profiles p ON p.id = a.profile_id
+				 WHERE a.network_id = $1::uuid AND p.tenant_id = $2::uuid`, nc.NetworkID, s.tenID).Scan(&raw)
+			if err == nil {
+				return raw, nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+		}
+	}
+	err := s.db.QueryRow(r.Context(), `SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenID).Scan(&raw)
+	return raw, err
 }

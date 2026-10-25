@@ -219,6 +219,7 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
+			mountResource(r, s, "portal-branding", s.brandingRoutes)
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "account-password-settings", s.accountPasswordSettingsRoutes)
 			mountResource(r, s, "audit", s.auditRoutes)

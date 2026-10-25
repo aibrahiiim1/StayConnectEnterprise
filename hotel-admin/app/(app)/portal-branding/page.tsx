@@ -25,7 +25,7 @@ import { canWrite } from "@/lib/roles";
 import { cn, errMsg } from "@/lib/utils";
 import { Upload, Trash2, Check, AlertTriangle } from "lucide-react";
 import {
-  LIMITS, templateById, validateDesign, type BrandingState, type DesignIssue, type RevisionSummary,
+  LIMITS, brandingBase, templateById, validateDesign, type BrandingState, type DesignIssue, type RevisionSummary,
   type TemplateId, type ValidateResp,
 } from "@/lib/api/portal-design";
 import { PortalPreview } from "./preview";
@@ -35,6 +35,7 @@ import { HistorySection } from "./history";
 import { Design, TemplateOptions, advancedChanged, assetSrc, collectedDetails, contrastRatio, offeredLanguages } from "./strings";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
 import { LanguagesSection } from "./languages";
+import { ProfileBar } from "./profiles";
 import { PRIVACY_TEMPLATE } from "./privacy-template";
 
 // Room numbers are mentioned only where hospitality is licensed.
@@ -118,6 +119,8 @@ export default function PortalSettingsPage() {
   const toast = useToast();
   // Picks the wording for what the sign-in page collects; unknown module state fails closed to the neutral wording.
   const hospitality = moduleLicensed(useCapabilities(), "hospitality");
+  const [profile, setProfile] = useState<string | null>(null);
+  const base = brandingBase(profile);
   const [saved, setSaved] = useState<Design | null>(null);
   const [d, setD] = useState<Design>({});
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
@@ -141,7 +144,7 @@ export default function PortalSettingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const s = await api.get<BrandingState<Design>>("/portal-branding");
+      const s = await api.get<BrandingState<Design>>(base);
       const live = s.design ?? {};
       setSaved(live);
       setRevisions(s.revisions ?? []);
@@ -152,7 +155,7 @@ export default function PortalSettingsPage() {
         setAssets(a.data ?? []);
       } catch { setAssets([]); }
     } catch (e) { setLoadErr(e); }
-  }, []);
+  }, [base]);
 
   useEffect(() => {
     load();
@@ -173,7 +176,7 @@ export default function PortalSettingsPage() {
     if (!verdictFor || verdictFor.key !== designKey || verdictFor.clean === false) return;
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(() => {
-      api.put("/portal-branding/draft", { design: d }).catch(() => { /* a lost keystroke cache is not an error to report */ });
+      api.put(`${base}/draft`, { design: d }).catch(() => { /* a lost keystroke cache is not an error to report */ });
     }, 1500);
     return () => { if (settle.current) clearTimeout(settle.current); };
   }, [d, designKey, dirty, writable, verdictFor]);
@@ -185,7 +188,7 @@ export default function PortalSettingsPage() {
     setChecking(true);
     const key = JSON.stringify(d);
     const t = setTimeout(() => {
-      validateDesign(d as Record<string, unknown>)
+      validateDesign(d as Record<string, unknown>, profile)
         .then((r) => {
           if (!live) return;
           const v = r && Array.isArray(r.issues) ? r : null;
@@ -221,7 +224,7 @@ export default function PortalSettingsPage() {
     }
     setBusy(true); setSaveErr(null);
     try {
-      await api.post("/portal-branding/settings", { design: d, password: password || undefined });
+      await api.post(`${base}/settings`, { design: d, password: password || undefined });
       setStepUp(false);
       toast.success("Saved", "Clients see these settings now.");
       await load();
@@ -240,7 +243,7 @@ export default function PortalSettingsPage() {
   async function discard() {
     if (!saved) return;
     setD(saved); setSaveErr(null);
-    try { await api.put("/portal-branding/draft", { design: saved }); } catch { /* best effort */ }
+    try { await api.put(`${base}/draft`, { design: saved }); } catch { /* best effort */ }
   }
 
   async function upload(field: ImageKey, file: File) {
@@ -325,6 +328,8 @@ export default function PortalSettingsPage() {
       {roles !== null && !writable && (
         <ReadOnlyNotice>Your role can see the portal design but not change it.</ReadOnlyNotice>
       )}
+
+      <ProfileBar profile={profile} onSelect={setProfile} writable={writable} dirty={dirty} />
 
       <MetricStrip
         items={[
@@ -648,7 +653,7 @@ export default function PortalSettingsPage() {
           )}
 
           {section === "history" && (
-            <HistorySection revisions={revisions} writable={writable} dirty={dirty} onRestored={load} />
+            <HistorySection revisions={revisions} writable={writable} dirty={dirty} onRestored={load} profile={profile} />
           )}
         </div>
         </div>

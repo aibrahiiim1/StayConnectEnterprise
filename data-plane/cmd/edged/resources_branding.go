@@ -56,6 +56,12 @@ type brandingRevision struct {
 func (s *server) brandingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(brandingBodyLimit)
+	s.mountBranding(r)
+	s.mountPortalProfiles(r)
+	return r
+}
+
+func (s *server) mountBranding(r chi.Router) {
 	r.Get("/", s.getBranding)
 	r.Put("/draft", s.saveBrandingDraft)
 	r.Post("/settings", s.saveBrandingSettings)
@@ -64,14 +70,18 @@ func (s *server) brandingRoutes() http.Handler {
 	r.Post("/validate", s.validateBranding)
 	r.Post("/publish", s.publishBranding)
 	r.Post("/rollback/{version}", s.rollbackBranding)
-	return r
 }
 
 func (s *server) loadBranding(req *http.Request) (*brandingDoc, error) {
 	ctx, cancel := dbCtx(req)
 	defer cancel()
 	var raw []byte
-	if err := s.db.QueryRow(ctx,
+	if profile := profileFrom(req); profile != "" {
+		if err := s.db.QueryRow(ctx, `SELECT doc FROM iam_v2.portal_profiles WHERE id = $1::uuid AND tenant_id = $2::uuid AND site_id = $3::uuid`,
+			profile, s.tenantID, s.siteID).Scan(&raw); err != nil {
+			return nil, err
+		}
+	} else if err := s.db.QueryRow(ctx,
 		`SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenantID).Scan(&raw); err != nil {
 		return nil, err
 	}
@@ -100,6 +110,14 @@ func (s *server) storeBranding(req *http.Request, doc *brandingDoc) error {
 	}
 	ctx, cancel := dbCtx(req)
 	defer cancel()
+	if profile := profileFrom(req); profile != "" {
+		tag, err := s.db.Exec(ctx, `UPDATE iam_v2.portal_profiles SET doc = $1::jsonb, updated_at = now() WHERE id = $2::uuid AND tenant_id = $3::uuid AND site_id = $4::uuid`,
+			string(raw), profile, s.tenantID, s.siteID)
+		if err == nil && tag.RowsAffected() == 0 {
+			err = errors.New("the portal profile no longer exists")
+		}
+		return err
+	}
 	_, err = s.db.Exec(ctx,
 		`UPDATE tenants SET branding = $1::jsonb, updated_at = now() WHERE id = $2`, string(raw), s.tenantID)
 	return err
@@ -256,7 +274,7 @@ func (s *server) saveBrandingDraft(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "draft could not be saved")
 		return
 	}
-	s.audit(req, "branding.draft_saved", "tenant", s.tenantID, nil)
+	s.audit(req, "branding.draft_saved", brandingTarget(req), brandingTargetID(req, s.tenantID), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 
@@ -318,7 +336,7 @@ func (s *server) publishBranding(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the design could not be published")
 		return
 	}
-	s.audit(req, "branding.published", "tenant", s.tenantID, map[string]any{"version": next, "note": in.Note})
+	s.audit(req, "branding.published", brandingTarget(req), brandingTargetID(req, s.tenantID), map[string]any{"version": next, "note": in.Note})
 	writeJSON(w, http.StatusOK, map[string]any{"version": next})
 }
 
@@ -378,7 +396,7 @@ func (s *server) rollbackBranding(w http.ResponseWriter, req *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "the rollback could not be published")
 		return
 	}
-	s.audit(req, "branding.rolled_back", "tenant", s.tenantID,
+	s.audit(req, "branding.rolled_back", brandingTarget(req), brandingTargetID(req, s.tenantID),
 		map[string]any{"to_version": want, "new_version": next})
 	writeJSON(w, http.StatusOK, map[string]any{"version": next, "restored_from": want})
 }
@@ -463,7 +481,7 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 		jsonErr(w, http.StatusInternalServerError, "internal", "the settings could not be saved")
 		return
 	}
-	s.audit(req, "branding.published", "tenant", s.tenantID, map[string]any{"version": next, "via": "settings"})
+	s.audit(req, "branding.published", brandingTarget(req), brandingTargetID(req, s.tenantID), map[string]any{"version": next, "via": "settings"})
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 
@@ -471,7 +489,11 @@ func (s *server) saveBrandingSettings(w http.ResponseWriter, req *http.Request) 
 // renders it in a sandboxed iframe (sandbox="allow-scripts", opaque origin).
 func (s *server) previewPortal(w http.ResponseWriter, req *http.Request) {
 	// Fetched on loopback without following redirects (see portal_loopback.go).
-	status, body, err := s.portalGet(req.Context(), portalPreviewPath)
+	path := portalPreviewPath
+	if profile := profileFrom(req); profile != "" {
+		path += "?" + portalPreviewProfileParam + "=" + profile
+	}
+	status, body, err := s.portalGet(req.Context(), path)
 	if err != nil {
 		// The portal is not answering; the operator's settings are fine.
 		jsonErr(w, http.StatusServiceUnavailable, "portal_unreachable",

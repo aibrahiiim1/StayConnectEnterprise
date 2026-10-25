@@ -266,7 +266,7 @@ func hotelSheet(d map[string]any) template.HTML {
 func (h *handler) newGuestPage(r *http.Request, nonce string, jsPrefixes ...string) guestPage {
 	d := map[string]any{}
 	if r != nil {
-		if got, ok := h.guestDesign(r.Context()); ok && got != nil {
+		if got, ok := h.guestDesign(r); ok && got != nil {
 			d = got
 		}
 	}

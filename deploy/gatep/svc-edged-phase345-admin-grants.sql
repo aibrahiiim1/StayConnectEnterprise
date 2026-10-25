@@ -516,8 +516,17 @@ BEGIN
   GRANT SELECT  ON iam_v2.walled_garden_settings_changes                                  TO svc_edged;
 END $g0125$;
 
--- 0151 — staged switch-on/off of client networks (activation, port mode, recovery operations).
---
--- edged is the only service that stages, materialises at apply, settles at confirm and reverts at rollback a change; netd renders what the rows say and
--- is granted nothing in iam_v2; scd, acctd and pmsd have no business with a staged request.
-GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_changes TO svc_edged;
+-- 0151 and 0152 — guarded on the migration being present, so a reconcile that runs before them does not fail.
+--   0151 staged switch-on/off of client networks: edged is the only service that stages, materialises at apply, settles at confirm and reverts at rollback.
+--   0152 portal profiles, their assignment and per-network sign-in narrowing: edged writes them; scd reads them to choose the portal design and the methods offered.
+DO $g$
+BEGIN
+  IF to_regclass('iam_v2.guest_network_changes') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_changes TO svc_edged;
+  END IF;
+  IF to_regclass('iam_v2.portal_profiles') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_edged;
+    GRANT SELECT ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_scd;
+  END IF;
+END;
+$g$;
