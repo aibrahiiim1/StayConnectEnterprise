@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0250",
+  "seq": 250,
+  "timestamp": "2026-10-25T23:32:03+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_MULTI_PMS_ROUTING_DEPLOYED_PRE_LIVE",
+  "authorisation": "D74 (2026-10-26) under the Product Owner's mission 'ONEGATE - COMPLETE ENTERPRISE CLIENT NETWORKING & MULTI-PMS DELIVERY'. It does NOT authorise merging PR #251 (the Product Owner's head-specific approval is preserved and was not applied by the agent), Go-Live, or any live network conversion, reset, PMS re-routing or posting by the agent.",
+  "deployment_provenance": {
+    "appliance": "edged 67808d7ab2a5 and scd 58abb4946dc5, each built from a clean clone with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false); sha256 edged 546c08d5b65e0036e4e304082adaa93f0aead2ac5dd8f9fdcd49adb99ad31e1e, scd 8f92026e475350010f0bef4fede9073adf1bfd93f459d5c36013d78c8ba2d320 verified on the appliance before install; backups edged.bak-pre-58abb494-20261025T195604Z, edged.bak-pre-67808d7a-20261025T201245Z, scd.bak-pre-58abb494-20261025T195609Z. An earlier install of edged 58abb494 was replaced by 67808d7a after two review findings. netd, portald, pmsd and acctd unchanged; Kea not restarted.",
+    "admin_console": "Release 20261025-201251 built from a clean clone of 67808d7ab2a5 (BUILD_ID s1pzi5fTyov8BdUtPn4jk, artifact sha256 1efeba7d37ea55dc8228a9959b692ac4eb26c853248b417d8540d779f697a1b8); intermediate 20261025-195619 (ab15b67e); before the mission 20261025-160357 (f524dc70).",
+    "database": "Schema 0154 -> 0155 on stayconnect_site with scripts/edge-migrate.sh as iam_v2_owner after an encrypted, proven-restorable backup (db-20261025T195514Z.sql.gz.age); rehearsed first on a disposable database as iam_v2_owner. Result: guest_network_pms_policy holds 2 rows, the existing single routes backfilled as DEDICATED; grants as designed (svc_scd select only, svc_edged select/insert/update/delete).",
+    "pull_request": "PR #251 (open, not merged). Two Codex P2 findings on the first head were fixed and resolved (duplicate-source detection in the routing preview; a selected interface that went out of service must stay removable).",
+    "preserved": "Before and after snapshots differ only in the intended objects: networks, active revision 98, archive (3), routing rows, Kea file hash, addresses, routes, management address, services and sessions (0) identical at the time of deployment."
+  },
+  "verification": "Before: Go unit and integration tests against a full-schema PostgreSQL (edged including the real svc_edged role, scd through its real handlers including duplicate room numbers, ambiguity, an unavailable and an out-of-service candidate, NONE, a mismatching policy and the cap, pmsresolve), 1022 console unit tests, lint and typecheck, 197 browser tests at 1280 px and 390 px (the routing specs re-run on the final head). After: the live API checks (/pms-routing, /readiness, /network/default, /overview, /recovery, /archive, /reports/overview, impact and three previews that changed nothing) all passed; a real browser rendered the affected pages without overflow at both widths and previewed (not confirmed) the editor; sha256sum -c DEPLOYED_BINARIES.sha256 7 of 7; check-appliance-units PASS; no edged or scd error. NOT verified: a real client signing in with a room number on a dedicated or shared network; real Protel behaviour with two interfaces on one network (one interface exists); the effect of the Product Owner's trunk conversions on real clients; any switch, access-point or hypervisor configuration.",
+  "product_owner_live_testing_observation": "After the deployment the Product Owner's own admin account tested the features on PRE-LIVE (audit): network.unarchived 20:13:55 UTC; network.port.mode_staged on ens192 at 20:15:34 and 20:16:54; apply and keep at 20:16:15/20:16:20 (revision 99) and 20:17:12/20:17:15 (revision 100); pms_routing.policy_set and pms_routing.cleared at 20:18 UTC through the new preview-and-confirm call. These were their actions; the deployment and the agent performed no network, routing, reset or PMS action. They are recorded as an observation, not as an acceptance.",
+  "defects_found": [
+    "The routing preview did not use the fingerprint-based duplicate-source detection that the source-conflicts page uses (Codex P2): fixed, with an integration test.",
+    "A selected interface that had gone out of service could not be unchecked in a shared set (Codex P2): fixed, with a unit test.",
+    "The production lint rule that a form label needs accessible text, which the local checks do not run, failed the first console build: the label is tied to its radio by id.",
+    "A network that is only waiting for a room sign-in decision was reported as 'not working on any network that offers it': it is now asked for a decision (found by the live browser check)."
+  ],
+  "rollback": "edged.bak-pre-67808d7a-20261025T201245Z (and edged.bak-pre-58abb494-20261025T195604Z for 40621f8e); scd.bak-pre-58abb494-20261025T195609Z; hotel-admin.previous -> 20261025-195619; database: 0155.down.sql via scripts/edge-migrate.sh --down after the recorded backup (every mapping is kept; policies are lost). Central: no change.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #251; real-client room sign-in acceptance on a dedicated and, with a second PMS Interface, a shared network; the physical switch/ESXi side of the trunk conversions; the shared-set cap decision (not requested).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "da58bb6c4f0389ffaee391d03594a4dd8af3bd3a",
+  "base_note": "Master after the merge of PR #250 (T0249).",
+  "head": "67808d7a",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0249",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

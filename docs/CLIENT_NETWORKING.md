@@ -375,3 +375,46 @@ cap. Console: 1019 unit tests and browser tests at 1280 px and 390 px.
 **Limits and open items.** The cap of three is a contract constant, not a setting. Sharing a network between two PMS makes it depend on both being able to answer; that is
 the strict contract's price and the readiness assessment says so. Real-client sign-in on a shared network, real Protel behaviour for two interfaces on one network, and any switch
 or hypervisor configuration are **not verified** and need the Product Owner's manual acceptance on PRE-LIVE.
+
+## 17. PRE-LIVE deployment record, third deployment (2026-10-25, appliance `172.21.60.25`)
+
+Measured, not claimed. A read-only snapshot was taken before and after (networks, active revision, archive and routing rows, Kea file hash, addresses, routes, services,
+binaries, console release); only the intended objects differ.
+
+| | Before | After |
+|---|---|---|
+| Schema | 0154 | 0155 (applied by `scripts/edge-migrate.sh` as `iam_v2_owner`, after the mandatory encrypted, proven-restorable backup `db-20261025T195514Z.sql.gz.age`) |
+| edged | `40621f8e` | `67808d7a` (a first install of `58abb494` was replaced by it after the two review findings below) |
+| scd | `4a192268` | `58abb494` |
+| netd, portald, pmsd, acctd | `4a192268`, `4a192268`, `ae4f85d2`, `9394eb5f` | unchanged (netd was not touched, Kea was not restarted) |
+| Admin Console | release `20261025-160357` (`f524dc70`) | release `20261025-201251`, built from `67808d7a` (`20261025-195619` was the intermediate `ab15b67e`) |
+| Routing | two rows, both on archived networks, no policy table | the same two rows, each backfilled as one dedicated PMS by the migration; nothing mapped, copied or merged |
+| Kea file hash, addresses, routes, management address, active revision (98), archive (3), sessions (0) | as running | identical |
+
+`DEPLOYED_BINARIES.{sha256,txt}` were rewritten from the installed bytes and `sha256sum -c` reports 7 of 7; `check-appliance-units.sh` passes; every `stayconnect-*` unit is
+active; neither edged nor scd logged an error. Rollback: `edged.bak-pre-67808d7a-20261025T201245Z`, `edged.bak-pre-58abb494-20261025T195604Z`,
+`scd.bak-pre-58abb494-20261025T195609Z`, `hotel-admin.previous` -> `20261025-195619` (`20261025-160357` is retained), `0155.down.sql` after the recorded backup.
+(nftables' hash is not a valid probe: it changes between two identical reads because of packet counters.)
+
+**Live checks as the verification operator (read-only, at the time of deployment):** `/pms-routing`, `/pms-routing/readiness`, `/network/default`, `/network/overview`,
+`/network/recovery`, `/network/archive`, `/reports/overview` and the impact endpoint all answered; the Default Network was undecided and the only warning was the decision for it
+(not a PMS fault, and nothing for Protel, which then served no active network and kept its two archived routes); the three previews (none, one dedicated PMS, a shared set of
+one, which is refused with its exact reason) changed nothing; a real browser rendered the Client networks, PMS routing, PMS connection, Dashboard, Room sign-in and Recovery
+pages without overflow at 1280 px and 390 px and the editor previewed (and was not confirmed) at both. The migration was also rehearsed beforehand on a disposable database as
+`iam_v2_owner`.
+
+**Observed after the deployment (not performed by it).** Within minutes the Product Owner's own `admin` account tested the features live, as the audit records: it restored a
+retired network from the archive (`network.unarchived`, 20:13:55 UTC), staged Access-to-Trunk changes on `ens192` (`network.port.mode_staged`, 20:15:34 and 20:16:54), applied
+and kept them (revisions 99 and 100), created networks *VLAN 90* and *VLAN 60* by that route, and set and cleared room sign-in routing for them through the new preview-and-confirm
+call (`pms_routing.policy_set`, `pms_routing.cleared`, 20:18 UTC, with the previous policy and interfaces recorded). None of this was done by the deployment or by the agent. It is
+the first live use of the new previews; it is not recorded here as an acceptance, and what those changes did to real clients is theirs to report.
+
+**Review findings fixed before the final deployment (PR #251, both P2, both resolved):** the routing preview did not use the fingerprint-based duplicate-source detection that
+the source-conflicts page uses, so two interfaces for one property could be approved as a shared set; and a selected interface that had since gone out of service could not
+be unchecked, blocking the repair. A production lint rule (a form label needs accessible text) that the local checks do not run also failed the first console build; the label is
+now tied to its radio by id.
+
+**Not verified, and not claimed:** a real client signing in with a room number on a dedicated or shared network; real Protel behaviour with two interfaces on one network (only
+one PMS Interface exists on PRE-LIVE, so a shared set cannot be exercised live); the effect of the Product Owner's trunk conversions on real clients; any switch, access-point or
+hypervisor configuration.
+
