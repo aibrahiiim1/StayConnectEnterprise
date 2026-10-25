@@ -43,6 +43,7 @@ type fakeStore struct {
 	markPendingErr  error
 	stateReadErr    error
 	resolveErr      error
+	markActiveErr   error
 	intents         map[string][]netcfg.GuestNetwork // the intent each revision was created with
 }
 
@@ -106,6 +107,9 @@ func (f *fakeStore) MarkPending(_ context.Context, id string, _ any) error {
 func (f *fakeStore) MarkActive(_ context.Context, id, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.markActiveErr != nil {
+		return f.markActiveErr
+	}
 	if f.state[id] != "pending_confirmation" {
 		return errNotPending
 	}

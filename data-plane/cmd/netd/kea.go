@@ -168,9 +168,9 @@ func (k *keaClient) LeaseFile() (string, error) {
 // idle network is recognised. Access never extends over it: an unverified address simply is not renewed (see addressOwner).
 const keaEvidenceSettle = 5 * time.Minute
 
-// EmptyAnswerTrusted reports whether Kea saying "no leases" can be believed for ip: it has run and stayed configured for keaEvidenceSettle, and
+// AbsenceTrusted reports whether Kea having no lease for ip can be believed: it has run and stayed configured for keaEvidenceSettle, and
 // its running configuration has a subnet that contains ip (an address Kea does not serve has no lease whatever the table says).
-func (k *keaClient) EmptyAnswerTrusted(ip net.IP) (bool, string) {
+func (k *keaClient) AbsenceTrusted(ip net.IP) (bool, string) {
 	k.evMu.Lock()
 	defer k.evMu.Unlock()
 	if time.Since(k.evAt) > 3*time.Second {
@@ -193,6 +193,20 @@ func (k *keaClient) EmptyAnswerTrusted(ip net.IP) (bool, string) {
 		}
 	}
 	return false, "Kea's running configuration has no subnet that contains " + ip.String()
+}
+
+// KeaEpoch is when the running Kea instance started, derived from its reported uptime.
+func (k *keaClient) KeaEpoch() (time.Time, bool) {
+	k.evMu.Lock()
+	defer k.evMu.Unlock()
+	if time.Since(k.evAt) > 3*time.Second {
+		k.evUptime, k.evReload, k.evSubnets, k.evErr = k.readStability()
+		k.evAt = time.Now()
+	}
+	if k.evErr != nil {
+		return time.Time{}, false
+	}
+	return k.evAt.Add(-time.Duration(k.evUptime * float64(time.Second))).Truncate(time.Second), true
 }
 
 // readStability asks Kea how long it has run and been configured, and which subnets it serves.

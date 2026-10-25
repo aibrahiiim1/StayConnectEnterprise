@@ -49,11 +49,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	ev := p.owner.Evidence(ctx, ip, s.MAC)
 	switch {
 	case ev.State == addressOwned:
-		p.rememberLease(key, ev.Until, now)
-	case ev.Empty:
-		// The table is empty, whether or not that is believed. A lease verified earlier is still valid on the client's side until it lapses, so the
-		// address stays authorized for exactly that long, never longer than the lease and never past leaseMemoryCap.
-		if left := p.rememberedLeaseLeft(key, now); left > 0 {
+		p.rememberLease(key, s.IP, s.MAC, ev.Until, ev.Epoch, now)
+	case ev.Missing:
+		// Kea has no record of this address. A lease verified earlier for this same address and device is still valid on the client's side until it
+		// lapses, so the address stays authorized for exactly that long: never longer than the lease and never past leaseMemoryCap.
+		if left := p.bridgedLeaseLeft(key, s.IP, s.MAC, ev, now); left > 0 {
 			if left < lease {
 				lease = left
 			}

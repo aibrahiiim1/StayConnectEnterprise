@@ -238,6 +238,8 @@ func newTestApplier(t *testing.T, k *fakeKernel) *applier {
 		outFn:        k.output,
 		// Stands in for /sys/class/net, whose read is fail-closed in production; cases that care override it.
 		liveBridgesFn: func() map[string]bool { return map[string]bool{} },
+		// The post-reconcile health checks read the machine; cases that care override this.
+		healthFn: func(context.Context, string, []netcfg.GuestNetwork) []healthResult { return nil },
 	}
 }
 

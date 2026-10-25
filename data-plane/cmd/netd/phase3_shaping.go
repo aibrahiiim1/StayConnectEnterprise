@@ -68,8 +68,8 @@ type phase3Shaping struct {
 	owner       addressOwner
 	// unverified: sessions not renewed because ownership could not be checked; their bounded leases run down.
 	unverified map[string]bool
-	// leaseUntil is when the lease last verified for each session lapses (see rememberLease).
-	leaseUntil map[string]time.Time
+	// leaseMem is the lease last verified for each session (see rememberLease).
+	leaseMem map[string]leaseMemory
 	// leaseFiles is optional; nil means health reports the symptom without the on-disk cause.
 	leaseFiles leaseFileInspector
 
@@ -113,11 +113,19 @@ type passLeases struct {
 	err    error
 }
 
-// EmptyAnswerTrusted forwards the stability question to the real source: this wrapper only caches one lease list per pass, and hiding the
+// KeaEpoch forwards to the real source.
+func (l *passLeases) KeaEpoch() (time.Time, bool) {
+	if ep, ok := l.src.(leaseEpoch); ok {
+		return ep.KeaEpoch()
+	}
+	return time.Time{}, false
+}
+
+// AbsenceTrusted forwards the stability question to the real source: this wrapper only caches one lease list per pass, and hiding the
 // source's judgement behind it would make every empty table read as trustworthy. A source that cannot judge keeps the established meaning.
-func (l *passLeases) EmptyAnswerTrusted(ip net.IP) (bool, string) {
+func (l *passLeases) AbsenceTrusted(ip net.IP) (bool, string) {
 	if st, ok := l.src.(leaseStability); ok {
-		return st.EmptyAnswerTrusted(ip)
+		return st.AbsenceTrusted(ip)
 	}
 	return true, ""
 }
@@ -143,7 +151,7 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.classes, classKey(bridge, sessionID))
 	// A half-allocated generation is void once the series ends; a returning session is a new class.
 	delete(p.pending, classKey(bridge, sessionID))
-	delete(p.leaseUntil, classKey(bridge, sessionID))
+	delete(p.leaseMem, classKey(bridge, sessionID))
 	// The quarantine deliberately outlives the series: clearing it would let the next pass re-admit the guest.
 }
 
@@ -227,6 +235,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 	p.passClasses = nil
 	defer func() { p.passClasses = nil }()
+	p.pruneLeaseMemory(now)
 
 	desired := map[string]map[int]shapeplan.Session{}
 	// Bridges come from the plan's declaration: a bridge with no sessions is the one most likely to hold a forgotten class.

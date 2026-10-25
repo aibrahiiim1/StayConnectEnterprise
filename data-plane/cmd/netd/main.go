@@ -113,6 +113,7 @@ func main() {
 	ap.loadIncompleteMarker(rootCtx)
 	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)
+	go ap.blockedRecoveryLoop(rootCtx, 20*time.Second, 10*time.Minute)
 
 	// Portal runtime state (interface, DHCP option 114, resolver fragment follow scd's HTTPS verdict, which
 	// changes with no revision). Never touches nftables or netplan. See portal.go.

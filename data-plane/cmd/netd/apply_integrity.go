@@ -231,7 +231,7 @@ func (a *applier) clearRollbackIncomplete(ctx context.Context) error {
 }
 
 func (m incompleteMarker) describe() string {
-	return fmt.Sprintf("rollback of revision %s did not finish (%s)", m.Revision, strings.Join(m.Steps, "; "))
+	return fmt.Sprintf("the appliance is not known to be on its confirmed configuration since revision %s (%s)", m.Revision, strings.Join(m.Steps, "; "))
 }
 
 // ---- rollback report -----------------------------------------------------------------------------------------------
@@ -382,4 +382,26 @@ func sameIntent(x, y []netcfg.GuestNetwork) bool {
 		return string(out)
 	}
 	return norm(x) == norm(y)
+}
+
+// blockedRecoveryLoop re-runs the reconcile while changes are refused, backing off while it keeps failing, so a transient fault (Kea slow to start, a database
+// that was down) clears itself without a restart and a persistent one does not restart the resolver every few seconds.
+func (a *applier) blockedRecoveryLoop(ctx context.Context, base, ceiling time.Duration) {
+	wait := base
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		if _, blocked := a.rollbackIncomplete(); !blocked {
+			wait = base
+			continue
+		}
+		if a.ReconcileActiveOnBoot(ctx) {
+			wait = base
+		} else if wait *= 2; wait > ceiling {
+			wait = ceiling
+		}
+	}
 }

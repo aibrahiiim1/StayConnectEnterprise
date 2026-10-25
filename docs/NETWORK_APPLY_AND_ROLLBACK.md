@@ -143,11 +143,16 @@ See [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §"apply rolled bac
 * **Confirm and rollback exclude each other.** Both hold the operation lock, so the database cannot say "active" while a rollback restores the previous
   network. A revision is confirmed only if it is what is running: after a service restart inside the window the previous configuration was restored and
   the pending revision is refused (409) until rolled back and applied again.
-* **The incomplete-rollback block is durable.** It is the marker file and the rollback's recorded reason in the revision history; either one blocks
-  applies after a crash. It is lifted only when the history record is resolved and the file removed, and a step that fails leaves it in place.
-* **An empty lease table is not "every address was given up".** A lease verified earlier keeps its address authorized until that lease lapses (never
-  more than four hours), so clients that have not yet reached their renewal time stay online. With nothing remembered, an empty table is believed only
-  from a Kea that has run and stayed configured for five minutes and serves the subnet; otherwise renewal is withheld and no session is ended.
+* **Changes are refused whenever the appliance is not known to be on its confirmed configuration.** That is the case after a rollback that did not finish
+  and after a boot reconcile that did not converge. Convergence is judged by the checks an apply must pass (management reachable, every gateway up, Kea
+  holding a socket), and with no confirmed revision it means verified factory-clean. The block is saved twice (marker file and the revision's recorded
+  reason), a failed save is part of the report, and it is lifted only after the record is resolved and the file removed. While it stands the reconcile
+  retries by itself with backoff, so a transient fault clears without a restart; Confirm is refused too.
+* **A lease Kea has lost does not end a valid session.** A lease verified earlier is remembered for exactly that address, device and Kea instance, and keeps the
+  address authorized until the lease lapses (never more than four hours) when Kea has an empty table, or has restarted since and no longer lists it. A lease
+  that another device now holds ends the session at once; so does a missing lease from the same Kea instance (a release or expiry) once Kea is stable. With
+  nothing remembered, an absence is believed only from a Kea that has run and stayed configured for five minutes and serves the subnet; otherwise renewal is
+  withheld and no session is ended.
 * **Only netd's own bridges are deleted, and only on agreeing evidence.** Every bridge and VLAN interface netd creates carries the alias
   `onegate:<network id>`. A bridge is removed only if an applied revision names it and either its mark names a network that revision ties to that bridge,
   or (created before the mark) its member interface is exactly the one the revision recorded. A name in history alone, an unreadable member, a mark that

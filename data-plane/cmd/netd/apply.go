@@ -87,6 +87,8 @@ type applier struct {
 	keaDiskErr    string
 	keaDiskMu     sync.Mutex
 	ifaceExistsFn func(name string) bool
+	// healthFn replaces the post-reconcile health checks.
+	healthFn func(ctx context.Context, revID string, intent []netcfg.GuestNetwork) []healthResult
 	// procNetUDPFn replaces /proc/net/udp when deciding whether Kea holds a DHCP socket.
 	procNetUDPFn func() string
 	ownerMarkFn  func(name string) string
@@ -343,6 +345,9 @@ func (a *applier) Confirm(ctx context.Context, id, actor string) error {
 		return errApplyBusy
 	}
 	defer a.releaseOp()
+	if m, blocked := a.rollbackIncomplete(); blocked {
+		return fmt.Errorf("%w: %s", errRollbackIncomplete, m.describe())
+	}
 	if state, err := a.revisionState(ctx, id); err != nil {
 		return fmt.Errorf("cannot read the state of revision %s: %w", id, err)
 	} else if state != "pending_confirmation" {

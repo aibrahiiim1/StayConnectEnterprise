@@ -329,6 +329,32 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 	defer a.opMu.Unlock()
 	a.busy.Add(1)
 	defer a.busy.Add(-1)
+	id, problems := a.reconcileConfirmed(ctx)
+	if len(problems) > 0 {
+		// The appliance is not known to be on its confirmed configuration, so nothing may be applied on top of it until a later reconcile converges.
+		if _, already := a.rollbackIncomplete(); !already {
+			a.event(ctx, id, "boot_reconcile_blocked", false, map[string]any{"problems": problems})
+			if err := a.markRollbackIncomplete(id, problems); err != nil {
+				slog.Error("netd could not save the block that follows an unconverged boot; this process still refuses changes", "err", err)
+			}
+		}
+		return false
+	}
+	// A complete convergence to the confirmed configuration is what an unfinished rollback was waiting for.
+	if _, was := a.rollbackIncomplete(); was {
+		if err := a.clearRollbackIncomplete(ctx); err != nil {
+			slog.Error("netd converged but could not lift the incomplete-rollback block; further changes stay refused", "err", err)
+			a.event(ctx, id, "rollback_incomplete_clear_failed", false, map[string]any{"error": err.Error()})
+			return false
+		}
+		a.event(ctx, id, "rollback_incomplete_cleared", true, map[string]any{"by": "reconcile"})
+	}
+	return true
+}
+
+// reconcileConfirmed brings the live system to the confirmed active revision and returns what it could not: no problems means it converged, verified by the
+// same health checks an apply must pass. Called with the operation lock held.
+func (a *applier) reconcileConfirmed(ctx context.Context) (string, []string) {
 	// The confirmed active revision's own intent snapshot, never the live guest_networks rows, which the UI edits directly and may hold an unapplied draft (see store.CurrentActiveIntent).
 	id, bundle, intent, err := a.currentActiveIntent(ctx)
 	if err != nil {
@@ -337,13 +363,17 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 			// would be a guess about what this appliance is supposed to be forwarding.
 			a.event(ctx, id, "boot_reconcile", false, map[string]any{"intent": err.Error()})
 			slog.Error("netd boot reconcile: active revision intent unusable; live state left untouched", "err", err)
-			return false
+			return id, []string{"the confirmed revision's intent could not be read: " + err.Error()}
 		}
-		// Nothing was ever confirmed: there is no configuration to converge to, which is itself a complete (factory-clean) state.
-		return true
+		// Nothing was ever confirmed: the correct state is factory-clean, so that is what is verified (and restored if something half-applied is still there).
+		rb := a.newRollbackReport(ctx, "")
+		if !a.factoryClean(ctx, rb) {
+			return "", rb.failed
+		}
+		return "", rb.failed
 	}
 	if id == "" {
-		return true
+		return "", nil
 	}
 	// The portal address of the confirmed revision comes from its own bundle, never the live setting: a saved-but-unapplied address must not take effect at restart.
 	// Only a revision applied before the portal address existed records none; that one upgrade step adopts the configured address, validated as an apply would.
@@ -402,7 +432,7 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 	res, nftErr := a.ensureNftStructure(ctx, intent, "boot_reconcile")
 	if nftErr != nil {
 		a.event(ctx, id, "boot_reconcile", false, map[string]any{"nft": nftErr.Error()})
-		return false
+		return id, append(bootProblems, "firewall: "+nftErr.Error())
 	}
 	// Keep the stored bundle honest: once the live ruleset has been rebuilt by the current renderer, the
 	// artifact on disk should say the same thing rather than remain a record of an older structure.
@@ -459,6 +489,12 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 			bootProblems = append(bootProblems, "portal resolver fragment: "+rerr.Error())
 		}
 	}
+	// Convergence is judged by the checks an apply must pass, not by the absence of errors: Kea may have accepted a configuration and still not hold a socket.
+	for _, h := range a.reconcileHealth(ctx, id, intent) {
+		if !h.OK && criticalHealth(h.Name) {
+			bootProblems = append(bootProblems, "health "+h.Name+": "+h.Detail)
+		}
+	}
 	// The recorded outcome is the real outcome: a boot that failed to rebuild a network or left a stray bridge forwarding must not look clean.
 	a.event(ctx, id, "boot_reconcile", len(bootProblems) == 0, map[string]any{
 		"bundle": bundle, "nft_changed": res.Changed, "carried_elements": res.Carried,
@@ -466,18 +502,20 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) (converged bool) {
 	})
 	if len(bootProblems) > 0 {
 		slog.Error("netd boot reconcile did not fully converge", "revision", id, "problems", bootProblems)
-		return false
 	}
-	// A complete convergence to the confirmed configuration is what an unfinished rollback was waiting for.
-	if _, was := a.rollbackIncomplete(); was {
-		if err := a.clearRollbackIncomplete(ctx); err != nil {
-			slog.Error("netd converged but could not lift the incomplete-rollback block; further changes stay refused", "err", err)
-			a.event(ctx, id, "rollback_incomplete_clear_failed", false, map[string]any{"error": err.Error()})
-			return false
-		}
-		a.event(ctx, id, "rollback_incomplete_cleared", true, map[string]any{"by": "boot_reconcile"})
+	return id, bootProblems
+}
+
+// criticalHealth names the checks whose failure means the confirmed network is not actually serving. portald is a separate service that may start after netd.
+func criticalHealth(name string) bool {
+	return name == "mgmt_reachable" || name == "kea_running" || strings.HasPrefix(name, "gateway_up")
+}
+
+func (a *applier) reconcileHealth(ctx context.Context, id string, intent []netcfg.GuestNetwork) []healthResult {
+	if a.healthFn != nil {
+		return a.healthFn(ctx, id, intent)
 	}
-	return true
+	return a.healthChecks(ctx, id, intent)
 }
 
 // rollback restores the previous active revision (its bundle re-applied) or, if none, removes everything netd added. Mgmt/legacy interfaces are never touched.
@@ -516,48 +554,12 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 	prevBundle, _ := a.previousBundle(ctx, failedID)
 
 	if prevBundle == "" {
-		// The tear-down is only correct for a revision that is NOT active, re-checked here: both callers (applier.Rollback, watchdogLoop) decide to roll back before looking for a target,
-		// and a /confirm can land in the gap, making the revision ACTIVE with no other active revision to find, which would take the branch below and destroy every bridge of a confirmed configuration.
-		// No prior good revision: tear down everything netd added and clear. A factory-clean appliance must come back factory-clean, including Kea, which the first apply STARTED.
-		if !a.dryRun {
-			_, failed, unmanaged, lerr := a.removeStrayBridges(ctx, nil)
-			if lerr != nil {
-				// Not knowing what exists is not permission to declare the appliance clean.
-				rb.fail("rollback", "the live bridges could not be listed", lerr, nil)
-				rb.persistMarker()
-				return rb.failed
-			}
-			if len(failed) > 0 {
-				// Recorded, and the rollback finishes what it can: leaving Kea serving a network whose bridge survived is worse than an incomplete tear-down that says so.
-				rb.fail("rollback_bridges", "client bridges not destroyed", errors.New(strings.Join(failed, "; ")), map[string]any{"not_destroyed": failed})
-			}
-			if len(unmanaged) > 0 {
-				a.event(ctx, failedID, "bridges_left_alone", true, map[string]any{"left_alone": unmanaged})
-			}
-			for _, f := range []string{a.netplanFile, a.unboundFrag} {
-				if f == "" {
-					continue
-				}
-				if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
-					rb.fail("rollback_files", "could not remove "+f, err, nil)
-				}
-			}
-			// Factory-clean has no portal address either: the interface goes, and the resolver stops answering
-			// the portal names with it.
-			if _, perr := a.ensurePortalIface(ctx, ""); perr != nil {
-				rb.fail("rollback_portal_address", "portal address not removed", perr, nil)
-			}
-			if changed, prev, ferr := a.writeUnboundPortal("", netcfg.PortalTLS{}); ferr != nil {
-				rb.fail("rollback_unbound", "portal resolver fragment not removed", ferr, nil)
-			} else if changed {
-				if rerr := a.reloadUnboundPortal(ctx, prev); rerr != nil {
-					rb.fail("rollback_unbound", "resolver not reloaded", rerr, nil)
-				}
-			}
-		}
-		a.clearInForce()
-		if kerr := a.restoreKeaBootstrap(ctx); kerr != nil {
-			rb.fail("rollback_kea", "DHCP service not returned to its pre-apply state", kerr, nil)
+		// The tear-down is only correct for a revision that is NOT active, re-checked above: both callers (applier.Rollback, watchdogLoop) decide to roll back before looking for a target,
+		// and a /confirm can land in the gap, making the revision ACTIVE with no other active revision to find, which would destroy every bridge of a confirmed configuration.
+		// No prior good revision: a factory-clean appliance must come back factory-clean, including Kea, which the first apply STARTED.
+		if !a.factoryClean(ctx, rb) {
+			rb.persistMarker()
+			return rb.failed
 		}
 		return a.finishRollback(ctx, failedID, reason, rb)
 	}
@@ -677,6 +679,49 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) []strin
 		}
 	}
 	return a.finishRollback(ctx, failedID, reason, rb)
+}
+
+// factoryClean removes everything netd added, for an appliance with no confirmed revision. It reports false when it could not even tell what exists;
+// every other failure is recorded on rb.
+func (a *applier) factoryClean(ctx context.Context, rb *rollbackReport) bool {
+	if !a.dryRun {
+		_, failed, unmanaged, lerr := a.removeStrayBridges(ctx, nil)
+		if lerr != nil {
+			// Not knowing what exists is not permission to declare the appliance clean.
+			rb.fail("rollback", "the live bridges could not be listed", lerr, nil)
+			return false
+		}
+		if len(failed) > 0 {
+			rb.fail("rollback_bridges", "client bridges not destroyed", errors.New(strings.Join(failed, "; ")), map[string]any{"not_destroyed": failed})
+		}
+		if len(unmanaged) > 0 {
+			a.event(ctx, rb.revID, "bridges_left_alone", true, map[string]any{"left_alone": unmanaged})
+		}
+		for _, f := range []string{a.netplanFile, a.unboundFrag} {
+			if f == "" {
+				continue
+			}
+			if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+				rb.fail("rollback_files", "could not remove "+f, err, nil)
+			}
+		}
+		// Factory-clean has no portal address either: the interface goes, and the resolver stops answering the portal names with it.
+		if _, perr := a.ensurePortalIface(ctx, ""); perr != nil {
+			rb.fail("rollback_portal_address", "portal address not removed", perr, nil)
+		}
+		if changed, prev, ferr := a.writeUnboundPortal("", netcfg.PortalTLS{}); ferr != nil {
+			rb.fail("rollback_unbound", "portal resolver fragment not removed", ferr, nil)
+		} else if changed {
+			if rerr := a.reloadUnboundPortal(ctx, prev); rerr != nil {
+				rb.fail("rollback_unbound", "resolver not reloaded", rerr, nil)
+			}
+		}
+	}
+	a.clearInForce()
+	if kerr := a.restoreKeaBootstrap(ctx); kerr != nil {
+		rb.fail("rollback_kea", "DHCP service not returned to its pre-apply state", kerr, nil)
+	}
+	return true
 }
 
 // abandonRejectedIntent puts back in force what was in force before the apply that is being rolled back, when this process applied it. It is used when the
