@@ -372,6 +372,8 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
     EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
+    -- The per-profile privacy-notice stamp (0152, iam_v2.profile_privacy_notice_stamp, SECURITY DEFINER as iam_v2_owner) records the notice a profile network showed.
+    EXECUTE 'GRANT SELECT, INSERT ON public.privacy_notice_versions TO iam_v2_owner';
     -- REFERENCES on public.operators is granted in gatep-iam-roles.sql, NOT here, and the difference
     -- matters: this file runs AFTER the numbered migrations, and the privilege is needed BY one of them.
     -- Granting it here would be granting it too late to be used.
