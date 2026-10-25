@@ -241,13 +241,11 @@ func (s *server) settleConfirmedChanges(ctx context.Context, revisionID string) 
 		return err
 	}
 	for _, x := range done {
-		if x.kind != string(changeDisable) || (x.groupKind != "FACTORY_RESET" && x.groupKind != "FULL_RESET") {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.network_archive (network_id, tenant_id, site_id, group_id, group_kind)
-			SELECT g.id, g.tenant_id, g.site_id, $2::uuid, $3 FROM guest_networks g WHERE g.id=$1::uuid AND g.tenant_id=$4::uuid AND g.site_id=$5::uuid AND NOT g.enabled
-			ON CONFLICT (network_id) DO NOTHING`, x.network, x.group, x.groupKind, s.tenantID, s.siteID); err != nil {
-			return err
+		if x.groupKind == "FACTORY_RESET" || x.groupKind == "FULL_RESET" {
+			if err := s.archiveRetired(ctx, tx); err != nil {
+				return err
+			}
+			break
 		}
 	}
 	// A network that is serving again is not archived, whatever switched it back on.

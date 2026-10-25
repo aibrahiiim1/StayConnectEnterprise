@@ -251,10 +251,12 @@ rules, sign-in restrictions and pauses, the audit trail, the last-confirmed snap
 **What archived means.** A marker in `iam_v2.network_archive` (migration 0154, additive; nothing in `public`). It is a presentation state: the network is still
 switched off, still has its history, settings, PMS routing and audit trail, and nothing a guest, an entitlement, a package rule or the PMS sees changes.
 
-* **Resets confirmed before the feature.** Migration 0154 archives, once and idempotently, the networks that an already-confirmed reset switched off and that nothing has touched since (from the recorded changes alone; a network that is serving is never shown as archived).
 * **When it is written.** Only when a Restore Factory Defaults or Full Client Networking Reset is **confirmed**, in the same transaction that settles the change
-  (`settleConfirmedChanges`), and only for the networks that reset switched off. Staged, applied, cancelled, rolled back and lapsed resets never archive anything,
-  so a failed change cannot leave an incorrect archive. Restore Last Working archives nothing.
+  (`settleConfirmedChanges`). It archives every network the reset left switched off: the ones it switched off and the ones that were already off. Staged, applied,
+  cancelled, rolled back and lapsed resets never archive anything, so a failed change cannot leave an incorrect archive. Restore Last Working archives nothing.
+* **Catch-up.** A reset confirmed before this existed is caught up from the recorded facts: migration 0154 archives the networks it switched off, and the reads that
+  show the archive archive the ones already off before it. Only networks untouched since that reset are archived: a network the operator edited, switched on,
+  or restored from the archive afterwards is not archived again (restoring touches the network's row for exactly that reason).
 * **Staged, applied, confirmed.** The Recovery page shows the latest recovery as three different states: *Staged* (nothing has changed), *Applied* (live, affecting
   clients, rolls back by itself unless kept) and *Confirmed* (kept; the retired networks are archived). Client networks lists a staged or applied recovery with
   *Not applied yet* or *Awaiting confirmation*.

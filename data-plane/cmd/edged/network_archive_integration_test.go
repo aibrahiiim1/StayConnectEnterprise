@@ -388,18 +388,25 @@ func TestIntegration_Default_ReadinessKeepsListsWhenChecksCannotRead(t *testing.
 	}
 }
 
-// A reset confirmed before the archive existed is archived by the migration from the recorded facts, and nothing else is.
-func TestIntegration_Archive_AResetConfirmedBeforeTheFeatureIsArchivedByTheMigration(t *testing.T) {
+// A reset confirmed before the archive existed is caught up, from the recorded facts: the networks it switched off (migration 0154) and the ones that were
+// already switched off before it (the catch-up on the reads that show the archive). Networks touched since are not archived, and a network restored from the
+// archive is not archived again.
+func TestIntegration_Archive_AResetConfirmedBeforeTheFeatureIsCaughtUp(t *testing.T) {
 	f := newAPI(t)
 	fn := startFakeNetd(t, f)
+	f.retireRevisions(t)
+	earlier := f.mkNet(t, "Retired earlier", 3071, "207.0")
+	if st, _ := f.do(t, "POST", "/network/guest-networks/"+earlier+"/disable", nil); st != 200 {
+		t.Fatal("disable")
+	}
 	h := heavilyReconfigured(t, f, fn)
 	ctx := context.Background()
 	if st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName}); st != 201 {
 		t.Fatalf("stage = %d %v", st, b)
 	}
 	f.applyAndKeep(t, fn)
-	if f.archivedCount(t) != 3 {
-		t.Fatal("setup")
+	if f.archivedCount(t) != 4 {
+		t.Fatalf("a confirmed reset archived %d, want the 3 it switched off and the one already off", f.archivedCount(t))
 	}
 	// As if the reset had been confirmed by the previous version: no markers.
 	if _, err := f.pool.Exec(ctx, `DELETE FROM iam_v2.network_archive WHERE tenant_id=$1::uuid`, f.tenant); err != nil {
@@ -419,15 +426,29 @@ func TestIntegration_Archive_AResetConfirmedBeforeTheFeatureIsArchivedByTheMigra
 		}
 	}
 	if got := f.archivedCount(t); got != 2 {
-		t.Fatalf("the migration archived %d, want the 2 that are still off", got)
+		t.Fatalf("the migration archived %d, want the 2 the reset switched off that are still off", got)
 	}
-	flags := f.listFlags(t)
-	for k, v := range flags {
+	// The catch-up on the read adds the one that was already off, and nothing the operator touched.
+	_, ar := f.do(t, "GET", "/network/archive", nil)
+	if ar["count"] != float64(3) {
+		t.Fatalf("after the catch-up: %v", ar)
+	}
+	for k, v := range f.listFlags(t) {
 		if strings.Contains(k, h.vlans[0][:8]) && v[0] {
 			t.Fatal("a network that was switched on again was archived")
 		}
 		if strings.HasPrefix(k, "Client Wi-Fi") && v[0] {
 			t.Fatal("the Default Network was archived")
 		}
+	}
+	// A network restored from the archive stays restored across later reads.
+	if st, _ := f.do(t, "POST", "/network/guest-networks/"+earlier+"/unarchive", nil); st != 200 {
+		t.Fatal("restore")
+	}
+	f.do(t, "GET", "/network/archive", nil)
+	f.do(t, "GET", "/network/guest-networks", nil)
+	f.do(t, "GET", "/network/overview", nil)
+	if f.count(t, `SELECT count(*) FROM iam_v2.network_archive WHERE network_id=$1::uuid`, earlier) != 0 {
+		t.Fatal("a network restored from the archive was archived again by the catch-up")
 	}
 }
