@@ -408,8 +408,9 @@ Reference hardware: **WAN = `ens160`**, **client trunk = `ens192`**.
 Steps: create two client networks on parent **`ens192`**, VLAN tagged, ids **100**
 and **200**, with the subnets/gateways above; give each its own DHCP pool; enable
 captive portal + NAT on both; apply + confirm each. On your wireless controller,
-map SSID "Client Wi-Fi" → VLAN 100 and SSID "Conference" → VLAN 200. Set branding
-per network in Portal settings.
+map SSID "Client Wi-Fi" → VLAN 100 and SSID "Conference" → VLAN 200. To give a network its
+own sign-in page, create a portal profile in Portal settings and assign it to the network; its sign-in methods
+are narrowed on the network's own page (see [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §7–§8).
 
 ### Example B — two VLANs sharing one portal/experience
 

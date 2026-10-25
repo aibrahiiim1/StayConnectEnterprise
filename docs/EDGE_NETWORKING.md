@@ -7,6 +7,10 @@
 > `data-plane/migrations/0002_edge_networking.up.sql`. Design rationale:
 > [PHASE19_ASSESSMENT.md](PHASE19_ASSESSMENT.md).
 
+> **Current state.** This describes the Phase 19 model. A new appliance now offers a prepared, not-yet-active Access network (`10.20.0.0/20`) that an
+> administrator activates, and `br-lan` is only a legacy bridge. Staging, Access/Trunk, recovery, portal profiles and per-network sign-in are in
+> [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md).
+
 Before Phase 19 the appliance hardcoded exactly one client network (`br-lan`,
 `10.10.0.0/24`) in every layer. Phase 19 makes the **site database the source of
 truth** for any number of client networks and VLANs, and renders the OS files

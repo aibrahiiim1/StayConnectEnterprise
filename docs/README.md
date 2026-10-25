@@ -106,7 +106,7 @@ The product words used throughout (Client, Admin Console, Client Portal, Site) a
 | Full system reference (historical snapshot, 2026-07-10) | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) |
 | Central (licensing, activation, fleet status) — authoritative | [CENTRAL_CONTROL_PLANE.md](CENTRAL_CONTROL_PLANE.md) |
 | Cloud / control-plane architecture | [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md) · [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) |
-| Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) |
+| Edge / appliance architecture | [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md) · [EDGE_NETWORKING.md](EDGE_NETWORKING.md) · [CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) |
 | Client networks / VLANs | [GUEST_VLAN_CONFIGURATION.md](GUEST_VLAN_CONFIGURATION.md) · [ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md) |
 | DHCP | [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md) · [DHCP_OPTION_114.md](DHCP_OPTION_114.md) · [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md) |
 | Sync protocol (historical — the appliance's telemetry subsystem was removed, CLAUDE.md §0E) | [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md) |

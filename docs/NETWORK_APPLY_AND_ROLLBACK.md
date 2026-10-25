@@ -158,3 +158,9 @@ See [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §"apply rolled bac
   or (created before the mark) its member interface is exactly the one the revision recorded. A name in history alone, an unreadable member, a mark that
   names another network, or an unreadable record proves nothing: the bridge is reported (`bridges_left_alone`) and left in place. A healthy wanted bridge
   without the mark is marked only when its single member is exactly the configured interface.
+
+## The last-confirmed snapshot and a database that is down
+
+netd writes `last-confirmed.json` beside the bundles after each confirmation. If the database is unreachable at start, netd stays up, restores the
+network from it, refuses every change and retries until the database answers; the database decides when it can. See
+[CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §6. `netd recover status` and `netd recover reassert-confirmed` are the local tools.

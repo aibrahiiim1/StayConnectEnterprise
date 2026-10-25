@@ -145,3 +145,6 @@ Validation is a hard gate before apply — see
 runs DHCP; StayConnect is still gateway + captive portal, see
 [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md). `relay` is supported in the schema
 (`relay_targets`) but minimal in this release. `disabled` serves no DHCP.
+
+The prepared Access network uses the pool `10.20.0.10` – `10.20.15.254` on `10.20.0.0/20` ([CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §1); its address is never
+forced onto a conflicting network.
