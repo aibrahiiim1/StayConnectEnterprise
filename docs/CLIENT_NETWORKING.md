@@ -1,7 +1,7 @@
 # Client networking
 
 How a client network is prepared, switched on, changed, recovered and given its own portal and sign-in. It describes what is implemented
-and tested; **PRE-LIVE acceptance on real Kea and a real switch has not been performed** (see §11).
+and tested; **PRE-LIVE acceptance on real Kea and a real switch has not been performed** (see §12).
 
 Related: [NETWORK_APPLY_AND_ROLLBACK.md](NETWORK_APPLY_AND_ROLLBACK.md) (the apply/confirm/rollback engine),
 [DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md), [EDGE_NETWORKING.md](EDGE_NETWORKING.md) (the original model),
