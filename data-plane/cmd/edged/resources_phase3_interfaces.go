@@ -1128,6 +1128,7 @@ func (s *server) unmappedGuestNetworks(r *http.Request) ([]map[string]string, er
 		 WHERE gn.site_id=$2
 		   AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_network_pms_map m
 		                    WHERE m.tenant_id=$1 AND m.site_id=$2 AND m.guest_network_id = gn.id)
+		   AND NOT (NOT gn.enabled AND EXISTS (SELECT 1 FROM iam_v2.network_archive a WHERE a.network_id = gn.id))
 		 ORDER BY gn.name, gn.id`, s.tenantID, s.siteID)
 	if err != nil {
 		return nil, err

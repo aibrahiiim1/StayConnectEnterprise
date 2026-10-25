@@ -39,6 +39,7 @@ func (s *server) networkRoutes() http.Handler {
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
 	s.mountRecovery(r)
+	s.mountArchive(r)
 	r.Get("/guest-networks/{id}/sign-in", s.getNetworkSignin)
 	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
 	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
@@ -145,6 +146,8 @@ type guestNetworkRow struct {
 	PortalURL       *string          `json:"portal_url,omitempty"`
 	Pools           []netcfg.Pool    `json:"pools"`
 	Reservations    []reservationRow `json:"reservations,omitempty"`
+	Archived        bool             `json:"archived"`
+	IsDefault       bool             `json:"is_default"`
 }
 
 type reservationRow struct {
@@ -193,8 +196,10 @@ func (s *server) listGuestNetworks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, g)
 	}
+	archived, def := s.archivedSet(ctx), s.defaultNetworkID(ctx)
 	for i := range out {
 		out[i].Pools = s.loadPoolsFor(ctx, out[i].ID)
+		out[i].Archived, out[i].IsDefault = archived[out[i].ID], out[i].ID == def
 	}
 	writeList(w, out)
 }

@@ -71,6 +71,8 @@ type overviewNetwork struct {
 	PMSInterfaces   []string           `json:"pms_interfaces"`
 	HealthKnown     bool               `json:"health_known"`
 	Attention       []string           `json:"attention"`
+	Archived        bool               `json:"archived"`
+	IsDefault       bool               `json:"is_default"`
 }
 
 type networkOverviewResp struct {
@@ -214,6 +216,7 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 	if inflight != nil {
 		inflightRev = &netstatus.Revision{Intent: inflightIntent}
 	}
+	archivedIDs, defaultID := s.archivedSet(ctx), s.defaultNetworkID(ctx)
 	for _, n := range saved {
 		var running *netcfg.GuestNetwork
 		for i := range activeIntent {
@@ -247,6 +250,7 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 			item.Changes = []netstatus.Change{}
 		}
 		_ = s.db.QueryRow(ctx, activeOnNetworkSQL, n.ID).Scan(&item.ActiveClients)
+		item.Archived, item.IsDefault = archivedIDs[n.ID], n.ID == defaultID
 		out.Networks = append(out.Networks, item)
 	}
 	return out, nil

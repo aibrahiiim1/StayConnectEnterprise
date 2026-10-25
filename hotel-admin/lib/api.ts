@@ -1041,6 +1041,10 @@ export type Pool = { start_ip: string; end_ip: string };
 export type GuestNetwork = {
   id: string;
   name: string;
+  /** Switched off by a confirmed reset and hidden from the main list. */
+  archived?: boolean;
+  /** The prepared network that is serving as the site's Default Network. */
+  is_default?: boolean;
   description?: string;
   ssid_label?: string;
   enabled: boolean;

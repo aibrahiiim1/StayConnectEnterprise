@@ -73,6 +73,22 @@ describe("recovery page", () => {
     expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("shows staged, applied and confirmed as three different things", async () => {
+    for (const [state, text, absent] of [
+      ["STAGED", /Nothing has changed yet\. Press Apply changes/, /archived and the Default Network/],
+      ["APPLIED", /It is live and affecting clients/, /archived and the Default Network/],
+      ["CONFIRMED", /archived and the Default Network serves clients/, null],
+    ] as const) {
+      get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery"
+        ? { ...status, latest: { group_id: "g1", kind: "FULL_RESET", state, at: "2026-10-26T08:00:00Z" } } : p === "/network/changes" ? { groups: [] } : items));
+      const { unmount } = render(<RecoveryPage />);
+      await screen.findByText(/Latest recovery: Full client networking reset/);
+      expect(screen.getByText(text)).toBeTruthy();
+      if (absent) expect(screen.queryByText(absent)).toBeNull();
+      unmount();
+    }
+  });
+
   it("tells an applied recovery apart from a staged one", async () => {
     get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes"
       ? { groups: [{ group_id: "g1", group_kind: "FULL_RESET", state: "APPLIED", created_at: "", changes: [] }] } : items));

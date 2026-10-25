@@ -29,6 +29,7 @@ import {
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
 import { FactoryNetworkCard, PortModeCard, StagedChangesList } from "@/components/network/lifecycle";
+import { ArchivedNetworks, DefaultNetworkCard } from "@/components/network/default-network";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
@@ -192,6 +193,8 @@ export default function NetworkPage() {
   }
 
   const enabledCount = (rows ?? []).filter((n) => n.enabled).length;
+  const shownRows = (rows ?? []).filter((n) => !n.archived);
+  const archivedCount = (rows ?? []).length - shownRows.length;
   const knownClients = Object.values(status);
   const clientTotal = knownClients.reduce((s, x) => s + (x.active_clients ?? 0), 0);
   const hasResults = !!validation || !!(health && health.length);
@@ -279,14 +282,15 @@ export default function NetworkPage() {
 
       <FactoryNetworkCard key={`f${stagedKey}`} writable={writable} onStaged={reload} />
       <StagedChangesList writable={writable} reloadKey={stagedKey} onCancelled={reload} />
+      <DefaultNetworkCard writable={writable} reloadKey={stagedKey} />
 
       {rows !== null && rows.length > 0 && (
         <StatGrid cols={3}>
-          <StatCard label="Client networks" value={rows.length} icon={<Network />} />
+          <StatCard label="Client networks" value={shownRows.length} hint={archivedCount > 0 ? `${archivedCount} archived` : undefined} icon={<Network />} />
           <StatCard
             label="Enabled"
             value={enabledCount}
-            hint={rows.length - enabledCount > 0 ? `${rows.length - enabledCount} disabled` : "All enabled"}
+            hint={shownRows.length - enabledCount > 0 ? `${shownRows.length - enabledCount} disabled` : "All enabled"}
             icon={<Wifi />}
             tone={enabledCount === 0 ? "warn" : "default"}
           />
@@ -302,7 +306,7 @@ export default function NetworkPage() {
       <Card className="overflow-hidden">
         {rows === null ? (
           <SkeletonRows rows={4} cols={6} />
-        ) : rows.length === 0 ? (
+        ) : shownRows.length === 0 ? (
           <EmptyState
             icon={<Network />}
             title="No client networks yet"
@@ -326,7 +330,7 @@ export default function NetworkPage() {
               </TR>
             </THead>
             <TBody>
-              {rows.map((n) => (
+              {shownRows.map((n) => (
                 <TR key={n.id} onClick={() => router.push(`/network/${n.id}`)}>
                   <TD className="min-w-44 max-w-[13rem]">
                     <Link
@@ -337,6 +341,7 @@ export default function NetworkPage() {
                     >
                       {n.name}
                     </Link>
+                    {n.is_default && <Badge tone="accent">Default</Badge>}
                     {(n.ssid_label || n.description) && (
                       <div className="truncate text-xs text-muted-foreground" title={n.description || n.ssid_label}>
                         {n.ssid_label ? `SSID ${n.ssid_label}` : n.description}
@@ -405,6 +410,8 @@ export default function NetworkPage() {
           </Table>
         )}
       </Card>
+
+      <ArchivedNetworks writable={writable} reloadKey={stagedKey} onRestored={reload} />
 
       <ConfirmDialog
         open={confirming !== null}
