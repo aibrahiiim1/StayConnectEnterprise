@@ -1,0 +1,299 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Layers, Rocket, X } from "lucide-react";
+import { api } from "@/lib/api";
+import {
+  FactoryInfo, GROUP_LABEL, PORT_MODE_LABEL, PortInfo, PortModePlan, StagedGroup,
+} from "@/lib/api/network-lifecycle";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { SectionCard } from "@/components/ui/card";
+import { DialogForm } from "@/components/ui/dialog";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
+import { Checkbox, Field, Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
+import { errMsg } from "@/lib/utils";
+
+/** The prepared Access network: shown until it is activated, never as if it were already serving. */
+export function FactoryNetworkCard({ writable, onStaged }: { writable: boolean; onStaged: () => void }) {
+  const [info, setInfo] = useState<FactoryInfo | null>(null);
+  const [open, setOpen] = useState(false);
+  const [ack, setAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    api.get<FactoryInfo>("/network/factory").then(setInfo).catch(() => setInfo(null));
+  }, []);
+
+  if (!info || !["prepared", "blocked", "awaiting_assignment", "lan_unknown"].includes(info.state)) return null;
+  const t = info.template;
+
+  async function activate() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post("/network/factory/activate", { no_other_dhcp_server: true });
+      setOpen(false);
+      toast.success("Activation is staged", "Review and apply it from this screen. The network serves clients only after the change is confirmed.");
+      onStaged();
+      setInfo({ ...info!, state: "staged" });
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Factory network"
+      description={info.reason}
+      actions={
+        writable && info.state === "prepared" ? (
+          <Button size="sm" onClick={() => { setAck(false); setErr(null); setOpen(true); }}>
+            <Rocket /> Activate…
+          </Button>
+        ) : undefined
+      }
+    >
+      <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <div><dt className="text-muted-foreground">Name</dt><dd>{t.name}</dd></div>
+        <div><dt className="text-muted-foreground">Mode</dt><dd>{t.mode}</dd></div>
+        <div><dt className="text-muted-foreground">Subnet</dt><dd className="font-mono">{t.subnet_cidr} (gateway {t.gateway_ip})</dd></div>
+        <div><dt className="text-muted-foreground">DHCP</dt><dd>{t.dhcp}, <span className="font-mono">{t.pool.start_ip}–{t.pool.end_ip}</span></dd></div>
+        <div className="sm:col-span-2"><dt className="text-muted-foreground">Prepared services</dt><dd>{t.services.join(", ")}</dd></div>
+        <div className="sm:col-span-2"><dt className="text-muted-foreground">PMS</dt><dd>{t.pms}</dd></div>
+      </dl>
+      {info.conflicts.length > 0 && (
+        <Callout tone="warning" title="Cannot be activated as it stands">
+          <ul className="list-disc space-y-1 pl-5">{info.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
+        </Callout>
+      )}
+      <DialogForm
+        open={open}
+        onOpenChange={setOpen}
+        title="Activate the factory network"
+        description="This stages the network. Nothing changes for clients until you apply it and then confirm it."
+        submitLabel="Stage activation"
+        busy={busy}
+        error={err}
+        disabled={!ack}
+        disabledReason="Confirm that no other DHCP server serves this segment."
+        onSubmit={activate}
+      >
+        <p className="text-sm text-muted-foreground">
+          {t.name}: {t.subnet_cidr}, gateway {t.gateway_ip}, DHCP {t.pool.start_ip}–{t.pool.end_ip}, on {info.lan_interface ?? "the client port"}.
+        </p>
+        <ul className="list-disc space-y-1 pl-5 text-sm">{info.checklist.map((c) => <li key={c}>{c}</li>)}</ul>
+        <Checkbox label="No other DHCP server serves this LAN segment." checked={ack} onChange={(e) => setAck(e.target.checked)} />
+      </DialogForm>
+    </SectionCard>
+  );
+}
+
+/** Operations staged together (a port conversion, an activation) and waiting to be applied; one can be cancelled until it is applied. */
+export function StagedChangesList({ writable, reloadKey, onCancelled }: { writable: boolean; reloadKey: number; onCancelled: () => void }) {
+  const [groups, setGroups] = useState<StagedGroup[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    api.get<{ groups: StagedGroup[] }>("/network/changes").then((r) => setGroups(r.groups ?? [])).catch(() => setGroups([]));
+  }, [reloadKey]);
+
+  if (groups.length === 0) return null;
+
+  async function cancel(g: StagedGroup) {
+    setErr(null);
+    try {
+      await api.del(`/network/changes/${g.group_id}`);
+      toast.success(`${GROUP_LABEL[g.group_kind]} cancelled`, "Nothing had been applied.");
+      onCancelled();
+    } catch (e) {
+      setErr(errMsg(e));
+    }
+  }
+
+  return (
+    <SectionCard title="Staged changes" description="Waiting to be applied. Nothing here is live yet.">
+      <ErrorBanner err={err} className="mb-3" />
+      <ul className="space-y-2">
+        {groups.map((g) => (
+          <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              <strong>{GROUP_LABEL[g.group_kind]}</strong>:{" "}
+              {g.changes.map((c) => `${c.kind === "ENABLE" ? "switch on" : "switch off"} ${c.network || c.network_id}`).join("; ")}
+            </span>
+            {writable && g.state === "PENDING" && (
+              <Button variant="ghost" size="sm" onClick={() => void cancel(g)} aria-label={`Cancel ${GROUP_LABEL[g.group_kind]}`}>
+                <X /> Cancel
+              </Button>
+            )}
+            {g.state === "APPLIED" && <Badge tone="info">Awaiting confirmation</Badge>}
+          </li>
+        ))}
+      </ul>
+    </SectionCard>
+  );
+}
+
+type VlanRow = { vlan: string; name: string };
+
+/** Access / Trunk per port, with a previewed, staged, atomic conversion. */
+export function PortModeCard({ writable, reloadKey, onStaged }: { writable: boolean; reloadKey: number; onStaged: () => void }) {
+  const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [target, setTarget] = useState<{ port: PortInfo; mode: "trunk" | "access" } | null>(null);
+  const [rows, setRows] = useState<VlanRow[]>([{ vlan: "", name: "" }]);
+  const [plan, setPlan] = useState<PortModePlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    api.get<{ ports: PortInfo[] }>("/network/ports").then((r) => setPorts((r.ports ?? []).filter((p) => !p.protected))).catch(() => setPorts([]));
+  }, [reloadKey]);
+
+  if (ports.length === 0) return null;
+
+  function body(preview: boolean) {
+    if (!target) return {};
+    if (target.mode === "access") return { mode: "access", preview };
+    return {
+      mode: "trunk",
+      preview,
+      vlans: rows.filter((r) => r.vlan.trim() !== "").map((r) => ({ vlan_id: Number(r.vlan), name: r.name.trim() })),
+    };
+  }
+
+  async function show() {
+    setBusy(true);
+    setErr(null);
+    try {
+      setPlan(await api.post<PortModePlan>(`/network/ports/${target!.port.name}/mode`, body(true)));
+    } catch (e) {
+      setPlan(null);
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stage() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post(`/network/ports/${target!.port.name}/mode`, body(false));
+      toast.success("Port conversion is staged", "Review and apply it. It is applied, confirmed or rolled back as one change.");
+      setTarget(null);
+      setPlan(null);
+      onStaged();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function open(port: PortInfo, mode: "trunk" | "access") {
+    setTarget({ port, mode });
+    setRows([{ vlan: "", name: "" }]);
+    setPlan(null);
+    setErr(null);
+  }
+
+  return (
+    <SectionCard title="Client ports" description="Access carries one untagged network. Trunk carries tagged VLANs, with an optional untagged (native) network.">
+      <ul className="space-y-3">
+        {ports.map((p) => (
+          <li key={p.name} className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="font-mono">{p.name}</span>{" "}
+              <Badge tone={p.mode === "trunk" ? "info" : p.mode === "access" ? "default" : "neutral"}>{PORT_MODE_LABEL[p.mode]}</Badge>
+              <div className="text-caption text-muted-foreground">
+                {p.native ? `Native: ${p.native.name}. ` : ""}
+                {p.vlans.length > 0 ? `VLANs: ${p.vlans.map((v) => `${v.vlan_id} ${v.name}`).join(", ")}.` : ""}
+                {p.staged_changes > 0 ? ` ${p.staged_changes} change(s) staged.` : ""}
+              </div>
+            </div>
+            {writable && (
+              <div className="flex gap-2">
+                {p.mode !== "unused" && (
+                  <Button variant="secondary" size="sm" onClick={() => open(p, "trunk")}><Layers /> {p.mode === "trunk" ? "Add VLANs…" : "Convert to Trunk…"}</Button>
+                )}
+                {p.mode === "trunk" && p.native && (
+                  <Button variant="secondary" size="sm" onClick={() => open(p, "access")}>Convert to Access…</Button>
+                )}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      <DialogForm
+        open={target !== null}
+        onOpenChange={(v) => !v && setTarget(null)}
+        title={target?.mode === "access" ? `Convert ${target.port.name} to Access` : `${target?.port.mode === "trunk" ? "Add VLANs to" : "Convert"} ${target?.port.name}${target?.port.mode === "trunk" ? "" : " to Trunk"}`}
+        description="You see what would change before anything is staged. Nothing is live until you apply and confirm."
+        size="lg"
+        submitLabel={plan ? "Stage this change" : "Preview"}
+        busy={busy}
+        error={err}
+        disabled={plan ? plan.conflicts.length > 0 : target?.mode === "trunk" && rows.every((r) => r.vlan.trim() === "")}
+        disabledReason={plan ? "Resolve the conflicts first." : "Give at least one VLAN id."}
+        onSubmit={() => (plan ? stage() : show())}
+      >
+        {target?.mode === "trunk" && (
+          <div className="space-y-2">
+            {rows.map((r, i) => (
+              <div key={i} className="grid grid-cols-[7rem_1fr] gap-2">
+                <Field label={i === 0 ? "VLAN id" : ""}>
+                  <Input inputMode="numeric" value={r.vlan} aria-label={`VLAN id ${i + 1}`}
+                    onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, vlan: e.target.value } : x))); }} />
+                </Field>
+                <Field label={i === 0 ? "Name (optional)" : ""}>
+                  <Input value={r.name} aria-label={`Name ${i + 1}`}
+                    onChange={(e) => { setPlan(null); setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x))); }} />
+                </Field>
+              </div>
+            ))}
+            <Button type="button" variant="ghost" size="sm" onClick={() => setRows([...rows, { vlan: "", name: "" }])}>Add another VLAN</Button>
+          </div>
+        )}
+        {plan && (
+          <div className="space-y-3 text-sm">
+            {plan.conflicts.length > 0 && (
+              <Callout tone="warning" title="Conflicts">
+                <ul className="list-disc space-y-1 pl-5">{plan.conflicts.map((c) => <li key={c}>{c}</li>)}</ul>
+              </Callout>
+            )}
+            {plan.create.length > 0 && (
+              <div>
+                <strong>Networks that would be created (switched on when applied)</strong>
+                <ul className="list-disc pl-5">
+                  {plan.create.map((c) => <li key={c.vlan_id}>VLAN {c.vlan_id} “{c.name}” — <span className="font-mono">{c.subnet_cidr}</span>, gateway <span className="font-mono">{c.gateway_ip}</span></li>)}
+                </ul>
+              </div>
+            )}
+            {plan.switch_off.length > 0 && (
+              <div>
+                <strong>Networks that would be switched off</strong>
+                <ul className="list-disc pl-5">{plan.switch_off.map((n) => <li key={n.id}>{n.name} (VLAN {n.vlan_id}) — {n.active_clients} connected</li>)}</ul>
+              </div>
+            )}
+            <div>
+              <strong>What this does to clients</strong>
+              <ul className="list-disc pl-5">{plan.impact.map((i) => <li key={i}>{i}</li>)}</ul>
+            </div>
+            <Callout tone="info" title="Check outside the appliance">
+              <p className="mb-1">The appliance cannot verify these.</p>
+              <ul className="list-disc pl-5">{plan.switch_requirements.map((i) => <li key={i}>{i}</li>)}</ul>
+            </Callout>
+          </div>
+        )}
+      </DialogForm>
+    </SectionCard>
+  );
+}

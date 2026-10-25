@@ -28,6 +28,7 @@ import {
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
 import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
+import { FactoryNetworkCard, PortModeCard, StagedChangesList } from "@/components/network/lifecycle";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
@@ -46,6 +47,7 @@ export default function NetworkPage() {
   const [acting, setActing] = useState<string | null>(null);
   const [validation, setValidation] = useState<{ ok: boolean; issues?: ValidationIssue[] } | null>(null);
   const [health, setHealth] = useState<HealthCheck[] | null>(null);
+  const [stagedKey, setStagedKey] = useState(0);
   const toast = useToast();
   const router = useRouter();
 
@@ -84,7 +86,7 @@ export default function NetworkPage() {
     } catch { /* revisions optional on the landing page */ }
   }
 
-  function reload() { loadNetworks(); loadRevisions(); }
+  function reload() { loadNetworks(); loadRevisions(); setStagedKey((k) => k + 1); }
 
   useEffect(() => {
     reload();
@@ -274,6 +276,9 @@ export default function NetworkPage() {
         </SectionCard>
       )}
 
+      <FactoryNetworkCard key={`f${stagedKey}`} writable={writable} onStaged={reload} />
+      <StagedChangesList writable={writable} reloadKey={stagedKey} onCancelled={reload} />
+
       {rows !== null && rows.length > 0 && (
         <StatGrid cols={3}>
           <StatCard label="Client networks" value={rows.length} icon={<Network />} />
@@ -428,6 +433,7 @@ export default function NetworkPage() {
         onConfirm={applyStagedRemoval}
       />
       {stepUp.dialog}
+      <PortModeCard writable={writable} reloadKey={stagedKey} onStaged={reload} />
     </PageShell>
   );
 }
