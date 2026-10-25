@@ -623,3 +623,49 @@ func TestIntegration_Routing_ADetectedDuplicateSourceCannotBeSharedOnOneNetwork(
 		t.Fatalf("a dedicated route was blocked by a duplicate it does not use: %v", pv["blockers"])
 	}
 }
+
+// Tagged VLAN networks are independent: each owns its policy, and choosing or changing one never touches another's policy, interfaces or fingerprint.
+func TestIntegration_Routing_EveryVLANNetworkOwnsItsOwnPolicy(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	lan := uniqueParent()
+	fn.lan = lan
+	f.retireRevisions(t)
+	st, body := f.do(t, "POST", "/network/ports/"+lan+"/mode", map[string]any{"mode": "trunk", "vlans": []map[string]any{{"vlan_id": 3201, "name": "Rooms"}, {"vlan_id": 3202, "name": "Spa"}, {"vlan_id": 3203, "name": "Conference"}}})
+	if st != 201 {
+		t.Fatalf("trunk = %d %v", st, body)
+	}
+	nets := toStrings(body["network_ids"])
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, nets[0], "DEDICATED", a); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.setRouting(t, nets[1], "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.setRouting(t, nets[2], "NONE"); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	before := []string{f.routing(t, nets[0])["fingerprint"].(string), f.routing(t, nets[2])["fingerprint"].(string)}
+
+	// change the middle VLAN twice, to a different PMS and then to none
+	if st, r := f.setRouting(t, nets[1], "DEDICATED", b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.setRouting(t, nets[1], "NONE"); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	after := []string{f.routing(t, nets[0])["fingerprint"].(string), f.routing(t, nets[2])["fingerprint"].(string)}
+	if before[0] != after[0] || before[1] != after[1] {
+		t.Fatalf("changing one VLAN's room sign-in changed another's: %v -> %v", before, after)
+	}
+	if f.routing(t, nets[0])["mode"] != "DEDICATED" || f.routing(t, nets[2])["mode"] != "NONE" || f.mapRows(t, nets[0]) != 1 || f.mapRows(t, nets[2]) != 0 {
+		t.Fatal("another VLAN's policy or interfaces moved")
+	}
+	// and a preview for one network never carries another's interfaces
+	_, pv := f.preview(t, nets[2], "DEDICATED", a)
+	if rem := pv["removed"].([]any); len(rem) != 0 {
+		t.Fatalf("a preview for one VLAN lists another's interfaces as removed: %v", rem)
+	}
+}
