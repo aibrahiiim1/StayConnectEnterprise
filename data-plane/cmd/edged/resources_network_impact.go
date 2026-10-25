@@ -1,8 +1,5 @@
 package main
 
-// What a topology change (Access to Trunk, a VLAN change, replacing a network) does to the people and settings that depend on a client network. Read-only: it
-// describes the consequences so the operator can confirm them before anything is applied; it moves no client, merges no PMS routing and changes no policy.
-
 import (
 	"context"
 	"errors"
@@ -86,7 +83,6 @@ func (s *server) consequencesFor(ctx context.Context, ids []string) []networkCon
 	return out
 }
 
-// externalRequirements is what the SWITCH, the access points and the hypervisor must provide for the target topology. OneGate configures none of it.
 func externalRequirements(networkType string, vlan *int, parent string) []string {
 	out := []string{}
 	if networkType == "vlan" && vlan != nil {
@@ -103,7 +99,6 @@ func externalRequirements(networkType string, vlan *int, parent string) []string
 	return append(out, "OneGate does not change your switch, access points or hypervisor. Make these changes there yourself; until they are made, clients on this network cannot reach it.")
 }
 
-// GET /network/guest-networks/{id}/impact[?to_type=vlan&to_vlan=60&to_parent=ens192]
 func (s *server) getNetworkImpact(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !uuidRe.MatchString(id) {

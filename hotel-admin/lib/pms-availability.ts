@@ -1,6 +1,3 @@
-// Can PMS Room sign-in serve a guest right now, and which guests are affected. The verdict is the SERVER's: one network-aware assessment
-// (`GET /pms-routing/readiness`) that the dashboard, PMS connections, PMS routing, the Default Network and Client networks all read. This file only turns it into
-// the shapes the screens show; it derives nothing, so two screens cannot disagree.
 
 import type { AssessmentNetwork, RoomSignInAssessment } from "@/lib/api/pms-routing";
 
@@ -9,13 +6,11 @@ export type AffectedRoute = {
   pmsInterface: string;
   reason: string;
   networkId?: string;
-  /** Nobody has chosen how room sign-in works here: a decision to make, not a fault. */
   undecided?: boolean;
 };
 
 export type RoomSignInReadiness =
   | { state: "unknown" }
-  /** No client network offers room sign-in (every one is deliberately PMS-free, switched off or not set up). Not a fault. */
   | { state: "none" }
   | { state: "ready"; unchecked: string[] }
   | { state: "down"; reason: string; affected: AffectedRoute[]; unchecked: string[] }
@@ -37,12 +32,10 @@ function affected(n: AssessmentNetwork): AffectedRoute {
   };
 }
 
-/** True when every affected network is only waiting for someone to decide how room sign-in works. */
 export function onlyUndecided(r: RoomSignInReadiness): boolean {
   return (r.state === "down" || r.state === "partial") && r.affected.length > 0 && r.affected.every((a) => a.undecided);
 }
 
-/** null = the assessment could not be read: unknown, never an outage. */
 export function readinessFromAssessment(a: RoomSignInAssessment | null | undefined): RoomSignInReadiness {
   if (!a || !Array.isArray(a.networks)) return { state: "unknown" };
   const faulty = a.networks.filter((n) => FAULTY.has(n.state)).map(affected);

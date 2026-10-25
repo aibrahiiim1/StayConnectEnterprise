@@ -398,13 +398,15 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// The network's explicit room sign-in policy decides what is consulted, before anything else. NONE offers no room sign-in at all (a voucher or account network);
 	// a network nobody has decided about offers it to nobody; DEDICATED asks exactly its one interface and SHARED_STRICT exactly its selected set. A policy that
 	// disagrees with the interfaces actually mapped is refused rather than guessed at. These are facts about the network, not a stale feed.
-	var policy string
 	var mapped int
-	if err := p.srv.db.QueryRow(ctx, `SELECT COALESCE((SELECT mode FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$3), ''),
-		(SELECT count(*) FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3)`,
-		p.srv.tenID, p.srv.siteID, dev.GuestNetwork).Scan(&policy, &mapped); err != nil {
+	policy, perr := p.srv.roomSignInPolicy(ctx, dev.GuestNetwork)
+	if perr == nil {
+		perr = p.srv.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`,
+			p.srv.tenID, p.srv.siteID, dev.GuestNetwork).Scan(&mapped)
+	}
+	if perr != nil {
 		at.Result = signinattempt.ServiceUnavailable
-		notVerified(w, at.Result, "mapping: "+err.Error())
+		notVerified(w, at.Result, "mapping: "+perr.Error())
 		return
 	}
 	if why := routingRefusal(policy, mapped); why != "" {

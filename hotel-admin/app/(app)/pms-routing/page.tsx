@@ -1,9 +1,5 @@
 "use client";
 
-// How a guest signs in with their room number is decided PER CLIENT NETWORK: not at all, against one dedicated PMS, or against an explicitly chosen shared set of two or
-// three. A network nobody has decided about offers it to nobody. The verdict on whether it works comes from the one server assessment the dashboard and the PMS
-// connections page also read.
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, PmsInterface, Whoami } from "@/lib/api";
@@ -54,7 +50,6 @@ export default function PMSRoutingPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  // edged grants pms-routing write to site_admin only; controls are hidden for other roles rather than offered and refused.
   const writable = canWrite("pms-routing", roles);
   const choosable: ChoosableInterface[] = useMemo(
     () => interfaces.filter((i) => i.lifecycle_state !== "DECOMMISSIONED").map((i) => ({
@@ -68,11 +63,12 @@ export default function PMSRoutingPage() {
     if (!clearing) return;
     setBusy(true); setFormErr(null);
     try {
-      await api.del(`/pms-routing/${clearing.network_id}`);
+      await api.del(`/pms-routing/${clearing.network_id}?based_on=${encodeURIComponent(clearing.fingerprint)}`);
       setClearing(null);
       await Promise.all([load(), reloadReadiness()]);
     } catch (e) {
       setFormErr(e);
+      void load();
     } finally {
       setBusy(false);
     }

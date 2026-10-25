@@ -313,3 +313,36 @@ func TestIntegration_MultiPMS_TheSessionControllerRoleHoldsWhatTheRoutingPolicyN
 		t.Errorf("the role being authorised can write the policy it is authorised by (err %v)", err)
 	}
 }
+
+func TestIntegration_MultiPMS_ASchemaRolledBackUnderARunningSessionControllerFailsClosedPerNetwork(t *testing.T) {
+	f := newAuthFixture(t)
+	b := f.addPMS(t, "700", "Delacroix", "RES-B1", true, "ACTIVE")
+	ctx := context.Background()
+	f.route(t, policyDedicated, f.iface)
+	if res := f.resolveAs(t, "412", "Okonkwo", ""); res.Outcome != outcomeVerified {
+		t.Fatalf("setup: %+v", res)
+	}
+	f.route(t, policyShared, f.iface, b.iface)
+
+	if _, err := f.pool.Exec(ctx, `ALTER TABLE iam_v2.guest_network_pms_policy RENAME TO guest_network_pms_policy_rolled_back`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := f.pool.Exec(ctx, `ALTER TABLE iam_v2.guest_network_pms_policy_rolled_back RENAME TO guest_network_pms_policy`); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+	}()
+	if res := f.resolveAs(t, "412", "Okonkwo", ""); res.Outcome != outcomeNotVerified || res.AuthContextID != "" {
+		t.Fatalf("a shared set with no policy table admitted a guest: %+v", res)
+	}
+	if _, err := f.pool.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1 AND pms_interface_id=$2`, f.network, b.iface); err != nil {
+		t.Fatal(err)
+	}
+	if res := f.resolveAs(t, "412", "Okonkwo", ""); res.Outcome != outcomeVerified {
+		t.Fatalf("a single mapped interface must keep working while the policy table is absent: %+v", res)
+	}
+	ov, err := f.srv.networkSigninFor(ctx, f.network)
+	if err != nil || ov.disabled[keyPMS] {
+		t.Fatalf("sign-in methods must stay readable without the policy table: %+v %v", ov, err)
+	}
+}

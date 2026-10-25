@@ -1,8 +1,5 @@
 "use client";
 
-// What a topology change touches before anything is applied: the clients, room sign-in routing, sign-in methods and packages of each affected network, and what the
-// switch, access points and hypervisor must provide. Read-only; it describes consequences and changes nothing.
-
 import { Callout } from "@/components/ui/error-banner";
 import { POLICY_WORDS, STATE_WORDS, type NetworkConsequence } from "@/lib/api/pms-routing";
 import { Badge } from "@/components/ui/badge";

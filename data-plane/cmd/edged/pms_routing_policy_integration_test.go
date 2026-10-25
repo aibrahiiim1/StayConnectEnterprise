@@ -75,6 +75,11 @@ func (f *apiFixture) setRouting(t *testing.T, network, mode string, ifaces ...st
 	return f.do(t, "PUT", "/pms-routing/"+network, map[string]any{"mode": mode, "pms_interface_ids": ifaces, "based_on": f.routing(t, network)["fingerprint"]})
 }
 
+func (f *apiFixture) clearRouting(t *testing.T, network string) (int, map[string]any) {
+	t.Helper()
+	return f.do(t, "DELETE", "/pms-routing/"+network+"?based_on="+f.routing(t, network)["fingerprint"].(string), nil)
+}
+
 func codes(b map[string]any, key string) []string {
 	var out []string
 	if l, ok := b[key].([]any); ok {
@@ -133,11 +138,6 @@ func TestIntegration_Routing_ADedicatedChoiceNeedsItsPreviewAndWritesPolicyAndIn
 	}
 	if f.count(t, `SELECT count(*) FROM public.audit_log WHERE action='pms_routing.policy_set' AND target_id=$1`, net) != 1 {
 		t.Fatal("the change was not audited")
-	}
-	// the legacy single-interface call is still accepted and can only mean DEDICATED
-	b, _, _ := f.seedInterface(t)
-	if st, body := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"pms_interface_id": b}); st != 200 || body["mode"] != "DEDICATED" || f.mapRows(t, net) != 1 {
-		t.Fatalf("legacy call = %d %v rows=%d", st, body, f.mapRows(t, net))
 	}
 }
 
@@ -243,7 +243,7 @@ func TestIntegration_Routing_ClearReturnsTheNetworkToUndecided(t *testing.T) {
 	if st, _ := f.setRouting(t, net, "DEDICATED", a); st != 200 {
 		t.Fatal("set")
 	}
-	if st, _ := f.do(t, "DELETE", "/pms-routing/"+net, nil); st != 200 {
+	if st, _ := f.clearRouting(t, net); st != 200 {
 		t.Fatal("clear")
 	}
 	if f.mapRows(t, net) != 0 || f.count(t, `SELECT count(*) FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, net) != 0 {
@@ -574,7 +574,7 @@ func TestIntegration_Routing_TheWholeJourneyRunsAsTheAdminConsoleRole(t *testing
 	if st, body := f.do(t, "POST", "/network/ports/"+h.lan+"/mode", map[string]any{"mode": "access", "preview": true}); st != 200 && st != 409 {
 		t.Fatalf("access preview as svc_edged = %d %v", st, body)
 	}
-	if st, body := f.do(t, "DELETE", "/pms-routing/"+h.vlans[1], nil); st != 200 {
+	if st, body := f.clearRouting(t, h.vlans[1]); st != 200 {
 		t.Fatalf("clear as svc_edged = %d %v", st, body)
 	}
 }
@@ -667,5 +667,91 @@ func TestIntegration_Routing_EveryVLANNetworkOwnsItsOwnPolicy(t *testing.T) {
 	_, pv := f.preview(t, nets[2], "DEDICATED", a)
 	if rem := pv["removed"].([]any); len(rem) != 0 {
 		t.Fatalf("a preview for one VLAN lists another's interfaces as removed: %v", rem)
+	}
+}
+
+func TestIntegration_Routing_NoRequestCanReplaceOrRemoveAnApprovedRouteWithoutItsPreview(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3110, "180.0")
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	want := f.routing(t, net)["fingerprint"]
+	intact := func(what string) {
+		t.Helper()
+		got := f.routing(t, net)
+		if got["mode"] != "SHARED_STRICT" || got["fingerprint"] != want || f.mapRows(t, net) != 2 {
+			t.Fatalf("%s changed the shared set: mode=%v rows=%d", what, got["mode"], f.mapRows(t, net))
+		}
+	}
+
+	for name, body := range map[string]map[string]any{
+		"the earlier single-interface request":              {"pms_interface_id": a},
+		"the earlier request with its routing_mode":         {"pms_interface_id": a, "routing_mode": "MAPPED"},
+		"a dedicated replacement with no preview":           {"mode": "DEDICATED", "pms_interface_ids": []string{a}},
+		"a dedicated replacement with an empty fingerprint": {"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": ""},
+		"a request with no mode":                            {"pms_interface_ids": []string{a}, "based_on": want},
+	} {
+		st, r := f.do(t, "PUT", "/pms-routing/"+net, body)
+		if st != 400 || (r["error"] != "preview_required" && r["error"] != "bad_request") {
+			t.Fatalf("%s = %d %v, want 400", name, st, r)
+		}
+		intact(name)
+	}
+	if st, r := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": "0000000000000000"}); st != 409 || r["error"] != "routing_changed" {
+		t.Fatalf("a replacement against a stale fingerprint = %d %v", st, r)
+	}
+	intact("a stale replacement")
+
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net, nil); st != 400 || r["error"] != "preview_required" {
+		t.Fatalf("a removal with no fingerprint = %d %v", st, r)
+	}
+	if st, r := f.do(t, "DELETE", "/pms-routing/"+net+"?based_on=0000000000000000", nil); st != 409 || r["error"] != "routing_changed" {
+		t.Fatalf("a removal against a stale fingerprint = %d %v", st, r)
+	}
+	intact("an unprotected or stale removal")
+
+	// a fingerprint taken from a preview of ANOTHER state does not authorise this change after the set changed underneath it
+	_, pv := f.preview(t, net, "DEDICATED", a)
+	stale := pv["network"].(map[string]any)["fingerprint"]
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", b, a); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.setRouting(t, net, "NONE"); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	if st, r := f.do(t, "PUT", "/pms-routing/"+net, map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{a}, "based_on": stale}); st != 409 {
+		t.Fatalf("an old preview authorised a later change: %d %v", st, r)
+	}
+}
+
+func TestIntegration_Routing_ARoutingFromAnOlderRelease_CannotDowngradeASharedSetThroughTheDatabase(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3111, "181.0")
+	a, _, _ := f.seedInterface(t)
+	b, _, _ := f.seedInterface(t)
+	if st, r := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 200 {
+		t.Fatalf("%d %v", st, r)
+	}
+	ctx := context.Background()
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1::uuid AND pms_interface_id <> $2::uuid`, net, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.guest_network_pms_map(tenant_id,site_id,guest_network_id,pms_interface_id,is_default,routing_mode)
+		VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,true,'MAPPED') ON CONFLICT (guest_network_id, pms_interface_id) DO UPDATE SET is_default=true`, f.tenant, f.site, net, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err == nil {
+		t.Fatal("the replace-with-one write of an older release was accepted against a shared policy")
+	}
+	if f.routing(t, net)["mode"] != "SHARED_STRICT" || f.mapRows(t, net) != 2 {
+		t.Fatal("the shared set did not survive the refused downgrade")
 	}
 }

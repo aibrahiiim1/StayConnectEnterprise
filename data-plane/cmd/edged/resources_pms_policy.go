@@ -1,10 +1,5 @@
 package main
 
-// The room sign-in policy of a client network: NONE, DEDICATED (exactly one PMS interface) or SHARED_STRICT (an explicitly selected set of two or three). The policy
-// and the interfaces it names are written together in one transaction, only after the operator has seen a preview of what the change affects and confirmed that
-// exact preview (based_on). Nothing here starts, stops or reconfigures PMS traffic, posts anything, copies a route from another network or widens package
-// eligibility; and nothing ever means "every active PMS": the set is always the one the operator chose.
-
 import (
 	"context"
 	"crypto/sha256"
@@ -83,7 +78,6 @@ func (s *server) loadRouting(ctx context.Context, q queryer, networkID string) (
 	if err := rows.Err(); err != nil {
 		return st, err
 	}
-	// A route with no policy row is the earlier single-interface meaning: DEDICATED.
 	if st.Mode == "" && len(st.Interfaces) == 1 {
 		st.Mode = policyDedicated
 	}
@@ -97,16 +91,10 @@ type routingChoice struct {
 	Mode         string   `json:"mode"`
 	InterfaceIDs []string `json:"pms_interface_ids"`
 	BasedOn      string   `json:"based_on"`
-	// The earlier shape: one interface, no preview fingerprint. Still accepted; it can only ever mean DEDICATED.
-	LegacyInterface string `json:"pms_interface_id"`
-	RoutingMode     string `json:"routing_mode"`
 }
 
-func (c routingChoice) normalised() (mode string, ids []string, legacy bool) {
+func (c routingChoice) normalised() (mode string, ids []string) {
 	mode = strings.ToUpper(strings.TrimSpace(c.Mode))
-	if mode == "" && strings.TrimSpace(c.LegacyInterface) != "" {
-		return policyDedicated, []string{strings.TrimSpace(c.LegacyInterface)}, true
-	}
 	seen := map[string]bool{}
 	for _, id := range c.InterfaceIDs {
 		id = strings.TrimSpace(id)
@@ -117,7 +105,7 @@ func (c routingChoice) normalised() (mode string, ids []string, legacy bool) {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return mode, ids, false
+	return mode, ids
 }
 
 type routingNote struct {
@@ -253,9 +241,6 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 		}
 	}
 
-	// Pairs of selected interfaces that may be the same property. Two sources feed it: conflicts that were recorded, and pairs whose published revisions carry the same
-	// source fingerprint (the detection the source-conflicts page uses, because nothing records those rows by itself). Equal fingerprints are the contract's CRITICAL
-	// duplicate source: a network checking both would count one property's guests twice, so it is not applied until the conflict is resolved.
 	if len(chosen) >= 2 {
 		recorded := map[string]bool{}
 		crows, cerr := s.db.Query(ctx, `SELECT interface_a::text, interface_b::text, COALESCE(severity,''), COALESCE(resolution,'')
@@ -297,7 +282,6 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 		}
 	}
 
-	// impact
 	pimp := routingProposed{Mode: mode, Interfaces: []routingImpactInterface{}}
 	var bridge string
 	_ = s.db.QueryRow(ctx, `SELECT COALESCE(bridge_name,'') FROM public.guest_networks WHERE id=$1::uuid`, cur.NetworkID).Scan(&bridge)
@@ -372,7 +356,6 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 	return plan, nil
 }
 
-// otherUsers: for each interface, the other networks (enabled, not archived) whose routing names it.
 func (s *server) otherUsers(ctx context.Context, exceptNetwork string) map[string][]string {
 	out := map[string][]string{}
 	archived := s.archivedSet(ctx)
@@ -414,7 +397,7 @@ func (s *server) pmsRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	mode, ids, _ := in.normalised()
+	mode, ids := in.normalised()
 	plan, err := s.planRouting(ctx, cur, mode, ids)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -434,18 +417,9 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	mode, ids, legacy := in.normalised()
-	if legacy {
-		if rm := strings.TrimSpace(in.RoutingMode); rm != "" && rm != "MAPPED" {
-			jsonErr(w, http.StatusBadRequest, "validation", "routing_mode must be MAPPED. Routing a network to every active PMS is not offered: choose the interfaces explicitly.")
-			return
-		}
-	} else if strings.TrimSpace(in.BasedOn) == "" {
-		jsonErr(w, http.StatusBadRequest, "validation", "based_on is required: preview the change first and confirm that preview.")
-		return
-	}
-	if mode == "" {
-		jsonErr(w, http.StatusBadRequest, "validation", "mode is required (NONE, DEDICATED or SHARED_STRICT) with pms_interface_ids")
+	mode, ids := in.normalised()
+	if mode == "" || strings.TrimSpace(in.BasedOn) == "" {
+		jsonErr(w, http.StatusBadRequest, "preview_required", "A routing change needs mode, pms_interface_ids and the based_on fingerprint of its preview. Preview the change first and confirm that preview.")
 		return
 	}
 
@@ -470,7 +444,7 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	if !legacy && in.BasedOn != cur.Fingerprint {
+	if in.BasedOn != cur.Fingerprint {
 		jsonErr(w, http.StatusConflict, "routing_changed", "This network's room sign-in changed after the preview was made. Preview it again before confirming.")
 		return
 	}
@@ -495,7 +469,6 @@ func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "route replace failed")
 		return
 	}
-	// The first interface (by id) is the network's default; the unique index allows exactly one.
 	if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_pms_map SET is_default=false WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND guest_network_id=$3::uuid AND is_default`,
 		s.tenantID, s.siteID, gnID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "route write failed")
@@ -553,11 +526,15 @@ func ifaceIDs(in []routingIface) []string {
 	return out
 }
 
-// Removes the network's routing and its policy, so the network is undecided again. The way to say "no room sign-in here" is NONE; this is for undoing a choice.
 func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
 	if !uuidRe.MatchString(gnID) {
 		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
+		return
+	}
+	basedOn := strings.TrimSpace(r.URL.Query().Get("based_on"))
+	if basedOn == "" {
+		jsonErr(w, http.StatusBadRequest, "preview_required", "Returning a network to not decided needs the based_on fingerprint of the routing you are looking at.")
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -568,6 +545,23 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "pms-routing:"+gnID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "lock failed")
+		return
+	}
+	cur, err := s.loadRouting(ctx, tx, gnID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
+		return
+	}
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if basedOn != cur.Fingerprint {
+		jsonErr(w, http.StatusConflict, "routing_changed", "This network's room sign-in changed after you opened it. Reload it before returning it to not decided.")
+		return
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, s.tenantID, s.siteID, gnID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "route delete failed")
@@ -581,7 +575,9 @@ func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
 		return
 	}
-	s.audit(r, "pms_routing.cleared", "guest_network", gnID, map[string]any{"removed": tag.RowsAffected()})
+	s.audit(r, "pms_routing.cleared", "guest_network", gnID, map[string]any{
+		"guest_network_name": cur.Name, "previous_mode": cur.Mode, "previous_pms_interface_ids": ifaceIDs(cur.Interfaces), "removed": tag.RowsAffected(),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
 }
 
@@ -590,7 +586,6 @@ type policyOut struct {
 	Mode string `json:"mode"`
 }
 
-// listPMSRouting: the rows (as before), the explicit policy of each network, and the networks nobody has decided about.
 func (s *server) listPMSRouting(w http.ResponseWriter, r *http.Request) {
 	routes, err := s.routesForInterface(r, "")
 	if err != nil {

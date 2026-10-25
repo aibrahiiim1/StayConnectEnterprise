@@ -51,6 +51,10 @@ interface) is read as `DEDICATED`; more than one mapped interface without a poli
 
 ## A2.2 Changing a policy
 
+There is **no other write path**: a request without a mode, the interfaces and the fingerprint of its preview is refused, and so is the earlier single-interface request;
+returning a network to *not decided* needs the fingerprint too. No administrative call can replace a shared set with a dedicated route, or remove it, without the preview and
+the stale-state check.
+
 A change is **previewed, then confirmed against that preview**. The preview names the interfaces added and removed, whether each can answer now, how many room numbers
 exist in more than one selected PMS (a guest in one is asked for the reservation number, never matched by room alone), the clients and room-based entitlements online on
 the network, and what is *not* touched: no PMS traffic is started or stopped, nothing is posted, package eligibility is not changed, no route is copied from another
@@ -72,7 +76,13 @@ only where a PMS in service could serve it; a PMS that also keeps a route to an 
 selected interface cannot answer (and says so); PMS transport health stays a separate fact (a disconnected transport with an intact mirror still answers); unknown evidence
 stays unknown. A warning names the network and interface, links to the page that fixes it, and clears by itself when the cause is corrected.
 
-## A2.5 Not decided here
+## A2.5 Rollback
+
+Software first, then schema. Rolling the schema back keeps every mapped interface and saves the policies so that applying it again restores those that still agree with the
+mapping; the rest fail closed until chosen. A release that predates the policy cannot downgrade a shared set (the database refuses its replace) but resolves it without the cap,
+the per-candidate freshness check or the out-of-service guard. Detail and the drill: docs/CLIENT_NETWORKING.md section 16.
+
+## A2.6 Not decided here
 
 Raising the three-interface cap; offering one network a *preference order* between interfaces (which STRICT forbids); routing by anything other than the client network
 (for example by SSID or by guest attribute).

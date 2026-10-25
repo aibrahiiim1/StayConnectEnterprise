@@ -82,6 +82,22 @@ BEGIN
 END;
 $g$;
 
+-- Policies saved by this migration's own down script come back first, but only where they still agree with the mapping; a shared or none network whose mapping
+-- changed while the policy table was absent stays undecided (fail closed) until an operator chooses again.
+DO $restore$
+BEGIN
+  IF to_regclass('iam_v2.guest_network_pms_policy_rolled_back') IS NOT NULL THEN
+    INSERT INTO iam_v2.guest_network_pms_policy (guest_network_id, tenant_id, site_id, mode, configured_at, configured_by)
+    SELECT s.guest_network_id, s.tenant_id, s.site_id, s.mode, s.configured_at, s.configured_by
+      FROM iam_v2.guest_network_pms_policy_rolled_back s
+      LEFT JOIN (SELECT guest_network_id, count(*) AS n FROM iam_v2.guest_network_pms_map GROUP BY guest_network_id) c ON c.guest_network_id = s.guest_network_id
+     WHERE (s.mode = 'NONE' AND COALESCE(c.n, 0) = 0) OR (s.mode = 'DEDICATED' AND c.n = 1) OR (s.mode = 'SHARED_STRICT' AND c.n BETWEEN 2 AND 3)
+    ON CONFLICT (guest_network_id) DO NOTHING;
+    DROP TABLE iam_v2.guest_network_pms_policy_rolled_back;
+  END IF;
+END
+$restore$;
+
 -- The one routing that existed, kept as it was: a network with exactly one mapped interface is DEDICATED to it. Networks with no row, or with more rows than the
 -- contract allows, get no policy and stay UNCONFIGURED (fail closed) until an operator decides.
 INSERT INTO iam_v2.guest_network_pms_policy (guest_network_id, tenant_id, site_id, mode, configured_by)

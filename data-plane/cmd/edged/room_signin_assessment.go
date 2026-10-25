@@ -1,17 +1,5 @@
 package main
 
-// ONE authoritative answer to "can a guest sign in with their room number, and where?". The dashboard's Needs attention, PMS Connections, PMS Routing, the Default
-// Network card and Client networks all read this and word it; none derives it again.
-//
-// Room sign-in is a fact about a CLIENT NETWORK and the PMS interfaces its explicit policy names, not about a PMS in general:
-//   - NONE: the network deliberately offers no room sign-in. Never a problem, whatever any PMS is doing.
-//   - DEDICATED: usable when its one interface is in service and its room-auth readiness holds.
-//   - SHARED_STRICT: usable only when EVERY selected interface can answer. Under the STRICT contract (Phase 0, section 8) one candidate that cannot answer means
-//     "no PMS has this guest" cannot be proven, so the network fails closed for every guest. The assessment says exactly that rather than "partially working".
-//   - no policy: undecided. It is a problem only where a PMS exists that could serve the network.
-// PMS transport health stays a separate fact (the interface's own screens). Unknown evidence stays unknown: an interface whose health could not be read never makes a
-// network fail, and never makes it healthy.
-
 import (
 	"context"
 	"fmt"
@@ -29,7 +17,6 @@ const (
 	policyUndecided = ""
 )
 
-// network states
 const (
 	rsOff        = "OFF"       // room sign-in deliberately not offered here
 	rsReady      = "READY"     // every interface the policy names can answer
@@ -85,8 +72,6 @@ type rsIssue struct {
 
 type rsInterfaceSummary struct {
 	rsInterface
-	// Serving: enabled, non-archived networks whose policy names this interface. ArchivedRoutes: routes it keeps to archived or switched-off networks, which are
-	// history and never a reason to warn on their own.
 	Serving        []string `json:"serving_networks"`
 	ArchivedRoutes int      `json:"archived_or_off_routes"`
 	State          string   `json:"state"` // SERVING | IMPAIRED | NOT_USED | UNKNOWN | NOT_IN_SERVICE
@@ -100,7 +85,6 @@ type roomSignInAssessment struct {
 	Issues      []rsIssue            `json:"issues"`
 }
 
-// rsNetworkFacts are the inputs for one network. Mapped is the interface ids its routing rows name.
 type rsNetworkFacts struct {
 	ID, Name      string
 	Enabled       bool
@@ -131,7 +115,6 @@ func roomAuthWord(code string) string {
 	return "the PMS is not able to answer"
 }
 
-// assessRoomSignIn is pure: facts in, verdict out. A maximum of three interfaces per network is the supported set (pmsresolve.MaxSharedCandidates).
 func assessRoomSignIn(nets []rsNetworkFacts, ifaces map[string]rsInterface, now time.Time) roomSignInAssessment {
 	out := roomSignInAssessment{GeneratedAt: now, Networks: []rsNetwork{}, Interfaces: []rsInterfaceSummary{}, Issues: []rsIssue{}}
 
@@ -167,7 +150,6 @@ func assessRoomSignIn(nets []rsNetworkFacts, ifaces map[string]rsInterface, now 
 			}
 		}
 
-		// A policy-less network keeps the one meaning it always had: exactly one mapped interface is that interface.
 		policy := f.Policy
 		if policy == policyUndecided && len(ids) == 1 {
 			policy, n.Legacy = policyDedicated, true
@@ -202,7 +184,6 @@ func assessRoomSignIn(nets []rsNetworkFacts, ifaces map[string]rsInterface, now 
 		out.Networks = append(out.Networks, n)
 	}
 
-	// per-interface summary
 	var idList []string
 	for id := range ifaces {
 		idList = append(idList, id)
@@ -235,7 +216,6 @@ func assessRoomSignIn(nets []rsNetworkFacts, ifaces map[string]rsInterface, now 
 		out.Interfaces = append(out.Interfaces, s)
 	}
 
-	// issues and overall
 	offered, ready, blocked, unknown := 0, 0, 0, 0
 	for _, n := range out.Networks {
 		switch n.State {
@@ -278,7 +258,6 @@ func policyWords(p string) string {
 	return "no decision"
 }
 
-// assessCandidates judges an in-service routed network by its candidates. Dedicated and shared differ only in how many must answer: all of them, in both.
 func assessCandidates(n *rsNetwork, policy string) {
 	var bad, unk []rsReason
 	for _, i := range n.Interfaces {
@@ -328,7 +307,6 @@ func issueFor(n rsNetwork) rsIssue {
 	switch n.State {
 	case rsBlocked:
 		it.Severity = "err"
-		// A feed problem is fixed on the PMS connection; a routing problem on the routing page.
 		for _, r := range n.Reasons {
 			if r.InterfaceID != "" && r.Code != roomAuthNotActive && r.Code != roomAuthNoRevision {
 				it.Href, it.Action = "/pms-interfaces", "Open PMS connections"
@@ -341,8 +319,6 @@ func issueFor(n rsNetwork) rsIssue {
 	}
 	return it
 }
-
-// ---- loading ------------------------------------------------------------------------------------------------------------------------------------------
 
 func (s *server) roomSignInFacts(ctx context.Context) ([]rsNetworkFacts, map[string]rsInterface, error) {
 	archived := s.archivedSet(ctx)
@@ -390,7 +366,6 @@ func (s *server) roomSignInFacts(ctx context.Context) ([]rsNetworkFacts, map[str
 		ifaces[i.ID] = i
 	}
 	irows.Close()
-	// A decommissioned interface can still be named by an old route; it is reported as out of service rather than missing.
 	for id, i := range ifaces {
 		h, herr := s.interfaceHealthRow(ctx, id)
 		if herr == nil {
@@ -406,7 +381,6 @@ func (s *server) roomSignInAssessment(ctx context.Context) (roomSignInAssessment
 	if err != nil {
 		return roomSignInAssessment{}, err
 	}
-	// Names for interfaces that are routed but decommissioned: out of service, never missing.
 	for _, n := range nets {
 		for _, id := range n.Mapped {
 			if _, ok := ifaces[id]; !ok {

@@ -240,7 +240,8 @@ POST /edge/v1/pms-routing/{guest_network_id}/preview   {mode, pms_interface_ids:
 PUT  /edge/v1/pms-routing/{guest_network_id}           {mode, pms_interface_ids: [...], based_on: <fingerprint of that preview>}
 ```
 
-The apply is refused if the network's routing changed after the preview. It **replaces** the network's routing as a whole and never copies a route from another network.
+The apply is refused if the network's routing changed after the preview, and a request without the mode and the fingerprint is refused (`preview_required`). Returning a
+network to not decided is `DELETE /edge/v1/pms-routing/{guest_network_id}?based_on=<fingerprint>`. It **replaces** the network's routing as a whole and never copies a route from another network.
 A network nobody has decided about offers room sign-in to nobody (it appears under `unmapped_guest_networks`); a deliberately PMS-free network (a staff VLAN, a
 voucher network) is `NONE`, which is a decision and not a hole. A shared set resolves strictly: if any selected interface cannot answer, no guest on that network is
 admitted — check `GET /edge/v1/pms-routing/readiness`, which says which interface and why.

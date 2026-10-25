@@ -288,8 +288,7 @@ func TestIntegration_API_SiteAdminCanSetAndClearARoute(t *testing.T) {
 	iface, _, _ := f.seedInterface(t)
 	gn := f.seedNet(t, "Guest VLAN set-clear")
 
-	if code, body := f.do(t, http.MethodPut, "/pms-routing/"+gn,
-		map[string]any{"pms_interface_id": iface, "routing_mode": "MAPPED"}); code != http.StatusOK {
+	if code, body := f.setRouting(t, gn, "DEDICATED", iface); code != http.StatusOK {
 		t.Fatalf("set route status %d: %v", code, body)
 	}
 	routes, _ := f.body(t, http.MethodGet, "/pms-routing", nil)["routes"].([]any)
@@ -297,7 +296,7 @@ func TestIntegration_API_SiteAdminCanSetAndClearARoute(t *testing.T) {
 		t.Fatalf("the route was not read back: %v", routes)
 	}
 
-	if code, body := f.do(t, http.MethodDelete, "/pms-routing/"+gn, nil); code != http.StatusOK {
+	if code, body := f.clearRouting(t, gn); code != http.StatusOK {
 		t.Fatalf("clear route status %d: %v", code, body)
 	}
 	after, _ := f.body(t, http.MethodGet, "/pms-routing", nil)["routes"].([]any)
@@ -319,7 +318,7 @@ func TestIntegration_API_RoutingRefusesAnotherSitesInterface(t *testing.T) {
 	gn := a.seedNet(t, "Guest VLAN cross-site")
 
 	code, body := a.do(t, http.MethodPut, "/pms-routing/"+gn,
-		map[string]any{"pms_interface_id": foreign, "routing_mode": "MAPPED"})
+		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{foreign}, "based_on": a.routing(t, gn)["fingerprint"]})
 	if code == http.StatusOK {
 		t.Fatalf("a guest network was mapped to another site's PMS interface: %v", body)
 	}
@@ -339,7 +338,7 @@ func TestIntegration_API_RoutingRefusesAnotherSitesGuestNetwork(t *testing.T) {
 	foreignNet := b.seedNet(t, "Guest VLAN other-site")
 
 	code, body := a.do(t, http.MethodPut, "/pms-routing/"+foreignNet,
-		map[string]any{"pms_interface_id": iface, "routing_mode": "MAPPED"})
+		map[string]any{"mode": "DEDICATED", "pms_interface_ids": []string{iface}, "based_on": "x"})
 	if code == http.StatusOK {
 		t.Fatalf("another site's guest network was mapped: %v", body)
 	}

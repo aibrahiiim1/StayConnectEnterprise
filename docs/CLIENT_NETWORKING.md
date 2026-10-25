@@ -339,8 +339,10 @@ network fail closed, because "no PMS has this guest" can no longer be proven. Al
   blockers (cap, wrong count for the policy, an interface that does not exist, is out of service or has no published configuration, an archived network, a critical
   duplicate-source conflict between two selected interfaces) and warnings.
 * The apply (`PUT /pms-routing/{network}`) carries the preview's fingerprint and is refused (`routing_changed`) if the network's routing changed since. The policy and
-  the interfaces are written in one transaction and audited (`pms_routing.policy_set`, with the previous policy and interfaces). The earlier single-interface call
-  (`{pms_interface_id}`) is still accepted and can only mean one dedicated PMS.
+  the interfaces are written in one transaction and audited (`pms_routing.policy_set`, with the previous policy and interfaces). **There is no other way to change
+  routing.** The earlier single-interface request (`{pms_interface_id}`) and any request without a mode and a fingerprint are refused (`preview_required`, nothing written), so a
+  shared set can never be replaced by a dedicated route silently; returning a network to *not decided* (`DELETE /pms-routing/{network}?based_on=<fingerprint>`) needs the same
+  fingerprint and is audited with the previous policy and interfaces.
 * It starts and stops no PMS traffic, posts nothing, changes no package eligibility, copies nothing from another network and leaves online guests with their access
   (their entitlements belong to the stay that earned them).
 
@@ -364,6 +366,18 @@ network and the interface, links to PMS routing or PMS connection, and clears by
 **Database.** Migration 0155 adds `iam_v2.guest_network_pms_policy` (one row per network; `NONE`, `DEDICATED`, `SHARED_STRICT`), a deferred constraint trigger that keeps the
 policy and the mapped interfaces consistent whenever either is written, and `iam_v2.p3_interface_can_authorise`. Existing single routes are backfilled as dedicated; nothing is
 inferred, mapped or merged. Grants are in `deploy/gatep` (`svc_edged` on the table; `svc_scd` select and execute). `.down` removes the objects and leaves every mapping.
+
+**Rollback after a shared policy exists** (drilled on a disposable database as `iam_v2_owner`, 34 shared, 179 dedicated and 12 none networks).
+* Roll the **software back first** (scd, edged, console), then the schema. If the schema goes first, scd treats a missing policy table as no policy: a network with one mapped
+  interface keeps working, a network with several refuses room sign-in (fail closed), and every other sign-in method is unaffected.
+* `0155.down.sql` keeps every mapped interface (269 of 269 rows) and copies the policies to `iam_v2.guest_network_pms_policy_rolled_back` before dropping the table. Applying
+  0155 again restores each policy that still agrees with the mapping (34, 179 and 12 came back exactly) and drops the copy; one whose mapping changed meanwhile stays undecided,
+  fail closed, until an operator chooses again. Networks holding more interfaces than the cap (four, in the fixture) cannot be restored as shared and stay undecided.
+* An older release (before 0155) given a database that still has 0155: its single-interface route replace is **refused by the database** on a shared network (a deferred
+  trigger), so it cannot downgrade a shared set; its resolver reads every mapped interface strictly but drops an out-of-service one and has no cap and no per-candidate
+  feed check. If that difference matters, change shared networks to a dedicated or none policy (previewed) before rolling the software back.
+* 0155 was amended after its live application, only to add the save-and-restore above: the live database already has the earlier text and is unaffected; the live ledger row is
+  unchanged.
 
 **Tests.** Unit: the assessment (PMS-free is never broken; archived-only routes do not warn; strict shared blocks on any candidate; unknown stays unknown; transport is
 separate; corrected warnings clear), the resolver (out-of-service candidate, cap, ambiguity), the routing refusal table. Integration against a full-schema PostgreSQL, also
