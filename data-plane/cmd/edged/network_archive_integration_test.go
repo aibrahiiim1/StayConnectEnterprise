@@ -387,3 +387,47 @@ func TestIntegration_Default_ReadinessKeepsListsWhenChecksCannotRead(t *testing.
 		}
 	}
 }
+
+// A reset confirmed before the archive existed is archived by the migration from the recorded facts, and nothing else is.
+func TestIntegration_Archive_AResetConfirmedBeforeTheFeatureIsArchivedByTheMigration(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	h := heavilyReconfigured(t, f, fn)
+	ctx := context.Background()
+	if st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName}); st != 201 {
+		t.Fatalf("stage = %d %v", st, b)
+	}
+	f.applyAndKeep(t, fn)
+	if f.archivedCount(t) != 3 {
+		t.Fatal("setup")
+	}
+	// As if the reset had been confirmed by the previous version: no markers.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM iam_v2.network_archive WHERE tenant_id=$1::uuid`, f.tenant); err != nil {
+		t.Fatal(err)
+	}
+	// Someone switched one retired network back on later: it must not come back as archived.
+	if st, _ := f.do(t, "POST", "/network/guest-networks/"+h.vlans[0]+"/enable", nil); st != 200 {
+		t.Fatal("enable")
+	}
+	raw, err := os.ReadFile("../../migrations/0154_a_client_network_a_reset_retired_is_archived_not_deleted.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // idempotent
+		if _, err := f.pool.Exec(ctx, string(raw)); err != nil {
+			t.Fatalf("run %d of the migration: %v", i+1, err)
+		}
+	}
+	if got := f.archivedCount(t); got != 2 {
+		t.Fatalf("the migration archived %d, want the 2 that are still off", got)
+	}
+	flags := f.listFlags(t)
+	for k, v := range flags {
+		if strings.Contains(k, h.vlans[0][:8]) && v[0] {
+			t.Fatal("a network that was switched on again was archived")
+		}
+		if strings.HasPrefix(k, "Client Wi-Fi") && v[0] {
+			t.Fatal("the Default Network was archived")
+		}
+	}
+}
