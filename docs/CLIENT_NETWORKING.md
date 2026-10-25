@@ -501,3 +501,14 @@ and is audited with its proposal; another operator, another network, an expired 
 
 No schema change: the proposals are not stored. Deployed to PRE-LIVE as software only (edged and the Admin Console).
 
+**Deployment of this follow-up (software only; no schema change).** edged `5726db14` (sha256 `6a25228e...`, `vcs.modified=false`, production tag) and Admin Console release
+`20261025-232056` (BUILD_ID `8cgt9uRsC5SDpgelCMyHC`); scd stays `1500865c`. Backup `edged.bak-pre-5726db14-20261025T232050Z`; console `hotel-admin.previous` -> `20261025-215640`.
+`DEPLOYED_BINARIES` rewritten from the installed bytes, units pass, no error logged.
+
+**Live checks** (as the verification operator; invalid requests aimed at a network that does not exist): the routing and readiness reads carry no proposal or fingerprint; the earlier
+single-interface request, a replacement with no, an invented or the old-style reference, and a removal with no, an old-style or an invented one are all refused; a valid preview
+returns its own proposal and is not applied; invalid previews mint none; every policy and interface set is identical before and after. The rollback tool's `--dry-run` against a real
+pre-policy edged build read the live database and replaced nothing; it found no Shared STRICT network at that moment (the Product Owner's live networks are all dedicated), so its
+refusal path is proven by the 47-case test suite and the disposable-database drill above, not on PRE-LIVE. PRE-LIVE changed continuously under the Product Owner's own testing
+during this work (a second PMS interface now exists); that is their activity, recorded in the audit, and none of it was done by the agent.
+
