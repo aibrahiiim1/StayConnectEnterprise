@@ -253,8 +253,11 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 		}
 	}
 
-	// pairs of selected interfaces that may be the same property
+	// Pairs of selected interfaces that may be the same property. Two sources feed it: conflicts that were recorded, and pairs whose published revisions carry the same
+	// source fingerprint (the detection the source-conflicts page uses, because nothing records those rows by itself). Equal fingerprints are the contract's CRITICAL
+	// duplicate source: a network checking both would count one property's guests twice, so it is not applied until the conflict is resolved.
 	if len(chosen) >= 2 {
+		recorded := map[string]bool{}
 		crows, cerr := s.db.Query(ctx, `SELECT interface_a::text, interface_b::text, COALESCE(severity,''), COALESCE(resolution,'')
 			FROM iam_v2.pms_source_conflicts WHERE tenant_id=$1::uuid AND site_id=$2::uuid AND interface_a = ANY($3::uuid[]) AND interface_b = ANY($3::uuid[])`,
 			s.tenantID, s.siteID, ids)
@@ -264,6 +267,7 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 				if crows.Scan(&a, &b, &sev, &res) != nil {
 					continue
 				}
+				recorded[a+"/"+b] = true
 				text := fmt.Sprintf("%s and %s may be the same property's PMS (a possible duplicate source). Sharing one network between them would double-count its guests.", byID[a].Label, byID[b].Label)
 				if strings.EqualFold(sev, "CRITICAL") && res == "" {
 					block("DUPLICATE_SOURCE", text+" Resolve the source conflict first.")
@@ -272,6 +276,24 @@ func (s *server) planRouting(ctx context.Context, cur routingState, mode string,
 				}
 			}
 			crows.Close()
+		}
+		drows, derr := s.db.Query(ctx, `
+			SELECT a.id::text, b.id::text
+			  FROM iam_v2.pms_interfaces a
+			  JOIN iam_v2.pms_interface_revisions ra ON ra.id = a.current_revision_id
+			  JOIN iam_v2.pms_interfaces b ON b.tenant_id = a.tenant_id AND b.site_id = a.site_id AND a.id < b.id
+			  JOIN iam_v2.pms_interface_revisions rb ON rb.id = b.current_revision_id
+			 WHERE a.tenant_id=$1::uuid AND a.site_id=$2::uuid AND a.id = ANY($3::uuid[]) AND b.id = ANY($3::uuid[])
+			   AND ra.source_fingerprint IS NOT NULL AND ra.source_fingerprint = rb.source_fingerprint`, s.tenantID, s.siteID, ids)
+		if derr == nil {
+			for drows.Next() {
+				var a, b string
+				if drows.Scan(&a, &b) != nil || recorded[a+"/"+b] {
+					continue
+				}
+				block("DUPLICATE_SOURCE", fmt.Sprintf("%s and %s point at the same source (their published configurations carry the same source fingerprint), so they are very likely one property's PMS. A network that checks both would count its guests twice. Resolve it under Duplicate sources first.", byID[a].Label, byID[b].Label))
+			}
+			drows.Close()
 		}
 	}
 

@@ -578,3 +578,48 @@ func TestIntegration_Routing_TheWholeJourneyRunsAsTheAdminConsoleRole(t *testing
 		t.Fatalf("clear as svc_edged = %d %v", st, body)
 	}
 }
+
+// Two interfaces whose published revisions carry the same source fingerprint are, by the contract, one property's PMS counted twice. The source-conflicts page detects
+// them from the fingerprints, because nothing records those rows by itself; the routing preview and apply use the same detection.
+func TestIntegration_Routing_ADetectedDuplicateSourceCannotBeSharedOnOneNetwork(t *testing.T) {
+	f := newAPI(t)
+	net := f.mkNet(t, "Resort", 3108, "178.0")
+	ctx := context.Background()
+	mk := func(label, fingerprint string) string {
+		var iface, rev string
+		if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interfaces(tenant_id,site_id,connector_kind,display_label,lifecycle_state)
+			VALUES ($1,$2,'protel-fias',$3,'ACTIVE') RETURNING id::text`, f.tenant, f.site, label).Scan(&iface); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interface_revisions
+			(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,posting_target_model,config,normalization_version,source_fingerprint)
+			VALUES ($1,$2,$3::uuid,1,'UTC','UNSET','{}'::jsonb,1,$4) RETURNING id::text`, f.tenant, f.site, iface, fingerprint).Scan(&rev); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2::uuid WHERE id=$1::uuid`, iface, rev); err != nil {
+			t.Fatal(err)
+		}
+		return iface
+	}
+	a, b, c := mk("Old link", "same-physical-source"), mk("New link", "same-physical-source"), mk("Spa", "another-source")
+
+	_, pv := f.preview(t, net, "SHARED_STRICT", a, b)
+	if !has(codes(pv, "blockers"), "DUPLICATE_SOURCE") {
+		t.Fatalf("a detected duplicate source was approved for sharing: %v", pv["blockers"])
+	}
+	if st, _ := f.setRouting(t, net, "SHARED_STRICT", a, b); st != 409 {
+		t.Fatalf("applied = %d", st)
+	}
+	if f.mapRows(t, net) != 0 {
+		t.Fatal("a refused shared set wrote rows")
+	}
+	// a different pair is unaffected, and so is a network that uses only one of the two
+	_, pv = f.preview(t, net, "SHARED_STRICT", a, c)
+	if has(codes(pv, "blockers"), "DUPLICATE_SOURCE") {
+		t.Fatalf("an unrelated pair was blocked: %v", pv["blockers"])
+	}
+	_, pv = f.preview(t, net, "DEDICATED", a)
+	if has(codes(pv, "blockers"), "DUPLICATE_SOURCE") {
+		t.Fatalf("a dedicated route was blocked by a duplicate it does not use: %v", pv["blockers"])
+	}
+}

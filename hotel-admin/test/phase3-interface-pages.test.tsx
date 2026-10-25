@@ -356,6 +356,26 @@ describe("Guest network routing page", () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  // A shared set whose member has since gone out of service is repaired by removing it: it must stay uncheckable while an unselected one cannot be added.
+  it("lets an administrator remove a selected interface that has gone out of service, but not add one that is", async () => {
+    const gone = { ...iface, id: "i1", display_label: "Old PMS", lifecycle_state: "AUTH_DISABLED" };
+    const live = { ...iface, id: "i2", display_label: "Main PMS" };
+    const off = { ...iface, id: "i3", display_label: "Spa PMS", lifecycle_state: "AUTH_DISABLED" };
+    routingMock({
+      interfaces: [gone, live, off],
+      policies: [net("gn1", "Resort", "SHARED_STRICT", [{ pms_interface_id: "i1", label: "Old PMS" }, { pms_interface_id: "i2", label: "Main PMS" }])],
+    });
+    const Page = (await import("@/app/(app)/pms-routing/page")).default;
+    render(<Page />);
+    await userEvent.click(await screen.findByRole("button", { name: /^change/i }));
+    const old = await screen.findByRole("checkbox", { name: /Old PMS/ });
+    expect((old as HTMLInputElement).checked).toBe(true);
+    expect((old as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole("checkbox", { name: /Spa PMS/ }) as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(old);
+    expect((old as HTMLInputElement).checked).toBe(false);
+  });
+
   it("offers no way to change the routing to a role that may only read it", async () => {
     routingMock({
       roles: ["front_office_operator"],

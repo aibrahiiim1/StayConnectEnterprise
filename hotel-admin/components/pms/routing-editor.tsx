@@ -159,17 +159,18 @@ export function RoutingEditor({
               </legend>
               {usable.length === 0 && <p className="text-sm text-muted-foreground">No PMS connection exists yet. Add one under PMS connection first.</p>}
               {usable.map((i) => {
+                // An interface that is already selected stays removable even when it has since gone out of service: that is how the set is repaired.
                 const why = unavailable(i);
                 const on = picked.includes(i.id);
                 const atLimit = mode === "SHARED_STRICT" && !on && picked.length >= MAX_SHARED;
                 return mode === "DEDICATED" ? (
                   <label key={i.id} className={`flex items-start gap-3 rounded-md border p-2.5 text-sm ${why ? "opacity-60" : "cursor-pointer"} ${on ? "border-primary" : "border-border"}`}>
-                    <input type="radio" name="routing-iface" className="mt-1" checked={on} disabled={!!why} onChange={() => setPicked([i.id])} />
+                    <input type="radio" name="routing-iface" className="mt-1" checked={on} disabled={!!why && !on} onChange={() => setPicked([i.id])} />
                     <span>{i.label || i.id}{why && <span className="ms-2 text-xs text-muted-foreground">({why})</span>}</span>
                   </label>
                 ) : (
                   <Checkbox key={i.id} label={<>{i.label || i.id}{why && <span className="ms-2 text-xs text-muted-foreground">({why})</span>}</>}
-                    checked={on} disabled={!!why || atLimit}
+                    checked={on} disabled={(!!why || atLimit) && !on}
                     onChange={(e) => setPicked((p) => (e.target.checked ? [...p, i.id] : p.filter((x) => x !== i.id)))} />
                 );
               })}
