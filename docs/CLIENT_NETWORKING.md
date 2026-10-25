@@ -69,6 +69,10 @@ layered review, the outside-the-appliance checklist, what is not touched), then 
 | **Restore factory defaults** | The prepared network (`10.20.0.0/20`) is put back and switched on; every other network is switched off. Requires the prepared network to have been activated before. Refused, with the reason, if the WAN overlaps its subnet — the factory address is never forced. |
 | **Full client networking reset** | As factory defaults, plus which portal design each network shows and each network's sign-in options go back to the site's. Requires typing the site name. |
 
+**All or nothing.** A preview says whether the recovery is *stageable*. If any part of it cannot be done — a network that was deleted or moved to another
+port or VLAN since the last confirmation, a prepared network that is no longer the untagged one on the client port, a conflict — **nothing is staged**
+(`409 cannot_restore`); the preview still shows what could have been restored. A partial restore would be a configuration nobody confirmed.
+
 **Never touched by any of them:** the networks themselves (nothing is deleted: identity and history stay, switched-off networks remain listed), guest
 records, sessions, devices, packages, licensing and the signed assignment, the WAN/management port, the PMS configuration and its routing, and the portal
 designs themselves.
@@ -125,7 +129,10 @@ A network can only **narrow** what the site offers (`iam_v2.network_signin_overr
 account, text code, WhatsApp code, social, open selection), choose which leads, and remember devices for **fewer** days. It can never switch on what the
 licence, the deployment or the site does not. `scd` applies it at every entry point — the guest authority (voucher, accounts, codes, social, resume),
 code issue, social start, open selection, room sign-in and the method listing the portal shows — and **fails closed** when the override cannot be read.
-Registration, resend and forgot-password for email accounts are not network-scoped; signing in is.
+A code is judged by the channel it arrived by (a text code on a network that switched text codes off is refused even if WhatsApp is on). The social
+callback is bound to the address that started the flow and is checked again, for the network that address belongs to *now*, when it completes; a flow whose
+network switched social sign-in off in between is refused. Registration, resend and forgot-password for email accounts are not network-scoped; signing in is.
+The network is always derived from the connection's source address on the appliance, never from a field the client supplies.
 
 Package rules of type *only on certain client networks* pick networks by name.
 
@@ -134,12 +141,19 @@ Package rules of type *only on certain client networks* pick networks by name.
 A network's room sign-in follows its PMS routing (Hotel → PMS routing). The network's sign-in card shows which interface(s) it is routed to, or says room
 sign-in is not available there. Routing itself is configured only under PMS routing.
 
-## 10. Permissions and audit
+## 10. Database objects and grants
+
+Migrations 0151 (staged changes), 0152 (profiles, assignments, sign-in overrides, the notice stamp) and 0153 (recovery snapshots and review items) create
+`iam_v2` tables owned by `iam_v2_owner`. `svc_edged` writes them and `svc_scd` reads the profile and sign-in tables; the grants are plain statements in
+`deploy/gatep/svc-edged-phase345-admin-grants.sql`, so a Gate-P reconcile after a factory-clean install reproduces them (the grant test replays that file).
+No table holds guest data. `iam_v2.portal_profiles.name` is recorded in the personal-column list as staff configuration.
+
+## 11. Permissions and audit
 
 Recovery, profiles and per-network sign-in use the existing `network` and `portal-branding` resources and their roles; changes are audited
 (`network.recovery.staged`, `portal_profile.*`, `network.signin_changed`). Publishing a design still requires the operator's password.
 
-## 11. What has and has not been verified
+## 12. What has and has not been verified
 
 Verified in isolation: unit tests; integration tests against a full-schema PostgreSQL with a fake network service; real-kernel container tests for bridge
 ownership, adoption, a hostile network name against the real nft parser and the **real `netd` binary starting with the database refusing connections**
