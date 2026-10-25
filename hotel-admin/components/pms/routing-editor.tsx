@@ -142,13 +142,13 @@ export function RoutingEditor({
           {intro}
           <div role="radiogroup" aria-label="Room sign-in on this network" className="space-y-2">
             {MODES.map((m) => (
-              <label key={m.value} className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 ${mode === m.value ? "border-primary bg-primary/5" : "border-border"}`}>
-                <input type="radio" name="routing-mode" className="mt-1" checked={mode === m.value} onChange={() => pickMode(m.value)} />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{m.title}</span>
-                  <span className="block text-xs text-muted-foreground">{m.body}</span>
-                </span>
-              </label>
+              <div key={m.value} className={`flex items-start gap-3 rounded-md border p-3 ${mode === m.value ? "border-primary bg-primary/5" : "border-border"}`}>
+                <input id={`routing-mode-${m.value}`} type="radio" name="routing-mode" className="mt-1" checked={mode === m.value} onChange={() => pickMode(m.value)} />
+                <div className="min-w-0">
+                  <label htmlFor={`routing-mode-${m.value}`} className="block cursor-pointer text-sm font-medium">{m.title}</label>
+                  <p className="text-xs text-muted-foreground">{m.body}</p>
+                </div>
+              </div>
             ))}
           </div>
 
