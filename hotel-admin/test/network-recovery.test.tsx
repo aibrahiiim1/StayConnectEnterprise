@@ -17,7 +17,7 @@ import RecoveryPage from "@/app/(app)/network/recovery/page";
 const status = { last_working: { revision: 7, confirmed_at: "2026-10-25T08:00:00Z", available: true }, factory: { available: true, subnet: "10.20.0.0/20" }, review_open: 1 };
 const items = { data: [{ id: "r1", network_id: "n1", network: "Rooms", layer: "pms_routing", detail: "PMS routing differs.", room_sign_in_paused: true, created_at: "" }] };
 const plan = {
-  op: "restore_last_working", summary: "Put every client network back.", cannot_restore: [], conflicts: [],
+  stageable: true, op: "restore_last_working", summary: "Put every client network back.", cannot_restore: [], conflicts: [],
   networks: [{ id: "n1", name: "Rooms", action: "restore_settings", changes: ["name"], active_clients: 0 }, { id: "n2", name: "Extra", action: "switch_off", active_clients: 3 }],
   review: [{ network_id: "n1", network: "Rooms", layer: "portal_profile", state: "CHANGED", detail: "Put back." }, { network_id: "n1", network: "Rooms", layer: "signin", state: "UNCHANGED", detail: "Same." }],
   protected: ["Guest records."], switch_checklist: ["The switch passes the VLANs."],
@@ -45,11 +45,20 @@ describe("recovery page", () => {
   });
 
   it("will not stage a plan with a conflict or one that changes nothing", async () => {
-    post.mockResolvedValueOnce({ ...plan, conflicts: ["The WAN network overlaps 10.20.0.0/20. The factory address is never forced onto a conflicting network."] });
+    post.mockResolvedValueOnce({ ...plan, stageable: false, conflicts: ["The WAN network overlaps 10.20.0.0/20. The factory address is never forced onto a conflicting network."] });
     render(<RecoveryPage />);
     await screen.findByText(/Last confirmed working/);
     fireEvent.click(screen.getAllByText(/Review…/)[1]);
     await screen.findByText("Cannot be staged");
+    expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("will not stage a recovery that cannot be done completely", async () => {
+    post.mockResolvedValueOnce({ ...plan, stageable: false, cannot_restore: ["Gone was deleted after it was last confirmed."] });
+    render(<RecoveryPage />);
+    await screen.findByText(/Last confirmed working/);
+    fireEvent.click(screen.getAllByText(/Review…/)[0]);
+    await screen.findByText("Cannot be restored from here");
     expect((screen.getByRole("button", { name: "Stage this recovery" }) as HTMLButtonElement).disabled).toBe(true);
   });
 

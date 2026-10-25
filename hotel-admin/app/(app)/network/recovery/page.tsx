@@ -66,9 +66,10 @@ export default function RecoveryPage() {
   }
 
   const needsName = plan?.confirm_site_name != null;
-  const blocked = !plan || plan.conflicts.length > 0 || plan.networks.length === 0 || (needsName && typed.trim() !== plan.confirm_site_name);
+  const blocked = !plan || !plan.stageable || (needsName && typed.trim() !== plan.confirm_site_name);
   const why = !plan ? "Working out what would change…"
     : plan.conflicts.length ? "Resolve the conflict first."
+    : plan.cannot_restore.length ? "Part of this cannot be restored, so none of it is staged."
     : plan.networks.length === 0 ? "Nothing would change."
     : "Type the site name to confirm.";
 

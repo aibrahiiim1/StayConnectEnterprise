@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
 )
 
 func (f *authFixture) setOverride(t *testing.T, network string, off []string, primary string, remember *int) {
@@ -137,4 +138,81 @@ func TestIntegration_NetworkSignin_TheAuthorityRefusesAMethodTheNetworkSwitchedO
 	if !f.srv.networkOffers(context.Background(), f.network, keyEmailAccount) {
 		t.Fatal("a method the network still offers was refused")
 	}
+}
+
+func (f *authFixture) post(t *testing.T, h http.HandlerFunc, body map[string]any) (int, string) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(raw))))
+	return rec.Code, rec.Body.String()
+}
+
+// Every route that starts or finishes a sign-in asks the same question about the network the connection comes from.
+func TestIntegration_NetworkSignin_EveryEntryPointHonoursTheNetworkItIsReachedFrom(t *testing.T) {
+	f := newAuthFixture(t)
+	other, otherID, _ := f.addNetwork(t, false)
+	f.setOverride(t, f.network, []string{"sms", "social", "email_account"}, "", nil)
+	notOffered := func(code int, body string) bool {
+		return code == 403 && strings.Contains(body, "METHOD_NOT_OFFERED_ON_NETWORK")
+	}
+
+	// Text-message code issue.
+	issue := map[string]any{"channel": "sms", "destination": "+201001234567", "ip": f.net.guestIP, "mac": f.net.mac}
+	if c, b := f.post(t, f.srv.otpIssue, issue); !notOffered(c, b) {
+		t.Fatalf("code issue on a network that switched text codes off = %d %s", c, b)
+	}
+	issue["ip"] = other.guestIP
+	if c, b := f.post(t, f.srv.otpIssue, issue); notOffered(c, b) {
+		t.Fatalf("code issue on another network was refused by the first network's setting: %s", b)
+	}
+
+	// Social sign-in start.
+	f.srv.methodSwitches = func(context.Context) (*tenantcfg.AuthMethods, error) {
+		return &tenantcfg.AuthMethods{Social: map[string]*tenantcfg.AuthMethod{"google": {Enabled: true}}}, nil
+	}
+	start := map[string]any{"provider": "google", "ip": f.net.guestIP, "mac": f.net.mac}
+	if c, b := f.post(t, f.srv.socialStart, start); !notOffered(c, b) {
+		t.Fatalf("social start on a network that switched it off = %d %s", c, b)
+	}
+	start["ip"] = other.guestIP
+	if c, b := f.post(t, f.srv.socialStart, start); notOffered(c, b) {
+		t.Fatalf("social start on another network was refused by the first network's setting: %s", b)
+	}
+
+	// The authority, for each method and route key, from the first network and from the other.
+	ip, otherIP := net.ParseIP(f.net.guestIP), net.ParseIP(other.guestIP)
+	try := func(ip net.IP, m iamv2.Method, key string) bool {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		if key != "" {
+			r = withMethodKey(r, key)
+		}
+		func() {
+			defer func() { _ = recover() }() // a method that is offered goes on to the authenticator, which this fixture does not carry
+			f.srv.authorizeViaIAMv2(rec, r, m, iamv2.Request{}, ip)
+		}()
+		return notOffered(rec.Code, rec.Body.String())
+	}
+	for _, c := range []struct {
+		name   string
+		m      iamv2.Method
+		key    string
+		refuse bool
+	}{
+		{"social callback", iamv2.MethodSocial, "", true},
+		{"email account sign-in", iamv2.MethodAccount, keyEmailAccount, true},
+		{"text code verify", iamv2.MethodOTP, keySMS, true},
+		{"whatsapp code verify", iamv2.MethodOTP, keyWhatsApp, false},
+		{"voucher", iamv2.MethodVoucher, "", false},
+		{"staff account", iamv2.MethodAccount, keyGuestAccount, false},
+	} {
+		if got := try(ip, c.m, c.key); got != c.refuse {
+			t.Errorf("%s on the narrowed network: refused=%v, want %v", c.name, got, c.refuse)
+		}
+		if try(otherIP, c.m, c.key) {
+			t.Errorf("%s on the other network was refused by the first network's setting", c.name)
+		}
+	}
+	_ = otherID
 }

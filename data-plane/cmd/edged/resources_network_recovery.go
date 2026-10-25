@@ -438,6 +438,7 @@ type recoveryPlan struct {
 	Protected       []string      `json:"protected"`
 	SwitchChecklist []string      `json:"switch_checklist"`
 	TypedName       string        `json:"confirm_site_name,omitempty"`
+	Stageable       bool          `json:"stageable"`
 	items           []stagedItem
 }
 
@@ -755,6 +756,7 @@ func (s *server) previewRecovery(w http.ResponseWriter, r *http.Request) {
 	if plan.TypedName != "" {
 		plan.TypedName = s.siteDisplayName(ctx)
 	}
+	plan.Stageable = len(plan.Conflicts) == 0 && len(plan.Cannot) == 0 && len(plan.items) > 0
 	writeJSON(w, http.StatusOK, plan)
 }
 
@@ -801,12 +803,13 @@ func (s *server) stageRecovery(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "conflict", strings.Join(plan.Conflicts, " "))
 		return
 	}
+	// A recovery is all or nothing: part of a restore is a configuration nobody confirmed.
+	if len(plan.Cannot) > 0 {
+		jsonErr(w, http.StatusConflict, "cannot_restore", "Nothing was staged, because part of this recovery cannot be done. "+strings.Join(plan.Cannot, " "))
+		return
+	}
 	if len(plan.items) == 0 {
-		msg := "Nothing needs to change: the client networks already match."
-		if len(plan.Cannot) > 0 {
-			msg = strings.Join(plan.Cannot, " ")
-		}
-		jsonErr(w, http.StatusConflict, "nothing_to_do", msg)
+		jsonErr(w, http.StatusConflict, "nothing_to_do", "Nothing needs to change: the client networks already match.")
 		return
 	}
 	var group string

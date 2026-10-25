@@ -384,6 +384,12 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	// The challenge is verified here; identity is IAM-v2's. public.auth_otps is a transient challenge store outside the identity
 	// model: only the verified factor crosses into iam_v2 (authOTPIdentity). Duration, data cap and shaping come from the
 	// package the guest selects after authentication, not from the credential.
+	// The channel the code came by is the method that must be offered on this network.
+	if v.Channel == "sms" {
+		r = withMethodKey(r, keySMS)
+	} else if v.Channel == "whatsapp" {
+		r = withMethodKey(r, keyWhatsApp)
+	}
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
 		FactorType:    otpFactorType(v.Channel),
 		FactorValue:   v.Destination,

@@ -310,3 +310,78 @@ func TestIntegration_Recovery_NeverForcesTheFactoryAddressOverTheWAN(t *testing.
 		t.Fatalf("the refusal does not say why: %s", raw)
 	}
 }
+
+// A recovery that cannot be done completely is not done at all: part of a restore is a configuration nobody confirmed.
+func TestIntegration_Recovery_ARestoreThatCannotBeCompleteStagesNothing(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	fn.lan = uniqueParent()
+	f.retireRevisions(t)
+	ctx := context.Background()
+
+	a := f.mkNet(t, "Rooms", 191, "191.0")
+	gone := f.mkNet(t, "Gone", 192, "192.0")
+	moved := f.mkNet(t, "Moved", 193, "193.0")
+	f.applyAndKeep(t, fn)
+
+	// After the confirmation: A drifts (restorable), one network is deleted, one is moved to another VLAN.
+	if st, b := f.do(t, "PUT", "/network/guest-networks/"+a, map[string]any{"name": "Drifted"}); st != 200 {
+		t.Fatalf("edit = %d %v", st, b)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE guest_networks SET vlan_id=299 WHERE id=$1::uuid`, moved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1::uuid`, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	st, plan := f.do(t, "POST", "/network/recovery/preview", map[string]any{"op": "restore_last_working"})
+	if st != 200 || plan["stageable"] != false || len(plan["cannot_restore"].([]any)) != 2 {
+		t.Fatalf("preview = %d %v", st, plan)
+	}
+	if actionOf(plan, a) != "restore_settings" {
+		t.Fatalf("the preview should still show what could be restored: %v", plan["networks"])
+	}
+	before := f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE tenant_id=$1::uuid`, f.tenant)
+	st, body := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "restore_last_working"})
+	if st != 409 || body["error"] != "cannot_restore" || !strings.Contains(body["message"].(string), "Nothing was staged") {
+		t.Fatalf("a partial restore was not refused: %d %v", st, body)
+	}
+	if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE tenant_id=$1::uuid`, f.tenant) != before {
+		t.Fatal("a refused restore left staged changes behind")
+	}
+	if f.nameOf(t, a) != "Drifted" {
+		t.Fatal("a refused restore changed a network")
+	}
+}
+
+func TestIntegration_Recovery_AFactoryResetThatCannotBeCompleteStagesNothing(t *testing.T) {
+	f := newAPI(t)
+	fn := startFakeNetd(t, f)
+	fn.lan = uniqueParent()
+	f.retireRevisions(t)
+	ctx := context.Background()
+	if st, _ := f.do(t, "POST", "/network/factory/activate", map[string]any{"no_other_dhcp_server": true}); st != 201 {
+		t.Fatal("activate")
+	}
+	f.applyAndKeep(t, fn)
+	other := f.mkNet(t, "Conference", 194, "194.0")
+	f.applyAndKeep(t, fn)
+	// The prepared network no longer sits on the untagged client port.
+	if _, err := f.pool.Exec(ctx, `UPDATE guest_networks SET network_type='vlan', vlan_id=88 WHERE tenant_id=$1 AND name='Client Wi-Fi'`, f.tenant); err != nil {
+		t.Fatal(err)
+	}
+	var siteName string
+	_ = f.pool.QueryRow(ctx, `SELECT name FROM sites WHERE id=$1`, f.site).Scan(&siteName)
+	for _, req := range []map[string]any{{"op": "factory_defaults"}, {"op": "full_reset", "confirm_site_name": siteName}} {
+		if st, b := f.do(t, "POST", "/network/recovery/stage", req); st != 409 || b["error"] != "cannot_restore" {
+			t.Fatalf("%v = %d %v", req["op"], st, b)
+		}
+	}
+	if !f.enabledOf(t, other) {
+		t.Fatal("a refused reset switched a network off")
+	}
+	if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE state='PENDING' AND tenant_id=$1::uuid`, f.tenant) != 0 {
+		t.Fatal("a refused reset left staged changes behind")
+	}
+}

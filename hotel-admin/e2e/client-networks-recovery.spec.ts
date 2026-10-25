@@ -2,7 +2,7 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 import { installCapabilities } from "./capabilities";
 
 const PLAN = {
-  op: "restore_last_working", summary: "Put every client network back to the configuration the appliance last confirmed working.",
+  stageable: true, op: "restore_last_working", summary: "Put every client network back to the configuration the appliance last confirmed working.",
   networks: [
     { id: "n1", name: "Rooms", action: "restore_settings", changes: ["name", "lease times"], active_clients: 0 },
     { id: "n2", name: "Conference centre with a long name", action: "switch_off", active_clients: 12 },

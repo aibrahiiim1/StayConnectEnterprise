@@ -14,6 +14,7 @@ export type RecoveryPlan = {
   protected: string[];
   switch_checklist: string[];
   confirm_site_name?: string;
+  stageable: boolean;
 };
 
 export type RecoveryStatus = {
