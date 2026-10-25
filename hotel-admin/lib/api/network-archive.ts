@@ -1,3 +1,5 @@
+import type { AssessmentNetwork } from "@/lib/api/pms-routing";
+
 export type ArchivedNetwork = {
   id: string;
   name: string;
@@ -20,4 +22,6 @@ export type DefaultReadiness = {
   items: ReadinessItem[];
   pms_candidates: PmsCandidate[];
   packages_pinned_to_other_networks: PinnedPackage[];
+  /** This network's room sign-in assessment, the same one the dashboard and PMS screens read. */
+  room_sign_in?: AssessmentNetwork;
 };

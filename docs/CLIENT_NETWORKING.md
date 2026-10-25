@@ -140,8 +140,9 @@ Package rules of type *only on certain client networks* pick networks by name.
 
 ## 9. PMS routing
 
-A network's room sign-in follows its PMS routing (Hotel → PMS routing). The network's sign-in card shows which interface(s) it is routed to, or says room
-sign-in is not available there. Routing itself is configured only under PMS routing.
+A network's room sign-in follows its **room sign-in policy** (Hotel → PMS routing): none, one dedicated PMS, or an explicitly chosen shared strict set (§16). The
+network's sign-in card shows which interface(s) it is routed to, or says room sign-in is not available there. Routing itself is configured only under PMS routing (or
+from the Default Network card and the post-reset step, which use the same preview and confirmation).
 
 ## 10. Database objects and grants
 
@@ -167,9 +168,16 @@ without it.
 configuration is unchanged; that the Kea file on disk now matches the confirmed configuration; that every new read endpoint answers; that the new pages render
 without overflow at 1280 px and 390 px; that the recovery previews are correct. These are read-only observations.
 
-**Not verified anywhere:** a real client obtaining a DHCP lease on the prepared `10.20.0.0/20` network; the live result of applying a Full Reset (the Product
-Owner's first Full Reset is staged and not applied, §14); an Access or Trunk conversion on the real port; real Kea behaviour while a network change is applied;
-any real switch or hypervisor trunk configuration; a real client reaching the portal over a guest network.
+**Verified on PRE-LIVE after the Product Owner's first Full Reset (§14, observed read-only):** the Product Owner applied the reset at 14:58:53 UTC and confirmed it at
+14:59:06 UTC on 2026-10-25, and revision 98 is the active, confirmed revision. Only *Client Wi-Fi* is enabled (untagged on `ens192`, `10.20.0.0/20`); its bridge is up;
+the old bridges are gone; Kea's live configuration holds exactly that one subnet; the management address and default route are unchanged; the three retired networks are
+switched off and, since the archive was deployed (§15), archived. This replaces an earlier wording of this section that described that reset as staged and not applied: it
+was written before the Product Owner applied it and is corrected here, not rewritten in the records that were true when they were made.
+
+**Not verified anywhere:** a real client signing in through the portal and reaching the internet over the prepared `10.20.0.0/20` network (Kea reports one active lease
+in that range, counted once and recorded as Kea's own observation; no guest session was active and nothing beyond the lease is claimed); an Access or Trunk conversion on
+the real port; real Kea behaviour while a network change is applied; any real switch or hypervisor trunk configuration; a real client reaching the portal over a guest
+network.
 
 **VLAN 60.** An earlier reading on PRE-LIVE showed 0 frames received on the `ens192.60` VLAN device while frames were sent on it. That is an observation of that
 counter and nothing more: it does not show where frames were lost. The switch port, the virtual-switch port group, the access point or controller mapping, VLAN
@@ -286,7 +294,7 @@ networks say what is ready and what needs the operator, and change nothing:
 | DHCP, DNS | The prepared settings: local DHCP and its pool, appliance DNS. |
 | Client Portal | The portal design the network shows (the site's default unless a profile is assigned). |
 | Sign-in | The site's methods, narrowed by the network if it has an override. |
-| PMS routing | A route is made only by the operator. The routes of the retired networks stay on them. If a PMS interface is routed only to archived or switched-off networks it is offered as a **candidate**, one interface at a time, with a preview; routing it uses the existing, explicit PMS-routing call. Two independent interfaces are two candidates, never merged; none is chosen for the operator. No PMS traffic or posting is started. |
+| Room sign-in | The network's own policy (§16): none, one dedicated PMS, or a shared strict set. The routes of the retired networks stay on them and nothing is copied. An undecided Default Network is shown as needing a decision, with a **Configure room sign-in** action that previews the effect first. No PMS traffic or posting is started. |
 | Package eligibility | A package whose current revision limits it to named networks, none of them the Default Network, is listed as *not offered here*. Revisions are immutable and were not widened; offering one here is a new revision of the package. |
 
 **Dependencies on retired network ids, investigated** (PRE-LIVE, 2026-10-25): two of the three old networks carry sign-in history (419 and 251 sign-ins; 139 and 174
@@ -295,3 +303,75 @@ device appearances; 187 and 23 resolutions); both old PRELIVE test networks are 
 replacement creates lineage so pinned package rules keep matching; a reset creates a new network without lineage, so nothing is widened.
 
 **Still a Product-Owner matter.** Removing history, or a network that has any, is not offered anywhere and would need its own authorisation.
+
+## 16. Room sign-in routing, shared networks and readiness (D74, 2026-10-26)
+
+*Record of the mission "Complete enterprise client networking and multi-PMS delivery". Contract: [Phase-0 Amendment A2](architecture/StayConnect-IAM-Phase0-Amendment-A2.md).*
+
+**Three concepts, kept apart.** The *physical LAN port* (Access or Trunk, with an optional untagged native network), the *Default Network* (the prepared network serving
+clients; an administrative idea that never reuses another network's identity or database id), and each *client network* (its own subnet, DHCP, DNS, portal, sign-in
+methods, isolation, package eligibility and room sign-in policy). A tagged VLAN network is configured independently of the Default Network and of every other VLAN.
+
+**The policy of one network.**
+
+| Policy | Meaning | Interfaces |
+|---|---|---|
+| None | No room sign-in on this network, by choice. Never a fault; the room tab is not offered. | 0 |
+| One dedicated PMS | The room is checked against exactly one interface. | 1 |
+| Shared strict set | Two or three independent interfaces; every one is asked; a guest is admitted only when exactly one finds them and all others clearly do not. | 2 to 3 |
+| (undecided) | Nobody has chosen. Room sign-in is not offered. | — |
+
+Many networks may use one PMS; one network may use several only as a shared strict set. **There is no "every active PMS"**: `ALL_ACTIVE_INTERFACES` is not offered, not
+implemented and not a fallback, and a PMS added to the site is never silently added to any network.
+
+**How a sign-in resolves** (`internal/pmsresolve`, `cmd/scd`). The network's policy and its mapped interfaces must agree or the attempt is refused as a routing failure
+before anything is looked up. The vector is every selected interface, asked in parallel, decided only on the complete outcome (no first responder, no fastest answer).
+A room number is only ever looked up inside one interface's own stays, so the same room number in two PMS never collides and a PMS is never inferred from the room; a
+guest who is in the same room number with the same surname in two selected PMS is *ambiguous* and is asked for the reservation number, never matched by picking. A
+selected interface that is out of service is UNAVAILABLE (never dropped); a candidate whose feed cannot authorise is STALE (never NO_MATCH); either makes the whole
+network fail closed, because "no PMS has this guest" can no longer be proven. All non-success outcomes remain one uniform guest response; the operator-facing reason
+(`auth_resolutions`, sign-in attempts) is recorded without any guest-visible interface or property detail. The cap of three is enforced at save and at run time.
+
+**Changing a network's policy** (PMS routing page, Default Network card, post-reset step). Choose a policy and the interfaces, *preview*, then *confirm*:
+
+* The preview (`POST /pms-routing/{network}/preview`) changes nothing. It lists the interfaces added and removed, each interface's ability to answer now and guests in
+  house, other networks that use the same interface, room numbers present in more than one selected PMS, clients and room-based entitlements online on the network, and
+  blockers (cap, wrong count for the policy, an interface that does not exist, is out of service or has no published configuration, an archived network, a critical
+  duplicate-source conflict between two selected interfaces) and warnings.
+* The apply (`PUT /pms-routing/{network}`) carries the preview's fingerprint and is refused (`routing_changed`) if the network's routing changed since. The policy and
+  the interfaces are written in one transaction and audited (`pms_routing.policy_set`, with the previous policy and interfaces). The earlier single-interface call
+  (`{pms_interface_id}`) is still accepted and can only mean one dedicated PMS.
+* It starts and stops no PMS traffic, posts nothing, changes no package eligibility, copies nothing from another network and leaves online guests with their access
+  (their entitlements belong to the stay that earned them).
+
+**Access ↔ Trunk, VLAN changes, replacement.** Before anything is staged, `GET /network/guest-networks/{id}/impact` and the port-mode preview list, for each network
+affected, its online clients and sessions, how many hold room-based access, its room sign-in policy and interfaces, its switched-off sign-in methods and the packages
+limited to it, and the requirements *outside* OneGate for the resulting topology (switch trunk or access configuration, the hypervisor port group's VLAN setting, the
+access-point profile). OneGate configures none of them. A replacement keeps its own network's policy and routing; nothing is merged with another network's, and no
+guest moves to a different PMS.
+
+**Reset and recovery.** No recovery operation changes PMS routing. Restore Last Working compares the policy as well as the interfaces; a difference pauses room sign-in
+on that network only until reviewed (D72, unchanged). After a **confirmed** Full or Factory reset the Recovery page offers an optional, separate *Configure room sign-in*
+step for the resulting network (with the same preview and confirmation); it is not offered while the reset is staged or applied, nor after a cancelled, lapsed or rolled-back
+one, and the confirmation of the network and the choice of routing are two different actions.
+
+**One readiness assessment** (`GET /pms-routing/readiness`). Dashboard Needs attention, PMS connection, PMS routing, the Default Network and Client networks all read
+it. Per network: working, not offered (by choice), not working, not known, needs a decision, not set up, needs correcting, or network off. A PMS that is not ready but
+serves no active network raises nothing; a PMS that also keeps a route to an archived network is not a problem on its own; an undecided network matters only where a PMS in
+service could serve it; PMS transport health is separate (a disconnected transport with an intact mirror still answers); unknown stays unknown. A warning names the
+network and the interface, links to PMS routing or PMS connection, and clears by itself when corrected.
+
+**Database.** Migration 0155 adds `iam_v2.guest_network_pms_policy` (one row per network; `NONE`, `DEDICATED`, `SHARED_STRICT`), a deferred constraint trigger that keeps the
+policy and the mapped interfaces consistent whenever either is written, and `iam_v2.p3_interface_can_authorise`. Existing single routes are backfilled as dedicated; nothing is
+inferred, mapped or merged. Grants are in `deploy/gatep` (`svc_edged` on the table; `svc_scd` select and execute). `.down` removes the objects and leaves every mapping.
+
+**Tests.** Unit: the assessment (PMS-free is never broken; archived-only routes do not warn; strict shared blocks on any candidate; unknown stays unknown; transport is
+separate; corrected warnings clear), the resolver (out-of-service candidate, cap, ambiguity), the routing refusal table. Integration against a full-schema PostgreSQL, also
+as the real `svc_edged` role: preview/apply/stale/blockers/cap/permissions, readiness and the dashboard attention agreeing, no routing change through stage, cancel, apply,
+lapse, rollback and confirm, the post-reset step offered only after confirmation, impact and external requirements. scd through its real handlers: duplicate room numbers,
+ambiguity across interfaces, an unavailable or out-of-service candidate failing the network closed while a dedicated network is unaffected, NONE, a mismatching policy, the
+cap. Console: 1019 unit tests and browser tests at 1280 px and 390 px.
+
+**Limits and open items.** The cap of three is a contract constant, not a setting. Sharing a network between two PMS makes it depend on both being able to answer; that is
+the strict contract's price and the readiness assessment says so. Real-client sign-in on a shared network, real Protel behaviour for two interfaces on one network, and any switch
+or hypervisor configuration are **not verified** and need the Product Owner's manual acceptance on PRE-LIVE.

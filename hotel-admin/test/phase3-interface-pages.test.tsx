@@ -259,63 +259,114 @@ describe("PMS interfaces page", () => {
 });
 
 describe("Guest network routing page", () => {
+  const net = (id: string, name: string, mode: string, ifaces: { pms_interface_id: string; label: string }[] = [], over: Record<string, unknown> = {}) => ({
+    network_id: id, name, enabled: true, archived: false, is_default: false, mode, fingerprint: `fp-${id}`,
+    interfaces: ifaces.map((i) => ({ ...i, lifecycle_state: "ACTIVE", published: true })), ...over,
+  });
+  const assessment = (networks: Record<string, unknown>[]) => ({
+    generated_at: "2026-10-26T08:00:00Z", overall: "READY", networks, interfaces: [], issues: [],
+  });
   const routingMock = (over: Record<string, any> = {}) =>
     get.mockImplementation((path: string) => {
       if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
-      if (path === "/pms-interfaces") {
-        return Promise.resolve({ interfaces: over.interfaces ?? [{ ...iface }] });
-      }
-      return Promise.resolve({
-        routes: over.routes ?? [],
-        unmapped_guest_networks: over.unmapped ?? [],
-      });
+      if (path === "/pms-interfaces") return Promise.resolve({ interfaces: over.interfaces ?? [{ ...iface }] });
+      if (path === "/pms-routing/readiness") return Promise.resolve(over.assessment ?? assessment([]));
+      if (path === "/pms-routing") return Promise.resolve({ routes: [], policies: over.policies ?? [], unmapped_guest_networks: [] });
+      return Promise.resolve({});
     });
 
-  it("names the networks that are mapped to nothing", async () => {
+  it("shows each network's room sign-in choice and what it checks", async () => {
     routingMock({
-      routes: [{ guest_network_id: "gn1", guest_network_name: "Guest VLAN 10", pms_interface_id: "i1",
-        pms_interface_label: "Main PMS", is_default: true, routing_mode: "MAPPED" }],
-      unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+      policies: [
+        net("gn1", "Guest VLAN 10", "DEDICATED", [{ pms_interface_id: "i1", label: "Main PMS" }]),
+        net("gn2", "Resort", "SHARED_STRICT", [{ pms_interface_id: "i1", label: "Main PMS" }, { pms_interface_id: "i2", label: "Spa PMS" }]),
+        net("gn3", "Vouchers", "NONE"),
+        net("gn4", "Conference VLAN 20", ""),
+      ],
+      assessment: assessment([
+        { network_id: "gn1", state: "READY", summary: "Room sign-in checks Main PMS and it can answer.", interfaces: [], reasons: [] },
+        { network_id: "gn3", state: "OFF", summary: "Room sign-in is not offered on this network, by choice. Guests use the other sign-in methods.", interfaces: [], reasons: [] },
+        { network_id: "gn4", state: "UNDECIDED", summary: "No one has decided how room sign-in works on this network, so it is not offered.", interfaces: [], reasons: [] },
+      ]),
     });
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
 
     expect(await screen.findByText("Guest VLAN 10")).toBeTruthy();
-    expect(screen.getByText("Main PMS")).toBeTruthy();
-    expect(await screen.findByText("Conference VLAN 20")).toBeTruthy();
-    expect(screen.getByText(/will not be recognised/i)).toBeTruthy();
+    expect(screen.getByText("One dedicated PMS")).toBeTruthy();
+    expect(screen.getByText("Main PMS, Spa PMS")).toBeTruthy();
+    expect(screen.getByText("Shared strict set")).toBeTruthy();
+    // a deliberately PMS-free network is "Not offered", not a fault; an undecided one needs a decision
+    expect(screen.getByText("Not offered")).toBeTruthy();
+    expect(screen.getByText("Needs a decision")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /decide/i })).toBeTruthy();
   });
 
-  // The page can set the PMS mapping for a VLAN (the guest-network API has no PMS field); WRITE is site_admin only and
-  // hidden for readers.
-  it("lets a site admin point a network at a PMS", async () => {
-    routingMock({ unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }] });
+  // Three explicit choices; the change is previewed, and is applied only against the preview that was shown.
+  it("lets a site admin choose a dedicated PMS, previews it, and applies it against that preview", async () => {
+    routingMock({ policies: [net("gn2", "Conference VLAN 20", "")] });
+    post.mockResolvedValue({
+      network: { ...net("gn2", "Conference VLAN 20", ""), fingerprint: "fp-gn2" },
+      proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true, in_house_stays: 12, room_auth_ready: true, health_known: true, also_used_by: [], live_sessions_on_this_network: 0 }] },
+      added: [], removed: [], blockers: [], warnings: [{ code: "INTERFACE_ALSO_USED", text: "Main PMS is also used by Rooms." }],
+      impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
+      guarantees: ["No PMS traffic is started or stopped, and nothing is posted to any PMS."],
+    });
     put.mockResolvedValue({});
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
 
-    await userEvent.click(await screen.findByRole("button", { name: /point at a pms/i }));
-    await userEvent.click(await screen.findByRole("button", { name: /save mapping/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /decide/i }));
+    await userEvent.click(await screen.findByRole("radio", { name: /one dedicated pms/i }));
+    await userEvent.click(await screen.findByRole("radio", { name: /main pms/i }));
+    await userEvent.click(screen.getByRole("button", { name: /preview the change/i }));
 
+    await screen.findByTestId("routing-preview");
+    expect(post).toHaveBeenCalledWith("/pms-routing/gn2/preview", { mode: "DEDICATED", pms_interface_ids: ["i1"] });
+    expect(screen.getByText(/also used by Rooms/)).toBeTruthy();
+    expect(screen.getByText(/nothing is posted to any PMS/)).toBeTruthy();
+    expect(put).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /confirm and apply/i }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][0]).toBe("/pms-routing/gn2");
-    expect(put.mock.calls[0][1]).toEqual({ pms_interface_id: "i1", routing_mode: "MAPPED" });
+    expect(put.mock.calls[0][1]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["i1"], based_on: "fp-gn2" });
   });
 
-  it("offers no way to change the mapping to a role that may only read it", async () => {
+  it("does not let a shared set exceed three, or be applied with a blocker", async () => {
+    const four = ["a", "b", "c", "d"].map((x) => ({ ...iface, id: `i-${x}`, display_label: `PMS ${x}` }));
+    routingMock({ interfaces: four, policies: [net("gn2", "Resort", "")] });
+    post.mockResolvedValue({
+      network: net("gn2", "Resort", ""), proposed: { mode: "SHARED_STRICT", interfaces: [] }, added: [], removed: [],
+      blockers: [{ code: "DUPLICATE_SOURCE", text: "PMS a and PMS b may be the same property's PMS." }], warnings: [],
+      impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
+      guarantees: [],
+    });
+    const Page = (await import("@/app/(app)/pms-routing/page")).default;
+    render(<Page />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /decide/i }));
+    await userEvent.click(await screen.findByRole("radio", { name: /shared strict set/i }));
+    for (const x of ["a", "b", "c"]) await userEvent.click(await screen.findByRole("checkbox", { name: new RegExp(`PMS ${x}`) }));
+    expect((screen.getByRole("checkbox", { name: /PMS d/ }) as HTMLInputElement).disabled).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: /preview the change/i }));
+    await screen.findByText("This cannot be applied");
+    expect((screen.getByRole("button", { name: /confirm and apply/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("offers no way to change the routing to a role that may only read it", async () => {
     routingMock({
       roles: ["front_office_operator"],
-      routes: [{ guest_network_id: "gn1", guest_network_name: "Guest VLAN 10", pms_interface_id: "i1",
-        pms_interface_label: "Main PMS", is_default: false, routing_mode: "MAPPED" }],
-      unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+      policies: [net("gn1", "Guest VLAN 10", "DEDICATED", [{ pms_interface_id: "i1", label: "Main PMS" }])],
     });
     const Page = (await import("@/app/(app)/pms-routing/page")).default;
     render(<Page />);
     await screen.findByText("Guest VLAN 10");
 
     expect(screen.queryByRole("button", { name: /change/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /point at a pms/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /decide/i })).toBeNull();
     expect(put).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
   });

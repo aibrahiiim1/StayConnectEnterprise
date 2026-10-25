@@ -1,3 +1,4 @@
+import type { NetworkConsequence } from "@/lib/api/pms-routing";
 // Factory network, staged changes and Access / Trunk port mode, as the Admin Console API reports them.
 
 export type FactoryState = "awaiting_assignment" | "lan_unknown" | "adopted" | "staged" | "activated" | "blocked" | "prepared";
@@ -62,6 +63,9 @@ export type PortModePlan = {
   impact: string[];
   switch_requirements: string[];
   conflicts: string[];
+  /** What depends on the networks this touches, and what must be provided outside the appliance. */
+  affected?: NetworkConsequence[];
+  external_requirements?: string[];
 };
 
 export const PORT_MODE_LABEL: Record<PortInfo["mode"], string> = { access: "Access", trunk: "Trunk", unused: "Not in use" };

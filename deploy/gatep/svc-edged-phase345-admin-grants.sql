@@ -526,3 +526,6 @@ GRANT SELECT ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_layer_snapshots, iam_v2.network_review_items TO svc_edged;
 --   0154 the archive of networks a confirmed reset retired: edged only.
 GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_archive TO svc_edged;
+
+-- 0155: the explicit room sign-in policy of each client network (NONE / DEDICATED / SHARED_STRICT). edged writes it with the mapping in one transaction.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_pms_policy TO svc_edged;

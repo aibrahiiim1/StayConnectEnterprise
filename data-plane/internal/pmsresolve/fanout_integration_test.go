@@ -107,6 +107,7 @@ func TestIntegration_FanOutWaitsForTheWholeVector(t *testing.T) {
 	ctx := context.Background()
 	f := seed(t, p, 5)
 	r := NewResolver(p)
+	r.MaxCandidates = 5 // the contract's hard ceiling; the production default is MaxSharedCandidates
 	slow := f.ifaces[3]
 	var probes int32
 	res, err := r.Resolve(ctx, f.tenant, f.site, f.network, uuid(t, p), ProbeFunc(
@@ -229,6 +230,7 @@ func TestIntegration_ConcurrentResolutions(t *testing.T) {
 	defer p.Close()
 	f := seed(t, p, 4)
 	r := NewResolver(p)
+	r.MaxCandidates = 5
 	req := uuid(t, p)
 	const n = 24
 	var wg sync.WaitGroup
@@ -322,4 +324,37 @@ func uuid(t *testing.T, p *pgxpool.Pool) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// An interface the network explicitly names but that is out of service stays in the vector as unavailable: it is not asked, and the resolution fails closed even
+// though the other candidate would have verified.
+func TestIntegration_AnOutOfServiceNamedInterfaceIsNotAskedAndFailsTheResolutionClosed(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := seed(t, p, 2)
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='AUTH_DISABLED' WHERE id=$1`, f.ifaces[1]); err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	var mu sync.Mutex
+	res, err := NewResolver(p).Resolve(ctx, f.tenant, f.site, f.network, uuid(t, p), ProbeFunc(
+		func(ctx context.Context, iface string) (CandidateOutcome, string, error) {
+			mu.Lock()
+			asked = append(asked, iface)
+			mu.Unlock()
+			return Verified, stayOf(f, iface), nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Resolution != ResIndeterminate || res.Reason != "CANDIDATE_NOT_ACTIVE" || res.Stay != "" {
+		t.Fatalf("%+v", res.Outcome)
+	}
+	if len(asked) != 1 || asked[0] != f.ifaces[0] {
+		t.Fatalf("asked %v, want only the interface in service", asked)
+	}
+	if len(res.Candidates) != 2 {
+		t.Fatalf("the vector dropped the out-of-service candidate: %+v", res.Candidates)
+	}
 }

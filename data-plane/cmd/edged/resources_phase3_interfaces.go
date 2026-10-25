@@ -936,155 +936,14 @@ type guestNetworkRoute struct {
 func (s *server) pmsRoutingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listPMSRouting)
+	r.Get("/readiness", s.getRoomSignInReadiness)
 	// The write path lives here, next to the read that explains the mapping: one guest network at a time, named in
-	// the path, with the interface validated against this site and required to be publishable. Wiring it into the
+	// the path. A change is previewed first and applied only against that preview's fingerprint. Wiring it into the
 	// network revision pipeline would make a routing typo a network outage.
+	r.Post("/{guest_network_id}/preview", s.pmsRoutingPreview)
 	r.Put("/{guest_network_id}", s.setPMSRoute)
 	r.Delete("/{guest_network_id}", s.clearPMSRoute)
 	return r
-}
-
-type setPMSRouteReq struct {
-	InterfaceID string `json:"pms_interface_id"`
-	// MAPPED (resolves against exactly this interface) or ALL_ACTIVE_INTERFACES (not implemented). Defaults to MAPPED.
-	RoutingMode string `json:"routing_mode"`
-}
-
-// Maps one guest network to one PMS Interface. An upsert that also REPLACES any other interface mapped to the
-// network: a network resolving against two properties' PMS at once is not a valid configuration.
-func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
-	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
-	if !uuidRe.MatchString(gnID) {
-		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
-		return
-	}
-	var in setPMSRouteReq
-	if err := decodeJSON(r, &in); err != nil {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
-		return
-	}
-	ifaceID := strings.TrimSpace(in.InterfaceID)
-	if ifaceID == "" {
-		jsonErr(w, http.StatusBadRequest, "validation", "pms_interface_id is required")
-		return
-	}
-	if !uuidRe.MatchString(ifaceID) {
-		jsonErr(w, http.StatusNotFound, "not_found", "PMS interface not found at this site")
-		return
-	}
-	mode := strings.TrimSpace(in.RoutingMode)
-	if mode == "" {
-		mode = "MAPPED"
-	}
-	// ALL_ACTIVE_INTERFACES is not offered: no resolver reads routing_mode (internal/pmsresolve uses mapped()), so
-	// it would behave as MAPPED under a name promising fan-out. Existing rows keep resolving against their mapped interface.
-	if mode != "MAPPED" {
-		jsonErr(w, http.StatusBadRequest, "validation",
-			"routing_mode must be MAPPED. Routing a client network to every active PMS is not implemented: "+
-				"the resolver only ever consults the interface a network is mapped to.")
-		return
-	}
-
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "begin failed")
-		return
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// Both sides are checked against THIS site rather than trusted: a cross-site id would otherwise surface as an "internal" 23503.
-	var gnName string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(name,'') FROM public.guest_networks
-	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, gnID, s.tenantID, s.siteID).Scan(&gnName); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
-		return
-	}
-	var ifaceLabel, lifecycle string
-	var published bool
-	// Publication is `current_revision_id`, not a per-revision timestamp (pms_interface_revisions.published_at does not exist).
-	if err := tx.QueryRow(ctx, `
-	    SELECT COALESCE(i.display_label,''), COALESCE(i.lifecycle_state,''),
-	           i.current_revision_id IS NOT NULL
-	      FROM iam_v2.pms_interfaces i
-	     WHERE i.id=$1 AND i.tenant_id=$2 AND i.site_id=$3`,
-		ifaceID, s.tenantID, s.siteID).Scan(&ifaceLabel, &lifecycle, &published); err != nil {
-		jsonErr(w, http.StatusNotFound, "not_found", "PMS interface not found at this site")
-		return
-	}
-	// An interface with no published revision has no endpoint; refuse with a message naming the missing step.
-	if !published {
-		jsonErr(w, http.StatusConflict, "validation",
-			"PMS interface has no published revision — publish one before routing a client network to it")
-		return
-	}
-
-	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
-	     WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3 AND pms_interface_id <> $4`,
-		s.tenantID, s.siteID, gnID, ifaceID); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "route replace failed")
-		return
-	}
-	// is_default=true: with exactly one mapping per network it is the default; the DELETE above runs first so the gnpm_one_default index sees one.
-	if _, err := tx.Exec(ctx, `
-	    INSERT INTO iam_v2.guest_network_pms_map
-	      (tenant_id, site_id, guest_network_id, pms_interface_id, is_default, routing_mode)
-	    VALUES ($1,$2,$3,$4,true,$5)
-	    ON CONFLICT (guest_network_id, pms_interface_id)
-	    DO UPDATE SET is_default=true, routing_mode=EXCLUDED.routing_mode`,
-		s.tenantID, s.siteID, gnID, ifaceID, mode); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "route write failed")
-		return
-	}
-	if err := tx.Commit(ctx); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
-		return
-	}
-	s.audit(r, "pms_routing.set", "guest_network", gnID,
-		map[string]any{"pms_interface_id": ifaceID, "routing_mode": mode, "guest_network_name": gnName})
-	writeJSON(w, http.StatusOK, guestNetworkRoute{
-		GuestNetworkID: gnID, GuestNetworkName: gnName,
-		InterfaceID: ifaceID, InterfaceLabel: ifaceLabel, IsDefault: true, RoutingMode: mode,
-	})
-}
-
-// Unmaps a guest network; resolving against nothing is legitimate (a staff VLAN) and listPMSRouting reports it as unmapped_guest_networks.
-func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
-	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
-	if !uuidRe.MatchString(gnID) {
-		jsonErr(w, http.StatusNotFound, "not_found", "client network not found at this site")
-		return
-	}
-	ctx, cancel := dbCtx(r)
-	defer cancel()
-	tag, err := s.db.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
-	     WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, s.tenantID, s.siteID, gnID)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "route delete failed")
-		return
-	}
-	s.audit(r, "pms_routing.cleared", "guest_network", gnID,
-		map[string]any{"removed": tag.RowsAffected()})
-	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
-}
-
-// The mapping decides which property's PMS a device on a VLAN is checked against; getting it wrong resolves a
-// guest against a neighbouring property's occupancy. Writes (setPMSRoute / clearPMSRoute) are confined to
-// site_admin by the `pms-routing` permWrite entry in rolePerms.
-func (s *server) listPMSRouting(w http.ResponseWriter, r *http.Request) {
-	routes, err := s.routesForInterface(r, "")
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
-		return
-	}
-	// A guest network with no mapping resolves against nothing, and the absence is invisible in a list of mapped ones.
-	unmapped, err := s.unmappedGuestNetworks(r)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"routes": routes, "unmapped_guest_networks": unmapped})
 }
 
 func (s *server) routesForInterface(r *http.Request, ifaceID string) ([]guestNetworkRoute, error) {
@@ -1128,6 +987,7 @@ func (s *server) unmappedGuestNetworks(r *http.Request) ([]map[string]string, er
 		 WHERE gn.site_id=$2
 		   AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_network_pms_map m
 		                    WHERE m.tenant_id=$1 AND m.site_id=$2 AND m.guest_network_id = gn.id)
+		   AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_network_pms_policy p WHERE p.guest_network_id = gn.id)
 		   AND NOT (NOT gn.enabled AND EXISTS (SELECT 1 FROM iam_v2.network_archive a WHERE a.network_id = gn.id))
 		 ORDER BY gn.name, gn.id`, s.tenantID, s.siteID)
 	if err != nil {

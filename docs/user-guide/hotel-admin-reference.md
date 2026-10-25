@@ -601,12 +601,21 @@ is safe to resume. Every decision needs **password confirmation** (a password fi
 (Formerly *PMS routing*. In-page title *Which PMS each network checks*.) Which PMS each client network's room sign-ins are checked
 against.
 
-- **Shows:** a *Why this matters* note (a network pointed at the wrong PMS produces no error — guests simply
-  cannot sign in); **Networks that can offer room sign-in** (network, the connection it is checked against,
-  and scope: that one PMS or *Every active PMS*); **Networks with no PMS** (a legitimate setup, because
-  vouchers and client accounts do not use the PMS).
-- **Change / Point at a PMS** — a dialog to choose the connection and scope. **Remove mapping** — a
-  confirmation dialog.
+- **Shows:** a *Why you preview first* note (a network pointed at the wrong PMS produces no error — guests simply
+  cannot sign in); one row per client network (archived networks are not listed): the network, its **room sign-in** choice —
+  *No room sign-in*, *One dedicated PMS*, *Shared strict set* or *Not decided* — the connection(s) it checks, and its **status**
+  (Working, Not offered, Not working, Needs a decision …) with a one-line reason. A network that deliberately offers no room
+  sign-in is *Not offered*, never a fault. The same status is what Needs attention on the dashboard and the PMS connection page
+  show.
+- **Decide / Change** — a dialog: choose *No room sign-in*, *One dedicated PMS* (one connection) or *A shared strict set* (two or
+  three connections, never more), then **Preview the change**. The preview lists what is added and removed, whether each
+  connection can answer now, how many room numbers exist in more than one selected PMS, the clients online on the network, and
+  what is **not** touched (no PMS traffic, nothing posted, no package change, no route copied, guests online keep access). **Confirm
+  and apply** is available only if nothing blocks it and applies only that preview. **Back to not decided** — a confirmation dialog.
+- **Shared strict set:** every selected connection is asked and a guest is admitted only when exactly one finds them and the
+  others clearly do not; if one cannot answer, no guest on that network can sign in with a room number, and the page says so.
+- After a confirmed Full or Factory reset, **Recovery** and the Default Network card offer the same *Configure room sign-in*
+  step; the reset itself never changes PMS routing.
 - **Who can change it:** Site admin only. **Read-only:** Site IT manager, Client services, Client relations,
   Site viewer.
 

@@ -364,6 +364,9 @@ type portModePlan struct {
 	Impact     []string         `json:"impact"`
 	Switch     []string         `json:"switch_requirements"`
 	Conflicts  []string         `json:"conflicts"`
+	// What depends on the networks this change touches (clients, PMS routing, sign-in methods, packages), and what the switch, access points and hypervisor must provide.
+	Affected []networkConsequence `json:"affected"`
+	External []string             `json:"external_requirements"`
 }
 
 // suggestSubnet is the first 10.<n>.0.0/24 from the VLAN id up that overlaps nothing taken.
@@ -432,6 +435,7 @@ func (s *server) setPortMode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "mode_change_refused", err.Error())
 		return
 	}
+	plan.Affected, plan.External = s.portPlanImpact(ctx, port, &plan)
 	if in.Preview {
 		writeJSON(w, http.StatusOK, plan)
 		return
@@ -605,4 +609,31 @@ func (s *server) planAccess(port *portInfo) (portModePlan, error) {
 		"Applying is not guaranteed to be uninterrupted. If the change does not hold, it is rolled back automatically.")
 	plan.Switch = append(plan.Switch, "The switch port and port group must deliver the untagged (native) VLAN. Tagged VLANs are no longer served and can be removed from the trunk.")
 	return plan, nil
+}
+
+// portPlanImpact lists the existing networks a port-mode change touches and what must be provided outside OneGate for the resulting topology.
+func (s *server) portPlanImpact(ctx context.Context, port *portInfo, plan *portModePlan) ([]networkConsequence, []string) {
+	var ids []string
+	for _, n := range plan.SwitchOff {
+		ids = append(ids, n.ID)
+	}
+	if plan.KeepNative != nil {
+		ids = append(ids, plan.KeepNative.ID)
+	}
+	if port.Native != nil {
+		ids = append(ids, port.Native.ID)
+	}
+	ext := []string{}
+	if plan.Mode == "trunk" {
+		for _, c := range plan.Create {
+			v := c.VLANID
+			ext = append(ext, externalRequirements("vlan", &v, port.Name)[:3]...)
+		}
+		if len(ext) > 0 {
+			ext = append(ext, "OneGate does not change your switch, access points or hypervisor. Make these changes there yourself; until they are made, clients on these networks cannot reach them.")
+		}
+	} else {
+		ext = externalRequirements("untagged", nil, port.Name)
+	}
+	return s.consequencesFor(ctx, ids), ext
 }

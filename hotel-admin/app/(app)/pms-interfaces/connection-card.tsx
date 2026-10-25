@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import type { PmsInterfaceHealth } from "@/lib/api";
+import type { AssessmentInterfaceSummary } from "@/lib/api/pms-routing";
 import { Card } from "@/components/ui/card";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,14 +85,14 @@ export function ChecksRow({ health }: { health?: PmsInterfaceHealth | null }) {
 }
 
 export function ConnectionCard({
-  iface, health, healthLoaded, provider, networks, onOpen,
+  iface, health, healthLoaded, provider, routing, onOpen,
 }: {
   iface: PmsConnection;
   health?: PmsInterfaceHealth;
   healthLoaded: boolean;
   provider: PmsProvider | null;
-  /** null when routing could not be read. */
-  networks: string[] | null;
+  /** What this connection serves, from the one server assessment; null when it could not be read. */
+  routing: AssessmentInterfaceSummary | null;
   onOpen: () => void;
 }) {
   const h = health;
@@ -104,9 +105,14 @@ export function ConnectionCard({
   const host = safeHost(iface.endpoint);
   const verification = verificationWords(iface.verification ?? provider?.verification);
 
+  const networks = routing ? routing.serving_networks : null;
+  const archivedRoutes = routing?.archived_or_off_routes ?? 0;
   const warnings: React.ReactNode[] = [];
+  // The connection's own state is always shown. That it also stops guests signing in is said only when a client network is actually routed to it: a connection that
+  // serves no active network is described, and nothing on the dashboard warns about it.
   if (active && h && !h.room_auth_ready && h.room_auth_reason) {
-    warnings.push(ROOM_AUTH_WORDS[h.room_auth_reason] ?? "Room sign-in is not available through this connection.");
+    const own = ROOM_AUTH_WORDS[h.room_auth_reason] ?? "Room sign-in is not available through this connection.";
+    warnings.push(routing?.state === "IMPAIRED" ? `${own} Guests on ${routing.serving_networks.join(", ")} cannot sign in with a room number until it is.` : own);
   }
   if ((h?.review_events ?? 0) > 0) {
     warnings.push(
@@ -114,9 +120,6 @@ export function ConnectionCard({
         {h!.review_events.toLocaleString()} PMS message{h!.review_events === 1 ? " needs" : "s need"} a decision
       </Link>,
     );
-  }
-  if (networks && networks.length === 0 && iface.lifecycle_state !== "DECOMMISSIONED") {
-    warnings.push("No client network uses this connection, so no guest is ever checked against it.");
   }
 
   const tone = !active ? "default" : !healthLoaded || !h ? "default" : readiness.tone;
@@ -187,7 +190,10 @@ export function ConnectionCard({
           <div className="col-span-2 min-w-0">
             <dt className="text-muted-foreground">Client networks</dt>
             <dd className="truncate font-medium" title={networks?.join(", ")}>
-              {networks === null ? "—" : networks.length === 0 ? "None" : networks.join(", ")}
+              {networks === null ? "—" : networks.length === 0 ? "None in use for room sign-in" : networks.join(", ")}
+              {archivedRoutes > 0 && (
+                <span className="font-normal text-muted-foreground"> · also routed to {archivedRoutes} archived or switched-off network{archivedRoutes === 1 ? "" : "s"}</span>
+              )}
             </dd>
           </div>
         </dl>

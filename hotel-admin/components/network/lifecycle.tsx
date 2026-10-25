@@ -1,5 +1,6 @@
 "use client";
 
+import { ImpactPanel } from "@/components/network/impact-panel";
 import { useEffect, useState } from "react";
 import { Layers, Rocket, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -288,9 +289,10 @@ export function PortModeCard({ writable, reloadKey, onStaged }: { writable: bool
               <strong>What this does to clients</strong>
               <ul className="list-disc pl-5">{plan.impact.map((i) => <li key={i}>{i}</li>)}</ul>
             </div>
+            <ImpactPanel affected={plan.affected} />
             <Callout tone="info" title="Check outside the appliance">
               <p className="mb-1">The appliance cannot verify these.</p>
-              <ul className="list-disc pl-5">{plan.switch_requirements.map((i) => <li key={i}>{i}</li>)}</ul>
+              <ul className="list-disc pl-5">{[...plan.switch_requirements, ...(plan.external_requirements ?? [])].map((i) => <li key={i}>{i}</li>)}</ul>
             </Callout>
           </div>
         )}

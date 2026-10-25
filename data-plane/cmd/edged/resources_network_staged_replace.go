@@ -153,9 +153,11 @@ func (s *server) stageGuestNetworkReplacement(w http.ResponseWriter, r *http.Req
 	})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"replacement_id": replID, "state": replStatePending, "original_network_id": id,
-		"carries":  s.replacementCarries(ctx, id, in.SubnetCIDR != "" && in.SubnetCIDR != cur.subnet),
-		"packages": s.packagesLimitedTo(ctx, id),
-		"next":     "nothing has changed yet. Apply the configuration on Client networks, then confirm it.",
+		"carries":               s.replacementCarries(ctx, id, in.SubnetCIDR != "" && in.SubnetCIDR != cur.subnet),
+		"packages":              s.packagesLimitedTo(ctx, id),
+		"affected":              s.consequencesFor(ctx, []string{id}),
+		"external_requirements": externalRequirements(in.NetworkType, in.VLANID, in.ParentInterface),
+		"next":                  "nothing has changed yet. Apply the configuration on Client networks, then confirm it.",
 	})
 }
 
@@ -469,6 +471,11 @@ func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, 
 			  FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1`, p.orig, created.ID); err != nil {
 			return nil, err
 		}
+		// The successor is the same client network continuing under another topology: it keeps its own room sign-in policy, nothing from any other network.
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.guest_network_pms_policy (guest_network_id, tenant_id, site_id, mode, configured_by)
+			SELECT $2::uuid, tenant_id, site_id, mode, configured_by FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, p.orig, created.ID); err != nil {
+			return nil, err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_replacements
 			   SET state='APPLIED', successor_network_id=$2, applied_at=now() WHERE id=$1`, p.id, created.ID); err != nil {
 			return nil, err
@@ -532,6 +539,9 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 				slogReplacement("successor_kept_as_history", replID, "a client signed in on it before the change was undone")
 			}
 			if _, err := tx.Exec(ctx, `RELEASE SAVEPOINT drop_successor`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_policy p WHERE p.guest_network_id=$1::uuid AND NOT EXISTS (SELECT 1 FROM public.guest_networks g WHERE g.id=p.guest_network_id)`, *succ); err != nil {
 				return err
 			}
 		}

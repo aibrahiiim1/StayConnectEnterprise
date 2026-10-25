@@ -148,9 +148,9 @@ func TestOverviewAttentionFollowsModules(t *testing.T) {
 		"hospitality": {ID: "hospitality", Deployed: true, Licensed: false, Manageable: true},
 		"room_charge": {ID: "room_charge", Deployed: true, Licensed: false, Manageable: false},
 	}))}
-	in := attentionInput{PMS: []attentionPMS{{Label: "FIAS", Active: true}}, PMSReviewCases: 2, PostingsReviewOpen: 1}
+	in := attentionInput{RoomSignInIssues: []rsIssue{{ID: "room-signin:n1", Severity: "warn", Title: "t", Href: "/pms-routing", Action: "a"}}, PMSReviewCases: 2, PostingsReviewOpen: 1}
 	got := s.moduleScopedAttention(context.Background(), in)
-	if got.PMS != nil || got.PMSReviewCases != 2 || got.PostingsReviewOpen != 0 {
+	if got.RoomSignInIssues != nil || got.PMSReviewCases != 2 || got.PostingsReviewOpen != 0 {
 		t.Fatalf("no room-sign-in readiness items without the licence; history work stays: %+v", got)
 	}
 }

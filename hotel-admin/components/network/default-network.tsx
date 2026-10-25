@@ -7,22 +7,20 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/ui/card";
-import { DialogForm } from "@/components/ui/dialog";
 import { Callout } from "@/components/ui/error-banner";
 import { useToast } from "@/components/ui/toast";
+import { RoutingEditor, usePmsRouting } from "@/components/pms/routing-editor";
 import { errMsg } from "@/lib/utils";
-import type { ArchivedNetwork, DefaultReadiness, PmsCandidate } from "@/lib/api/network-archive";
+import type { ArchivedNetwork, DefaultReadiness } from "@/lib/api/network-archive";
 
 const STATE_TONE = { ok: "ok", attention: "warn", unresolved: "err" } as const;
 const STATE_LABEL = { ok: "Ready", attention: "Check", unresolved: "Needs your decision" } as const;
 
 /** What stands between the Default Network and being the guest-service entry point. It describes; it changes nothing by itself. */
-export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean; reloadKey: number }) {
-  const toast = useToast();
+export function DefaultNetworkCard({ reloadKey }: { reloadKey: number }) {
   const [info, setInfo] = useState<DefaultReadiness | null>(null);
-  const [choose, setChoose] = useState<PmsCandidate | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<unknown>(null);
+  const { canRoute, interfaces } = usePmsRouting();
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(() => {
     api.get<DefaultReadiness>("/network/default").then(setInfo).catch(() => setInfo(null));
@@ -30,22 +28,8 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
   useEffect(load, [load, reloadKey]);
 
   if (!info || !info.present) return null;
-
-  async function route() {
-    if (!choose || !info) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.put(`/pms-routing/${info.network_id}`, { pms_interface_id: choose.pms_interface_id });
-      toast.success("Room sign-in is routed to the Default Network", `It now checks ${choose.label}. The routes of the archived networks were not changed.`);
-      setChoose(null);
-      load();
-    } catch (e) {
-      setErr(e);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const room = info.room_sign_in;
+  const undecided = room?.state === "UNDECIDED" || room?.state === "NOT_SET";
 
   return (
     <SectionCard title={`Default Network: ${info.name}`} description="The entry point guests meet. Each check says what was found; nothing here is changed for you.">
@@ -59,18 +43,15 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
         ))}
       </ul>
 
-      {(info.pms_candidates ?? []).length > 0 && (
-        <Callout tone="warning" title="Room sign-in needs a decision">
-          <p className="mb-2">A PMS interface keeps its routes to the archived networks. None was copied here. Choosing one routes room sign-in on this network to that interface only.</p>
-          <ul className="space-y-2">
-            {(info.pms_candidates ?? []).map((c) => (
-              <li key={c.pms_interface_id} className="flex flex-wrap items-center justify-between gap-2">
-                <span><strong>{c.label}</strong> — routed to {c.routed_from.join(", ")}</span>
-                {writable && <Button size="sm" variant="secondary" onClick={() => { setErr(null); setChoose(c); }}>Route to this network…</Button>}
-              </li>
-            ))}
-          </ul>
-        </Callout>
+      {canRoute && room && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant={undecided ? "primary" : "secondary"} onClick={() => setEditing(true)}>
+            {undecided ? "Configure room sign-in…" : "Change room sign-in…"}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Choose none, one dedicated PMS or a shared strict set. You see what it affects first; nothing is copied from an archived network.
+          </span>
+        </div>
       )}
 
       {(info.packages_pinned_to_other_networks ?? []).length > 0 && (
@@ -84,19 +65,8 @@ export function DefaultNetworkCard({ writable, reloadKey }: { writable: boolean;
         </Callout>
       )}
 
-      <DialogForm open={choose !== null} onOpenChange={(v) => !v && setChoose(null)} title="Route room sign-in to the Default Network"
-        description="Check what this does before you confirm." submitLabel="Route to the Default Network" busy={busy} error={err} onSubmit={route}>
-        {choose && (
-          <div className="space-y-3 text-sm">
-            <p>{choose.preview}</p>
-            <ul className="list-disc pl-5 text-muted-foreground">
-              <li>No PMS traffic is started or stopped, and nothing is posted.</li>
-              <li>Package eligibility is not changed.</li>
-              <li>You can undo it under PMS routing.</li>
-            </ul>
-          </div>
-        )}
-      </DialogForm>
+      <RoutingEditor open={editing} network={{ id: info.network_id, name: info.name }} interfaces={interfaces}
+        onClose={() => setEditing(false)} onDone={() => load()} />
     </SectionCard>
   );
 }

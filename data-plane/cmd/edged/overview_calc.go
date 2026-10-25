@@ -425,14 +425,6 @@ const (
 	attentionDiskCritPct = 95.0
 )
 
-type attentionPMS struct {
-	Label         string
-	Active        bool
-	RoomAuthReady bool
-	Connected     bool
-	Reason        string
-}
-
 type attentionService struct {
 	Name     string
 	State    string
@@ -450,7 +442,7 @@ type attentionDisk struct {
 }
 
 type attentionInput struct {
-	PMS                []attentionPMS
+	RoomSignInIssues   []rsIssue
 	PMSReviewCases     int64
 	PostingsReviewOpen int64
 	Services           []attentionService
@@ -497,25 +489,8 @@ func deriveAttention(in attentionInput) []attentionItem {
 	out := []attentionItem{}
 	add := func(it attentionItem) { out = append(out, it) }
 
-	for _, p := range in.PMS {
-		if !p.Active || p.RoomAuthReady {
-			continue
-		}
-		sev := "err"
-		if p.Connected {
-			sev = "warn"
-		}
-		label := p.Label
-		if label == "" {
-			label = "PMS connection"
-		}
-		detail := "Clients cannot sign in with their room number on this connection until it is ready."
-		if p.Reason != "" {
-			detail += " Reason: " + strings.ToLower(strings.ReplaceAll(p.Reason, "_", " ")) + "."
-		}
-		add(attentionItem{ID: "pms-not-ready:" + label, Severity: sev,
-			Title: label + " is not ready for room sign-in", Detail: detail,
-			Href: "/pms-interfaces", Action: "Open PMS connection"})
+	for _, it := range in.RoomSignInIssues {
+		add(attentionItem{ID: it.ID, Severity: it.Severity, Title: it.Title, Detail: it.Detail, Href: it.Href, Action: it.Action})
 	}
 	if in.PMSReviewCases > 0 {
 		add(attentionItem{ID: "pms-review", Severity: "warn",

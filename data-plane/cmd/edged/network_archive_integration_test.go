@@ -287,8 +287,10 @@ func TestIntegration_Default_ReadinessNamesWhatIsUnresolvedAndChangesNothing(t *
 	}
 	_, r = f.do(t, "GET", "/network/default", nil)
 	for _, it := range r["items"].([]any) {
-		if m := it.(map[string]any); m["id"] == "pms" && m["state"] != "ok" {
-			t.Fatalf("pms after the operator's choice: %v", m)
+		// Routed now, so the item reports whether the chosen interface can answer. The fixture's interface has no live feed, so it is honestly not ready; what must
+		// have gone is the "choose how room sign-in works" decision.
+		if m := it.(map[string]any); m["id"] == "pms" && strings.Contains(m["detail"].(string), "Choose") {
+			t.Fatalf("pms after the operator's choice still asks for a decision: %v", m)
 		}
 	}
 	if len(r["pms_candidates"].([]any)) != 0 {

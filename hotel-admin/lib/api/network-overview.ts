@@ -1,6 +1,8 @@
 // Client network status and diagnostics, as the Admin Console API reports them. Status is derived on the appliance from what was confirmed and what it
 // observes; this module only names the values and words them.
 
+import type { RoomSignInBrief } from "@/lib/api/pms-routing";
+
 export type NetworkStatusValue =
   | "not_activated"
   | "activating"
@@ -32,6 +34,8 @@ export type OverviewNetwork = {
   pms_interfaces: string[];
   health_known: boolean;
   attention: string[];
+  /** What room sign-in does on this network, from the one assessment the dashboard and PMS screens read. Absent when it could not be assessed. */
+  room_sign_in?: RoomSignInBrief;
 };
 
 export type RevisionInfo = {

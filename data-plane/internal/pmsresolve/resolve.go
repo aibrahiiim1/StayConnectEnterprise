@@ -17,7 +17,13 @@ const (
 type Candidate struct {
 	InterfaceID string
 	Outcome     CandidateOutcome
+	// NotActive: the interface is explicitly part of the network's routing but is not in service (auth disabled, draining, decommissioned). It is never probed.
+	NotActive bool
 }
+
+// MaxSharedCandidates is the supported size of a network's explicit PMS set (contract section 8: a bounded fan-out; the hard ceiling is 5 and needs a Product
+// Owner decision to raise).
+const MaxSharedCandidates = 3
 
 type Resolution string
 
@@ -51,7 +57,7 @@ func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 	}
 
 	var verified []string
-	var ambiguousLocal, indeterminate, noMatch int
+	var ambiguousLocal, indeterminate, noMatch, notActive int
 	for _, c := range candidates {
 		switch c.Outcome {
 		case Verified:
@@ -60,6 +66,9 @@ func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 			ambiguousLocal++
 		case Unavailable, Stale, UnsupportedEvidence:
 			indeterminate++
+			if c.NotActive {
+				notActive++
+			}
 		case NoMatch:
 			noMatch++
 		default:
@@ -71,6 +80,9 @@ func Resolve(candidates []Candidate, maxCandidates int) Outcome {
 	switch {
 	case len(verified) >= 2 || ambiguousLocal > 0:
 		return Outcome{Resolution: ResAmbiguous, Reason: "DISCRIMINATOR_REQUIRED"}
+	case indeterminate > 0 && notActive == indeterminate:
+		// Nothing was unreachable: the operator's routing names an interface that is out of service. A configuration fact, not a feed one.
+		return Outcome{Resolution: ResIndeterminate, Reason: "CANDIDATE_NOT_ACTIVE"}
 	case indeterminate > 0:
 		return Outcome{Resolution: ResIndeterminate, Reason: "INCOMPLETE_EVIDENCE"}
 	case len(verified) == 1:

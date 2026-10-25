@@ -27,7 +27,8 @@ const plan = {
 
 beforeEach(() => {
   get.mockReset(); post.mockReset(); push.mockReset();
-  get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes" ? { groups: [] } : items));
+  get.mockImplementation((p: string) => Promise.resolve(p === "/network/recovery" ? status : p === "/network/changes" ? { groups: [] }
+    : p === "/auth/whoami" ? { roles: ["site_admin"] } : p === "/pms-interfaces" ? { interfaces: [] } : items));
 });
 
 describe("recovery page", () => {
@@ -129,5 +130,39 @@ describe("recovery page", () => {
     expect(screen.getByText("Room sign-in paused here")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/network/recovery/review/r1/acknowledge", {}));
+  });
+});
+
+describe("the optional room sign-in step after a confirmed reset", () => {
+  const confirmed = (step: unknown) => ({ ...status, latest: { group_id: "g1", kind: "FULL_RESET", state: "CONFIRMED", at: "2026-10-25T14:59:06Z", room_sign_in_step: step } });
+  const serve = (st: unknown, roles = ["site_admin"]) => get.mockImplementation((p: string) => Promise.resolve(
+    p === "/network/recovery" ? st : p === "/network/changes" ? { groups: [] } : p === "/auth/whoami" ? { roles } : p === "/pms-interfaces" ? { interfaces: [] } : items));
+
+  it("offers it, separately from the reset, saying the reset changed no PMS routing", async () => {
+    serve(confirmed({ offered: true, network_id: "d1", network_name: "Client Wi-Fi", policy: "", state: "UNDECIDED", summary: "undecided" }));
+    render(<RecoveryPage />);
+    await screen.findByText("Room sign-in on the new network (optional)");
+    expect(screen.getByText(/The reset did not change any PMS routing/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Configure room sign-in…/ })).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("states the decision once one has been made and no longer offers it", async () => {
+    serve(confirmed({ offered: false, network_id: "d1", network_name: "Client Wi-Fi", policy: "SHARED_STRICT", state: "READY", summary: "Room sign-in checks all 2 selected PMS interfaces strictly." }));
+    render(<RecoveryPage />);
+    await screen.findByText(/Room sign-in checks all 2 selected PMS interfaces strictly/);
+    expect(screen.queryByRole("button", { name: /Configure room sign-in…/ })).toBeNull();
+  });
+
+  it("does not appear while the reset is only staged or applied, nor for a role that cannot route", async () => {
+    serve({ ...status, latest: { group_id: "g1", kind: "FULL_RESET", state: "APPLIED", at: "2026-10-25T14:58:53Z" } });
+    const { unmount } = render(<RecoveryPage />);
+    await screen.findByText(/Latest recovery/);
+    expect(screen.queryByText("Room sign-in on the new network (optional)")).toBeNull();
+    unmount();
+    serve(confirmed({ offered: true, network_id: "d1", network_name: "Client Wi-Fi", policy: "", state: "UNDECIDED", summary: "" }), ["front_office_operator"]);
+    render(<RecoveryPage />);
+    await screen.findByText("Room sign-in on the new network (optional)");
+    expect(screen.queryByRole("button", { name: /Configure room sign-in…/ })).toBeNull();
   });
 });

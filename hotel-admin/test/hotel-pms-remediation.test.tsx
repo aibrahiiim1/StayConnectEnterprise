@@ -110,14 +110,17 @@ describe("Stays (H-14, H-7)", () => {
 });
 
 describe("PMS routing (H-16)", () => {
-  it("saves a legacy every-active-PMS row as MAPPED", async () => {
+  // A route saved by an older version as "every active PMS" always resolved against the one PMS it was mapped to. It is shown as exactly that, and any change is an
+  // explicit, previewed choice of named interfaces: "every active PMS" is not something the screen can send.
+  it("shows a legacy every-active-PMS row as the one PMS it resolved against, and saves only an explicit choice", async () => {
     get.mockImplementation((path: string) => {
       if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
-      if (path.startsWith("/pms-routing")) {
+      if (path === "/pms-routing/readiness") return Promise.resolve({ generated_at: "x", overall: "READY", networks: [], interfaces: [], issues: [] });
+      if (path === "/pms-routing") {
         return Promise.resolve({
-          routes: [{ guest_network_id: "g1", guest_network_name: "Guest", pms_interface_id: "i1",
-            pms_interface_label: "Protel", is_default: true, routing_mode: "ALL_ACTIVE_INTERFACES" }],
-          unmapped_guest_networks: [],
+          routes: [], unmapped_guest_networks: [],
+          policies: [{ network_id: "g1", name: "Guest", enabled: true, archived: false, is_default: false, mode: "DEDICATED", fingerprint: "fp1",
+            interfaces: [{ pms_interface_id: "i1", label: "Protel", lifecycle_state: "ACTIVE", published: true }] }],
         });
       }
       if (path.startsWith("/pms-interfaces")) {
@@ -126,14 +129,21 @@ describe("PMS routing (H-16)", () => {
       }
       return Promise.resolve({});
     });
+    post.mockResolvedValue({
+      network: { network_id: "g1", name: "Guest", mode: "DEDICATED", fingerprint: "fp1", interfaces: [] },
+      proposed: { mode: "DEDICATED", interfaces: [] }, added: [], removed: [], blockers: [], warnings: [],
+      impact: { active_sessions: 0, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
+      guarantees: [],
+    });
     put.mockResolvedValue({});
     const { default: Page } = await import("@/app/(app)/pms-routing/page");
     render(<Page />);
     await userEvent.click(await screen.findByRole("button", { name: /^Change\b/ }));
-    expect(await screen.findByTestId("legacy-route-note")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Save mapping" }));
+    await userEvent.click(screen.getByRole("button", { name: /preview the change/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /confirm and apply/i }));
     await waitFor(() => expect(put).toHaveBeenCalledWith("/pms-routing/g1",
-      { pms_interface_id: "i1", routing_mode: "MAPPED" }));
+      { mode: "DEDICATED", pms_interface_ids: ["i1"], based_on: "fp1" }));
+    expect(JSON.stringify(put.mock.calls)).not.toContain("ALL_ACTIVE");
   });
 });
 

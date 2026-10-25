@@ -62,14 +62,19 @@ func (s *server) networkSigninFor(ctx context.Context, networkID string) (networ
 	var primary *string
 	err := s.db.QueryRow(ctx, `SELECT disabled_methods, primary_method, remember_days FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid AND tenant_id=$2::uuid`,
 		networkID, s.tenID).Scan(&off, &primary, &out.remember)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
 	for _, m := range off {
 		out.disabled[m] = true
+	}
+	// A network whose room sign-in is deliberately NONE does not offer the room method at all, however the site's setting reads.
+	var policy string
+	if perr := s.db.QueryRow(ctx, `SELECT mode FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, networkID).Scan(&policy); perr != nil && !errors.Is(perr, pgx.ErrNoRows) {
+		return out, perr
+	}
+	if policy == "NONE" {
+		out.disabled[keyPMS] = true
 	}
 	if primary != nil {
 		out.primary = *primary

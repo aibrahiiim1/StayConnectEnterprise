@@ -7,6 +7,8 @@ import { api, ApiError, Interface } from "@/lib/api";
 import { DialogForm } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Callout } from "@/components/ui/error-banner";
+import { ImpactPanel } from "@/components/network/impact-panel";
+import type { NetworkConsequence } from "@/lib/api/pms-routing";
 
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
@@ -16,6 +18,8 @@ export type ReplaceResult = {
   original_network_id: string;
   carries: { pools: number; reservations: number; pms_routes: number };
   packages?: string[] | null;
+  affected?: NetworkConsequence[];
+  external_requirements?: string[];
 };
 
 export function ReplaceTopologyDialog({
@@ -49,6 +53,8 @@ export function ReplaceTopologyDialog({
       .catch(() => setInterfaces([]));
   }, [open, interfaces]);
 
+  const [impact, setImpact] = useState<{ affected: NetworkConsequence[]; external_requirements?: string[] } | null>(null);
+
   const vlanNum = Number(vlan);
   const vlanOk = !tagged || (Number.isInteger(vlanNum) && vlanNum >= 1 && vlanNum <= 4094);
   const same = (tagged ? "vlan" : "untagged") === network.network_type && parent === network.parent_interface &&
@@ -59,6 +65,17 @@ export function ReplaceTopologyDialog({
     same ? "That is the current topology; nothing would change." :
     readdress && (!subnet || !gateway || !poolStart || !poolEnd) ? "A new subnet needs its gateway and DHCP pool." :
     reason.trim().length < 4 ? "Say why (at least 4 characters)." : null;
+
+  // The consequences are read for the topology as currently entered, before anything is recorded.
+  useEffect(() => {
+    if (!open) return;
+    const q = new URLSearchParams({ to_type: tagged ? "vlan" : "untagged", to_parent: parent });
+    if (tagged && Number.isInteger(vlanNum) && vlanNum >= 1) q.set("to_vlan", String(vlanNum));
+    let live = true;
+    api.get<{ affected: NetworkConsequence[]; external_requirements?: string[] }>(`/network/guest-networks/${network.id}/impact?${q}`)
+      .then((r) => live && setImpact(r)).catch(() => live && setImpact(null));
+    return () => { live = false; };
+  }, [open, network.id, tagged, parent, vlanNum]);
 
   async function submit() {
     if (problem) return;
@@ -101,6 +118,7 @@ export function ReplaceTopologyDialog({
           The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, sign-in page
           settings and PMS route; clients reconnect on it, and their internet package and data used carry on.
         </Callout>
+        <ImpactPanel affected={impact?.affected} external={impact?.external_requirements} />
         <Field label="Port" required>
           <Select aria-label="Port" value={parent} onChange={(e) => setParent(e.target.value)}>
             {(interfaces ?? [{ name: network.parent_interface } as Interface]).map((i) => (

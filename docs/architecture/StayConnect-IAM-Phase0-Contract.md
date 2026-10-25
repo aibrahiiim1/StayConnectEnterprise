@@ -1,5 +1,7 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
+> **Amended by [Amendment A2, D74](StayConnect-IAM-Phase0-Amendment-A2.md) (2026-10-26).** Room sign-in routing is an explicit policy of each client network: `NONE`, `DEDICATED` (one interface) or `SHARED_STRICT` (two or three, selected). `ALL_ACTIVE_INTERFACES` is removed; a named candidate that is out of service is UNAVAILABLE, not dropped. §8 item 1 carries the amended wording.
+>
 > **Amended by [Amendment A1, D46](StayConnect-IAM-Phase0-Amendment-A1.md) (2026-09-29).** FIAS guest posting targets the reservation: posting identity `(PMS interface, G#)`; the room is refreshed before sending; no folio model. The sections below carry the amended wording.
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
@@ -717,7 +719,7 @@ Auxiliary tables — all with tenant (and site where site-operational) columns a
 
 ## 8. Multi-PMS Automatic Resolution (STRICT, no guest selector)
 
-1. Candidate set = ACTIVE interfaces mapped to the client's guest network (`MAPPED`), or all ACTIVE interfaces only under explicit `ALL_ACTIVE_INTERFACES`; **an unmapped network fails closed** (+ config alert). Cap 3 default / 5 hard. Client-supplied interface hints are discarded and re-derived.
+1. Candidate set = the interfaces **explicitly selected** by the client network's routing policy ([Amendment A2, D74](StayConnect-IAM-Phase0-Amendment-A2.md)): `NONE` (no room sign-in), `DEDICATED` (exactly one) or `SHARED_STRICT` (two or three). **"Every active interface" does not exist** (`ALL_ACTIVE_INTERFACES` is removed). **A network with no policy, or whose policy disagrees with its mapping, fails closed** (+ config alert). Cap 3 (the default; 5 is the hard ceiling), enforced at save and at runtime. A selected interface that is out of service stays in the vector as UNAVAILABLE and is never dropped. Client-supplied interface hints are discarded and re-derived.
 2. Parallel fan-out to all candidates with connector-specific bounded timeouts, each evaluated under its pinned current revision (normalization, evidence rules, freshness). Decision on the **complete outcome vector** — `VERIFIED | AMBIGUOUS_LOCAL | NO_MATCH | UNAVAILABLE | STALE | UNSUPPORTED_EVIDENCE`; no first-match, no fastest-response. Cache older than the revision's `max_auth_cache_age` ⇒ STALE, never VERIFIED.
 3. **STRICT (the only mode):** authenticate iff exactly one candidate returns exactly one VERIFIED stay and every other candidate returns a determinate NO_MATCH. Any UNAVAILABLE/STALE/UNSUPPORTED_EVIDENCE ⇒ INDETERMINATE. `V≥2` or any AMBIGUOUS_LOCAL (sharers) ⇒ discriminator escalation. No fallback to another PMS, including the single-candidate case.
 4. All non-success outcomes return one **uniform, time-padded envelope** (fixed budget) with the same escalation prompt, computed from the intersection of candidate verifier fields (save-time validation guarantees a non-empty intersection). Layered throttles (room+IP, room+MAC, per-interface, global); `auth_resolutions` audit rows carry outcome codes only.

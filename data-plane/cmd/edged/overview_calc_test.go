@@ -356,7 +356,6 @@ func ids(items []attentionItem) []string {
 
 func TestAttentionIsEmptyWhenEverythingIsFine(t *testing.T) {
 	in := attentionInput{
-		PMS:      []attentionPMS{{Label: "Opera", Active: true, RoomAuthReady: true, Connected: true}},
 		Services: []attentionService{{Name: "scd", State: stHealthy, Critical: true}, {Name: "kea", State: stWaiting, Critical: true}},
 		KeaKnown: true, KeaConfigured: false, KeaHealthy: false,
 		Pools:        []attentionPool{{Network: "Guest", Pct: 85}},
@@ -370,9 +369,8 @@ func TestAttentionIsEmptyWhenEverythingIsFine(t *testing.T) {
 
 func TestAttentionRulesEachLinkToTheScreenThatFixesThem(t *testing.T) {
 	in := attentionInput{
-		PMS: []attentionPMS{
-			{Label: "Opera", Active: true, RoomAuthReady: false, Connected: false, Reason: "SYNC_INCOMPLETE"},
-			{Label: "Old", Active: false, RoomAuthReady: false},
+		RoomSignInIssues: []rsIssue{
+			{ID: "room-signin:n1", Severity: "err", Title: "Room sign-in is unavailable on Guest", Detail: "d", Href: "/pms-interfaces", Action: "Open PMS connections"},
 		},
 		PMSReviewCases: 3, PostingsReviewOpen: 1,
 		Services: []attentionService{
@@ -387,7 +385,7 @@ func TestAttentionRulesEachLinkToTheScreenThatFixesThem(t *testing.T) {
 	}
 	got := deriveAttention(in)
 	want := map[string]string{
-		"pms-not-ready:Opera":      "/pms-interfaces",
+		"room-signin:n1":           "/pms-interfaces",
 		"pms-review":               "/stay-events",
 		"postings-review":          "/financial-review",
 		"service:portald":          "/health",
