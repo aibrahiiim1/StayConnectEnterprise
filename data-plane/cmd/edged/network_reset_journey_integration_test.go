@@ -242,3 +242,111 @@ func TestIntegration_Reset_NeverForcesAGenuineConflictOrTheManagementPort(t *tes
 		t.Fatal("a refused reset changed something")
 	}
 }
+
+// Cancelling closes the change and removes the network the reset made as one step: whichever half fails, nothing is cancelled or removed, and a retry completes it.
+func TestIntegration_Reset_ACancelThatFailsHalfWayChangesNothingAndCanBeRetried(t *testing.T) {
+	for _, c := range []struct{ name, table, event, when string }{
+		{"removing the network fails", "public.guest_networks", "DELETE", ""},
+		{"closing the change fails", "iam_v2.guest_network_changes", "UPDATE", "WHEN (NEW.state = 'CANCELLED') "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAPI(t)
+			fn := startFakeNetd(t, f)
+			h := heavilyReconfigured(t, f, fn)
+			ctx := context.Background()
+			st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName})
+			if st != 201 {
+				t.Fatalf("stage = %d %v", st, b)
+			}
+			group := b["group_id"].(string)
+
+			if _, err := f.pool.Exec(ctx, `CREATE OR REPLACE FUNCTION public.test_injected_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure'; END $$`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.pool.Exec(ctx, `CREATE TRIGGER test_injected_failure BEFORE `+c.event+` ON `+c.table+` FOR EACH ROW `+c.when+`EXECUTE FUNCTION public.test_injected_failure()`); err != nil {
+				t.Fatalf("inject: %v", err)
+			}
+			t.Cleanup(func() {
+				_, _ = f.pool.Exec(ctx, `DROP TRIGGER IF EXISTS test_injected_failure ON `+c.table)
+				_, _ = f.pool.Exec(ctx, `DROP FUNCTION IF EXISTS public.test_injected_failure()`)
+			})
+
+			if st, _ := f.do(t, "DELETE", "/network/changes/"+group, nil); st != 500 {
+				t.Fatalf("a failed cancel = %d", st)
+			}
+			if f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND state='CANCELLED'`, group) != 0 ||
+				f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND state='PENDING'`, group) == 0 {
+				t.Fatal("a cancel that failed left the change cancelled")
+			}
+			if f.networkCount(t) != h.networkCount+1 {
+				t.Fatal("a cancel that failed removed the network the pending change still points at")
+			}
+
+			if _, err := f.pool.Exec(ctx, `DROP TRIGGER test_injected_failure ON `+c.table); err != nil {
+				t.Fatal(err)
+			}
+			if st, _ := f.do(t, "DELETE", "/network/changes/"+group, nil); st != 200 {
+				t.Fatalf("the retry = %d", st)
+			}
+			if f.networkCount(t) != h.networkCount || f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND state='PENDING'`, group) != 0 {
+				t.Fatal("the retry did not complete the cancel")
+			}
+			if st, _ := f.do(t, "DELETE", "/network/changes/"+group, nil); st != 404 {
+				t.Fatalf("cancelling twice = %d", st)
+			}
+		})
+	}
+}
+
+// Two cancels at once, or a cancel against an apply, end in one consistent state.
+func TestIntegration_Reset_CancelsAndAnApplyRaceToOneConsistentState(t *testing.T) {
+	for round := 0; round < 4; round++ {
+		f := newAPI(t)
+		fn := startFakeNetd(t, f)
+		h := heavilyReconfigured(t, f, fn)
+		st, b := f.do(t, "POST", "/network/recovery/stage", map[string]any{"op": "full_reset", "confirm_site_name": h.siteName})
+		if st != 201 {
+			t.Fatalf("stage = %d %v", st, b)
+		}
+		group := b["group_id"].(string)
+
+		codes := make(chan int, 3)
+		applyCode := make(chan int, 1)
+		start := make(chan struct{})
+		for i := 0; i < 2; i++ {
+			go func() {
+				<-start
+				c, _ := f.do(t, "DELETE", "/network/changes/"+group, nil)
+				codes <- c
+			}()
+		}
+		go func() {
+			<-start
+			c, _ := f.apply(t)
+			applyCode <- c
+		}()
+		close(start)
+		c1, c2, ac := <-codes, <-codes, <-applyCode
+
+		cancelled := f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND state='CANCELLED'`, group) > 0
+		applied := f.count(t, `SELECT count(*) FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND state='APPLIED'`, group) > 0
+		switch {
+		case cancelled && !applied:
+			if (c1 != 200) == (c2 != 200) {
+				t.Fatalf("round %d: two cancels returned %d and %d, want exactly one 200", round, c1, c2)
+			}
+			if f.networkCount(t) != h.networkCount || len(f.enabledNames(t)) != 3 {
+				t.Fatalf("round %d: cancelled, but the networks are %d and %v", round, f.networkCount(t), f.enabledNames(t))
+			}
+		case applied && !cancelled:
+			if c1 == 200 || c2 == 200 || ac != 200 {
+				t.Fatalf("round %d: applied, but cancels returned %d, %d and the apply %d", round, c1, c2, ac)
+			}
+			if len(f.enabledNames(t)) != 1 || f.networkCount(t) != h.networkCount+1 {
+				t.Fatalf("round %d: applied, but the networks are %v", round, f.enabledNames(t))
+			}
+		default:
+			t.Fatalf("round %d: cancelled=%v applied=%v (cancels %d %d, apply %d)", round, cancelled, applied, c1, c2, ac)
+		}
+	}
+}

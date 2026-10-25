@@ -330,35 +330,75 @@ func (s *server) loadStagedGroups(ctx context.Context) ([]stagedGroup, error) {
 // ordinary client networks the operator can delete; nothing live changes.
 func (s *server) cancelStagedGroup(w http.ResponseWriter, r *http.Request) {
 	group := chi.URLParam(r, "group_id")
+	if !uuidPattern.MatchString(group) {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "unknown change")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	var applied bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM iam_v2.guest_network_changes WHERE group_id=$1::uuid AND tenant_id=$2 AND site_id=$3 AND state='APPLIED')`,
-		group, s.tenantID, s.siteID).Scan(&applied); err != nil {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "unknown change")
+	// One transaction: the group's rows are locked first, so an apply that is materialising them either finished before this saw them (and the cancel is
+	// refused) or waits for this to commit (and finds nothing pending). The change is closed and the network the operation made is removed together or not at all.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT network_id::text, state, COALESCE(target->>'created','') = 'true' FROM iam_v2.guest_network_changes
+		 WHERE group_id=$1::uuid AND tenant_id=$2 AND site_id=$3 ORDER BY id FOR UPDATE`, group, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
+		return
+	}
+	var created []string
+	pending, applied := 0, false
+	for rows.Next() {
+		var network, state string
+		var madeHere bool
+		if err := rows.Scan(&network, &state, &madeHere); err != nil {
+			rows.Close()
+			jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
+			return
+		}
+		switch state {
+		case "APPLIED":
+			applied = true
+		case "PENDING":
+			pending++
+			if madeHere {
+				created = append(created, network)
+			}
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
 		return
 	}
 	if applied {
 		jsonErr(w, http.StatusConflict, "not_pending", "this change has been applied and is awaiting confirmation: confirm or roll it back instead")
 		return
 	}
-	// A network the operation itself created, never applied, goes away with it; everything else stays.
-	if _, err := s.db.Exec(ctx, `DELETE FROM guest_networks g USING iam_v2.guest_network_changes c
-		 WHERE c.network_id = g.id AND c.group_id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3 AND c.state='PENDING' AND c.target->>'created' = 'true' AND NOT g.enabled`,
-		group, s.tenantID, s.siteID); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
-		return
-	}
-	tag, err := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_changes SET state='CANCELLED', settled_at=now()
-		 WHERE group_id=$1::uuid AND tenant_id=$2 AND site_id=$3 AND state='PENDING'`, group, s.tenantID, s.siteID)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
-		return
-	}
-	if tag.RowsAffected() == 0 {
+	if pending == 0 {
 		jsonErr(w, http.StatusNotFound, "not_found", "no pending change with that id")
 		return
 	}
-	s.audit(r, "network.change.cancelled", "guest_network_change", group, map[string]any{"changes": tag.RowsAffected()})
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_changes SET state='CANCELLED', settled_at=now()
+		 WHERE group_id=$1::uuid AND tenant_id=$2 AND site_id=$3 AND state='PENDING'`, group, s.tenantID, s.siteID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed")
+		return
+	}
+	// A network the operation itself created, never applied, goes away with it; everything else stays.
+	if len(created) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM guest_networks WHERE id = ANY($1::uuid[]) AND tenant_id=$2 AND site_id=$3 AND NOT enabled`, created, s.tenantID, s.siteID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed; nothing was changed")
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed; nothing was changed")
+		return
+	}
+	s.audit(r, "network.change.cancelled", "guest_network_change", group, map[string]any{"changes": pending, "networks_removed": len(created)})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "cancelled"})
 }
