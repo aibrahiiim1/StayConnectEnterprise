@@ -46,7 +46,21 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// Before anything is installed or renewed, DHCP is asked whose address this is. A reassigned or released
 	// address fails closed and the Session is closed. UNKNOWN (Kea unreadable) is not a failure: tearing every
 	// guest down over an unreadable socket would manufacture an outage.
-	switch p.owner.Owns(ctx, ip, s.MAC) {
+	ev := p.owner.Evidence(ctx, ip, s.MAC)
+	switch {
+	case ev.State == addressOwned:
+		p.rememberLease(key, s.IP, s.MAC, ev.Until, ev.Epoch, now)
+	case ev.Missing:
+		// Kea has no record of this address. A lease verified earlier for this same address and device is still valid on the client's side until it
+		// lapses, so the address stays authorized for exactly that long: never longer than the lease and never past leaseMemoryCap.
+		if left := p.bridgedLeaseLeft(key, s.IP, s.MAC, ev, now); left > 0 {
+			if left < lease {
+				lease = left
+			}
+			ev.State = addressOwned
+		}
+	}
+	switch ev.State {
 	case addressOwned:
 		p.clearUnverified(bridge, s.SessionID)
 	case addressForeign:

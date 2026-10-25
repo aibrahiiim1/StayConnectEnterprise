@@ -1,0 +1,408 @@
+package main
+
+// Integrity of the apply / rollback pipeline: what keeps a rejected or half-finished change from reaching the wire, and what stops a
+// second change from being applied on top of a rollback that did not finish.
+//
+//   - opMu serialises every operation that changes what is in force (apply, rollback, boot reconcile). The periodic loops that render the
+//     in-force configuration (nft re-assertion, Kea captive sync, portal refresh) only run while they can take it, so they can never
+//     read an intent that an apply has published but not yet proven.
+//   - A rollback records every step that failed. If any did, the appliance is NOT reported as rolled back cleanly: the revision is
+//     marked, a durable marker is written, and Apply refuses until a boot reconcile has converged the appliance to its confirmed
+//     configuration.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+)
+
+var (
+	// errApplyBusy: another apply, rollback or boot reconcile is running in this process.
+	errApplyBusy = errors.New("another network change is being applied or rolled back; try again in a moment")
+	// errChangeInFlight: a revision is applying or awaiting confirmation.
+	errChangeInFlight = errors.New("a network change is still awaiting confirmation")
+	// errRollbackIncomplete: an earlier rollback did not restore everything.
+	errRollbackIncomplete = errors.New("an earlier rollback did not finish")
+	// errNotApplied: the network that is running is not the revision being confirmed.
+	errNotApplied = errors.New("the running network is not this revision")
+)
+
+// confirmWait is how long a confirm waits for an apply or rollback in progress before reporting busy.
+const confirmWait = 30 * time.Second
+
+// opWait is how long Apply waits for a periodic re-assertion tick (milliseconds long) before saying it is busy.
+const opWait = 3 * time.Second
+
+// revisionStore is the part of the database netd's applier uses; *store implements it, and a test supplies a fake.
+type revisionStore interface {
+	Event(ctx context.Context, revID, phase string, ok bool, detail map[string]any)
+	Health(ctx context.Context, revID, name string, ok bool, detail string)
+	LoadIntent(ctx context.Context) ([]netcfg.GuestNetwork, error)
+	CreateRevision(ctx context.Context, summary string, intent []netcfg.GuestNetwork, createdBy string) (string, int64, error)
+	SetRevisionValidation(ctx context.Context, id string, v netcfg.ValidationResult) error
+	SetRevisionState(ctx context.Context, id, state string) error
+	MarkApplying(ctx context.Context, id, bundlePath, appliedBy string, confirmDeadline any) error
+	MarkPending(ctx context.Context, id string, deadline any) error
+	MarkActive(ctx context.Context, id, confirmedBy string) error
+	MarkFailed(ctx context.Context, id, reason string) error
+	MarkRolledBack(ctx context.Context, id, reason string) error
+	RevisionState(ctx context.Context, id string) (string, error)
+	RevisionIntent(ctx context.Context, id string) ([]netcfg.GuestNetwork, error)
+	CurrentActiveIntent(ctx context.Context) (id, bundlePath string, intent []netcfg.GuestNetwork, err error)
+	ActiveBundlePath(ctx context.Context, exceptID string) (string, error)
+	ActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error)
+	InFlightRevision(ctx context.Context) (id, state string, err error)
+	ApplyingRevisions(ctx context.Context) ([]string, error)
+	IncompleteRollback(ctx context.Context) (string, error)
+	ResolveIncompleteRollbacks(ctx context.Context) error
+	RecordedBridges(ctx context.Context) (map[string]recordedBridge, error)
+	LoadPortalIP(ctx context.Context) (string, error)
+	LoadPortalTLS(ctx context.Context) (netcfg.PortalTLS, error)
+	KnownIfaceSet(ctx context.Context) (map[string]bool, error)
+	SyncInterfaces(ctx context.Context, ifaces []Interface, mgmt, wan string) error
+}
+
+var _ revisionStore = (*store)(nil)
+
+// acquireOp takes the operation lock, waiting up to wait. false means another operation holds it.
+func (a *applier) acquireOp(ctx context.Context, wait time.Duration) bool {
+	if a.opMu.TryLock() {
+		return true
+	}
+	if wait <= 0 {
+		return false
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			return false
+		case <-tick.C:
+			if a.opMu.TryLock() {
+				return true
+			}
+		}
+	}
+}
+
+func (a *applier) releaseOp() { a.opMu.Unlock() }
+
+// inFlight reports a revision that is applying or awaiting confirmation. An unreadable answer is an error: not knowing is
+// not permission to publish a new intent.
+func (a *applier) inFlight(ctx context.Context) (id, state string, err error) {
+	if a.inFlightFn != nil {
+		return a.inFlightFn(ctx)
+	}
+	return a.st.InFlightRevision(ctx)
+}
+
+// applyInflight remembers what was in force before the apply that is running (or awaiting confirmation) in this process, so any
+// path that abandons that apply puts the previous intent back in force rather than leaving the rejected one to be re-asserted.
+type applyInflight struct {
+	id     string
+	before portalInForce
+}
+
+func (a *applier) beginApplyInflight(id string, before portalInForce) {
+	a.inflightMu.Lock()
+	defer a.inflightMu.Unlock()
+	a.inflight = &applyInflight{id: id, before: before}
+}
+
+// takeApplyInflight returns the pre-apply state for id (and forgets it) when this process applied it.
+func (a *applier) takeApplyInflight(id string) (portalInForce, bool) {
+	a.inflightMu.Lock()
+	defer a.inflightMu.Unlock()
+	if a.inflight == nil || a.inflight.id != id {
+		return portalInForce{}, false
+	}
+	b := a.inflight.before
+	a.inflight = nil
+	return b, true
+}
+
+func (a *applier) clearApplyInflight() {
+	a.inflightMu.Lock()
+	defer a.inflightMu.Unlock()
+	a.inflight = nil
+}
+
+// ---- incomplete rollback marker ----------------------------------------------------------------------------------
+
+type incompleteMarker struct {
+	Revision string   `json:"revision"`
+	Steps    []string `json:"steps"`
+	At       string   `json:"at"`
+}
+
+func (a *applier) incompleteMarkerPath() string {
+	return filepath.Join(a.generatedDir, "rollback-incomplete.json")
+}
+
+// markRollbackIncomplete records, in memory and durably, that a rollback left the appliance off its confirmed configuration. The memory flag blocks
+// this process regardless; the returned error says the file could not be written, so a crash would forget it (the revision's recorded reason, which
+// names the incomplete rollback, is the second durable record: see loadIncompleteMarker).
+func (a *applier) markRollbackIncomplete(id string, steps []string) error {
+	m := incompleteMarker{Revision: id, Steps: steps, At: time.Now().UTC().Format(time.RFC3339)}
+	a.incMu.Lock()
+	a.incomplete = &m
+	a.incMu.Unlock()
+	if a.generatedDir == "" || a.dryRun {
+		return nil
+	}
+	raw, _ := json.MarshalIndent(m, "", "  ")
+	return writeFileAtomic(a.incompleteMarkerPath(), raw, 0o640)
+}
+
+// rollbackIncomplete returns the marker when a rollback did not finish.
+func (a *applier) rollbackIncomplete() (incompleteMarker, bool) {
+	a.incMu.Lock()
+	defer a.incMu.Unlock()
+	if a.incomplete == nil {
+		return incompleteMarker{}, false
+	}
+	return *a.incomplete, true
+}
+
+// loadIncompleteMarker restores the marker at start. An unreadable file counts as present. A missing file is not proof there was none: the marker
+// may never have been written, so the revision history is asked too, and a rollback recorded there as incomplete and not since resolved blocks applies.
+func (a *applier) loadIncompleteMarker(ctx context.Context) {
+	if a.generatedDir == "" {
+		return
+	}
+	raw, err := os.ReadFile(a.incompleteMarkerPath())
+	var m incompleteMarker
+	switch {
+	case err == nil:
+		if jerr := json.Unmarshal(raw, &m); jerr != nil {
+			m = incompleteMarker{Revision: "unknown", Steps: []string{"the marker file is unreadable: " + jerr.Error()}}
+		}
+	case errors.Is(err, os.ErrNotExist):
+		if a.st == nil {
+			return
+		}
+		id, qerr := a.st.IncompleteRollback(ctx)
+		if qerr != nil {
+			slog.Error("netd could not check the revision history for an unfinished rollback", "err", qerr)
+			return
+		}
+		if id == "" {
+			return
+		}
+		m = incompleteMarker{Revision: id, Steps: []string{"the revision history records its rollback as incomplete and the marker file is missing"}}
+	default:
+		m = incompleteMarker{Revision: "unknown", Steps: []string{"the marker file could not be read: " + err.Error()}}
+	}
+	a.incMu.Lock()
+	a.incomplete = &m
+	a.incMu.Unlock()
+}
+
+// clearRollbackIncomplete lifts the block, durably: the history record is resolved and the file removed before the memory flag is dropped, so a
+// failure at any step leaves the block in place instead of a marker that a crash could resurrect or lose.
+func (a *applier) clearRollbackIncomplete(ctx context.Context) error {
+	if a.st != nil {
+		if err := a.st.ResolveIncompleteRollbacks(ctx); err != nil {
+			return fmt.Errorf("resolve the recorded incomplete rollback: %w", err)
+		}
+	}
+	if a.generatedDir != "" {
+		if err := os.Remove(a.incompleteMarkerPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove the marker file: %w", err)
+		}
+	}
+	a.incMu.Lock()
+	a.incomplete = nil
+	a.incMu.Unlock()
+	return nil
+}
+
+func (m incompleteMarker) describe() string {
+	return fmt.Sprintf("the appliance is not known to be on its confirmed configuration since revision %s (%s)", m.Revision, strings.Join(m.Steps, "; "))
+}
+
+// ---- rollback report -----------------------------------------------------------------------------------------------
+
+// rollbackReport collects every rollback step that did not succeed, so the outcome is the real one.
+type rollbackReport struct {
+	a      *applier
+	ctx    context.Context
+	revID  string
+	failed []string
+}
+
+func (a *applier) newRollbackReport(ctx context.Context, revID string) *rollbackReport {
+	return &rollbackReport{a: a, ctx: ctx, revID: revID}
+}
+
+// fail records a failed step and the matching event. err may be nil when the failure is a condition rather than an error.
+func (r *rollbackReport) fail(kind, step string, err error, extra map[string]any) {
+	msg := step
+	if err != nil {
+		msg = step + ": " + err.Error()
+	}
+	r.failed = append(r.failed, msg)
+	detail := map[string]any{"step": step}
+	if err != nil {
+		detail["error"] = err.Error()
+	}
+	for k, v := range extra {
+		detail[k] = v
+	}
+	r.a.event(r.ctx, r.revID, kind, false, detail)
+}
+
+func (r *rollbackReport) incomplete() bool { return len(r.failed) > 0 }
+
+// persistMarker blocks further applies and saves the block; a save that fails is one more step the rollback did not complete.
+func (r *rollbackReport) persistMarker() {
+	if err := r.a.markRollbackIncomplete(r.revID, r.failed); err != nil {
+		r.fail("rollback_marker", "the incomplete-rollback marker could not be saved", err, nil)
+	}
+}
+
+// writeFileAtomic writes data to path so a reader (or a crash) sees the old file or the new one, never a partial one: a temp file in
+// the same directory, fsync, rename, fsync of the directory.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
+}
+
+// rollbackExclusive is rollback for a caller that does not already hold the operation lock (the confirmation watchdog). It waits for any
+// apply in progress: a revision that is pending confirmation cannot be the one being applied.
+func (a *applier) rollbackExclusive(ctx context.Context, id, reason string) []string {
+	a.opMu.Lock()
+	defer a.opMu.Unlock()
+	return a.rollback(ctx, id, reason)
+}
+
+// ReclaimInterruptedOnBoot rolls back every revision a previous run of netd left in 'applying'. At start no apply of this process can be running,
+// so such a row was interrupted; nothing else would ever move it, and it holds the unique in-flight slot against every later apply. The rollback
+// is the ordinary one: it returns to the previous confirmed revision, or to factory-clean when there is none.
+func (a *applier) ReclaimInterruptedOnBoot(ctx context.Context) {
+	if a.dryRun || a.st == nil {
+		return
+	}
+	ids, err := a.st.ApplyingRevisions(ctx)
+	if err != nil {
+		slog.Error("netd could not list interrupted changes; a change left 'applying' by the last run, if any, still holds the in-flight slot", "err", err)
+		return
+	}
+	for _, id := range ids {
+		slog.Warn("netd: rolling back a change that the last run left half-applied", "revision", id)
+		steps := a.rollbackExclusive(ctx, id, "interrupted: the network service stopped while this change was being applied")
+		a.event(ctx, id, "boot_reclaim", len(steps) == 0, map[string]any{"steps": steps})
+	}
+}
+
+// rollbackIncompleteStatus is the /v1/health view of the unfinished-rollback marker.
+func (a *applier) rollbackIncompleteStatus() map[string]any {
+	m, ok := a.rollbackIncomplete()
+	if !ok {
+		return map[string]any{"incomplete": false}
+	}
+	return map[string]any{"incomplete": true, "revision": m.Revision, "steps": m.Steps, "since": m.At}
+}
+
+func (a *applier) keaDiskStatus() map[string]any {
+	ok, detail := a.keaDiskState()
+	return map[string]any{"holds_confirmed_configuration": ok, "detail": detail}
+}
+
+// runningIs reports whether the intent in force is the intent of revision id.
+func (a *applier) runningIs(ctx context.Context, id string) error {
+	want, err := a.st.RevisionIntent(ctx, id)
+	if err != nil {
+		return fmt.Errorf("cannot read revision %s to check that it is what is running: %w", id, err)
+	}
+	have, _, known := a.inForce()
+	if !known || !sameIntent(want, have) {
+		return fmt.Errorf("%w: it was applied by a service run that has since restarted and the previous configuration was restored. "+
+			"Roll it back and apply again", errNotApplied)
+	}
+	return nil
+}
+
+// sameIntent compares two intents as stored: both are normalised through JSON, so an empty list and a missing one are the same.
+func sameIntent(x, y []netcfg.GuestNetwork) bool {
+	norm := func(in []netcfg.GuestNetwork) string {
+		raw, _ := json.Marshal(in)
+		var round []netcfg.GuestNetwork
+		_ = json.Unmarshal(raw, &round)
+		out, _ := json.Marshal(round)
+		return string(out)
+	}
+	return norm(x) == norm(y)
+}
+
+// blockedRecoveryLoop re-runs the reconcile while changes are refused, backing off while it keeps failing, so a transient fault (Kea slow to start, a database
+// that was down) clears itself without a restart and a persistent one does not restart the resolver every few seconds.
+func (a *applier) blockedRecoveryLoop(ctx context.Context, base, ceiling time.Duration) {
+	wait := base
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		if _, blocked := a.rollbackIncomplete(); !blocked {
+			wait = base
+			continue
+		}
+		a.ReclaimInterruptedOnBoot(ctx)
+		if a.ReconcileActiveOnBoot(ctx) {
+			wait = base
+		} else if wait *= 2; wait > ceiling {
+			wait = ceiling
+		}
+	}
+}

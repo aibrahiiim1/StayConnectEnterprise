@@ -14,7 +14,7 @@ import { Button, LinkButton } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { ErrorBanner } from "@/components/ui/error-banner";
+import { Callout, ErrorBanner } from "@/components/ui/error-banner";
 import { PageShell, PageHeader, StatCard, StatGrid } from "@/components/ui/page";
 import { SkeletonRows } from "@/components/ui/misc";
 import { RowActions } from "@/components/ui/row-actions";
@@ -27,6 +27,9 @@ import {
   ApplyResults, DhcpModeBadge, EnabledBadge, networkTypeLabel, useNetworkAccess,
 } from "@/components/network/shared";
 import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-step-up";
+import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
+import { FactoryNetworkCard, PortModeCard, StagedChangesList } from "@/components/network/lifecycle";
+import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
   if (!net.pools || net.pools.length === 0) return "—";
@@ -36,12 +39,15 @@ function poolSummary(net: GuestNetwork): string {
 export default function NetworkPage() {
   const [rows, setRows] = useState<GuestNetwork[] | null>(null);
   const [status, setStatus] = useState<Record<string, GuestNetworkStatus>>({});
+  const [overview, setOverview] = useState<Record<string, OverviewNetwork>>({});
+  const [blocked, setBlocked] = useState<string | null>(null);
   const [pending, setPending] = useState<NetRevision | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "validate" | "apply" | "confirm" | "rollback">(null);
   const [acting, setActing] = useState<string | null>(null);
   const [validation, setValidation] = useState<{ ok: boolean; issues?: ValidationIssue[] } | null>(null);
   const [health, setHealth] = useState<HealthCheck[] | null>(null);
+  const [stagedKey, setStagedKey] = useState(0);
   const toast = useToast();
   const router = useRouter();
 
@@ -61,6 +67,14 @@ export default function NetworkPage() {
       const map: Record<string, GuestNetworkStatus> = {};
       for (const e of entries) if (e) map[e[0]] = e[1];
       setStatus(map);
+      // What each network IS (confirmed, running, observed) rather than what was saved. Older appliances answer 404 and keep the saved-state badge.
+      try {
+        const o = await api.get<NetworkOverview>("/network/overview");
+        const byId: Record<string, OverviewNetwork> = {};
+        for (const n of o.networks ?? []) byId[n.id] = n;
+        setOverview(byId);
+        setBlocked(o.changes_blocked ? (o.blocked_detail ?? "Changes are being refused.") : null);
+      } catch { setOverview({}); setBlocked(null); }
     } catch (e) { setErr(errMsg(e)); }
   }
 
@@ -72,7 +86,7 @@ export default function NetworkPage() {
     } catch { /* revisions optional on the landing page */ }
   }
 
-  function reload() { loadNetworks(); loadRevisions(); }
+  function reload() { loadNetworks(); loadRevisions(); setStagedKey((k) => k + 1); }
 
   useEffect(() => {
     reload();
@@ -221,6 +235,7 @@ export default function NetworkPage() {
             <Button variant="secondary" disabled={busy !== null} onClick={onApply}>
               <Power /> {busy === "apply" ? "Applying…" : "Apply changes"}
             </Button>
+            <LinkButton variant="secondary" href="/network/recovery">Recovery</LinkButton>
             {newButton}
           </>
         )}
@@ -229,6 +244,12 @@ export default function NetworkPage() {
       {known && !writable && <ReadOnlyNotice>Your role can view client networks but not change them.</ReadOnlyNotice>}
 
       <ErrorBanner err={err} className="mb-0" />
+
+      {blocked && (
+        <Callout tone="warning" title="Changes are being refused">
+          {blocked} The appliance re-checks by itself; once it is back on its confirmed configuration this clears.
+        </Callout>
+      )}
 
       {pending && (
         <PendingChangeBanner
@@ -255,6 +276,9 @@ export default function NetworkPage() {
           <ApplyResults validation={validation} health={health} />
         </SectionCard>
       )}
+
+      <FactoryNetworkCard key={`f${stagedKey}`} writable={writable} onStaged={reload} />
+      <StagedChangesList writable={writable} reloadKey={stagedKey} onCancelled={reload} />
 
       {rows !== null && rows.length > 0 && (
         <StatGrid cols={3}>
@@ -337,8 +361,17 @@ export default function NetworkPage() {
                       </>
                     )}
                   </TD>
-                  <TD nowrap><EnabledBadge enabled={n.enabled} /></TD>
-                  <TD numeric muted>{status[n.id]?.active_clients ?? "—"}</TD>
+                  <TD nowrap>
+                    {overview[n.id] ? (
+                      <>
+                        <NetworkStatusBadge status={overview[n.id].status} reason={overview[n.id].reason} />
+                        <PendingChangeNote changes={overview[n.id].changes} />
+                      </>
+                    ) : (
+                      <EnabledBadge enabled={n.enabled} />
+                    )}
+                  </TD>
+                  <TD numeric muted>{overview[n.id]?.active_clients ?? status[n.id]?.active_clients ?? "—"}</TD>
                   <TD className="w-0">
                     <RowActions
                       subject={n.name}
@@ -401,6 +434,7 @@ export default function NetworkPage() {
         onConfirm={applyStagedRemoval}
       />
       {stepUp.dialog}
+      <PortModeCard writable={writable} reloadKey={stagedKey} onStaged={reload} />
     </PageShell>
   );
 }

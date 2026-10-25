@@ -23,6 +23,7 @@ type fakeKernel struct {
 	timeouts    map[string]int      // element key -> remaining seconds
 	cmds        []string
 	failNftF    bool
+	loaded      []string // the fingerprint of every ruleset loaded, in order
 
 	// Read-failure seams: ways nft can fail that do not mean "the object is absent".
 	failListTables   bool
@@ -67,6 +68,7 @@ func (k *fakeKernel) run(_ context.Context, name string, args ...string) error {
 
 // loadScript models `nft -f`: the render begins with `delete table`, so only what the script re-adds survives.
 func (k *fakeKernel) loadScript(script string) {
+	defer func() { k.loaded = append(k.loaded, k.fp) }()
 	if strings.Contains(script, "delete table inet stayconnect") {
 		k.sets = map[string][]string{}
 		k.timeouts = map[string]int{}
@@ -236,6 +238,8 @@ func newTestApplier(t *testing.T, k *fakeKernel) *applier {
 		outFn:        k.output,
 		// Stands in for /sys/class/net, whose read is fail-closed in production; cases that care override it.
 		liveBridgesFn: func() map[string]bool { return map[string]bool{} },
+		// The post-reconcile health checks read the machine; cases that care override this.
+		healthFn: func(context.Context, string, []netcfg.GuestNetwork) []healthResult { return nil },
 	}
 }
 

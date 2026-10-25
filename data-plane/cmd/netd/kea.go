@@ -8,13 +8,23 @@ import (
 	"io/fs"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
 // keaClient speaks the Kea control-socket protocol (unframed JSON over a unix stream socket): config-test to
-// validate, config-set to apply live, config-write to persist. No Kea restart and no CSV parsing.
+// validate and config-set to apply live. Persistence is netd's own atomic write of the confirmed configuration, not config-write.
+// No Kea restart and no CSV parsing.
 type keaClient struct {
 	socket string
+
+	// A short-lived view of Kea's age and subnets for EmptyAnswerTrusted: with an empty table every session asks the same question in one pass.
+	evMu      sync.Mutex
+	evAt      time.Time
+	evUptime  float64
+	evReload  float64
+	evSubnets []*net.IPNet
+	evErr     error
 }
 
 func newKeaClient(socket string) *keaClient { return &keaClient{socket: socket} }
@@ -90,10 +100,9 @@ func (k *keaClient) ConfigSet(dhcp4 map[string]any) error {
 	if code, text := resultOK(resp); code != 0 {
 		return fmt.Errorf("kea config-set failed: %s", text)
 	}
-	// Persist so a cold Kea start uses the same config.
-	if _, err := k.cmd("config-write", nil); err != nil {
-		return fmt.Errorf("kea config-write: %w", err)
-	}
+	// Deliberately NOT persisted here (no config-write): this is the LIVE configuration, which can be one that is still awaiting
+	// confirmation or is about to be rolled back. The file a cold Kea starts from is written by netd from the confirmed
+	// configuration only (kea_persist.go), atomically and with its failures reported.
 	return nil
 }
 
@@ -152,6 +161,109 @@ func (k *keaClient) LeaseFile() (string, error) {
 		return "", nil
 	}
 	return name, nil
+}
+
+// keaEvidenceSettle is how long Kea must have been running, and unreconfigured, before an empty lease table is believed. Long enough for clients
+// to renew into a restarted or re-pointed lease file (their renewal timers are a fraction of the lease time), short enough that a genuinely
+// idle network is recognised. Access never extends over it: an unverified address simply is not renewed (see addressOwner).
+const keaEvidenceSettle = 5 * time.Minute
+
+// AbsenceTrusted reports whether Kea having no lease for ip can be believed: it has run and stayed configured for keaEvidenceSettle, and
+// its running configuration has a subnet that contains ip (an address Kea does not serve has no lease whatever the table says).
+func (k *keaClient) AbsenceTrusted(ip net.IP) (bool, string) {
+	k.evMu.Lock()
+	defer k.evMu.Unlock()
+	if time.Since(k.evAt) > 3*time.Second {
+		k.evUptime, k.evReload, k.evSubnets, k.evErr = k.readStability()
+		k.evAt = time.Now()
+	}
+	if k.evErr != nil {
+		return false, k.evErr.Error()
+	}
+	settle := keaEvidenceSettle.Seconds()
+	if k.evUptime < settle {
+		return false, fmt.Sprintf("Kea started %.0f s ago (less than %.0f s)", k.evUptime, settle)
+	}
+	if k.evReload < settle {
+		return false, fmt.Sprintf("Kea was reconfigured %.0f s ago (less than %.0f s)", k.evReload, settle)
+	}
+	for _, n := range k.evSubnets {
+		if n.Contains(ip) {
+			return true, ""
+		}
+	}
+	return false, "Kea's running configuration has no subnet that contains " + ip.String()
+}
+
+// Counters returns Kea's server-wide DHCP packet counters. Per-subnet counters are deliberately not read.
+func (k *keaClient) Counters() (map[string]int, error) {
+	resp, err := k.cmd("statistic-get-all", nil)
+	if err != nil {
+		return nil, err
+	}
+	if code, text := resultOK(resp); code != 0 {
+		return nil, fmt.Errorf("statistic-get-all: %s", text)
+	}
+	args, _ := resp["arguments"].(map[string]any)
+	out := map[string]int{}
+	for _, name := range []string{"pkt4-received", "pkt4-discover-received", "pkt4-offer-sent", "pkt4-request-received", "pkt4-ack-sent", "pkt4-nak-sent"} {
+		series, _ := args[name].([]any)
+		if len(series) == 0 {
+			continue
+		}
+		point, _ := series[0].([]any)
+		if len(point) == 0 {
+			continue
+		}
+		if v, ok := point[0].(float64); ok {
+			out[name] = int(v)
+		}
+	}
+	return out, nil
+}
+
+// KeaEpoch is when the running Kea instance started, derived from its reported uptime.
+func (k *keaClient) KeaEpoch() (time.Time, bool) {
+	k.evMu.Lock()
+	defer k.evMu.Unlock()
+	if time.Since(k.evAt) > 3*time.Second {
+		k.evUptime, k.evReload, k.evSubnets, k.evErr = k.readStability()
+		k.evAt = time.Now()
+	}
+	if k.evErr != nil {
+		return time.Time{}, false
+	}
+	return k.evAt.Add(-time.Duration(k.evUptime * float64(time.Second))).Truncate(time.Second), true
+}
+
+// readStability asks Kea how long it has run and been configured, and which subnets it serves.
+func (k *keaClient) readStability() (uptime, reload float64, subnets []*net.IPNet, err error) {
+	resp, err := k.cmd("status-get", nil)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("Kea status could not be read: %w", err)
+	}
+	if code, text := resultOK(resp); code != 0 {
+		return 0, 0, nil, fmt.Errorf("Kea status-get failed: %s", text)
+	}
+	args, _ := resp["arguments"].(map[string]any)
+	uptime, okU := args["uptime"].(float64)
+	reload, okR := args["reload"].(float64)
+	if !okU || !okR {
+		return 0, 0, nil, errors.New("Kea did not report how long it has been running, so its stability cannot be judged")
+	}
+	dhcp4, err := k.RunningDhcp4()
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("Kea's running configuration could not be read: %w", err)
+	}
+	list, _ := dhcp4["subnet4"].([]any)
+	for _, s := range list {
+		m, _ := s.(map[string]any)
+		cidr, _ := m["subnet"].(string)
+		if _, n, perr := net.ParseCIDR(cidr); perr == nil {
+			subnets = append(subnets, n)
+		}
+	}
+	return uptime, reload, subnets, nil
 }
 
 // Leases returns all current DHCPv4 leases via the control socket (never parses the CSV).

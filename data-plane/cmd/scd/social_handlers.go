@@ -63,6 +63,10 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": reasonProviderNotEnabled})
 		return
 	}
+	if ip := net.ParseIP(req.IP); ip != nil && !s.networkOffersIP(r.Context(), ip, keySocial) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK"})
+		return
+	}
 
 	// OFFERED ONLY OVER HTTPS, ON A CALLBACK HOST THE HOTEL REGISTERED. The redirect URI is derived from the canonical hostname, not the Host header
 	// or the provider row, and stored on the attempt so the exchange uses the value the provider was sent.

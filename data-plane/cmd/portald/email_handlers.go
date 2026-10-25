@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -16,7 +17,7 @@ import (
 func (h *handler) branding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	d, ok := h.guestDesign(r.Context())
+	d, ok := h.guestDesign(r)
 	if !ok {
 		_, _ = w.Write([]byte(`{}`))
 		return
@@ -25,7 +26,7 @@ func (h *handler) branding(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) authMethods(w http.ResponseWriter, r *http.Request) {
-	req, _ := http.NewRequestWithContext(r.Context(), "GET", "http://unix/v1/tenant/auth-methods", nil)
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", "http://unix/v1/tenant/auth-methods?ip="+url.QueryEscape(clientIPString(r)), nil)
 	resp, err := h.scd.Do(req)
 	if err != nil {
 		slog.Error("scd auth-methods", "err", err)

@@ -153,8 +153,12 @@ func TestAnUnreadableStateAtTheDecisionPointDoesNotTearDownTheGuestNetwork(t *te
 	a.markRolledFn = func(context.Context, string, string) error { return nil }
 	a.eventFn = func(context.Context, string, string, bool, map[string]any) {}
 
-	if err := a.Rollback(context.Background(), "rev-unreadable", "operator@example.test"); err != nil {
-		t.Fatalf("the caller's guard should have admitted this: %v", err)
+	// The rollback did not run, which is NOT a rollback that succeeded: the operator is told, and further changes are refused until it is dealt with.
+	if err := a.Rollback(context.Background(), "rev-unreadable", "operator@example.test"); !errors.Is(err, errRollbackIncomplete) {
+		t.Fatalf("a rollback that could not even read the revision's state was reported as done: %v", err)
+	}
+	if _, blocked := a.rollbackIncomplete(); !blocked {
+		t.Fatal("no marker was left, so a further change would be applied on top of an unknown state")
 	}
 	if got := k.mutations(); len(got) != 0 {
 		t.Fatalf("an unreadable state destroyed %d kernel object(s): %v", len(got), got)

@@ -169,7 +169,7 @@ func (h *handler) landing(w http.ResponseWriter, r *http.Request, errMsg string)
 		}
 	}
 	// The published design is applied at first paint in the guest's language; the handler's message choice is untouched.
-	d, ok := h.guestDesign(r.Context())
+	d, ok := h.guestDesign(r)
 	if !ok || d == nil {
 		d = map[string]any{}
 	}

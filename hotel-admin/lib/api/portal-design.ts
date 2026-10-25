@@ -17,8 +17,13 @@ export type ValidateResp = {
   sanitized: { custom_css: string; custom_html: string };
 };
 
-export function validateDesign(design: Record<string, unknown>) {
-  return api.post<ValidateResp>("/portal-branding/validate", { design });
+/** The design endpoints of the site default, or of one portal profile. */
+export function brandingBase(profile?: string | null) {
+  return profile ? `/portal-branding/profiles/${encodeURIComponent(profile)}/branding` : "/portal-branding";
+}
+
+export function validateDesign(design: Record<string, unknown>, profile?: string | null) {
+  return api.post<ValidateResp>(`${brandingBase(profile)}/validate`, { design });
 }
 
 export type RevisionSummary = {
@@ -35,9 +40,9 @@ export type BrandingState<D> = {
   published?: boolean;
 };
 
-export function restoreRevision(version: number, password: string) {
+export function restoreRevision(version: number, password: string, profile?: string | null) {
   return api.post<{ version: number; restored_from: number }>(
-    `/portal-branding/rollback/${encodeURIComponent(String(version))}`, { password });
+    `${brandingBase(profile)}/rollback/${encodeURIComponent(String(version))}`, { password });
 }
 
 export type PortalTemplate = {

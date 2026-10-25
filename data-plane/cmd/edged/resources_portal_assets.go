@@ -15,14 +15,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"regexp"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/portaldesign"
 )
 
 const portalAssetDir = "/opt/stayconnect/portal-assets"
@@ -69,16 +66,11 @@ type portalAsset struct {
 
 func (s *server) listPortalAssets(w http.ResponseWriter, r *http.Request) {
 	out := []portalAsset{}
-	// What the published design and draft point at, so the UI can refuse to delete a file the portal is showing.
-	used := map[string]bool{}
-	if doc, err := s.loadBranding(r); err == nil {
-		for _, d := range []map[string]any{doc.Design, doc.Draft} {
-			for _, k := range portaldesign.ImageFields() {
-				if v, ok := d[k].(string); ok {
-					used[strings.TrimPrefix(v, "/assets/")] = true
-				}
-			}
-		}
+	// What any portal design (the site default or a profile) points at, so the UI can refuse to delete a file a portal is showing.
+	used, usedErr := s.assetsInUse(r)
+	if usedErr != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the images in use could not be read")
+		return
 	}
 	entries, err := os.ReadDir(portalAssetDir)
 	if err != nil {
@@ -196,17 +188,15 @@ func (s *server) deletePortalAsset(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such asset")
 		return
 	}
-	// Refuse to delete what the portal is showing: guests would see a broken image on the sign-in page.
-	if doc, err := s.loadBranding(r); err == nil {
-		for _, d := range []map[string]any{doc.Design, doc.Draft} {
-			for _, k := range portaldesign.ImageFields() {
-				if v, ok := d[k].(string); ok && strings.TrimPrefix(v, "/assets/") == name {
-					jsonErr(w, http.StatusConflict, "in_use",
-						"this image is used by the portal design. Change the design first, then delete it.")
-					return
-				}
-			}
-		}
+	// Refuse to delete what any portal design is showing: guests would see a broken image on the sign-in page. Unknown is refused too.
+	used, err := s.assetsInUse(r)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "the images in use could not be read, so nothing was deleted")
+		return
+	}
+	if used[name] {
+		jsonErr(w, http.StatusConflict, "in_use", "this image is used by a portal design. Change the design first, then delete it.")
+		return
 	}
 	if err := os.Remove(filepath.Join(portalAssetDir, name)); err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such asset")

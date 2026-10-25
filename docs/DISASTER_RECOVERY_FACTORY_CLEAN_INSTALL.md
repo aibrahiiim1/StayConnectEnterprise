@@ -433,7 +433,9 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
    `EDGED_SITE_ID` — a production build ignores them.
 9. **Confirm the licence** in Admin Console → **Appliance & licence** (it arrives by itself after activation; an
    offline site uploads the activation package or licence file there).
-10. **Configure the site** through Admin Console: networks, packages, access policy, PMS interfaces.
+10. **Configure the site** through Admin Console: activate the prepared Access network (or create your own), packages, access policy, PMS interfaces.
+    The recovery operations in Client networks → Recovery return a *running* appliance to a known network state without a reinstall; they do not replace
+    this procedure ([CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §5).
 11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on
     a production build it cannot be configured off, and an attempt to do so is a startup refusal (§4G).
     first operation; legacy guest-auth is never configured on.

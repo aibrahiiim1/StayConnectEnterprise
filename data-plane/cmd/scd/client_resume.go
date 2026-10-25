@@ -70,6 +70,13 @@ func (s *server) rememberDeviceDays(ctx context.Context) int {
 	if err != nil || cfg == nil {
 		return 0 // unreadable settings: do not remember (fail closed), do not break the sign-in
 	}
+	if nid := networkFrom(ctx); nid != "" {
+		ov, oerr := s.networkSigninFor(ctx, nid)
+		if oerr != nil {
+			return 0
+		}
+		ov.apply(cfg)
+	}
 	return cfg.RememberDeviceDays()
 }
 

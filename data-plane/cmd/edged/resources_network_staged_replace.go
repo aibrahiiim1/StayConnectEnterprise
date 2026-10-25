@@ -567,6 +567,11 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 const staleReplacementGrace = 10 * time.Minute
 
 func (s *server) reconcileStaleReplacements(ctx context.Context, r *http.Request) error {
+	if s.tenantID != "" && s.siteID != "" {
+		if err := s.reconcileStaleChanges(ctx); err != nil {
+			return err
+		}
+	}
 	rows, err := s.db.Query(ctx, `SELECT g.id::text, COALESCE(v.state,''),
 		       g.revision_id IS NULL AS unrecorded,
 		       g.applied_at < now() - $3::interval AS past_grace

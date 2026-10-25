@@ -42,6 +42,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "flows-end" {
 		os.Exit(runFlowsEndCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "recover" {
+		os.Exit(runRecoverCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	// Exponential crash-loop backoff (internal/startupbackoff).
@@ -66,9 +69,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	dbUp := true
 	if err := pool.Ping(rootCtx); err != nil {
-		slog.Error("site db unreachable", "err", err)
-		os.Exit(1)
+		// The network must come back from its last-confirmed snapshot without the database (last_confirmed.go), so this is not a reason to exit.
+		dbUp = false
+		slog.Error("site db unreachable; starting from the last-confirmed snapshot, changes stay refused until the database answers", "err", err)
 	}
 
 	st := &store{db: pool}
@@ -108,7 +113,12 @@ func main() {
 
 	// Boot reconciliation re-asserts the active revision onto the live OS: nftables loads only its static
 	// config at boot, so otherwise the auth set and any bridge netplan did not recreate would drift from the DB.
+	// A previous run that stopped mid-apply left its revision in 'applying', which holds the single in-flight slot against every later change and which
+	// nothing else would ever move. It is rolled back first, then the confirmed configuration is re-asserted over whatever that left.
+	ap.loadIncompleteMarker(rootCtx)
+	ap.ReclaimInterruptedOnBoot(rootCtx)
 	ap.ReconcileActiveOnBoot(rootCtx)
+	go ap.blockedRecoveryLoop(rootCtx, 20*time.Second, 10*time.Minute)
 
 	// Portal runtime state (interface, DHCP option 114, resolver fragment follow scd's HTTPS verdict, which
 	// changes with no revision). Never touches nftables or netplan. See portal.go.
@@ -145,8 +155,13 @@ func main() {
 	if p3mode.Active {
 		// Allocating generations and registering class origins is only meaningful if the writer-guard boundary is installed.
 		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
-			slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
-			os.Exit(1)
+			if dbUp {
+				slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
+				os.Exit(1)
+			}
+			// Dark until the scope watch can verify the boundary against a database that answers.
+			slog.Error("netd: the writer boundary cannot be verified without the database; Phase-3 shaping stays dark", "err", err)
+			p3mode.Active = false
 		}
 	}
 	p3shaping := &phase3Shaping{
@@ -266,9 +281,11 @@ func (s *server) routes() http.Handler {
 	r.Get("/v1/interfaces", admin(s.interfaces))
 	r.Post("/v1/validate", admin(s.validate))
 	r.Post("/v1/apply", admin(s.apply))
+	r.Post("/v1/reassert-confirmed", admin(s.reassertConfirmed))
 	r.Post("/v1/confirm", admin(s.confirm))
 	r.Post("/v1/rollback", admin(s.rollback))
 	r.Get("/v1/leases", admin(s.leases))
+	r.Get("/v1/diagnostics", admin(s.diagnostics))
 	r.Get("/v1/pending", admin(s.pending))
 	r.Post("/v1/portal-ip/validate", admin(s.portalIPValidate))
 	// The only Phase-3 tc mutation entry point (ADR-0002), authenticated in the handler against the producer uid.
@@ -320,6 +337,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		"kea_healthy":    healthy,
 		"kea_detail":     detail,
 		"phase3_shaping": s.phase3.statusWithEvidence(ev, true),
+		// Whether an earlier rollback left the appliance off its confirmed configuration (further changes are refused), and whether the
+		// file Kea starts from holds the confirmed configuration.
+		"rollback_incomplete": s.ap.rollbackIncompleteStatus(),
+		"kea_disk":            s.ap.keaDiskStatus(),
 	})
 }
 
@@ -394,7 +415,12 @@ func (s *server) apply(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	res, err := s.ap.Apply(changeCtx(r), req.Summary, actor)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		// A refusal that changed nothing (another change is running or awaiting confirmation, or an earlier rollback did not finish) is a 409.
+		code := 500
+		if errors.Is(err, errApplyBusy) || errors.Is(err, errChangeInFlight) || errors.Is(err, errRollbackIncomplete) {
+			code = 409
+		}
+		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
 	code := 200
@@ -415,7 +441,7 @@ func (s *server) confirm(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	if err := s.ap.Confirm(changeCtx(r), req.RevisionID, actor); err != nil {
 		code := 500
-		if errors.Is(err, errNotPending) {
+		if errors.Is(err, errNotPending) || errors.Is(err, errNotApplied) || errors.Is(err, errApplyBusy) {
 			code = 409
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
@@ -430,7 +456,7 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 	actor, _, _ := s.callers.actorFor(r.Context(), req.Actor, "", "")
 	if err := s.ap.Rollback(changeCtx(r), req.RevisionID, actor); err != nil {
 		// A deliberate refusal (for example the confirmed active revision, which would tear down every guest network) is a 409, not a 500.
-		if errors.Is(err, errRollbackRefused) {
+		if errors.Is(err, errRollbackRefused) || errors.Is(err, errApplyBusy) {
 			writeJSON(w, 409, map[string]string{"error": err.Error()})
 			return
 		}
@@ -438,6 +464,20 @@ func (s *server) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"state": "rolled_back"})
+}
+
+// diagnostics serves GET /v1/diagnostics[?sample_ms=N]: read-only observations of the confirmed client networks.
+func (s *server) diagnostics(w http.ResponseWriter, r *http.Request) {
+	sample := time.Duration(0)
+	if v := r.URL.Query().Get("sample_ms"); v != "" {
+		ms, err := strconv.Atoi(v)
+		if err != nil || ms < 0 || ms > 5000 {
+			writeJSON(w, 400, map[string]string{"error": "sample_ms must be between 0 and 5000"})
+			return
+		}
+		sample = time.Duration(ms) * time.Millisecond
+	}
+	writeJSON(w, 200, s.ap.diagnose(r.Context(), sample))
 }
 
 func (s *server) leases(w http.ResponseWriter, r *http.Request) {
@@ -469,7 +509,7 @@ func (s *server) watchdogLoop(ctx context.Context) {
 			id, _, overdue, err := s.st.PendingRevision(ctx)
 			if err == nil && id != "" && overdue {
 				slog.Warn("watchdog: rolling back unconfirmed revision", "revision", id)
-				s.ap.rollback(ctx, id, "confirmation window elapsed")
+				s.ap.rollbackExclusive(ctx, id, "confirmation window elapsed")
 			}
 		}
 	}

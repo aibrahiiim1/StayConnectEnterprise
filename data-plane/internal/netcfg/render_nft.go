@@ -138,7 +138,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// the broadcast destination: a client with no address sends DISCOVER/REQUEST to 255.255.255.255, so a gateway-only
 	// rule would break address assignment.
 	for _, n := range enabled {
-		br := n.BridgeName
+		br := SafeIface(n.BridgeName)
 		fmt.Fprintf(&b, "\t\tiifname \"%s\" meta nfproto ipv6 counter name \"guest_ipv6_dropped\" drop comment \"no IPv6 guest services\"\n", br)
 		// Fail safe on a missing gateway: an empty GatewayIP would render `ip daddr  udp dport ...`, a syntax error that,
 		// because the ruleset is one atomic `nft -f`, breaks the whole table. A network without a gateway gets no accepts.
@@ -190,7 +190,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	// access point exchange frames without the appliance seeing them, so the access point's own isolation is needed too.
 	for _, n := range enabled {
 		if n.ClientIsolation {
-			fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"client isolation\"\n", n.BridgeName, n.BridgeName)
+			fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"client isolation\"\n", SafeIface(n.BridgeName), SafeIface(n.BridgeName))
 		}
 	}
 	b.WriteString("\t\tct state established,related accept\n\t\tct state invalid drop\n")
@@ -200,7 +200,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	for _, n := range enabled {
 		if s := customDNSServers(n); s != "" {
 			fmt.Fprintf(&b, "\t\tiifname \"%s\" ip daddr { %s } meta l4proto { tcp, udp } th dport 53 accept comment \"custom DNS (pre-auth)\"\n",
-				n.BridgeName, s)
+				SafeIface(n.BridgeName), s)
 		}
 	}
 	for _, cidr := range topo.MgmtCIDRs {
@@ -210,7 +210,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	for _, n := range enabled {
 		if !n.InternetEnabled {
 			fmt.Fprintf(&b, "\t\tiifname \"%s\" oifname \"%s\" drop comment \"internet disabled for %s\"\n",
-				n.BridgeName, topo.WANInterface, n.Name)
+				SafeIface(n.BridgeName), topo.WANInterface, SafeText(n.Name))
 		}
 	}
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
@@ -251,7 +251,7 @@ func renderNftBody(nets []GuestNetwork, topo Topology) string {
 		if !n.CaptiveEnabled {
 			continue
 		}
-		br := n.BridgeName
+		br := SafeIface(n.BridgeName)
 		gw := n.GatewayIP
 		// A guest authorized in either set must not be captive-redirected; omitting the Phase-3 exclusion would DNAT an
 		// authorized guest's web traffic to the login page.
@@ -310,7 +310,7 @@ func customDNSServers(n GuestNetwork) string {
 func joinBridges(nets []GuestNetwork) string {
 	var parts []string
 	for _, n := range nets {
-		parts = append(parts, fmt.Sprintf("%q", n.BridgeName))
+		parts = append(parts, fmt.Sprintf("%q", SafeIface(n.BridgeName)))
 	}
 	return strings.Join(parts, ", ")
 }

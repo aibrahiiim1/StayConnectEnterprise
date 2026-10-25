@@ -107,6 +107,10 @@ func (s *server) authorizeOpen(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "NO_GUEST_NETWORK", "authority": "iam_v2"})
 		return
 	}
+	if !s.networkOffers(r.Context(), nc.NetworkID, keyOpen) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK", "authority": "iam_v2"})
+		return
+	}
 	if strings.TrimSpace(req.RecoveryCode) != "" && !s.openLimiter.allow(mac.String()) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS", "authority": "iam_v2"})
 		return

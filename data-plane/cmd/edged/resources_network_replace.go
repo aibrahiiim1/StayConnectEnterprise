@@ -230,6 +230,13 @@ func (s *server) createGuestNetworkBatch(w http.ResponseWriter, r *http.Request)
 	for i := range body.Networks {
 		normalizeGuestNetworkInput(&body.Networks[i])
 		n := body.Networks[i]
+		if n.Name == "" {
+			jsonErr(w, http.StatusBadRequest, "invalid_name", fmt.Sprintf("network %d: network name is required", i+1))
+			return
+		}
+		if writeNetworkTextRefusal(w, n.Name, n.DomainName) {
+			return
+		}
 		if n.NetworkType == "vlan" && n.VLANID != nil {
 			key := fmt.Sprintf("%s/%d", n.ParentInterface, *n.VLANID)
 			if j, dup := seenVLAN[key]; dup {

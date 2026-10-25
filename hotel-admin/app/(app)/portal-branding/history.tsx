@@ -24,11 +24,12 @@ function describe(note?: string) {
   return note || "";
 }
 
-export function HistorySection({ revisions, writable, dirty, onRestored }: {
+export function HistorySection({ revisions, writable, dirty, onRestored, profile }: {
   revisions: RevisionSummary[];
   writable: boolean;
   dirty: boolean;
   onRestored: () => Promise<void> | void;
+  profile?: string | null;
 }) {
   const toast = useToast();
   const [open, setOpen] = useState<RevisionSummary | null>(null);
@@ -41,7 +42,7 @@ export function HistorySection({ revisions, writable, dirty, onRestored }: {
     if (!target) return;
     setBusy(true); setErr(null);
     try {
-      await restoreRevision(target.version, password);
+      await restoreRevision(target.version, password, profile);
       toast.success(`Save #${target.version} restored`, "Clients see it now. It was added to the history as a new save.");
       setTarget(null);
       await onRestored();

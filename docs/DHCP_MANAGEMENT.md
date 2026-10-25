@@ -15,11 +15,12 @@ enabled **local** client networks and drives Kea online:
 |---|---|---|
 | Validate | `config-test` | check the rendered config, no apply |
 | Apply | `config-set` | swap the running config atomically (no restart) |
-| Persist | `config-write` | write to `/etc/kea/kea-dhcp4.conf` for cold start |
+| Persist | *(netd's own atomic write, not Kea's `config-write`)* | `/etc/kea/kea-dhcp4.conf` holds the **confirmed** configuration only, written at a confirm, at boot reconcile and after a rollback to the previous revision; a failed write is reported by `/v1/health` (`kea_disk`) and retried |
 | Leases | `lease4-get-all` | read live leases for the leases page |
 | Status | `status-get` | liveness for the `kea_running` health check |
 
-Kea is **never restarted** to change DHCP, and leases are **never** read by
+Kea is **not restarted** to change DHCP (the one exception: when it accepts a configuration but does not bind a gateway, netd restarts it once, waits for
+its control socket and pushes the configuration again, because a restart loads the confirmed file, not the live one). Leases are **never** read by
 parsing the memfile CSV — the socket is the structured interface. `RenderKeaFile`
 produces the same `{ "Dhcp4": {…} }` document for the on-disk file so a cold
 start matches what was `config-set`.
@@ -144,3 +145,6 @@ Validation is a hard gate before apply — see
 runs DHCP; StayConnect is still gateway + captive portal, see
 [EXTERNAL_DHCP_MODE.md](EXTERNAL_DHCP_MODE.md). `relay` is supported in the schema
 (`relay_targets`) but minimal in this release. `disabled` serves no DHCP.
+
+The prepared Access network uses the pool `10.20.0.10` – `10.20.15.254` on `10.20.0.0/20` ([CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §1); its address is never
+forced onto a conflicting network.

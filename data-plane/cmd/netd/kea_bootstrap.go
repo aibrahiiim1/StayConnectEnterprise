@@ -109,39 +109,57 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, dhcp4
 	return fmt.Errorf("kea bootstrap: started kea-dhcp4-server but no control socket appeared at %s within 20s", a.keaSocket)
 }
 
-// restoreKeaBootstrap undoes bootstrapKeaIfStopped, only if it ran. Confirming a revision discards the snapshot.
-func (a *applier) restoreKeaBootstrap(ctx context.Context) {
+// waitKeaSocket waits for Kea's control socket to answer.
+func (a *applier) waitKeaSocket(ctx context.Context, d time.Duration) error {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if a.keaSocketPresent() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("no control socket at %s within %s", a.keaSocket, d)
+}
+
+// restoreKeaBootstrap undoes bootstrapKeaIfStopped, only if it ran. Confirming a revision discards the snapshot. Every step that fails is returned
+// (and logged); the snapshot is kept then, so the undo can be retried instead of being forgotten.
+func (a *applier) restoreKeaBootstrap(ctx context.Context) error {
 	snap, ok := a.readKeaSnapshot()
 	if !ok || a.dryRun {
-		return
+		return nil
 	}
 	slog.Warn("kea bootstrap: rolling back the state this appliance was in before its first guest network",
 		"was_enabled", snap.WasEnabled, "was_active", snap.WasActive, "had_config", snap.HadConfig)
+	var errs []error
+	step := func(what string, err error) {
+		if err != nil {
+			slog.Error("kea rollback: "+what, "err", err)
+			errs = append(errs, fmt.Errorf("%s: %w", what, err))
+		}
+	}
 
 	if snap.HadConfig {
-		if err := os.WriteFile(a.keaConfPath(), snap.PrevConfig, 0o644); err != nil {
-			slog.Error("kea rollback: restore previous config", "err", err)
-		}
-	} else {
-		if err := os.Remove(a.keaConfPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			slog.Error("kea rollback: remove bootstrap config", "err", err)
-		}
+		step("restore previous config", os.WriteFile(a.keaConfPath(), snap.PrevConfig, 0o644))
+	} else if err := os.Remove(a.keaConfPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		step("remove bootstrap config", err)
 	}
 	if !snap.WasActive {
-		if err := a.run(ctx, "systemctl", "stop", "kea-dhcp4-server"); err != nil {
-			slog.Error("kea rollback: stop", "err", err)
-		}
+		step("stop", a.run(ctx, "systemctl", "stop", "kea-dhcp4-server"))
 	} else {
-		if err := a.run(ctx, "systemctl", "restart", "kea-dhcp4-server"); err != nil {
-			slog.Error("kea rollback: restart onto the restored config", "err", err)
-		}
+		step("restart onto the restored config", a.run(ctx, "systemctl", "restart", "kea-dhcp4-server"))
 	}
 	if !snap.WasEnabled {
-		if err := a.run(ctx, "systemctl", "disable", "kea-dhcp4-server"); err != nil {
-			slog.Error("kea rollback: disable", "err", err)
-		}
+		step("disable", a.run(ctx, "systemctl", "disable", "kea-dhcp4-server"))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	a.clearKeaSnapshot()
+	return nil
 }
 
 func (a *applier) writeKeaSnapshot(s keaBootstrapState) error {
@@ -235,6 +253,9 @@ func ifaceIsRunning(name string) bool {
 // networks legitimately have none). Empty is the only acceptable post-apply state.
 func (a *applier) gatewaysNotListening(managed []netcfg.GuestNetwork) []string {
 	proc := readProcNetUDP()
+	if a.procNetUDPFn != nil {
+		proc = a.procNetUDPFn()
+	}
 	var missing []string
 	for _, n := range managed {
 		if !n.Enabled || n.DHCPMode != netcfg.DHCPLocal || n.GatewayIP == "" {

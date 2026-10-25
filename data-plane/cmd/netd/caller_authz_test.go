@@ -61,6 +61,7 @@ var netdRoutes = []struct {
 	{http.MethodGet, "/v1/interfaces", classAdmin},
 	{http.MethodPost, "/v1/validate", classAdmin},
 	{http.MethodPost, "/v1/apply", classAdmin},
+	{http.MethodPost, "/v1/reassert-confirmed", classAdmin},
 	{http.MethodPost, "/v1/confirm", classAdmin},
 	{http.MethodPost, "/v1/rollback", classAdmin},
 	{http.MethodGet, "/v1/leases", classAdmin},

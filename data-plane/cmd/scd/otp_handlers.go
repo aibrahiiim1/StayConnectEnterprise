@@ -9,9 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
@@ -36,6 +39,18 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	s.applyProviderReadiness(r.Context(), cfg)
 	// A social provider is listed only while it can be started: HTTPS active and the canonical hostname registered in the hotel's app. Under the HTTP fallback the buttons go.
 	s.applySocialOffering(cfg)
+	// A client on a network that narrows the site's sign-in sees only what that network offers.
+	if ip := net.ParseIP(r.URL.Query().Get("ip")); ip != nil {
+		if nc := s.resolveNetwork(r.Context(), ip); nc.NetworkID != "" {
+			ov, oerr := s.networkSigninFor(r.Context(), nc.NetworkID)
+			if oerr != nil {
+				slog.Error("auth-methods: network sign-in settings unreadable", "err", oerr)
+				httpErr(w, http.StatusInternalServerError, "network sign-in settings unavailable")
+				return
+			}
+			ov.apply(cfg)
+		}
+	}
 
 	// Can this site give a guest anything at all? A site can authenticate guests while having no package to give, and the portal
 	// would tell them to check their details. This is a site-level fact, computed independent of any identity, so it is safe to
@@ -119,8 +134,16 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		if !s.licenseGate(w, licstate.FeatSMSOTP) {
 			return
 		}
+		if ip := net.ParseIP(req.IP); ip != nil && !s.networkOffersIP(r.Context(), ip, keySMS) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK"})
+			return
+		}
 	case "whatsapp":
 		if !s.licenseGate(w, licstate.FeatWhatsAppOTP) {
+			return
+		}
+		if ip := net.ParseIP(req.IP); ip != nil && !s.networkOffersIP(r.Context(), ip, keyWhatsApp) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "METHOD_NOT_OFFERED_ON_NETWORK"})
 			return
 		}
 	}
@@ -361,6 +384,12 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	// The challenge is verified here; identity is IAM-v2's. public.auth_otps is a transient challenge store outside the identity
 	// model: only the verified factor crosses into iam_v2 (authOTPIdentity). Duration, data cap and shaping come from the
 	// package the guest selects after authentication, not from the credential.
+	// The channel the code came by is the method that must be offered on this network.
+	if v.Channel == "sms" {
+		r = withMethodKey(r, keySMS)
+	} else if v.Channel == "whatsapp" {
+		r = withMethodKey(r, keyWhatsApp)
+	}
 	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
 		FactorType:    otpFactorType(v.Channel),
 		FactorValue:   v.Destination,
@@ -380,8 +409,9 @@ func otpFactorType(channel string) string {
 	return ""
 }
 
-// tenantBranding serves the hotel's published portal design to the captive portal: the published design only, never the draft
-// or revision history. Failure is an empty object, not an error, because a guest must never be unable to sign in over branding.
+// tenantBranding serves the portal design to the captive portal: the published design only, never the draft or revision history. Which design is decided
+// by the network the client is on (the portal passes the connection's source address; a client cannot name its own network), falling back to the site's default design.
+// Failure is an empty object, not an error, because a guest must never be unable to sign in over branding.
 func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -390,9 +420,8 @@ func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 		empty()
 		return
 	}
-	var raw []byte
-	if err := s.db.QueryRow(r.Context(),
-		`SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenID).Scan(&raw); err != nil {
+	raw, err := s.portalDesignDoc(r)
+	if err != nil {
 		slog.Warn("portal branding unavailable; serving defaults", "err", err)
 		empty()
 		return
@@ -418,4 +447,34 @@ func (s *server) tenantBranding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(b)
+}
+
+var profileUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// portalDesignDoc returns the stored design document for the profile that applies: the one named for a preview (only the local portal can ask for it), else the
+// profile assigned to the network that owns the client's address, else the site default.
+func (s *server) portalDesignDoc(r *http.Request) ([]byte, error) {
+	var raw []byte
+	if id := r.URL.Query().Get("profile"); id != "" {
+		if !profileUUID.MatchString(id) {
+			return nil, errors.New("not a profile id")
+		}
+		err := s.db.QueryRow(r.Context(), `SELECT doc FROM iam_v2.portal_profiles WHERE id=$1::uuid AND tenant_id=$2::uuid`, id, s.tenID).Scan(&raw)
+		return raw, err
+	}
+	if ip := net.ParseIP(r.URL.Query().Get("ip")); ip != nil {
+		if nc := s.resolveNetwork(r.Context(), ip); nc.NetworkID != "" {
+			err := s.db.QueryRow(r.Context(), `
+				SELECT p.doc FROM iam_v2.portal_profile_assignments a JOIN iam_v2.portal_profiles p ON p.id = a.profile_id
+				 WHERE a.network_id = $1::uuid AND p.tenant_id = $2::uuid`, nc.NetworkID, s.tenID).Scan(&raw)
+			if err == nil {
+				return raw, nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+		}
+	}
+	err := s.db.QueryRow(r.Context(), `SELECT COALESCE(branding, '{}'::jsonb) FROM tenants WHERE id = $1`, s.tenID).Scan(&raw)
+	return raw, err
 }

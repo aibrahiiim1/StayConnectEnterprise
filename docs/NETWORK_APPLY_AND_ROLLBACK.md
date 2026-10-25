@@ -44,7 +44,7 @@ identity). It contains the four rendered artifacts and their inputs:
 | File | Produced by | Applied via |
 |---|---|---|
 | `netplan.yaml` | `netcfg.RenderNetplan` | `netplan generate` + `netplan apply` |
-| `kea-dhcp4.json` | `netcfg.RenderKeaFile` / `RenderKeaDhcp4` | Kea `config-test` → `config-set` → `config-write` |
+| `kea-dhcp4.json` | `netcfg.RenderKeaFile` / `RenderKeaDhcp4` | Kea `config-set` (live). The file Kea starts from is written by netd at confirm, never during an apply |
 | `stayconnect.nft` | `netcfg.RenderNftables` | `nft -c` (check) → `nft -f` |
 | `unbound.conf` | `netcfg.RenderUnbound` | `unbound-control reload` |
 
@@ -128,3 +128,39 @@ reverse. Revision history and every apply event/health check are visible at
 - `network_config_revisions.failure_reason` — the summary cause.
 
 See [NETWORK_TROUBLESHOOTING.md](NETWORK_TROUBLESHOOTING.md) §"apply rolled back".
+
+## Pipeline integrity rules
+
+* **One operation at a time.** An apply, a rollback and a boot reconcile hold one operation lock; the periodic loops that render the configuration in force
+  (firewall re-assertion, DHCP option 114 sync, portal refresh) run only while they can take it, so none can install an intent an apply has published but
+  not proven. A second apply is refused (409) while another revision is applying or awaiting confirmation, and before it publishes anything.
+* **A refused or failed apply never stays in force.** Every error path puts the previous intent back before returning.
+* **A rollback reports what it did.** Every step that fails (bridges, addressing, firewall, DHCP, resolver, netplan) is listed in the revision's reason and in a
+  `rollback_incomplete` event; a clean one records `rollback_complete`. After an incomplete rollback a durable marker
+  (`rollback-incomplete.json` beside the bundles) refuses further applies (409) until a boot reconcile converges completely, which is what a restart of the
+  network service does. `/v1/health` shows the marker.
+* **An interrupted apply is reclaimed.** A revision a previous run left `applying` is rolled back at netd start, freeing the single in-flight slot.
+* **Confirm and rollback exclude each other.** Both hold the operation lock, so the database cannot say "active" while a rollback restores the previous
+  network. A revision is confirmed only if it is what is running: after a service restart inside the window the previous configuration was restored and
+  the pending revision is refused (409) until rolled back and applied again.
+* **Changes are refused whenever the appliance is not known to be on its confirmed configuration.** That is the case after a rollback that did not finish
+  and after a boot reconcile that did not converge. Convergence is judged by the checks an apply must pass (management reachable, every gateway up, Kea
+  holding a socket), and with no confirmed revision it means verified factory-clean. The block is saved twice (marker file and the revision's recorded
+  reason), a failed save is part of the report, and it is lifted only after the record is resolved and the file removed. While it stands the reconcile
+  retries by itself with backoff, so a transient fault clears without a restart; Confirm is refused too.
+* **A lease Kea has lost does not end a valid session.** A lease verified earlier is remembered for exactly that address, device and Kea instance, and keeps the
+  address authorized until the lease lapses (never more than four hours) when Kea has an empty table, or has restarted since and no longer lists it. A lease
+  that another device now holds ends the session at once; so does a missing lease from the same Kea instance (a release or expiry) once Kea is stable. With
+  nothing remembered, an absence is believed only from a Kea that has run and stayed configured for five minutes and serves the subnet; otherwise renewal is
+  withheld and no session is ended.
+* **Only netd's own bridges are deleted, and only on agreeing evidence.** Every bridge and VLAN interface netd creates carries the alias
+  `onegate:<network id>`. A bridge is removed only if an applied revision names it and either its mark names a network that revision ties to that bridge,
+  or (created before the mark) its member interface is exactly the one the revision recorded. A name in history alone, an unreadable member, a mark that
+  names another network, or an unreadable record proves nothing: the bridge is reported (`bridges_left_alone`) and left in place. A healthy wanted bridge
+  without the mark is marked only when its single member is exactly the configured interface.
+
+## The last-confirmed snapshot and a database that is down
+
+netd writes `last-confirmed.json` beside the bundles after each confirmation. If the database is unreachable at start, netd stays up, restores the
+network from it, refuses every change and retries until the database answers; the database decides when it can. See
+[CLIENT_NETWORKING.md](CLIENT_NETWORKING.md) §6. `netd recover status` and `netd recover reassert-confirmed` are the local tools.

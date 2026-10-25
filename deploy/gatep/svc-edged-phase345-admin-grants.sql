@@ -515,3 +515,12 @@ BEGIN
   GRANT EXECUTE ON FUNCTION iam_v2.walled_garden_settings_set(uuid,uuid,integer,text,text) TO svc_edged;
   GRANT SELECT  ON iam_v2.walled_garden_settings_changes                                  TO svc_edged;
 END $g0125$;
+
+-- 0151, 0152 and 0153. Plain statements, like the rest of this file: gatep-grants.sql runs after the migrations, and the grants test replays them.
+--   0151 staged switch-on/off of client networks: edged is the only service that stages, materialises at apply, settles at confirm and reverts at rollback.
+--   0152 portal profiles, their assignment and per-network sign-in narrowing: edged writes them; scd reads them to choose the portal design and the methods offered.
+--   0153 recovery snapshots and review items: edged only.
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.guest_network_changes TO svc_edged;
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_edged;
+GRANT SELECT ON iam_v2.portal_profiles, iam_v2.portal_profile_assignments, iam_v2.network_signin_overrides TO svc_scd;
+GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.network_layer_snapshots, iam_v2.network_review_items TO svc_edged;

@@ -38,6 +38,17 @@ func (s *server) networkRoutes() http.Handler {
 	r.Get("/guest-network-replacements", s.listGuestNetworkReplacements)
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
+	s.mountRecovery(r)
+	r.Get("/guest-networks/{id}/sign-in", s.getNetworkSignin)
+	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
+	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
+	r.Get("/overview", s.networkOverview)
+	r.Get("/factory", s.getFactory)
+	r.Post("/factory/activate", s.activateFactory)
+	r.Get("/changes", s.listStagedChanges)
+	r.Delete("/changes/{group_id}", s.cancelStagedGroup)
+	r.Get("/ports", s.listPorts)
+	r.Post("/ports/{iface}/mode", s.setPortMode)
 
 	// There is no "adopt": declaring the editable rows ACTIVE without validating or applying them is retired. A
 	// client network configuration becomes active only by being applied, health-checked and confirmed.
@@ -237,6 +248,13 @@ func (s *server) createGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalizeGuestNetworkInput(&in)
+	if in.Name == "" {
+		jsonErr(w, http.StatusBadRequest, "invalid_name", "network name is required")
+		return
+	}
+	if writeNetworkTextRefusal(w, in.Name, in.DomainName) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
@@ -264,6 +282,9 @@ func (s *server) updateGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	var in guestNetworkInput
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if writeNetworkTextRefusal(w, in.Name, in.DomainName) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -548,6 +569,13 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		writeNetworkInsertErr(w, merr)
 		return
 	}
+	chg, cerr := s.materialisePendingChanges(ctx, tx)
+	if cerr != nil {
+		_ = tx.Rollback(ctx)
+		cancel()
+		writeNetworkInsertErr(w, cerr)
+		return
+	}
 	if err := tx.Commit(ctx); err != nil {
 		_ = tx.Rollback(ctx)
 		cancel()
@@ -559,20 +587,30 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	for _, m := range mats {
 		staged = append(staged, m.ReplacementID)
 	}
+	// Everything the apply materialised is put back together if it does not hold.
+	revertAll := func(reason string) error {
+		return errors.Join(s.revertMaterialised(ctx, staged, reason), s.revertChanges(ctx, chg, reason))
+	}
+	everything := append(append([]string{}, staged...), chg...)
 
 	st, raw, err := s.netd.call(r.Context(), http.MethodPost, "/v1/apply",
 		map[string]string{"actor": s.actor(r), "summary": in.Summary})
 	// The audit follows the outcome, as confirm and rollback do, so an apply that never reached the appliance is not logged as one.
 	{
-		detail := map[string]any{"summary": in.Summary, "replacements": staged, "status": st}
+		detail := map[string]any{"summary": in.Summary, "replacements": staged, "changes": chg, "status": st}
 		var out struct {
-			RevisionID string `json:"revision_id"`
-			State      string `json:"state"`
+			RevisionID         string   `json:"revision_id"`
+			State              string   `json:"state"`
+			RollbackIncomplete []string `json:"rollback_incomplete"`
 		}
 		if err != nil {
 			detail["error"] = err.Error()
 		} else if json.Unmarshal(raw, &out) == nil {
 			detail["revision_id"], detail["state"] = out.RevisionID, out.State
+			if len(out.RollbackIncomplete) > 0 {
+				// The rollback ran but did not restore everything: the audit trail must not read as a clean rollback.
+				detail["rollback_incomplete"] = out.RollbackIncomplete
+			}
 		}
 		action := "network.apply"
 		if err != nil || st >= 300 || out.State == "failed" || out.State == "rolled_back" {
@@ -588,8 +626,8 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err != nil {
-		if rerr := s.revertMaterialised(ctx, staged, "netd could not be reached"); rerr != nil {
-			unrevertedStagedChanges(w, staged, rerr, "the appliance's network service could not be reached")
+		if rerr := revertAll("netd could not be reached"); rerr != nil {
+			unrevertedStagedChanges(w, everything, rerr, "the appliance's network service could not be reached")
 			return
 		}
 		jsonErr(w, http.StatusBadGateway, "netd_unreachable", err.Error())
@@ -602,11 +640,11 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &res)
 	switch {
 	case st >= 300, res.State == "failed", res.State == "rolled_back":
-		if rerr := s.revertMaterialised(ctx, staged, "the apply did not hold ("+res.State+")"); rerr != nil {
-			unrevertedStagedChanges(w, staged, rerr, "the configuration did not hold ("+res.State+")")
+		if rerr := revertAll("the apply did not hold (" + res.State + ")"); rerr != nil {
+			unrevertedStagedChanges(w, everything, rerr, "the configuration did not hold ("+res.State+")")
 			return
 		}
-	case len(staged) > 0:
+	case len(staged)+len(chg) > 0:
 		// The revision id is what everything noticing a watchdog rollback later keys on. If netd's answer did not
 		// carry it, ask netd (/v1/pending) rather than guess.
 		rev := res.RevisionID
@@ -622,20 +660,24 @@ func (s *server) netApply(w http.ResponseWriter, r *http.Request) {
 		if rev == "" {
 			// netd said the apply was fine yet there is no revision to confirm; edged does not know what the
 			// appliance did and must not leave the database claiming a successor on that basis.
-			if rerr := s.revertMaterialised(ctx, staged, "the apply reported no revision to confirm"); rerr != nil {
-				unrevertedStagedChanges(w, staged, rerr, "the apply named no revision")
+			if rerr := revertAll("the apply reported no revision to confirm"); rerr != nil {
+				unrevertedStagedChanges(w, everything, rerr, "the apply named no revision")
 				return
 			}
 			jsonErr(w, http.StatusBadGateway, "apply_unidentifiable",
 				"the appliance applied the configuration but did not say which revision carries it, so the staged client-network changes were put back. Check Client networks and apply again.")
 			return
 		}
-		if _, uerr := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid
-			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, rev); uerr != nil {
+		_, uerr := s.db.Exec(ctx, `UPDATE iam_v2.guest_network_replacements SET revision_id=$2::uuid
+			 WHERE id = ANY($1::uuid[]) AND state='APPLIED'`, staged, rev)
+		if uerr == nil {
+			uerr = s.recordChangesRevision(ctx, chg, rev)
+		}
+		if uerr != nil {
 			// Without the record nothing can tell later whether this apply was kept or rolled back, so it is put back now.
 			slog.Error("client network replacement revision could not be recorded", "err", uerr)
-			if rerr := s.revertMaterialised(ctx, staged, "the apply's revision could not be recorded"); rerr != nil {
-				unrevertedStagedChanges(w, staged, rerr, "the apply's revision could not be recorded")
+			if rerr := revertAll("the apply's revision could not be recorded"); rerr != nil {
+				unrevertedStagedChanges(w, everything, rerr, "the apply's revision could not be recorded")
 				return
 			}
 			jsonErr(w, http.StatusInternalServerError, "revision_not_recorded",
@@ -760,6 +802,9 @@ func (s *server) createReservation(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "guest_network_id, mac and reserved_ip required")
 		return
 	}
+	if writeHostnameRefusal(w, in.Hostname) {
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var id string
@@ -784,6 +829,9 @@ func (s *server) updateReservation(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if writeHostnameRefusal(w, in.Hostname) {
 		return
 	}
 	ctx, cancel := dbCtx(r)
@@ -940,6 +988,9 @@ func (s *server) confirmRevision(w http.ResponseWriter, r *http.Request) {
 	if st < 300 {
 		ctx, cancel := dbCtx(r)
 		defer cancel()
+		if cerr := s.settleConfirmedChanges(ctx, id); cerr != nil {
+			slog.Error("staged client-network changes could not be settled after a confirm; the next read retries", "err", cerr)
+		}
 		if settled := s.settleConfirmedReplacements(ctx, r, id); len(settled) > 0 {
 			out := map[string]any{}
 			_ = json.Unmarshal(raw, &out)

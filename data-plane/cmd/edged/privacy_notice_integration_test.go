@@ -151,3 +151,53 @@ func TestIntegration_PrivacyNotice_EverySignInIsStampedAndExported(t *testing.T)
 		}
 	}
 }
+
+// A network with its own portal profile shows that profile's notice, so the sign-in is recorded under it, not under the site's.
+func TestIntegration_PrivacyNotice_ASignInOnAProfileNetworkIsRecordedUnderTheProfilesNotice(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	sfx := fmt.Sprint(time.Now().UnixNano())
+
+	var before []byte
+	if err := f.pool.QueryRow(ctx, `SELECT branding FROM tenants WHERE id=$1`, f.tenant).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(ctx, `UPDATE tenants SET branding=$2 WHERE id=$1`, f.tenant, before) })
+	site, _ := json.Marshal(map[string]any{"design": map[string]any{"privacy_text": "Site notice " + sfx}})
+	if _, err := f.pool.Exec(ctx, `UPDATE tenants SET branding=$2::jsonb WHERE id=$1`, f.tenant, string(site)); err != nil {
+		t.Fatal(err)
+	}
+
+	acct, device, _ := seedEndedAccount(t, f, "pn-"+sfx+"@example.com", time.Hour, "10.88.0.31")
+	plain, _ := seedGuestNetwork(t, f.pool, f.tenant, f.site, "Plain "+sfx, "10.98.0.0/24")
+	special, _ := seedGuestNetwork(t, f.pool, f.tenant, f.site, "Special "+sfx, "10.99.0.0/24")
+	prof := f.newProfile(t, "Notice "+sfx, "default")
+	doc, _ := json.Marshal(map[string]any{"design": map[string]any{"privacy_text": "Profile notice " + sfx}})
+	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.portal_profiles SET doc=$2::jsonb WHERE id=$1::uuid`, prof, string(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := f.do(t, "PUT", "/portal-branding/profiles/assignments/"+special, map[string]any{"profile_id": prof}); st != 200 {
+		t.Fatalf("assign = %d", st)
+	}
+
+	noticeOf := func(network string) string {
+		t.Helper()
+		var version *string
+		if err := controlled(ctx, f.pool, []string{"auth_context"}, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
+				VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid,now()+interval '10 minutes') RETURNING privacy_notice_version_id::text`,
+				f.tenant, f.site, acct, device, network).Scan(&version)
+		}); err != nil || version == nil {
+			t.Fatalf("sign in on %s: %v %v", network, err, version)
+		}
+		var text string
+		_ = f.pool.QueryRow(ctx, `SELECT COALESCE(privacy_text,'<none>') FROM public.privacy_notice_versions WHERE id=$1::uuid`, *version).Scan(&text)
+		return text
+	}
+	if got := noticeOf(plain); got != "Site notice "+sfx {
+		t.Fatalf("a network without a profile was recorded under %q", got)
+	}
+	if got := noticeOf(special); got != "Profile notice "+sfx {
+		t.Fatalf("a network with a profile was recorded under %q", got)
+	}
+}
