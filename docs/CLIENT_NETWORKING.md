@@ -213,26 +213,30 @@ Measured, not claimed. The appliance was inspected first and re-inspected after 
 
 ## 14. The Product Owner's first Full Reset on PRE-LIVE (observed 2026-10-25)
 
-**What the appliance recorded.** At 12:11:56 UTC the Product Owner staged a Full Client Networking Reset (audit action `network.recovery.staged`). At 12:26 UTC
-the appliance still showed: three changes in state `PENDING` (switch on the new prepared network, switch off VLAN 60, switch off the VLAN 90 test network); the
-active network revision unchanged (seq 97, confirmed 2026-10-24); no apply and no confirmation in the audit log; bridges `br-g60` and `br-g90` up; Kea serving
-both subnets exactly as before; 0 sessions. **The reset had been staged, not applied.** Staging changes nothing by design (§2).
+**Timeline recorded by the appliance (UTC).** 12:11:56 the Product Owner staged a Full Client Networking Reset (`network.recovery.staged`). At 12:26 it was still
+staged: three changes `PENDING`, active revision 97, VLAN 60 and VLAN 90 still enabled, Kea unchanged. **At 14:58:53 the reset was applied (`network.apply`,
+revision 98) and at 14:59:06 it was confirmed (`network.revision.confirmed`); revision 98 is active.** All three changes are `CONFIRMED`.
 
-**What staging did create:** one new network row, *Client Wi-Fi*, switched off: untagged on `ens192`, `10.20.0.0/20`, gateway `10.20.0.1`, local DHCP pool
-`10.20.0.10`–`10.20.15.254`, appliance DNS, `guest.local`, leases 900/3600/7200 s, captive portal, internet and NAT on, client isolation on. That matches the
-approved prepared network. It serves nothing until the change is applied and kept.
+**State read afterwards (15:53 UTC, read-only).**
+* Only *Client Wi-Fi* is enabled: untagged on `ens192`, `10.20.0.0/20`, gateway `10.20.0.1`, local DHCP pool `10.20.0.10`–`10.20.15.254`. The bridge `br-g-52fd7a28`
+  is up with `10.20.0.1/20`; `br-g60` and `br-g90` are gone.
+* Kea's live configuration has exactly one subnet, `10.20.0.0/20`, and the Kea file on disk holds the confirmed configuration (`kea_disk.holds_confirmed_configuration`
+  is true). netd is healthy. The WAN/management address `172.21.60.25/24` and the default route are unchanged.
+* Kea reports one active lease in `10.20.x.x`: a client obtained an address from the new network's DHCP. That is Kea's own record, counted once; this document does
+  not claim a client test beyond it. No guest session was active.
+* The three old networks are all switched off and still listed: *PRELIVE Test Guest* (untagged), *PRELIVE Test Guest* (VLAN 90) and *VLAN 60*. No review item exists;
+  the one PMS interface is still routed to the two old test networks, so room sign-in is not offered on the new network until the operator routes it (section 15).
+* **Not verified:** a real client's sign-in and internet access through the portal on the new network, the switch and ESXi side (the untagged VLAN must reach
+  `ens192`), and anything about what the access point or controller maps.
 
-**What the Product Owner reported** is "performed successfully". The records above show the staging step was successful; they do not show an apply. If an
-apply was done after 12:26 UTC it is not covered by this record. DHCP on the prepared network, a real client, and the switch/ESXi side remain **unverified**.
+**Why old networks are still listed.** Two carry sign-in history that foreign keys reference: *PRELIVE Test Guest* (untagged) has 419 sign-ins, 139 device appearances
+and 187 resolutions; *PRELIVE Test Guest* (VLAN 90) has 251, 174 and 23. *VLAN 60* has none. A network with history cannot be removed (the existing delete answers
+`kept_as_history`), and a rollback and the audit trail need the rows. That is intended. This reset was confirmed before the archive existed, so nothing was archived
+at the time; migration 0154 archives networks retired by an already-confirmed reset (section 15).
 
-**Why old networks are still listed.** Three of the four networks are the old ones. Two of them carry sign-in history: *PRELIVE Test Guest* (untagged, already
-switched off) has 419 sign-ins, 139 device appearances and 187 resolutions recorded on it; *PRELIVE Test Guest* (VLAN 90) has 251, 174 and 23. *VLAN 60* has none.
-Database foreign keys from `auth_contexts`, `auth_resolutions`, `device_network_appearances` and the PMS mapping reference a network by its identity, so a
-network with history cannot be removed (the existing delete answers `kept_as_history`). That is intended.
-
-**Defect found while investigating, and fixed:** the success message after staging said the recovery was staged, but nothing on the Recovery page afterwards
-showed that it was still waiting, so a staged reset could be taken for a finished one. Staging now sends the operator to Client networks, the Recovery page
-carries a warning that a recovery is staged and not applied, and the staged-changes list marks it *Not applied yet*.
+**Defect found while investigating, and fixed:** after staging, nothing on the Recovery page showed that the recovery was still waiting, so a staged reset could be
+taken for a finished one. Staging now sends the operator to Client networks, the Recovery page shows the latest recovery as Staged, Applied or Confirmed, and the
+staged list marks it *Not applied yet*.
 
 ## 15. Archived networks and the Default Network
 
@@ -247,6 +251,7 @@ rules, sign-in restrictions and pauses, the audit trail, the last-confirmed snap
 **What archived means.** A marker in `iam_v2.network_archive` (migration 0154, additive; nothing in `public`). It is a presentation state: the network is still
 switched off, still has its history, settings, PMS routing and audit trail, and nothing a guest, an entitlement, a package rule or the PMS sees changes.
 
+* **Resets confirmed before the feature.** Migration 0154 archives, once and idempotently, the networks that an already-confirmed reset switched off and that nothing has touched since (from the recorded changes alone; a network that is serving is never shown as archived).
 * **When it is written.** Only when a Restore Factory Defaults or Full Client Networking Reset is **confirmed**, in the same transaction that settles the change
   (`settleConfirmedChanges`), and only for the networks that reset switched off. Staged, applied, cancelled, rolled back and lapsed resets never archive anything,
   so a failed change cannot leave an incorrect archive. Restore Last Working archives nothing.

@@ -41,4 +41,16 @@ BEGIN
 END;
 $g$;
 
+-- A reset that was CONFIRMED before this migration retired its networks without archiving them. Archive them now, from the recorded facts alone: the networks a
+-- confirmed Restore Factory Defaults or Full Reset switched off, and that nothing has touched since. Idempotent. Whether a network is still switched off is
+-- checked when the archive is read (iam_v2_owner cannot read public.guest_networks), and the marker is dropped the moment the network serves again.
+INSERT INTO iam_v2.network_archive (network_id, tenant_id, site_id, group_id, group_kind, archived_at)
+SELECT DISTINCT ON (c.network_id) c.network_id, c.tenant_id, c.site_id, c.group_id, c.group_kind, COALESCE(c.settled_at, now())
+  FROM iam_v2.guest_network_changes c
+ WHERE c.state = 'CONFIRMED' AND c.kind = 'DISABLE' AND c.group_kind IN ('FACTORY_RESET','FULL_RESET')
+   AND NOT EXISTS (SELECT 1 FROM iam_v2.guest_network_changes later
+                    WHERE later.network_id = c.network_id AND later.created_at > c.created_at AND later.state <> 'CANCELLED')
+ ORDER BY c.network_id, c.settled_at DESC NULLS LAST
+ON CONFLICT (network_id) DO NOTHING;
+
 COMMIT;
