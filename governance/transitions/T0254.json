@@ -1,0 +1,42 @@
+{
+  "transition_id": "T0254",
+  "seq": 254,
+  "timestamp": "2026-10-26T04:07:05+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "SAME_VENDOR_MULTI_PMS_SOURCE_OWNERSHIP_DEPLOYED_AND_PR251_MERGED",
+  "authorisation": "The Product Owner approved the merge of PR #251 at exact head 2487508e (merged as ae289eeb5c1198214ce20556acf00cc5ddfbc631) and authorised the separate same-vendor Multi-PMS fix with controlled PRE-LIVE software deployment. It does NOT authorise merging PR #252, Go-Live, or any PMS Interface, routing, network or PMS action by the agent.",
+  "findings": [
+    "PR #251 merged by a merge commit pinned to the approved head; po-merge-authorization passed on that head; master is ae289eeb.",
+    "Root cause of the repeated-vendor refusal: createPMSInterface counted non-decommissioned protel-fias Interfaces and answered 409 protel_fias_exists. Ownership was never enforced for the source that actually matters; duplicates were only reported by /pms-source-conflicts. Corrected: vendor restriction removed; publish and activate refuse with 409 pms_source_in_use while another live Interface holds the same source_fingerprint; pmsd starts one worker per source."
+  ],
+  "deployment_provenance": {
+    "appliance": "edged b66212dd93d3 built from a clean clone (tags=stayconnect_production, vcs.modified=false), sha256 81fc3905cb6e6556662c3d6ab91e0da54c8b929e5a05cde11034160d55f2ee91 verified on the appliance before install; backup edged.bak-pre-b66212dd-20261026T010335Z. pmsd was not restarted on purpose.",
+    "admin_console": "Release 20261026-010341 built from a clean clone of b66212dd93d3 (BUILD_ID cUJ4cI315LYLo2okAyX7T, artifact sha256 3e2b9eb8724eba06eaec86c736882ed1ec2328d8517237083aac016fd3e0800b); previous 20261025-235825 (3db9ed56).",
+    "database": "No migration.",
+    "pull_request": "PR #252, head b66212dd plus the governance commit that introduces this receipt."
+  },
+  "verification": "Before: edged integration suite (172 s, full schema), pmsd and pmsresolve suites, new edged tests (three independent Protel Interfaces; a duplicate claim refused at publish and at activation and released by decommission) and a pmsd worker-ownership unit test, console unit test for the refusal wording, typecheck and lint. After deployment: before/after snapshots differ only in the edged binary and the console release; units pass; DEPLOYED_BINARIES 7 of 7; the installed edged carries pms_source_in_use; authenticated read-only smoke (PMS interfaces and routing pages and APIs 200, no source conflicts). NOT verified live: the refusal itself, because exercising it needs two real PMS Interfaces and the mission forbids creating or modifying any; the pmsd backstop (deployed nowhere, tested only); real-client sign-in against two Protel systems.",
+  "rollback": "edged.bak-pre-b66212dd-20261026T010335Z; hotel-admin.previous -> 20261025-235825. No schema to roll back.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #252; deploying pmsd with the next planned PMS restart; a live check with a second real PMS when the Product Owner chooses to configure one; names versus IPs are not recognised as one source.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "ae289eeb5c1198214ce20556acf00cc5ddfbc631",
+  "base_note": "Master after the merge of PR #251 (ae289eeb).",
+  "head": "b66212dd",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0253",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
