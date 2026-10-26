@@ -2,7 +2,7 @@
 
 - **Base commit:** `ee0be45aee41115d7a2c3fc14b911ba6c8769e6f`
 - **HEAD commit:** `1623194378b9179a9be314ab105dae23f16243d5`
-- **Provenance (generation HEAD = inventory_head):** `1623194378b9179a9be314ab105dae23f16243d5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `e833be2bccc1dba160e4f04d8afc737b08039f9e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/multi-pms-network-admin-experience`
 - **Remote branch:** `origin/delivery/multi-pms-network-admin-experience`
 - **Changed files:** 89
@@ -40,17 +40,17 @@
 | `data-plane/migrations/0158_a_the_history_of_a_connections_settings_is_history.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | A connection whose settings were ever changed is retired, not deleted (0158); social login is offered only where a switched-on provider has a working application |
 | `deploy/gatep/svc-edged-phase345-admin-grants.sql` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Admin: remove a PMS connection (delete a never-used one, retire a used one), PMS-scoped stays, reconciliation and sessions, one network service state |
 | `docs/CLIENT_NETWORKING.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | A connection whose settings were ever changed is retired, not deleted (0158); social login is offered only where a switched-on provider has a working application |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `docs/manifests/MultiPmsNetworkAdmin-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: the change manifest lists itself |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `docs/manifests/MultiPmsNetworkAdmin-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
 | `docs/user-guide/hotel-admin-config-manual.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Admin: roster runs per connection, wording that does not assume one PMS, cross-PMS transfer fields, tests and documentation |
 | `docs/user-guide/hotel-admin-reference.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Admin: roster runs per connection, wording that does not assume one PMS, cross-PMS transfer fields, tests and documentation |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
-| `governance/transitions/T0257.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
+| `governance/transitions/T0257.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com> |
 | `hotel-admin/app/(app)/dashboard/overview-blocks.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin: PMS-scoped stay views and tests, package eligibility by network and PMS, cross-PMS transfer names its connections |
 | `hotel-admin/app/(app)/devices/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin: devices, post-stay and settlements name the PMS connection of a room |
 | `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Admin: roster runs per connection, wording that does not assume one PMS, cross-PMS transfer fields, tests and documentation |
@@ -136,7 +136,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../MultiPmsNetworkAdmin-change-manifest.md        | 209 +++++++++++++
+ .../MultiPmsNetworkAdmin-change-manifest.md        | 222 ++++++++++++++
  docs/user-guide/hotel-admin-config-manual.md       |   7 +-
  docs/user-guide/hotel-admin-reference.md           |   8 +
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
@@ -193,23 +193,17 @@
  hotel-admin/test/remove-connection-dialog.test.tsx |  82 +++++
  hotel-admin/test/sign-in-effective.test.ts         |  68 +++++
  hotel-admin/test/stays-multi-pms.test.tsx          | 102 +++++++
- 89 files changed, 3372 insertions(+), 309 deletions(-)
+ 89 files changed, 3385 insertions(+), 309 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  governance/project-state.json
-M  governance/transitions/T0257.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: e833be2b Governance: T0257 records migration 0158 and the final PRE-LIVE deployment Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 HISTORICAL: 16231943 A connection whose settings were ever changed is retired, not deleted (0158); social login is offered only where a switched-on provider has a working application
 HISTORICAL: e3b96e20 Governance: the change manifest lists itself
 HISTORICAL: 3f917947 Governance: T0257 records the multi-PMS and multi-network admin experience delivery and its PRE-LIVE deployment
