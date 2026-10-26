@@ -553,3 +553,40 @@ On PRE-LIVE, pmsd was restarted with no pending postings (the existing Protel li
 Protel Interface (Coral Sea Aqua Club, read-only, posting UNSET) ran concurrently with the first. Authentication-only room sign-in on the live Client Wi-Fi network gave the expected result in every routing scenario
 (dedicated to each hotel, shared strict, and shared strict with one candidate off, which failed closed), a duplicate-source publish was refused, and the network's routing was restored. Aqua was left AUTH_DISABLED.
 
+## 21. The administrator's journey across several PMS connections and several networks (2026-10-26)
+
+This section records the decisions behind the Hotel Admin changes that make a site with more than one PMS connection and more than one client network readable.
+
+**A room belongs to its PMS connection.** A room number identifies a room only together with the connection that reported it; the same number at two connections is two rooms, never a duplicate.
+Stays, PMS reconciliation (unresolved departures, rooms with several stays, stays past departure), roster reconciliation runs, sessions, devices, post-stay access, settlements and the
+cross-PMS transfer now name the connection (only where the site has more than one, so a single-PMS site is not cluttered) and key their rows by connection and room. The Stays page has connection
+tabs with counts under the current filters and a combined "All connections" view; the API takes `pms_interface_id` and answers `by_interface`. The guest-facing rule is unchanged: a guest is never
+asked which PMS they belong to, and identity stays behind the same permission.
+
+**Removing a connection (migration 0157).** `GET /pms-interfaces/{id}/removal` assesses, `POST` acts, both under a row lock and the same transaction logic, so what the administrator confirmed is what
+happens (`removal_changed` otherwise). Outcomes:
+
+| Outcome | When | What happens |
+|---|---|---|
+| `DELETE` | switched off, never switched on (no audit record), never connected to its PMS, and nothing refers to it: no stay, event, posting, answer, routing, package mapping, sign-in record or conflict | `iam_v2.delete_unused_pms_interface` removes the connection, its draft revisions, sealed secrets and runtime row. It is the only path that deletes one, and it fails (rolling back) on any record that refers to the connection. |
+| `RETIRE` | the connection was ever used | lifecycle `DECOMMISSIONED` (terminal). Hidden from ordinary lists (`?include=retired` shows it). Every stay, event, entitlement, posting, sign-in record and the audit trail is untouched; open financial work is refused by the existing decommission gate. |
+| `BLOCKED` | switched on or draining; a serving network is routed to it; financial work is open | nothing changes; the reasons are listed, with the networks named. Nothing is reassigned for the administrator. |
+
+Revisions and secret generations stay immutable: the guards allow a delete only inside that function, for that connection (a transaction-local setting the function sets after it has verified the connection
+is unused). A deletion or retirement needs the operator's password, a reason code and the connection's name typed, and is audited.
+
+**One reading of where a client network stands.** `service_state` is `serving` (enabled, not archived), `off` or `archived`, produced once on the server (`networkServiceState`) and returned by the network list, the network
+overview and the portal design list. Selectors offer only serving networks as places to do something (assign a design, route room sign-in); off and archived networks are shown, marked, where their history or
+settings still matter. The dashboard and overview no longer list archived networks as current ones.
+
+**A port is a wire, a network is a purpose.** The Client ports card lists, per port, the untagged (native) network and each tagged VLAN with its own state, subnet and connected clients, and says in words that a
+trunk can carry a native network and tagged VLANs together. The "Change VLAN or port" dialog now opens showing the network's current topology (it used to open on the opposite one). Replacing a network's topology
+carries its sign-in narrowing and portal design to the successor (and removes them again if the replacement is reverted); it used to carry only addressing, reservations, routing and policy.
+
+**What a network actually offers.** `GET /network/sign-in-overrides` returns every network's narrowing in one read. Sign-in methods shows, for each serving network, which methods are offered, which are off here, off
+site-wide or need setup, with the reason, from `lib/sign-in-effective.ts` (a mirror of what scd decides: a network can only narrow what the site offers; a network set to no room sign-in offers none; room sign-in needs a
+PMS connection that can answer). The packages list shows who can get each package (the networks and PMS connections a package is tied to); a package's PMS rule is picked by name, not by pasting an id.
+
+**Where each setting lives.** Site-wide: the switches on Sign-in methods. Network-specific: a network's own narrowing, design and addressing. PMS-specific: room sign-in routing under PMS routing and each connection's
+own configuration. Package eligibility: Internet packages. None of them changes another; the screens say so.
+

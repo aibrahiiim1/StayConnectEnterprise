@@ -23,14 +23,14 @@ import (
 const deviceSearchHeader = "X-Device-Search"
 
 type devicePackage struct {
-	EntitlementID   string     `json:"entitlement_id"`
-	Status          string     `json:"status"`
-	PackageName     string     `json:"package_name"`
-	Free            bool       `json:"free"`
-	SubjectKind     string     `json:"subject_kind"` // ACCOUNT | VOUCHER | ROOM | CLIENT | OPEN
-	SubjectLabel    string     `json:"subject_label,omitempty"`
+	EntitlementID string `json:"entitlement_id"`
+	Status        string `json:"status"`
+	PackageName   string `json:"package_name"`
+	Free          bool   `json:"free"`
+	SubjectKind   string `json:"subject_kind"` // ACCOUNT | VOUCHER | ROOM | CLIENT | OPEN
+	SubjectLabel  string `json:"subject_label,omitempty"`
 	// The PMS connection a room stay came from (a room number only identifies a room together with it).
-	PMSConnection string `json:"pms_interface_label,omitempty"`
+	PMSConnection   string     `json:"pms_interface_label,omitempty"`
 	AccountID       string     `json:"account_id,omitempty"`
 	Slot            string     `json:"slot"` // AUTHORIZED (holds a place) | DISCONNECTED (released)
 	SlotReason      string     `json:"slot_reason,omitempty"`

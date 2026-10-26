@@ -356,7 +356,7 @@ export default function GuestAccountsPage() {
             </HelpSection>
             <HelpSection title="Good to know">
               <HelpList items={[
-                "Accounts staff create can only be used while username-and-password sign-in is offered on the Client Portal (the switch below, which is part of Sign-in methods). Self-service accounts follow the Email accounts switch on Sign-in methods instead.",
+                "Accounts staff create can only be used while username-and-password sign-in is offered on the Client Portal (the switch below, which is part of Sign-in methods). That switch is for the whole site: a client network can still switch the method off for itself, and Sign-in methods shows the result for each network. Self-service accounts follow the Email accounts switch instead.",
                 "A password is shown once, when it is set. It cannot be looked up again; if it is lost, set a new one.",
                 "Repeated failed sign-ins restrict the DEVICE that is guessing, not the account. See Client sign-in protection under Sign-in methods.",
                 "Disable stops an account being used for now: its devices are disconnected and its package is paused. Enable resumes the package if it has not ended — its end date does not move while it is paused. Removing cannot be undone.",
@@ -400,7 +400,7 @@ export default function GuestAccountsPage() {
             </div>
             <p className="text-caption text-muted-foreground">
               {portalOn
-                ? "Clients can sign in with the accounts staff created here."
+                ? "Clients can sign in with the accounts staff created here, on every network that has not switched this method off."
                 : "The tab is hidden, so accounts staff created cannot be used even though they exist."}
               {roles !== null && !mayOfferOnPortal && " Your role cannot change which sign-in methods are offered."}
             </p>

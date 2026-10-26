@@ -44,7 +44,7 @@ const OUTCOMES: Record<string, { label: string; meaning: string; fix?: string; t
   AMBIGUOUS: {
     label: "More than one match",
     meaning: "The details matched more than one stay, so the appliance refused rather than picking one.",
-    fix: "Usually a duplicated room in the guest list. Check Duplicate sources.",
+    fix: "Usually two stays claiming one room in the same guest list, or a shared network whose PMS connections both know the guest. Check PMS routing and Duplicate sources.",
     tone: "warn",
   },
   AMBIGUOUS_ROOM: {

@@ -227,37 +227,45 @@ export function StayTransferView({ canAct, rolesKnown = true }: { canAct: boolea
               className="grid items-end gap-3 sm:grid-cols-[1fr_auto_1fr_auto]"
               onSubmit={(e) => { e.preventDefault(); void runPreview(); }}
             >
-              <Field label="From stay" hint="Reservation number on the PMS the guest is leaving, or a stay id.">
-                <Input
-                  value={fromStay}
-                  onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
-                  placeholder="Reservation number"
-                  className="font-mono"
-                  autoComplete="off"
-                />
+              <div className="space-y-2">
+                <Field label="From stay" hint="Reservation number on the PMS the guest is leaving, or a stay id.">
+                  <Input
+                    value={fromStay}
+                    onChange={(e) => { setFromStay(e.target.value); setPreview(null); }}
+                    placeholder="Reservation number"
+                    className="font-mono"
+                    autoComplete="off"
+                  />
+                </Field>
                 {multi && (
-                  <Select aria-label="PMS connection of the stay being left" className="mt-2" value={fromPms} onChange={(e) => { setFromPms(e.target.value); setPreview(null); }}>
-                    <option value="">Any PMS connection</option>
-                    {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </Select>
+                  <Field label="PMS connection of that stay" optional>
+                    <Select value={fromPms} onChange={(e) => { setFromPms(e.target.value); setPreview(null); }}>
+                      <option value="">Any PMS connection</option>
+                      {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </Select>
+                  </Field>
                 )}
-              </Field>
+              </div>
               <ArrowRight className="mb-9 hidden size-4 text-muted-foreground sm:block rtl:rotate-180" aria-hidden />
-              <Field label="To stay" hint="Reservation number on the PMS the guest is moving to, or a stay id.">
-                <Input
-                  value={toStay}
-                  onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
-                  placeholder="Reservation number"
-                  className="font-mono"
-                  autoComplete="off"
-                />
+              <div className="space-y-2">
+                <Field label="To stay" hint="Reservation number on the PMS the guest is moving to, or a stay id.">
+                  <Input
+                    value={toStay}
+                    onChange={(e) => { setToStay(e.target.value); setPreview(null); }}
+                    placeholder="Reservation number"
+                    className="font-mono"
+                    autoComplete="off"
+                  />
+                </Field>
                 {multi && (
-                  <Select aria-label="PMS connection of the stay being moved to" className="mt-2" value={toPms} onChange={(e) => { setToPms(e.target.value); setPreview(null); }}>
-                    <option value="">Any PMS connection</option>
-                    {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </Select>
+                  <Field label="PMS connection of that stay" optional>
+                    <Select value={toPms} onChange={(e) => { setToPms(e.target.value); setPreview(null); }}>
+                      <option value="">Any PMS connection</option>
+                      {(connections ?? []).filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </Select>
+                  </Field>
                 )}
-              </Field>
+              </div>
               <Button type="submit" variant="secondary" className="sm:mb-6" disabled={busy}>
                 {busy && !confirming ? "Previewing…" : "Preview"}
               </Button>

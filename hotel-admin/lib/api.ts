@@ -1660,6 +1660,8 @@ export type RosterReconciliationState = {
 };
 
 export type ReconcileRunRecord = ReconcileRun & {
+  pms_interface_id?: string;
+  pms_interface_label?: string;
   mode: "DRY_RUN" | "APPLY";
   resync_generation: number;
   run_at: string;

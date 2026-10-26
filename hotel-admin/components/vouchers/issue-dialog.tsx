@@ -165,7 +165,7 @@ export function IssueDialog({
               <EmptyState
                 icon={<Package />}
                 title="No internet package can be put on a card yet"
-                hint="Vouchers are issued only for an active package that clients may get by Voucher. Under Internet packages, tick Voucher on the package, then come back to issue cards for it."
+                hint="Vouchers are issued only for an active package that clients may get by Voucher. Under Internet packages, tick Voucher on the package, then come back to issue cards for it. Where a card can be used is set by the package (some packages are limited to certain networks or PMS connections) and by Sign-in methods."
               />
             ) : (
               <div role="radiogroup" aria-label="Package the cards grant" className="grid gap-3 sm:grid-cols-2">

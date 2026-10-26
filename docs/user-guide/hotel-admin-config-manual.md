@@ -335,7 +335,12 @@ sign-in page itself needs — every entry is reachable without signing in.
 
 **Client Portal → Portal settings** (`/portal-branding`) — design the client
 sign-in page with a live preview (desktop, tablet, mobile), then **Save
-changes**. Clients see it immediately.
+changes**. Clients see it immediately. At the top, **Portal designs** shows the
+site default and any named designs, which serving networks show each one, and
+lets you choose a design per network: pick it, review the staged change, then
+**Apply**. Switched-off and archived networks are listed apart and keep their
+assignment. A design only changes how the page looks; sign-in methods, PMS
+routing and package eligibility are set elsewhere.
 
 - **Template** — Classic, Split, Immersive, Header bar, Editorial or Kiosk, and its
   options.

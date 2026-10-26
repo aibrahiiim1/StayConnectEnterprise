@@ -248,11 +248,16 @@ func (s *server) previewRosterReconcile(w http.ResponseWriter, r *http.Request) 
 func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	var ifaceArg any
+	if id := strings.TrimSpace(r.URL.Query().Get("pms_interface_id")); uuidRe.MatchString(id) {
+		ifaceArg = id
+	}
 	rows, err := s.db.Query(ctx, `SELECT mode, outcome, roster_size, mirror_in_house, absent_from_roster,
 		stays_closed, rooms_enumerated, rooms_expected, protected_by_newer_events,
-		resync_generation, run_at, run_by, COALESCE(reason,'')
+		resync_generation, run_at, run_by, COALESCE(reason,''), pms_interface_id::text,
+		COALESCE((SELECT i.display_label FROM iam_v2.pms_interfaces i WHERE i.id = pms_interface_id), '')
 		FROM iam_v2.pms_roster_reconciliation_runs
-		WHERE tenant_id=$1 AND site_id=$2 ORDER BY run_at DESC LIMIT 100`, s.tenantID, s.siteID)
+		WHERE tenant_id=$1 AND site_id=$2 AND ($3::uuid IS NULL OR pms_interface_id = $3::uuid) ORDER BY run_at DESC LIMIT 100`, s.tenantID, s.siteID, ifaceArg)
 	if err != nil {
 		slog.Error("roster reconciliation: runs unreadable", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "runs_unreadable", "the run history could not be read")
@@ -261,12 +266,12 @@ func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) 
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var mode, outcome, runBy, reason string
+		var mode, outcome, runBy, reason, ifaceID, ifaceLabel string
 		var roster, mirror, absent, closed, rooms, expected, protected int
 		var gen int64
 		var at any
 		if err := rows.Scan(&mode, &outcome, &roster, &mirror, &absent, &closed, &rooms, &expected,
-			&protected, &gen, &at, &runBy, &reason); err != nil {
+			&protected, &gen, &at, &runBy, &reason, &ifaceID, &ifaceLabel); err != nil {
 			slog.Error("roster reconciliation: runs unreadable", "err", err)
 			jsonErr(w, http.StatusInternalServerError, "runs_unreadable", "the run history could not be read")
 			return
@@ -276,6 +281,7 @@ func (s *server) listReconciliationRuns(w http.ResponseWriter, r *http.Request) 
 			"absent_from_roster": absent, "stays_closed": closed, "rooms_enumerated": rooms,
 			"rooms_expected": expected, "protected_by_newer_events": protected,
 			"resync_generation": gen, "run_at": at, "run_by": runBy, "reason": reason,
+			"pms_interface_id": ifaceID, "pms_interface_label": ifaceLabel,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": out})

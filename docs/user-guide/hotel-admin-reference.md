@@ -344,6 +344,14 @@ disconnect clients already online.
 The designer for the client sign-in page, with a live preview. One **Save changes**; clients see the result as
 soon as it is saved.
 
+- **Portal designs** (top of the page): one card per design (the site default, which every network without its own
+  shows, and each named design) with the serving networks that show it and **Edit this design**. Below, a list of
+  **serving** networks only, each with a design selector and "Clients see …". Changes are staged (*Not applied*),
+  reviewed in a confirmation that names every network and its old and new design, and applied together.
+  Switched-off and archived networks are collapsed under "Show … switched-off or archived networks" and keep their
+  assignment. **New design**, **Rename** and **Delete** act on the design being edited; deleting returns its
+  networks to the site default.
+
 - **Header:** *Unsaved changes* / *All changes saved*, **Discard**, **Save changes**. A strip shows the
   Layout, Languages offered, Custom code and Checks (*N to fix* / *All clear*).
 - **Sections** (left rail) with a live preview (Desktop, Tablet, Mobile) beside them:
