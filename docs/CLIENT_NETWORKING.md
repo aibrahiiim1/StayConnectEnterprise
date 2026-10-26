@@ -521,3 +521,8 @@ pre-policy edged build read the live database and replaced nothing; it found no 
 refusal path is proven by the 47-case test suite and the disposable-database drill above, not on PRE-LIVE. PRE-LIVE changed continuously under the Product Owner's own testing
 during this work (a second PMS interface now exists); that is their activity, recorded in the audit, and none of it was done by the agent.
 
+**Deployment of the review fixes** (migration 0156 and software): schema `0156` applied after backup `db-20261025T235730Z.sql.gz.age`; edged and scd `3db9ed56` (sha256 `f7bf5285...`
+and `d53f91eb...`); Admin Console release `20261025-235825` (BUILD_ID `m6vMRcAo0xTwXxIgLVMgG`); backups `edged.bak-pre-3db9ed56-20261025T235814Z` and `scd.bak-pre-3db9ed56-20261025T235820Z`.
+Snapshots before and after differ only in those; units pass; `DEPLOYED_BINARIES` 7 of 7; the live function carries the roster-age evidence and `svc_scd` keeps `EXECUTE`. Not exercised live:
+a stale roster with a real disconnected PMS, and the rollback tool's refusal against a live shared network (the Product Owner's networks are dedicated); both are proven by tests.
+

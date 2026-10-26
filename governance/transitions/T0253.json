@@ -1,0 +1,42 @@
+{
+  "transition_id": "T0253",
+  "seq": 253,
+  "timestamp": "2026-10-26T02:59:48+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_CANDIDATE_ROSTER_FRESHNESS_AND_ROLLBACK_QUERY_FIXED",
+  "authorisation": "D74 (2026-10-26), continued under the same mission and PR #251 (Codex review findings on the head of T0252). It does NOT authorise merging PR #251, Go-Live, or any live network, routing, PMS or financial action by the agent.",
+  "findings": [
+    "P1: p3_interface_can_authorise evaluated the feed predicate at now(), which makes the revision's max_auth_cache_age ceiling trivially true, so a disconnected candidate with an expired roster could return a trusted 'no such guest' and let another interface's guest in on a shared network. Fixed by migration 0156 (evidence time = the roster's age) and by applying the same ceiling to the health the console shows (ROSTER_EXPIRED), so the readiness assessment and the resolver agree.",
+    "P2: the rollback tool's shared-set count queried the policy table inside a CASE, which PostgreSQL resolves before evaluating, so a database without the table (never migrated, or rolled back) was reported as unreadable and a harmless rollback refused. The existence check is now a separate query."
+  ],
+  "deployment_provenance": {
+    "appliance": "edged and scd 3db9ed56504f, each built from a clean clone (tags=stayconnect_production, vcs.modified=false), sha256 edged f7bf5285bae2c3a0d9eaf48a5fa404c4f1d7619e144994f5916121e81507deaf, scd d53f91eb82883e976b3e38ebbfee2c2fcc9f8160e20c5919b0590415adb6a6e3 verified on the appliance before install; backups edged.bak-pre-3db9ed56-20261025T235814Z and scd.bak-pre-3db9ed56-20261025T235820Z. netd, portald, pmsd, acctd and Kea untouched.",
+    "admin_console": "Release 20261025-235825 built from a clean clone of 3db9ed56504f (BUILD_ID m6vMRcAo0xTwXxIgLVMgG, artifact sha256 920e38fec79e2a8fc26fcc185e6f38d8bf4b7f09894760edb9db02aab1ff62c2); previous 20261025-232056 (5726db14).",
+    "database": "Migration 0156 applied with scripts/edge-migrate.sh as iam_v2_owner (sha256 861241ff...) after the encrypted, proven-restorable backup db-20261025T235730Z.sql.gz.age; it replaces one function, keeps its grants (svc_scd EXECUTE confirmed), and has a .down that refuses while a shared policy exists.",
+    "pull_request": "PR #251, head 3db9ed56 plus the governance commit that introduces this receipt."
+  },
+  "verification": "Before: Go unit and integration tests on a fresh full-schema PostgreSQL including 0156 (edged with the real svc_edged role, scd, pmsresolve), 50 binary-rollback cases, 1028 console unit tests and typecheck. New tests: scd (a candidate disconnected for an hour still answers; at ten days it cannot clear another interface's guest; a dedicated network is unaffected; the test fails against the 0155 function), edged (readiness READY at one hour, BLOCKED with ROSTER_EXPIRED at ten days), the rollback tool through a stand-in docker (absent table proceeds, four shared refuse and are counted, zero proceeds). After deployment: before/after snapshots differ only in the schema head, the two binaries and the console release; units pass; DEPLOYED_BINARIES 7 of 7; the function in the live database contains the roster-age evidence and svc_scd keeps EXECUTE; the live API checks (reads expose nothing that authorises a change; seven invalid or old-style requests refused; a valid preview mints its own proposal and is not applied; every policy identical) all pass. NOT verified: the stale-roster refusal with a real disconnected PMS (a second PMS Interface now exists on PRE-LIVE but the agent changed no routing and disconnected nothing); the rollback tool's refusal path against a live shared network; a real client signing in; tagged-VLAN delivery on the switch/ESXi side.",
+  "rollback": "edged.bak-pre-3db9ed56-20261025T235814Z and scd.bak-pre-3db9ed56-20261025T235820Z; hotel-admin.previous -> 20261025-232056. Schema: 0156.down.sql and 0155.down.sql both refuse while a Shared STRICT policy exists, as does scripts/binary-rollback.sh for scd and edged builds without the policy. Central: no change.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #251; real-client room sign-in acceptance; a shared network and a stale roster exercised live (the Product Owner's decision); the switch/ESXi delivery of tagged VLANs.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "da58bb6c4f0389ffaee391d03594a4dd8af3bd3a",
+  "base_note": "Master after the merge of PR #250 (T0249).",
+  "head": "3db9ed56",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0252",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
