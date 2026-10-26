@@ -9,6 +9,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { Callout } from "@/components/ui/error-banner";
 import { ImpactPanel } from "@/components/network/impact-panel";
 import type { NetworkConsequence } from "@/lib/api/pms-routing";
+import { topologyWords } from "@/lib/network-state";
 
 const SELECTABLE = new Set(["guest_access", "guest_trunk", "unused"]);
 
@@ -34,7 +35,8 @@ export function ReplaceTopologyDialog({
   onReplaced: (r: ReplaceResult) => void;
 }) {
   const [interfaces, setInterfaces] = useState<Interface[] | null>(null);
-  const [tagged, setTagged] = useState(network.network_type !== "vlan");
+  // Starts as the network is today, so the dialog shows what is true now and a change is a deliberate edit.
+  const [tagged, setTagged] = useState(network.network_type === "vlan");
   const [parent, setParent] = useState(network.parent_interface);
   const [vlan, setVlan] = useState(network.vlan_id ? String(network.vlan_id) : "");
   const [readdress, setReaddress] = useState(false);
@@ -115,8 +117,8 @@ export function ReplaceTopologyDialog({
         <Callout tone="info" title="Nothing changes until you apply">
           This only records the change. The client network keeps serving its clients, keeps its PMS routing and keeps
           its place in your Internet packages until you apply the configuration on Client networks and confirm it.
-          The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, sign-in page
-          settings and PMS route; clients reconnect on it, and their internet package and data used carry on.
+          The replacement then carries over this network&rsquo;s addressing, DHCP pools, reservations, DNS, portal design,
+          sign-in method choices and PMS route; clients reconnect on it, and their internet package and data used carry on.
         </Callout>
         <ImpactPanel affected={impact?.affected} external={impact?.external_requirements} />
         <Field label="Port" required>
@@ -128,10 +130,15 @@ export function ReplaceTopologyDialog({
             ))}
           </Select>
         </Field>
+        <p className="text-sm text-muted-foreground">
+          Today: <strong className="font-medium text-foreground">{topologyWords(network).label}</strong> on <span className="font-mono">{network.parent_interface}</span>.
+          The port does not decide the network&rsquo;s purpose &mdash; a trunk can carry an untagged (native) network and tagged VLANs together.
+        </p>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="size-4 accent-primary" checked={tagged} onChange={(e) => setTagged(e.target.checked)} />
-          Tagged VLAN (802.1Q) on a trunk
+          Tagged VLAN (802.1Q)
         </label>
+        <p className="-mt-2 text-xs text-muted-foreground">Leave it off to deliver this network untagged, as the native network when the port is a trunk.</p>
         {tagged && (
           <Field label="VLAN id" required hint="1 to 4094 — the VLAN your switch and wireless controller use for this network." className="max-w-48">
             <Input aria-label="VLAN id" type="number" min={1} max={4094} value={vlan} onChange={(e) => setVlan(e.target.value)} />

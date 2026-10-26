@@ -30,6 +30,7 @@ import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-st
 import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
 import { FactoryNetworkCard, PortModeCard, StagedChangesList } from "@/components/network/lifecycle";
 import { ArchivedNetworks, DefaultNetworkCard } from "@/components/network/default-network";
+import { topologyWords } from "@/lib/network-state";
 import { POLICY_WORDS, STATE_WORDS, type RoomSignInBrief } from "@/lib/api/pms-routing";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
 
@@ -289,9 +290,9 @@ export default function NetworkPage() {
         <StatGrid cols={3}>
           <StatCard label="Client networks" value={shownRows.length} hint={archivedCount > 0 ? `${archivedCount} archived` : undefined} icon={<Network />} />
           <StatCard
-            label="Enabled"
+            label="Serving clients"
             value={enabledCount}
-            hint={shownRows.length - enabledCount > 0 ? `${shownRows.length - enabledCount} disabled` : "All enabled"}
+            hint={shownRows.length - enabledCount > 0 ? `${shownRows.length - enabledCount} switched off` : "All switched on"}
             icon={<Wifi />}
             tone={enabledCount === 0 ? "warn" : "default"}
           />
@@ -351,7 +352,7 @@ export default function NetworkPage() {
                     )}
                   </TD>
                   <TD nowrap>
-                    <Badge tone={n.network_type === "vlan" ? "info" : "default"}>{networkTypeLabel(n)}</Badge>
+                    <Badge tone={n.network_type === "vlan" ? "info" : "default"} title={topologyWords(n).detail}>{networkTypeLabel(n)}</Badge>
                   </TD>
                   <TD nowrap className="hidden font-mono text-xs 2xl:table-cell">{n.parent_interface}</TD>
                   <TD nowrap className="hidden font-mono text-xs md:table-cell">

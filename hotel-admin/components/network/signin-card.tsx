@@ -48,6 +48,7 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
   const [rooms, setRooms] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<"loading" | "ok" | "failed">("loading");
 
   useEffect(() => {
     let live = true;
@@ -61,13 +62,23 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
       setOff(o.disabled_methods ?? []);
       setPrimary(o.primary_method ?? "");
       setRemember(o.remember_days == null ? "" : String(o.remember_days));
-    }).catch(() => { if (live) setSite(null); });
+      setLoaded("ok");
+    }).catch(() => { if (live) { setSite(null); setLoaded("failed"); } });
     api.get<NetworkOverview>("/network/overview")
       .then((ov) => { if (live) setRooms(ov.networks.find((n) => n.id === networkId)?.pms_interfaces ?? []); })
       .catch(() => { if (live) setRooms(null); });
     return () => { live = false; };
   }, [networkId]);
 
+  if (loaded === "failed") {
+    return (
+      <SectionCard title="Sign-in on this network" description="Which sign-in methods clients on this network are offered.">
+        <p className="text-sm text-muted-foreground">
+          This network&rsquo;s sign-in settings could not be read just now, so nothing is shown rather than a guess. Reload the page; if it persists, check that your role may view sign-in methods.
+        </p>
+      </SectionCard>
+    );
+  }
   if (!site || !saved) return null;
   const offered = SIGNIN_METHODS.filter((m) => m.offered(site));
   const siteDays = site.portal?.remember_device_days;
@@ -94,7 +105,7 @@ export function SignInCard({ networkId, writable }: { networkId: string; writabl
   return (
     <SectionCard
       title="Sign-in on this network"
-      description="Start from what the site offers and switch methods off here. A network cannot offer a method the site does not."
+      description="Applies to this network only. Start from what the whole site offers (Sign-in methods) and switch methods off here; a network cannot offer a method the site does not. Room sign-in also follows this network's PMS routing."
       bodyClassName="space-y-4"
       footer={writable ? <Button disabled={!dirty || invalid || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save sign-in options"}</Button> : undefined}
     >

@@ -246,7 +246,9 @@ type portInfo struct {
 	Mode      string        `json:"mode"` // access | trunk | unused
 	Native    *portNetwork  `json:"native,omitempty"`
 	VLANs     []portNetwork `json:"vlans"`
-	Staged    int           `json:"staged_changes"`
+	// Networks on this port that are switched off but still part of the set-up (archived history is not listed).
+	SwitchedOff []portNetwork `json:"switched_off"`
+	Staged      int           `json:"staged_changes"`
 }
 
 func (s *server) loadPorts(ctx context.Context) ([]portInfo, error) {
@@ -262,7 +264,7 @@ func (s *server) loadPorts(ctx context.Context) ([]portInfo, error) {
 	get := func(name string) *portInfo {
 		p, ok := by[name]
 		if !ok {
-			p = &portInfo{Name: name, Mode: "unused", VLANs: []portNetwork{}, Protected: name == facts.WAN.Interface && name != ""}
+			p = &portInfo{Name: name, Mode: "unused", VLANs: []portNetwork{}, SwitchedOff: []portNetwork{}, Protected: name == facts.WAN.Interface && name != ""}
 			by[name] = p
 			order = append(order, name)
 		}
@@ -287,10 +289,14 @@ func (s *server) loadPorts(ctx context.Context) ([]portInfo, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	archived := s.archivedSet(ctx)
 	for _, r := range all {
 		_ = s.db.QueryRow(ctx, activeOnNetworkSQL, r.n.ID).Scan(&r.n.Clients)
 		p := get(r.parent)
 		if !r.n.Enabled {
+			if !archived[r.n.ID] {
+				p.SwitchedOff = append(p.SwitchedOff, r.n)
+			}
 			continue
 		}
 		if r.typ == "vlan" {

@@ -1049,6 +1049,8 @@ export type GuestNetwork = {
   archived?: boolean;
   /** The prepared network that is serving as the site's Default Network. */
   is_default?: boolean;
+  /** serving | off | archived: the one reading of whether this network is a place clients can be served. */
+  service_state?: "serving" | "off" | "archived";
   description?: string;
   ssid_label?: string;
   enabled: boolean;

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ListResp, GuestNetwork } from "@/lib/api";
 import { Checkbox, Input } from "@/components/ui/input";
+import { serviceStateOf } from "@/lib/network-state";
 
 const split = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
 
@@ -30,7 +31,12 @@ export function NetworkPicker({ value, onChange, label, testId }: {
   const chosen = split(value);
   const known = new Set(networks.map((n) => n.id));
   const rows = [
-    ...networks.map((n) => ({ id: n.id, name: n.archived ? `${n.name} (archived)` : n.name })),
+    ...[...networks]
+      .sort((a, b) => Number(serviceStateOf(a) !== "serving") - Number(serviceStateOf(b) !== "serving") || a.name.localeCompare(b.name))
+      .map((n) => {
+        const st = serviceStateOf(n);
+        return { id: n.id, name: st === "archived" ? `${n.name} (archived)` : st === "off" ? `${n.name} (switched off)` : n.name };
+      }),
     ...chosen.filter((id) => !known.has(id)).map((id) => ({ id, name: "A network that no longer exists" })),
   ];
   const toggle = (id: string, on: boolean) => onChange((on ? Array.from(new Set([...chosen, id])) : chosen.filter((x) => x !== id)).join(","));

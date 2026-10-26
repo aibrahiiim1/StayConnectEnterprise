@@ -51,6 +51,8 @@ export type PortInfo = {
   mode: "access" | "trunk" | "unused";
   native?: PortNetwork;
   vlans: PortNetwork[];
+  /** Switched-off networks still part of the set-up (archived ones are history and not listed). */
+  switched_off?: PortNetwork[];
   staged_changes: number;
 };
 

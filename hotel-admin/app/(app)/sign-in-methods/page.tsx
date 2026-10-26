@@ -26,6 +26,8 @@ import { ReadOnlyNotice, SettingField } from "@/components/ui/patterns";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { moduleLicensed, useCapabilities } from "@/lib/capabilities";
+import { NetworkSignInOverview } from "@/components/network/effective-signin";
+import type { SiteFacts } from "@/lib/sign-in-effective";
 import { senderReady, type NotifyProvider } from "@/lib/sign-in-readiness";
 import { Ticket, Hotel, KeyRound, Mail, MessageSquare, Users, ArrowUpRight, PackageOpen, Smartphone } from "lucide-react";
 
@@ -147,13 +149,15 @@ export default function SignInMethodsPage() {
   const header = (
     <PageHeader
       title="Sign-in methods"
-      description="How clients sign in. Each switch applies immediately; clients already online stay connected."
+      description="How clients sign in, for the whole site. Each switch applies immediately; clients already online stay connected. A network can narrow these, as shown further down."
       help={
         <>
           <HelpSection title="What this page sets">
             <p>
-              How clients prove who they are on the portal. Each switch applies immediately — the next client to open
-              the sign-in page sees it. Turning a method off does not disconnect clients already online.
+              How clients prove who they are on the portal, for the whole site. Each switch applies immediately — the next
+              client to open the sign-in page sees it, on every network that has not switched that method off for itself.
+              Turning a method off does not disconnect clients already online. <em>What each client network offers</em>
+              shows the result per network.
             </p>
           </HelpSection>
           <HelpSection title="The methods">
@@ -206,6 +210,16 @@ export default function SignInMethodsPage() {
   }
 
   const pms = cfg.pms ?? {};
+  const facts: SiteFacts = {
+    cfg,
+    modules: { hospitality, email_otp: emailMod, sms_otp: smsMod, whatsapp_otp: whatsappMod, social_login: socialMod },
+    senders: {
+      email: emailMod && roles !== null && canRead("notification-providers", roles) ? emailReady : null,
+      sms: smsMod && roles !== null && canRead("notification-providers", roles) ? smsReady : null,
+      whatsapp: whatsappMod && roles !== null && canRead("notification-providers", roles) ? whatsappReady : null,
+    },
+    socialProviders: socialMod && roles !== null && canRead("social-providers", roles) ? socialReady : null,
+  };
 
   return (
     <PageShell>
@@ -278,8 +292,8 @@ export default function SignInMethodsPage() {
               onToggle={(v) => save({ pms: { ...pms, enabled: v, mode: pms.mode || "room_lastname" } }, "Room sign-in")}
               warning={pms.enabled && roomSignInImpaired(pmsReadiness)
                 ? pmsReadiness.state === "down"
-                  ? "Not working at the moment — the PMS is not available."
-                  : "Not working on some client networks — the PMS is not available for them."
+                  ? "Not working on any network that offers it — see PMS routing."
+                  : "Not working on some client networks — see PMS routing."
                 : undefined}
               manageHref="/room-sign-in"
               manageLabel="Room sign-in settings — under Hotel"
@@ -384,6 +398,8 @@ export default function SignInMethodsPage() {
           )}
         </ul>
       </SectionCard>
+
+      <NetworkSignInOverview facts={facts} />
 
       {emailMod && <EmailAccountsSettingsCard canEdit={writable} />}
 

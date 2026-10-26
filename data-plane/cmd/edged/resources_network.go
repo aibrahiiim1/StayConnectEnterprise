@@ -43,6 +43,7 @@ func (s *server) networkRoutes() http.Handler {
 	s.mountArchive(r)
 	r.Get("/guest-networks/{id}/sign-in", s.getNetworkSignin)
 	r.Put("/guest-networks/{id}/sign-in", s.putNetworkSignin)
+	r.Get("/sign-in-overrides", s.listNetworkSigninOverrides)
 	r.Get("/guest-networks/{id}/diagnostics", s.networkDiagnostics)
 	r.Get("/overview", s.networkOverview)
 	r.Get("/factory", s.getFactory)
