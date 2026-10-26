@@ -484,3 +484,40 @@ func TestIntegration_API_MalformedIdsAreNotFound(t *testing.T) {
 		t.Fatalf("DELETE routing with a malformed id = %d, want 404", st)
 	}
 }
+
+func (f *apiFixture) mewsPublish(t *testing.T, label string, extra map[string]any) (int, map[string]any) {
+	t.Helper()
+	st, body := f.do(t, http.MethodPost, "/pms-interfaces/", map[string]any{"connector_kind": "mews", "display_label": label})
+	if st != http.StatusCreated {
+		t.Fatalf("create %q = %d %v", label, st, body)
+	}
+	iface := body["id"].(string)
+	cfg := map[string]any{"platform_url": "https://api.mews-demo.com", "poll_interval_seconds": 60}
+	for k, v := range extra {
+		cfg[k] = v
+	}
+	st, body = f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/revisions", map[string]any{"source_timezone": "Europe/Prague", "provider_config": cfg})
+	if st != http.StatusCreated {
+		t.Fatalf("author %q = %d %v", label, st, body)
+	}
+	return f.do(t, http.MethodPost, "/pms-interfaces/"+iface+"/publish", map[string]any{
+		"revision_id": body["revision_id"], "expected_revision_id": "", "reason_code": "INITIAL_SETUP", "password": f.password})
+}
+
+func TestIntegration_API_TokenScopedMewsPropertiesAreNotTreatedAsOneSource(t *testing.T) {
+	f := newAPI(t)
+	for _, label := range []string{"Property one", "Property two"} {
+		if st, b := f.mewsPublish(t, label, nil); st != http.StatusOK {
+			t.Fatalf("%s (token-scoped, no enterprise id) = %d %v, want published", label, st, b)
+		}
+	}
+	if st, b := f.mewsPublish(t, "Named one", map[string]any{"enterprise_id": "3FA85F64-5717-4562-B3FC-2C963F66AFA6"}); st != http.StatusOK {
+		t.Fatalf("named enterprise = %d %v", st, b)
+	}
+	if st, b := f.mewsPublish(t, "Named two", map[string]any{"enterprise_id": "4fa85f64-5717-4562-b3fc-2c963f66afa7"}); st != http.StatusOK {
+		t.Fatalf("a different enterprise on the same platform = %d %v", st, b)
+	}
+	if st, b := f.mewsPublish(t, "Named duplicate", map[string]any{"enterprise_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}); st != http.StatusConflict || b["error"] != "pms_source_in_use" {
+		t.Fatalf("the same enterprise twice = %d %v, want 409 pms_source_in_use", st, b)
+	}
+}

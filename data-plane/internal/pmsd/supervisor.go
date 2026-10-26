@@ -63,32 +63,62 @@ func (s *supervisor) reconcile(ctx context.Context) error {
 		logEvent(s.deps.log(), EventSupervisorReconcileErr, Classify(err), SafeFields{Stage: StageDiscover})
 		return nil // transient; retry next tick (do not tear down healthy workers)
 	}
-	next := map[string]struct{}{}
-	for _, iface := range s.sourceOwners(ifaces) {
+	stops, starts := s.planReconcile(ifaces)
+	for _, id := range stops {
+		s.workers[id].stop(s.deps.StopGrace)
+		delete(s.workers, id)
+		delete(s.desired, id)
+	}
+	for _, iface := range starts {
+		s.startWorker(ctx, iface)
+	}
+	return nil
+}
+
+// planReconcile returns the workers to stop and the Interfaces to start. Every stop runs before any start, so a source
+// handed from one Interface to another is released by the old owner before the new one dials it.
+func (s *supervisor) planReconcile(ifaces []Interface) (stops []string, starts []Interface) {
+	live := map[string]Interface{}
+	candidates := make([]Interface, 0, len(ifaces))
+	for _, iface := range ifaces {
 		if iface.TenantID != s.assign.TenantID || iface.SiteID != s.assign.SiteID {
 			continue // defense in depth: never accept a cross-scope row
 		}
 		if !workerLifecycle(iface.LifecycleState) {
 			continue
 		}
-		next[iface.ID] = struct{}{}
-		if w, ok := s.workers[iface.ID]; ok {
-			if s.desired[iface.ID] == iface.CurrentRevisionID {
-				continue
-			}
-			w.stop(s.deps.StopGrace) // complete identity (revision) changed → drain and replace
-			delete(s.workers, iface.ID)
-		}
-		s.startWorker(ctx, iface)
+		live[iface.ID] = iface
+		candidates = append(candidates, iface)
 	}
+	gone := map[string]bool{}
+	for id := range s.workers {
+		if iface, ok := live[id]; !ok || s.desired[id] != iface.CurrentRevisionID {
+			gone[id] = true
+		}
+	}
+	// Ownership is judged as if the changed workers were already stopped: only unchanged workers keep a source.
+	kept := &supervisor{workers: map[string]*worker{}}
 	for id, w := range s.workers {
-		if _, keep := next[id]; !keep {
-			w.stop(s.deps.StopGrace)
-			delete(s.workers, id)
-			delete(s.desired, id)
+		if !gone[id] {
+			kept.workers[id] = w
 		}
 	}
-	return nil
+	owners := kept.sourceOwners(candidates)
+	own := map[string]bool{}
+	for _, iface := range owners {
+		own[iface.ID] = true
+	}
+	for id := range s.workers {
+		if gone[id] || !own[id] {
+			stops = append(stops, id)
+		}
+	}
+	for _, iface := range owners {
+		if _, running := s.workers[iface.ID]; !running || gone[iface.ID] {
+			starts = append(starts, iface)
+		}
+	}
+	return stops, starts
 }
 
 // One worker per physical source: when two live interfaces carry the same source fingerprint (the console refuses

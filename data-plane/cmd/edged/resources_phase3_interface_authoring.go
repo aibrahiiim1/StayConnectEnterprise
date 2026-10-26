@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -258,7 +259,13 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	}
 	fingerprint := pmsSourceFingerprint(connectorKind, in.Endpoint)
 	if restCfg != nil {
-		fingerprint = pmsprovider.SourceFingerprint(connectorKind, restCfg.SourceIdentity())
+		identity := restCfg.SourceIdentity()
+		if !restCfg.SourceIdentityComplete() {
+			var nonce [8]byte
+			_, _ = rand.Read(nonce[:])
+			identity += "|unscoped|" + hex.EncodeToString(nonce[:])
+		}
+		fingerprint = pmsprovider.SourceFingerprint(connectorKind, identity)
 		in.Endpoint = restCfg.Endpoint()
 	}
 
