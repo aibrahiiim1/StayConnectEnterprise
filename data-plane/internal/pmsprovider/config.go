@@ -245,6 +245,16 @@ func (c RESTConfig) SourceIdentity() string {
 	return ""
 }
 
+// SourceIdentityComplete reports whether SourceIdentity names one property. A Mews token can be scoped to a
+// single property without an enterprise id, so two such connections on one platform may be different properties:
+// their identity cannot prove they are the same source and must not be used to refuse either.
+func (c RESTConfig) SourceIdentityComplete() bool {
+	if c.Kind == KindMews {
+		return strings.TrimSpace(str(c.Provider, "enterprise_id")) != ""
+	}
+	return true
+}
+
 // Timings derives the seven durations pmsd.Revision requires from the poll settings:
 //
 //	dial/read/write timeout = request timeout

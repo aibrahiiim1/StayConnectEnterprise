@@ -526,3 +526,30 @@ and `d53f91eb...`); Admin Console release `20261025-235825` (BUILD_ID `m6vMRcAo0
 Snapshots before and after differ only in those; units pass; `DEPLOYED_BINARIES` 7 of 7; the live function carries the roster-age evidence and `svc_scd` keeps `EXECUTE`. Not exercised live:
 a stale roster with a real disconnected PMS, and the rollback tool's refusal against a live shared network (the Product Owner's networks are dedicated); both are proven by tests.
 
+## 20. Several PMS Interfaces of one vendor (2026-10-26)
+
+**Defect.** Creating a Protel FIAS Interface was refused (`protel_fias_exists`) whenever the property already had one, so a second, independent Protel system could not be configured. The
+premise ("a second link is a second writer") is true only for the same PMS server, not for the same vendor.
+
+**Rule now.** The vendor is not the unit of ownership; the physical source is. Every Interface keeps its own identity, revisions, sealed credentials, Stay and guest namespaces, health, lifecycle,
+audit, routing and posting target, and any number of Interfaces of one connector kind may exist. One source (connector kind plus lowercased, trimmed endpoint, the existing `source_fingerprint`) has one
+owner:
+
+- **Publishing** a revision, and **activating** an Interface, are refused with `409 pms_source_in_use` while another Interface that is not decommissioned has that source in its published revision. The refusal
+  names the other connection's label, never the address, and changes nothing. Two claims racing for one source are serialised by a transaction advisory lock on the source.
+- A decommissioned Interface releases its source. Drafts and unpublished Interfaces claim nothing.
+- **Runtime backstop.** pmsd starts one worker per source: if rows written any other way give two live Interfaces the same fingerprint, the one already running keeps it (otherwise the lowest id) and the
+  other gets no connection, so there is never a second writer on one socket. `GET /pms-source-conflicts` still reports such a pair.
+- Routing is unchanged: a Client network maps to Interfaces by the policy in section 16, and a Shared STRICT set still needs every candidate to answer.
+
+**Limit.** The fingerprint compares the configured address text. The same server reached once by name and once by IP is not recognised as one source; the operator is the check there.
+
+**Tests.** edged integration: three independent Protel Interfaces created, published and activated with distinct fingerprints; a second claim on one address (case and spacing varied) is refused at publish and at
+activation, leaves the interface unpublished, and succeeds once the owner is decommissioned. pmsd: one worker per source, a running worker keeps it. Console: the refusal is explained in words.
+
+**Review fixes and live acceptance (PR #252 follow-up).** A REST connection whose identity cannot name one property (a Mews token without an enterprise id) claims no exclusive source, so two independent properties
+on one platform can both be published; and the pmsd reconcile stops every obsolete or displaced worker before starting any, so a source handed from one Interface to another has one writer throughout.
+On PRE-LIVE, pmsd was restarted with no pending postings (the existing Protel link reconnected and resynchronised in about 37 s, identity, revision, stays and financial counters unchanged), and a second real
+Protel Interface (Coral Sea Aqua Club, read-only, posting UNSET) ran concurrently with the first. Authentication-only room sign-in on the live Client Wi-Fi network gave the expected result in every routing scenario
+(dedicated to each hotel, shared strict, and shared strict with one candidate off, which failed closed), a duplicate-source publish was refused, and the network's routing was restored. Aqua was left AUTH_DISABLED.
+

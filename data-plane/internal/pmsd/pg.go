@@ -46,7 +46,9 @@ func (r *pgRepo) Close() error {
 // link at once would strand authorized charges). The Stay-Event applier keeps to ACTIVE only.
 func (r *pgRepo) ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error) {
 	rows, err := r.pool.Query(ctx, `SELECT tenant_id::text, site_id::text, id::text, connector_kind,
-		lifecycle_state, COALESCE(current_revision_id::text,'') FROM iam_v2.pms_interfaces
+		lifecycle_state, COALESCE(current_revision_id::text,''),
+		COALESCE((SELECT r.source_fingerprint FROM iam_v2.pms_interface_revisions r WHERE r.id = current_revision_id),'')
+		FROM iam_v2.pms_interfaces
 		WHERE tenant_id=$1 AND site_id=$2
 		  AND (lifecycle_state='ACTIVE'
 		       OR (lifecycle_state='DRAINING'
@@ -58,7 +60,7 @@ func (r *pgRepo) ListActiveInterfaces(ctx context.Context, tenantID, siteID stri
 	var out []Interface
 	for rows.Next() {
 		var i Interface
-		if err := rows.Scan(&i.TenantID, &i.SiteID, &i.ID, &i.ConnectorKind, &i.LifecycleState, &i.CurrentRevisionID); err != nil {
+		if err := rows.Scan(&i.TenantID, &i.SiteID, &i.ID, &i.ConnectorKind, &i.LifecycleState, &i.CurrentRevisionID, &i.SourceFingerprint); err != nil {
 			return nil, err
 		}
 		out = append(out, i)

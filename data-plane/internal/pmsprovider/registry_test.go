@@ -157,3 +157,18 @@ func TestSourceIdentity_NeverContainsCredentials(t *testing.T) {
 		t.Fatalf("identity %q", rc.SourceIdentity())
 	}
 }
+
+func TestSourceIdentityCompleteness(t *testing.T) {
+	mews := func(ent string) RESTConfig {
+		return RESTConfig{Kind: KindMews, Provider: map[string]any{"platform_url": "https://api.mews.com", "enterprise_id": ent}}
+	}
+	if mews("").SourceIdentityComplete() || mews("  ").SourceIdentityComplete() {
+		t.Fatal("a Mews connection without an enterprise id does not name one property")
+	}
+	if !mews("E1").SourceIdentityComplete() {
+		t.Fatal("a Mews connection with an enterprise id does")
+	}
+	if !(RESTConfig{Kind: KindApaleo}).SourceIdentityComplete() || !(RESTConfig{Kind: KindOperaCloud}).SourceIdentityComplete() {
+		t.Fatal("Apaleo and OPERA Cloud require their property identity")
+	}
+}

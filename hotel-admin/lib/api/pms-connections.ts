@@ -483,6 +483,11 @@ export function pmsErrorText(e: unknown): string | null {
         "Another operator published a different revision while this form was open. Reload to see what is live " +
           "now, then decide again.",
       );
+    case "pms_source_in_use":
+      return say(
+        "Another connection already uses this PMS server address. Two connections to the same PMS would both write to it, " +
+          "so use a different address for this one, or retire the other connection first.",
+      );
     case "revision_invalid":
       return say("That configuration version does not belong to this connection. Reload and try again.");
     case "secret_required":
