@@ -13,13 +13,13 @@
     "The 'Change VLAN or port' dialog opened on the opposite topology to the network's own, and the screens equated a trunk with tagged VLANs, hiding that a native network and tagged VLANs can share one trunk port."
   ],
   "deployment_provenance": {
-    "appliance": "edged 16d7097f38f3 sha256 fb841982dc3d99ac3f134712d7bf9b107c1873d58159c3a76f2a9d91cef35c8c built from a clean clone (tags=stayconnect_production, vcs.modified=false) and verified on the appliance before install; backup edged.bak-pre-16d7097f-20261026T092828Z (an earlier install of b592a6c8 is edged.bak-pre-b592a6c8-20261026T092059Z). pmsd, scd, netd, portald and acctd were not touched.",
-    "admin_console": "Release 20261026-092834 built from a clean clone of 16d7097f38f3 (BUILD_ID Vqu-EYtkJk_NOg2w4odga, artifact sha256 2d8ddd84e406e24394109b800e117b67ffaf42b3b3992362769038cdd7bc80de); previous 20261026-092105 (b592a6c8).",
-    "database": "Migration 0157 applied with scripts/edge-migrate.sh as iam_v2_owner (sha256 d05c052e...) after the encrypted, proven-restorable backup db-20261026T092001Z.sql.gz.age; svc_edged holds EXECUTE on the new function; the .down was exercised.",
-    "pull_request": "PR #254, code head 16d7097f plus the governance commit that introduces this receipt."
+    "appliance": "edged 1623194378b9 sha256 e8f7a8cd3543e96ca98bf8ebf8beb8631ee79f0eade5f1f1a44e1439d7952771 built from a clean clone (tags=stayconnect_production, vcs.modified=false) and verified on the appliance before install; backups edged.bak-pre-16231943-* (the previous install, 16d7097f), edged.bak-pre-16d7097f-20261026T092828Z and edged.bak-pre-b592a6c8-20261026T092059Z. pmsd, scd, netd, portald and acctd were not touched.",
+    "admin_console": "Release 20261026-092834 built from a clean clone of 1623194378b9 (BUILD_ID O_SftfiFD43v3z7XnG616, artifact sha256 e676e9948d4f89d2648c5adc9cb71d7862bfc1b010401838f2d7a9315cb54660); previous 20261026-092834 (16d7097f).",
+    "database": "Migrations 0157 (sha256 d05c052e...) and 0158 (sha256 1aa98f61...) applied with scripts/edge-migrate.sh as iam_v2_owner after the encrypted, proven-restorable backups db-20261026T092001Z.sql.gz.age and db-20261026T100856Z.sql.gz.age; svc_edged holds EXECUTE on the new function; the 0157 .down was exercised.",
+    "pull_request": "PR #254, code head 16231943 plus the governance commit that introduces this receipt."
   },
   "verification": "Before: 1050 console unit tests and typecheck and lint; edged, pmsd, pmsresolve and pmsprovider integration suites on a fresh full schema including the new removal, multi-PMS, service-state, sign-in-override and replace carry-over tests; Playwright at 1280 and 390 px for the new journeys (stays by connection, removal, portal designs, effective sign-in, ports) plus the 14 existing specs that touch the changed screens (88 tests). After deployment: before/after snapshots differ only in the schema head, the edged binary and the console release; units active; DEPLOYED_BINARIES 7 of 7; the live API answers for the three existing connections (removal preview: the Protel connection BLOCKED because it is on and routed to Client Wi-Fi, the Aqua Protel connection RETIRE, the empty 'aqua' placeholder DELETE - none executed), the stays tabs count 208 and 468 in house per connection, the network list reports one serving and seven archived networks, and the real-browser pass of the deployed pages at 1360 and 390 px showed the portal designs, connection tabs, effective sign-in and ports on real data with no page error and no horizontal scroll. NOT performed: executing a deletion or a retirement on PRE-LIVE (the mission forbids changing real PMS connections); the Aqua network and tagged-VLAN delivery on the switch (unchanged and out of scope).",
-  "rollback": "edged.bak-pre-16d7097f-20261026T092828Z; hotel-admin.previous -> 20261026-092105; migration 0157.down.sql restores the guards exactly (no connection is deleted by the deployment itself); database backup db-20261026T092001Z.sql.gz.age.",
+  "rollback": "The edged.bak-pre-16231943-* backup; hotel-admin.previous -> 20261026-092834; migration 0158.down.sql then 0157.down.sql restore the function and the guards exactly (no connection is deleted by the deployment itself); database backups db-20261026T092001Z.sql.gz.age and db-20261026T100856Z.sql.gz.age.",
   "follow_up": "OPEN: none required by this delivery. Known limits kept on record: the sign-in attempts and sign-in protection lists still show a submitted room without its PMS connection (a shared network can have several), and the Aqua network remains disabled.",
   "previous_state": {
     "phase": "7",
@@ -38,7 +38,7 @@
   "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
   "base": "ee0be45aee41115d7a2c3fc14b911ba6c8769e6f",
   "base_note": "Master after the merge of PR #253 (ee0be45a).",
-  "head": "16d7097f",
+  "head": "16231943",
   "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
   "previous_delivery": "T0256",
   "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
