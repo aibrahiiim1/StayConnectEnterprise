@@ -44,7 +44,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/../sc-appliance-build}"
 GO_IMAGE="${GO_IMAGE:-golang:1.25.12}"
-SERVICES="${SERVICES:-scd edged pmsd portald netd acctd}"
+# keybootstrap and svc-run are part of every release: the provisioner runs keybootstrap before scd may start, and
+# the Caddy, Admin Console, Kea and Unbound units run svc-run as their ExecStartPre. They were missing from this
+# default, so a release built with it could not be provisioned.
+SERVICES="${SERVICES:-scd edged pmsd portald netd acctd keybootstrap svc-run}"
 BUILD_TAGS="${BUILD_TAGS:-stayconnect_production}"
 
 cd "$ROOT"

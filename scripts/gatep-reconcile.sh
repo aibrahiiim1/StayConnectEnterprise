@@ -83,8 +83,24 @@ if command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --git-dir >/dev/nu
   if ! git -C "$ROOT" diff --quiet -- deploy/gatep || ! git -C "$ROOT" diff --cached --quiet -- deploy/gatep; then
     refuse "deploy/gatep has uncommitted changes; reconcile only from a committed revision"
   fi
+elif [ -f "$ROOT/RELEASE.json" ] && [ -f "$ROOT/SHA256SUMS" ]; then
+  # AN INSTALLED RELEASE (deploy/scripts/appliance-install.sh) carries no .git, but it carries the release's
+  # identity and the checksum of every file in it. The commit guard then means: the release this tree came
+  # from IS that commit, and every Gate-P file about to be read is byte-identical to what that release shipped.
+  REL_COMMIT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_commit",""))' "$ROOT/RELEASE.json" 2>/dev/null)"
+  echo "   installed release: ${REL_COMMIT:-unknown}"
+  if [ -n "$EXPECT_COMMIT" ] && [ "$REL_COMMIT" != "$EXPECT_COMMIT" ]; then
+    refuse "the installed release is ${REL_COMMIT:-unknown} but --expect-commit asked for $EXPECT_COMMIT"
+  fi
+  for f in "${FILES[@]}"; do
+    want="$(awk -v p="./deploy/gatep/$f" '$2==p {print $1}' "$ROOT/SHA256SUMS")"
+    [ -n "$want" ] || refuse "deploy/gatep/$f is not listed in the release's SHA256SUMS"
+    got="$(sha256sum "$GP/$f" | awk '{print $1}')"
+    [ "$want" = "$got" ] || refuse "deploy/gatep/$f differs from what release ${REL_COMMIT:-unknown} shipped"
+  done
+  echo "   every Gate-P file matches the release's SHA256SUMS"
 elif [ -n "$EXPECT_COMMIT" ]; then
-  refuse "--expect-commit was given but this is not a git checkout"
+  refuse "--expect-commit was given but this is neither a git checkout nor an installed release"
 fi
 
 # ---------------------------------------------------------------------------------------------------------

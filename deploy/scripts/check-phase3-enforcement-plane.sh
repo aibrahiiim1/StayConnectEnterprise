@@ -22,6 +22,11 @@ in_file() { grep -qE "^$2=" "$DIR/$1" 2>/dev/null; }
 surface=""
 on STAYCONNECT_PHASE3_PMS_AUTH      && surface="STAYCONNECT_PHASE3_PMS_AUTH"
 on STAYCONNECT_PHASE3_CHECKOUT_GRACE && surface="${surface:+$surface, }STAYCONNECT_PHASE3_CHECKOUT_GRACE"
+# THE CLIENT PORTAL'S COMMERCE PATH MINTS SESSIONS TOO, and on every appliance, not only a hotel's. A voucher, a
+# Free package or a client account is redeemed or confirmed through /v1/commerce (mounted by PHASE2_PORTAL) and
+# activated as an IAM-v2 session in PENDING_ENFORCEMENT, which only this same plane promotes. A factory-clean
+# install that enabled the portal and not the plane signed every Client in and let none of them online.
+on STAYCONNECT_PHASE2_PORTAL && surface="${surface:+$surface, }STAYCONNECT_PHASE2_PORTAL"
 if [ -z "$surface" ]; then
   echo "phase3 enforcement-plane check: OK ($DIR — no session-minting surface is enabled)"
   exit 0

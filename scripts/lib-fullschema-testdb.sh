@@ -21,7 +21,12 @@
 # (transient; the only retryable case).
 
 FULLSCHEMA_IMAGE="${FULLSCHEMA_IMAGE:-timescale/timescaledb:2.16.1-pg16}"
-FULLSCHEMA_BASELINE_TOP="${FULLSCHEMA_BASELINE_TOP:-0149}"
+# The last migration the baseline already contains, read from the baseline's own header rather than kept here as
+# a constant that silently goes stale when the baseline is regenerated (deploy/scripts/lib-baseline.sh).
+# shellcheck source=../deploy/scripts/lib-baseline.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/deploy/scripts/lib-baseline.sh"
+FULLSCHEMA_BASELINE_TOP="${FULLSCHEMA_BASELINE_TOP:-$(baseline_through "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data-plane/migrations/baseline/0000_production_baseline.sql")}"
+[ -n "$FULLSCHEMA_BASELINE_TOP" ] || { echo "lib-fullschema-testdb: cannot read which migrations the baseline contains" >&2; return 1 2>/dev/null || exit 1; }
 
 fullschema_psql() { # <container> <db> [psql args...]  -- stdin is the script
   local c="$1" db="$2"; shift 2
