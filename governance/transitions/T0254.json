@@ -1,7 +1,7 @@
 {
   "transition_id": "T0254",
   "seq": 254,
-  "timestamp": "2026-10-26T04:13:15+03:00",
+  "timestamp": "2026-10-26T04:06:36+03:00",
   "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
   "record_type": "SAME_VENDOR_MULTI_PMS_SOURCE_OWNERSHIP_DEPLOYED_AND_PR251_MERGED",
   "authorisation": "The Product Owner approved the merge of PR #251 at exact head 2487508e (merged as ae289eeb5c1198214ce20556acf00cc5ddfbc631) and authorised the separate same-vendor Multi-PMS fix with controlled PRE-LIVE software deployment. It does NOT authorise merging PR #252, Go-Live, or any PMS Interface, routing, network or PMS action by the agent.",
