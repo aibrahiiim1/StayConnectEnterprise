@@ -63,9 +63,22 @@ GO_IMAGE="$(sed -n 's/^   toolchain: //p' "$OUT/.build-$SHORT.log" | head -1)"
 rm -f "$OUT/.build-$SHORT.log"
 
 # ---------------------------------------------------------------- 2. the Admin Console bundle
-( cd "$SRC" && bash deploy/scripts/deploy-hotel-admin.sh package hotel-admin )
+# Packaged in the pinned Node container (the appliance runs Node 20), never with whatever Node the workstation has.
 mkdir -p "$REL/bundles"
-cp "$SRC/hotel-admin/hotel-admin-deploy.tgz" "$SRC/hotel-admin/hotel-admin-deploy.tgz.sha256" "$REL/bundles/"
+winpath() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "$(winpath "$SRC")":/src:ro -v "$(winpath "$REL/bundles")":/out \
+  -e NEXT_TELEMETRY_DISABLED=1 -e npm_config_update_notifier=false -e DEBIAN_FRONTEND=noninteractive \
+  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+  "$NODE_IMAGE" bash -euc '
+    apt-get update -qq >/dev/null && apt-get install -y -qq git python3 >/dev/null
+    cp -a /src /work && cd /work
+    bash deploy/scripts/deploy-hotel-admin.sh package hotel-admin
+    cp hotel-admin/hotel-admin-deploy.tgz hotel-admin/hotel-admin-deploy.tgz.sha256 /out/
+    node --version > /out/.packaged-with-node
+    chown -R "$(stat -c %u:%g /out)" /out 2>/dev/null || true
+  '
+PACKAGED_NODE="$(cat "$REL/bundles/.packaged-with-node")"; rm -f "$REL/bundles/.packaged-with-node"
 ( cd "$REL/bundles" && sha256sum -c --quiet hotel-admin-deploy.tgz.sha256 ) || die "the console bundle does not match its checksum"
 CONSOLE_JSON="$(tar -xOzf "$REL/bundles/hotel-admin-deploy.tgz" ./hotel-admin-release.json 2>/dev/null || tar -xOzf "$REL/bundles/hotel-admin-deploy.tgz" hotel-admin-release.json)"
 
