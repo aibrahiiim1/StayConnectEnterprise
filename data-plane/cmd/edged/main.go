@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,7 +61,9 @@ func envOr(k, d string) string {
 }
 
 type server struct {
-	db *pgxpool.Pool
+	db        *pgxpool.Pool
+	propsOnce sync.Once
+	props     *proposalStore
 	// dbDefaultPassword warns while the database accepts its default superuser password.
 	dbDefaultPassword *defaultDBPasswordCheck
 	scd               *scdClient

@@ -40,6 +40,8 @@ type layerState struct {
 	PortalProfile *string      `json:"portal_profile"`
 	Signin        *signinState `json:"signin"`
 	PMS           []string     `json:"pms_interfaces"`
+	// The room sign-in policy at the time (NONE, DEDICATED, SHARED_STRICT). Empty in a record made before policies existed, which then compares on the interfaces alone.
+	PMSMode string `json:"pms_mode,omitempty"`
 }
 
 type reviewSpec struct {
@@ -178,6 +180,22 @@ func (s *server) readLayers(ctx context.Context, q queryer) (map[string]layerSta
 		}
 	}
 	orows.Close()
+	mrows, err := q.Query(ctx, `SELECT guest_network_id::text, mode FROM iam_v2.guest_network_pms_policy WHERE tenant_id=$1::uuid AND site_id=$2::uuid`, s.tenantID, s.siteID)
+	if err != nil {
+		return nil, err
+	}
+	for mrows.Next() {
+		var n, m string
+		if err := mrows.Scan(&n, &m); err != nil {
+			mrows.Close()
+			return nil, err
+		}
+		if l, ok := out[n]; ok {
+			l.PMSMode = m
+			out[n] = l
+		}
+	}
+	mrows.Close()
 	prows, err := q.Query(ctx, `SELECT guest_network_id::text, pms_interface_id::text FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1::uuid AND site_id=$2::uuid ORDER BY 2`, s.tenantID, s.siteID)
 	if err != nil {
 		return nil, err
@@ -714,7 +732,7 @@ func (s *server) layerReview(ctx context.Context, plan *recoveryPlan, n netcfg.G
 		line("signin", "CHANGED", "The sign-in options were changed after the last confirmation and are put back. Restored – review needed.")
 		lt.Review = append(lt.Review, reviewSpec{Layer: "signin", Detail: "The sign-in options were put back to what they were at the last confirmation."})
 	}
-	if equalStrings(now.PMS, was.PMS) {
+	if equalStrings(now.PMS, was.PMS) && (was.PMSMode == "" || was.PMSMode == now.PMSMode) {
 		line("pms_routing", "UNCHANGED", "The PMS routing of this network is the same as at the last confirmation.")
 	} else {
 		line("pms_routing", "CHANGED", "The PMS routing of this network differs from the last confirmation. It is not changed here: room sign-in is paused on this network only until you review it under PMS routing. Restored – review needed.")
@@ -995,6 +1013,18 @@ type latestRecovery struct {
 	// State is STAGED (nothing has changed), APPLIED (live, awaiting confirmation, rolls back by itself), CONFIRMED (kept), or CANCELLED.
 	State string `json:"state"`
 	At    string `json:"at"`
+	// RoomSignIn is the optional step after a CONFIRMED reset: choosing how room sign-in works on the resulting network. It is a separate decision with its own
+	// preview, never part of the reset, and nothing about it changes unless the operator confirms it. Only present once the reset is confirmed.
+	RoomSignIn *roomSignInStep `json:"room_sign_in_step,omitempty"`
+}
+
+type roomSignInStep struct {
+	Offered     bool   `json:"offered"`
+	NetworkID   string `json:"network_id,omitempty"`
+	NetworkName string `json:"network_name,omitempty"`
+	Policy      string `json:"policy"`
+	State       string `json:"state,omitempty"`
+	Summary     string `json:"summary,omitempty"`
 }
 
 func (s *server) latestRecovery(ctx context.Context) *latestRecovery {
@@ -1021,5 +1051,27 @@ func (s *server) latestRecovery(ctx context.Context) *latestRecovery {
 	default:
 		l.State = "CANCELLED"
 	}
+	if l.State == "CONFIRMED" && l.Kind != "RESTORE" {
+		l.RoomSignIn = s.roomSignInStepFor(ctx)
+	}
 	return &l
+}
+
+// roomSignInStepFor describes the Default Network's room sign-in after a confirmed reset. It is offered while no policy has been chosen, and stays visible
+// (without being offered) once one has, so the screen can say what was decided.
+func (s *server) roomSignInStepFor(ctx context.Context) *roomSignInStep {
+	id := s.defaultNetworkID(ctx)
+	if id == "" {
+		return nil
+	}
+	a, err := s.roomSignInAssessment(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, n := range a.Networks {
+		if n.NetworkID == id {
+			return &roomSignInStep{Offered: n.Policy == policyUndecided, NetworkID: id, NetworkName: n.Name, Policy: n.Policy, State: n.State, Summary: n.Summary}
+		}
+	}
+	return nil
 }

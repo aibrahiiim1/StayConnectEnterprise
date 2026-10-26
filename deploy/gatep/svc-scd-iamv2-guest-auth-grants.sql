@@ -84,6 +84,7 @@ GRANT SELECT, INSERT ON iam_v2.auth_resolutions TO svc_scd;
 -- resolver error is deliberately indistinguishable from a failed match to the guest. Read privileges only:
 -- the resolver decides, it does not modify the Stay domain.
 GRANT SELECT ON iam_v2.guest_network_pms_map      TO svc_scd; -- which interfaces this network resolves against
+GRANT SELECT ON iam_v2.guest_network_pms_policy   TO svc_scd; -- whether this network offers room sign-in, to one interface or to a strict set (0155)
 GRANT SELECT ON iam_v2.pms_interfaces             TO svc_scd; -- candidate interfaces and their lifecycle
 GRANT SELECT ON iam_v2.pms_interface_revisions    TO svc_scd; -- the revision each decision is pinned to
 GRANT SELECT ON iam_v2.stays                      TO svc_scd; -- the in-house Stay being matched
@@ -198,6 +199,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.complete_sign_in_attempt(uuid,uuid,uuid,text,uu
 -- be able to read the feed health it is authorised against. The first version of this read the table directly
 -- and the Gate-P privilege suite caught it refusing every guest on the property.
 GRANT EXECUTE ON FUNCTION iam_v2.p3_guest_network_mirror_state(uuid,uuid,uuid) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p3_interface_can_authorise(uuid,uuid,uuid) TO svc_scd; -- one candidate's feed verdict for a shared network (0155)
 
 -- GUEST SIGN-IN PROTECTION (migration 0068) — THREE FUNCTIONS, AND NOT ONE TABLE PRIVILEGE.
 --

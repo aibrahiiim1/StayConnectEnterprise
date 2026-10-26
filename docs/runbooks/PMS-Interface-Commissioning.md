@@ -232,15 +232,22 @@ the line. Read those before changing anything.
 
 ## 8. Route the guest network
 
+Room sign-in is an **explicit policy of each client network** (Phase-0 Amendment A2): `NONE`, `DEDICATED` (one interface) or `SHARED_STRICT` (two or three
+independent interfaces). Normally this is done in **Hotel → PMS routing**, which previews every change. The API is two steps:
+
 ```
-PUT /edge/v1/pms-routing/{guest_network_id}   {pms_interface_id, routing_mode: MAPPED}
+POST /edge/v1/pms-routing/{guest_network_id}/preview   {mode, pms_interface_ids: [...]}      → the effect, blockers, warnings, proposal_id
+PUT  /edge/v1/pms-routing/{guest_network_id}           {mode, pms_interface_ids: [...], proposal_id: <the proposal that preview returned>}
 ```
 
-Setting a route **replaces** any other interface mapped to that network. An unmapped network resolves against
-nothing and is reported under `unmapped_guest_networks`, which is a legitimate configuration for a staff VLAN
-— not a hole.
+The proposal is single-use, expires after 15 minutes, belongs to the operator who previewed it, and is void after any change to that network; the apply is refused otherwise,
+and a request without the mode and a proposal is refused (`preview_required`). Returning a network to not decided is previewed with `mode: UNDECIDED` and confirmed with
+`DELETE /edge/v1/pms-routing/{guest_network_id}?proposal=<id>`. It **replaces** the network's routing as a whole and never copies a route from another network.
+A network nobody has decided about offers room sign-in to nobody (it appears under `unmapped_guest_networks`); a deliberately PMS-free network (a staff VLAN, a
+voucher network) is `NONE`, which is a decision and not a hole. A shared set resolves strictly: if any selected interface cannot answer, no guest on that network is
+admitted — check `GET /edge/v1/pms-routing/readiness`, which says which interface and why.
 
-Verify with `GET /edge/v1/pms-routing`, and confirm authentication end to end by checking
+Verify with `GET /edge/v1/pms-routing` and `/pms-routing/readiness`, and confirm authentication end to end by checking
 `iam_v2.auth_resolutions` for a `VERIFIED` row. The guest-facing response is a uniform envelope by design, so
 a resolver failure and a genuine non-match look identical from outside. **When authentication is unexpectedly
 refused, the reason is in the daemon log and the audit table, never on screen.**

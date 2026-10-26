@@ -1,3 +1,5 @@
+import type { RoomSignInStep } from "@/lib/api/pms-routing";
+
 export type RecoveryOp = "restore_last_working" | "factory_defaults" | "full_reset";
 
 export type PlanNetwork = { id: string; name: string; action: "switch_on" | "switch_off" | "restore_settings" | "create_and_switch_on"; changes?: string[]; active_clients: number };
@@ -21,7 +23,11 @@ export type RecoveryStatus = {
   last_working: { revision: number | null; confirmed_at: string | null; available: boolean };
   factory: { available: boolean; subnet: string };
   review_open: number;
-  latest?: { group_id: string; kind: "RESTORE" | "FACTORY_RESET" | "FULL_RESET"; state: "STAGED" | "APPLIED" | "CONFIRMED" | "CANCELLED"; at: string } | null;
+  latest?: {
+    group_id: string; kind: "RESTORE" | "FACTORY_RESET" | "FULL_RESET"; state: "STAGED" | "APPLIED" | "CONFIRMED" | "CANCELLED"; at: string;
+    /** The optional step after a confirmed reset; a separate decision, never part of the reset. */
+    room_sign_in_step?: RoomSignInStep | null;
+  } | null;
 };
 
 export type ReviewItem = { id: string; network_id: string; network: string; layer: string; detail: string; room_sign_in_paused: boolean; created_at: string };

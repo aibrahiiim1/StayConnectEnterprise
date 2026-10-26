@@ -30,6 +30,7 @@ import { isReauth, useNetworkChangeStepUp } from "@/components/network/change-st
 import { NetworkStatusBadge, PendingChangeNote } from "@/components/network/status";
 import { FactoryNetworkCard, PortModeCard, StagedChangesList } from "@/components/network/lifecycle";
 import { ArchivedNetworks, DefaultNetworkCard } from "@/components/network/default-network";
+import { POLICY_WORDS, STATE_WORDS, type RoomSignInBrief } from "@/lib/api/pms-routing";
 import type { NetworkOverview, OverviewNetwork } from "@/lib/api/network-overview";
 
 function poolSummary(net: GuestNetwork): string {
@@ -282,7 +283,7 @@ export default function NetworkPage() {
 
       <FactoryNetworkCard key={`f${stagedKey}`} writable={writable} onStaged={reload} />
       <StagedChangesList writable={writable} reloadKey={stagedKey} onCancelled={reload} />
-      <DefaultNetworkCard writable={writable} reloadKey={stagedKey} />
+      <DefaultNetworkCard reloadKey={stagedKey} />
 
       {rows !== null && rows.length > 0 && (
         <StatGrid cols={3}>
@@ -324,6 +325,7 @@ export default function NetworkPage() {
                 <TH className="hidden 2xl:table-cell">DHCP</TH>
                 <TH className="hidden 2xl:table-cell">Pool</TH>
                 <TH className="hidden sm:table-cell">Portal</TH>
+                <TH className="hidden lg:table-cell">Room sign-in</TH>
                 <TH>Status</TH>
                 <TH numeric>Clients</TH>
                 <TH><span className="sr-only">Actions</span></TH>
@@ -365,6 +367,9 @@ export default function NetworkPage() {
                         <div className="mt-1 text-caption text-warning-subtle-foreground">No internet</div>
                       </>
                     )}
+                  </TD>
+                  <TD className="hidden max-w-[12rem] lg:table-cell">
+                    <RoomSignInCell brief={overview[n.id]?.room_sign_in} />
                   </TD>
                   <TD nowrap>
                     {overview[n.id] ? (
@@ -443,5 +448,19 @@ export default function NetworkPage() {
       {stepUp.dialog}
       <PortModeCard writable={writable} reloadKey={stagedKey} onStaged={reload} />
     </PageShell>
+  );
+}
+
+/** The room sign-in verdict of one network, from the shared assessment. A PMS-free network is "Not offered", never a fault. */
+function RoomSignInCell({ brief }: { brief?: RoomSignInBrief }) {
+  if (!brief) return <span className="text-muted-foreground">—</span>;
+  const st = STATE_WORDS[brief.state];
+  return (
+    <div title={brief.summary}>
+      <Badge tone={st.tone} dot>{st.label}</Badge>
+      <div className="truncate text-xs text-muted-foreground">
+        {POLICY_WORDS[brief.policy]}{brief.interfaces.length > 0 ? `: ${brief.interfaces.join(", ")}` : ""}
+      </div>
+    </div>
   );
 }

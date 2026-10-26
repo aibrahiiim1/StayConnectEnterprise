@@ -93,3 +93,45 @@ func TestD11_UniformNonSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestAnOutOfServiceCandidateIsIndeterminateAndNamedAsAConfigurationFact(t *testing.T) {
+	out := Resolve([]Candidate{
+		{InterfaceID: "a", Outcome: Verified},
+		{InterfaceID: "b", Outcome: Unavailable, NotActive: true},
+	}, MaxSharedCandidates)
+	if out.Resolution != ResIndeterminate || out.Reason != "CANDIDATE_NOT_ACTIVE" || out.GuestVisibleSuccess() {
+		t.Fatalf("a verified guest was admitted while a selected PMS was out of service: %+v", out)
+	}
+	// a feed that cannot answer is a different fact from a PMS that is out of service
+	out = Resolve([]Candidate{
+		{InterfaceID: "a", Outcome: Verified},
+		{InterfaceID: "b", Outcome: Stale},
+		{InterfaceID: "c", Outcome: Unavailable, NotActive: true},
+	}, MaxSharedCandidates)
+	if out.Resolution != ResIndeterminate || out.Reason != "INCOMPLETE_EVIDENCE" {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestTheDefaultResolverBoundsTheVectorAtTheSupportedSharedSet(t *testing.T) {
+	over := make([]Candidate, MaxSharedCandidates+1)
+	for i := range over {
+		over[i] = Candidate{InterfaceID: string(rune('a' + i)), Outcome: NoMatch}
+	}
+	if out := Resolve(over, MaxSharedCandidates); out.Resolution != ResIndeterminate || out.Reason != "CANDIDATE_CAP_EXCEEDED" {
+		t.Fatalf("%+v", out)
+	}
+	if NewResolver(nil).MaxCandidates != MaxSharedCandidates {
+		t.Fatal("the production resolver is built unbounded")
+	}
+}
+
+func TestAmbiguityBeatsAnOutOfServiceCandidate(t *testing.T) {
+	out := Resolve([]Candidate{
+		{InterfaceID: "a", Outcome: Verified}, {InterfaceID: "b", Outcome: Verified},
+		{InterfaceID: "c", Outcome: Unavailable, NotActive: true},
+	}, MaxSharedCandidates)
+	if out.Resolution != ResAmbiguous {
+		t.Fatalf("%+v", out)
+	}
+}

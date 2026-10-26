@@ -55,7 +55,7 @@ If you need to read the full code on a card (e.g. a smudged card), open it and u
    - Room number **exactly** as the PMS has it (some PMSes store "0214", some "214").
    - Name spelling — the guest should enter the full first name, family name, or reservation number, depending on what **Hotel → Room sign-in** asks for (with *any one of*, the one box accepts any of the three).
    - **Why** says *Licence refused new clients* or *Licensed capacity full* → the client's details are not the problem: the appliance's licence did not admit a new client, or the appliance is at its licensed number of clients online (room, voucher and account sign-ins all count, and each device of a room takes a place). Check **System → Appliance & licence**.
-3. **Hotel → Guest sign-in checks** → if every attempt on ONE client network fails while others work, that network points at the wrong PMS or none: fix it under **Hotel → PMS routing**.
+3. **Hotel → Guest sign-in checks** → if every attempt on ONE client network fails while others work, that network points at the wrong PMS, none, or a shared set in which one PMS cannot answer: **Hotel → PMS routing** says which and why, and fixes it.
 4. **Too many attempts**: after too many wrong tries (by default 5 within 60 seconds) the device is asked to wait (by default 60 seconds) and sees a countdown. The desk (Client services or Client relations) can **Release** it on **Guest sign-in attempts → Active restrictions** — this lets the device try again; it does not sign the client in.
 5. If all of the above check out and the PMS still rejects, the reservation may not be in the PMS correctly. Have the site team check the reservation in the PMS directly; **Hotel → PMS activity** shows whether the check-in message ever arrived.
 

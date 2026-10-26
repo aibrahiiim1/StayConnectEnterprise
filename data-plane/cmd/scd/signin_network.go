@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
@@ -62,19 +63,40 @@ func (s *server) networkSigninFor(ctx context.Context, networkID string) (networ
 	var primary *string
 	err := s.db.QueryRow(ctx, `SELECT disabled_methods, primary_method, remember_days FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid AND tenant_id=$2::uuid`,
 		networkID, s.tenID).Scan(&off, &primary, &out.remember)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
 	for _, m := range off {
 		out.disabled[m] = true
 	}
+	// A network whose room sign-in is deliberately NONE does not offer the room method at all, however the site's setting reads.
+	policy, perr := s.roomSignInPolicy(ctx, networkID)
+	if perr != nil {
+		return out, perr
+	}
+	if policy == "NONE" {
+		out.disabled[keyPMS] = true
+	}
 	if primary != nil {
 		out.primary = *primary
 	}
 	return out, nil
+}
+
+func isUndefinedTable(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "42P01"
+}
+
+// roomSignInPolicy is "" for a network with no policy, and also while the policy table does not exist (a schema rolled back under a running scd): the network is then
+// judged by its mapped interfaces alone, which refuses anything but exactly one.
+func (s *server) roomSignInPolicy(ctx context.Context, networkID string) (string, error) {
+	var policy string
+	err := s.db.QueryRow(ctx, `SELECT mode FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, networkID).Scan(&policy)
+	if errors.Is(err, pgx.ErrNoRows) || isUndefinedTable(err) {
+		return "", nil
+	}
+	return policy, err
 }
 
 // networkOffers reports whether at least one of the methods is offered on the network. Unreadable means not offered.

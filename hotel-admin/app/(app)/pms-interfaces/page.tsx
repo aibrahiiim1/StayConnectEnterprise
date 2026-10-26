@@ -3,9 +3,9 @@
 // Never-configured connections are kept in a folded group so a half-finished setup is not read as a PMS link that is down.
 // Readiness is the server's verdict (`room_auth_ready`, `roomSignInReadiness`); this page words it and does not re-derive it.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { api, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type Whoami } from "@/lib/api";
+import { api, type PmsInterfaceHealth, type Whoami } from "@/lib/api";
 import { PageHeader, PageShell, StatCard, StatGrid } from "@/components/ui/page";
 import { Card, CardBody, SectionCard } from "@/components/ui/card";
 import { FilterBar } from "@/components/ui/toolbar";
@@ -17,7 +17,9 @@ import { FilterChips } from "@/components/ui/data";
 import { Skeleton } from "@/components/ui/misc";
 import { canWrite } from "@/lib/roles";
 import { formatDate, formatRelative } from "@/lib/utils";
-import { roomSignInReadiness } from "@/lib/pms-availability";
+import { useRoomSignInReadiness } from "@/components/room-sign-in-readiness";
+import { onlyUndecided, type RoomSignInReadiness } from "@/lib/pms-availability";
+import type { AssessmentInterfaceSummary } from "@/lib/api/pms-routing";
 import {
   type PmsConnection, type PmsProvider,
   PROTEL_FALLBACK, isNeverConfigured, isSyncing, lastCommunication, loadProviderCatalogue, pmsErrorText, providerFor,
@@ -36,8 +38,8 @@ export default function PMSInterfacesPage() {
   const [health, setHealth] = useState<Record<string, PmsInterfaceHealth>>({});
   // Health arrives after the list; until it does the summary must not announce "not working".
   const [healthLoaded, setHealthLoaded] = useState(false);
-  // null = routing could not be read.
-  const [routes, setRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
+  // The one network-aware room sign-in assessment; null = it could not be read (unknown, never an outage).
+  const { readiness: signIn, assessment, reload: reloadReadiness } = useRoomSignInReadiness();
   const [err, setErr] = useState<unknown>(null);
 
   const [providers, setProviders] = useState<PmsProvider[]>([PROTEL_FALLBACK]);
@@ -56,7 +58,8 @@ export default function PMSInterfacesPage() {
       const list = r.interfaces ?? [];
       setRows(list);
       setErr(null);
-      const [results, rt] = await Promise.all([
+      const [, results] = await Promise.all([
+        reloadReadiness(),
         Promise.all(
           list
             .filter((i) => i.lifecycle_state !== "DECOMMISSIONED" && !isNeverConfigured(i))
@@ -69,16 +72,14 @@ export default function PMSInterfacesPage() {
               }
             }),
         ),
-        api.get<{ routes?: PmsGuestNetworkRoute[] }>("/pms-routing").catch(() => null),
       ]);
-      setRoutes(Array.isArray(rt?.routes) ? rt!.routes : null);
       setHealth(Object.fromEntries(results.filter((x) => x && x[1]) as [string, PmsInterfaceHealth][]));
       setHealthLoaded(true);
     } catch (e) {
       setErr(e);
       setRows((x) => x ?? []);
     }
-  }, []);
+  }, [reloadReadiness]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -102,26 +103,13 @@ export default function PMSInterfacesPage() {
   const heard = Object.values(health).map(lastCommunication).filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0] ?? null;
 
-  const networksFor = useCallback((i: PmsConnection): string[] | null => {
-    if (!routes) return null;
-    return routes
-      // A network is served by the interface it is routed to whatever routing_mode says: the resolver consults only the mapped interface.
-      .filter((r) => r.pms_interface_id === i.id)
-      .map((r) => r.guest_network_name || "Unnamed network");
-  }, [routes]);
+  const routingFor = useCallback((i: PmsConnection): AssessmentInterfaceSummary | null =>
+    assessment?.interfaces.find((x) => x.pms_interface_id === i.id) ?? null, [assessment]);
 
-  const needsAttention = (i: PmsConnection) => {
-    const h = health[i.id];
-    return (i.lifecycle_state === "ACTIVE" && h && h.room_auth_ready === false) || (h?.review_events ?? 0) > 0;
-  };
-  const working = (i: PmsConnection) => i.lifecycle_state === "ACTIVE" && health[i.id]?.room_auth_ready === true;
+  // A connection needs attention for room sign-in only when it is serving a client network and cannot answer; one that serves no active network is not a fault.
+  const needsAttention = (i: PmsConnection) => routingFor(i)?.state === "IMPAIRED" || (health[i.id]?.review_events ?? 0) > 0;
+  const working = (i: PmsConnection) => i.lifecycle_state === "ACTIVE" && routingFor(i)?.state === "SERVING";
   const shown = live.filter((i) => filter === "all" || (filter === "attention" ? needsAttention(i) : working(i)));
-
-  const signIn = useMemo(
-    () => roomSignInReadiness(list, healthLoaded ? Object.values(health) : null, routes),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, health, healthLoaded, routes],
-  );
 
   const selectedRow = list.find((r) => r.id === selected) ?? null;
   const open = (id: string, t: SheetTab = "overview") => { setTab(t); setSelected(id); };
@@ -230,7 +218,12 @@ export default function PMSInterfacesPage() {
         </Card>
       ) : (
         <>
-          {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
+          {healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") && onlyUndecided(signIn) ? (
+            <Callout tone="warning" title="Room sign-in needs a decision">
+              {`Nobody has chosen how room sign-in works on ${signIn.affected.map((a) => a.guestNetwork).join(", ")}. `}
+              <Link href="/pms-routing" className="underline underline-offset-2">Choose under PMS routing</Link>
+            </Callout>
+          ) : healthLoaded && active.length > 0 && (signIn.state === "down" || signIn.state === "partial") ? (
             <Callout tone={signIn.state === "down" ? "danger" : "warning"}
               title={signIn.state === "down" ? "Guests cannot sign in with a room number" : "Room sign-in is not working on every client network"}>
               {signIn.state === "down"
@@ -274,7 +267,7 @@ export default function PMSInterfacesPage() {
                   health={health[i.id]}
                   healthLoaded={healthLoaded}
                   provider={providerFor(i.connector_kind, providers)}
-                  networks={networksFor(i)}
+                  routing={routingFor(i)}
                   onOpen={() => open(i.id)}
                 />
               ))}
@@ -385,7 +378,7 @@ function AdvancedDiagnostics({ reviewEvents }: { reviewEvents: number }) {
 function RoomSignInStat({
   signIn, activeCount, ready, fromLastRoster,
 }: {
-  signIn: ReturnType<typeof roomSignInReadiness>;
+  signIn: RoomSignInReadiness;
   activeCount: number;
   ready: number;
   /** A ready connection is answering from its last complete guest list rather than a live feed. */
@@ -395,6 +388,9 @@ function RoomSignInStat({
   if (activeCount === 0) {
     return <StatCard label="Room sign-in" value={<span className="text-muted-foreground">Not in use</span>} hint="No connection is active" />;
   }
+  if (signIn.state === "none") {
+    return <StatCard label="Room sign-in" value={<span className="text-muted-foreground">Not offered</span>} hint="No client network uses a PMS for sign-in" />;
+  }
   if (signIn.state === "ready" && fromLastRoster) {
     return <StatCard label="Room sign-in" tone="warn" value="Working" hint="From the last complete guest list" />;
   }
@@ -402,6 +398,12 @@ function RoomSignInStat({
     return (
       <StatCard label="Room sign-in" tone="ok" value="Working"
         hint={signIn.unchecked.length ? `${signIn.unchecked.length} network${signIn.unchecked.length === 1 ? "" : "s"} not yet checked` : "On every client network using a PMS"} />
+    );
+  }
+  if ((signIn.state === "partial" || signIn.state === "down") && onlyUndecided(signIn)) {
+    return (
+      <StatCard label="Room sign-in" tone="warn" value="Needs a decision"
+        hint={`${signIn.affected.length} client network${signIn.affected.length === 1 ? "" : "s"} not set up`} />
     );
   }
   if (signIn.state === "partial" || signIn.state === "down") {

@@ -205,10 +205,10 @@ func TestIntegration_Default_ReadinessNamesWhatIsUnresolvedAndChangesNothing(t *
 
 	ifaceA, _, _ := f.seedInterface(t)
 	ifaceB, _, _ := f.seedInterface(t)
-	if st, b := f.do(t, "PUT", "/pms-routing/"+h.vlans[0], map[string]any{"pms_interface_id": ifaceA}); st != 200 {
+	if st, b := f.setRouting(t, h.vlans[0], "DEDICATED", ifaceA); st != 200 {
 		t.Fatalf("route A = %d %v", st, b)
 	}
-	if st, b := f.do(t, "PUT", "/pms-routing/"+h.vlans[1], map[string]any{"pms_interface_id": ifaceB}); st != 200 {
+	if st, b := f.setRouting(t, h.vlans[1], "DEDICATED", ifaceB); st != 200 {
 		t.Fatalf("route B = %d %v", st, b)
 	}
 	f.app.commerce = f.commerceAdmin(t)
@@ -282,13 +282,15 @@ func TestIntegration_Default_ReadinessNamesWhatIsUnresolvedAndChangesNothing(t *
 
 	// The operator chooses ONE interface through the existing, explicit routing call. The other interface's route stays where it was.
 	first := cands[0].(map[string]any)["pms_interface_id"].(string)
-	if st, b := f.do(t, "PUT", "/pms-routing/"+def, map[string]any{"pms_interface_id": first}); st != 200 {
+	if st, b := f.setRouting(t, def, "DEDICATED", first); st != 200 {
 		t.Fatalf("route default = %d %v", st, b)
 	}
 	_, r = f.do(t, "GET", "/network/default", nil)
 	for _, it := range r["items"].([]any) {
-		if m := it.(map[string]any); m["id"] == "pms" && m["state"] != "ok" {
-			t.Fatalf("pms after the operator's choice: %v", m)
+		// Routed now, so the item reports whether the chosen interface can answer. The fixture's interface has no live feed, so it is honestly not ready; what must
+		// have gone is the "choose how room sign-in works" decision.
+		if m := it.(map[string]any); m["id"] == "pms" && strings.Contains(m["detail"].(string), "Choose") {
+			t.Fatalf("pms after the operator's choice still asks for a decision: %v", m)
 		}
 	}
 	if len(r["pms_candidates"].([]any)) != 0 {
@@ -321,7 +323,7 @@ func TestIntegration_Archive_TheWholeJourneyRunsAsTheAdminConsoleRole(t *testing
 	h := heavilyReconfigured(t, f, fn)
 	f.app.commerce = f.commerceAdmin(t)
 	iface, _, _ := f.seedInterface(t)
-	if st, b := f.do(t, "PUT", "/pms-routing/"+h.vlans[0], map[string]any{"pms_interface_id": iface}); st != 200 {
+	if st, b := f.setRouting(t, h.vlans[0], "DEDICATED", iface); st != 200 {
 		t.Fatalf("route = %d %v", st, b)
 	}
 	f.seedNetworkPackage(t, "role-"+uniqueParent(), h.vlans[0], nil)

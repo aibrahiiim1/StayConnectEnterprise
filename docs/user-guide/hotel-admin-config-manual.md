@@ -267,8 +267,10 @@ password sign-in, an alternative to vouchers:
 3. **Actions** → **Activate** (**password**, with a reason). **Test the
    connection** reads a small sample and writes nothing to the PMS.
 4. **Hotel → PMS routing** (`/pms-routing`, Site admin
-   only): point each client network that should offer room sign-in at the
-   connection.
+   only): for each client network choose how room sign-in works — *No room
+   sign-in*, *One dedicated PMS*, or *A shared strict set* of two or three
+   connections — and confirm the preview. A network left undecided offers room
+   sign-in to nobody.
 5. **Hotel → Room sign-in** (`/room-sign-in`): choose what the guest types
    besides the room number — always exactly one detail from the reservation:
    - **Room number + any one of: first name, surname or reservation number

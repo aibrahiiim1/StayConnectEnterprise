@@ -111,9 +111,12 @@ async function installBackend(
     if (path.startsWith("/pms-interfaces/")) {
       return route.fulfill(json(200, { interface: IFACE, guest_networks: opts.routes ?? [] }));
     }
+    if (path === "/pms-routing/readiness") {
+      return route.fulfill(json(200, { generated_at: "2026-10-26T08:00:00Z", overall: "READY", networks: opts.assessmentNetworks ?? [], interfaces: [], issues: [] }));
+    }
     if (path.startsWith("/pms-routing")) {
       return route.fulfill(json(200, {
-        routes: opts.routes ?? [], unmapped_guest_networks: opts.unmapped ?? [],
+        routes: opts.routes ?? [], policies: opts.policies ?? [], unmapped_guest_networks: opts.unmapped ?? [],
       }));
     }
     if (path.startsWith("/pms-source-conflicts")) {
@@ -265,22 +268,26 @@ test("adding a Protel connection sends exactly the create and draft requests, an
   });
 });
 
-test("routing names the guest networks that are mapped to nothing", async ({ page }) => {
+test("routing shows each network's choice, and names the networks nobody has decided about", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     mutations,
-    routes: [{
-      guest_network_id: "gn1", guest_network_name: "Guest VLAN 10",
-      pms_interface_id: "i1", pms_interface_label: "Main PMS", is_default: true, routing_mode: "MAPPED",
-    }],
-    unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+    policies: [
+      { network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED",
+        interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true }] },
+      { network_id: "gn2", name: "Conference VLAN 20", enabled: true, archived: false, is_default: false, mode: "", interfaces: [] },
+    ],
+    assessmentNetworks: [
+      { network_id: "gn2", name: "Conference VLAN 20", state: "UNDECIDED", summary: "No one has decided how room sign-in works on this network, so it is not offered.", interfaces: [], reasons: [] },
+    ],
   });
   await page.goto("/pms-routing");
 
   await expect(page.getByText("Guest VLAN 10")).toBeVisible();
-  await expect(page.getByText("Main PMS")).toBeVisible();
+  await expect(page.getByText("Main PMS").first()).toBeVisible();
   await expect(page.getByText("Conference VLAN 20")).toBeVisible();
-  await expect(page.getByText(/will not be recognised/)).toBeVisible();
+  await expect(page.getByText("Needs a decision")).toBeVisible();
+  await expect(page.getByText(/so it is not offered/)).toBeVisible();
 });
 
 test("source conflicts name both interfaces by their labels", async ({ page }) => {
@@ -328,9 +335,8 @@ test("the PMS pages are accessible: one heading, named controls, labelled fields
   const mutations: Mutations = [];
   await installBackend(page, {
     mutations,
-    routes: [{ guest_network_id: "gn1", guest_network_name: "Guest VLAN 10", pms_interface_id: "i1",
-      pms_interface_label: "Main PMS", is_default: true, routing_mode: "MAPPED" }],
-    unmapped: [{ guest_network_id: "gn2", guest_network_name: "Conference VLAN 20" }],
+    policies: [{ network_id: "gn1", name: "Guest VLAN 10", enabled: true, archived: false, is_default: false, mode: "DEDICATED",
+      interfaces: [{ pms_interface_id: "i1", label: "Main PMS", lifecycle_state: "ACTIVE", published: true }] }],
     conflicts: [{ id: "c1", interface_a: "i1", interface_a_label: "Main PMS", interface_b: "i2",
       interface_b_label: "Spa PMS", severity: "HIGH", resolution: "UNRESOLVED" }],
     resolutions: [{ id: "a1", guest_network_id: "gn1", outcome_code: "VERIFIED", resolved: true,

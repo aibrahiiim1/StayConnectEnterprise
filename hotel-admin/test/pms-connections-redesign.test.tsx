@@ -62,6 +62,9 @@ function mockBackend(over: {
   providers?: any[] | null;
   revisions?: any[];
   roles?: string[];
+  serving?: string[];
+  unused?: boolean;
+  archivedRoutes?: number;
 } = {}) {
   get.mockImplementation((path: string) => {
     if (path === "/auth/whoami") return Promise.resolve({ roles: over.roles ?? ["site_admin"] });
@@ -71,11 +74,14 @@ function mockBackend(over: {
         ? Promise.resolve({ providers: over.providers })
         : Promise.reject(Object.assign(new Error("page not found"), { status: 404 }));
     }
-    if (path === "/pms-routing") {
+    if (path === "/pms-routing/readiness") {
       return Promise.resolve({
-        routes: [{ guest_network_id: "gn1", guest_network_name: "Guest Wi-Fi", pms_interface_id: "i1",
-          is_default: true, routing_mode: "MAPPED" }],
-        unmapped_guest_networks: [],
+        generated_at: "2026-10-26T08:00:00Z", overall: "READY", issues: [],
+        networks: [{ network_id: "gn1", name: "Guest Wi-Fi", enabled: true, is_default: false, policy: "DEDICATED", state: "READY", interfaces: [], reasons: [], summary: "ok" }],
+        interfaces: (over.serving ?? ["i1"]).map((id: string) => ({
+          pms_interface_id: id, label: id, lifecycle_state: "ACTIVE", published: true, health_known: true, room_auth_ready: true,
+          serving_networks: over.unused ? [] : ["Guest Wi-Fi"], archived_or_off_routes: over.archivedRoutes ?? 0, state: over.unused ? "NOT_USED" : "SERVING",
+        })),
       });
     }
     const m = /^\/pms-interfaces\/([^/]+)\/health$/.exec(path);
@@ -252,6 +258,20 @@ describe("the overview", () => {
     expect(screen.getAllByText("41").length).toBeGreaterThan(0);
     expect(screen.getAllByText("1m ago").length).toBeGreaterThan(0);
     expect(screen.getByText("Guest Wi-Fi")).toBeTruthy();
+  });
+
+  // A PMS that also keeps a route to an archived network is described, not warned about, while it serves an active one.
+  it("says a connection also routed to archived networks is fine while it serves an active one", async () => {
+    mockBackend({ archivedRoutes: 2 });
+    await renderPage();
+    expect(await screen.findByText(/also routed to 2 archived or switched-off networks/)).toBeTruthy();
+    expect(screen.queryByText(/cannot sign in with a room number/)).toBeNull();
+  });
+
+  it("does not warn about a connection that serves no active network, and says so", async () => {
+    mockBackend({ unused: true });
+    await renderPage();
+    expect(await screen.findByText(/None in use for room sign-in/)).toBeTruthy();
   });
 });
 

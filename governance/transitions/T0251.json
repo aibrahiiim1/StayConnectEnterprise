@@ -1,0 +1,52 @@
+{
+  "transition_id": "T0251",
+  "seq": 251,
+  "timestamp": "2026-10-26T01:00:37+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_ROUTING_WRITE_PATH_CLOSED_AND_ROLLBACK_DRILLED",
+  "authorisation": "D74 (2026-10-26), continued under the same mission and PR #251 (the Product Owner's instruction of 2026-10-26 to close the legacy write path, verify rollback, reconcile revisions 99 and 100 read-only and report the new reviewed head). It does NOT authorise merging PR #251 (the head-specific approval was not applied by the agent), Go-Live, or any live network, routing, PMS or financial action by the agent.",
+  "deployment_provenance": {
+    "appliance": "edged and scd 1500865c4d39, each built from a clean clone with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false); sha256 edged 852373f79da13d743667c0ea1a893f0e2469da7aad0bd1ecc4ca9b2070d4a91d, scd ce292ebdb94a36b8079d43cedcae5bec744c383dd35e2e3abbb00adc107ffc95 verified on the appliance before install; backups edged.bak-pre-1500865c-20261025T215629Z and scd.bak-pre-1500865c-20261025T215634Z. Software only: no migration was applied and Kea, netd, portald, pmsd and acctd were not touched.",
+    "admin_console": "Release 20261025-215640 built from a clean clone of 1500865c4d39 (BUILD_ID lshkkUlm4k3eLnLbQnfjd, artifact sha256 6edee0a6152956780535881fe8c7c30d13cc897067dbb807ee67f05be9532942); previous 20261025-201251 (67808d7a).",
+    "database": "No change. Migration 0155 text was amended in the repository (down saves the policies, up restores them when applied again); the live database applied the earlier text, which is equivalent when no saved table exists.",
+    "pull_request": "PR #251, head 1500865c plus the governance commit that introduces this receipt."
+  },
+  "changes": [
+    "Every routing mutation needs its preview and fingerprint: the earlier single-interface request and any request without mode, interfaces and fingerprint are refused (preview_required); removing a network's routing needs ?based_on= and records the previous policy. Regression tests prove a shared set survives each bypass.",
+    "scd treats an absent policy table as no policy: one mapped interface keeps working, several refuse, every other method is unaffected (schema rolled back under a running scd).",
+    "0155 down saves the policies and re-apply restores those that still agree with the mapping. Drilled on a disposable database as iam_v2_owner: 269 of 269 mapped rows kept; 34 shared, 179 dedicated and 12 none restored exactly.",
+    "A database trigger refuses an older release's replace-with-one write against a shared policy (tested).",
+    "The room sign-in editor is a guided two-step flow with a recommended option, reasons for unavailable options, a plain-language sentence of the effect, a countdown for the shared selection, and a clear recovery when the routing changed after the preview."
+  ],
+  "reconciliation_after_revisions_99_and_100": {
+    "method": "Read-only: database queries, the audit log, host addresses and routes, Kea's file, service state and the Admin Console API as the verification operator. Re-read after the deployment: identical apart from one backup.created by admin.",
+    "revisions": "100 active (applied 20:17:07, confirmed 20:17:15 UTC by admin); 99 and 98 superseded; nothing staged or in flight.",
+    "topology": "ens192 is a trunk: Client Wi-Fi untagged (10.20.0.0/20), VLAN 60 (10.60.0.0/24) and VLAN 90 (10.90.0.0/24) tagged; all enabled and confirmed running; bridges, VLAN devices, addresses and routes up; Kea lists exactly those three subnets; management address and default route unchanged; no service error; no failing diagnostic check; 0 guest sessions.",
+    "archive_and_routing": "Archive holds 2; PRELIVE Test Guest (VLAN 90) was restored by admin and is off. VLAN 90 is dedicated to Protel and ready; VLAN 60 and Client Wi-Fi are undecided (one decision warning each); no mapping without a policy, no policy without a network.",
+    "observation": "ens192.60 has received 0 frames (17 sent) and ens192.90 0 (14 sent) while ens192 carries traffic: no tagged frame has reached this appliance on those VLANs. This does not show where they are lost; the switch trunk, the ESXi port group (VLAN ID 4095 is needed to receive tagged frames), the access-point mapping and the virtual NIC are unexamined."
+  },
+  "verification": "Before: Go unit and integration tests on a fresh full-schema PostgreSQL (edged including the real svc_edged role, scd, pmsresolve), 1027 console unit tests, lint, typecheck and 27 browser tests for the changed areas. After: refused-write probes against a non-existent network id (all refused, every policy and fingerprint identical), readiness answers, the reconciliation re-read identical, and a real-browser check of the guided editor at 1280 px and 390 px (preview and Back, not confirmed). NOT verified: a real client signing in with a room number; real Protel behaviour with two interfaces on one network; whether tagged frames can reach the appliance on VLAN 60 and VLAN 90 (switch/ESXi side); any switch, access-point or hypervisor configuration.",
+  "rollback": "edged.bak-pre-1500865c-20261025T215629Z and scd.bak-pre-1500865c-20261025T215634Z (previous builds 67808d7a / 58abb494 are retained as edged.bak-pre-67808d7a-..., scd.bak-pre-58abb494-...); hotel-admin.previous -> 20261025-201251. Schema: software first, then 0155.down.sql after a backup; it keeps every mapping and saves the policies. Central: no change.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #251; the switch/ESXi delivery of tagged VLANs 60 and 90; real-client room sign-in acceptance on a dedicated and, with a second PMS Interface, a shared network; the shared-set cap (not requested).",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "da58bb6c4f0389ffaee391d03594a4dd8af3bd3a",
+  "base_note": "Master after the merge of PR #250 (T0249).",
+  "head": "1500865c",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0250",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

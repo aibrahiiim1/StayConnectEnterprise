@@ -395,18 +395,23 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A network no PMS interface is mapped to (a staff or conference network) offers no room sign-in at all. That is a fact about the network, not a stale feed,
-	// and it is refused as such before anything else is consulted.
+	// The network's explicit room sign-in policy decides what is consulted, before anything else. NONE offers no room sign-in at all (a voucher or account network);
+	// a network nobody has decided about offers it to nobody; DEDICATED asks exactly its one interface and SHARED_STRICT exactly its selected set. A policy that
+	// disagrees with the interfaces actually mapped is refused rather than guessed at. These are facts about the network, not a stale feed.
 	var mapped int
-	if err := p.srv.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_pms_map
-		 WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, p.srv.tenID, p.srv.siteID, dev.GuestNetwork).Scan(&mapped); err != nil {
+	policy, perr := p.srv.roomSignInPolicy(ctx, dev.GuestNetwork)
+	if perr == nil {
+		perr = p.srv.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_pms_map WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`,
+			p.srv.tenID, p.srv.siteID, dev.GuestNetwork).Scan(&mapped)
+	}
+	if perr != nil {
 		at.Result = signinattempt.ServiceUnavailable
-		notVerified(w, at.Result, "mapping: "+err.Error())
+		notVerified(w, at.Result, "mapping: "+perr.Error())
 		return
 	}
-	if mapped == 0 {
+	if why := routingRefusal(policy, mapped); why != "" {
 		at.Result = signinattempt.RoutingOrInterfaceFailure
-		notVerified(w, at.Result, "network_has_no_pms_mapping")
+		notVerified(w, at.Result, why)
 		return
 	}
 
@@ -578,6 +583,19 @@ func validRequestID(s string) bool {
 // admit anyone who guessed a common first name for a room.
 func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
 	obs := probeObservation{InterfaceID: ifaceID}
+	// Each candidate answers for its own mirror. A candidate whose feed cannot be trusted is STALE, never NO_MATCH: on a shared network "this PMS has no such guest"
+	// is only worth something when this PMS was actually in a position to say so.
+	var feedOK bool
+	if err := p.srv.db.QueryRow(ctx, `SELECT iam_v2.p3_interface_can_authorise($1::uuid,$2::uuid,$3::uuid)`, p.srv.tenID, p.srv.siteID, ifaceID).Scan(&feedOK); err != nil {
+		obs.Failed = true
+		seen.add(obs)
+		return pmsresolve.Unavailable, "", err
+	}
+	if !feedOK {
+		obs.Failed = true
+		seen.add(obs)
+		return pmsresolve.Stale, "", nil
+	}
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT s.id::text,
 		       s.status IN ('IN_HOUSE','POST_STAY_ACTIVE') AS eligible,
@@ -661,6 +679,33 @@ func (p *phase3Auth) probeInterface(ctx context.Context, seen *observations, ifa
 	}
 }
 
+// routingRefusal returns why a network's room sign-in policy refuses before any interface is consulted, or "" when the policy and the interfaces it names agree.
+// A network with no policy row keeps the one meaning it always had: exactly one mapped interface is that interface, anything else is not decided.
+func routingRefusal(policy string, mapped int) string {
+	switch policy {
+	case "NONE":
+		return "network_room_sign_in_policy_none"
+	case "DEDICATED":
+		if mapped != 1 {
+			return "network_policy_dedicated_mapping_mismatch"
+		}
+	case "SHARED_STRICT":
+		if mapped < 2 || mapped > pmsresolve.MaxSharedCandidates {
+			return "network_policy_shared_mapping_mismatch"
+		}
+	case "":
+		switch {
+		case mapped == 0:
+			return "network_has_no_pms_mapping"
+		case mapped > 1:
+			return "network_has_undecided_multi_pms_mapping"
+		}
+	default:
+		return "network_policy_unknown"
+	}
+	return ""
+}
+
 // classifyRefusal maps the resolver verdict plus probe observations to the operator-facing reason. The test
 // order matters: "nothing matched" covers absent room, ineligible stay and mismatch, and a wrong order gives a confident wrong diagnosis.
 func classifyRefusal(out pmsresolve.Result, roomExists bool, eligible int, anyProbeFailed bool) signinattempt.Result {
@@ -671,7 +716,7 @@ func classifyRefusal(out pmsresolve.Result, roomExists bool, eligible int, anyPr
 	case pmsresolve.ResAmbiguous:
 		return signinattempt.AmbiguousRoomCandidates
 	case pmsresolve.ResIndeterminate:
-		if out.Reason == "UNMAPPED" || out.Reason == "CANDIDATE_CAP_EXCEEDED" {
+		if out.Reason == "UNMAPPED" || out.Reason == "CANDIDATE_CAP_EXCEEDED" || out.Reason == "CANDIDATE_NOT_ACTIVE" {
 			// Not anything the guest typed.
 			return signinattempt.RoutingOrInterfaceFailure
 		}

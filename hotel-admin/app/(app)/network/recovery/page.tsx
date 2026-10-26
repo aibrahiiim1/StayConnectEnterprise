@@ -18,6 +18,8 @@ import {
   ACTION_LABEL, LAYER_LABEL, OP_TITLE, STATE_LABEL, type RecoveryOp, type RecoveryPlan, type RecoveryStatus, type ReviewItem,
 } from "@/lib/api/network-recovery";
 import { errMsg } from "@/lib/utils";
+import { RoutingEditor, usePmsRouting } from "@/components/pms/routing-editor";
+import { POLICY_WORDS } from "@/lib/api/pms-routing";
 import { GROUP_LABEL, type StagedGroup } from "@/lib/api/network-lifecycle";
 
 const OPS: { op: RecoveryOp; text: string }[] = [
@@ -86,6 +88,7 @@ export default function RecoveryPage() {
       <PageHeader title="Recovery" description="Return the client networks to a known state. Each is staged, applied and kept or rolled back like any other network change." />
 
       {status?.latest && <RecoveryProgress latest={status.latest} />}
+      {status?.latest?.room_sign_in_step && <RoomSignInStepCard step={status.latest.room_sign_in_step} onChanged={load} />}
 
       {staged.some((g) => g.state === "PENDING") && (
         <Callout tone="warning" title="A recovery is staged and has not been applied">
@@ -208,6 +211,32 @@ function RecoveryProgress({ latest }: { latest: NonNullable<RecoveryStatus["late
         ))}
       </ol>
       <p className="mt-2 text-sm">{STEPS[at].text}{retired ? " The networks it switched off are archived and the Default Network serves clients." : ""}</p>
+    </SectionCard>
+  );
+}
+
+/**
+ * After a CONFIRMED reset: how room sign-in works on the resulting network. Optional, and separate from the reset: the reset never touched PMS routing, and nothing
+ * changes until the operator has seen the preview and confirmed it.
+ */
+function RoomSignInStepCard({ step, onChanged }: { step: NonNullable<NonNullable<RecoveryStatus["latest"]>["room_sign_in_step"]>; onChanged: () => void | Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const { canRoute, interfaces } = usePmsRouting();
+  return (
+    <SectionCard title="Room sign-in on the new network (optional)" description={`${step.network_name ?? "The Default Network"} · ${POLICY_WORDS[step.policy] ?? "Not decided"}`}>
+      {step.offered ? (
+        <>
+          <p className="text-sm">
+            The reset did not change any PMS routing. Room sign-in is not offered on {step.network_name ?? "the Default Network"} until you choose how it works: none, one dedicated PMS, or a shared
+            strict set of two or three. You see what it affects before anything is applied. You can skip this and decide later under <Link className="underline" href="/pms-routing">PMS routing</Link>.
+          </p>
+          {canRoute && <Button className="mt-3" size="sm" onClick={() => setOpen(true)}>Configure room sign-in…</Button>}
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">{step.summary} <Link className="underline" href="/pms-routing">PMS routing</Link></p>
+      )}
+      <RoutingEditor open={open} network={step.network_id ? { id: step.network_id, name: step.network_name ?? "the Default Network" } : null} interfaces={interfaces}
+        onClose={() => setOpen(false)} onDone={onChanged} />
     </SectionCard>
   );
 }

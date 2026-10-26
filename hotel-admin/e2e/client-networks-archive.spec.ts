@@ -39,9 +39,23 @@ async function install(page: Page, posts: { path: string }[]) {
     }
     if (path === "/network/default") {
       return route.fulfill(json(200, { network_id: "d1", name: "Client Wi-Fi", present: true,
-        items: [{ id: "dhcp", label: "DHCP", state: "ok", detail: "Local DHCP." }, { id: "pms", label: "PMS routing", state: "unresolved", detail: "Room sign-in is not offered on this network." }],
-        pms_candidates: [{ pms_interface_id: "p1", label: "Protel", routed_from: ["PRELIVE Test Guest"], preview: "Room sign-in on the Default Network would check Protel." }],
-        packages_pinned_to_other_networks: [] }));
+        items: [{ id: "dhcp", label: "DHCP", state: "ok", detail: "Local DHCP." }, { id: "pms", label: "Room sign-in", state: "unresolved", detail: "Room sign-in is not offered on this network until you choose how it works." }],
+        pms_candidates: [], packages_pinned_to_other_networks: [],
+        room_sign_in: { network_id: "d1", name: "Client Wi-Fi", enabled: true, is_default: true, policy: "", state: "UNDECIDED", summary: "undecided", interfaces: [], reasons: [] } }));
+    }
+    if (path === "/pms-interfaces") {
+      return route.fulfill(json(200, { interfaces: [{ id: "p1", display_label: "Protel", connector_kind: "protel-fias", lifecycle_state: "ACTIVE", published: true }] }));
+    }
+    if (path === "/pms-routing") {
+      return route.fulfill(json(200, { routes: [], unmapped_guest_networks: [], policies: [{ network_id: "d1", name: "Client Wi-Fi", enabled: true, archived: false, is_default: true, mode: "", fingerprint: "fp-d1", interfaces: [] }] }));
+    }
+    if (path === "/pms-routing/d1/preview") {
+      return route.fulfill(json(200, {
+        proposal_id: "pr-d1", network: { network_id: "d1", name: "Client Wi-Fi", mode: "", interfaces: [] },
+        proposed: { mode: "DEDICATED", interfaces: [{ pms_interface_id: "p1", label: "Protel", lifecycle_state: "ACTIVE", published: true, in_house_stays: 3, room_auth_ready: true, health_known: true, also_used_by: ["PRELIVE Test Guest"], live_sessions_on_this_network: 0 }] },
+        added: [], removed: [], blockers: [], warnings: [{ code: "INTERFACE_ALSO_USED", text: "Protel is also used by PRELIVE Test Guest." }],
+        impact: { active_sessions: 4, live_room_entitlements: 0, room_numbers_in_more_than_one_selected_pms: 0, sign_in_methods_switched_off: [], network_serves_clients: true },
+        guarantees: ["No PMS traffic is started or stopped, and nothing is posted to any PMS."] }));
     }
     if (path.endsWith("/status")) return route.fulfill(json(200, { id: "x", bridge_name: "br", enabled: true, active_clients: 0 }));
     if (path === "/network/factory") return route.fulfill(json(200, { state: "activated", reason: "", template: {}, conflicts: [], checklist: [] }));
@@ -81,22 +95,29 @@ for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
     await expect.poll(() => posts.some((p) => p.path === "/network/guest-networks/o1/unarchive")).toBe(true);
   });
 
-  test(`room sign-in is routed to the Default Network only after the preview is confirmed (${vp.width}px)`, async ({ page }) => {
-    const puts: string[] = [];
+  test(`room sign-in is chosen for the Default Network, previewed, and applied only when that preview is confirmed (${vp.width}px)`, async ({ page }) => {
+    const puts: unknown[] = [];
     await page.setViewportSize(vp);
     await install(page, []);
     await page.route("**/api/edge/v1/pms-routing/d1", async (route) => {
-      puts.push(route.request().method());
+      if (route.request().method() === "PUT") puts.push(route.request().postDataJSON());
       await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
     await page.goto("/network");
-    await expect(page.getByText("Room sign-in needs a decision")).toBeVisible();
+    await expect(page.getByText("Room sign-in is not offered on this network until you choose how it works.")).toBeVisible();
     expect(puts).toHaveLength(0);
-    await page.getByRole("button", { name: /Route to this network…/ }).click();
-    await expect(page.getByText("Room sign-in on the Default Network would check Protel.")).toBeVisible();
+    await page.getByRole("button", { name: /Configure room sign-in…/ }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("radio", { name: /One dedicated PMS/ }).check();
+    await dialog.getByRole("radio", { name: /Protel/ }).check();
+    await noHorizontalScroll(page);
+    await dialog.getByRole("button", { name: "Preview the change" }).click();
+    await expect(dialog.getByText("Protel is also used by PRELIVE Test Guest.")).toBeVisible();
+    await expect(dialog.getByText(/nothing is posted to any PMS/)).toBeVisible();
     await noHorizontalScroll(page);
     expect(puts).toHaveLength(0);
-    await page.getByRole("button", { name: "Route to the Default Network" }).click();
-    await expect.poll(() => puts.join()).toBe("PUT");
+    await dialog.getByRole("button", { name: "Confirm and apply" }).click();
+    await expect.poll(() => puts.length).toBe(1);
+    expect(puts[0]).toEqual({ mode: "DEDICATED", pms_interface_ids: ["p1"], proposal_id: "pr-d1" });
   });
 }

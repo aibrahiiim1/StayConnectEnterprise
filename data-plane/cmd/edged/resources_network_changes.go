@@ -447,6 +447,10 @@ func (s *server) cancelStagedGroup(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed; nothing was changed")
 			return
 		}
+		if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_policy WHERE guest_network_id = ANY($1::uuid[])`, created); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed; nothing was changed")
+			return
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "cancel failed; nothing was changed")

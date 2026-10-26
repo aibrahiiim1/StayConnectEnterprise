@@ -35,6 +35,7 @@ func (s *server) networkRoutes() http.Handler {
 	r.Post("/guest-networks/{id}/disable", s.disableGuestNetwork)
 	r.Post("/guest-networks/{id}/enable", s.enableGuestNetwork)
 	r.Post("/guest-networks/{id}/replace", s.stageGuestNetworkReplacement)
+	r.Get("/guest-networks/{id}/impact", s.getNetworkImpact)
 	r.Get("/guest-network-replacements", s.listGuestNetworkReplacements)
 	r.Delete("/guest-network-replacements/{id}", s.cancelGuestNetworkReplacement)
 	r.Get("/guest-networks/{id}/status", s.guestNetworkStatus)
@@ -422,6 +423,9 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag, err := s.db.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1`, id)
+	if err == nil {
+		_, _ = s.db.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, id)
+	}
 	if err != nil {
 		// A network that has seen clients is part of their history: sign-ins, resolutions and device appearances
 		// reference it (foreign keys without cascade), so it cannot be deleted. It stays disabled.

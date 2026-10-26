@@ -128,6 +128,8 @@ type ovPMS struct {
 	ReadyInterfaces  int           `json:"ready_interfaces"`
 	Occupancy        dashOccupancy `json:"occupancy"`
 	Postings         dashPostings  `json:"postings"`
+	// The network-aware room sign-in assessment: the only source of room sign-in warnings. Nil when it could not be read.
+	RoomSignIn *roomSignInAssessment `json:"room_sign_in,omitempty"`
 }
 
 type ovNetwork struct {
@@ -505,12 +507,12 @@ func (s *server) moduleScopedAttention(ctx context.Context, in attentionInput) a
 	}
 	rep, ok := s.moduleReport(ctx)
 	if !ok {
-		in.PMS, in.PMSReviewCases, in.PostingsReviewOpen = nil, 0, 0
+		in.RoomSignInIssues, in.PMSReviewCases, in.PostingsReviewOpen = nil, 0, 0
 		return in
 	}
 	hosp, rc := rep.Modules["hospitality"], rep.Modules["room_charge"]
 	if !(hosp.Licensed && hosp.Deployed) {
-		in.PMS = nil
+		in.RoomSignInIssues = nil
 	}
 	if !hosp.Manageable {
 		in.PMSReviewCases = 0
@@ -921,6 +923,9 @@ func (s *server) overviewPackages(ctx context.Context, win overviewWindow) ovPac
 
 func (s *server) overviewPMS(ctx context.Context) ovPMS {
 	p := ovPMS{dashPms: s.dashPMS(ctx), Occupancy: s.dashOccupancy(ctx), Postings: s.dashPostings(ctx)}
+	if a, err := s.roomSignInAssessment(ctx); err == nil {
+		p.RoomSignIn = &a
+	}
 	for _, i := range p.Interfaces {
 		if i.Lifecycle == "ACTIVE" {
 			p.ActiveInterfaces++
@@ -1317,9 +1322,9 @@ func (s *server) overviewRevisions(ctx context.Context) ovRevisions {
 func attentionInputFrom(o overviewResp) attentionInput {
 	in := attentionInput{}
 	if o.PMS.Available {
-		for _, i := range o.PMS.Interfaces {
-			in.PMS = append(in.PMS, attentionPMS{Label: i.Label, Active: i.Lifecycle == "ACTIVE",
-				RoomAuthReady: i.RoomAuthReady, Connected: i.Transport == "CONNECTED", Reason: i.RoomAuthReason})
+		// Room sign-in is judged per client network by the assessment; a PMS that is not ready but serves no active network raises nothing here.
+		if o.PMS.RoomSignIn != nil {
+			in.RoomSignInIssues = o.PMS.RoomSignIn.Issues
 		}
 		in.PMSReviewCases = o.PMS.EventsReview
 	}

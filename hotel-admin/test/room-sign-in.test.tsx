@@ -132,35 +132,54 @@ describe("Client access → Sign-in methods keeps only the Room sign-in switch",
   });
 });
 
-// Read the interfaces field; using .data would misreport a healthy PMS as unavailable.
-describe("Room sign-in readiness reads edged's /pms-interfaces shape", () => {
-  const IFACE = { id: "ddff5d07-f588-4f1f-8133-a0f393524476", display_label: "Protel", lifecycle_state: "ACTIVE" };
-  function readiness(ready: boolean) {
+// The page reads the one server assessment; it derives nothing from interface health or routing itself.
+describe("Room sign-in readiness reads the shared assessment", () => {
+  const net = (state: string, summary: string, reasons: { text: string }[] = []) => ({
+    network_id: "n1", name: "Lobby", enabled: true, is_default: false, policy: "DEDICATED", state, summary, reasons,
+    interfaces: [{ pms_interface_id: "p1", label: "Protel", lifecycle_state: "ACTIVE", published: true, health_known: true, room_auth_ready: state === "READY" }],
+  });
+  function assessed(overall: string, n: ReturnType<typeof net> | null) {
     g.mockImplementation((path: string) => {
       if (path === "/auth/whoami") return Promise.resolve({ roles: ["site_admin"] });
       if (path === "/auth-methods") return Promise.resolve({ pms: { enabled: true, mode: "room_any" } });
-      if (path === "/pms-interfaces") return Promise.resolve({ interfaces: [IFACE] });
-      if (path === "/pms-routing") return Promise.resolve({ routes: [
-        { guest_network_id: "n1", guest_network_name: "Lobby", routing_mode: "SINGLE_INTERFACE", pms_interface_id: IFACE.id },
-      ] });
-      if (path === `/pms-interfaces/${IFACE.id}/health`) return Promise.resolve({ health: {
-        pms_interface_id: IFACE.id, room_auth_ready: ready, room_auth_reason: ready ? undefined : "FEED_SILENT",
-      } });
+      if (path === "/pms-routing/readiness") return Promise.resolve({ generated_at: "x", overall, networks: n ? [n] : [], interfaces: [], issues: [] });
       return Promise.resolve(list([]));
     });
   }
 
-  it("a connected, ready PMS is not reported as an outage", async () => {
-    readiness(true);
+  it("a network whose PMS can answer is not reported as an outage", async () => {
+    assessed("READY", net("READY", "ok"));
     render(<RoomSignInPage />);
     expect(await screen.findByRole("heading", { name: "Room sign-in" })).toBeInTheDocument();
-    await waitFor(() => expect(g).toHaveBeenCalledWith(`/pms-interfaces/${IFACE.id}/health`));
+    await waitFor(() => expect(g).toHaveBeenCalledWith("/pms-routing/readiness"));
     expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
   });
 
-  it("a PMS that is not ready is still reported", async () => {
-    readiness(false);
+  it("a network whose PMS cannot answer is named, with the reason", async () => {
+    assessed("BLOCKED", net("BLOCKED", "Guests on this network cannot sign in with their room number until its PMS interface is ready.", [{ text: "Protel: the PMS has stopped responding" }]));
     render(<RoomSignInPage />);
-    expect(await screen.findByText(/room sign-in is not working at the moment/i)).toBeInTheDocument();
+    expect(await screen.findByText(/room sign-in is not working on any network that offers it/i)).toBeInTheDocument();
+    expect(screen.getByText("Lobby")).toBeInTheDocument();
+    expect(screen.getByText(/the PMS has stopped responding/)).toBeInTheDocument();
+  });
+
+  it("a network that deliberately offers no room sign-in, or evidence that could not be read, is not an outage", async () => {
+    assessed("NOT_OFFERED", net("OFF", "by choice"));
+    const { unmount } = render(<RoomSignInPage />);
+    await screen.findByRole("heading", { name: "Room sign-in" });
+    expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
+    unmount();
+    assessed("UNKNOWN", net("UNKNOWN", "could not be read"));
+    render(<RoomSignInPage />);
+    await screen.findByRole("heading", { name: "Room sign-in" });
+    expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
+  });
+
+  it("a network that is only waiting for a decision is asked for one, not reported as not working", async () => {
+    assessed("BLOCKED", { ...net("UNDECIDED", "No one has decided how room sign-in works on this network, so it is not offered."), policy: "", interfaces: [] } as ReturnType<typeof net>);
+    render(<RoomSignInPage />);
+    expect(await screen.findByText("Room sign-in needs a decision")).toBeInTheDocument();
+    expect(screen.getByText(/Nobody has chosen how room sign-in works on Lobby/)).toBeInTheDocument();
+    expect(screen.queryByText(/room sign-in is not working/i)).not.toBeInTheDocument();
   });
 });

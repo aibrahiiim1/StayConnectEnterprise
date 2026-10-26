@@ -154,6 +154,8 @@ type defaultReadiness struct {
 	Items         []readinessItem `json:"items"`
 	PMSCandidates []pmsCandidate  `json:"pms_candidates"`
 	PinnedOnOld   []pinnedPackage `json:"packages_pinned_to_other_networks"`
+	// The assessment of this network, the same one the dashboard and PMS screens read.
+	RoomSignIn *rsNetwork `json:"room_sign_in,omitempty"`
 }
 
 // getDefaultReadiness says what stands between the Default Network and being the coherent guest-service entry point. It changes nothing: PMS routing and package
@@ -203,32 +205,42 @@ func (s *server) getDefaultReadiness(w http.ResponseWriter, r *http.Request) {
 	ov, _ := s.signinSummary(ctx, id)
 	add("signin", "Sign-in", "ok", ov)
 
-	// PMS routing. The routing of retired networks is kept on them, untouched. A route to the Default Network is made only by the operator, one interface at
-	// a time, with the preview below confirmed.
-	var routed int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_network_pms_map WHERE guest_network_id=$1::uuid`, id).Scan(&routed)
+	// PMS room sign-in. The routing of retired networks is kept on them, untouched. The Default Network's own policy is chosen by the operator under Configure room
+	// sign-in (none, one dedicated PMS, or a strict shared set), after a preview; nothing is copied from a retired network.
+	assess, aerr := s.roomSignInAssessment(ctx)
+	var rn *rsNetwork
+	if aerr == nil {
+		for i := range assess.Networks {
+			if assess.Networks[i].NetworkID == id {
+				rn = &assess.Networks[i]
+			}
+		}
+	}
+	out.RoomSignIn = rn
 	var cands []pmsCandidate
 	var cerr error
-	if routed == 0 {
+	if rn != nil && (rn.State == rsUndecided || rn.State == rsNotSet) {
 		cands, cerr = s.pmsCandidatesFor(ctx, id)
 		if cands != nil {
 			out.PMSCandidates = cands
 		}
 	}
 	switch {
-	case routed > 0:
-		add("pms", "PMS routing", "ok", "Room sign-in on this network checks the PMS interface routed to it (PMS routing).")
-	case cerr != nil:
-		add("pms", "PMS routing", "attention", "PMS routing could not be read, so nothing is claimed about it.")
-	case len(cands) > 0:
+	case rn == nil:
+		add("pms", "Room sign-in", "attention", "Room sign-in routing could not be read, so nothing is claimed about it.")
+	case rn.State == rsReady || rn.State == rsOff:
+		add("pms", "Room sign-in", "ok", rn.Summary)
+	case rn.State == rsUnknown || rn.State == rsNotSet:
+		add("pms", "Room sign-in", "attention", rn.Summary)
+	case rn.State == rsUndecided && cerr == nil && len(cands) > 0:
 		names := make([]string, 0, len(cands))
 		for _, c := range cands {
 			names = append(names, c.Label)
 		}
-		add("pms", "PMS routing", "unresolved", "Room sign-in is not offered on this network: no PMS interface is routed to it. "+strings.Join(names, ", ")+
-			" is routed only to archived or switched-off networks. Nothing was copied; choose below whether to route it here.")
+		add("pms", "Room sign-in", "unresolved", "Room sign-in is not offered on this network until you choose how it works. "+strings.Join(names, ", ")+
+			" is routed only to archived or switched-off networks; nothing was copied. Choose none, one dedicated PMS, or a shared set below.")
 	default:
-		add("pms", "PMS routing", "attention", "No PMS interface is routed to this network, so room sign-in is not offered on it. No retired network had a route to carry over.")
+		add("pms", "Room sign-in", "unresolved", rn.Summary)
 	}
 
 	pinned, perr := s.packagesPinnedElsewhere(ctx, id)

@@ -73,6 +73,23 @@ type overviewNetwork struct {
 	Attention       []string           `json:"attention"`
 	Archived        bool               `json:"archived"`
 	IsDefault       bool               `json:"is_default"`
+	// What room sign-in does on this network, from the one assessment every screen reads. Nil when it could not be assessed.
+	RoomSignIn *roomSignInBrief `json:"room_sign_in,omitempty"`
+}
+
+type roomSignInBrief struct {
+	Policy  string   `json:"policy"`
+	State   string   `json:"state"`
+	Summary string   `json:"summary"`
+	Labels  []string `json:"interfaces"`
+}
+
+func briefOf(n rsNetwork) *roomSignInBrief {
+	b := &roomSignInBrief{Policy: n.Policy, State: n.State, Summary: n.Summary, Labels: []string{}}
+	for _, i := range n.Interfaces {
+		b.Labels = append(b.Labels, i.Label)
+	}
+	return b
 }
 
 type networkOverviewResp struct {
@@ -218,6 +235,12 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 	}
 	_ = s.archiveRetired(ctx, s.db)
 	archivedIDs, defaultID := s.archivedSet(ctx), s.defaultNetworkID(ctx)
+	roomBy := map[string]*roomSignInBrief{}
+	if a, aerr := s.roomSignInAssessment(ctx); aerr == nil {
+		for _, rn := range a.Networks {
+			roomBy[rn.NetworkID] = briefOf(rn)
+		}
+	}
 	for _, n := range saved {
 		var running *netcfg.GuestNetwork
 		for i := range activeIntent {
@@ -252,6 +275,7 @@ func (s *server) buildNetworkOverview(ctx context.Context, diag netdDiagReport, 
 		}
 		_ = s.db.QueryRow(ctx, activeOnNetworkSQL, n.ID).Scan(&item.ActiveClients)
 		item.Archived, item.IsDefault = archivedIDs[n.ID], n.ID == defaultID
+		item.RoomSignIn = roomBy[n.ID]
 		out.Networks = append(out.Networks, item)
 	}
 	return out, nil

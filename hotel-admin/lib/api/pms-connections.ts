@@ -373,6 +373,7 @@ export const ROOM_AUTH_WORDS: Record<string, string> = {
   FEED_SILENT: "The PMS has gone quiet for longer than this connection allows.",
   REVISION_NOT_PINNED: "The live configuration changed and the connection has not picked it up yet.",
   MIRROR_NEVER_SYNCHRONIZED: "No complete guest list has ever been loaded, so there is nothing to fall back on.",
+  ROSTER_EXPIRED: "The PMS has been unreachable for longer than its last guest list may be trusted.",
   RESYNC_IN_FLIGHT: "A full refresh is partway through. Room sign-in resumes when it finishes.",
   MATERIALIZATION_BEHIND: "The guest list has arrived and is being applied — usually a few seconds.",
 };

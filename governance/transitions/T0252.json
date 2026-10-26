@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0252",
+  "seq": 252,
+  "timestamp": "2026-10-26T02:23:01+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "CLIENT_NETWORKING_ROUTING_APPROVAL_IS_A_PROPOSAL_AND_ROLLBACK_BOUNDARY_ENFORCED",
+  "authorisation": "D74 (2026-10-26), continued under the same mission and PR #251 (the Product Owner's final-acceptance finding: the routing fingerprint is exposed by reads and derived only from current state; and a controlled rollback must not silently weaken Shared STRICT). It does NOT authorise merging PR #251 (the head-specific approval was not applied by the agent), Go-Live, or any live network, routing, PMS or financial action by the agent.",
+  "gap_found": "The apply compared a fingerprint of the current routing, which ordinary reads returned. It proved the state had not moved, not that this exact change had been previewed and accepted by this operator, and a change away and back restored the same fingerprint, so an approval older than both changes would have been accepted again.",
+  "changes": [
+    "A preview that can be applied mints a server-held, single-use, 15-minute proposal bound to the network, the previewing operator, the exact mode and interfaces, the network's change counter and its routing. Reads never expose it. The apply and the removal are refused unless every binding holds (other operator, other content, any change to the network since, expired or used); any applied change retires all of that network's proposals.",
+    "Removal is previewed (mode UNDECIDED) and confirmed with DELETE ?proposal=; the previous policy and interfaces are audited. pms_routing.previewed, pms_routing.policy_set, pms_routing.cleared and pms_routing.proposal_refused carry the proposal id and reason.",
+    "scripts/binary-rollback.sh refuses to install an scd or edged that predates the room sign-in policy while any Shared STRICT policy exists (artifact marker plus live count; unreadable is a refusal; no override). 0155.down.sql refuses while a shared policy exists. Both leave everything unchanged and name the operator action.",
+    "The Admin Console confirms with the proposal of its own preview, returns to step 1 when the proposal can no longer be confirmed, and previews the removal before it can be confirmed."
+  ],
+  "deployment_provenance": {
+    "appliance": "edged 5726db140a80 built from a clean clone with scripts/build-appliance-binaries.sh (tags=stayconnect_production, vcs.modified=false), sha256 6a25228e3482565ffb69ba57b6d9f866b66c3eabd3df993e16a31e04c4288595 verified on the appliance before install; backup edged.bak-pre-5726db14-20261025T232050Z. scd (1500865c), netd, portald, pmsd and acctd unchanged; no migration; Kea not touched.",
+    "admin_console": "Release 20261025-232056 built from a clean clone of 5726db140a80 (BUILD_ID 8cgt9uRsC5SDpgelCMyHC, artifact sha256 c4923055f7f71ddbe0764259d2db20da4ada20b4cbc7bfec22c5beaf96b5e009); previous 20261025-215640 (1500865c).",
+    "database": "No change (the proposals are not stored).",
+    "pull_request": "PR #251, head 5726db14 plus the governance commit that introduces this receipt."
+  },
+  "verification": "Before: Go unit and integration tests on a fresh full-schema PostgreSQL (edged including the real svc_edged role, scd, pmsresolve), 47 binary-rollback cases, 1028 console unit tests, lint, typecheck and 27 browser tests for the changed areas. Regression tests: reads expose nothing that authorises a change; an invented, empty, old-style or fingerprint request changes nothing; a proposal confirmed for other interfaces, another policy or as the other kind of change is refused; a proposal works once; an approval made before two changes that restored the same state is refused; an obsolete removal approval removes nothing; the removal preview lists and audits what it removes; the store binds operator, network and content, expires, and is bounded; the down migration refuses with a shared set and runs without one; the rollback tool refuses scd and edged targets without the policy while shared sets exist, refuses an unreadable or non-numeric count, and allows a policy-aware target or zero shared networks. On a disposable database as iam_v2_owner: the down migration was refused with 26 shared networks (nothing changed), ran after they were converted, saved 68 policies, and the re-apply restored them. After deployment: reads carry no authorising value; seven invalid or old-style requests against a non-existent network were refused; a valid preview returned its own proposal and was not applied; invalid previews minted none; every network's policy and interfaces identical before and after; the rollback tool, in --dry-run against a real pre-policy edged build, read the live database (0 shared networks at that moment) and replaced nothing. NOT verified: the refusal path of the rollback tool against a live shared network (none exists on PRE-LIVE: the Product Owner's networks are dedicated); a real client signing in; real Protel behaviour with two interfaces on one network; tagged-VLAN delivery on the switch/ESXi side.",
+  "product_owner_live_testing_observation": "PRE-LIVE kept changing under the Product Owner's own admin account after the previous receipt (audit): further recovery, Access-to-Trunk changes (one rolled back), a second PMS interface created, routing set for Client Wi-Fi and a new network, backups and guest-data operations. These were their actions; the agent performed none. Two previews I made on the Default Network (valid, never applied) are in the audit as pms_routing.previewed.",
+  "rollback": "edged.bak-pre-5726db14-20261025T232050Z (earlier builds retained as edged.bak-pre-1500865c-..., -67808d7a-..., -58abb494-...); hotel-admin.previous -> 20261025-215640. Nothing may be rolled back to a build without the policy while a Shared STRICT policy exists (tool and down migration refuse). Central: no change.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #251; real-client room sign-in acceptance; a shared network exercised live now that a second PMS Interface exists (Product Owner's decision); the switch/ESXi delivery of tagged VLANs.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "da58bb6c4f0389ffaee391d03594a4dd8af3bd3a",
+  "base_note": "Master after the merge of PR #250 (T0249).",
+  "head": "5726db14",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0251",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}

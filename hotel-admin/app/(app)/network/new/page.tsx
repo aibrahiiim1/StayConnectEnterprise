@@ -641,16 +641,24 @@ export default function NewGuestNetworkPage() {
                   <>
                     Make <span className="font-mono">{parentInterface}</span> a trunk carrying VLAN
                     {vlans.length === 1 ? " " : "s "}{vlans.map((r) => r.vlan).join(", ")}, and tag each SSID onto its VLAN
-                    on your wireless controller.
+                    on your wireless controller. If OneGate runs on a hypervisor, the port group feeding that port must pass
+                    tagged frames (VLAN ID 4095, all VLANs).
                   </>
                 ) : (
                   <>
                     Leave <span className="font-mono">{parentInterface}</span> untagged (native) for this network, and map
-                    the &lsquo;{ssidLabel || name}&rsquo; SSID to it on your wireless controller.
+                    the &lsquo;{ssidLabel || name}&rsquo; SSID to it on your wireless controller. If OneGate runs on a
+                    hypervisor, the port group feeding that port must deliver untagged frames (VLAN ID 0, None).
                   </>
                 )}{" "}
                 OneGate manages the gateway, DHCP and captive portal on its own LAN side; it does not configure your
-                switch or broadcast Wi-Fi.
+                switch, access points or hypervisor, or broadcast Wi-Fi. Until those are in place, clients cannot reach the
+                network.
+              </Callout>
+              <Callout tone="info" title="Room sign-in on the new network">
+                A new network offers room sign-in to nobody until you choose how it works under{" "}
+                <span className="font-medium">PMS routing</span>: none, one dedicated PMS or a shared strict set. Nothing is
+                copied from another network, and nothing about any PMS changes when the network is created.
               </Callout>
             </div>
           )}

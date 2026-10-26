@@ -38,7 +38,7 @@ type Resolver struct {
 }
 
 func NewResolver(pool *pgxpool.Pool) *Resolver {
-	return &Resolver{pool: pool, ProbeTimeout: 5 * time.Second}
+	return &Resolver{pool: pool, MaxCandidates: MaxSharedCandidates, ProbeTimeout: 5 * time.Second}
 }
 
 type Result struct {
@@ -84,7 +84,12 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 	cands := make([]Candidate, len(ifaces))
 	stays := make([]string, len(ifaces))
 	var wg sync.WaitGroup
-	for i, id := range ifaces {
+	for i, m := range ifaces {
+		if !m.Active {
+			// Part of the explicit set, so it can neither be skipped (its guests would be invisible to the vector) nor asked.
+			cands[i] = Candidate{InterfaceID: m.ID, Outcome: Unavailable, NotActive: true}
+			continue
+		}
 		wg.Add(1)
 		go func(i int, id string) {
 			defer wg.Done()
@@ -103,7 +108,7 @@ func (r *Resolver) Resolve(ctx context.Context, tenant, site, guestNetwork, requ
 			if out == Verified {
 				stays[i] = stay
 			}
-		}(i, id)
+		}(i, m.ID)
 	}
 	wg.Wait()
 
@@ -159,28 +164,36 @@ func (r *Resolver) reconcile(stored, fresh Result, cands []Candidate) Result {
 	return fresh
 }
 
-func (r *Resolver) mapped(ctx context.Context, tenant, site, guestNetwork string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT m.pms_interface_id::text
+// mappedInterface is one interface the network's routing explicitly names, in service or not.
+type mappedInterface struct {
+	ID     string
+	Active bool
+}
+
+// mapped returns every interface the network's routing names, whatever its lifecycle: an out-of-service candidate stays in the vector as unavailable instead of
+// vanishing from it, because a strict resolution that quietly asked one fewer PMS could admit a guest the missing one would have contradicted.
+func (r *Resolver) mapped(ctx context.Context, tenant, site, guestNetwork string) ([]mappedInterface, error) {
+	rows, err := r.pool.Query(ctx, `SELECT m.pms_interface_id::text, COALESCE(pi.lifecycle_state,'') = 'ACTIVE'
 		FROM iam_v2.guest_network_pms_map m
-		JOIN iam_v2.pms_interfaces pi ON pi.tenant_id=m.tenant_id AND pi.site_id=m.site_id AND pi.id=m.pms_interface_id
-		WHERE m.tenant_id=$1 AND m.site_id=$2 AND m.guest_network_id=$3 AND pi.lifecycle_state='ACTIVE'
+		LEFT JOIN iam_v2.pms_interfaces pi ON pi.tenant_id=m.tenant_id AND pi.site_id=m.site_id AND pi.id=m.pms_interface_id
+		WHERE m.tenant_id=$1 AND m.site_id=$2 AND m.guest_network_id=$3
 		ORDER BY m.pms_interface_id`, tenant, site, guestNetwork)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var out []mappedInterface
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var m mappedInterface
+		if err := rows.Scan(&m.ID, &m.Active); err != nil {
 			return nil, err
 		}
-		out = append(out, id)
+		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
