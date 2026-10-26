@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0256",
+  "seq": 256,
+  "timestamp": "2026-10-26T09:35:08+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the merge and the read-back of master, and before the commit that introduces this receipt.",
+  "record_type": "SAME_VENDOR_MULTI_PMS_MERGED_AND_CLOSED",
+  "authorisation": "The Product Owner approved the protected merge of PR #252 at exact head d27fc403bfc281b8e3f019dc870a1bffb5400ca9 on 2026-10-26 and directed closure synchronization. It authorises no PMS, network or financial operation and no Go-Live.",
+  "merge": {
+    "pull_request": 252,
+    "approved_head": "d27fc403bfc281b8e3f019dc870a1bffb5400ca9",
+    "merge_commit": "1b0e5bb1d6bc9c8d26300719f6b09b64956f4536",
+    "method": "merge commit pinned to the approved head",
+    "check": "po-merge-authorization passed on the approved head after po-merge-approved was applied; the head was verified unchanged before and at the merge.",
+    "review": "Codex reviewed the approved head and found no major issues; both earlier P2 threads were resolved."
+  },
+  "deployed_software": "Installed code equals master's code: git diff between the deployed code head 735efe77 and master shows no change under data-plane or hotel-admin. edged and pmsd 735efe77, Admin Console release 20261026-055206, scd 3db9ed56, netd and portald 4a192268, acctd 9394eb5f.",
+  "closed": "The software delivery mission for same-vendor Multi-PMS is closed: several Interfaces of one vendor, one owner per physical source, stop-before-start source handoffs, token-scoped sources claiming none, verified live against two real Protel systems with authentication only.",
+  "limits": "NOT exercised and not claimed: physical delivery of tagged VLANs on the switch/ESXi side; a stale roster on a real disconnected PMS; PMS posting, purchase or reversal; the Aqua network (disabled). The Aqua Protel Interface stays AUTH_DISABLED. Go-Live is not authorised.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "1b0e5bb1d6bc9c8d26300719f6b09b64956f4536",
+  "base_note": "Master after the merge of PR #252 (1b0e5bb1).",
+  "head": "1b0e5bb1",
+  "head_note": "Master at the merge; the closure records follow in the next merge.",
+  "previous_delivery": "T0255",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
