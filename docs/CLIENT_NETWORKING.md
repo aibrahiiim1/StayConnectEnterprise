@@ -547,3 +547,9 @@ owner:
 **Tests.** edged integration: three independent Protel Interfaces created, published and activated with distinct fingerprints; a second claim on one address (case and spacing varied) is refused at publish and at
 activation, leaves the interface unpublished, and succeeds once the owner is decommissioned. pmsd: one worker per source, a running worker keeps it. Console: the refusal is explained in words.
 
+**Review fixes and live acceptance (PR #252 follow-up).** A REST connection whose identity cannot name one property (a Mews token without an enterprise id) claims no exclusive source, so two independent properties
+on one platform can both be published; and the pmsd reconcile stops every obsolete or displaced worker before starting any, so a source handed from one Interface to another has one writer throughout.
+On PRE-LIVE, pmsd was restarted with no pending postings (the existing Protel link reconnected and resynchronised in about 37 s, identity, revision, stays and financial counters unchanged), and a second real
+Protel Interface (Coral Sea Aqua Club, read-only, posting UNSET) ran concurrently with the first. Authentication-only room sign-in on the live Client Wi-Fi network gave the expected result in every routing scenario
+(dedicated to each hotel, shared strict, and shared strict with one candidate off, which failed closed), a duplicate-source publish was refused, and the network's routing was restored. Aqua was left AUTH_DISABLED.
+

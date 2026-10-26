@@ -1,0 +1,44 @@
+{
+  "transition_id": "T0255",
+  "seq": 255,
+  "timestamp": "2026-10-26T09:04:57+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and acceptance, and before the commit that introduces this receipt.",
+  "record_type": "SAME_VENDOR_MULTI_PMS_REVIEW_FIXES_PMSD_DEPLOYED_AND_ACCEPTED_AGAINST_TWO_REAL_PROTEL_SYSTEMS",
+  "authorisation": "The Product Owner extended the mission on 2026-10-26 to the Codex findings, the pmsd deployment and restart, and controlled authentication-only acceptance against two real Protel systems on PRE-LIVE. It does NOT authorise merging PR #252, PMS financial posting, Go-Live, or any change to physical networking.",
+  "findings": [
+    "P2 token-scoped sources: a Mews connection without an enterprise id fingerprinted like every other on its platform, so source exclusivity would have refused the second independent property. A connection whose identity cannot name one property now gets a fingerprint no other connection can equal (RESTConfig.SourceIdentityComplete); Apaleo and OPERA Cloud require their property identity, so they are unchanged.",
+    "P2 source handoff: reconcile started replacement workers before stopping the old ones, so an interface republished from source X to Y while another took X could have two writers on X. Reconcile now plans first (planReconcile): every obsolete, revision-changed or displaced worker is stopped before any worker starts."
+  ],
+  "deployment_provenance": {
+    "appliance": "edged 735efe775289 sha256 c307d60cc3f3ce19bf8970da24b91c29762eeef72607e61da20f8a5e9e4faeb2 and pmsd 735efe775289 sha256 c002123d053ad2deedda27ad36ec1b2d6c705223a0d9ab6aee0a88602d551d7c, each built from a clean clone (tags=stayconnect_production, vcs.modified=false) and verified on the appliance before install; backups edged.bak-pre-735efe77-20261026T055200Z and pmsd.bak-pre-735efe77-20261026T055225Z.",
+    "admin_console": "Release 20261026-055206 built from a clean clone of 735efe775289 (BUILD_ID _YKWi8g87bhGj7qI4Z0pC, artifact sha256 d2dd5a92fb956bb3accc8aca3fa837fdf826e69ded87605ecc183690904751ca); previous 20261026-010341 (b66212dd).",
+    "database": "No migration.",
+    "pull_request": "PR #252, code head 735efe77 plus the governance commit that introduces this receipt."
+  },
+  "pmsd_restart": "Preflight: no interface had undrained postings; the only posting ever made was POSTED and ACKED; counters pms_postings/outbox/payment_transactions 1/1/17. The restart reconnected the existing Protel link (150.0.0.18:5003) and resynchronised to IN_SYNC in about 37 s. After: the same interface id, the same published revision, 4142 stays, the same posting attempts, counters still 1/1/17.",
+  "acceptance": "Second real Protel Interface 'Coral Sea Aqua Club' (120.0.0.15:5001, read-only, posting target UNSET) created, published and activated through the API: CONNECTED and IN_SYNC concurrently with the first (208 and 470 in-house stays). A draft revision pointing the Aqua interface at the Protel endpoint was refused at publish with 409 pms_source_in_use and changed nothing (the draft is retained unpublished as revision 2). On the live Client Wi-Fi network, each with a free package and a fresh client on the guest bridge: DEDICATED Protel - Protel stay VERIFIED and online, Aqua stay refused (STAY_NOT_ELIGIBLE); DEDICATED Aqua - Aqua stay VERIFIED and online, Protel stay refused (ROOM_NOT_IN_MIRROR); SHARED_STRICT Protel+Aqua - single-room stays from both hotels VERIFIED and online, and a room number in house at both hotels VERIFIED for each guest by their own verification; SHARED_STRICT with Aqua switched off - the Protel stay refused (ROUTING_OR_INTERFACE_FAILURE), failing closed. Seven sessions granted, each ended and its entitlement terminated; no leftover sessions or namespaces; financial counters unchanged at 1/1/17. The network's routing was restored to DEDICATED Protel and verified identical. Aqua was left AUTH_DISABLED (published, inert, holds no PMS slot).",
+  "verification": "Before: pmsd, pmsprovider and pmsresolve suites, the edged integration suite on a fresh full schema, new tests for token-scoped Mews sources, for the handoff plan (the old owner is stopped first, a running owner is not displaced) and for SourceIdentityComplete. After deployment: units active, DEPLOYED_BINARIES 7 of 7, APPLIANCE_UNITS PASS. NOT performed: any PMS posting, purchase or reversal; a stale-roster scenario on a real disconnected PMS; physical-network delivery of tagged VLANs; the Aqua network itself (disabled by the Product Owner).",
+  "rollback": "edged.bak-pre-735efe77-20261026T055200Z, pmsd.bak-pre-735efe77-20261026T055225Z; hotel-admin.previous -> 20261026-010341. No schema to roll back.",
+  "follow_up": "OPEN: the Product Owner's head-specific approval to merge PR #252. The Aqua Protel interface exists AUTH_DISABLED; activating it and mapping it to a network is the Product Owner's choice. The runtime row of a disabled interface keeps its last transport state until it is next activated.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "ae289eeb5c1198214ce20556acf00cc5ddfbc631",
+  "base_note": "Master after the merge of PR #251 (ae289eeb).",
+  "head": "735efe77",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0254",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
