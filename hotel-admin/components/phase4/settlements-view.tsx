@@ -2,6 +2,7 @@
 
 // Refunds come from the provider; operator actions follow the API's available_actions list.
 
+import { usePmsConnections } from "@/lib/pms-scope";
 import { useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, BedDouble, Receipt } from "lucide-react";
@@ -33,9 +34,9 @@ export const PAID_BY: Record<string, string> = {
   MANUAL_APPROVAL: "Manual approval",
 };
 
-function sourceWords(r: FinancialSettlement): string {
+function sourceWords(r: FinancialSettlement, multi = false): string {
   switch (r.source) {
-    case "ROOM": return r.room ? `Room ${r.room}` : "Room sign-in";
+    case "ROOM": return r.room ? `Room ${r.room}${multi && r.pms_interface_label ? ` · ${r.pms_interface_label}` : ""}` : "Room sign-in";
     case "VOUCHER": return "Voucher";
     case "ACCOUNT": return "Client account";
     case "OPEN": return "Chose a package without signing in";
@@ -100,6 +101,7 @@ type Detail = {
 };
 
 export function SettlementsView() {
+  const { multi } = usePmsConnections();
   const [view, setView] = useState<View>("");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -239,7 +241,7 @@ export function SettlementsView() {
                       <TD className="hidden md:table-cell">
                         <span className="inline-flex items-center gap-1.5">
                           {r.source === "ROOM" && <BedDouble className="size-3.5 text-muted-foreground" aria-hidden />}
-                          {sourceWords(r)}
+                          {sourceWords(r, multi)}
                         </span>
                       </TD>
                       <TD className="hidden sm:table-cell">{PAID_BY[r.method] ?? humanize(r.method)}</TD>
@@ -308,7 +310,7 @@ export function SettlementsView() {
                   <KeyValueGrid
                     items={[
                       { label: "Package", value: s.package_name || "—" },
-                      { label: "Client", value: sourceWords(s) },
+                      { label: "Client", value: sourceWords(s, multi) },
                       { label: "Paid by", value: PAID_BY[s.method] ?? humanize(s.method) },
                       { label: "Amount", value: s.method === "NOT_REQUIRED" ? "Free" : money(s.amount_minor, s.currency, s.currency_exponent) },
                       { label: "Access", value: ACCESS_WORDS[s.purchase_state] ?? humanize(s.purchase_state) },

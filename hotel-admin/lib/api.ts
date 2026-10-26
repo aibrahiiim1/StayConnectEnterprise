@@ -203,7 +203,7 @@ export type GuestAccountManage = {
 };
 export type DevicePackage = {
   entitlement_id: string; status: string; package_name: string; free: boolean;
-  subject_kind: "ACCOUNT" | "VOUCHER" | "ROOM" | "CLIENT" | "OPEN"; subject_label?: string; account_id?: string;
+  subject_kind: "ACCOUNT" | "VOUCHER" | "ROOM" | "CLIENT" | "OPEN"; subject_label?: string; pms_interface_label?: string; account_id?: string;
   slot: "AUTHORIZED" | "DISCONNECTED" | string; slot_reason?: string;
   first_authorized?: string | null; last_authorized?: string | null; window_ends_at?: string | null;
   consumed_data_bytes: number; data_quota_bytes?: number | null; max_devices?: number | null; places_in_use: number;
@@ -1415,6 +1415,7 @@ export type FinancialSettlement = {
   package_name?: string | null;
   at?: string | null;
   source?: "ROOM" | "VOUCHER" | "ACCOUNT" | "OPEN" | "" | null;
+  pms_interface_label?: string | null;
   room?: string | null;
 };
 

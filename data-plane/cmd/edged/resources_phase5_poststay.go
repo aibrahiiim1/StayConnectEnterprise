@@ -43,6 +43,8 @@ type postStayProfileRow struct {
 	RevokedAt     *string `json:"revoked_at"`
 	RevokeReason  *string `json:"revoke_reason"`
 	Authenticable bool    `json:"authenticable"`
+	// The PMS connection the stay came from: a room number only identifies a room together with it.
+	PMSConnection string `json:"pms_interface_label,omitempty"`
 	// The reservation number and revoke reason are withheld from roles without pms-stay-identity.
 	IdentityHidden bool `json:"identity_hidden,omitempty"`
 }
@@ -63,7 +65,8 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 		       to_char(psp.valid_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(psp.revoked_at  AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       psp.revoke_reason,
-		       iam_v2.p5_post_stay_authenticable(psp.tenant_id, psp.site_id, psp.id)
+		       iam_v2.p5_post_stay_authenticable(psp.tenant_id, psp.site_id, psp.id),
+		       COALESCE((SELECT pi.display_label FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id), '')
 		  FROM iam_v2.post_stay_profiles psp
 		  JOIN iam_v2.stays st
 		    ON st.tenant_id=psp.tenant_id AND st.site_id=psp.site_id AND st.id=psp.origin_stay_id
@@ -81,7 +84,7 @@ func (s *server) listPostStayProfiles(w http.ResponseWriter, r *http.Request) {
 		var v postStayProfileRow
 		if err := rows.Scan(&v.ID, &v.StayID, &v.Episode, &v.Reservation, &v.Room, &v.StayStatus,
 			&v.Status, &v.Generation, &v.IssuedVia, &v.IssuedAt, &v.ValidUntil,
-			&v.RevokedAt, &v.RevokeReason, &v.Authenticable); err != nil {
+			&v.RevokedAt, &v.RevokeReason, &v.Authenticable, &v.PMSConnection); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "scan_failed", err.Error())
 			return
 		}
@@ -106,7 +109,8 @@ func (s *server) getPostStayProfile(w http.ResponseWriter, r *http.Request) {
 		       to_char(psp.valid_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       to_char(psp.revoked_at  AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       psp.revoke_reason,
-		       iam_v2.p5_post_stay_authenticable(psp.tenant_id, psp.site_id, psp.id)
+		       iam_v2.p5_post_stay_authenticable(psp.tenant_id, psp.site_id, psp.id),
+		       COALESCE((SELECT pi.display_label FROM iam_v2.pms_interfaces pi WHERE pi.id = st.pms_interface_id), '')
 		  FROM iam_v2.post_stay_profiles psp
 		  JOIN iam_v2.stays st
 		    ON st.tenant_id=psp.tenant_id AND st.site_id=psp.site_id AND st.id=psp.origin_stay_id
@@ -114,7 +118,7 @@ func (s *server) getPostStayProfile(w http.ResponseWriter, r *http.Request) {
 		s.tenantID, s.siteID, id).
 		Scan(&v.ID, &v.StayID, &v.Episode, &v.Reservation, &v.Room, &v.StayStatus,
 			&v.Status, &v.Generation, &v.IssuedVia, &v.IssuedAt, &v.ValidUntil,
-			&v.RevokedAt, &v.RevokeReason, &v.Authenticable)
+			&v.RevokedAt, &v.RevokeReason, &v.Authenticable, &v.PMSConnection)
 	if err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such post-stay profile")
 		return
