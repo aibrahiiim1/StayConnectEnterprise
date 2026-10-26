@@ -2,7 +2,8 @@
 
 // Guest names are PII: never write them to logs or diagnostics.
 // Only ADMIN_BLOCK is an operator's (site administrator, reason + password); PMS_NO_POST and PMS_DATA_SUSPECT
-// clear only from fresh Protel data and POSTING_UNRESOLVED only from manual review, so the page never offers to lift them.
+// clear only from fresh PMS data and POSTING_UNRESOLVED only from manual review, so the page never offers to lift them.
+// A room number belongs to the PMS connection it came from: the same number at two connections is two rooms, never a duplicate.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -32,6 +33,9 @@ import { RowActions } from "@/components/ui/row-actions";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { speedPair } from "@/lib/session-words";
 import { Hotel, Ban, Undo2 } from "lucide-react";
+import { usePmsConnections } from "@/lib/pms-scope";
+import { PmsTag, roomWithPms } from "@/components/pms/pms-tag";
+import { FilterChips } from "@/components/ui/data";
 
 const STATUS_LABELS: Record<string, string> = {
   IN_HOUSE: "In house",
@@ -62,6 +66,9 @@ export default function StaysPage() {
   const [status, setStatus] = useState("IN_HOUSE");
   const [q, setQ] = useState("");
   const [vipOnly, setVipOnly] = useState(false);
+  // "" = every connection together; otherwise one connection's stays only.
+  const [pms, setPms] = useState("");
+  const { multi } = usePmsConnections();
   const [pageSize, setPageSize] = useState(PAGE_SIZES[1]);
   const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState<Stay[] | null>(null);
@@ -81,7 +88,7 @@ export default function StaysPage() {
   const [blockBusy, setBlockBusy] = useState(false);
   const [blockErr, setBlockErr] = useState<string | null>(null);
 
-  useEffect(() => { setOffset(0); }, [status, q, vipOnly, pageSize]);
+  useEffect(() => { setOffset(0); }, [status, q, vipOnly, pms, pageSize]);
 
   // The search text goes in a header, not the URL: it is often a guest's name, and edged logs request lines.
   // Responses can arrive out of order, so only the newest request's response is applied.
@@ -94,6 +101,7 @@ export default function StaysPage() {
       const params = new URLSearchParams();
       if (status) params.set("status", status);
       if (vipOnly) params.set("vip", "true");
+      if (pms) params.set("pms_interface_id", pms);
       params.set("page", String(Math.floor(offset / pageSize) + 1));
       params.set("page_size", String(pageSize));
       const needle = q.trim();
@@ -111,7 +119,7 @@ export default function StaysPage() {
       setResp(null);
       setRows([]);
     }
-  }, [status, vipOnly, offset, pageSize, q]);
+  }, [status, vipOnly, pms, offset, pageSize, q]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -161,19 +169,27 @@ export default function StaysPage() {
 
   const inHouseNoInternet =
     status === "IN_HOUSE" && rows !== null && rows.length > 0 && summary.withInternet === 0;
-  const filtering = q.trim() !== "" || vipOnly;
+  const filtering = q.trim() !== "" || vipOnly || pms !== "";
+  const byPms = resp?.by_interface ?? [];
+  const showPms = multi || byPms.length > 1;
+  const pmsTotal = byPms.reduce((a, b) => a + b.total, 0);
 
   return (
     <PageShell width="wide">
       <PageHeader
         title="Stays"
-        description="Who the PMS reports in the building, and the internet each room has."
+        description="Who each PMS reports in the building, and the internet each room has."
         help={
           <>
             <HelpSection title="Where stays come from">
               <p>
-                This is what the property management system reports about who is in the building, and which
+                This is what the property management systems report about who is in the building, and which
                 internet package each room has been given. Stays themselves are changed in the PMS, not here.
+              </p>
+              <p>
+                With more than one PMS connection, each stay belongs to the connection that reported it. The same
+                room number at two connections is two different rooms, not a duplicate. Use the connection tabs to
+                look at one PMS, or leave them on All connections for the combined list.
               </p>
             </HelpSection>
             <HelpSection title="Internet packages on a stay">
@@ -223,14 +239,14 @@ export default function StaysPage() {
           href="/sessions"
           hint="Across every matching stay"
         />
-        <StatCard label="VIP guests" value={rows ? summary.vip.toLocaleString() : "—"} hint="Marked VIP by the PMS" />
+        <StatCard label="VIP guests" value={rows ? summary.vip.toLocaleString() : "—"} hint="Marked VIP in the PMS" />
       </StatGrid>
 
       {inHouseNoInternet && (
         <Callout tone="warning" title="No in-house room has an internet package">
           If guests cannot get online, check that a package applies to these stays on{" "}
           <Link href="/internet-packages" className="underline underline-offset-2">Internet packages</Link>, and
-          that their Wi-Fi network is pointed at this PMS on{" "}
+          that their Wi-Fi network is routed to the PMS they belong to on{" "}
           <Link href="/pms-routing" className="underline underline-offset-2">PMS routing</Link>.
         </Callout>
       )}
@@ -273,6 +289,23 @@ export default function StaysPage() {
             </Select>
           }
         />
+        {showPms && byPms.length > 0 && (
+          <div className="border-b border-border px-4 py-2.5">
+            <FilterChips<string>
+              label="PMS connection"
+              value={pms}
+              onChange={setPms}
+              options={[
+                { value: "", label: "All connections", count: pmsTotal },
+                ...byPms.map((b) => ({
+                  value: b.pms_interface_id,
+                  label: b.lifecycle_state === "DECOMMISSIONED" ? `${b.label} (retired)` : b.label,
+                  count: b.total,
+                })),
+              ]}
+            />
+          </div>
+        )}
         <ResultsCount count={rows?.length} noun="stay" />
         {err !== null && <div className="px-4 pt-3"><ErrorBanner err={err} /></div>}
 
@@ -285,13 +318,13 @@ export default function StaysPage() {
             title={q ? "No stays match that search" : "No stays to show"}
             hint={filtering
               ? "Nothing matches across all stays for the selected status."
-              : "Nothing has arrived from the PMS for this filter yet."}
+              : "Nothing has arrived from a PMS for this filter yet."}
           />
         ) : (
           <Table label="Stays">
             <THead>
               <TR>
-                <TH>Room</TH>
+                <TH>{showPms ? "Room · PMS" : "Room"}</TH>
                 <TH>Guest</TH>
                 <TH className="hidden sm:table-cell">Stay</TH>
                 <TH>Status</TH>
@@ -308,6 +341,7 @@ export default function StaysPage() {
                       {s.room ?? "—"}
                       {s.vip ? <Badge tone="warn" size="sm">VIP</Badge> : null}
                     </div>
+                    {showPms && <div className="mt-0.5"><PmsTag label={s.pms_interface_label} /></div>}
                     {s.external_reservation_id && (
                       <div className="truncate font-mono text-2xs text-muted-foreground" title={s.external_reservation_id}>{s.external_reservation_id}</div>
                     )}
@@ -346,7 +380,7 @@ export default function StaysPage() {
                   </TD>
                   <TD className="w-0">
                     <RowActions
-                      subject={`stay, room ${s.room ?? "unknown"}`}
+                      subject={`stay, ${roomWithPms(s.room, s.pms_interface_label, showPms)}`}
                       primary={{ label: "View", onSelect: () => void open(s.id), disabled: detailBusy }}
                     />
                   </TD>
@@ -488,7 +522,7 @@ export default function StaysPage() {
           title={blockAction === "SET" ? "Block room charge for this stay" : "Remove the administrative block"}
           description={blockAction === "SET"
             ? "No room charge is offered or accepted for this stay until a site administrator removes the block. Internet access the guest already has is not affected."
-            : "Room charge becomes possible again for this stay, unless another block remains. Blocks placed by Protel or by an unresolved charge are not affected."}
+            : "Room charge becomes possible again for this stay, unless another block remains. Blocks placed by the PMS or by an unresolved charge are not affected."}
           confirmLabel={blockAction === "SET" ? "Block room charge" : "Remove administrative block"}
           confirmVariant={blockAction === "SET" ? "danger" : "primary"}
           busy={blockBusy}
@@ -608,7 +642,7 @@ function RoomChargeSection({
       )}
       {canManage && active.some((b) => b.reason !== "ADMIN_BLOCK") && (
         <p className="text-xs text-muted-foreground">
-          Only an administrative block can be removed here. Blocks from Protel clear when fresh Protel data allows
+          Only an administrative block can be removed here. Blocks from the PMS clear when fresh PMS data allows
           posting, and a block from an unresolved charge clears when that charge is decided in Manual review.
         </p>
       )}

@@ -476,6 +476,15 @@ func (s *server) materialisePendingReplacements(ctx context.Context, tx pgx.Tx, 
 			SELECT $2::uuid, tenant_id, site_id, mode, configured_by FROM iam_v2.guest_network_pms_policy WHERE guest_network_id=$1::uuid`, p.orig, created.ID); err != nil {
 			return nil, err
 		}
+		// Its sign-in narrowing and its portal design belong to the client network, not to the topology it sat on.
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.network_signin_overrides (network_id, tenant_id, site_id, disabled_methods, primary_method, remember_days)
+			SELECT $2::uuid, tenant_id, site_id, disabled_methods, primary_method, remember_days FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid`, p.orig, created.ID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.portal_profile_assignments (network_id, profile_id, tenant_id, site_id)
+			SELECT $2::uuid, profile_id, tenant_id, site_id FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid`, p.orig, created.ID); err != nil {
+			return nil, err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE iam_v2.guest_network_replacements
 			   SET state='APPLIED', successor_network_id=$2, applied_at=now() WHERE id=$1`, p.id, created.ID); err != nil {
 			return nil, err
@@ -526,7 +535,14 @@ func (s *server) revertOne(ctx context.Context, replID, reason string) error {
 			if _, err := tx.Exec(ctx, `SAVEPOINT drop_successor`); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1`, *succ); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM guest_networks WHERE id=$1`, *succ); err == nil {
+				if _, derr := tx.Exec(ctx, `DELETE FROM iam_v2.network_signin_overrides WHERE network_id=$1::uuid`, *succ); derr != nil {
+					return derr
+				}
+				if _, derr := tx.Exec(ctx, `DELETE FROM iam_v2.portal_profile_assignments WHERE network_id=$1::uuid`, *succ); derr != nil {
+					return derr
+				}
+			} else {
 				if !isFKViolation(err) {
 					return err
 				}

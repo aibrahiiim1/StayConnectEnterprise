@@ -3,6 +3,7 @@
 // Everything that changes what happens to guests (publish, activate, pause, store a credential, test, reload
 // the guest list) asks for the operator's own password, because edged requires it.
 
+import { RemoveConnectionDialog } from "@/components/pms/remove-connection-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ApiError, type PmsConnectionSettings, type PmsGuestNetworkRoute, type PmsInterfaceHealth, type PmsRevision } from "@/lib/api";
@@ -993,6 +994,7 @@ function ActionsTab({
 }) {
   const toast = useToast();
   const [move, setMove] = useState<LifecycleMove | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [reason, setReason] = useState(LIFECYCLE_REASONS[0].value);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
@@ -1034,13 +1036,15 @@ function ActionsTab({
               : "Configure the connection and put the configuration live first — there is nothing to connect to until then."}
           </Callout>
         )}
-        {!retired && (
-          <p className="text-xs text-muted-foreground">
-            Retiring a connection permanently is not offered here: stays and messages already recorded keep
-            referring to it, so it is done as a separate, supported procedure.
-          </p>
-        )}
       </SheetSection>
+
+      {!retired && writable && (
+        <SheetSection title="Remove this connection"
+          description="Deletes a connection that was never used, or retires one that was and keeps its history. You are told which before anything happens.">
+          <Button variant="secondary" onClick={() => setRemoving(true)}>Remove connection…</Button>
+          <RemoveConnectionDialog open={removing} onOpenChange={setRemoving} connection={iface} onDone={onChanged} />
+        </SheetSection>
+      )}
 
       {canTestConnection(provider) && !retired && (
         <SheetSection title="Test the connection"

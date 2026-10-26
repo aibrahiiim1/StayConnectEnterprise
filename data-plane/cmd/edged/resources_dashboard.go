@@ -121,6 +121,11 @@ type dashNetwork struct {
 	DevicesOnline int64 `json:"devices_online"`
 	CaptivePortal bool  `json:"captive_portal_enabled"`
 	Internet      bool  `json:"internet_access_enabled"`
+	// Untagged (the port's native network) or vlan (tagged); a trunk port can carry both.
+	NetworkType string `json:"network_type"`
+	// Room sign-in on this network: the policy and the connections it uses. Archived networks are history and are not listed here at all.
+	RoomPolicy string   `json:"room_sign_in_policy,omitempty"`
+	RoomPMS    []string `json:"room_sign_in_connections,omitempty"`
 }
 
 type dashPackageRow struct {
@@ -400,7 +405,11 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 	// Every text column is coalesced: they are nullable in the schema, a NULL made Scan fail, and the loop appends
 	// only on success, so a half-configured network would vanish from the dashboard silently.
 	rows, err := s.db.Query(ctx, `
-		SELECT COALESCE(gn.name,''), COALESCE(gn.bridge_name,''), gn.enabled, gn.vlan_id,
+		SELECT COALESCE(gn.name,''), COALESCE(gn.bridge_name,''), gn.enabled, gn.vlan_id, COALESCE(gn.network_type,''),
+		       COALESCE((SELECT p.mode FROM iam_v2.guest_network_pms_policy p WHERE p.guest_network_id = gn.id), ''),
+		       COALESCE((SELECT array_agg(i.display_label ORDER BY i.display_label) FROM iam_v2.guest_network_pms_map m
+		                   JOIN iam_v2.pms_interfaces i ON i.id = m.pms_interface_id AND i.lifecycle_state <> 'DECOMMISSIONED'
+		                  WHERE m.guest_network_id = gn.id), '{}'),
 		       COALESCE(gn.subnet_cidr::text,''), COALESCE(gn.dhcp_mode,''),
 		       gn.captive_portal_enabled, gn.internet_access_enabled,
 		       -- THE POOL SIZE, summed across every range configured for the network. Counted from the stored
@@ -433,6 +442,7 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 		                    AND NULLIF(gn.bridge_name,'') IS NOT NULL), 0)::bigint
 		  FROM public.guest_networks gn
 		 WHERE gn.tenant_id = $1 AND gn.site_id = $2
+		   AND NOT (NOT gn.enabled AND EXISTS (SELECT 1 FROM iam_v2.network_archive a WHERE a.network_id = gn.id))
 		 ORDER BY gn.enabled DESC, gn.name
 	`, s.tenantID, s.siteID)
 	if err != nil {
@@ -443,7 +453,7 @@ func (s *server) dashNetworks(ctx context.Context) []dashNetwork {
 	defer rows.Close()
 	for rows.Next() {
 		var n dashNetwork
-		if err := rows.Scan(&n.Name, &n.Bridge, &n.Enabled, &n.VlanID, &n.SubnetCIDR, &n.DhcpMode,
+		if err := rows.Scan(&n.Name, &n.Bridge, &n.Enabled, &n.VlanID, &n.NetworkType, &n.RoomPolicy, &n.RoomPMS, &n.SubnetCIDR, &n.DhcpMode,
 			&n.CaptivePortal, &n.Internet, &n.PoolAddresses, &n.DevicesOnline); err != nil {
 			slog.Warn("dashboard: skipped a guest-network row", "err", err)
 			continue

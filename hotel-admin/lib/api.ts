@@ -329,6 +329,8 @@ export type Session = {
 
   // A voucher code and a guest principal's contact details are deliberately NOT included.
   credential_method?: string | null;
+  /** The PMS connection a room session's stay came from. */
+  pms_interface_label?: string | null;
   ingress_interface?: string | null;
   guest_network_name?: string | null;
 
@@ -393,6 +395,8 @@ export type StaysPage = {
   page: number;
   page_size: number;
   summary: { total: number; with_internet: number; devices_online: number; arriving: number; vip: number };
+  /** What each PMS connection would hold under the current filters (ignoring the connection filter itself). */
+  by_interface?: { pms_interface_id: string; label: string; lifecycle_state: string; total: number; in_house: number }[];
 };
 
 export type TravelAgent = { name: string; in_house: number; stays: number };
@@ -1561,6 +1565,9 @@ export type ReconciliationState =
   | "NEEDS_PMS_EVIDENCE";
 
 export type ReconciliationCase = {
+  /** A case key is unique only within one PMS connection. */
+  pms_interface_id: string;
+  pms_interface_label?: string;
   case_key: string;
   reservation?: string;
   room?: string;
@@ -1658,6 +1665,8 @@ export type ReconcileRunRecord = ReconcileRun & {
 };
 
 export type MultiOccupancyRoom = {
+  pms_interface_id: string;
+  pms_interface_label?: string;
   room: string;
   stays_in_room: number;
   earliest_arrival?: string | null;
@@ -1666,6 +1675,8 @@ export type MultiOccupancyRoom = {
 
 export type StayPastDeparture = {
   stay_id: string;
+  pms_interface_id: string;
+  pms_interface_label?: string;
   room?: string;
   reservation?: string;
   arrival?: string | null;
