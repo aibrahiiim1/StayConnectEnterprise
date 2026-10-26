@@ -563,12 +563,12 @@ cross-PMS transfer now name the connection (only where the site has more than on
 tabs with counts under the current filters and a combined "All connections" view; the API takes `pms_interface_id` and answers `by_interface`. The guest-facing rule is unchanged: a guest is never
 asked which PMS they belong to, and identity stays behind the same permission.
 
-**Removing a connection (migration 0157).** `GET /pms-interfaces/{id}/removal` assesses, `POST` acts, both under a row lock and the same transaction logic, so what the administrator confirmed is what
+**Removing a connection (migrations 0157 and 0158).** `GET /pms-interfaces/{id}/removal` assesses, `POST` acts, both under a row lock and the same transaction logic, so what the administrator confirmed is what
 happens (`removal_changed` otherwise). Outcomes:
 
 | Outcome | When | What happens |
 |---|---|---|
-| `DELETE` | switched off, never switched on (no audit record), never connected to its PMS, and nothing refers to it: no stay, event, posting, answer, routing, package mapping, sign-in record or conflict | `iam_v2.delete_unused_pms_interface` removes the connection, its draft revisions, sealed secrets and runtime row. It is the only path that deletes one, and it fails (rolling back) on any record that refers to the connection. |
+| `DELETE` | switched off, never switched on (no audit record), never connected to its PMS, and nothing refers to it: no stay, event, posting, answer, routing, package mapping, sign-in record, conflict, or log of changes to its settings (migration 0158: that log is history, so a connection whose settings were ever changed is retired) | `iam_v2.delete_unused_pms_interface` removes the connection, its draft revisions, sealed secrets and runtime row. It is the only path that deletes one, and it fails (rolling back) on any record that refers to the connection. |
 | `RETIRE` | the connection was ever used | lifecycle `DECOMMISSIONED` (terminal). Hidden from ordinary lists (`?include=retired` shows it). Every stay, event, entitlement, posting, sign-in record and the audit trail is untouched; open financial work is refused by the existing decommission gate. |
 | `BLOCKED` | switched on or draining; a serving network is routed to it; financial work is open | nothing changes; the reasons are listed, with the networks named. Nothing is reassigned for the administrator. |
 

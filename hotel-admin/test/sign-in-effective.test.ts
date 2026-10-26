@@ -49,6 +49,16 @@ describe("what a network actually offers", () => {
     expect(state(r, "email_account")).toBe("needs_setup");
   });
 
+  it("social login needs a provider that is both switched on and set up, not just any of each", () => {
+    const social = (cfgSocial: Record<string, { enabled: boolean }>, ready: string[] | null) =>
+      effectiveMethods(facts({ cfg: { ...facts().cfg, social: cfgSocial }, modules: { ...facts().modules, social_login: true }, socialProviders: ready }), undefined, room());
+    expect(state(social({ google: { enabled: true } }, ["facebook"]), "social")).toBe("needs_setup");
+    expect(state(social({ google: { enabled: true }, facebook: { enabled: false } }, ["facebook"]), "social")).toBe("needs_setup");
+    expect(state(social({ google: { enabled: true } }, ["google"]), "social")).toBe("offered");
+    expect(state(social({ google: { enabled: true } }, null), "social")).toBe("offered");
+    expect(state(social({}, ["google"]), "social")).toBe("off_site");
+  });
+
   it("the network's own lead method wins over the site's, and only an offered method can lead", () => {
     const r = effectiveMethods(facts(), { disabled_methods: [], primary_method: "voucher" }, room());
     expect(r.lead).toBe("voucher");

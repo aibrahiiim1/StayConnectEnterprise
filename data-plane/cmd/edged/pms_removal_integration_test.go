@@ -196,3 +196,30 @@ func TestIntegration_API_RemovalIsRefusedWhileTheConnectionIsOnOrRoutedTo(t *tes
 		t.Fatal("the assessment changed the routing")
 	}
 }
+
+// The log of who changed a connection's settings is history: such a connection is retired, never deleted, and asking never fails.
+func TestIntegration_API_AConnectionWhoseSettingsWereChangedIsRetiredNotDeleted(t *testing.T) {
+	f := newAPI(t)
+	ctx := context.Background()
+	fin := f.shell(t, "Financial setting changed")
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_financial_setting_changes (tenant_id,site_id,pms_interface_id,setting,old_value,new_value,reason,changed_by)
+		VALUES ($1::uuid,$2::uuid,$3::uuid,'mirror_max_age_seconds',900,1200,'set up',$4::uuid)`, f.tenant, f.site, fin, f.operator); err != nil {
+		t.Fatalf("seed financial change: %v", err)
+	}
+	conn := f.shell(t, "Connection setting changed")
+	if _, err := f.pool.Exec(ctx, `INSERT INTO iam_v2.pms_connection_settings_changes (tenant_id,site_id,pms_interface_id,changed_by,new_values,new_config_version)
+		VALUES ($1::uuid,$2::uuid,$3::uuid,'operator','{}'::jsonb,2)`, f.tenant, f.site, conn); err != nil {
+		t.Fatalf("seed connection change: %v", err)
+	}
+	for _, id := range []string{fin, conn} {
+		if got := f.removal(t, id)["outcome"]; got != "RETIRE" {
+			t.Fatalf("%s: a connection with settings history = %v, want RETIRE", id, got)
+		}
+		if st, b := f.remove(t, id, "DELETE"); st != http.StatusConflict || b["error"] != "removal_changed" {
+			t.Fatalf("deleting it = %d %v, want 409 removal_changed", st, b)
+		}
+		if st, b := f.remove(t, id, "RETIRE"); st != http.StatusOK {
+			t.Fatalf("retiring it = %d %v", st, b)
+		}
+	}
+}

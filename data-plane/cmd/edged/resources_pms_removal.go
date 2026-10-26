@@ -68,7 +68,7 @@ type removalAssessment struct {
 func isUnusedRefusal(err error) bool {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
-		return pg.Code == "23514" || pg.Code == "23503" || strings.HasPrefix(pg.Message, "PMS_INTERFACE_IN_USE")
+		return pg.Code == "23514" || pg.Code == "23503" || pg.Code == "23001" || strings.HasPrefix(pg.Message, "PMS_INTERFACE_IN_USE")
 	}
 	return false
 }

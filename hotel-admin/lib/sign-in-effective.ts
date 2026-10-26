@@ -72,9 +72,10 @@ function site(key: MethodKey, f: SiteFacts): { on: boolean; setup?: string } | "
       return { on: f.cfg.whatsapp?.enabled === true, setup: f.senders.whatsapp === false ? "No WhatsApp sender is set up." : undefined };
     case "social": {
       if (!f.modules.social_login) return "hidden";
-      const on = Object.values(f.cfg.social ?? {}).some((m) => m?.enabled === true);
-      const ready = f.socialProviders === null ? true : f.socialProviders.length > 0;
-      return { on, setup: ready ? undefined : "No social login provider is set up." };
+      // A provider counts only when it is switched on here AND has a working application: the guest server filters each provider on its own.
+      const enabled = Object.entries(f.cfg.social ?? {}).filter(([, m]) => m?.enabled === true).map(([p]) => p);
+      const ready = f.socialProviders === null ? true : enabled.some((p) => f.socialProviders!.includes(p));
+      return { on: enabled.length > 0, setup: ready ? undefined : "None of the switched-on identity providers has a working application." };
     }
   }
 }
