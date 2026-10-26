@@ -6,7 +6,7 @@
 # Admin Console package built separately, the deploy tree and migrations copied over with scp, and nothing that
 # proved the pieces came from the same commit. This is the appliance counterpart of central-build.sh.
 #
-# Run on a workstation or CI with docker, git, Node 20 + npm and python3. Never on an appliance.
+# Run on a workstation or CI with docker, git and python3 (Go and Node run in pinned containers). Never on an appliance.
 #
 #   deploy/scripts/appliance-build.sh [outdir]                    default outdir: <repo>/dist/appliance
 #
@@ -34,9 +34,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${1:-$ROOT/dist/appliance}"
 SERVICES="scd edged netd portald acctd pmsd keybootstrap svc-run"
+NODE_IMAGE="${NODE_IMAGE:-node:20.18.0-bookworm-slim}"
 say() { echo "[appliance-build] $*"; }
 die() { echo "[appliance-build] REFUSED: $*" >&2; exit 2; }
-for t in docker git python3 node npm sha256sum tar gzip; do command -v "$t" >/dev/null || die "$t is required"; done
+for t in docker git python3 sha256sum tar gzip; do command -v "$t" >/dev/null || die "$t is required"; done
 cd "$ROOT"
 if [ -n "$(git status --porcelain)" ]; then git status --short >&2; die "the working tree is dirty; a release names ONE commit"; fi
 SHA="$(git rev-parse HEAD)"; SHORT="${SHA:0:12}"; NAME="onegate-appliance-$SHORT"; REL="$OUT/$NAME"
@@ -92,7 +93,7 @@ find "$REL/deploy/pki" -type f ! -name README.md ! -name .gitignore -delete
 
 # ---------------------------------------------------------------- 4. identity + checksums
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-python3 - "$REL" "$SHA" "$BUILT_AT" "${GO_IMAGE:-unknown}" "$(node --version)" \
+python3 - "$REL" "$SHA" "$BUILT_AT" "${GO_IMAGE:-unknown}" "$PACKAGED_NODE ($NODE_IMAGE)" \
   "$(baseline_through "$REL/data-plane/migrations/baseline/0000_production_baseline.sql")" \
   "$(latest_migration "$REL/data-plane/migrations")" "$SERVICES" "$CONSOLE_JSON" <<'PY'
 import hashlib, json, re, sys
