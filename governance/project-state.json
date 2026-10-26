@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0255). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged and pmsd 735efe77 (PR #252 code head); scd 3db9ed56 (Client Networking delivery); netd and portald 4a192268; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). PR #252 awaits merge approval: PRE-LIVE is ahead of master, as intended, and this is not authoritative master state.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0255). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged and pmsd 735efe77 (PR #252 code head); scd 3db9ed56 (Client Networking delivery); netd and portald 4a192268; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). PR #252 was merged on 2026-10-26 by Product-Owner approval of its exact head; the installed code is identical to master's code (the merge added only governance records), and this note is not authoritative master state.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -1278,7 +1278,7 @@
     "prelive_phase4_flag_posture": "PRE-LIVE 172.21.60.25 since 2026-09-30 (D47): scd runs STAYCONNECT_PHASE4_MASTER, _PAYMENT, _PAYMENT_PROVIDER, _POSTING, _FINANCIAL_REVIEW, _OUTBOX_WORKER and _PMS_TRANSMIT; pmsd runs _MASTER, _OUTBOX_WORKER and _PMS_TRANSMIT; edged runs _MASTER, _POSTING and _FINANCIAL_REVIEW. STAYCONNECT_PAYMENT_LIVE_ALLOWED is set nowhere. Real PMS postings ever: one (T0204, USD 1.00, PA OK). Payment-provider traffic ever: none.",
     "phase4_flags_off_scope": "phase4_flags_off records the DELIVERED REPOSITORY configuration (no file in the tree enables a Phase-4 flag; scripts/ci/phase4-dark-check.sh asserts it). It is not a statement about the PRE-LIVE environment, whose posture is recorded in prelive_phase4_flag_posture."
   },
-  "latest_transition_id": "T0255",
+  "latest_transition_id": "T0256",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1775,17 +1775,17 @@
   "current_delivery": {
     "kind": "SAME_VENDOR_MULTI_PMS",
     "decision": "Several PMS Interfaces of one vendor may be configured; one physical PMS source has one owner (publish and activate refuse a source another live Interface holds; token-scoped connections that cannot name a property claim none; a source handoff releases the old owner first) - deployed to PRE-LIVE including pmsd and accepted against two real Protel systems, 2026-10-26.",
-    "decision_note": "PR #252 awaits the Product Owner's head-specific merge approval. edged, pmsd and the Admin Console 735efe77 are on PRE-LIVE; no schema change. A second Protel Interface (Coral Sea Aqua Club, a read-only link with posting UNSET) is configured and left AUTH_DISABLED; the Protel connection, its revision, its stays and the financial counters are unchanged.",
-    "manifest": "docs/manifests/SameVendorMultiPMS-change-manifest.md",
-    "base": "ae289eeb5c1198214ce20556acf00cc5ddfbc631",
-    "base_note": "Master after the merge of PR #251 (ae289eeb).",
-    "head": "735efe77",
-    "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
-    "transition": "T0255",
-    "previous_delivery": "T0254",
+    "decision_note": "PR #252 was merged as 1b0e5bb1 by the Product Owner's approval of its exact head d27fc403. The merged code is what runs on PRE-LIVE (edged, pmsd and the Admin Console 735efe77); no schema change. A second Protel Interface (Coral Sea Aqua Club, a read-only link with posting UNSET) is configured and AUTH_DISABLED; the Protel connection, its revision, its stays and the financial counters are unchanged.",
+    "manifest": "docs/manifests/SameVendorMultiPMS-closure-change-manifest.md",
+    "base": "1b0e5bb1d6bc9c8d26300719f6b09b64956f4536",
+    "base_note": "Master after the merge of PR #252 (1b0e5bb1).",
+    "head": "1b0e5bb1",
+    "head_note": "Master at the merge of PR #252; the deployed code head 735efe77 is its content.",
+    "transition": "T0256",
+    "previous_delivery": "T0255",
     "pr": 252,
-    "pr_state": "OPEN, not merged (awaiting the Product Owner's head-specific approval)",
-    "note": "T0255. PRE-LIVE runs edged and pmsd 735efe77; scd 3db9ed56; netd, portald 4a192268; acctd 9394eb5f; Admin Console release 20261026-055206 (735efe77); migrations through 0156. Central unchanged. Go-Live not authorised.",
+    "pr_state": "MERGED as 1b0e5bb1d6bc9c8d26300719f6b09b64956f4536 (merge commit, protected path)",
+    "note": "T0256. Master 1b0e5bb1. PRE-LIVE runs edged and pmsd 735efe77; scd 3db9ed56; netd, portald 4a192268; acctd 9394eb5f; Admin Console release 20261026-055206; migrations through 0156. Closed with limits: physical delivery of tagged VLANs on the switch/ESXi side, a stale roster on a real disconnected PMS, and PMS posting were not exercised. Central unchanged. Go-Live not authorised.",
     "branch": "delivery/same-vendor-multi-pms"
   },
   "onboarding_reconciliation": {
