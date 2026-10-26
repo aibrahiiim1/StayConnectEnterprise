@@ -144,7 +144,12 @@ type ovNetwork struct {
 	DNSServers    []string `json:"dns_servers"`
 	CaptivePortal bool     `json:"captive_portal_enabled"`
 	Internet      bool     `json:"internet_access_enabled"`
-	PoolSize      int64    `json:"pool_size"`
+	// untagged (the port's native network) or vlan (tagged): a trunk port can carry both.
+	NetworkType string `json:"network_type"`
+	// Room sign-in on this network: its policy and the PMS connections it uses (archived networks are history and are not listed).
+	RoomPolicy string   `json:"room_sign_in_policy,omitempty"`
+	RoomPMS    []string `json:"room_sign_in_connections,omitempty"`
+	PoolSize   int64    `json:"pool_size"`
 	// Counts invalid ranges, so a zero pool size from a bad row is distinguishable from "no range configured".
 	InvalidPools  int      `json:"invalid_pools,omitempty"`
 	DevicesOnline int64    `json:"devices_online"`
@@ -949,7 +954,11 @@ type ovPoolRow struct {
 
 func (s *server) overviewNetworkRows(ctx context.Context) ([]ovNetRow, []ovPoolRow) {
 	rows, err := s.db.Query(ctx, `
-		SELECT gn.id::text, COALESCE(gn.name,''), gn.enabled, gn.vlan_id,
+		SELECT gn.id::text, COALESCE(gn.name,''), gn.enabled, gn.vlan_id, COALESCE(gn.network_type,''),
+		       COALESCE((SELECT p.mode FROM iam_v2.guest_network_pms_policy p WHERE p.guest_network_id = gn.id), ''),
+		       COALESCE((SELECT array_agg(i.display_label ORDER BY i.display_label) FROM iam_v2.guest_network_pms_map m
+		                   JOIN iam_v2.pms_interfaces i ON i.id = m.pms_interface_id AND i.lifecycle_state <> 'DECOMMISSIONED'
+		                  WHERE m.guest_network_id = gn.id), '{}'),
 		       COALESCE(gn.subnet_cidr::text,''), COALESCE(gn.bridge_name,''),
 		       COALESCE(gn.dhcp_mode,''), COALESCE(gn.dns_mode,''), COALESCE(gn.dns_servers::text,'[]'),
 		       gn.captive_portal_enabled, gn.internet_access_enabled,
@@ -960,6 +969,7 @@ func (s *server) overviewNetworkRows(ctx context.Context) ([]ovNetRow, []ovPoolR
 		                    AND NULLIF(gn.bridge_name,'') IS NOT NULL), 0)::bigint
 		  FROM public.guest_networks gn
 		 WHERE gn.tenant_id = $1 AND gn.site_id = $2
+		   AND NOT (NOT gn.enabled AND EXISTS (SELECT 1 FROM iam_v2.network_archive a WHERE a.network_id = gn.id))
 		 ORDER BY gn.enabled DESC, gn.name
 		 LIMIT 200`, s.tenantID, s.siteID)
 	if err != nil {
@@ -970,7 +980,7 @@ func (s *server) overviewNetworkRows(ctx context.Context) ([]ovNetRow, []ovPoolR
 	for rows.Next() {
 		var n ovNetRow
 		var dns string
-		if err := rows.Scan(&n.ID, &n.Name, &n.Enabled, &n.VlanID, &n.SubnetCIDR, &n.Bridge, &n.DhcpMode,
+		if err := rows.Scan(&n.ID, &n.Name, &n.Enabled, &n.VlanID, &n.NetworkType, &n.RoomPolicy, &n.RoomPMS, &n.SubnetCIDR, &n.Bridge, &n.DhcpMode,
 			&n.DNSMode, &dns, &n.CaptivePortal, &n.Internet, &n.DevicesOnline); err != nil {
 			slog.Warn("overview: skipped a guest-network row", "err", err)
 			continue

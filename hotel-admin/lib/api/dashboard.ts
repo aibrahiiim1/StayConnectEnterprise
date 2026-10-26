@@ -116,6 +116,10 @@ export type OvNetwork = {
   dns_servers: string[];
   captive_portal_enabled: boolean;
   internet_access_enabled: boolean;
+  /** untagged (the port's native network) or vlan (tagged). */
+  network_type?: string;
+  room_sign_in_policy?: string;
+  room_sign_in_connections?: string[];
   pool_size: number;
   invalid_pools?: number;
   devices_online: number;

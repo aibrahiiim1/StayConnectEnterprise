@@ -3,6 +3,7 @@
 // Revisions are immutable: lib/package-save decides which revision a save pins, and a save always records a
 // new permanent version.
 
+import { eligibilityWords, type EligibilityNames } from "@/lib/package-eligibility";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Ban, CheckCircle2, Gauge, Package, Pencil, Plus, Trash2, Users } from "lucide-react";
@@ -67,6 +68,8 @@ export function PackagesTab({
   const [activeBy, setActiveBy] = useState<Record<string, number> | null>(null);
   const [activeNow, setActiveNow] = useState<number | null>(null);
   const [stayWarnings, setStayWarnings] = useState<string[]>([]);
+  // Package id -> what ties it to a place (networks, PMS connections); null until read.
+  const [eligibility, setEligibility] = useState<Record<string, string[]> | null>(null);
   const [chip, setChip] = useState<Chip>("all");
   const [q, setQ] = useState("");
 
@@ -151,9 +154,16 @@ export function PackagesTab({
       // carries no eligibility rules, so they are read per package. A package with no current revision is
       // skipped: asking would 404 and log an error on every load.
       const active = pkgs.filter((p) => p.active && !!p.current_revision_id);
+      const names: EligibilityNames = { networks: new Map(), connections: new Map() };
+      await Promise.all([
+        api.get<ListResp<{ id: string; name: string }>>("/network/guest-networks").then((r) => { for (const n of r.data ?? []) names.networks.set(n.id, n.name); }).catch(() => {}),
+        api.get<{ interfaces?: { id: string; display_label: string }[] }>("/pms-interfaces?include=retired").then((r) => { for (const c of r?.interfaces ?? []) names.connections.set(c.id, c.display_label); }).catch(() => {}),
+      ]);
+      const words: Record<string, string[]> = {};
       const ranges = await Promise.all(active.map(async (p): Promise<PackageStayRange> => {
         try {
           const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
+          words[p.package_id] = eligibilityWords(cur.eligibility_rules, names);
           return {
             package_id: p.package_id, name: p.name || p.code, active: true,
             range: readStayLength((cur.eligibility_rules ?? []).map((r) => ({
@@ -165,6 +175,7 @@ export function PackagesTab({
         }
       }));
       setStayWarnings(stayLengthWarnings(ranges));
+      setEligibility(words);
     } catch (e) {
       if (!guard(e)) { setRows([]); setErr((e as Error)?.message ?? "Could not load packages"); }
     }
@@ -398,7 +409,7 @@ export function PackagesTab({
         ) : (
           <Table label="Internet packages">
             <THead><TR>
-              <TH>Package</TH><TH>Status</TH><TH numeric>Price</TH><TH>Speed (down / up)</TH>
+              <TH>Package</TH><TH>Status</TH><TH className="hidden lg:table-cell">Who can get it</TH><TH numeric>Price</TH><TH>Speed (down / up)</TH>
               <TH className="hidden md:table-cell">Data</TH><TH className="hidden 2xl:table-cell">Time</TH>
               <TH className="hidden 2xl:table-cell">Devices</TH><TH numeric>Still valid</TH>
               <TH><span className="sr-only">Actions</span></TH>
@@ -418,6 +429,11 @@ export function PackagesTab({
                       )}
                     </TD>
                     <TD nowrap>{statusBadge(p)}</TD>
+                    <TD className="hidden max-w-[14rem] text-xs text-muted-foreground lg:table-cell">
+                      {eligibility === null || !(p.package_id in eligibility) ? "—"
+                        : eligibility[p.package_id].length === 0 ? "Any signed-in client"
+                          : eligibility[p.package_id].map((w) => <div key={w} className="truncate" title={w}>{w}</div>)}
+                    </TD>
                     <TD numeric>{priceText(p.price_minor, p.currency, p.currency_exponent)}</TD>
                     <TD nowrap>
                       {formatSpeedPair(p.down_kbps, p.up_kbps)}
