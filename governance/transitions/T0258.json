@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0258",
+  "seq": 258,
+  "timestamp": "2026-10-26T13:28:20+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the merge and the read-back of master, and before the commit that introduces this receipt.",
+  "record_type": "MULTI_PMS_NETWORK_ADMIN_EXPERIENCE_MERGED_AND_CLOSED",
+  "authorisation": "The Product Owner's mission of 2026-10-26 pre-authorized the protected merge of the exact verified head and the closure records. It authorises no PMS, routing or network action, no deletion of PMS history, no PMS posting and no Go-Live.",
+  "merge": {
+    "pull_request": 254,
+    "merged_head": "29c7e9a8603ef51d4d09b0464d7e7e01f273db6a",
+    "merge_commit": "9189faefbefeee68ee7687d2c1b52e4a58eb0afd",
+    "method": "merge commit pinned to the verified head",
+    "check": "po-merge-authorization passed on the merged head after po-merge-approved was applied to exactly that head; the head was verified unchanged before and at the merge.",
+    "review": "Codex reviewed the merged head and found no major issues; its two earlier P2 findings (settings history counted as history; social login needs an enabled provider with a working application) were fixed, deployed and resolved."
+  },
+  "deployed_software": "Installed code equals master's code: git diff between the deployed code head 16231943 and master shows no change under data-plane, hotel-admin, deploy or scripts. edged and the Admin Console 16231943 (release 20261026-100937), pmsd 735efe77, scd 3db9ed56, netd and portald 4a192268, acctd 9394eb5f.",
+  "closed": "The multi-PMS and multi-network administrator experience is closed: rooms belong to their PMS connection; a connection is deleted (never used) or retired (used) with history kept; one network service state; portal designs per serving network; effective sign-in per network; port topology; replacement carry-over.",
+  "limits": "NOT exercised and not claimed: an executed deletion or retirement on PRE-LIVE (the mission forbids changing real PMS connections; the previews for the three existing connections were read), tagged-VLAN delivery on the switch/ESXi side, PMS posting. Recorded gap: sign-in attempts and sign-in protection still show a submitted room without its PMS connection. Go-Live is not authorised.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes.",
+  "base": "9189faefbefeee68ee7687d2c1b52e4a58eb0afd",
+  "base_note": "Master after the merge of PR #254 (9189faef).",
+  "head": "9189faef",
+  "head_note": "Master at the merge; the closure records follow in the next merge.",
+  "previous_delivery": "T0257",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
