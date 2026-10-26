@@ -462,7 +462,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "MIXED -- see deployed_runtime_services; there is no single deployed head",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0254). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged b66212dd (PR #252 head); scd 3db9ed56 (PR #251, since merged); netd and portald 4a192268; pmsd ae4f85d2; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). PR #252 is NOT merged: PRE-LIVE is ahead of master, as intended, and this is not authoritative master state.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25, re-read live on 2026-10-26 (T0254). THE APPLIANCE RUNS BINARIES FROM SEVERAL COMMITS and this field names none. Per binary: edged b66212dd (PR #252 head); scd 3db9ed56 (Client Networking delivery); netd and portald 4a192268; pmsd ae4f85d2; acctd 9394eb5f; keybootstrap fa32e3df. All read out of the INSTALLED bytes with vcs.modified=false and -tags=stayconnect_production; sha256sum -c DEPLOYED_BINARIES.sha256 on the appliance is all OK (7 of 7). PR #252 awaits merge approval: PRE-LIVE is ahead of master, as intended, and this is not authoritative master state.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -1775,7 +1775,7 @@
   "current_delivery": {
     "kind": "SAME_VENDOR_MULTI_PMS",
     "decision": "Several PMS Interfaces of one vendor may be configured; one physical PMS source has one owner (publish and activate refuse a source another live Interface holds) - deployed to PRE-LIVE for Product-Owner testing, 2026-10-26.",
-    "decision_note": "PR #251 (Client Networking, D74) was merged by Product-Owner approval of its exact head 2487508e as ae289eeb. PR #252 is open and NOT merged: edged b66212dd and Admin Console b66212dd are on PRE-LIVE; no schema change. The agent created or changed no PMS Interface, routing, network or PMS traffic on PRE-LIVE.",
+    "decision_note": "PR #252 awaits the Product Owner's head-specific merge approval: edged b66212dd and Admin Console b66212dd are on PRE-LIVE; no schema change. The agent created or changed no PMS Interface, routing, network or PMS traffic on PRE-LIVE.",
     "manifest": "docs/manifests/SameVendorMultiPMS-change-manifest.md",
     "base": "ae289eeb5c1198214ce20556acf00cc5ddfbc631",
     "base_note": "Master after the merge of PR #251 (ae289eeb).",

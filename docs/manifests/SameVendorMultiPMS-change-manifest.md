@@ -2,7 +2,7 @@
 
 - **Base commit:** `ae289eeb5c1198214ce20556acf00cc5ddfbc631`
 - **HEAD commit:** `b66212dd93d3f3729cd290d11ab92773d178e8f6`
-- **Provenance (generation HEAD = inventory_head):** `0472517ed2def66f222d0ff06b1269d98fe8c40a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `7a56de98d4a530e3cfbc528270bfb95efff92a1b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/same-vendor-multi-pms`
 - **Remote branch:** `origin/delivery/same-vendor-multi-pms`
 - **Changed files:** 19
@@ -24,7 +24,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `docs/manifests/SameVendorMultiPMS-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
+| `docs/manifests/SameVendorMultiPMS-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: the change manifest lists itself |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
@@ -46,23 +46,25 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |  4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  4 +-
  docs/context/StayConnect-IAM-Handoff.md            |  4 +-
- .../SameVendorMultiPMS-change-manifest.md          | 72 +++++++++++++++++++
+ .../SameVendorMultiPMS-change-manifest.md          | 68 ++++++++++++++++++
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |  4 +-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  4 +-
  governance/project-state.json                      | 50 ++++++-------
  governance/transitions/T0254.json                  | 42 +++++++++++
  hotel-admin/lib/api/pms-connections.ts             |  5 ++
  hotel-admin/test/phase3-interface-pages.test.tsx   | 20 ++++++
- 19 files changed, 388 insertions(+), 61 deletions(-)
+ 19 files changed, 384 insertions(+), 61 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  governance/project-state.json
+M  governance/transitions/T0254.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 7a56de98 Governance: the change manifest lists itself
 HISTORICAL: 0472517e Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment
 HISTORICAL: b66212dd Several PMS Interfaces of one vendor can be configured; one physical PMS source has one owner
 ```
