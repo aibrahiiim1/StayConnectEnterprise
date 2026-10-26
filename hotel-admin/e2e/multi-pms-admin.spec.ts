@@ -17,7 +17,6 @@ const conn = (id: string, label: string, over: Record<string, unknown> = {}) => 
 type Call = { method: string; path: string; body?: any };
 
 async function install(page: Page, calls: Call[], routes: Record<string, (req: { method: string; query: URLSearchParams; body: any }) => unknown>) {
-  page.on("pageerror", (e) => console.log("PAGEERROR", e.message.slice(0, 400)));
   await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
   await page.route("**/api/edge/v1/**", async (route: Route) => {
     const req = route.request();

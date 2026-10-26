@@ -317,7 +317,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 }
 
 // staysByInterface counts the stays the current filters match under each PMS connection, ignoring the connection filter itself, so the tabs show what choosing each would hold.
-// Every connection that is not retired is listed, with zero when it matches none; a retired one appears only while it holds matching stays.
+// Every configured connection that is not retired is listed, with zero when it matches none (one that was never configured has nothing to show); a retired one appears only while it holds matching stays.
 func (s *server) staysByInterface(ctx context.Context, filter string, args []any) ([]staysByInterface, error) {
 	open := append([]any{}, args...)
 	open[5] = nil
@@ -345,7 +345,8 @@ func (s *server) staysByInterface(ctx context.Context, filter string, args []any
 	}
 	rows.Close()
 	live, err := s.db.Query(ctx, `SELECT id::text, COALESCE(display_label,''), lifecycle_state FROM iam_v2.pms_interfaces
-		WHERE tenant_id=$1 AND site_id=$2 AND lifecycle_state <> 'DECOMMISSIONED'`, s.tenantID, s.siteID)
+		WHERE tenant_id=$1 AND site_id=$2 AND lifecycle_state <> 'DECOMMISSIONED'
+		  AND (current_revision_id IS NOT NULL OR lifecycle_state <> 'AUTH_DISABLED')`, s.tenantID, s.siteID)
 	if err != nil {
 		return nil, err
 	}

@@ -64,6 +64,13 @@ func TestIntegration_API_TheSameRoomNumberAtTwoPMSConnectionsIsTwoRooms(t *testi
 		m := x.(map[string]any)
 		by[m["pms_interface_id"].(string)] = m["total"].(float64)
 	}
+	shell := f.shell(t, "Never configured")
+	_, again := f.do(t, http.MethodGet, "/pms-stays?status=IN_HOUSE&page_size=1", nil)
+	for _, x := range again["by_interface"].([]any) {
+		if x.(map[string]any)["pms_interface_id"] == shell {
+			t.Fatal("a connection that was never configured is offered as a stays tab")
+		}
+	}
 	if by[a] != 1 || by[b] != 2 {
 		t.Fatalf("the connection tabs must count every connection under the same filters, ignoring the connection filter: %v", by)
 	}
