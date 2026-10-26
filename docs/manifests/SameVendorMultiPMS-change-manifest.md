@@ -2,7 +2,7 @@
 
 - **Base commit:** `ae289eeb5c1198214ce20556acf00cc5ddfbc631`
 - **HEAD commit:** `735efe775289cced2ceeb23edd7e61a7840cf976`
-- **Provenance (generation HEAD = inventory_head):** `735efe775289cced2ceeb23edd7e61a7840cf976`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `4e966d113d307f649d9326dcd19f1ce5bec3633d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `delivery/same-vendor-multi-pms`
 - **Remote branch:** `origin/delivery/same-vendor-multi-pms`
 - **Changed files:** 22
@@ -21,17 +21,17 @@
 | `data-plane/internal/pmsd/supervisor_source_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Token-scoped REST connections claim no exclusive source, and a source handoff releases the old owner before the new one starts |
 | `data-plane/internal/pmsprovider/config.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Token-scoped REST connections claim no exclusive source, and a source handoff releases the old owner before the new one starts |
 | `data-plane/internal/pmsprovider/registry_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Token-scoped REST connections claim no exclusive source, and a source handoff releases the old owner before the new one starts |
-| `docs/CLIENT_NETWORKING.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Several PMS Interfaces of one vendor can be configured; one physical PMS source has one owner |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `docs/manifests/SameVendorMultiPMS-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0254 keeps the timestamp computed before the commit that introduced it |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0254 records PR #251 merged, the same-vendor source-ownership fix and its PRE-LIVE deployment |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: state wording passes the current-state parity check |
+| `docs/CLIENT_NETWORKING.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `docs/manifests/SameVendorMultiPMS-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
 | `governance/transitions/T0254.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0254 keeps the timestamp computed before the commit that introduced it |
-| `governance/transitions/T0255.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | (no commit subject in range) |
+| `governance/transitions/T0255.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems |
 | `hotel-admin/lib/api/pms-connections.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Several PMS Interfaces of one vendor can be configured; one physical PMS source has one owner |
 | `hotel-admin/test/phase3-interface-pages.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Several PMS Interfaces of one vendor can be configured; one physical PMS source has one owner |
 
@@ -51,7 +51,7 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   4 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   4 +-
  docs/context/StayConnect-IAM-Handoff.md            |   4 +-
- .../SameVendorMultiPMS-change-manifest.md          |  70 ++++++++++++
+ .../SameVendorMultiPMS-change-manifest.md          |  86 +++++++++++++++
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   4 +-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   4 +-
  governance/project-state.json                      |  52 ++++-----
@@ -59,24 +59,17 @@
  governance/transitions/T0255.json                  |  44 ++++++++
  hotel-admin/lib/api/pms-connections.ts             |   5 +
  hotel-admin/test/phase3-interface-pages.test.tsx   |  20 ++++
- 22 files changed, 576 insertions(+), 76 deletions(-)
+ 22 files changed, 592 insertions(+), 76 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/CLIENT_NETWORKING.md
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  governance/project-state.json
-A  governance/transitions/T0255.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 4e966d11 Governance: T0255 records the review fixes, the pmsd deployment and the acceptance against two real Protel systems
 HISTORICAL: 735efe77 Token-scoped REST connections claim no exclusive source, and a source handoff releases the old owner before the new one starts
 HISTORICAL: da373712 Governance: T0254 keeps the timestamp computed before the commit that introduced it
 HISTORICAL: 5dc195c3 Governance: state wording passes the current-state parity check
