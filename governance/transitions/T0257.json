@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0257",
+  "seq": 257,
+  "timestamp": "2026-10-26T12:29:49+03:00",
+  "timestamp_derivation": "Computed from the workstation clock after the PRE-LIVE deployment and verification, and before the commit that introduces this receipt.",
+  "record_type": "MULTI_PMS_NETWORK_ADMIN_EXPERIENCE_DEPLOYED",
+  "authorisation": "The Product Owner's mission of 2026-10-26 pre-authorized implementation, safe reversible migrations, tests, deployment to PRE-LIVE 172.21.60.25 and the protected merge of the exact verified head. It authorises no PMS, routing or network change by the agent, no deletion of PMS history, no PMS posting and no Go-Live.",
+  "root_causes": [
+    "Portal Settings listed every network: its design dialog read the unfiltered network list, so archived, replaced and switched-off networks looked like active choices (the Client Wi-Fi site had seven archived networks beside its one serving network). Each screen read 'enabled' or 'archived' for itself; there was no single reading.",
+    "Rooms were shown and keyed by room number alone in several places (reconciliation tables, the sessions 'rooms' count), the same number at two PMS connections looked like one room, and the stays page had no way to look at one connection.",
+    "A PMS connection could not be removed at all: DECOMMISSIONED existed but was not reachable, revisions and secrets are immutable, and nothing told the administrator whether a connection was a never-used shell or history.",
+    "A network replacement carried addressing, reservations, routing and policy but not the network's sign-in narrowing or portal design, so a replaced network could offer methods its administrator had switched off.",
+    "The 'Change VLAN or port' dialog opened on the opposite topology to the network's own, and the screens equated a trunk with tagged VLANs, hiding that a native network and tagged VLANs can share one trunk port."
+  ],
+  "deployment_provenance": {
+    "appliance": "edged 16d7097f38f3 sha256 fb841982dc3d99ac3f134712d7bf9b107c1873d58159c3a76f2a9d91cef35c8c built from a clean clone (tags=stayconnect_production, vcs.modified=false) and verified on the appliance before install; backup edged.bak-pre-16d7097f-20261026T092828Z (an earlier install of b592a6c8 is edged.bak-pre-b592a6c8-20261026T092059Z). pmsd, scd, netd, portald and acctd were not touched.",
+    "admin_console": "Release 20261026-092834 built from a clean clone of 16d7097f38f3 (BUILD_ID Vqu-EYtkJk_NOg2w4odga, artifact sha256 2d8ddd84e406e24394109b800e117b67ffaf42b3b3992362769038cdd7bc80de); previous 20261026-092105 (b592a6c8).",
+    "database": "Migration 0157 applied with scripts/edge-migrate.sh as iam_v2_owner (sha256 d05c052e...) after the encrypted, proven-restorable backup db-20261026T092001Z.sql.gz.age; svc_edged holds EXECUTE on the new function; the .down was exercised.",
+    "pull_request": "PR #254, code head 16d7097f plus the governance commit that introduces this receipt."
+  },
+  "verification": "Before: 1050 console unit tests and typecheck and lint; edged, pmsd, pmsresolve and pmsprovider integration suites on a fresh full schema including the new removal, multi-PMS, service-state, sign-in-override and replace carry-over tests; Playwright at 1280 and 390 px for the new journeys (stays by connection, removal, portal designs, effective sign-in, ports) plus the 14 existing specs that touch the changed screens (88 tests). After deployment: before/after snapshots differ only in the schema head, the edged binary and the console release; units active; DEPLOYED_BINARIES 7 of 7; the live API answers for the three existing connections (removal preview: the Protel connection BLOCKED because it is on and routed to Client Wi-Fi, the Aqua Protel connection RETIRE, the empty 'aqua' placeholder DELETE - none executed), the stays tabs count 208 and 468 in house per connection, the network list reports one serving and seven archived networks, and the real-browser pass of the deployed pages at 1360 and 390 px showed the portal designs, connection tabs, effective sign-in and ports on real data with no page error and no horizontal scroll. NOT performed: executing a deletion or a retirement on PRE-LIVE (the mission forbids changing real PMS connections); the Aqua network and tagged-VLAN delivery on the switch (unchanged and out of scope).",
+  "rollback": "edged.bak-pre-16d7097f-20261026T092828Z; hotel-admin.previous -> 20261026-092105; migration 0157.down.sql restores the guards exactly (no connection is deleted by the deployment itself); database backup db-20261026T092001Z.sql.gz.age.",
+  "follow_up": "OPEN: none required by this delivery. Known limits kept on record: the sign-in attempts and sign-in protection lists still show a submitted room without its PMS connection (a shared network can have several), and the Aqua network remains disabled.",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)",
+    "unchanged_on_purpose": "Still Phase 7, accepted and closed; no cutover."
+  },
+  "state_note": "No phase, activity or acceptance state changes. Go-Live remains unauthorised.",
+  "base": "ee0be45aee41115d7a2c3fc14b911ba6c8769e6f",
+  "base_note": "Master after the merge of PR #253 (ee0be45a).",
+  "head": "16d7097f",
+  "head_note": "The last content commit deployed. Governance and documentation commits follow it.",
+  "previous_delivery": "T0256",
+  "go_live": "NOT authorised. PRE-LIVE remains PRE-LIVE."
+}
